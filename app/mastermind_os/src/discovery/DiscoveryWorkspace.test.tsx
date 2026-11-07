@@ -404,7 +404,20 @@ describe("DiscoveryWorkspace", () => {
     expect(container.querySelector(".discovery-status")!.textContent).toBe("3 supplied results");
     expect(items()).toHaveLength(3);
     await type("zzz-nothing");
-    expect(container.textContent).toContain("No supplied results match this search.");
+    expect(container.textContent!.split("No supplied results match this search.")).toHaveLength(2);
+  });
+
+  it("distinguishes unavailable and withdrawn sources from a completed empty search", async () => {
+    const unavailable = view({ items: [], sources: [] });
+    await mount(baseProps({ view: unavailable }));
+    expect(container.querySelector('[role="status"]')!.textContent).toBe("Search sources are unavailable. No search results can be confirmed.");
+    expect(container.textContent).not.toContain("No supplied results match this search.");
+    await rerender(baseProps());
+    await type("zzz-nothing");
+    expect(container.textContent!.split("No supplied results match this search.")).toHaveLength(2);
+    await rerender(baseProps({ view: unavailable, locale: "zh-CN" }));
+    expect(container.querySelector('[role="status"]')!.textContent).toBe("搜索来源暂不可用，无法确认搜索结果。");
+    expect(items()).toHaveLength(0);
   });
 
   it("scopes project, conversation and knowledge (evidence+result) types", async () => {
@@ -780,6 +793,7 @@ describe("DiscoveryWorkspace", () => {
     await click("Open return review");
     expect(onOpenKnowledge).toHaveBeenCalledTimes(1);
     await click("Placement");
+    expect(container.textContent).toContain("Preview only — sending is separate and unavailable here");
     expect(button("Open placement").disabled).toBe(true);
     expect(container.textContent).toContain("never accepts or releases");
     await click("Release");

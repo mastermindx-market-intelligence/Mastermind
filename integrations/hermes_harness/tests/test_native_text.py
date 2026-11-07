@@ -43,7 +43,7 @@ def _canonical() -> str:
 def _native_stream(answer: str = "Progress recorded.", *, extra: dict | None = None) -> bytes:
     session = "native-s1"
     events = [
-        {"type": "system", "subtype": "init", "model": MODEL, "session_id": session},
+        {"type": "system", "subtype": "init", "model": "", "session_id": ""},
         {"type": "text", "text": answer},
         {"type": "result", "exit_code": 0, "error": False, "replay_gap": False,
          "text": answer, "tokens": {"input": 12, "output": 4}, "session_id": session},
@@ -98,7 +98,7 @@ class NativeProtocolTests(unittest.TestCase):
     def test_positive_complete_text_protocol(self):
         self.assertEqual(
             read_native_text(role=ROLE, expected_model=MODEL, stdout=_native_stream(),
-                             stderr=b"session_id: native-s1\n", process_exit_code=0),
+                             stderr=b"Session: native-s1\n\nsession_id: native-s1\n", process_exit_code=0),
             "Progress recorded.",
         )
 
@@ -111,7 +111,7 @@ class NativeProtocolTests(unittest.TestCase):
             {"stdout": _native_stream("a" * 701)},
         ]:
             base = dict(role=ROLE, expected_model=MODEL, stdout=_native_stream(),
-                        stderr=b"session_id: native-s1\n", process_exit_code=0)
+                        stderr=b"Session: native-s1\n\nsession_id: native-s1\n", process_exit_code=0)
             base.update(kwargs)
             with self.subTest(keys=kwargs):
                 with self.assertRaises(ObservationRefusal):
@@ -127,7 +127,7 @@ class NativeProtocolTests(unittest.TestCase):
             "integrations.hermes_harness.native_text.native_provider", return_value=spec,
         ), mock.patch(
             "integrations.hermes_harness.native_text._capture_bounded_child",
-            return_value=(0, _native_stream(), b"session_id: native-s1\n"),
+            return_value=(0, _native_stream(), b"Session: native-s1\n\nsession_id: native-s1\n"),
         ) as capture:
             self.assertEqual(execute_prepared_text(
                 profile, hermes_bin=Path("/installed/bin/hermes"),

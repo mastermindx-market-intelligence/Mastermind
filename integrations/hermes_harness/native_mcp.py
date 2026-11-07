@@ -3,11 +3,19 @@
 This is an installer input, not authorization or a Steward connection.
 The live server can be enabled only by a future receiving-owner authenticated
 release; ordinary Hermes installs must not connect, post or dispatch.
+
+The same module also owns the *qualified optional* consumer config: the exact
+MCP/OAuth entry of the Executive connection, and the plugin grant that lets
+the non-bundled consumer plugin call that one server. That config is rendered
+only for a qualified optional input. The default stays disarmed, and neither
+the bearer token nor any client secret is ever written here: the bearer stays
+with the incumbent OAuth owner and its token storage.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.hermes_config import render_hermes_config
@@ -81,3 +89,70 @@ def render_disarmed_native_config(profile: object) -> str:
     if rebuilt.get("mcp_servers") != {_SERVER: server}:
         raise RuntimeRefusal("NATIVE_MCP_RESULT_INVALID")
     return result
+
+
+# The bounded connect timeout of the qualified Executive entry. It is the same
+# bound the reviewed Steward donor uses.
+_CONSUMER_TIMEOUT = 30
+
+
+def render_consumer_mcp_server(publication: Any) -> dict[str, Any]:
+    """The exact MCP/OAuth entry of the qualified Executive connection.
+
+    The raw Executive tools of that server are never model-facing: the
+    ``include`` filter is empty, so the upstream filter registers nothing for
+    this server and only the C28 ``mmx_delegate`` exposes delegation.
+
+    There is no bearer template, no token copy and no client secret here. The
+    OAuth entry carries the *public* client reference and the scope; the
+    bearer stays with the incumbent OAuth owner and its token storage.
+    """
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_MCP_SERVER,
+    )
+
+    mcp = publication.mcp
+    if mcp.server != CONSUMER_MCP_SERVER:
+        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_SERVER_INVALID")
+    server = {
+        "url": mcp.url,
+        "enabled": True,
+        "auth": "oauth",
+        "timeout": _CONSUMER_TIMEOUT,
+        "oauth": {
+            "client_id": mcp.client_id,
+            "scope": mcp.scope,
+        },
+        "tools": {
+            "include": [],
+            "resources": False,
+            "prompts": False,
+        },
+    }
+    if mcp._workspace_principal_scope is not None:
+        from integrations.hermes_harness.native_executive_consumer import workspace_oauth_descriptor
+        server["oauth"]["workspace"] = workspace_oauth_descriptor(mcp._workspace_principal_scope)
+        server.update(transport="streamable-http", strict_redirect_headers=True)
+    return server
+
+
+def render_consumer_plugin_config(publication: Any) -> dict[str, Any]:
+    """The plugin grant of the qualified consumer.
+
+    The upstream plugin loader is opt-in: a *user* plugin loads only when the
+    operator lists it in ``plugins.enabled``. The per-server MCP grant is
+    default-deny, so the Executive server is named explicitly. Nothing else
+    is granted.
+    """
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_PLUGIN_NAME,
+    )
+
+    return {
+        "enabled": [CONSUMER_PLUGIN_NAME],
+        "entries": {
+            CONSUMER_PLUGIN_NAME: {
+                "mcp_allowlist": [publication.mcp.server],
+            },
+        },
+    }

@@ -86,7 +86,7 @@ if name == 'ssh':
                remote_budget=int(budget.group(1)) if budget else None,
                original_macro_commit=("FABRIC_NEW_MACRO_COMMIT='" + macro['commit'] + "'") in command,
                original_run=("REMOTE_SUB_RUN_ID='" + rid + "'") in command,
-               original_host="LANE_REMOTE_HOST='ubuntu0'" in command)
+               original_host=("LANE_REMOTE_HOST='" + macro["fixture_host"] + "'") in command)
         raise SystemExit(macro['launch_rc'])
     if '__REMOTE_SUB_PENDING__' in command:
         record('poll', worker_rc=macro['worker_rc'])
@@ -230,6 +230,8 @@ print(json.dumps({'status': status, 'result': result}, sort_keys=True))
 
 
 class MacroResultControllerTests(unittest.TestCase):
+    host = HOST
+
     def setUp(self):
         # Compose the fixture instead of inheriting its unrelated deadline tests.
         self.harness = deadline_fixture.ControllerDeadline(
@@ -251,10 +253,10 @@ class MacroResultControllerTests(unittest.TestCase):
 
         registry_path = self.ext / "hosts.json"
         registry = json.loads(registry_path.read_text())
-        registry[HOST] = registry.pop("fixture")
+        registry[self.host] = registry.pop("fixture")
         # Deliberately unbound: no physical_lane_root and no support for bound
         # new-Macro is claimed by this fixture.
-        self.assertNotIn("physical_lane_root", registry[HOST])
+        self.assertNotIn("physical_lane_root", registry[self.host])
         registry_path.write_text(json.dumps(registry))
         registry_path.chmod(0o600)
 
@@ -297,7 +299,7 @@ class MacroResultControllerTests(unittest.TestCase):
                       stdout_failure=stdout_failure, sessions=sessions,
                       session_failure=session_failure, launch_rc=launch_rc,
                       mode=mode, model=model)
-        config.update(fixture_fault=getattr(self, "fixture_fault", None), fixture_host=HOST,
+        config.update(fixture_fault=getattr(self, "fixture_fault", None), fixture_host=self.host,
                       fixture_packet=str(self.harness.packet), fixture_cwd="~/lanes/repos/macro")
         (self.root / "macro-result-case.json").write_text(json.dumps(config))
         raw = RESULT_BYTES if worker_rc == 0 else DIAGNOSTIC_BYTES
@@ -309,7 +311,7 @@ class MacroResultControllerTests(unittest.TestCase):
                 schema = ("mastermind.local_session_created.v1" if suffix.startswith("session-created")
                           else "mastermind.local_session_retained.v1")
                 row = dict(schema=schema, run_id=rid, root_id="offline-root",
-                           parent_id="offline-parent", host=HOST, provider=mode,
+                           parent_id="offline-parent", host=self.host, provider=mode,
                            home_path="/inert/private-session-not-probed", command_rc=worker_rc)
                 content = (json.dumps(row, sort_keys=True) + "\n").encode()
                 (self.remote_receipts / (rid + "." + suffix)).write_bytes(content)
@@ -337,7 +339,7 @@ class MacroResultControllerTests(unittest.TestCase):
         }
         if escalation_reason is not None:
             env["POOL_ESCALATION_REASON"] = escalation_reason
-        command = ["/bin/bash", str(self.ext / "remote_sub.sh"), HOST, mode,
+        command = ["/bin/bash", str(self.ext / "remote_sub.sh"), self.host, mode,
                    str(self.harness.packet), "~/lanes/repos/macro", model,
                    "--run-id", rid, "--new-macro-worktree", FROZEN_MACRO_COMMIT]
         if custom:
@@ -590,7 +592,7 @@ class MacroResultControllerTests(unittest.TestCase):
                      if row["stage"] == "fixture_support_meta_unproven")
         self.assertEqual(fault["argv"][:4], [str(self.ext / "remote_sub_helpers.py"),
                          "support-meta", str(self.ext), str(support)])
-        owned_prefix = " [remote_sub id=" + rid + " host=" + HOST + "] "
+        owned_prefix = " [remote_sub id=" + rid + " host=" + self.host + "] "
         events = [line.split(owned_prefix, 1)[1] for line in result["log"].splitlines()
                   if owned_prefix in line]
         self.assertEqual(events.count("CONTROLLER_PROCESS_UNPROVEN stage=support-meta rc=76"), 1)
@@ -609,7 +611,7 @@ class MacroResultControllerTests(unittest.TestCase):
         rid = result["run_id"]
         self.assertRegex(result["log"], (
             r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
-            r"\[remote_sub id=" + rid + " host=" + HOST + r"\] "
+            r"\[remote_sub id=" + rid + " host=" + self.host + r"\] "
             r"MACRO_RESULT_REQUIRED schema=1\n\Z"))
         for stage in ("macro_prepare", "cwd_preflight", "acquire", "granted", "scp",
                       "support_publish", "launch", "stdout_collect", "macro_publish", "release"):
@@ -652,6 +654,11 @@ class MacroResultControllerTests(unittest.TestCase):
         self.assertFalse(self.custom.exists())
         self.assertIn("LEASE_PRESERVED effect_unknown=1", result["log"])
         self.assert_unavailable(result, expected_state="EFFECT_UNKNOWN")
+
+
+class Ubuntu4MacroResultControllerTests(MacroResultControllerTests):
+    """The same current controller and retained-result proofs on Ubuntu4."""
+    host = "ubuntu4"
 
 
 if __name__ == "__main__":

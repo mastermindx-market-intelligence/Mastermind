@@ -5,7 +5,16 @@ two phases: a prepare config admitting both the retired and candidate asset
 paths plus the new fixed authenticated Control Room GET/POST routes, and a final
 config admitting only candidate assets plus those same closed new routes. Both
 the incumbent and expanded observed method-specific profiles are admitted;
-mixed or extra routes fail closed. Configs are transformed only in memory;
+mixed or extra routes fail closed. The optional dedicated source-operation POST
+branch (exact 98304-byte cap) is planned the same way: an observed config
+without it gains it at the canonical position between the legacy POST branch
+and the MCP branches, and an observed config with it is validated exactly and
+stays idempotent. The two public-MCP matchers are planned as one coherent
+profile: an observed CEO-only metadata/transport pair is upgraded in place to
+the complete CEO+COO pair, and an already complete pair stays idempotent. A
+partial upgrade, a mixed pair, a duplicate, a wildcard or an extra path fails
+closed, and a config with no public-MCP family at all never gains one here.
+Configs are transformed only in memory;
 staging writes plan/candidate JSON under an existing sealed parent. No network, SSH, subprocess, daemon, environment
 override, ``caddy load``/reload or production write exists here.
 """
@@ -21,8 +30,10 @@ import re
 import stat
 
 from ops.executive_os.os_public_edge import (
-    GET_ROUTES, HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTE,
-    MCP_ROUTES, POST_ROUTES, TRANSITION_ROUTE_PROFILES, asset_routes,
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES, GET_ROUTES, HOST, LEGACY_GET_ROUTES,
+    LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTES, MCP_ROUTES,
+    POST_ROUTES, SOURCE_MAX_BODY, SOURCE_POST_ROUTES, TRANSITION_ROUTE_PROFILES,
+    asset_routes,
 )
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
@@ -141,8 +152,7 @@ def _proxy_matches(observed: object, relay_port: int, upstream_host: str) -> boo
     return candidate == _expected_proxy(relay_port, upstream_host)
 
 
-def _locate(fullconfig: object, current_routes: tuple[str, ...],
-            relay_port: int) -> tuple:
+def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int) -> dict:
     _relay(relay_port)
     if type(fullconfig) is not dict:
         raise ValueError("OS edge transition fullconfig refused")
@@ -180,13 +190,25 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             break
         inner = nested
         path += (0, "handle", 0, "routes")
-    # Two accepted shapes: the original GET/POST/abort and, with the public MCP
-    # entrypoint (#1656), GET/POST/MCP-metadata-GET/MCP-POST/abort in that order.
-    if len(inner) not in (3, 5):
+    # Accepted inner shapes: GET/POST/abort, GET/POST/MCP-metadata-GET/MCP-POST/
+    # abort (the public MCP entrypoint), and either of those two plus the
+    # dedicated source-operation POST branch in its canonical position between
+    # the legacy POST branch and the MCP branches. Arbitrary reordering,
+    # partial upgrades and mixtures cannot pass.
+    if len(inner) not in (3, 4, 5, 6):
         raise ValueError("OS edge transition inner route set refused")
+    has_source = len(inner) in (4, 6)
+    has_mcp = len(inner) in (5, 6)
+    mcp_meta_position = 3 if has_source else 2
+    mcp_post_position = mcp_meta_position + 1
     # Match a complete admitted pair, not independent subsets or a cross-product.
     # Comparing list and set forms permits only the known index.html /os/ overlap.
-    get_path = post_path = None
+    source_profiles = {index for index, (fixed_get, _) in enumerate(TRANSITION_ROUTE_PROFILES)
+                       if "/workspace/source-operation/operation" in fixed_get}
+    get_path = post_path = source_path = None
+    mcp_meta_path = mcp_post_path = None
+    mcp_meta_paths = mcp_post_paths = None
+    post_group = None
     get_matches = post_matches = set()
     methods = set()
     for position, item in enumerate(inner):
@@ -210,61 +232,132 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
                 or type(paths) is not list or any(type(value) is not str for value in paths)):
             raise ValueError("OS edge transition inner matcher refused")
         handlers = _branch_handlers(item["handle"])
-        if position >= 2:
+        if has_mcp and position == mcp_meta_position:
             # Fixed, immutable MCP branches: only the two OS path lists change.
-            if position == 2:
-                same = method == ["GET"] and paths == [MCP_METADATA_ROUTE] and len(handlers) == 1
-            else:
-                same = (method == ["POST"] and paths == list(MCP_ROUTES) and len(handlers) == 2
-                        and handlers[0] == {"handler": "request_body", "max_size": MCP_MAX_BODY}
-                        and type(handlers[0].get("max_size")) is int)
-            if not same:
+            # The metadata matcher carries exactly the CEO-only list or the
+            # complete CEO+COO list, in that order. A partial COO upgrade, a
+            # duplicate, a wildcard or any extra path is refused here.
+            if (method != ["GET"]
+                    or paths not in (list(MCP_METADATA_ROUTES), list(COMPLETE_MCP_METADATA_ROUTES))
+                    or len(handlers) != 1):
                 raise ValueError("OS edge transition observed MCP route differs")
-        else:
+            mcp_meta_paths = list(paths)
+        elif has_mcp and position == mcp_post_position:
+            if (method != ["POST"]
+                    or paths not in (list(MCP_ROUTES), list(COMPLETE_MCP_ROUTES))
+                    or len(handlers) != 2
+                    or handlers[0] != {"handler": "request_body", "max_size": MCP_MAX_BODY}
+                    or type(handlers[0].get("max_size")) is not int):
+                raise ValueError("OS edge transition observed MCP route differs")
+            mcp_post_paths = list(paths)
+        elif has_source and position == 2:
+            # Dedicated source branch: exact paths in canonical order, the
+            # 98304-byte cap; no wildcard, duplicate, merged or reordered entry.
+            if (method != ["POST"] or paths != list(SOURCE_POST_ROUTES) or len(handlers) != 2
+                    or handlers[0] != {"handler": "request_body", "max_size": SOURCE_MAX_BODY}
+                    or type(handlers[0].get("max_size")) is not int):
+                raise ValueError("OS edge transition observed source route differs")
+            source_path = path + (position, "match", 0, "path")
+        elif position == 0 and method == ["GET"]:
             if method[0] in methods:
                 raise ValueError("OS edge transition inner matcher refused")
             methods.add(method[0])
-            if method == ["GET"]:
-                get_matches = {
-                    index for index, (fixed_get, _) in enumerate(TRANSITION_ROUTE_PROFILES)
-                    if sorted(paths) in (
-                        sorted(set(fixed_get) | set(current_routes)),
-                        sorted(list(fixed_get) + list(current_routes)),
-                    )
-                }
-                if not get_matches or len(handlers) != 1:
-                    raise ValueError("OS edge transition observed GET routes differ")
-                get_path = path + (position, "match", 0, "path")
-            else:
-                post_matches = {
-                    index for index, (_, fixed_post) in enumerate(TRANSITION_ROUTE_PROFILES)
-                    if sorted(paths) == sorted(fixed_post)
-                }
-                if (len(paths) != len(set(paths)) or not post_matches
-                        or len(handlers) != 2
-                        or handlers[0] != {"handler": "request_body", "max_size": 64000}
-                        or type(handlers[0].get("max_size")) is not int):
-                    raise ValueError("OS edge transition observed POST route differs")
-                post_path = path + (position, "match", 0, "path")
+            get_matches = {
+                index for index, (fixed_get, _) in enumerate(TRANSITION_ROUTE_PROFILES)
+                if sorted(paths) in (
+                    sorted(set(fixed_get) | set(current_routes)),
+                    sorted(list(fixed_get) + list(current_routes)),
+                )
+            }
+            if not get_matches or len(handlers) != 1:
+                raise ValueError("OS edge transition observed GET routes differ")
+            get_path = path + (position, "match", 0, "path")
+        elif position == 1 and method == ["POST"]:
+            if method[0] in methods:
+                raise ValueError("OS edge transition inner matcher refused")
+            methods.add(method[0])
+            post_matches = {
+                index for index, (_, fixed_post) in enumerate(TRANSITION_ROUTE_PROFILES)
+                if sorted(paths) == sorted(fixed_post)
+            }
+            if (len(paths) != len(set(paths)) or not post_matches
+                    or len(handlers) != 2
+                    or handlers[0] != {"handler": "request_body", "max_size": 64000}
+                    or type(handlers[0].get("max_size")) is not int):
+                raise ValueError("OS edge transition observed POST route differs")
+            post_path = path + (position, "match", 0, "path")
+            if type(item.get("group")) is str and item["group"]:
+                post_group = item["group"]
+        else:
+            raise ValueError("OS edge transition inner route order refused")
         # Every branch's proxy must be the whole rendered handler, not merely the
         # right upstream: a changed Host, header list, rewrite or transport would
-        # alter what the gateway sees. Only /mcp presents the gateway's loopback Host.
-        upstream_host = "127.0.0.1" if position == 3 and len(inner) == 5 else HOST
+        # alter what the gateway sees. Only the MCP POST branch presents the
+        # gateway's loopback Host; the source branch presents the public HOST.
+        upstream_host = "127.0.0.1" if has_mcp and position == mcp_post_position else HOST
         if not _proxy_matches(handlers[-1], relay_port, upstream_host):
             raise ValueError("OS edge transition relay upstream refused")
     if (methods != {"GET", "POST"} or get_path is None or post_path is None
+            or (has_source and source_path is None)
             or not get_matches.intersection(post_matches)):
         raise ValueError("OS edge transition mixed or incomplete route profile")
-    return get_path, post_path
+    # All exact profiles containing the original-operation read retain its
+    # dedicated POST branch, including the sealed predecessor before controls.
+    # The intersection still requires one complete admitted GET/POST pair.
+    matched_source = bool(get_matches.intersection(post_matches, source_profiles))
+    if has_source and not matched_source:
+        raise ValueError("OS edge transition source profile incomplete")
+    if not has_source and matched_source:
+        raise ValueError("OS edge transition mixed or incomplete route profile")
+    # The two public-MCP matchers form one coherent profile: the CEO-only pair
+    # or the complete CEO+COO pair. A metadata list upgraded without the
+    # matching transport list is a partial upgrade and is refused.
+    if has_mcp:
+        metadata_complete = mcp_meta_paths == list(COMPLETE_MCP_METADATA_ROUTES)
+        transport_complete = mcp_post_paths == list(COMPLETE_MCP_ROUTES)
+        if metadata_complete != transport_complete:
+            raise ValueError("OS edge transition mixed or incomplete MCP profile")
+        mcp_profile = "complete" if metadata_complete else "ceo_only"
+        mcp_meta_path = path + (mcp_meta_position, "match", 0, "path")
+        mcp_post_path = path + (mcp_post_position, "match", 0, "path")
+    else:
+        mcp_profile = "absent"
+    return {"inner": path, "get": get_path, "post": post_path, "source": source_path,
+            "source_branch": has_source, "post_group": post_group,
+            "mcp_meta": mcp_meta_path, "mcp_post": mcp_post_path,
+            "mcp_profile": mcp_profile}
+
+
+def _source_branch(relay_port: int, group: object) -> dict:
+    # The canonical dedicated source branch, identical to the rendered template
+    # branch: the 98304-byte cap plus the same public HOST proxy with the same
+    # stripped forwarded headers. Never a widened legacy matcher.
+    branch = {
+        "match": [{"method": ["POST"], "path": list(SOURCE_POST_ROUTES)}],
+        "handle": [
+            {"handler": "request_body", "max_size": SOURCE_MAX_BODY},
+            _expected_proxy(relay_port, HOST),
+        ],
+    }
+    if group is not None:
+        branch = {"group": group, **branch}
+    return branch
 
 
 def _transition(*, fullconfig: object, current_manifest: object,
                 candidate_manifest: object, relay_port: int) -> dict:
     current_routes, candidate_routes, shared = _asset_pair(current_manifest, candidate_manifest)
-    position, post_position = _locate(fullconfig, current_routes, relay_port)
+    located = _locate(fullconfig, current_routes, relay_port)
     return {
-        "position": position,
-        "post_position": post_position,
+        "position": located["get"],
+        "post_position": located["post"],
+        "source_position": located["source"],
+        "source_branch": located["source_branch"],
+        "inner_position": located["inner"],
+        "post_group": located["post_group"],
+        "mcp_meta_position": located["mcp_meta"],
+        "mcp_post_position": located["mcp_post"],
+        "mcp_profile": located["mcp_profile"],
         "retired": list(current_routes),
         "candidate": list(candidate_routes),
         "shared": shared,
@@ -274,15 +367,60 @@ def _transition(*, fullconfig: object, current_manifest: object,
     }
 
 
+def _set_path(root: object, field_path: tuple, values: object) -> None:
+    target = root
+    for key in field_path[:-1]:
+        target = target[key]
+    target[field_path[-1]] = list(values)
+
+
 def _rebuild(fullconfig: object, position: tuple, paths: list[str],
-             *, post_position: tuple, post_paths: tuple[str, ...]) -> dict:
+             *, post_position: tuple, post_paths: tuple[str, ...],
+             source_position: tuple | None = None,
+             source_paths: tuple[str, ...] | None = None,
+             mcp_meta_position: tuple | None = None,
+             mcp_meta_paths: tuple[str, ...] | None = None,
+             mcp_post_position: tuple | None = None,
+             mcp_post_paths: tuple[str, ...] | None = None,
+             insert: tuple | None = None) -> dict:
     rebuilt = copy.deepcopy(fullconfig)
-    for field_path, values in ((position, paths), (post_position, post_paths)):
+    _set_path(rebuilt, position, paths)
+    _set_path(rebuilt, post_position, post_paths)
+    if source_position is not None:
+        _set_path(rebuilt, source_position, source_paths)
+    # The public-MCP matchers are rewritten before the optional source-branch
+    # insertion, so these positions are the observed ones. Only the two fixed
+    # path lists change; the metadata branch keeps the public Host, the
+    # transport branch keeps the gateway's loopback Host and 64000-byte cap.
+    if mcp_meta_position is not None:
+        _set_path(rebuilt, mcp_meta_position, mcp_meta_paths)
+    if mcp_post_position is not None:
+        _set_path(rebuilt, mcp_post_position, mcp_post_paths)
+    if insert is not None:
+        inner_path, index, branch = insert
         target = rebuilt
-        for key in field_path[:-1]:
+        for key in inner_path:
             target = target[key]
-        target[field_path[-1]] = list(values)
+        if type(target) is not list or len(target) < 2 or index != 2:
+            raise ValueError("OS edge transition insertion point refused")
+        target.insert(index, copy.deepcopy(branch))
     return rebuilt
+
+
+def _rebuilt(fullconfig: object, data: dict, get_paths: list[str], relay_port: int) -> dict:
+    insert = None
+    if not data["source_branch"]:
+        insert = (data["inner_position"], 2,
+                  _source_branch(relay_port, data["post_group"]))
+    return _rebuild(fullconfig, data["position"], get_paths,
+                    post_position=data["post_position"], post_paths=POST_ROUTES,
+                    source_position=data["source_position"],
+                    source_paths=SOURCE_POST_ROUTES,
+                    mcp_meta_position=data["mcp_meta_position"],
+                    mcp_meta_paths=COMPLETE_MCP_METADATA_ROUTES,
+                    mcp_post_position=data["mcp_post_position"],
+                    mcp_post_paths=COMPLETE_MCP_ROUTES,
+                    insert=insert)
 
 
 def plan(*, old_source: str, new_source: str, fullconfig: object, current_manifest: object,
@@ -301,10 +439,8 @@ def plan(*, old_source: str, new_source: str, fullconfig: object, current_manife
             "observed_fullconfig_sha256": _sha256(fullconfig),
             "current_manifest_sha256": _sha256(current_manifest),
             "candidate_manifest_sha256": _sha256(candidate_manifest),
-            "prepare_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["prepare"],
-                                                    post_position=data["post_position"], post_paths=POST_ROUTES)),
-            "final_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["final"],
-                                                  post_position=data["post_position"], post_paths=POST_ROUTES)),
+            "prepare_fullconfig_sha256": _sha256(_rebuilt(fullconfig, data, data["prepare"], relay_port)),
+            "final_fullconfig_sha256": _sha256(_rebuilt(fullconfig, data, data["final"], relay_port)),
         },
         "get_routes": {
             "fixed": list(GET_ROUTES),
@@ -314,6 +450,16 @@ def plan(*, old_source: str, new_source: str, fullconfig: object, current_manife
             "final": data["final"],
         },
         "post_routes": list(POST_ROUTES),
+        "source_post_routes": list(SOURCE_POST_ROUTES),
+        # Existing MCP profiles upgrade to the complete CEO+COO pair.
+        # An absent MCP family stays absent in both planned configurations.
+        "mcp_routes": {
+            "observed_profile": data["mcp_profile"],
+            "metadata": ([] if data["mcp_profile"] == "absent"
+                         else list(COMPLETE_MCP_METADATA_ROUTES)),
+            "transport": ([] if data["mcp_profile"] == "absent"
+                          else list(COMPLETE_MCP_ROUTES)),
+        },
         "shared_assets_verified": data["shared"],
         "installed": False,
         "published": False,
@@ -324,16 +470,14 @@ def prepare_config(*, fullconfig: object, current_manifest: object,
                    candidate_manifest: object, relay_port: int) -> dict:
     data = _transition(fullconfig=fullconfig, current_manifest=current_manifest,
                        candidate_manifest=candidate_manifest, relay_port=relay_port)
-    return _rebuild(fullconfig, data["position"], data["prepare"],
-                                                    post_position=data["post_position"], post_paths=POST_ROUTES)
+    return _rebuilt(fullconfig, data, data["prepare"], relay_port)
 
 
 def final_config(*, fullconfig: object, current_manifest: object,
                  candidate_manifest: object, relay_port: int) -> dict:
     data = _transition(fullconfig=fullconfig, current_manifest=current_manifest,
                        candidate_manifest=candidate_manifest, relay_port=relay_port)
-    return _rebuild(fullconfig, data["position"], data["final"],
-                                                  post_position=data["post_position"], post_paths=POST_ROUTES)
+    return _rebuilt(fullconfig, data, data["final"], relay_port)
 
 
 def preparation_complete(*, observed: object, prepared: object) -> dict:

@@ -131,6 +131,55 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
             with self.subTest(source="clients", required=required):
                 self.assertIn(required, clients)
 
+    def test_gate_triage_has_action_level_release_and_owner_controls(self) -> None:
+        active = (ROOT / "docs/sol_skills/ACTIVE_EXECUTION.md").read_text()
+        reconcile = (ROOT / "docs/sol_skills/RECONCILE_STATE.md").read_text()
+        cold = (ROOT / "docs/sol_skills/COLD_START.md").read_text()
+        clients = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text()
+        kernel = (ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md").read_text()
+        self.assertIn("**Prove an owner gate before using it to stop:**", active)
+        self.assertIn("**Responsibility survives a chat; a chat does not own work forever.**", active)
+        self.assertEqual(active.count("`RECONCILE_STATE.md` Step 4B"), 1)
+        self.assertIn("## Step 4B — Owner-gate triage and takeover discipline", reconcile)
+        self.assertEqual(reconcile.count("### Prove an owner gate before using it to stop"), 1)
+        for phrase in (
+            "A factual/source owner",
+            "Separate role, receiver and lease",
+            "The active assigned session owns the next recovery action",
+            "Name the exact blocked action",
+            "Check effective execution/custody",
+            "Prove an owner gate before using it to stop",
+            "current session executes now",
+            "Requested GitHub reviewer is not mandatory approval",
+            "A 403/unknown read does not prove approval is required",
+            "Disabled or protected runtime is an action gate, not a ghost owner",
+            "Do not obtain the same denied effect via another",
+            "Exit with an executable action, not a department",
+            "EXACT_HUMAN_GATE",
+            "another safe phase remains",
+            "no gate state, approval, account, queue, lease, retry path or release",
+            "Do not reopen an already-denied protected-result operation",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, reconcile)
+        self.assertIn('a requested reviewer, a historical author or a disabled runtime service', cold)
+        self.assertIn("a requested login alone is not an enforced approval", clients)
+        self.assertIn("requested reviewer does not prove approval required", kernel.lower())
+        block = kernel.split("## Approved Project instruction text", 1)[1].split("```text\n", 1)[1].split("\n```", 1)[0]
+        self.assertLessEqual(len(block.encode("utf-8")), 8000)
+
+    def test_native_clients_require_real_gate_not_ghost_owner(self) -> None:
+        contract = _extract_contract(ROOT / "AGENTS.md")
+        for phrase in (
+            "requested GitHub reviewer is metadata",
+            "a permission-limited read is UNKNOWN",
+            "disabled Executive Control service",
+            "not evidence that an archived original chat owns the project",
+            "Apply ACTIVE_EXECUTION's",
+            "Never self-approve or self-merge",
+        ):
+            self.assertIn(phrase.lower(), contract.lower())
+
     def test_existing_protected_result_hold_does_not_authorize_clearing_it(self) -> None:
         contract = _extract_contract(ROOT / "AGENTS.md")
         for phrase in (

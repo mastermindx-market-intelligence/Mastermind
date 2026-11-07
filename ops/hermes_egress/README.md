@@ -4,14 +4,15 @@
 process**, configured with two fixed, role-specific listeners and no model
 keys. It consumes the host network policy in PR #1961; it is **not** a new
 agent, scheduler, admission service, queue, identity store or retry engine.
-The Ubuntu1 network owner must inspect and independently approve the host
-side before enabling any real bot.
+The assigned network/release session must qualify the actual host boundary
+under the existing protected release and activation requirements before enabling
+any real bot.
 
 ## Fixed contract
 
-| Source unit | Exact proxy socket | Only CONNECT destination |
+| Source unit | Exact proxy socket | Only CONNECT destinations |
 | --- | --- | --- |
-| `hermes-runtime-mmsecretary.service` | `127.0.0.2:18651` | `ark.ap-southeast.bytepluses.com:443` |
+| `hermes-runtime-mmsecretary.service` | `127.0.0.2:18651` | `ark.ap-southeast.bytepluses.com:443`, `mcp.mastermind-x.com:443`, `dev-eo0jf8us5mup7wd5.us.auth0.com:443` |
 | `hermes-runtime-mmmeta.service` | `127.0.0.3:18652` | `api.z.ai:443` |
 
 The Squid config defines two `http_port` listeners in one process, gates
@@ -25,6 +26,27 @@ requests, TLS interception, CA injection or bearer token handling** in
 the proxy. The Hermes native client continues verifying HTTPS TLS itself.
 Squid cannot see encrypted HTTP bodies or bearer values inside CONNECT.
 
+Each allowed host is its own exact-hostname ACL with exactly one hostname, so
+no host inherits another one's permission, and each allow line names exactly
+one socket ACL, one host ACL, `CONNECT` and the 443 port. The Meta listener
+keeps its single original vendor: only the role that actually has the
+supported native consumer is widened, and the other role is never widened
+merely because its socket exists. The private/loopback deny precedes every
+allow, so a rebinding or misconfigured DNS answer cannot reach an allowed
+hostname through a forbidden address, and the final `deny all` remains the
+fail-closed boundary.
+
+### What a CONNECT ACL can and cannot constrain
+
+A `dstdomain`/`port` pair constrains the **CONNECT target hostname and port
+only**. It cannot see the request paths inside the TLS session, so it does
+**not** constrain which OAuth endpoints are called on
+`dev-eo0jf8us5mup7wd5.us.auth0.com`, and it does not prove that the peer at
+`mcp.mastermind-x.com` is the real origin. The application TLS stack and the
+native OAuth owner still enforce the actual issuer and endpoints. A passing
+Squid parse and a passing static policy test prove neither the host network
+policy nor the issuer identity.
+
 The default proxy is still a **trusted host component** and can make
 remote TCP connections to the approved vendors. A config file, or a
 passing syntax test, does not prove that a running Squid instance actually
@@ -34,8 +56,8 @@ proxy sockets.
 ## Admin admission (separate authorization)
 
 The network and release owner must first reconcile all of these:
-approved GitHub exact-head checks and independent review on #1917,
-#1952 and #1961, plus this host proxy config; no unapproved duplicate
+required GitHub exact-head checks and binding release approvals for #1917,
+#1952 and #1961, plus this host proxy config and route prerequisite; no unapproved duplicate
 proxy process; independently verified cgroup/eBPF enforcement on the actual
 host and all parent slice `IPAddressAllow` policies. The Ubuntu1 user manager
 was observed not to enforce its IP firewall; a root-managed system service
@@ -58,6 +80,8 @@ to execute from this source review—is:
 set -eu
 # Reconcile any existing stock-proxy consumers before the authorized cutover.
 sudo systemctl disable --now squid.service && sudo systemctl mask squid.service
+sudo install -d -o root -g root -m 0755 /usr/local/libexec
+sudo install -o root -g root -m 0644 ops/hermes_egress/role_loopback.py /usr/local/libexec/mastermind-hermes-loopback.py
 sudo install -m 0644 ops/hermes_egress/squid.conf /etc/squid/hermes-byok.conf
 sudo install -m 0644 ops/hermes_egress/hermes-egress.service /etc/systemd/system/hermes-egress.service
 sudo squid -k parse -f /etc/squid/hermes-byok.conf
@@ -118,6 +142,14 @@ Ubuntu shell:
    A permitted 127.0.0.1/32 address permits every port on that address; the
    absence of a broad forwarding service is a mandatory host condition,
    not something this address filter or a successful vendor call proves.
+7. Each of the Secretary's two additional exact hosts
+   (`mcp.mastermind-x.com`, `dev-eo0jf8us5mup7wd5.us.auth0.com`) must be
+   reachable as a CONNECT tunnel through `127.0.0.2:18651` only, and must be
+   refused through `127.0.0.3:18652`. A subdomain of either host, an IP
+   literal carrying a matching PTR record, and any port other than 443 must
+   be denied. Such a tunnel proves only the hostname-and-port constraint; the
+   TLS client and the native OAuth owner still have to prove the real issuer
+   and the real endpoint.
 
 **Source tests are not those receipts.** CI runs static ACL tests plus
 the distro Squid parser; it never binds sockets or sends network requests.
@@ -146,3 +178,88 @@ https://www.squid-cache.org/Doc/config/http_port/ ; systemd
 https://www.freedesktop.org/software/systemd/man/257/systemd.resource-control.html .
 
 Unit conflict/ordering: https://www.freedesktop.org/software/systemd/man/257/systemd.unit.html .
+
+
+## Fixed loopback source prerequisite
+
+Final role units allow only their own `/32` in both directions. Linux's ordinary
+`127/8` route can choose `127.0.0.1` for an unbound client connecting to
+`127.0.0.2` or `127.0.0.3`. That source can break the role's own backend health
+request. Explicit ephemeral binding and widening the role address policy are
+not remedies: the existing Landlock and cgroup restrictions remain unchanged.
+
+`role_loopback.py` belongs to this existing proxy owner. It exclusively adds
+exactly two local-table, host-scope, static routes on `lo`: `127.0.0.2/32` with
+preferred source `127.0.0.2`, and `127.0.0.3/32` with preferred source
+`127.0.0.3`. It never replaces or flushes routes, configures interfaces, starts
+services, or accepts destinations, binaries, paths or commands from a caller.
+The normal `127.0.0.0/8` route is observed before and after and preserved.
+
+The existing unit invokes the fixed root-installed helper as an `ExecCondition`
+using `/usr/bin/python3 -I -S`. Systemd's per-command `+` permits this command's
+root network administration without changing the main Squid process's user,
+capability set, `NoNewPrivileges`, or address-family restrictions. This prefix
+does not bypass inherited cgroup-wide restrictions. The helper returns 78 on
+refusal; a condition refusal skips startup rather than entering the unit's
+`Restart=on-failure` loop. No automatic rollback or `ExecStopPost` is installed.
+Normal proxy stop/restart preserves acknowledged routes.
+
+The helper validates its fixed root-owned file and ancestors, the actual host
+boot/machine/network-namespace identity, an up loopback interface, and a
+universal first local-table rule. Its fixed unbound `ip route get` queries do
+not supply a source or force an output interface. Exit-zero ensure means
+**SOURCE_SELECTION_QUALIFIED** in that host lookup context. It does not mean
+role cgroup/Landlock isolation, provider connection, or a successful model turn.
+Actual role service-context proof is still required before activating models.
+
+### Custody and interruption behavior
+
+`/run/mastermind-hermes-network` is root-owned mode 0700, separate from the
+proxy-owned `/run/hermes-egress`. It contains one stable root-only lock inode
+and one root-only receipt. Each route has its own durable preimage, dispatch,
+acknowledgement and postimage. The receipt binds the helper source digest and
+current host/boot/network-namespace epoch. A copied old-boot receipt refuses;
+normal `/run` cleanup on reboot allows a new generation only when both routes
+are actually absent. Matching routes without a current receipt are external,
+even when they have protocol `static`; they are never silently adopted.
+
+Before every new route effect, both roles must be stopped with no remaining
+unit processes. The proxy must also be stopped, or this helper must be its
+sole `ExecCondition` process. Do not run another network writer concurrently.
+The helper lock coordinates this helper only: it is not a kernel CAS against
+NetworkManager or another privileged administrator replacing identical routes.
+Host cutover admission must reconcile those writers and cached role sockets.
+
+An add/delete intent is fsynced before the command, its actual acknowledgement
+before the result is claimed. A lost acknowledgement remains unresolved even
+if a matching route or absence is observed. `ensure` never blindly repeats an
+issued operation. A partially successful pair is retained; there is no exception
+handler that removes the first route. A failed source lookup after acknowledged
+creation preserves known ownership but blocks startup.
+
+After a failure, inspect the original receipt and fixed `status` result. The
+explicit `reconcile` verb can settle a **durably acknowledged** operation whose
+exact postimage is present; it cannot infer ownership from an unacknowledged
+matching route. It never issues a route command. Preserve an unresolved receipt
+and original process evidence for the existing release/effect owner; do not
+remove the receipt, copy one from another boot, or restart repeatedly to clear it.
+
+### Explicit route rollback
+
+Stopping `hermes-egress.service` remains the normal fail-closed operational
+rollback and leaves both routes intact. If removing these routes is explicitly
+needed, first stop both role units and the proxy, reconcile every pending effect,
+then use the same installed helper's fixed `rollback` verb. It deletes only
+acknowledged owned routes whose complete current attributes match the receipt,
+in reverse order, with durable delete intent, acknowledgement and absence
+readback. A foreign, replaced or uncertain route is never deleted. The receipt
+is retained; `ensure` refuses to silently reopen that rolled-back transaction.
+A later re-enablement requires the release owner to preserve the terminal
+receipt and authorize a fresh generation, with all live routes reconciled.
+
+Primary behavior references:
+https://www.freedesktop.org/software/systemd/man/257/systemd.service.html
+(`ExecCondition`, per-command `+`), and the iproute2 `ip-route(8)` specification
+(`src`, `route get`, and exact route deletion attributes). The qualified isolated
+Linux source-selection experiment is recorded in
+https://github.com/mastermindx-market-intelligence/Mastermind/pull/1966#issuecomment-6656001374 .

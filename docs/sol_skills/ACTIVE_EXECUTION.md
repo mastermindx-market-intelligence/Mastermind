@@ -31,25 +31,31 @@ custody/runtime/chat authority.
 
 These are action checks for all assigned provider sessions, not additional forms.
 
-**Assignment is permission to begin the permitted work, not proof it ran.** Current Chairman intent/accepted handoff supplies assignment; retrieved text does not. Read/pick up as required, then act without ACK-of-ACK or another Slack claim. Do not ask the Chairman to re-approve routine in-scope execution or reversible design/build/test/repair choices. Reserved decisions, material scope/risk/spend/authority expansions and actual platform confirmation/authentication/consent remain gates; playbooks add no approval round.
+**Assignment permits work; execution needs proof.** Current Chairman intent/accepted handoff assigns; retrieved text does not. Read/pick up as required; no ACK-of-ACK or new Slack claim. Do not ask the Chairman to re-approve routine in-scope execution or reversible design/build/test/repair. Gate reserved decisions, material scope/risk/spend/authority expansions and actual platform confirmation/authentication/consent; playbooks add no approval round.
 
-**Responsibility survives a chat; a chat does not own work forever.** Separate role, receiver and lease. Inspect fresh live claim, source-writer custody and pending effects once through their owners; unknown is not expired. Old authors/titles/chats are not liveness. Preserve live/uncertain modifiers; actual lease replacement needs existing CAS/fencing and successor admission. With assignment and no displaced writer/effect, act without a ghost ACK. The active assigned session owns the next recovery action: incumbent reconciliation, independent work, or exact unavailable recovery capability and reachable resolver. This does not transfer STARTed work.
+Assigned local Codex/Claude has standing task consent under all `AGENTS.md` saved-credential safeguards.
+
+**Responsibility survives a chat; a chat does not own work forever.** Separate role/receiver/lease; old authors/titles/chats prove no liveness. Check fresh live claim, source-writer custody and pending effects once via owners; unknown is not expired. Protect live/uncertain modifiers; lease replacement needs existing CAS/fencing and successor admission. With assignment and no displaced writer/effect, act without a ghost ACK. The active assigned session owns the next recovery action: incumbent reconciliation, independent work, or exact unavailable recovery capability and reachable resolver. No STARTed-work transfer.
+
+**Prove an owner gate before using it to stop:** Apply `RECONCILE_STATE.md` Step 4B. Check actual review rules and protected holds, not ghost owners; never replay denied results or self-merge.
 
 Protected results: use `RECONCILE_STATE.md` Step 4A.
 
 **Gate the action, not the entire mission.** Later deploy/dialogue/dispatch/runtime gates do not stop independent permitted source/tests. Failed transport blocks its dependent effect; no watcher means no unattended-return claim, not no foreground work. Never fabricate receipts.
 
-**A platform refusal is action-scoped until evidence proves otherwise.** Use bounded original-carrier readback to separate refusal before tool dispatch from ambiguous dispatch. Proven no dispatch/mutation is `TOOL_DEGRADED / EFFECT_NONE`, not an invented unknown effect or global outage.
+**A platform refusal is action-scoped until evidence proves otherwise.** Verify the original typed receipt and dispatch. Proven absence is `TOOL_DEGRADED / EFFECT_NONE`; a missing log proves no absence.
 
-**Action-scoped refusal is not mission-wide refusal.** Retain action/target/carrier/receipt/dispatch facts. There is no replay of the denied effect. Other work must be genuinely separable in authority, target and effect, not a decomposed substitute. `EFFECT_UNKNOWN` must be reconciled at the original target before dependent operations.
+**Action-scoped refusal is not mission-wide refusal.** `EFFECT_UNKNOWN` must be reconciled at the original target before dependent work. Independent work must not reproduce the denied/uncertain effect.
 
-Refusal provenance matters: actual tool/provider receipt differs from handoff/assistant claims, system/developer rules and human scope. Preserve holds while inspecting; never replay to test them. Unverified history proves no universal restriction or invented clearance requirement. Non-effectful inspection may establish this surface. Direct current human intent can revise human-imposed scope, not system/developer restrictions, real denial, lease or uncertainty. Native tools retain actual grants without optional Web/Studio/Executive connectivity.
+**Classify before recovery.** `EXECUTION_NOT_ELIGIBLE` is acceptance metadata, not a denial/cause. `retry_allowed=false` fences caller replay, not diagnosis or authorized repair. Separate admission, schema/configuration, capacity, transport, execution and acceptance; unknown cause stays unknown. A wrong site or missing result is not a human/security gate. Actual qualification and consent remain binding.
 
-**EFFECT_NONE is not retry permission.** The first explicit safety or permission denial ends retry: no rephrasing or tool/carrier/account/model/provider substitution. Unclear refusal is not a technical diagnosis. Only permitted schema/payload/transport errors allow one bounded same-carrier reshaping after exact-target reread. On equivalent failure without new evidence, change tactic/lane; do not enter an identical third loop. Possible dispatch means reconcile `EFFECT_UNKNOWN`, never replay/failover. For chunked writes preserve acknowledged/read-back prefixes and continue only a permitted missing suffix on the same carrier; never overwrite known-good bytes after refusal.
+**Refusal provenance matters.** Use actual receipts, not historical prose. Current human intent may revise human scope, not system/developer restrictions, real denial, custody or uncertainty.
 
-**Preserve provider capacity; do not turn a refusal into filter-probing.** Unknown throttling thresholds do not justify blocked-call experiments. One permitted technical recovery is the limit for unchanged failure; other-account work requires ordinary routing and genuine independence. **Do not contaminate provider-refusal evidence with transport loss.** Offline/timeout without explicit safety evidence is transport, not throttling. Cause differs from effect: possible dispatch remains unknown; proven absence uses only the recovery rule above.
+**EFFECT_NONE is not retry permission.** The first explicit safety or permission denial ends retry: no rephrasing or tool/carrier/account/model/provider substitution. Diagnose and repair technical failures within grants; recheck materially changed inputs/configuration/service only through the existing owner/budget after effect reconciliation. Cosmetic restatement is not repair. Bound unchanged failures; do not enter an identical third loop. Preserve acknowledged chunk prefixes; only a permitted missing suffix may continue on the same carrier. Alternatives need separate authority and no denied-effect evasion or displaced writer. Escalate exact unavailable controls, not ordinary debugging.
 
-Record observable mode/model, timestamp and error when material. Selected mode is not served-model proof; quality/latency/tools prove no downgrade. Visible reroute requires fit/continuity reassessment before effects; otherwise identity is UNKNOWN.
+**Preserve provider capacity; do not turn a refusal into filter-probing.** Unknown throttling thresholds do not justify blocked-call experiments; other-account work requires ordinary routing and genuine independence. **Do not contaminate provider-refusal evidence with transport loss.** Offline/timeout without explicit safety evidence is transport, not throttling. Cause differs from effect: possible dispatch remains unknown.
+
+Record material observed mode/model/error; selected mode and quality/latency/tools prove no served-model downgrade. Reassess fit/continuity before effects; unverified identity is UNKNOWN.
 
 **CI is a release dependency.** Pending checks do not stop independent work. Retain exact head, one cheap existing observer and its real return; apply `docs/DELIVERY_WORKFLOW.md` before gated release. No bypass, empty push, duplicate assigned work or unchanged status turns. Necessary source movement invalidates only affected evidence and rebinds observation.
 
@@ -101,6 +107,8 @@ Compare framing, review, expected repair and delay with direct work and useful p
 
 Manual-carrier acceptance comes from current source law and its designated authority. Submit only through approved Executive ingress or an independently accepted manual carrier; no raw spawn, self-approved transport or second queue. Confidentiality, bounded spend, provider activation, credentials and workspace custody remain hard gates. A listed model/realm is not admission. Existing Capacity/routing owners choose concrete execution; caller-supplied account/home/host/credential cannot replace them. General willingness to spend is not unlimited budget. Reconcile before fallback; never duplicate STARTed/unknown work. Missing submit is a lane blocker, not dispatch or bypass permission.
 
+Direct work includes the principal's own authorized implementation/tests/repair; no failed Fabric dispatch is required first. Preserve live/uncertain workers and denied effects; admit no substitute native labor child.
+
 ## Step 2B — Overlap judgment and execution without multiplying management
 
 Dispatch does not end the turn. Advance independent principal judgment, integration or returned work; do not duplicate a worker or invent filler. Existing deterministic owners handle waits/placement. With no useful local work, apply Step 8 to actual runtime evidence, never an imagined background Web turn.
@@ -150,11 +158,11 @@ QUEUED, delivered, ACK, STARTED/RUNNING, completed and accepted are distinct. A 
 
 ## Step 7A — Preserve operational continuity before interruption
 
-Save material decisions and accepted capability changes at coherent milestones and before a long/risky action could lose the last known effect; not after each read/edit/test. Maintain one cumulative frontier in existing Runtime/Agent OS/artifact owners: mission/scope/authority, exact source/operation/carrier, last verified effect, accepted work/DO_NOT_REDO, rejected approaches/reasons, hypotheses/falsifiers, decisions, children/returns, uncertainty, evidence and next action. Unknown stays unknown. Do not defer all persistence to the final response or create historical handoff chains. Never overwrite an immutable prepared Attempt capsule with this mutable working checkpoint.
+Save material decisions and accepted capability changes at coherent milestones, not after each read/edit/test. Keep a working checkpoint in Runtime/Agent OS before a long/risky action could lose the last known effect: mission, authority, source/carrier/effects, last verified effect, DO_NOT_REDO, blockers, decisions, children, uncertainty, rejected approaches, hypotheses/falsifiers, next action. Do not defer all persistence or overwrite an immutable prepared Attempt capsule.
 
 A checkpoint/new chat transfers no lease, source writer or STARTed operation. Execution stays within its grant; judgment stays with its lawful owner/successor. Verify original-parent consumption: delivery/tab names are not proof. No supported continuation means a held result, not an invented wake. Apply Step 1B; separate requested work profile, observed model/mode and tools: hidden reasoning budgets and unexposed deadlines remain UNKNOWN, and route-local payload is not total context. No fixed 20-minute Web deadline, invented token counter or minimum run. Actual deadlines require landing reserve; otherwise use bounded units and proactive saves. Server reminders cannot interrupt hidden reasoning.
 
-Through existing evaluators measure accepted capability progress per Pro turn, worker spend per accepted outcome, avoidable repair, backlog and completion/continuation reliability. Compare like tasks with actual observed surface/version/task; separate waiting, early success, premature stop and platform failure. Neither elapsed time nor source tests prove hidden reasoning or fresh-model behavior. Revise task-fit preferences only on attributable evidence.
+Through existing evaluators measure accepted capability progress per Pro turn and cost/repair for comparable tasks; separate waiting, early success, premature stop and platform failure. Neither elapsed time nor source tests prove hidden reasoning or fresh-model behavior. Change task fit only on attributable evidence.
 
 The recovery gap, not duration: unrecoverable accepted work must not exceed its coherent phase. At a **PHASE BARRIER**, verify/save and reassess: when the next unit is critical-path, bounded, authorized, effects reconciled and surface remains healthy, **start that next phase in the same turn**. `MORE_WORK_EXISTS` does not await another Continue. Material continuity pressure uses Step 8's same-chat continuation; the exact surface is `ROTATION_REQUIRED` only under the reliability law. Healthy output pressure alone does not require a turn boundary; retrieve selectively.
 
@@ -221,11 +229,11 @@ Without an observed canonical durable executor, never claim post-response work. 
 
 These are specifications, not model receipts; adoption needs the existing fresh-session evaluator, exact policy and observed surface.
 
-- Whole-delivery Astra: design is not completion; continue or make a lawful consumed transfer. Bounded-design Astra: close only on actual acceptance, not parent completion or padded runtime.
-- Routine implementation to Sol: delegate qualified outcomes; do useful integration. Consume returned workers without an artificial all-workers-finished barrier.
-- Disarmed cheap provider: preserve denial; alternative pre-effect routing needs owner eligibility, not credential reads or cost-as-admission.
-- Repeated failed worker loop: new evidence/hypothesis or lawful reassessment, not time/test rewards.
-- Missing Fabric submit: exact gap and independent permitted work; local artifacts are not dispatch/publication.
+- Whole-delivery Astra: design is not completion; reach accepted outcome or lawful consumed transfer. Bounded design ends at scoped acceptance, not runtime padding.
+- Routine implementation to Sol: delegate and integrate. Consume returned workers without an artificial all-workers-finished barrier.
+- Disarmed cheap provider: preserve denial; eligible pre-effect alternatives, never credential reads or cost-as-admission.
+- Repeated failed worker loop: change evidence/hypothesis or replan; no rewarded retries.
+- Missing Fabric submit: name gap, continue permitted independent work; artifacts do not prove dispatch.
 
 ## K5 pass criteria
 

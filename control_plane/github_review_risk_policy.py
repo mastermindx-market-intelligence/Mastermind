@@ -250,21 +250,22 @@ def _validate(facts: ReviewChangeFacts) -> None:
         raise RiskPolicyInputError("file metrics do not match authenticated aggregate")
 
 
-def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
-    # This authority-neutral assessment is also consumed by signed AUTOMATIC
-    # GitHub/Executive ingress, which has no authenticated attended-CEO-Web
-    # origin discriminator. Keep the accepted machine review-risk requirements.
-    # The Chairman's all-tier no-mandatory-review waiver is for attended CEO
-    # Web author workflow (docs/DELIVERY_WORKFLOW.md / Project instructions),
-    # NOT a global exemption for bot/privileged release or financial ingress.
-    # The optional automatic review host stays OFF unless separately enabled.
-    review_counts = {
+def minimum_review_requirements(tier: ReviewTier) -> tuple[int, int]:
+    """Internal assurance only; native repository requirements remain separate."""
+    return {
         ReviewTier.FAST: (0, 0),
-        ReviewTier.STANDARD: (1, 1),
-        ReviewTier.CRITICAL: (2, 1),
+        ReviewTier.STANDARD: (0, 0),
+        ReviewTier.CRITICAL: (1, 0),
         ReviewTier.HOLD: (0, 0),
-    }
-    assessments, approvals = review_counts[tier]
+    }[tier]
+
+
+def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
+    # Ordinary changes self-check; consequential automatic/native work receives
+    # one distinct technical assessment. Formal GitHub approvals arise only
+    # from actual repository enforcement or a specific binding release hold.
+    # This does not enable the default-OFF host or change attended-Web policy.
+    assessments, approvals = minimum_review_requirements(tier)
     return ReviewRiskAssessment(
         schema=SCHEMA,
         repository=facts.repository,

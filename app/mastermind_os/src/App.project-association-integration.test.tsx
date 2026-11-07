@@ -49,6 +49,8 @@ async function setup({conflict=false, rootless=false, noGeneration=false, noPort
   fireEvent.click(screen.getByRole("button",{name:"Projects"}));
   fireEvent.click(await screen.findByRole("button",{name:"Open project Synthetic project"}));
   fireEvent.click(await screen.findByRole("button",{name:"Project details"}));
+  fireEvent.click(screen.getByRole("button",{name:"History and sources",exact:true}));
+  fireEvent.click(screen.getByText("Project history and source evidence",{selector:"summary"}));
   return {invoke, host, read, notify, changeRoom:(next: typeof room) => {room=next;}, room};
 }
 

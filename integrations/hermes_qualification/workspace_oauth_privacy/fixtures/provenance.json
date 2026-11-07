@@ -1,0 +1,103 @@
+{
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+  "license_file": "../UPSTREAM_LICENSE",
+  "files": {
+    "utils.py": {
+      "fixture": "utils.py.source",
+      "bytes": 36013,
+      "sha256": "9c4751dc9fbcbfe7e16d9e0cc5fb25566517c4927d2dc84061d4cac993a98445",
+      "git_blob": "095cbff16e231dd062714168312b951a31d8a2b8"
+    },
+    "tools/mcp_dashboard_oauth.py": {
+      "fixture": "tools__mcp_dashboard_oauth.py.source",
+      "bytes": 8988,
+      "sha256": "e05456bcd667771f50a7426d18562de2ff063046e73c0afb4fa595a87232f4f9",
+      "git_blob": "8ff229a906c777798c491f2a8fb23194e8904b2d"
+    },
+    "tools/mcp_oauth.py": {
+      "fixture": "tools__mcp_oauth.py.source",
+      "bytes": 67845,
+      "sha256": "b25655d6a2ca717b3697f2fe98b5f817da5605c203ebdce8823da55398a8b99f",
+      "git_blob": "9f63bfaddcaff7998bc450633bedf65256063966"
+    },
+    "agent/redact.py": {
+      "fixture": "agent__redact.py.source",
+      "bytes": 71327,
+      "sha256": "cea25df8139675b600eca448f70756bfa9ad22f537abf4f123d01bcbfc71e563",
+      "git_blob": "7529bf76bc1933b1ac2fcdcd2e4e22f75d6c4741"
+    },
+    "pyproject.toml": {
+      "fixture": "pyproject.toml.source",
+      "bytes": 45438,
+      "sha256": "019ffb66aeb36787d0053657bd55d424c24e656d2d184a302061a4e09a3cba15",
+      "git_blob": "361d16892f79b4b40e03e04f89a786ca721de81d"
+    },
+    "tools/mcp_tool_server_run.py": {
+      "fixture": "tools__mcp_tool_server_run.py.source",
+      "bytes": 34743,
+      "sha256": "fc05e142e0dedc888e9dfe78c8044cfe4a55de874799c31ffd17d47b4c5fb712",
+      "git_blob": "10141145c39a3cc9f0c262e9db0485e71e4106dd"
+    },
+    "tools/mcp_tool_errors.py": {
+      "fixture": "tools__mcp_tool_errors.py.source",
+      "bytes": 28793,
+      "sha256": "7f9a13601314b420119b7b633e48be69117827a784c1c980fddeb80e08ef95a8",
+      "git_blob": "0d48a0c941c4c088ff85f631fccd9f7947cc5ff2"
+    },
+    "tools/mcp_tool_transport.py": {
+      "fixture": "tools__mcp_tool_transport.py.source",
+      "bytes": 46904,
+      "sha256": "d28d6c11688142f179b59d52774e9c56dbad560011bdd737d5a3a8cfc57568d9",
+      "git_blob": "32a70d2869df7d7bea88d273792ea2b7afb815f5"
+    },
+    "hermes_constants.py": {
+      "fixture": "hermes_constants.py.source",
+      "bytes": 66932,
+      "sha256": "d54fc31b000ad700925d43c7593485c1b0d66482047f7856df8d96a4c65da955",
+      "git_blob": "7c00d84a32c21de3afd5713c3ce3cc29f8d960e9"
+    },
+    "agent/agent_init.py": {
+      "fixture": "agent__agent_init.py.source",
+      "bytes": 126617,
+      "sha256": "040c74ad19dc27c7886bf32d2e60a251a44b5b0efc95425c461b2b3b322cbcc0",
+      "git_blob": "1d2d7f302e41c0f83f32fe628a3d308f6fdc5bca"
+    },
+    "tools/mcp_oauth_provider.py": {
+      "fixture": "tools__mcp_oauth_provider.py.source",
+      "bytes": 34983,
+      "sha256": "d502124bb36ad9ed09429b5abf86bdf2878373b8c3700ab82a69d22a568c9ffa",
+      "git_blob": "545c5b071d25e4a230fd3d0af29f76901608a503"
+    },
+    "agent/memory_caller_scope.py": {
+      "fixture": "agent__memory_caller_scope.py.source",
+      "bytes": 7600,
+      "sha256": "98e96ae63394a0e80d3b0b235c59a520184d64b76006f73e8954f9a71e7a7d88",
+      "git_blob": "a05d2de55d3df2d8913a23f457779f49527d29d7"
+    },
+    "tools/mcp_oauth_manager.py": {
+      "fixture": "tools__mcp_oauth_manager.py.source",
+      "bytes": 27510,
+      "sha256": "6ff9697153ecd267464c57b1890edbd4b6259ec65cea5cce03feba5261ae1469",
+      "git_blob": "3399d06c2160091237b90e23ebbf53addb708758"
+    },
+    "hermes_cli/mcp_config.py": {
+      "fixture": "hermes_cli__mcp_config.py.source",
+      "bytes": 49006,
+      "sha256": "bd017489bfbb2769f73572ed6627b67e61838d8af162bf3072cc664d9a31f696",
+      "git_blob": "3bb246863c39569492b5718c8f65a1a0cce07c05"
+    },
+    "agent/file_safety.py": {
+      "fixture": "agent__file_safety.py.source",
+      "bytes": 24943,
+      "git_blob": "31bd2c8f0f944d101da2ac62adfd6888d2d5a878",
+      "sha256": "90515fb80bcf85c5b153370071f3d85bd945d838e0423d29e11e951f95833f6f"
+    },
+    "hermes_dir_acl.py": {
+      "fixture": "hermes_dir_acl.py.source",
+      "bytes": 24757,
+      "git_blob": "88149ddd3d5484a643b9f25beb60571067d6f6fc",
+      "sha256": "d978e1fbddffd05f4506e9c6d80a279ac9d5fea799d9a3174b260a7ff02bb50e"
+    }
+  }
+}

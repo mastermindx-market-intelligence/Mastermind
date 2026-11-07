@@ -184,15 +184,39 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
             if peak > 0:
                 max_drawdown_pct = min(max_drawdown_pct, (value / peak - 1.0) * 100.0)
 
+    def _flat_unpriced_pair(prev_row: dict[str, Any], last_row: dict[str, Any]) -> bool:
+        """TR-D(a): a flat pair with no price movement did not record a day change.
+
+        Two consecutive rows with an identical ``nav`` and no price evidence behind
+        them (an absent ``invested`` on either row, or an identical NON-ZERO
+        ``invested``) mean no quotes landed — the flatness is the feed's, not the
+        book's. An all-cash book (``invested == 0`` on both rows) genuinely did not
+        move, so it keeps its true 0.00%.
+        """
+        prev_nav = _number(prev_row.get("nav"))
+        last_nav = _number(last_row.get("nav"))
+        if prev_nav is None or last_nav is None or prev_nav != last_nav:
+            return False
+        prev_invested = _number(prev_row.get("invested"))
+        last_invested = _number(last_row.get("invested"))
+        if prev_invested is None or last_invested is None:
+            return True
+        if prev_invested == 0.0 and last_invested == 0.0:
+            return False
+        return prev_invested == last_invested
+
+    # A starting NAV of zero or absent proves nothing about return, so it is None —
+    # never a fabricated 0.0% that reads as a break-even book.
     total_return_pct = ((current_nav / starting_nav - 1.0) * 100.0
-                        if starting_nav > 0 else 0.0)
-    day_change_pct = 0.0
+                        if starting_nav > 0 else None)
+    day_change_pct = None
     if len(navs) >= 2 and navs[-2] > 0:
-        day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
+        if not _flat_unpriced_pair(history[-2], history[-1]):
+            day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
 
     final_spy_nav = (_number(final.get("spy_nav")) if _benchmark_matches(final) else None)
     vs_benchmark_pct = None
-    if final_spy_nav and starting_nav > 0:
+    if final_spy_nav and starting_nav > 0 and total_return_pct is not None:
         benchmark_return_pct = (final_spy_nav / starting_nav - 1.0) * 100.0
         vs_benchmark_pct = round(total_return_pct - benchmark_return_pct, 4)
 
@@ -206,14 +230,14 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
         "current_nav": round(current_nav, 2),
         "cash": round(cash, 2),
         "invested": round(invested, 2),
-        "total_return_pct": round(total_return_pct, 4),
+        "total_return_pct": round(total_return_pct, 4) if total_return_pct is not None else None,
         "vs_benchmark_pct": vs_benchmark_pct,
         "vs_spy_pct": vs_benchmark_pct,
         "benchmark": benchmark,
         "benchmark_name": _portfolio_registry.benchmark_name(portfolio_id),
         "benchmark_name_zh": _portfolio_registry.benchmark_name_zh(portfolio_id),
         "benchmark_as_of": final.get("date") if final_spy_nav is not None else None,
-        "day_change_pct": round(day_change_pct, 4),
+        "day_change_pct": round(day_change_pct, 4) if day_change_pct is not None else None,
         "max_drawdown_pct": round(max_drawdown_pct, 4),
         "realized_since": history[0].get("date") if history else inception_date,
         "series": series,
@@ -222,6 +246,34 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
         "frozen_as_of": frozen_as_of,
         "note": "Archived portfolio: values are frozen at the final persisted mark.",
     }
+
+
+def _account_state_probe(portfolio: str) -> dict[str, Any] | None:
+    """Display-only D-ACCT-1 probe: ``{"status": "invalid", "quarantine_sha16", "problems"}`` or None.
+
+    ``problems`` are the validator's own problem codes (strings only, at most 20, each at
+    most 120 characters) for the page's evidence tier; nothing is derived or paraphrased.
+
+    Uses only the read-only ``paper_account.account_file_status(path=...)``; never loads,
+    recovers, quarantines or writes. Any failure (including the function not existing on an
+    older tree) returns None, so the caller's existing response is unchanged.
+    """
+    try:
+        from portfolio import paper_account
+
+        path = paper_account._paths(portfolio)["account"]
+        status = paper_account.account_file_status(path=path)
+        if not isinstance(status, dict) or status.get("status") != "INVALID":
+            return None
+        problems = status.get("problems")
+        return {
+            "status": "invalid",
+            "quarantine_sha16": (status.get("sha256") or "")[:16] or None,
+            "problems": [str(code)[:120] for code in (problems if isinstance(problems, list) else [])
+                         if isinstance(code, str) and code][:20],
+        }
+    except Exception:  # noqa: BLE001 — a display probe must never change the response
+        return None
 
 
 def _archived_live_marks(portfolio_id: str) -> dict[str, Any]:
@@ -1044,10 +1096,18 @@ def api_performance(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
         # This read serves persisted performance. Intraday previews have their own
         # quote/session endpoint; do not warm quotes or recover accounts here.
         payload = paper_account.performance(portfolio_id=portfolio)
+        # An account file that exists but cannot be read must be distinguishable from
+        # "no account yet": the browser renders one canonical cell, never a zero NAV.
+        invalid_state = _account_state_probe(portfolio)
+        if invalid_state is not None:
+            payload["account_state"] = invalid_state
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
     except Exception:
-        return JSONResponse(paper_account.unavailable_performance(portfolio),
-                            headers={"Cache-Control": "no-store"})
+        unavailable = paper_account.unavailable_performance(portfolio)
+        invalid_state = _account_state_probe(portfolio)
+        if invalid_state is not None:
+            unavailable["account_state"] = invalid_state
+        return JSONResponse(unavailable, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/live_marks")
@@ -1210,7 +1270,7 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
     except Exception:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
         from portfolio import paper_account
-        return JSONResponse({
+        degraded = {
             "schema_version": "live_marks.v1",
             "portfolio": pid,
             "currency": registry.currency(pid),
@@ -1221,7 +1281,13 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "performance": paper_account.unavailable_performance(pid),
             "pricing": {"priced_positions": 0, "total_positions": 0, "complete": False},
             "error": "live_marks_unavailable",
-        }, headers={"Cache-Control": "no-store"})
+        }
+        # Same rule as /api/performance: say the state is invalid rather than let the
+        # browser read an empty mark set as an all-cash book.
+        invalid_state = _account_state_probe(pid)
+        if invalid_state is not None:
+            degraded["account_state"] = invalid_state
+        return JSONResponse(degraded, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/risk")
@@ -1413,7 +1479,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
                         })
                     payload.setdefault("positions", []).append(account_row)
             except Exception:
-                pass
+                # Keep the swallow: a failed account read must not sink the payload.
+                # But say WHY when the file exists and is unreadable, so the browser
+                # can render the canonical cell instead of an empty positions list.
+                invalid_state = _account_state_probe(portfolio)
+                if invalid_state is not None:
+                    payload["account_state"] = invalid_state
 
         # Every book gets canonical human-readable security names on read. This
         # repairs historical US/China/HK payloads without mutating runtime state.
@@ -2594,7 +2665,14 @@ def api_shadow_books() -> JSONResponse:
                          for p in shadow_books.POLICIES],
         })
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"leaderboard": [], "books": {}, "policies": [], "error": str(exc)})
+        _log.warning("shadow books read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "shadow_books_unavailable",
+            "leaderboard": None,
+            "books": None,
+            "policies": None,
+        })
 
 
 @router.get("/api/predictions")
@@ -2610,7 +2688,13 @@ def api_predictions() -> JSONResponse:
         from portfolio import predictions
         return JSONResponse(predictions.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
+        _log.warning("predictions read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "predictions_unavailable",
+            "coverage": None,
+            "scorecard": None,
+        })
 
 
 @router.get("/api/rejections")
@@ -2652,7 +2736,13 @@ def api_student() -> JSONResponse:
         out["top_predicted"] = student.predict(top=12)
         return JSONResponse(out)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "top_predicted": [], "error": str(exc)})
+        _log.warning("student model read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "top_predicted": None,
+            "error": "student_unavailable",
+        })
 
 
 @router.get("/api/distill")
@@ -2666,7 +2756,13 @@ def api_distill() -> JSONResponse:
         out["top_predicted"] = distill.predict(top=12)
         return JSONResponse(out)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "top_predicted": [], "error": str(exc)})
+        _log.warning("distill model read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "top_predicted": None,
+            "error": "distill_unavailable",
+        })
 
 
 @router.get("/api/interim_marks")
@@ -2693,7 +2789,12 @@ def api_engine_backtest() -> JSONResponse:
         from loop import engine_backtest
         return JSONResponse(engine_backtest.load())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "unavailable", "error": str(exc)})
+        _log.warning("engine backtest read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "error": "engine_backtest_unavailable",
+        })
 
 
 @router.get("/api/factor_zoo")
@@ -2707,7 +2808,12 @@ def api_factor_zoo() -> JSONResponse:
         from loop import factor_zoo
         return JSONResponse(factor_zoo.load())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "unavailable", "error": str(exc)})
+        _log.warning("factor zoo read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "error": "factor_zoo_unavailable",
+        })
 
 
 @router.get("/api/fundamentals")
@@ -2720,7 +2826,12 @@ def api_fundamentals() -> JSONResponse:
         from loop import fundamentals
         return JSONResponse(fundamentals.load())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "unavailable", "error": str(exc)})
+        _log.warning("fundamentals read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "error": "fundamentals_unavailable",
+        })
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -2745,7 +2856,15 @@ def api_mastermind_ai() -> JSONResponse:
         payload["legacy_route_prefix"] = "/api/mastermind_ai"
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"schema": "mastermind_ai_status.v1", "error": str(exc)})
+        _log.warning("mastermind portfolio loop status read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "schema": "mastermind_ai_status.v1",
+            "read_status": "unavailable",
+            "product_scope": "mastermind_portfolio_loop",
+            "public_chatbot_separate": True,
+            "legacy_route_prefix": "/api/mastermind_ai",
+            "error": "mastermind_ai_status_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/loop_log")
@@ -2758,7 +2877,13 @@ def api_mastermind_ai_loop_log(n: int = 50) -> JSONResponse:
         return JSONResponse({"loop_log": mastermind_ai.loop_log(limit=n),
                              "reviews": mastermind_ai.reviews(limit=12)})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"loop_log": [], "reviews": [], "error": str(exc)})
+        _log.warning("mastermind portfolio loop log read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "loop_log": None,
+            "reviews": None,
+            "error": "mastermind_ai_loop_log_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/improvements")
@@ -2770,8 +2895,15 @@ def api_mastermind_ai_improvements() -> JSONResponse:
         from brain import mastermind_ai
         return JSONResponse(mastermind_ai.improvements())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"pins": [], "agenda_top": [], "lessons_by_taxonomy": {},
-                             "error": str(exc)})
+        _log.warning("mastermind portfolio improvements read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "pins": None,
+            "self_tune": None,
+            "agenda_top": None,
+            "lessons_by_taxonomy": None,
+            "error": "mastermind_ai_improvements_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/reflection")
@@ -2784,7 +2916,12 @@ def api_mastermind_ai_reflection() -> JSONResponse:
         return JSONResponse(nw_reflection.latest() or {"schema": nw_reflection.SCHEMA,
                                                        "state": "absent"})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"state": "absent", "error": str(exc)})
+        _log.warning("mastermind portfolio reflection read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "state": "unavailable",
+            "error": "mastermind_ai_reflection_unavailable",
+        })
 
 
 class _MMAISettingsReq(BaseModel):
@@ -3337,13 +3474,10 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
         # fall back to the append-log latest() for any parked name not yet in the snapshot so the
         # surface is never thinner than before (back-compatible).
         state_by_ticker = {}
-        try:
-            for s in (watchlist.state_rows() or []):
-                t = (s.get("ticker") or "").upper()
-                if t:
-                    state_by_ticker[t] = s
-        except Exception:  # noqa: BLE001
-            state_by_ticker = {}
+        for s in (watchlist.state_rows() or []):
+            t = (s.get("ticker") or "").upper()
+            if t:
+                state_by_ticker[t] = s
         rows = []
         for r in (watchlist.latest() or []):
             t = (r.get("ticker") or "").upper()
@@ -3367,7 +3501,9 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
                              "last_review": str(s.get("last_review") or "")[:10] or None})
         return JSONResponse({"book": book, "watchlist": rows[:120]})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"book": book, "watchlist": [], "error": str(exc)})
+        _log.warning("desk_watchlist_unavailable: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "book": book,
+                             "watchlist": None, "error": "desk_watchlist_unavailable"})
 
 
 @router.get("/api/desk/scorecard")
@@ -3591,13 +3727,18 @@ def api_scheduler() -> JSONResponse:
     Returns per-job records: id, next_run_time, last_started, last_finished, last_skipped,
     last_status, last_severity.  Reads the run_events JSONL tail and the live APScheduler
     instance.  Auth-gated via the same app-level middleware as all other /api/* routes.
-    Never 500s — degrades to an empty list on any failure.
+    Failed reads return a closed unavailable state; a successful read may have no job rows.
     """
     try:
         from app.scheduler import scheduler_health
-        return JSONResponse({"jobs": scheduler_health()})
+        return JSONResponse({"scheduler_status": "available", "jobs": scheduler_health()})
     except Exception as exc:  # noqa: BLE001 — operator endpoint; must never raise
-        return JSONResponse({"jobs": [], "note": f"Scheduler health unavailable: {exc}"})
+        _log.warning("scheduler health read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "scheduler_status": "unavailable",
+            "jobs": None,
+            "error": "scheduler_health_unavailable",
+        })
 
 
 @router.get("/api/provenance")

@@ -13,6 +13,9 @@ protected Qwen files, symlinked-candidate and tampered-accepted-base
 negatives (typed mismatch, no completed manifest). Existing guarded runtime
 suites qualify freshness and caller UTC behavior separately. Every negative
 fixture is cloned under tmp_path; repository state is only ever read.
+
+S14 adds only the exact reviewed artifact-delivery forward composition. Its
+protected overlay base remains independently pinned and checked before staging.
 """
 import hashlib
 import importlib.util
@@ -36,8 +39,13 @@ QWEN = ("bailian_keys.py", "lease_broker.py",
         "glm_host_account_probe.py", "glm_host_account_source.py")
 HISTORICAL_FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
 LONG_HORIZON_FORWARD_NAMES = ("fabric_operator_contract.py", "native_remote.py", "sub.sh")
-FORWARD_NAMES = HISTORICAL_FORWARD_NAMES + LONG_HORIZON_FORWARD_NAMES
-BASE_ONLY_OVERLAY_NAMES = ("artifact_delivery.py", "fabric_operator_client.py")
+# Current delivery forward composes S14 with the exact reviewed advertised
+# recovery. The historical nine-source Grok map stays unchanged below.
+S14_FORWARD_DIGESTS = {
+    "artifact_delivery.py": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
+}
+FORWARD_NAMES = HISTORICAL_FORWARD_NAMES + LONG_HORIZON_FORWARD_NAMES + tuple(S14_FORWARD_DIGESTS)
+BASE_ONLY_OVERLAY_NAMES = ("fabric_operator_client.py",)
 PROTECTED_QWEN_SOURCE_DIGESTS = {
     "bailian_keys.py":
         "a6a775dd3204c4e508dedf9a892d80d3dd42069e88c1e9462c049e9cedbee085",
@@ -49,9 +57,11 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
         "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
 }
 
-# Keep the exact historical Qwen map above. Only this reviewed restrictive
-# context-reader join advances; the other three Qwen payloads remain exact.
+# Keep the exact historical Qwen map above. The restrictive context-reader
+# join and the composed application-turn/fair-share broker each have one exact
+# forward digest; remaining Qwen payloads retain their original bytes.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
+    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
@@ -242,13 +252,16 @@ def test_approved_grok_bytes_stay_pinned_after_concurrent_source_change(tmp_path
     builder.main()
     assert seen["changed"]
     manifest = json.loads((stage / "native-manifest.json").read_text())
-    pin = read_builder().GROK47_MERGED_SOURCE_DIGESTS["artifact_delivery.py"]
+    base_pin = read_builder().GROK47_MERGED_SOURCE_DIGESTS["artifact_delivery.py"]
+    assert base_pin == "447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3"
+    pin = S14_FORWARD_DIGESTS["artifact_delivery.py"]
+    assert builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["artifact_delivery.py"] == pin
     assert manifest["ext/artifact_delivery.py"] == pin
     assert digest((stage / "native-code-stage/ext/artifact_delivery.py").read_bytes()) == pin
-    assert digest(changed.read_bytes()) != pin
+    assert digest(changed.read_bytes()) != base_pin
 
 
-@pytest.mark.parametrize("name", ("pick.py", "remote_sub.sh", "remote_sub_helpers.py"))
+@pytest.mark.parametrize("name", ("artifact_delivery.py", "pick.py", "remote_sub.sh", "remote_sub_helpers.py"))
 @pytest.mark.parametrize("damage", ("changed", "missing", "symlink"))
 def test_builder_refuses_unqualified_forward_composition(tmp_path, name, damage):
     clone_root = tmp_path / "ops/native_fabric"
@@ -312,14 +325,17 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
 
 
 def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
-    """Keep the historical four and byte-pin three new finite-runtime deltas."""
+    """Keep historical four/three maps and the one exact reviewed S14 join."""
     builder = read_builder()
     forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS
     merged = builder.GROK47_MERGED_SOURCE_DIGESTS
     assert len(merged) == 9 and set(merged) == set(NAMES)
     assert set(HISTORICAL_FORWARD_NAMES) == {"pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py"}
     assert set(LONG_HORIZON_FORWARD_NAMES) == {"fabric_operator_contract.py", "native_remote.py", "sub.sh"}
-    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 7
+    assert set(S14_FORWARD_DIGESTS) == {"artifact_delivery.py"}
+    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 8
+    for name, value in S14_FORWARD_DIGESTS.items():
+        assert forward[name] == value
     assert set(forward) < set(merged)
     assert set(merged) - set(forward) == set(BASE_ONLY_OVERLAY_NAMES)
     for name, value in sorted(forward.items()):
@@ -340,7 +356,7 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS)
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
-    assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py"}
+    assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py", "lease_broker.py"}
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
         expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
         assert name in builder.BASE_FILES

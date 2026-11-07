@@ -5,6 +5,8 @@ from dataclasses import replace
 import pytest
 
 from common import workspace_autonomy_read_contract as wire
+from control_plane import executive_coo_policy as policy_owner
+from control_plane import workspace_autonomy_policy_adapter as adapter
 from control_plane.executive_coo_policy import CooCyclePolicy
 from control_plane.workspace_autonomy_policy_adapter import read_autonomy_policy
 from tests.test_workspace_admitted_plan_read import owner_fixture, request, service
@@ -88,14 +90,24 @@ def test_policy_source_move_and_private_failures_are_closed(tmp_path, monkeypatc
     with owner_fixture(tmp_path) as owner:
         authorize, _ = authorizer()
         existing = service(owner, authorize)
-        original = CooCyclePolicy.for_digest
-        calls = [0]
-        def changed(digest):
-            value = original(digest)
-            calls[0] += 1
-            return replace(value, source_sha256="f" * 64) if calls[0] == 2 else value
-        monkeypatch.setattr(CooCyclePolicy, "for_digest", changed)
+        # Move the actual policy source across composition, independently of
+        # how many earlier admission reads resolve this same policy owner.
+        path = tmp_path / "policy-source.yml"
+        path.write_bytes(policy_owner._POLICY_PATH.read_bytes())
+        monkeypatch.setattr(policy_owner, "_POLICY_PATH", path)
+        original = adapter.compose_autonomy_policy_read
+        observed = []
+        def changed(body, policy):
+            result = original(body, policy)
+            observed.append(policy)
+            path.write_bytes(path.read_bytes() + b"\n")
+            return result
+        monkeypatch.setattr(adapter, "compose_autonomy_policy_read", changed)
         assert asyncio.run(read_autonomy_policy(existing, frame(owner)))["result"]["reason_codes"] == ["SOURCE_CHANGED"]
+        assert len(observed) == 1
+        after = CooCyclePolicy.load()
+        assert after.policy_sha256 == observed[0].policy_sha256
+        assert after.source_sha256 != observed[0].source_sha256
         def fail(_): raise RuntimeError("private host path must never be released")
         monkeypatch.setattr(CooCyclePolicy, "for_digest", fail)
         result = asyncio.run(read_autonomy_policy(existing, frame(owner)))

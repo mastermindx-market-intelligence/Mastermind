@@ -40,6 +40,74 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
 
 
+def test_smoke_checkout_uses_the_full_shard_pinned_fixture_without_credentials():
+    import yaml
+
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    smoke = workflow["jobs"]["pr_fast"]["steps"][3]
+    full = next(
+        step for step in workflow["jobs"]["pytest_shards"]["steps"]
+        if step.get("name") == "Checkout pinned Macro engine"
+    )
+    assert smoke["name"] == "Checkout pinned Macro engine for source-proximate tests"
+    assert smoke["uses"] == full["uses"] == "actions/checkout@v4"
+    assert smoke["with"] == full["with"]
+    assert smoke["with"]["persist-credentials"] is False
+    assert smoke["if"] == "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
+    fan.validate_parallel_workflow(text)
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing", "duplicate", "ref", "repository", "path", "sparse-checkout",
+    "credentials", "missing-credentials", "string-credentials", "numeric-credentials",
+    "token", "action", "condition", "missing-condition", "reordered",
+    "continue-on-error", "extra-command",
+])
+def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pr_fast"]["steps"]
+    fixture = steps[3]
+    assert fixture["name"] == "Checkout pinned Macro engine for source-proximate tests"
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    if mutation == "missing":
+        steps.pop(3)
+    elif mutation == "duplicate":
+        steps.insert(4, dict(fixture))
+    elif mutation in {"ref", "repository", "path", "sparse-checkout", "token"}:
+        fixture["with"][mutation] = {
+            "ref": "master",
+            "repository": "other/repository",
+            "path": ".",
+            "sparse-checkout": "engine\n",
+            "token": "${{ secrets.OTHER_TOKEN }}",
+        }[mutation]
+    elif mutation == "credentials":
+        fixture["with"]["persist-credentials"] = True
+    elif mutation == "missing-credentials":
+        fixture["with"].pop("persist-credentials")
+    elif mutation == "string-credentials":
+        fixture["with"]["persist-credentials"] = "false"
+    elif mutation == "numeric-credentials":
+        fixture["with"]["persist-credentials"] = 0
+    elif mutation == "action":
+        fixture["uses"] = "actions/checkout@v3"
+    elif mutation == "condition":
+        fixture["if"] = "${{ always() }}"
+    elif mutation == "missing-condition":
+        fixture.pop("if")
+    elif mutation == "reordered":
+        steps[3], steps[4] = steps[4], steps[3]
+    elif mutation == "continue-on-error":
+        fixture["continue-on-error"] = True
+    else:
+        fixture["run"] = "echo unexpected"
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
 @pytest.mark.parametrize(
     ("preimage", "mutation"),
     [
@@ -117,6 +185,14 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
         ),
         (
             "gateway-shared-backend.test.mjs ",
+            "",
+        ),
+        (
+            "gateway-fleet-git-failure.test.mjs ",
+            "",
+        ),
+        (
+            "control_bundle*test.py",
             "",
         ),
         (
@@ -416,7 +492,8 @@ def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
 def test_primary_checkout_never_persists_expanded_proof_credentials():
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
-    primary = workflow["jobs"]["pytest_shards"]["steps"][0]
+    primary = workflow["jobs"]["pytest_shards"]["steps"][1]
+    assert primary["name"] == "Checkout event source"
     assert primary["uses"] == "actions/checkout@v4"
     assert primary["with"].get("persist-credentials") is False
     assert primary["with"].get("fetch-depth") == 0
@@ -428,7 +505,7 @@ def test_primary_checkout_credential_boundary_is_load_bearing(mutation):
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
     steps = workflow["jobs"]["pytest_shards"]["steps"]
-    primary = steps[0]
+    primary = steps[1]
     primary["with"]["persist-credentials"] = False
     fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
     if mutation == "missing":
@@ -447,6 +524,58 @@ def test_primary_checkout_credential_boundary_is_load_bearing(mutation):
         primary["with"] = []
     else:
         steps.append(dict(primary))
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("mutation", [
+    "wrong-anchor", "missing-anchor", "missing-event", "reversed", "interposed-code",
+    "anchor-credentials", "anchor-conditional", "anchor-path", "anchor-depth-type",
+    "event-ref", "event-continue", "missing-proof", "wrong-event-proof", "ignored-proof",
+    "explicit-root-checkout", "other-root-checkout", "fixture-root-path", "fixture-credentials",
+])
+def test_fixture_anchor_acquisition_preserves_event_source_boundary(mutation):
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    if mutation == "wrong-anchor":
+        steps[0]["with"]["ref"] = "0" * 40
+    elif mutation == "missing-anchor":
+        steps.pop(0)
+    elif mutation == "missing-event":
+        steps.pop(1)
+    elif mutation == "reversed":
+        steps[0], steps[1] = steps[1], steps[0]
+    elif mutation == "interposed-code":
+        steps.insert(1, {"run": "python -m scripts.ci_parallel_shard"})
+    elif mutation == "anchor-credentials":
+        steps[0]["with"]["persist-credentials"] = True
+    elif mutation == "anchor-conditional":
+        steps[0]["if"] = "${{ false }}"
+    elif mutation == "anchor-path":
+        steps[0]["with"]["path"] = "other"
+    elif mutation == "anchor-depth-type":
+        steps[0]["with"]["fetch-depth"] = True
+    elif mutation == "event-ref":
+        steps[1]["with"]["ref"] = "master"
+    elif mutation == "event-continue":
+        steps[1]["continue-on-error"] = True
+    elif mutation == "missing-proof":
+        steps.pop(2)
+    elif mutation == "wrong-event-proof":
+        steps[2]["run"] = "git cat-file -e HEAD"
+    elif mutation in {"explicit-root-checkout", "other-root-checkout"}:
+        repository = ("mastermindx-market-intelligence/Mastermind"
+                      if mutation == "explicit-root-checkout" else "other/repository")
+        steps.append({"uses": "actions/checkout@v4", "with": {"repository": repository}})
+    elif mutation in {"fixture-root-path", "fixture-credentials"}:
+        fixture = next(step for step in steps if step.get("name") == "Checkout pinned Macro engine")
+        if mutation == "fixture-root-path":
+            fixture["with"]["path"] = "."
+        else:
+            fixture["with"]["persist-credentials"] = True
+    else:
+        steps[2]["continue-on-error"] = True
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
@@ -486,7 +615,9 @@ _GATE_PASS_CASES = [
     ("pull_request", "full", ("success", "skipped", "success")),
     ("pull_request", "fast", ("success", "success", "skipped")),
     ("pull_request", "smoke", ("success", "success", "skipped")),
-    ("merge_group", "", ("skipped", "skipped", "success")),
+    ("merge_group", "full", ("success", "skipped", "success")),
+    ("merge_group", "fast", ("success", "success", "skipped")),
+    ("merge_group", "smoke", ("success", "success", "skipped")),
     ("push", "", ("skipped", "skipped", "success")),
     ("workflow_dispatch", "", ("skipped", "skipped", "success")),
 ]
@@ -559,7 +690,7 @@ def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
     assert calls == []
 
 
-@pytest.mark.parametrize("event", ["merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
 @pytest.mark.parametrize("mode", ["fast", "smoke"])
 def test_actual_shell_gate_never_uses_pr_fast_results_for_release(tmp_path, event, mode):
     result, calls = _run_exact_workflow_gate(

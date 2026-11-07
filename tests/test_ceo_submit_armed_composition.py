@@ -360,7 +360,10 @@ class _BindingScope:
 
 def _scope_language(path: str) -> str:
     suffix = Path(path).suffix.lower()
-    if suffix == ".py":
+    # Pinned donor archives are still Python source for this identity audit.
+    # Parse their strings/aliases exactly as executable .py postimages; this
+    # does not exempt them from changed-source or literal-identity checking.
+    if suffix == ".py" or path.lower().endswith(".py.source"):
         return "py"
     if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
         return "js"
@@ -812,6 +815,28 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     return modes == 1
 
 
+def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
+    """Admit only the reviewed, closed JS directory-permission statements.
+
+    Keep the existing recursive dir form and the publisher's nonrecursive
+    current/quarantineDir forms. These octal mode slots are permissions, not
+    UID/GID values. Operand shape, options and the complete single statement
+    remain closed; attached identities or other operations stay guarded.
+    """
+    if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
+        return False
+    matched = re.fullmatch(
+        r"\s*await\s+mkdir\(\s*(dir|current|quarantineDir)\s*,\s*\{\s*"
+        r"(recursive\s*:\s*true\s*,\s*)?"
+        r"mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
+        line,
+    )
+    if matched is None or matched.group(3) != token_text:
+        return False
+    return (matched.group(1) == "dir" if matched.group(2)
+            else matched.group(1) in {"current", "quarantineDir"})
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
@@ -823,6 +848,8 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
         return True
     if _line_mentions_identity_name(line):
         return False
+    if _is_js_mkdir_mode_literal(line, token_text):
+        return True
     # Recognize only the mode slot of this closed shell statement shape.
     # Additional commands, substitutions and unquoted operands stay guarded.
     chmod = re.fullmatch(
@@ -1556,28 +1583,30 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
+    # Pin the sole transport owner, not a line displaced by closed wire constants.
+    assert [path for path, _line in clients] == ["integrations/mastermind_executive_app/gateway.py"]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # H2 direct-native host composition: the qualified current-config/source
-    # generation callback changes this module; the installed event-loop AST
-    # remains exactly the independently reviewed 060525... anchor below.
-    # Keep a pinned full-source digest. Never derive it during this test.
-    # Exact source review of the canonical installed wrapper. This does not
-    # exempt other run calls or imports, even inside the same function.
-    # Return plus attention composition changes the module; the installed entry
-    # AST below remains identical to protected d65414e. This static literal
-    # freezes the combined candidate, not independent review or release authority.
-    # P16 READ composition adds only the qualified Plan/Journal reader factories;
-    # the exact installed event-loop AST below and all dispatch guards stay fixed.
+    # Exact source review of the canonical installed wrapper. Keep a pinned
+    # full-source digest; never derive it during this test. The pinned digest
+    # covers the composed C18 Secretary and frozen selected-child target
+    # injection. The installed entry AST remains exactly the
+    # independently reviewed 060525... anchor checked below. This does not
+    # exempt other run calls or imports, even inside the same function. This
+    # static literal freezes the combined candidate, not independent review or
+    # release authority, and grants no native SEND or installed-release
+    # approval.
+    # The adopted-context read composition changes this full-file pin. The
+    # exact installed entry AST and all ten mutation refusals remain unchanged;
+    # no additional event loop or execution call is admitted.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'a81cdea9e79374fa3e95c10c3dcf6922f92fdf816e899c8c9abff0aab018f57c'):
+            '8208bae9f1af55cc313f176f73740182db89ecd4578572c11f79d131055f7803'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -1821,6 +1850,18 @@ def _d8_frozen_source_diff(path: str, source: str) -> str:
             *(f"+{line}" for line in lines),
         ]
     )
+
+
+@pytest.mark.parametrize("suffix", [".py", ".py.source"])
+def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
+    path = "integrations/hermes_runtime/tests/fixtures/native_donor" + suffix
+    prose = 'def reserve_context():\n    """Reserving 0 lets the provider 400 before compaction."""\n    return None\n'
+    assert _identity_guard_source_path(path)
+    assert _scope_language(path) == "py"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, prose), source_postimages={path: prose}) == []
+    for executable in ("new_peer_uid = 471\n", "value = 471\npeer_uid = value\n", 'message = f"""peer {os.setuid(471)}"""\n'):
+        source = prose + executable
+        assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
 
 
 _D8_PR1572_CSS = "\n".join([
@@ -2455,6 +2496,35 @@ def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
         "    descriptor = reopen(descriptor, dir_fd=parent_descriptor)",
         "    " + mkdir_line,
     ])
+
+
+def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
+    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
+
+
+@pytest.mark.parametrize("source", [
+    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
+    "await makedir(dir, {recursive:true, mode:0o700});",
+    "await mkdir(dir, {recursive:false, mode:0o700});",
+    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
+    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
+    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
+    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
+])
+def test_d8_js_mkdir_near_misses_remain_guarded(source):
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    assert not _is_js_mkdir_mode_literal(source, "0o700")
+    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
+    # The D8 scanner is contextual; a shape alone is not an identity. Actual
+    # identity-bearing text remains guarded even beside a mkdir mode token.
+    if "peer_uid:501" in source or "peer_uid = 501" in source:
+        assert "501" in findings
+    if "mkdir(peer_uid" in source:
+        assert "0o700" in findings
+
 
 
 def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
@@ -3158,3 +3228,169 @@ def test_d8_hermes_https_port_rejects_false_postimage():
             _d8_frozen_source_diff(_HERMES_TAB_SWEEP_PATH, source),
             source_postimages={_HERMES_TAB_SWEEP_PATH: source.replace("else 443", "else 444")},
         )
+
+
+def test_d8_s14_private_parent_mode_is_one_exact_source_bound_token():
+    path = 'ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337'
+    assert REVIEWED_FILES[path]['sites'] == ((294, 79, 84, 'int', '0o700'),)
+    def scan(content, actual_path=path, postimage=True):
+        return _scan_added_identity_diff(_d8_frozen_source_diff(actual_path, content),
+            source_postimages={actual_path: content} if postimage else None)
+    assert scan(source) == []
+    assert scan(source, postimage=False) == ['0o700']
+    assert scan(source, actual_path='ops/other_account/post_failure_observation.py') == ['0o700']
+    for changed in (source.replace('!=0o700', '!=0o701', 1),
+                    source.replace('if parent_before', 'if  parent_before', 1),
+                    source + '\n# unrelated byte drift\n'):
+        assert scan(changed)
+    assert '777' in scan(source + '\npeer_uid = 777\n')
+
+
+_X_ENGAGEMENT_HTML = (
+    "research/competitive_intelligence/x_engagement/2026-10-30/"
+    "account_network_interactive.html"
+)
+_X_ENGAGEMENT_GEOMETRY = ["680", "900", "495", "535", "720", "922", "800"]
+
+
+def _d8_x_engagement_scan(source, *, path=_X_ENGAGEMENT_HTML, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_x_engagement_exact_geometry_is_frozen():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    assert hashlib.sha256(source.encode("utf-8")).hexdigest() == (
+        "62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8"
+    )
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == (
+        (8, 77, 80, "int"), (37, 17, 20, "int"),
+        (70, 45, 48, "int"), (70, 51, 54, "int"),
+        (72, 45, 48, "int"), (74, 10, 13, "int"),
+        (79, 56, 59, "int"),
+    )
+    lines = source.splitlines()
+    for line, start, end, kind, token in REVIEWED_FILES[_X_ENGAGEMENT_HTML]["sites"]:
+        assert lines[line - 1].isascii()
+        assert lines[line - 1][start:end] == token
+        assert kind == "int"
+    assert _d8_x_engagement_scan(source) == []
+
+
+@pytest.mark.parametrize("path,postimage", [
+    (_X_ENGAGEMENT_HTML, False),
+    ("research/competitive_intelligence/x_engagement/unreviewed.html", True),
+    ("ops/identity/account_network_interactive.html", True),
+])
+def test_d8_x_engagement_requires_exact_path_and_postimage(path, postimage):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    if path != _X_ENGAGEMENT_HTML:
+        assert reviewed_literal_spans(path, source) == ()
+    findings = _d8_x_engagement_scan(source, path=path, postimage=postimage)
+    # The existing nonidentity-path CSS classifier still excludes dimensions.
+    expected = _X_ENGAGEMENT_GEOMETRY[2:] if path.endswith("/unreviewed.html") else _X_ENGAGEMENT_GEOMETRY
+    assert set(expected) <= set(findings)
+
+
+def test_d8_x_engagement_registry_removal_restores_geometry(monkeypatch):
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _X_ENGAGEMENT_HTML)
+    assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("min-height:680px", "min-height:681px", "681"),
+    ("x:495,y:535", "x:496,y:535", "496"),
+    ("x:1470,y:922", "x:1470,y:923", "923"),
+    ("x:495,y:535", "peer_uid:495,y:535", "495"),
+    ("x:495,y:535", "x:495,y:535,extra:495", "495"),
+    ("Additional group ", "Additional group changed ", "800"),
+    ("</body></html>", "</body></html>\n<!-- changed byte -->", "922"),
+])
+def test_d8_x_engagement_geometry_or_context_drift_is_not_repinned(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, changed) == ()
+    assert expected in _d8_x_engagement_scan(changed)
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n<script>const peer_uid=777;</script>", ["777"]),
+    ("\n<script>const allowed_peer_uids=[450,459];</script>", ["450", "459"]),
+    ('\n<script>const account="_mastermind_unreviewed";</script>', ["_mastermind_unreviewed"]),
+    ("\n<style>*{--peer-uid:777}</style>", ["777"]),
+    ("\n<button onclick=peer_uid(777)>Inspect</button>", ["777"]),
+    ("\n<button data-peer-uid=777>Inspect</button>", ["777"]),
+])
+def test_d8_x_engagement_pin_cannot_hide_new_identity(suffix, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
+    findings = _d8_x_engagement_scan(source)
+    for token in expected:
+        assert token in findings  # The injected identity itself must be exposed.
+
+
+def test_d8_x_engagement_false_postimage_is_rejected():
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_X_ENGAGEMENT_HTML, source),
+            source_postimages={_X_ENGAGEMENT_HTML: source.replace("x:495,y:535", "x:496,y:535")},
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_x_engagement_real_committed_git_collector(tmp_path, monkeypatch, identity):
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    if identity:
+        source += "\n<script>const peer_uid=777;</script>\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _X_ENGAGEMENT_HTML, source, identity,
+    )
+
+
+def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    source += '\n<button onclick="peer_uid=777">Inspect</button>'
+    # Quoted handler dataflow is outside the existing scanner's contract. The
+    # source change still invalidates every frozen site and is rejected by D8.
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
+    assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
+    """Exercise the reviewed mode-only statements in real identity context."""
+    safe = (
+        "await mkdir(current, {mode: 0o700});",
+        "await mkdir(quarantineDir, {mode: 0o700});",
+    )
+    for line in safe:
+        assert _scan_identity_source_lines(
+            [line], identity_aliases={"current", "quarantineDir"}) == [], line
+    guarded = (
+        "await mkdir(current, {mode: 448});",
+        "await mkdir(current.uid, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700, owner: 501});",
+        "await other(current, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700}); uid = 501;",
+        "await mkdir(current, {mode: 0o700}); extra = 502;",
+        "await mkdir(current, {recursive: true, mode: 0o700});",
+        "await mkdir(unreviewed, {mode: 0o700});",
+    )
+    for line in guarded:
+        assert _scan_identity_source_lines([line], path_identity=True), line

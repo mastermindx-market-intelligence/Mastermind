@@ -80,8 +80,8 @@ it("preserves UNKNOWN across route hiding and an unavailable current gate, then 
   expect(screen.getByText(/original request outcome is unresolved/)).toBeTruthy();
   e.setData(unavailable);fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));
   await waitFor(()=>expect(e.read).toHaveBeenCalledTimes(2));
-  await waitFor(()=>expect((screen.getByRole("button",{name:"Check original request"}) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+  await waitFor(()=>expect((screen.getByRole("button",{name:"Check original project request"}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button",{name:"Check original project request"}));
   await screen.findByText(/Request committed/);
   expect(e.transport.status).toHaveBeenCalledExactlyOnceWith({kind:"project_pause",selection,command_id:pointer.operationKey,signal:expect.any(AbortSignal)});
   expect(e.transport.pause).toHaveBeenCalledTimes(1);expect(e.transport.resume).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ it("reopens the exact durable pointer only after explicit current-state read and
   expect(await e.store.read(scope)).toEqual(pointer);
   expect((screen.getByRole("button",{name:"Pause new work"}) as HTMLButtonElement).disabled).toBe(true);
   expect(e.transport.status).toHaveBeenCalledTimes(1);expect(mint).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+  fireEvent.click(screen.getByRole("button",{name:"Check original project request"}));
   await screen.findByText(/Request committed/);
   expect(e.transport.status.mock.calls.map(([request])=>request.command_id)).toEqual([pointer.operationKey,pointer.operationKey]);
   expect(e.transport.pause).not.toHaveBeenCalled();expect(e.transport.resume).not.toHaveBeenCalled();
@@ -171,4 +171,35 @@ it("withdraws the old controller when its actual store disappears and restores o
   expect(e.transport.status).toHaveBeenCalledExactlyOnceWith({kind:"project_pause",selection,command_id:pointer.operationKey,signal:expect.any(AbortSignal)});
   expect(await e.store.read(scope)).toEqual(pointer);
   expect(e.transport.pause).not.toHaveBeenCalled();expect(e.transport.resume).not.toHaveBeenCalled();
+});
+
+
+it.each(["host-currentness", "source-generation"] as const)("refuses a detached action when %s changes without a React notification",async change=>{
+  random();const e=environment();let allowed=true,generation=1;
+  e.props.canRead=()=>allowed;e.props.sourceGeneration=()=>generation;
+  render(<Driver {...e.props}/>);await readCurrent();
+  const pause=screen.getByRole("button",{name:"Pause new work"});
+  await waitFor(()=>expect(pause).toHaveProperty("disabled",false));
+  if(change==="host-currentness")allowed=false;else generation=2;
+  fireEvent.click(pause);
+  expect(screen.getByText("Request in progress…")).toBeTruthy();
+  await waitFor(()=>expect(screen.queryByText("Request in progress…")).toBeNull());
+  expect(e.transport.pause).not.toHaveBeenCalled();
+  expect(e.transport.resume).not.toHaveBeenCalled();
+  expect(await e.store.read(scope)).toBeNull();
+});
+
+
+it("withholds a completed current read if its actual owner was withdrawn without notification",async()=>{
+  const e=environment();let allowed=true,finish!:(value:unknown)=>void;
+  e.props.canRead=()=>allowed;
+  e.read.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+  render(<Driver {...e.props}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));
+  allowed=false;
+  await act(async()=>{finish(fixture.open);});
+  expect(screen.queryByRole("button",{name:"Pause new work"})).toBeNull();
+  expect(screen.queryByText("New work is not paused here. Other limits and permissions still apply.")).toBeNull();
+  expect(screen.queryByRole("button",{name:"Reading…"})).toBeNull();
+  expect(e.transport.pause).not.toHaveBeenCalled();
 });
