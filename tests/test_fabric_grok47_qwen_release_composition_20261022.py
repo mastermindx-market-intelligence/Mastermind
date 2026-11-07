@@ -81,6 +81,7 @@ def read_builder():
 def current_source_closure():
     """Bind current candidates separately from immutable historical overlays."""
     raw = (NATIVE / "rollout/native-manifest.json").read_bytes()
+    # Current host-pull successor; historical overlay pins remain independent.
     assert digest(raw) == "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
     manifest = json.loads(raw)
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_bytes())

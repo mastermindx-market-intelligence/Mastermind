@@ -1,0 +1,158 @@
+{
+  "configuration_log_sha256": "e5b5d642fb6a0131e153a37677a6f362f906636d4e3c5639d380a03743ae3d7b",
+  "governing_pin": "de6966ce1524c01ab6ac06af5461370aa79f3994",
+  "installed_configuration": {
+    "archive_sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "canonical_factory": true,
+    "canonical_imports": [
+      "engine",
+      "engine.fabric_inference_client",
+      "engine.neuralweb",
+      "engine.neuralweb.capability_broker",
+      "engine.provider_health",
+      "engine.provider_production_modes",
+      "engine.provider_workload_policy",
+      "lib",
+      "lib.ai_costs"
+    ],
+    "eligibility": "finite_observation_fixture",
+    "fixed_auto_exact_selection": true,
+    "frozen_original_configuration": true,
+    "installed_acceptance": false,
+    "live_provider_acceptance": false,
+    "macro_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "material_files": 2532,
+    "namespace_cleanup": true,
+    "network_calls": 0,
+    "package_sha256": "7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376",
+    "project_checkout_on_sys_path": false,
+    "projection_bytecode_files": 0,
+    "real_source_and_capsule_stagers": true,
+    "rehashed_tampering_refused": [
+      "fixed:foreign_source",
+      "fixed:injected_file",
+      "fixed:altered_capability",
+      "auto:foreign_source",
+      "auto:injected_file",
+      "auto:altered_capability"
+    ],
+    "revocation_refuses_new_selection": true,
+    "root_ownership_control_publication_and_acl": "explicit_fixture_doubles",
+    "same_canonical_factory_identity": true,
+    "same_release_renewal": true,
+    "schema": "mastermind.hermes_installed_configuration_qualification.v1",
+    "sealed_release_unchanged": true
+  },
+  "installed_package": {
+    "archive_sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "build_seconds": 11.024,
+    "canonical_package": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/installed-adapter-25ba92bb-proof/workspace/plugin-sources/mastermind-fabric-gateway-827bd000594cc858",
+    "checkout_on_path": false,
+    "environment": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/installed-adapter-25ba92bb-proof/environment/bin/python",
+    "generation": "/tmp/mmx-hermes-auto-qualification-ptnsvanb/installed-adapter-25ba92bb-proof/workspace",
+    "installed_acceptance": false,
+    "jsonschema": "4.26.0",
+    "live_provider_acceptance": false,
+    "macro_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "package_sha256": "7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376",
+    "pyyaml": "6.0.3",
+    "same_class_identity": true
+  },
+  "live_installation": false,
+  "live_provider_acceptance": false,
+  "logs": {
+    "composed7e61-historical-controls.log": {
+      "sha256": "cfc14fd2dc11c362cccf5421245ca5ab0e9d286b54a604a80bd2dd5522f6feb9"
+    },
+    "macro-25ba92bb-installed-build.log": {
+      "sha256": "af3231be1fc08a578842bb1807a7e62d7944380482898e58884532baca8a7aff"
+    },
+    "macro25ba-source-materialization.log": {
+      "sha256": "5c7f065975fa811d50638bef858c4143a76b5e03bf03eb79f6b09982142b538d"
+    }
+  },
+  "merge_resolution": {
+    "conflicts": [
+      "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+      "tests/test_native_pool_policy_publication.py"
+    ],
+    "incoming_h6_and_native_source_retained": true,
+    "native_release_builder_body_not_read": true,
+    "retained_strict_superset": "exact_5f05_postimages"
+  },
+  "original_hosted_native_os": {
+    "commit": "906bb682d3bb061a8db347a871977f2dcfb47a9a",
+    "conclusion": "success",
+    "run": 42404768766,
+    "scope": "original_source_only"
+  },
+  "original_j_and_held_reload_untouched": true,
+  "original_macro": {
+    "all_four_support_postimages_and_five_preserved_inputs_exact": true,
+    "attended_auto_fff_ancestor": true,
+    "commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "original_339_ancestor": true,
+    "projected_delta_from_fff": [
+      "engine/neuralweb/options_selection_context.py"
+    ],
+    "tree": "c2a4d629c87dec9381460560a31dffa4e2550917"
+  },
+  "prior_historical_failure_limit": "review_evidence/hermes_primary/historical-shadow-fixture-repair-20261107.json",
+  "prior_native_proof": "review_evidence/hermes_primary/attended-native-observation-20261107.json",
+  "production_acceptance": false,
+  "projection": {
+    "archive_sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "archive_size": 75634300,
+    "commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "material_manifest_sha256": "0ba76aacfe1c86e524b883ca0a9465d74e2832a105760ea68c8f3b0ac15d87eb",
+    "projection": "engine-lib-config/v1",
+    "repository": "mastermindx-market-intelligence/macro",
+    "schema": "mastermind.hermes_attended_source_projection/v1",
+    "tree": "c2a4d629c87dec9381460560a31dffa4e2550917"
+  },
+  "projection_check": {
+    "archive_sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "files": 2532,
+    "material_bytes": 74718668,
+    "tree": "c2a4d629c87dec9381460560a31dffa4e2550917"
+  },
+  "provider_preserving_owner": {
+    "adoption_not_claimed": true,
+    "observed_head": "2ce06c261241e2a82723fa01bfc990c748a9b1d0",
+    "pr": 2232
+  },
+  "qualification": {
+    "current_and_historical_release_controls": {
+      "failures": 0,
+      "passed": 13
+    },
+    "installed_configuration": "passed",
+    "source_materialization": {
+      "failures": 0,
+      "passed": 10
+    },
+    "two_home_package_build": "passed_offline"
+  },
+  "remaining": [
+    "original_carrier_absorption",
+    "required_current_head_ci",
+    "protected_release_and_selected_generation",
+    "current_scoped_enrollment",
+    "original_j_reconciliation",
+    "real_primary_tool_continuation_and_worker_return"
+  ],
+  "required_successor_hosted_ci": "pending_publication",
+  "schema": "mastermind.hermes_original_source_composition.v1",
+  "source_parents": [
+    "5f05b4ea24ff62e49114ca6623853e0c56e7ce6e",
+    "7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f"
+  ],
+  "unchanged_runtime": {
+    "attended_files": 17,
+    "attended_sha256": "7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376",
+    "native_patch_sha256": "631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541",
+    "sealed_backend_sha256": "887a42fd53cc4d510c1ac9dd0a1db8d52937c342da83a5b98eac07f6ebf47075",
+    "worker_sha256": "c3ce3f07017224947ea9ce28ac6744172c1fa08e767210bfbab23277d39205ee"
+  }
+}
