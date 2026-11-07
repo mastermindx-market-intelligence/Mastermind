@@ -8,6 +8,10 @@ the remaining gates. The deployment itself lives on the operator workstation
 (`~/.hermes/profiles/` + `~/.hermes/config.yaml`), not in this repo;
 `integrations/hermes_leadership/charters.py` remains the charter canon.
 
+This is a dated record of the operator's 2026-11-07 report, not a fresh
+verification of current runtime health or authority for a new restart,
+reclaim, force, dispatch or routing change.
+
 ## Roles (bound to charter canon)
 
 | Seat | Profile | Charter key | V1 accountability |
@@ -96,10 +100,13 @@ keys `orchv1-*`):
 | `t_eaaa7f69` | VERIFICATION.md (20,587 B), gated on all three wave-1 cards | assurance | done, run 25 — **6/6 re-derived claims PASS + denial test** |
 | `t_96b6eb64` | Mission monitor note (4,887 B), progress censuses on acceptance card | chief-of-staff | done, run 29 (9 attempts, all infra-class) |
 
-Mission totals: 282 events / 12 comments / 21 worker sessions; run outcomes: 6 completed, 13
-crashed, 1 rate_limited, 1 reclaimed — every adversarial interruption honestly accounted,
-zero false completions (the two `protocol_violation` events 263/288 were correctly booked on
-the seat that narrated without completing).
+The dated mission report records 282 events, 12 comments and 21 worker sessions.
+Its cited event-ID window is 107–371 inclusive, which contains 265 possible
+integer IDs. The 282-event total and that window have not been reconciled to
+the same counting scope; 265 is not a re-count of the board. The reported run
+outcomes are 6 completed, 13 crashed, 1 rate_limited and 1 reclaimed. The report
+records zero false completions and identifies `protocol_violation` events
+263/288 as narration without terminal completion.
 
 ### Adversarial test results (all by the Chairman's integrator, all live)
 
