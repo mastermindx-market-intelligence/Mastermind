@@ -36,15 +36,20 @@ MARKER_SCHEMA = "mastermind.hermes_native_eval_admission/v2"
 MARKER_KEY = "mastermind_eval_inputs_v1"
 RESULT_KEY = "mastermind_eval_inputs"
 LEGACY_RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v1"
-RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v2"
+PREVIOUS_RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v2"
+RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v3"
+STRONG_RESULT_SCHEMAS = frozenset({PREVIOUS_RESULT_SCHEMA, RESULT_SCHEMA})
 RENDERER = "mastermind.harness_instruction_text/v1"
 MAX_MARKER_BYTES = 192 * 1024
 MAX_CANDIDATE_BYTES = 16 * 1024
 MAX_CONTEXT_BYTES = 16 * 1024
 MAX_INPUT_BYTES = 16 * 1024
 MAX_EVENTS = 8
-OBSERVATION_ERRORS = frozenset({"delivery_overflow", "assembly_overflow", "metadata_overflow",
+LEGACY_OBSERVATION_ERRORS = frozenset({"delivery_overflow", "assembly_overflow", "metadata_overflow",
     "delivery_unavailable", "assembly_unavailable", "tool_schema_unavailable", "retention_overflow"})
+OBSERVATION_ERRORS = LEGACY_OBSERVATION_ERRORS | {"history_overflow", "history_unavailable"}
+HISTORY_BOUNDARY = "build_turn_context.history_adoption"
+MAX_HISTORY_ROWS = 1 << 16
 _PRIVATE = object()
 _REQUEST_FIELDS = {"run_id", "scenario_id", "scenario_version", "scenario_digest",
     "configuration_id", "configuration_digest", "experiment_id", "experiment_digest",
@@ -362,10 +367,19 @@ class NativeEvalInputOwner:
         self.publication = {"artifact_root": str(root), "root_identity": dict(zip(
             ("device", "inode", "uid", "mode"), self.root_identity))}
         launch.check()
+        # Extend the existing qualified memory/turn owner before native startup.
+        # The hook observes adoption only; it creates no history reader or store.
+        from .native_agentos_memory import NativeAgentOsMemoryFactory
+        factory = binding.memory_factory
+        if type(factory) is not NativeAgentOsMemoryFactory or factory.observation is not binding:
+            _refuse("NATIVE_EVAL_HISTORY_OWNER_UNAVAILABLE")
+        factory.bind_evaluation_history(self)
 
     def check(self):
         self.launch.check()
         self.require_transport()
+        if getattr(self.binding.memory_factory, "evaluation_history_owner", None) is not self:
+            _refuse("NATIVE_EVAL_HISTORY_OWNER_CHANGED")
         info = self.store.root.lstat()
         if (self.binding.evaluation_owner is not self
                 or self.launch.recipe.get("evaluation_inputs") != self.recipe
@@ -607,7 +621,7 @@ def _request_identity(row):
 
 def observed_record_sources(value):
     """Only original validated delivery-to-assembly joins contribute sources."""
-    if value["schema"] != RESULT_SCHEMA:
+    if value["schema"] not in STRONG_RESULT_SCHEMAS:
         return []
     snapshots = {row["inventory_sha256"]: row for row in value["source_snapshots"]}
     deliveries = {row["sequence"]: row for row in value["deliveries"]}
@@ -622,22 +636,69 @@ def observed_record_sources(value):
     return [{"artifact_ref": ref, "digest": pairs[ref]} for ref in sorted(pairs)]
 
 
+def _history_conversation_row(row):
+    """Recognize a small replayable subset without retaining its content."""
+    role = row.get("role")
+    if type(role) is not str or role not in {"user", "assistant"}:
+        return False
+    content = row.get("content")
+    if type(content) is str and content.strip():
+        return True
+    if type(content) is list:
+        for item in content:
+            if type(item) is not dict:
+                continue
+            if (item.get("type") == "text" and type(item.get("text")) is str
+                    and item["text"].strip()):
+                return True
+            picture = item.get("image_url")
+            if (item.get("type") == "image_url" and type(picture) is dict
+                    and type(picture.get("url")) is str and picture["url"].strip()):
+                return True
+    calls = row.get("tool_calls")
+    if role == "assistant" and type(calls) is list:
+        for call in calls:
+            if type(call) is not dict or call.get("type") != "function":
+                continue
+            function = call.get("function")
+            if (type(call.get("id")) is str and call["id"].strip()
+                    and type(function) is dict and type(function.get("name")) is str
+                    and function["name"].strip() and type(function.get("arguments")) is str):
+                return True
+    return False
+
+
+def _validate_history(row, *, sequence):
+    from .native_request_observation import _text, _integer
+    if (type(row) is not dict or set(row) != {"sequence", "boundary", "agent_session_id",
+            "turn_id", "row_count", "conversation_rows"}
+            or type(row["sequence"]) is not int or row["sequence"] != sequence
+            or row["boundary"] != HISTORY_BOUNDARY
+            or not _text(row["agent_session_id"]) or not _text(row["turn_id"])
+            or not _integer(row["row_count"]) or not _integer(row["conversation_rows"])
+            or not 0 <= row["conversation_rows"] <= row["row_count"] <= MAX_HISTORY_ROWS):
+        _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+
+
 def validate_observation(value, *, marker, receipt, request_observation):
     """Historical projection from the original row/result, never today's owner."""
     from .native_request_observation import MAX_METADATA_BYTES, _text, _integer
     value = _detach(value, maximum=MAX_METADATA_BYTES)
-    version2 = type(value) is dict and value.get("schema") == RESULT_SCHEMA
-    expected = {"schema": RESULT_SCHEMA if version2 else LEGACY_RESULT_SCHEMA, "run_id": marker["run_id"],
+    schema = value.get("schema") if type(value) is dict else None
+    version2 = type(schema) is str and schema in STRONG_RESULT_SCHEMAS
+    version3 = schema == RESULT_SCHEMA
+    allowed_errors = OBSERVATION_ERRORS if version3 else LEGACY_OBSERVATION_ERRORS
+    expected = {"schema": value["schema"] if version2 else LEGACY_RESULT_SCHEMA, "run_id": marker["run_id"],
         "binding_sha256": marker["binding_sha256"], "admission_id": receipt["admission_id"],
         "execution_generation": receipt["execution_generation"], "authority_epoch": receipt["authority_epoch"],
         "candidate_digest": marker["configuration"]["procedure"]["instruction_bundle"]["digest"],
         "rendered_sha256": marker["rendered_sha256"], "complete_evaluation": False}
-    extra_fields = {"source_snapshots"} if version2 else set()
+    extra_fields = ({"source_snapshots"} if version2 else set()) | ({"histories"} if version3 else set())
     if (type(value) is not dict or set(value) != set(expected) | {"instance_id", "deliveries", "assemblies", "errors"} | extra_fields
             or any(type(value[key]) is not type(item) or value[key] != item for key, item in expected.items())
             or not _text(value["instance_id"]) or not _integer(value["execution_generation"])
             or not _integer(value["authority_epoch"]) or value["authority_epoch"] < 1
-            or type(value["errors"]) is not list or any(type(e) is not str or e not in OBSERVATION_ERRORS for e in value["errors"])
+            or type(value["errors"]) is not list or any(type(e) is not str or e not in allowed_errors for e in value["errors"])
             or value["errors"] != sorted(set(value["errors"]))):
         _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     # The caller supplies the independently validated sibling projection from
@@ -651,7 +712,14 @@ def validate_observation(value, *, marker, receipt, request_observation):
         _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     available = Counter((row.get("turn_id"), row.get("api_request_id"), row.get("content_sha256"))
                         for row in sibling["observations"])
-    snapshots, deliveries = {}, {}
+    snapshots, deliveries, histories = {}, {}, {}
+    if version3:
+        rows = value["histories"]
+        if type(rows) is not list or len(rows) > MAX_EVENTS:
+            _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+        for sequence, row in enumerate(rows, 1):
+            _validate_history(row, sequence=sequence)
+            histories[sequence] = row
     if version2:
         rows = value["source_snapshots"]
         if type(rows) is not list or len(rows) > MAX_EVENTS:
@@ -677,6 +745,8 @@ def validate_observation(value, *, marker, receipt, request_observation):
         fields = {"rendered_sha256", "messages_sha256", "turn_id", "agentos"}
         if version2:
             fields |= {"sequence", "source_inventory_sha256", "current_user"}
+        if version3:
+            fields.add("history_sequence")
         if (type(row) is not dict or set(row) != fields
                 or row["rendered_sha256"] != marker["rendered_sha256"] or not _text(row["turn_id"])):
             _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
@@ -695,6 +765,12 @@ def validate_observation(value, *, marker, receipt, request_observation):
             inventory = snapshots[row["source_inventory_sha256"]]
             record_source_pairs(inventory, bundle_sha256=row["agentos"]["bundle_sha256"])
             deliveries[ordinal] = row
+        if version3 and row["history_sequence"] is not None:
+            sequence = row["history_sequence"]
+            if (type(sequence) is not int or sequence not in histories
+                    or histories[sequence]["turn_id"] != row["turn_id"]
+                    or histories[sequence]["agent_session_id"] != row["agentos"]["agent_session_id"]):
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     if version2 and set(snapshots) != {row["source_inventory_sha256"] for row in deliveries.values()}:
         _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     for row in value["assemblies"]:
@@ -744,7 +820,8 @@ class EvalInputClaim:
         self.owner, self.scope, self.marker = owner, scope, marker
         self.rendered = render_inputs(marker["candidate_files"], marker["context_text"])
         self.resolved_route = self.resolved_ephemeral = None
-        self.deliveries, self.assemblies = [], []
+        self.deliveries, self.assemblies, self.histories = [], [], []
+        self.history_proof = None  # Original transient claim/turn, never a history cache.
         self.source_snapshots = {}
         self.delivery_proof = None  # One current original claim; never a history lookup.
         self.errors = set()
@@ -773,6 +850,63 @@ class EvalInputClaim:
                 records.append(row)
             else:
                 self.errors.add("metadata_overflow")
+
+    def history_snapshot(self, claim, agent, history, messages):
+        """Only counts from the qualified caller's already copied history."""
+        factory = self.owner.binding.memory_factory
+        if (claim.scope is not self.scope or self.scope.evaluation is not self or self.scope.closed
+                or not self.scope.current() or claim.factory is not factory or claim.agent is not agent
+                or not claim.current(adopted=True) or factory.current_claim() is not claim):
+            return None
+        self.history_proof = None
+        if not factory.evaluation_history_current(claim, agent):
+            return None
+        rows = [] if history is None else history
+        if (type(rows) is not list or type(messages) is not list
+                or len(rows) > MAX_HISTORY_ROWS or len(messages) != len(rows)
+                or any(type(row) is not dict or messages[index] is not row
+                       for index, row in enumerate(rows))):
+            return None
+        # Reuse the existing bounded JSON walk; discard its digest. The
+        # observation retains neither history bytes nor a history-content hash.
+        from .native_request_observation import _content_digest
+        _content_digest({"messages": rows})
+        row = {"sequence": 1, "boundary": HISTORY_BOUNDARY,
+            "agent_session_id": agent.session_id, "turn_id": getattr(agent, "_current_turn_id", None),
+            "row_count": len(rows),
+            "conversation_rows": sum(_history_conversation_row(item) for item in rows)}
+        _validate_history(row, sequence=1)
+        return row
+
+    def note_history(self, claim, agent, snapshot):
+        """Retain once the original hydration helper returned without failure."""
+        factory = self.owner.binding.memory_factory
+        with self.scope.live.event_stream.lock, self.scope.lock:
+            if (claim.scope is not self.scope or self.scope.evaluation is not self or self.scope.closed
+                    or not self.scope.current() or not factory.evaluation_history_current(claim, agent)
+                    or snapshot["agent_session_id"] != agent.session_id
+                    or snapshot["turn_id"] != getattr(agent, "_current_turn_id", None)):
+                return
+            if len(self.histories) >= MAX_EVENTS:
+                self.errors.add("history_overflow")
+                return
+            row = {**snapshot, "sequence": len(self.histories) + 1}
+            if not self.scope._reserve(row):
+                self.errors.add("metadata_overflow")
+                return
+            self.histories.append(row)
+            self.history_proof = {"claim": claim, "agent": agent, "row": row}
+
+    def history_for_delivery(self, claim, agent):
+        proof = self.history_proof
+        factory = self.owner.binding.memory_factory
+        if (proof is None or proof["claim"] is not claim or proof["agent"] is not agent
+                or claim.scope is not self.scope or self.scope.evaluation is not self or self.scope.closed
+                or not self.scope.current() or not factory.evaluation_history_current(claim, agent)
+                or proof["row"]["agent_session_id"] != agent.session_id
+                or proof["row"]["turn_id"] != getattr(agent, "_current_turn_id", None)):
+            return None
+        return proof["row"]["sequence"]
 
     def _descriptor(self, route):
         from integrations.hermes_omh.hae_zai_extension import direct_zai_levels
@@ -956,6 +1090,7 @@ class EvalInputClaim:
             "messages_sha256": messages_digest,
             "turn_id": getattr(agent, "_current_turn_id", None), "agentos": delivery,
             "sequence": len(self.deliveries) + 1,
+            "history_sequence": self.history_for_delivery(claim, agent),
             "source_inventory_sha256": inventory["inventory_sha256"],
             "current_user": {key: anchor[key] for key in ("row_index", "row_count", "text_sha256")}}
         # Retain one inventory per digest within the original shared budget.
@@ -1019,6 +1154,7 @@ class EvalInputClaim:
             "rendered_sha256": self.marker["rendered_sha256"],
             "deliveries": [] if force_empty else copy.deepcopy(self.deliveries),
             "assemblies": [] if force_empty else copy.deepcopy(self.assemblies),
+            "histories": [] if force_empty else copy.deepcopy(self.histories),
             "source_snapshots": [] if force_empty else [copy.deepcopy(self.source_snapshots[key])
                                                         for key in sorted(self.source_snapshots)],
             "errors": sorted(self.errors | ({"retention_overflow"} if force_empty else set())),

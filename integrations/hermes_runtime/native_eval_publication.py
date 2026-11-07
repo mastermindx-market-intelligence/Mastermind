@@ -205,9 +205,9 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         matched[key] = indexed[key]
     if set(matched) != set(indexed):
         return
-    from .native_eval_inputs import RESULT_SCHEMA as CURRENT_INPUT_OBSERVATION
+    from .native_eval_inputs import RESULT_SCHEMA as CURRENT_INPUT_OBSERVATION, STRONG_RESULT_SCHEMAS
     content_fields = (("agent_session_id", "turn_id", "api_request_id", "api_call_count", "retry_count", "content_sha256")
-                      if selected_inputs["schema"] == CURRENT_INPUT_OBSERVATION
+                      if selected_inputs["schema"] in STRONG_RESULT_SCHEMAS
                       else ("turn_id", "api_request_id", "content_sha256"))
     if Counter(tuple(row[key] for key in content_fields) for row in selected_inputs["assemblies"]) != Counter(
             tuple(row[key] for key in content_fields) for row in indexed.values()):
@@ -244,6 +244,17 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
             marker["source"]["profile_id"], next(iter(physical_ids))])
     else:
         unavailable["execution.native_session_fingerprint"] = "OBSERVATION_CONFLICT"
+    if selected_inputs["schema"] == CURRENT_INPUT_OBSERVATION and len(physical_ids) == 1:
+        # Every retained request must join the same original history-adoption
+        # witness through its delivery. Empty history is not freshness evidence.
+        histories = {row["sequence"]: row for row in selected_inputs["histories"]}
+        deliveries = {row["sequence"]: row for row in selected_inputs["deliveries"]}
+        joined = [histories.get(deliveries[row["delivery_sequence"]]["history_sequence"])
+                  for row in selected_inputs["assemblies"]]
+        if joined and all(row is not None and row["conversation_rows"] > 0
+                          and row["agent_session_id"] in physical_ids for row in joined):
+            draft["execution"]["resume_used"] = True
+            draft["execution"]["fresh_session_observed"] = False
     requests = [row["request"] for row in attempts]
 
     def uniform(path, values):
@@ -275,7 +286,7 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
 
 
 def _build_run(marker, receipt, projected, *, finalizer_ref, now, missing_reason):
-    from .native_eval_inputs import RESULT_SCHEMA as CURRENT_INPUT_OBSERVATION, observed_record_sources
+    from .native_eval_inputs import STRONG_RESULT_SCHEMAS, observed_record_sources
     scenario, config = marker["scenario"], marker["configuration"]
     completion, reason = _TERMINAL[receipt["outcome"]]
     if (receipt["outcome"] == "completed"
@@ -337,7 +348,7 @@ def _build_run(marker, receipt, projected, *, finalizer_ref, now, missing_reason
         draft["observations"]["observed_tool_schema_digests"] = digests
         if selected["assemblies"]:
             coverage["observed_tool_schema_digests"] = {"status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
-            if selected["schema"] == CURRENT_INPUT_OBSERVATION:
+            if selected["schema"] in STRONG_RESULT_SCHEMAS:
                 draft["observations"]["observed_sources"] = observed_record_sources(selected)
                 coverage["observed_sources"] = {"status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
     timing = draft["timing"]

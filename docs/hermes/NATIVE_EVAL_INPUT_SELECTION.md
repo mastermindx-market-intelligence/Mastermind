@@ -179,7 +179,8 @@ to the context compiler or entire model prompt. Inventory coverage remains
 `PARTIAL`; full-file digests do not mean whole files were delivered. Auxiliary
 inputs and pointer-only artifacts remain outside this evidence claim.
 
-`mastermind.hermes_native_eval_input_observation/v2` stores each inventory once
+Input observation v2 introduced the once-per-digest inventory. Current
+`mastermind.hermes_native_eval_input_observation/v3` retains that same inventory
 inside the existing 16 KiB metadata budget. Each assembly joins the exact delivery
 sequence **and canonical delivery digest**, final message/content digests, physical
 session, turn, request ID, API-call count and retry count. Historical validation
@@ -345,7 +346,7 @@ Provider request coverage remains partial. Response-reported labels do not prove
 the serving model. Explicit wire sampling digests remain in the trace and are not
 relabeled as complete effective sampling. Network-origin hashes are not EVAL
 destination-string digests. Unobserved auth, effective environment,
-freshness, capability/source/network coverage, effects and cleanup stay missing or
+process/workspace freshness, capability/source/network coverage, effects and cleanup stay missing or
 unknown. This publisher therefore creates invalid v3 evidence of attempts,
 never a valid Harness2 trial or learning promotion.
 
@@ -483,3 +484,57 @@ otherwise admitted port; it grants no parent/Attempt, resource budget or new
 execution. The underlying private `decode_trial` returns the incumbent Trial
 object for that consumer. Read loss and owner replacement are unavailable reads,
 including outer asyncio shutdown loss, and never unknown publication effects.
+
+
+## Native conversation-history adoption
+
+Current retained input observation **v3** adds bounded `histories` and a nullable
+`history_sequence` on each original delivery. Its witness contains only the
+qualified boundary, physical session and turn identities, ordinal, total row
+count and count of recognized prior user/assistant conversation rows. It
+retains no history text, content hash, transcript locator or additional memory
+store. The new witness shares the original 16 KiB observation budget.
+
+The existing qualified memory factory binds the original
+`build_turn_context -> _hydrate_from_history` seam. At that point native
+rotated-session recovery has run, the effective history has been copied, and
+the current user row has not been appended. The wrapper preserves the helper's
+return and exception behavior. Only a call from the qualified builder can
+supply a witness; calling the helper directly cannot do so.
+
+The existing marked admission requires exactly the closed finite-input payload.
+Its qualified ingress clears API execution context and sets API-managed history
+only for the API-server source. This leaf therefore qualifies only the original
+LOCAL source object, original logical source session, same runner and private
+approval-owner tuple, matching inbound admission ID, current claim and adopted
+agent. It does not infer the transport from the agent's platform hint. An
+API-managed, copied-source, mismatched-owner or unjoined physical-session path
+contributes no history witness.
+
+A prior user or assistant row with recognized replayable text, image content
+or structured function-call content can establish reuse. A completed pair is
+not required: interrupted conversations also carry prior state. Empty,
+system-only, tool-only, unsupported or role-only scaffolds do not supply positive
+reuse. Prefill examples inserted later during request assembly are outside this
+boundary and cannot create a history witness.
+
+After the current original delivery, retry-aware assembly and complete
+transport/content joins, every retained request must reference a positive
+witness for the same physical session. Only then can the publisher populate
+`execution.resume_used=true` and `execution.fresh_session_observed=false`.
+This means consumption of prior native conversation state, not a successful
+earlier inference or a particular resume command. Rotation after adoption
+withholds the delivery join unless the original session binding still matches.
+
+Empty or missing history never produces `resume_used=false` or
+`fresh_session_observed=true`. A cached agent can have empty history; a rebuilt
+agent can adopt existing history. Neither case proves process or workspace
+freshness. Those facts still require trial-relative creation/allocation evidence
+from their existing owners. The warm-session admission gate is unchanged.
+
+Historical input v1 and v2 remain closed and readable without added history.
+V1 retains its historical correlation shape; **both v2 and v3** retain the
+strong six-field request/content join and selected-record-source behavior.
+Historical records cannot acquire a new witness from the current runtime.
+These two conditional session fields do not close the remaining observation,
+coverage, effect, cleanup, Harness2 execution or learning-promotion gates.

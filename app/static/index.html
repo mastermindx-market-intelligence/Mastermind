@@ -1889,6 +1889,11 @@ body.page-mm .mm-pf-tab .mm-pf-sub {
   white-space: nowrap;
 }
 
+body.page-mm .mm-pf-status-chip { margin-left: 5px; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+body.page-mm .mm-pf-status-chip.partial { color: var(--warn); }
+body.page-mm .mm-pf-status-chip.unavailable { color: var(--down); }
+body.page-mm .mm-pf-switch-unavailable { align-self: center; padding: 0 10px; color: var(--down); font-size: 11px; font-weight: 750; }
+
 /* Unified layout rhythm and machined panels. */
 body.page-mm .mm-section { margin-top: 18px; }
 body.page-mm .grid { gap: 18px; }
@@ -3996,6 +4001,7 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
+var _portfoliosStatus = 'loading'; // loading | available | unavailable
 var _decisionAvailability = null; // independent persisted decision/account clocks; active regional books only
 var _forwardEvaluation = null;
 var _forwardEvaluationPending = true;
@@ -5127,8 +5133,18 @@ function renderPositions() {
     return;
   }
 
+  var accountUnavailable = b.account_reconciliation_status === 'unavailable';
+  var accountWarning = accountUnavailable
+    ? '<div class="mm-cal-building" style="margin-bottom:10px"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Account reconciliation unavailable</strong> — showing published strategy positions only; live/account-only holdings may be missing.</span>' +
+      '<span class="l-zh"><strong>账户对账暂不可用</strong> — 当前仅显示已发布的策略持仓；实时/仅账户持仓可能缺失。</span></span></div>'
+    : '';
+
   if (!positions.length) {
-    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2><div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('pos.empty') + '</div>';
+    var emptyCopy = accountUnavailable
+      ? '<span class="l-en">Published strategy snapshot has no position rows; actual account holdings could not be reconciled.</span><span class="l-zh">已发布策略快照没有持仓行；实际账户持仓目前无法对账。</span>'
+      : t('pos.empty');
+    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2>' + accountWarning + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + emptyCopy + '</div>';
     return;
   }
 
@@ -5311,7 +5327,7 @@ function renderPositions() {
     : '';
 
   el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px">' + t('pos.subtitle') + '</span></h2>' +
-    banner +
+    banner + accountWarning +
     '<div class="mm-table-wrap"><table>' +
     '<thead><tr>' +
     '<th>' + t('pos.ticker') + '</th>'
@@ -7104,6 +7120,10 @@ function _fmtPctSigned(v) {
 function renderPortfolioSwitch() {
   var host = E('pf-switch');
   if (!host) return;
+  if (_portfoliosStatus === 'unavailable') {
+    host.innerHTML = '<span class="mm-pf-switch-unavailable"><span class="l-en">Portfolios unavailable</span><span class="l-zh">组合列表暂不可用</span></span>';
+    return;
+  }
   if (!_portfolios.length) { host.innerHTML = ''; return; }
   host.innerHTML = _pfOrdered(_portfolios).map(function(p) {
     var st = p.status || {};
@@ -7114,7 +7134,13 @@ function renderPortfolioSwitch() {
     // tracks the live mark. The old $X.XXM format quantized to $10k steps, so intraday moves
     // (and books sitting near $1M) looked frozen even though /api/portfolios refreshes them.
     var navStr = st.nav != null ? ccy + Math.round(st.nav).toLocaleString('en-US') : '—';
-    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>';
+    var statusChip = '';
+    if (st.read_status === 'partial') {
+      statusChip = '<span class="mm-pf-status-chip partial"><span class="l-en">PARTIAL</span><span class="l-zh">不完整</span></span>';
+    } else if (st.read_status === 'unavailable') {
+      statusChip = '<span class="mm-pf-status-chip unavailable"><span class="l-en">UNAVAILABLE</span><span class="l-zh">不可用</span></span>';
+    }
+    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>' + statusChip;
     var archived = p.lifecycle === 'archived' || p.active === false;
     var archiveChip = archived ? '<span class="mm-archive-chip">' + (document.documentElement.getAttribute('data-lang') === 'zh' ? '已归档' : 'ARCHIVED') + '</span>' : '';
     var title = archived ? ((p.archived_reason || 'Frozen historical portfolio') + (p.superseded_by ? ' · successor: ' + p.superseded_by : '')) : (p.tagline || '');
@@ -7253,7 +7279,14 @@ async function loadPortfolios() {
   try {
     var r = await fetch('/api/portfolios');
     var d = r.ok ? await r.json() : null;
-    if (d && d.portfolios) {
+    if (!d || d.read_status === 'unavailable' || !Array.isArray(d.portfolios) ||
+        !d.portfolios.every(function(p) { return p && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && p.id.length > 0; })) {
+      _portfoliosStatus = 'unavailable';
+      renderPortfolioSwitch();
+      return;
+    }
+    if (Array.isArray(d.portfolios)) {
+      _portfoliosStatus = 'available';
       _portfolios = d.portfolios;
       // The registry owns the product default. Explicit historical/workspace URLs keep their
       // selected book, while the root dashboard follows the backend contract instead of a second
@@ -7273,7 +7306,10 @@ async function loadPortfolios() {
       }
       _schedulePortfolioPrefetch();
     }
-  } catch (e) {}
+  } catch (e) {
+    _portfoliosStatus = 'unavailable';
+    renderPortfolioSwitch();
+  }
 }
 
 // ── DECISION AVAILABILITY: display-only, per-book, independent source clocks ──
@@ -9495,7 +9531,7 @@ function _mergeLiveMarks(data) {
         var mark = byTicker[row.ticker];
         if (mark) {
           seen[row.ticker] = true;
-          reconciled.push(Object.assign(row, mark));
+          reconciled.push(Object.assign({}, row, mark));
         } else if (row.pending) {
           reconciled.push(row);
         }
@@ -9517,6 +9553,16 @@ function _mergeLiveMarks(data) {
       var hasPricing = data.pricing != null && typeof data.pricing === 'object';
       var holdingsComplete = !data.error && hasPricing && Number(data.pricing.total_positions || 0) === (data.positions || []).length;
       if (holdingsComplete) _book.positions = reconciled;
+      if (holdingsComplete && _book.account_reconciliation_status === 'unavailable') {
+        _book.account_reconciliation_status = 'available';
+        if (Array.isArray(_book.failed_sources)) {
+          var hadAccountFailure = _book.failed_sources.indexOf('account_reconciliation') !== -1;
+          _book.failed_sources = _book.failed_sources.filter(function(source) { return source !== 'account_reconciliation'; });
+          if (hadAccountFailure && !_book.failed_sources.length && _book.snapshot_status === 'partial') {
+            _book.snapshot_status = 'available';
+          }
+        }
+      }
       // Without the block, the cached rows stay and the gap is named in the status line.
       if (!hasPricing) _liveMarks.pricing_partial = true;
     }

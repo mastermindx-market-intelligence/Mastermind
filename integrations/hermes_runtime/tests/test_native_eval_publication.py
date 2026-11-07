@@ -23,7 +23,8 @@ from integrations.hermes_runtime import native_transport_observation as transpor
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.tests.test_native_eval_inputs import (
     admission_db, compile_selected, marker, source_owner, trial,
-    lifecycle, decoded_fixture, actual_result, engine, native, native_trial, execute_trial, actual_custom_effort, success,
+    lifecycle, history_lifecycle, historical_v2_observation, decoded_fixture, actual_result, engine, native,
+    native_trial, execute_trial, actual_custom_effort, success,
     current_result, signed, rsa_key, joined, owner, env, isolated_git_env, identity,
 )
 from integrations.hermes_runtime.tests.test_native_request_observation import module
@@ -376,6 +377,9 @@ def test_existing_artifact_is_not_proof_of_original_frozen_publication(original,
 def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
     openai = pytest.importorskip("openai")
     mode = getattr(request, "param", "ordinary")
+    native_history = mode.startswith("history_")
+    if native_history:
+        lifecycle = request.getfixturevalue("history_lifecycle")
     selected = {}
     t = native_trial(lifecycle, tmp_path)
     original_turn = lifecycle.turn_for
@@ -421,7 +425,11 @@ def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
                 engine.invoke(out["agent"], out["kwargs"], make_client, request_id="eval-request")
         else:
             engine.invoke(out["agent"], out["kwargs"], make_client, request_id="eval-request")
-    out = execute_trial(lifecycle, t, after_request=downstream)
+    from gateway.config import Platform
+    prior = [] if mode == "history_empty" else [{"role": "user", "content": "Original prior conversation."}]
+    out = execute_trial(lifecycle, t, after_request=downstream, native_context=native_history,
+        history=prior if native_history else None,
+        source_platform=Platform.API_SERVER if mode == "history_api" else None)
     receipt = {"admission_id": "eval-admission", "ref": {"profile_id": t.owner.profile_id, "session_id": t.session},
         "sequence": 1, "status": "terminal", "outcome": "failed" if mode == "raised_attempt" else "completed",
         "authority_epoch": 2, "execution_generation": 3}
@@ -924,3 +932,51 @@ def test_trial_private_read_loss_is_unavailable_and_uses_the_original_handler(or
     assert response["status"] == "REFUSED" and "trial_summary" in response
     monkeypatch.setattr(o.t.owner.store, "resolve_run", lambda *_: (_ for _ in ()).throw(TimeoutError("read loss")))
     assert handler(request, o.t.principal)["status"] == "UNAVAILABLE"
+
+
+@pytest.mark.parametrize("wire_projection,expected", [
+    ("history_prior", True), ("history_empty", False), ("history_api", False)],
+    indirect=["wire_projection"])
+def test_original_native_history_reaches_existing_run_fields(wire_projection, expected):
+    run = wire_projection.build()
+    assert run["execution"]["resume_used"] is (True if expected else None)
+    assert run["execution"]["fresh_session_observed"] is (False if expected else None)
+    assert run["execution"]["fresh_process_observed"] is None
+    assert run["execution"]["fresh_workspace_observed"] is None
+    assert run["execution"]["provider"] == "custom"
+    assert run["validity"]["status"] != "VALID"
+    assert run["effect"]["state"] == "EFFECT_UNKNOWN" and run["cleanup"]["status"] == "UNPROVEN"
+
+
+@pytest.mark.parametrize("wire_projection", ["history_prior"], indirect=True)
+@pytest.mark.parametrize("change", ["no_delivery", "no_history", "empty", "missing_assembly", "overflow"])
+def test_history_scalar_needs_original_delivery_and_complete_request_join(wire_projection, change):
+    value = copy.deepcopy(wire_projection.projected)
+    selected = value["evaluation_inputs"]
+    if change == "no_delivery":
+        selected["deliveries"][0]["history_sequence"] = None
+    elif change == "no_history":
+        selected["histories"] = []
+    elif change == "empty":
+        selected["histories"][0]["conversation_rows"] = 0
+    elif change == "missing_assembly":
+        selected["assemblies"] = []
+    else:
+        value["request_observation"]["transport"]["overflow"] = True
+    run = wire_projection.build(value)
+    assert run["execution"]["resume_used"] is None
+    assert run["execution"]["fresh_session_observed"] is None
+
+
+@pytest.mark.parametrize("wire_projection", ["history_prior"], indirect=True)
+def test_retained_input_v2_keeps_strong_join_and_sources_without_new_history(wire_projection):
+    value = copy.deepcopy(wire_projection.projected)
+    value["evaluation_inputs"] = historical_v2_observation(value["evaluation_inputs"])
+    run = wire_projection.build(value)
+    assert run["execution"]["provider"] == "custom" and run["execution"]["model_requested"] == "glm-5.3"
+    assert run["observations"]["observed_sources"] == inputs.observed_record_sources(value["evaluation_inputs"])
+    assert run["execution"]["resume_used"] is run["execution"]["fresh_session_observed"] is None
+    # Old v2 must never fall back to v1's weaker correlation after a version bump.
+    value["evaluation_inputs"]["assemblies"][0]["retry_count"] += 1
+    changed = wire_projection.build(value)
+    assert changed["execution"]["provider"] is changed["execution"]["model_requested"] is None

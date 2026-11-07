@@ -226,6 +226,7 @@ class NativeAgentOsMemoryFactory:
         self.connection = self.rpc_current = None
         self.connection_current = None
         self.wrappers = []
+        self.evaluation_history_owner = None
         self.last_instance = self.last_delivery = None
         self.memory_manager_class = modules["agent.memory_manager"].MemoryManager
         self.collector_class = modules["plugins.memory"]._ProviderCollector
@@ -248,6 +249,76 @@ class NativeAgentOsMemoryFactory:
                 and all(getattr(owner, name, None) is wrapper for owner, name, wrapper in self.wrappers))
         except Exception:
             return False
+
+    def evaluation_history_current(self, claim, agent):
+        """Original LOCAL admission identity, not an agent platform hint."""
+        try:
+            from gateway.config import Platform
+            scope, turn = claim.scope, claim.turn
+            ctx, source = turn._ctx, scope.live.source
+            evaluation = scope.evaluation
+            return (self.evaluation_history_owner is not None
+                and self.observation.evaluation_owner is self.evaluation_history_owner
+                and evaluation is not None and evaluation.owner is self.evaluation_history_owner
+                and evaluation.scope is scope and self.current_claim() is claim
+                and claim.agent is agent and claim.current(adopted=True)
+                and turn._runner is scope.authority.runner
+                and turn._approval_owner == (scope.authority, scope.session_id, scope.generation)
+                and ctx.inbound_message_id == scope.admission_id
+                and ctx.source is source and source.platform is Platform.LOCAL
+                and source.chat_id == scope.session_id
+                and ctx.session_id == agent.session_id)
+        except Exception:
+            return False
+
+    def bind_evaluation_history(self, owner):
+        """Add one optional witness to this existing qualified turn owner."""
+        from .native_eval_inputs import NativeEvalInputOwner
+        if (type(owner) is not NativeEvalInputOwner or owner.binding is not self.observation
+                or owner.launch is not self.launch or self.evaluation_history_owner is not None
+                or not self.local_current()):
+            _refuse("NATIVE_EVAL_HISTORY_OWNER_UNAVAILABLE")
+        turn_context = self.modules["agent.turn_context"]
+        build = _function(turn_context, "build_turn_context")
+        hydrate = _function(turn_context, "_hydrate_from_history")
+
+        def hydrate_history(agent, conversation_history):
+            claim = evaluation = snapshot = None
+            frame = caller = None
+            try:
+                frame = inspect.currentframe()
+                caller = frame.f_back
+                if (caller.f_code is build.__code__ and caller.f_globals is vars(turn_context)
+                        and getattr(turn_context, "build_turn_context", None) is build
+                        and caller.f_locals.get("agent") is agent
+                        and caller.f_locals.get("conversation_history") is conversation_history):
+                    claim = self.current_claim()
+                    evaluation = claim.scope.evaluation
+                    if evaluation is not None and evaluation.owner is owner:
+                        with claim.scope.live.event_stream.lock, claim.scope.lock:
+                            snapshot = evaluation.history_snapshot(claim, agent, conversation_history,
+                                                                   caller.f_locals.get("messages"))
+            except Exception:
+                if evaluation is not None and evaluation.owner is owner:
+                    evaluation.fail("history_unavailable")
+            finally:
+                # Never retain caller frames, message lists or history text.
+                del caller, frame
+            # Preserve the original helper's return and exception behavior.
+            result = hydrate(agent, conversation_history)
+            if snapshot is not None:
+                try:
+                    evaluation.note_history(claim, agent, snapshot)
+                except Exception:
+                    evaluation.fail("history_unavailable")
+            return result
+
+        self.launch.check()
+        if not self.local_current():
+            _refuse("NATIVE_EVAL_HISTORY_OWNER_UNAVAILABLE")
+        self.evaluation_history_owner = owner
+        self.wrappers.append((turn_context, "_hydrate_from_history", hydrate_history))
+        turn_context._hydrate_from_history = hydrate_history
 
     def configure(self, *, session_id, instance_id, authority_epoch, server, session, loop,
                   currentness, connection_current):

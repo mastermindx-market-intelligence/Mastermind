@@ -355,24 +355,90 @@ def native_trial(lifecycle, tmp_path, *, context="Known fixture facts.\n", files
     t = source_owner(tmp_path / "eval-store", str(n.home), context=context, files=files, record_sources=sources)
     t.principal = l.factory.publication.session.principal_id
     t.owner.binding = n.binding
+    t.owner.launch = n.launch  # Explicit retained release-owner fixture edge.
     n.binding.memory_factory = l.factory
     n.binding.evaluation_owner = t.owner
     del t.owner.require_enrollment  # Actual current native factory/enrollment joins.
+    if getattr(l, "history_ready", False):
+        l.factory.bind_evaluation_history(t.owner)
     return t
 
 
+@pytest.fixture
+def history_lifecycle(lifecycle, monkeypatch):
+    """Original full turn builder/hydrator; unrelated services are fixture edges."""
+    from integrations.hermes_runtime.tests.test_native_agentos_memory import edge
+    from integrations.hermes_runtime import native_agentos_memory as memory
+    l, module = lifecycle, lifecycle.turn_context
+    path = Path(module.__file__)
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == memory.SOURCE_SHA256["agent/turn_context.py"]
+    names = {"build_turn_context", "_hydrate_from_history"}
+    nodes = [node for node in ast.parse(raw).body if getattr(node, "name", None) in names]
+    assert {node.name for node in nodes} == names
+    future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[future, *nodes], type_ignores=[])),
+                 str(path), "exec"), vars(module))
+    l.history_recovery = l.history_compaction = None
+    l.history_ready = True
+    def identity(agent, *_):
+        agent._current_turn_id = "turn-A"
+        return "fixture-task", agent._current_turn_id
+    def compact(agent, **kwargs):
+        if l.history_compaction is not None:
+            l.history_compaction(agent)
+        return SimpleNamespace(**{key: kwargs[key] for key in (
+            "messages", "active_system_prompt", "conversation_history", "current_turn_user_idx")},
+            compressed=False, blocked=False)
+    values = {
+        "parse_turn_author": lambda value: value,
+        "recover_rotated_compression_session": lambda agent: (
+            l.history_recovery(agent) if l.history_recovery is not None else None),
+        "_bind_turn_identity": identity,
+        "_stage_turn_user_message": lambda _agent, text, *_: ({"role": "user", "content": text}, None),
+        "append_message": lambda rows, row: rows.append(row),
+        "_tick_memory_nudge": lambda _agent: False,
+        "_collect_pre_llm_call_context": lambda *_a, **_k: "",
+        "_merge_gateway_notes": lambda _agent, _messages, _index, context: context,
+        "TurnContext": SimpleNamespace, "logger": logging.getLogger(__name__),
+    }
+    for name in ("_publish_runtime_main", "_refresh_mcp_tools_between_turns", "_reset_per_turn_agent_state",
+                 "bind_image_token_cost", "_emit_reaction", "_ensure_session_row", "stage_skills_index_note",
+                 "_bind_interrupt_scope", "_maybe_title_session_at_turn_start", "_stamp_api_content_sidecar",
+                 "_persist_turn_start", "restore_usage_anchor"):
+        values[name] = lambda *_a, **_k: None
+    for name, value in values.items():
+        monkeypatch.setattr(module, name, value, raising=False)
+    edge(monkeypatch, "agent.turn_context_compaction", run_turn_start_compaction=compact)
+    edge(monkeypatch, "tools.skill_provenance", set_review_attended=lambda *_: None)
+    edge(monkeypatch, "agent.delegation_backends", apply_requested_tool_rebuild=lambda *_: None)
+    edge(monkeypatch, "tools.bot_mode_dm", ensure_message_agent_tool=lambda *_: None)
+    edge(monkeypatch, "agent.session_persistence", _PERSIST_AFTER_ADMISSION_INTERRUPT="_pending_fixture")
+    return l
+
+
 def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, before_request=None,
-                  after_request=None, history=None, before_builder=None):
+                  after_request=None, history=None, before_builder=None, native_context=False,
+                  cached=None, before_history=None, after_history=None, source_platform=None):
     l, n = lifecycle, lifecycle.native
     selected = marker(t)
     ref, row, _ = n.claim(admission=admission, generation=generation)
     row.update(principal_id=t.principal, request_id=selected["input"]["submission_id"],
         payload={"text": t.text, "finite": True, inputs.MARKER_KEY: selected})
     n.authority.adopted.pop(ref.session_id, None)
+    if native_context:
+        from gateway.config import Platform
+        n.authority.sessions[ref.session_id].source = SimpleNamespace(
+            platform=Platform.LOCAL if source_platform is None else source_platform,
+            user_id="user", user_id_alt=None, user_name=None, chat_id=ref.session_id,
+            chat_name=None, chat_type="private", thread_id=None)
     route = provider_route()
     out = {"marker": selected, "row": row}
     def execute():
-        turn = l.turn_for(ref, row)
+        turn = l.turn_for(ref, row, cached=cached)
+        if native_context:
+            turn._ctx.source = n.authority.sessions[ref.session_id].source
+            turn._ctx.inbound_message_id = row["admission_id"]
         original = turn._ctx.AIAgent
         def create(**kwargs):
             agent = original(**kwargs)
@@ -382,14 +448,30 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
         turn._ctx.AIAgent = create
         agent, reused = turn._resolve_turn_agent(route, "api", "original ephemeral", 3, None, {})
         turn._wire_turn_agent_callbacks(agent, route, None, None, None, False)
-        out.update(agent=agent, reused=reused, scope=observation._current.get())
+        out.update(agent=agent, reused=reused, scope=observation._current.get(), turn=turn)
         if before_builder:
             before_builder(out)
-        context = l.turn_context._memory_turn_start_and_prefetch(agent, t.text)
         history = copy.deepcopy(history_rows)
-        messages, system = l.turn_context.build_api_messages(agent, [*history, {"role": "user", "content": t.text}],
-            current_turn_user_idx=len(history), ext_prefetch_cache=context, plugin_user_context="", moa_config=None,
-            active_system_prompt="original system")
+        if native_context:
+            agent._todo_store = SimpleNamespace(has_items=lambda: True)
+            agent._restore_primary_runtime = lambda: None
+            agent.quiet_mode, agent._cached_system_prompt = True, "original system"
+            if before_history:
+                before_history(out)
+            built = l.turn_context.build_turn_context(agent, t.text, None, history, "fixture-task", None, None,
+                restore_or_build_system_prompt=lambda *_: None, install_safe_stdio=lambda: None,
+                sanitize_surrogates=lambda text: text, summarize_user_message_for_log=lambda text: text,
+                set_session_context=lambda *_: None, set_current_write_origin=lambda *_: None, ra=None)
+            context = built.ext_prefetch_cache
+            if after_history:
+                after_history(out)
+            rows, user_index, active_system = built.messages, built.current_turn_user_idx, built.active_system_prompt
+        else:
+            context = l.turn_context._memory_turn_start_and_prefetch(agent, t.text)
+            rows, user_index, active_system = [*history, {"role": "user", "content": t.text}], len(history), "original system"
+        messages, system = l.turn_context.build_api_messages(agent, rows,
+            current_turn_user_idx=user_index, ext_prefetch_cache=context, plugin_user_context="", moa_config=None,
+            active_system_prompt=active_system)
         kwargs = {"model": agent.model, "messages": messages, "seed": agent.request_overrides["seed"],
                   "reasoning_effort": agent.reasoning_config["effort"], "tools": [], "stream": False}
         out.update(messages=messages, system=system, kwargs=kwargs)
@@ -674,9 +756,10 @@ def test_historical_v1_observation_stays_exact_and_source_unobserved(lifecycle, 
     # Historical structural contract: explicitly remove every new v2 field;
     # no newer inventory is inferred into old evidence at readback.
     old["schema"] = inputs.LEGACY_RESULT_SCHEMA
+    old.pop("histories")
     old.pop("source_snapshots")
     for row in old["deliveries"]:
-        for key in ("sequence", "source_inventory_sha256", "current_user"):
+        for key in ("sequence", "source_inventory_sha256", "current_user", "history_sequence"):
             row.pop(key)
     for row in old["assemblies"]:
         for key in ("agent_session_id", "api_call_count", "retry_count", "messages_sha256", "delivery_sequence", "delivery_sha256"):
@@ -1155,3 +1238,216 @@ def test_eval_owner_requires_current_original_dispatch_installation(engine, monk
     monkeypatch.setattr(engine.helpers, "_dispatch_nonstreaming_api_request", lambda *_a, **_kw: None)
     with pytest.raises(RuntimeRefusal, match="DISPATCH_FENCE"):
         owner.require_transport()
+
+
+# Native history evidence executes the qualified donor's complete turn builder
+# and hydration helper. The surrounding provider/compaction/host edges above
+# are synthetic; none of these cases creates a live session or a fresh trial.
+@pytest.mark.parametrize("rows", [
+    [{"role": "user", "content": "PRIOR_NATIVE_TEXT_SENTINEL"}],
+    [{"role": "assistant", "content": "An interrupted partial response."}],
+    [{"role": "assistant", "content": None, "tool_calls": [
+        {"id": "prior-call", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}],
+])
+def test_native_history_adoption_retains_only_original_counts(history_lifecycle, tmp_path, rows):
+    l = history_lifecycle
+    t = native_trial(l, tmp_path)
+    out = execute_trial(l, t, history=rows, native_context=True)
+    value = out["saved"][inputs.RESULT_KEY]
+    assert out["reused"] is False
+    assert value["schema"] == inputs.RESULT_SCHEMA
+    assert value["histories"] == [{"sequence": 1, "boundary": inputs.HISTORY_BOUNDARY,
+        "agent_session_id": out["agent"].session_id, "turn_id": "turn-A",
+        "row_count": 1, "conversation_rows": 1}]
+    assert value["deliveries"][0]["history_sequence"] == 1
+    assert b"PRIOR_NATIVE_TEXT_SENTINEL" not in canonical_json_bytes(value)
+    assert inputs.validate_observation(value, marker=out["marker"],
+        receipt={"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2},
+        request_observation=out["saved"][observation.RESULT_KEY]) == value
+
+
+@pytest.mark.parametrize("rows", [[], [{"role": "system", "content": "Prior instructions."}],
+    [{"role": "tool", "content": "Only a tool suffix."}], [{"role": "assistant"}],
+    [{"role": "user", "content": " \n "}], [{"role": "assistant", "content": []}]])
+def test_empty_or_scaffold_history_is_not_positive_reuse(history_lifecycle, tmp_path, rows):
+    t = native_trial(history_lifecycle, tmp_path)
+    out = execute_trial(history_lifecycle, t, history=rows, native_context=True)
+    value = out["saved"][inputs.RESULT_KEY]
+    assert len(value["histories"]) == 1
+    assert value["histories"][0]["conversation_rows"] == 0
+
+
+def test_cached_and_rebuilt_agents_use_original_history_evidence(history_lifecycle, tmp_path):
+    l = history_lifecycle
+    t = native_trial(l, tmp_path)
+    first = execute_trial(l, t, native_context=True)
+    assert first["reused"] is False
+    assert first["saved"][inputs.RESULT_KEY]["histories"][0]["conversation_rows"] == 0
+    t.specification["run_id"] = fresh_run_id()
+    def late_old(out):
+        old = first["scope"].evaluation
+        before = copy.deepcopy(old.histories)
+        claim = l.factory.current_claim()
+        old.note_history(claim, out["agent"], first["saved"][inputs.RESULT_KEY]["histories"][0])
+        assert old.histories == before and out["scope"].evaluation.histories == []
+    second = execute_trial(l, t, admission="second-eval", generation=4, native_context=True,
+        cached=first["agent"], history=[{"role": "user", "content": "Unanswered previous turn."}],
+        before_history=late_old)
+    assert second["reused"] is True and second["agent"] is first["agent"]
+    assert second["saved"][inputs.RESULT_KEY]["histories"][0]["conversation_rows"] == 1
+    assert second["saved"][inputs.RESULT_KEY]["admission_id"] == "second-eval"
+    before = copy.deepcopy(first["scope"].evaluation.histories)
+    first["scope"].evaluation.note_history(second["scope"].evaluation.history_proof["claim"],
+        second["agent"], second["saved"][inputs.RESULT_KEY]["histories"][0])
+    assert first["scope"].evaluation.histories == before  # Late old claim cannot adopt a peer.
+
+
+@pytest.mark.parametrize("change", ["api", "source_copy", "inbound", "runner", "authority", "chat", "physical"])
+def test_history_witness_requires_original_local_admission(history_lifecycle, tmp_path, change):
+    from gateway.config import Platform
+    l = history_lifecycle
+    t = native_trial(l, tmp_path)
+    def alter(out):
+        ctx, turn = out["turn"]._ctx, out["turn"]
+        if change == "source_copy":
+            ctx.source = copy.copy(ctx.source)
+        elif change == "inbound":
+            ctx.inbound_message_id = "another-admission"
+        elif change == "runner":
+            turn._runner = SimpleNamespace()
+        elif change == "authority":
+            turn._approval_owner = (out["scope"].authority, out["scope"].session_id, 99)
+        elif change == "chat":
+            ctx.source.chat_id = "another-session"
+        elif change == "physical":
+            out["agent"].session_id = "rotated-physical-session"
+    out = execute_trial(l, t, native_context=True, history=[{"role": "user", "content": "Prior turn."}],
+        before_history=alter, source_platform=Platform.API_SERVER if change == "api" else None)
+    value = out["saved"][inputs.RESULT_KEY]
+    assert value["histories"] == []
+    assert value["deliveries"][0]["history_sequence"] is None
+
+
+def test_recovery_replacement_is_sampled_before_current_user_append(history_lifecycle, tmp_path):
+    l = history_lifecycle
+    l.history_recovery = lambda _agent: [
+        {"role": "user", "content": "Recovered prior request."},
+        {"role": "assistant", "content": "Recovered partial reply."}]
+    t = native_trial(l, tmp_path)
+    out = execute_trial(l, t, native_context=True, history=[])
+    assert out["saved"][inputs.RESULT_KEY]["histories"][0]["conversation_rows"] == 2
+    assert out["saved"][inputs.RESULT_KEY]["histories"][0]["row_count"] == 2
+
+
+def test_compaction_rotation_withholds_delivery_join(history_lifecycle, tmp_path):
+    l = history_lifecycle
+    l.history_compaction = lambda agent: setattr(agent, "session_id", "new-physical-session")
+    t = native_trial(l, tmp_path)
+    out = execute_trial(l, t, native_context=True, history=[{"role": "user", "content": "Prior request."}])
+    value = out["saved"][inputs.RESULT_KEY]
+    assert value["histories"][0]["conversation_rows"] == 1
+    assert value["histories"][0]["agent_session_id"] != out["agent"].session_id
+    assert value["deliveries"][0]["history_sequence"] is None
+
+
+def test_original_history_hydration_failure_is_not_empty_evidence(history_lifecycle, tmp_path):
+    l, captured = history_lifecycle, {}
+    t = native_trial(l, tmp_path)
+    def fail(out):
+        captured.update(out)
+        out["agent"]._todo_store = SimpleNamespace(has_items=lambda: False)
+        def raised(_rows):
+            raise LookupError("original hydration failed")
+        out["agent"]._hydrate_todo_store = raised
+    with pytest.raises(LookupError, match="original hydration failed"):
+        execute_trial(l, t, native_context=True, history=[{"role": "user", "content": "Prior request."}],
+                      before_history=fail)
+    assert captured["scope"].evaluation.histories == []
+    assert captured["scope"].evaluation.history_proof is None
+
+
+def test_unqualified_helper_and_later_prefill_do_not_create_reuse(history_lifecycle, tmp_path):
+    l = history_lifecycle
+    t = native_trial(l, tmp_path)
+    rows = [{"role": "user", "content": "Configured example."},
+            {"role": "assistant", "content": "Configured example reply."}]
+    def naked(out):
+        out["agent"]._todo_store = SimpleNamespace(has_items=lambda: True)
+        l.turn_context._hydrate_from_history(out["agent"], rows)
+        out["agent"].prefill_messages = copy.deepcopy(rows)
+    out = execute_trial(l, t, native_context=True, before_builder=naked, history=[])
+    value = out["saved"][inputs.RESULT_KEY]
+    assert len(value["histories"]) == 1  # Only the actual builder's empty history.
+    assert value["histories"][0]["conversation_rows"] == 0
+
+
+def test_history_witness_uses_original_budget_and_closed_claim(history_lifecycle, tmp_path):
+    l = history_lifecycle
+    t = native_trial(l, tmp_path)
+    def limit(out):
+        out["scope"].metadata_bytes = observation.MAX_METADATA_BYTES - 2
+    out = execute_trial(l, t, native_context=True, before_history=limit,
+        history=[{"role": "user", "content": "Prior request."}])
+    value = out["saved"][inputs.RESULT_KEY]
+    assert value["histories"] == [] and "metadata_overflow" in value["errors"]
+    assert len(canonical_json_bytes(value)) + len(canonical_json_bytes(
+        out["saved"][observation.RESULT_KEY])) <= observation.MAX_METADATA_BYTES
+
+
+def historical_v2_observation(value):
+    old = copy.deepcopy(value)
+    old["schema"] = inputs.PREVIOUS_RESULT_SCHEMA
+    old.pop("histories")
+    deliveries = {}
+    for row in old["deliveries"]:
+        row.pop("history_sequence")
+        deliveries[row["sequence"]] = row
+    for row in old["assemblies"]:
+        row["delivery_sha256"] = hashlib.sha256(canonical_json_bytes(
+            deliveries[row["delivery_sequence"]])).hexdigest()
+    return old
+
+
+@pytest.mark.parametrize("change", ["sequence", "bool_count", "too_many", "turn", "session",
+    "delivery", "extra", "old_extra", "old_error", "old_retry", "old_duplicate"])
+def test_history_closed_versions_preserve_original_strong_joins(history_lifecycle, tmp_path, change):
+    l = history_lifecycle
+    t = native_trial(l, tmp_path)
+    out = execute_trial(l, t, native_context=True, history=[{"role": "user", "content": "Prior request."}])
+    value = copy.deepcopy(out["saved"][inputs.RESULT_KEY])
+    sibling = copy.deepcopy(out["saved"][observation.RESULT_KEY])
+    receipt = {"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2}
+    old = historical_v2_observation(value)
+    assert inputs.validate_observation(old, marker=out["marker"], receipt=receipt,
+        request_observation=sibling) == old
+    assert inputs.observed_record_sources(old) == inputs.observed_record_sources(value)
+    if change.startswith("old_"):
+        value = old
+        if change == "old_extra":
+            value["histories"] = []
+        elif change == "old_error":
+            value["errors"].append("history_unavailable")
+        elif change == "old_retry":
+            value["assemblies"][0]["retry_count"] += 1
+        else:
+            sibling["observations"].append(copy.deepcopy(sibling["observations"][0]))
+    elif change == "delivery":
+        value["deliveries"][0]["history_sequence"] = 2
+    elif change == "extra":
+        value["histories"][0]["history_text"] = "must not be retained"
+    else:
+        target, new = {"sequence": ("sequence", True), "bool_count": ("row_count", True),
+            "too_many": ("conversation_rows", 2), "turn": ("turn_id", "other-turn"),
+            "session": ("agent_session_id", "other-session")}[change]
+        value["histories"][0][target] = new
+    with pytest.raises(RuntimeRefusal):
+        inputs.validate_observation(value, marker=out["marker"], receipt=receipt, request_observation=sibling)
+
+
+@pytest.mark.parametrize("schema", [None, [], {}, 3, True, "future"])
+def test_history_observation_schema_type_is_a_closed_refusal(trial, schema):
+    value = {"schema": schema}
+    with pytest.raises(RuntimeRefusal):
+        inputs.validate_observation(value, marker=marker(trial),
+            receipt={"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2},
+            request_observation={})
