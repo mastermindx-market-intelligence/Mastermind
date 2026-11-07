@@ -1085,7 +1085,7 @@ class _NativeGatewayLaunch:
 def _hermes_runtime(argv: list[str]) -> int:
     if (not argv or argv[0] not in {"supervise", "canary", "isolation-probe", "native-gateway",
                                     "enroll-secretary-session", "enroll-meta-session",
-                                    "eval-submit", "eval-read", "eval-publish"}
+                                    "eval-submit", "eval-read", "eval-publish", "eval-trial"}
             or not _HERMES_EARLY_NO_SITE or not _hermes_recipe_is_qualified()
             or any(name not in sys.modules or sys.modules[name] is not None
                    for name in _HERMES_SITE_NAMES)):

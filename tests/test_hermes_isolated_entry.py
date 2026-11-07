@@ -310,6 +310,7 @@ print('REFUSED_BEFORE_FIRST_PARTY_IMPORT')
 @pytest.mark.parametrize("command, argument", [
     ("supervise", "--help"), ("isolation-probe", "--list-cases"),
     ("eval-submit", "--help"), ("eval-read", "--help"), ("eval-publish", "--help"),
+    ("eval-trial", "--help"),
 ])
 def test_actual_archive_runs_closed_hermes_modes_with_held_yaml(tmp_path, command, argument):
     """Actual CLI/import closure; synthetic root identity is stated in the driver."""
@@ -329,6 +330,8 @@ def test_actual_archive_runs_closed_hermes_modes_with_held_yaml(tmp_path, comman
                      "integrations/hermes_runtime/system_service.py",
                      "integrations/hermes_runtime/cli.py",
                      "integrations/hermes_runtime/native_eval_operator.py",
+                     "integrations/hermes_runtime/native_eval_publication.py",
+                     "integrations/hermes_runtime/native_session_control.py",
                      "scripts/enroll_linux_secondary_worker.py"):
         (root / relative).write_bytes((ROOT / relative).read_bytes())
     # Isolate the source/import closure with the documented runtime double.
@@ -381,6 +384,12 @@ if sys.argv[2].startswith('eval-'):
   with m._held_release_imports(owner) as finder:
    evaluator=importlib.import_module('integrations.hermes_runtime.native_eval_operator')
    assert evaluator.RESULT_SCHEMA=='mastermind.hermes_native_eval_operator/v1'
+   if sys.argv[2]=='eval-trial':
+    consumer=importlib.import_module('scripts.ohf.harness2_recursion')
+    assert consumer.Trial.__module__=='scripts.ohf.harness2_recursion'
+    reader=importlib.import_module('integrations.hermes_runtime.native_eval_publication')
+    assert reader.decode_trial.__module__==reader.__name__
+    assert evaluator.TRIAL_RESULT_SCHEMA=='mastermind.hermes_native_eval_trial_operator/v1'
    finder.check()
  finally:owner.close()
  assert not any(n.split('.')[0] in m._FIRST_PARTY for n in sys.modules)

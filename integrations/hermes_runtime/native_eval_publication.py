@@ -26,6 +26,8 @@ from .errors import RuntimeRefusal
 
 SCHEMA = "mastermind.hermes_native_eval_publication/v1"
 MAX_PUBLICATION_BYTES = 64 * 1024
+TRIAL_SCHEMA = "mastermind.hermes_native_eval_trial/v1"
+MAX_TRIAL_BYTES = 256 * 1024
 MAX_RETAINED_RESULT_BYTES = 2 * 1024 * 1024
 VALIDATOR_ID = "mastermind.hermes_native_eval_finalizer"
 VALIDATOR_VERSION = "1"
@@ -95,12 +97,13 @@ def _utc_ms(value):
         return None
 
 
-def _request(params, home):
+def _request(params, home, *, operation="publish_evaluation"):
     from .native_session_control import _id
     if (type(params) is not dict or set(params) != {
             "operation", "profile_id", "session_id", "submission_id", "input_sha256",
             "admission_id", "evaluation_binding"}
-            or params["operation"] != "publish_evaluation" or params["profile_id"] != str(home)):
+            or operation not in {"publish_evaluation", "read_evaluation_trial"}
+            or params["operation"] != operation or params["profile_id"] != str(home)):
         _refuse("PUBLICATION_REQUEST_INVALID")
     for key in ("session_id", "submission_id", "admission_id"):
         _id(params[key])
@@ -483,3 +486,176 @@ def publish_original(runner, home, params, principal, *, owner, role):
                        frozen_record_retained=True)
     except Exception:
         raise PublicationEffectUnknown() from None
+
+
+def _trial_summary(run, *, eligible, reason=None):
+    return {"run_id": run["run_id"], "run_digest": run["run_digest"],
+            "validity": run["validity"]["status"],
+            "reason_codes": copy.deepcopy(run["validity"]["reason_codes"]),
+            "eligible_for_consumption": eligible, "eligibility_reason": reason}
+
+
+def decode_trial(document, *, admission_id, evaluation_binding):
+    """Decode evidence from the authenticated original reader, never a grant.
+
+    The caller owns carrier/principal authentication and expected original
+    identity. Graph/content validation alone cannot supply either authority.
+    """
+    from scripts.ohf.harness2_recursion import Trial, _validate_trial
+    from scripts.agent_eval.harness2_native import validate_native_harness_text
+    raw = canonical_json_bytes(document)
+    if len(raw) > MAX_TRIAL_BYTES:
+        _refuse("TRIAL_DOCUMENT_LIMIT")
+    value = json.loads(raw)
+    if (type(value) is not dict or set(value) != {
+            "schema", "scenario", "configuration", "experiment", "run", "candidate_files", "output"}
+            or value["schema"] != TRIAL_SCHEMA
+            or type(evaluation_binding) is not dict
+            or set(evaluation_binding) != {"run_id", "binding_sha256"}
+            or type(value["run"]) is not dict
+            or value["run"].get("run_id") != evaluation_binding["run_id"]
+            or type(evaluation_binding["binding_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", evaluation_binding["binding_sha256"]) is None):
+        _refuse("TRIAL_DOCUMENT_INVALID")
+    from .native_session_control import _id, MAX_ANSWER_BYTES
+    _id(admission_id)
+    contracts.v_run_id(evaluation_binding["run_id"], "$.run_id")
+    output = value["output"]
+    if (type(output) is not dict or set(output) != {"stage", "text", "digest", "bytes"}
+            or output["stage"] != "retained_redacted_final_response"
+            or type(output["text"]) is not str or type(output["bytes"]) is not int):
+        _refuse("TRIAL_OUTPUT_INVALID")
+    encoded = output["text"].encode("utf-8")
+    digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    expected_ref = _original_ref(
+        {"binding_sha256": evaluation_binding["binding_sha256"]}, {"admission_id": admission_id}) + "#final_response"
+    if (not 0 < len(encoded) <= MAX_ANSWER_BYTES
+            or any(ord(c) < 32 and c not in "\n\r\t" for c in output["text"])
+            or output["bytes"] != len(encoded) or output["digest"] != digest
+            or value["run"].get("evidence", {}).get("output") != {
+                "artifact_ref": expected_ref, "digest": digest}):
+        _refuse("TRIAL_OUTPUT_CONFLICT")
+    source = value["candidate_files"]
+    if type(source) is not dict or any(type(p) is not str or type(v) is not str for p, v in source.items()):
+        _refuse("TRIAL_HARNESS_INVALID")
+    candidate = {p: text.encode("utf-8") for p, text in source.items()}
+    validate_native_harness_text(candidate)
+    assert_public_safe_evidence(value)
+    trial = Trial(value["scenario"], value["configuration"], value["experiment"], value["run"], encoded)
+    _validate_trial(trial, candidate)
+    return trial
+
+
+def read_original_trial(runner, home, params, principal, *, owner, role):
+    """Read one already published original trial. No create, submit or repair."""
+    from hermes_state_runtime import _epoch
+    from hermes_state_terminal import RESULT_PREFIX, load_result
+    from scripts.agent_eval.verification import verify_scenario_graph, verify_configuration_graph, verify_experiment_graph
+    from scripts.ohf.harness2_recursion import Harness2CycleError
+    from .native_session_control import _project_original_result, _result
+    if role != "mmmeta":
+        _refuse("TRIAL_ROLE_UNQUALIFIED")
+    params = _request(params, home, operation="read_evaluation_trial")
+    authority = _selected_owner(runner, home, owner)
+    db, epoch, store = authority.db, authority.epoch, owner.store
+
+    def read():
+        with db._read_ctx() as conn:
+            _epoch(conn, epoch)
+            raw, receipt, marker = _original(conn, params, principal, home, owner)
+            frozen = raw.get("eval_publication_json")
+            if frozen is None:
+                _refuse("TRIAL_PUBLICATION_NOT_FROZEN")
+            if type(frozen) is not str or len(frozen.encode("utf-8")) > MAX_PUBLICATION_BYTES:
+                _refuse("TRIAL_PUBLICATION_INVALID")
+            record = _validate_record(json.loads(frozen), marker, receipt)
+            saved_row = conn.execute(
+                "SELECT CASE WHEN length(CAST(value AS BLOB))<=? THEN value ELSE NULL END "
+                "FROM state_meta WHERE key=?", (MAX_RETAINED_RESULT_BYTES, RESULT_PREFIX + receipt["admission_id"])).fetchone()
+            saved, unavailable = None, "NATIVE_EVAL_TRIAL_OUTPUT_NOT_RETAINED"
+            if saved_row is not None:
+                if saved_row[0] is None:
+                    unavailable = "NATIVE_EVAL_TRIAL_OUTPUT_LIMIT"
+                else:
+                    try:
+                        saved = load_result(saved_row[0])
+                        if type(saved) is not dict:
+                            saved = None
+                        unavailable = "NATIVE_EVAL_TRIAL_OUTPUT_INVALID"
+                    except (ValueError, TypeError, RecursionError):
+                        unavailable = "NATIVE_EVAL_TRIAL_OUTPUT_INVALID"
+            projected = _project_original_result(receipt, marker, saved, role=role)
+            # Only this closed output projection survives the read context.
+            return record, receipt, marker, projected.get("answer"), projected.get("terminal_metadata", {}).get("output"), unavailable
+
+    record, receipt, marker, answer, output, unavailable = read()
+    published = store.resolve_run(marker["run_id"])
+    if published is None:
+        _refuse("TRIAL_ARTIFACT_NOT_RETAINED")
+    if canonical_json_bytes(published) != canonical_json_bytes(record["run"]):
+        _refuse("TRIAL_ARTIFACT_CONFLICT")
+    scenario = store.resolve_scenario(marker["scenario"]["scenario_id"], marker["scenario"]["scenario_version"])
+    configuration = store.resolve_configuration(marker["configuration"]["configuration_id"])
+    experiment = (store.resolve_experiment(marker["experiment"]["experiment_id"])
+                  if marker["experiment"] is not None else None)
+    if any(canonical_json_bytes(actual) != canonical_json_bytes(marker[key])
+           for actual, key in ((scenario, "scenario"), (configuration, "configuration"), (experiment, "experiment"))):
+        _refuse("TRIAL_GRAPH_CONFLICT")
+    verify_scenario_graph(scenario, store)
+    verify_configuration_graph(configuration, store)
+    if experiment is not None:
+        verify_experiment_graph(experiment, store)
+    verify_run_graph(published, store)
+    binding = {"run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}
+    status, reason, document = "REFUSED", unavailable, None
+    # The original graph already established these facts. Preserve the
+    # incumbent consumer's effect/validity precedence without constructing or
+    # disclosing an ineligible candidate, including an empty failed answer.
+    if published["effect"]["state"] != "NO_EFFECT":
+        reason = "NATIVE_EFFECT_REQUIRES_RECONCILIATION"
+    elif published["validity"]["status"] != "VALID":
+        reason = "NATIVE_TRIAL_INVALID"
+    elif output is not None and type(answer) is str:
+        expected = {"artifact_ref": _original_ref(marker, receipt) + "#final_response",
+                    "digest": "sha256:" + output["sha256"]}
+        if (output["stage"] != "retained_redacted_final_response"
+                or published["evidence"]["output"] != expected):
+            reason = "NATIVE_EVAL_TRIAL_OUTPUT_CONFLICT"
+        else:
+            candidate = {"schema": TRIAL_SCHEMA, "scenario": scenario, "configuration": configuration,
+                "experiment": experiment, "run": published, "candidate_files": marker["candidate_files"],
+                "output": {"stage": output["stage"], "text": answer,
+                           "digest": expected["digest"], "bytes": output["utf8_bytes"]}}
+            try:
+                decode_trial(candidate, admission_id=receipt["admission_id"], evaluation_binding=binding)
+            except Harness2CycleError as exc:
+                reason = (exc.code if exc.code in {
+                    "NATIVE_TRIAL_INVALID", "NATIVE_EFFECT_REQUIRES_RECONCILIATION"}
+                    else "NATIVE_EVAL_TRIAL_EVIDENCE_INVALID")
+            except RuntimeRefusal as exc:
+                reason = (exc.code if exc.code in {
+                    "NATIVE_EVAL_TRIAL_DOCUMENT_LIMIT", "NATIVE_EVAL_TRIAL_OUTPUT_INVALID",
+                    "NATIVE_EVAL_TRIAL_OUTPUT_CONFLICT"} else "NATIVE_EVAL_TRIAL_EVIDENCE_INVALID")
+            except ContractError:
+                reason = "NATIVE_EVAL_TRIAL_EVIDENCE_INVALID"
+            else:
+                status, reason, document = "TRIAL_OBSERVED", None, candidate
+    # A source/store/owner replacement, changed frozen record or result expiry
+    # during the read cannot splice a surviving publication to different bytes.
+    if (_selected_owner(runner, home, owner) is not authority or authority.epoch != epoch
+            or owner.store is not store):
+        _refuse("TRIAL_OWNER_CHANGED")
+    again = read()
+    first = (record, receipt, marker, answer, output, unavailable)
+    if canonical_json_bytes(list(again)) != canonical_json_bytes(list(first)):
+        _refuse("TRIAL_ORIGINAL_CHANGED")
+    if (_selected_owner(runner, home, owner) is not authority or authority.epoch != epoch
+            or owner.store is not store):
+        _refuse("TRIAL_OWNER_CHANGED")
+    result = _result(status, role=role, admission=receipt, evaluation_binding=binding,
+        trial_summary=_trial_summary(published, eligible=document is not None, reason=reason))
+    if document is not None:
+        result["trial"] = document
+    else:
+        result["reason"] = reason
+    return result

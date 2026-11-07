@@ -115,6 +115,28 @@ def command(enrollment_command, monkeypatch, capsys):
                 value["admission"]["outcome"] = "unbounded private label " * 100
             return value
 
+        def read_evaluation_trial(self, **identity):
+            assert identity == {"session_id": recovery["session_id"], "submission_id": recovery["submission_id"],
+                "input_sha256": recovery["input_sha256"], "admission_id": receipt["admission_id"],
+                "evaluation_binding": binding}
+            called("trial")
+            summary = {"run_id": recovery["run_id"], "run_digest": "sha256:" + "f" * 64,
+                "validity": "INVALID_EFFECT_UNKNOWN", "reason_codes": ["REQUIRED_OBSERVATION_UNAVAILABLE"],
+                "eligible_for_consumption": False, "eligibility_reason": "NATIVE_EFFECT_REQUIRES_RECONCILIATION"}
+            value = control._result("REFUSED", role="mmmeta", admission=deepcopy(receipt),
+                evaluation_binding=deepcopy(binding), trial_summary=summary, reason=summary["eligibility_reason"])
+            if state.mutate == "trial-eligible":
+                summary["eligible_for_consumption"] = True
+            if state.mutate == "trial-admission":
+                value["admission"]["execution_generation"] += 1
+            if state.mutate == "trial-binding":
+                value["evaluation_binding"]["binding_sha256"] = "e" * 64
+            if state.mutate == "trial-extra":
+                value["trial"] = {"output": "never copy this original private answer"}
+            if state.mutate == "trial-not-submitted":
+                return control._result("NOT_SUBMITTED", role="mmmeta")
+            return value
+
         def publish_evaluation(self, **identity):
             assert identity == {"session_id": recovery["session_id"], "submission_id": recovery["submission_id"],
                 "input_sha256": recovery["input_sha256"], "admission_id": receipt["admission_id"],
@@ -296,7 +318,7 @@ def test_wrong_original_profile_or_enrolled_session_never_submits(command):
     assert w.state.calls == []
 
 
-@pytest.mark.parametrize("operation", ["submit", "read", "publish"])
+@pytest.mark.parametrize("operation", ["submit", "read", "publish", "trial"])
 def test_outer_runner_loss_after_connected_result_preserves_uncertainty(command, monkeypatch, operation):
     import asyncio
     w = command
@@ -306,8 +328,8 @@ def test_outer_runner_loss_after_connected_result_preserves_uncertainty(command,
         raise RuntimeError("runner shutdown lost its return")
     monkeypatch.setattr(asyncio, "run", lose_after_result)
     code, value = w.run(operation)
-    assert code == (2 if operation == "read" else 3)
-    assert value["status"] == ("UNAVAILABLE" if operation == "read" else "EFFECT_UNKNOWN")
+    assert code == (2 if operation in {"read", "trial"} else 3)
+    assert value["status"] == ("UNAVAILABLE" if operation in {"read", "trial"} else "EFFECT_UNKNOWN")
     assert value["recovery"] == w.recovery
     assert value["reason"] == "EVALUATION_OPERATOR_RUNNER_RECONCILIATION_REQUIRED"
     assert w.state.calls.count("submit") <= 1 and w.state.calls.count("publish") <= 1
@@ -327,3 +349,48 @@ def test_shared_enrollment_attaches_tcp_policy_once_before_asyncio(enrollment_co
     assert json.loads(capsys.readouterr().out)["status"] == "ENROLLED"
     assert calls == ["mmmeta"]
     assert world.state.creations == 1 and world.state.qualifications >= 4
+
+
+def test_actual_trial_command_reads_original_without_current_enrollment_or_publication(command):
+    w = command
+    w.state.capability = "withdrawn"
+    code, value = w.run("trial")
+    assert code == 2 and value["status"] == "REFUSED"
+    assert value["schema"] == operator.TRIAL_RESULT_SCHEMA
+    assert value["trial"]["run_id"] == w.recovery["run_id"]
+    assert value["trial"]["validity"] == "INVALID_EFFECT_UNKNOWN"
+    assert value["trial"]["eligible_for_consumption"] is False
+    assert value["trial"]["reason_codes"] == ["REQUIRED_OBSERVATION_UNAVAILABLE"]
+    assert value["recovery"]["admission_id"] == w.receipt["admission_id"]
+    assert w.state.calls == ["read", "trial"] and w.state.publication_count == 0
+    assert w.world.state.inspections == w.world.state.creations == 0
+
+
+@pytest.mark.parametrize("failure", ["loss", "change"])
+def test_trial_read_loss_or_owner_change_never_becomes_a_mutation_uncertainty(command, failure):
+    w = command
+    setattr(w.state, failure, "trial")
+    code, value = w.run("trial")
+    assert code == 2 and value["status"] == "UNAVAILABLE"
+    assert value["recovery"]["admission_id"] == w.receipt["admission_id"]
+    assert value["recovery"]["evaluation_binding"] == w.binding
+    assert w.state.calls == ["read", "trial"] and w.state.publication_count == 0
+
+
+@pytest.mark.parametrize("mutation", ["trial-eligible", "trial-admission", "trial-binding",
+                                     "trial-extra", "trial-not-submitted"])
+def test_trial_command_refuses_mixed_or_escalated_read_response(command, mutation):
+    w = command
+    w.state.mutate = mutation
+    code, value = w.run("trial")
+    assert code == 2 and value["status"] == "UNAVAILABLE" and value["trial"] is None
+    assert w.state.calls == ["read", "trial"] and w.state.publication_count == 0
+
+
+def test_trial_command_does_not_poll_or_publish_nonterminal_original(command):
+    w = command
+    w.receipt.update(status="started", outcome=None)
+    code, value = w.run("trial")
+    assert code == 0 and value["status"] == "OBSERVED"
+    assert value["reason"] == "ORIGINAL_NOT_TERMINAL" and value["trial"] is None
+    assert w.state.calls == ["read"] and w.state.publication_count == 0

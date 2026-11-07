@@ -26,7 +26,7 @@ from integrations.hermes_runtime.tests.test_native_eval_inputs import (
 )
 from integrations.hermes_runtime.tests.test_native_request_observation import module
 from scripts.agent_eval.canonical import canonical_json_bytes
-from scripts.agent_eval.errors import ContractError
+from scripts.agent_eval.errors import ContractDefect, ContractError
 
 
 @pytest.fixture
@@ -540,3 +540,244 @@ def test_retired_recovery_still_requires_original_input_and_eval_binding(origina
     r.params[field] = bad
     with pytest.raises(RuntimeRefusal, match="ORIGINAL_MISMATCH"):
         r.read()
+
+
+def complete_historical_trial_fixture(original, monkeypatch, *, answer=" \nOriginal 原始 output\t\n"):
+    """Explicit synthetic complete producer; never a current native observation.
+
+    Actual admission, settlement, freeze, ArtifactStore and read owners execute.
+    Only the historical complete producer facts are supplied at this fixture edge.
+    """
+    from tests.agent_eval_factories import build_run_draft_fields
+    from scripts.agent_eval.validity import finalize_run_receipt
+    o = original
+    def fixture_producer(marker, receipt, projected, *, finalizer_ref, now, missing_reason):
+        scenario, config = marker["scenario"], marker["configuration"]
+        draft = build_run_draft_fields(scenario, config, {"experiment_id": "unused-fixture"},
+            arm_id="fixture", replicate_index=1, run_id=marker["run_id"])
+        draft.update(schema=inputs.contracts.RUN_DRAFT_SCHEMA_V3, comparison=copy.deepcopy(marker["comparison"]))
+        draft["execution"].update(marker["producer"], completion_status="COMPLETED", termination_reason="NATIVE_COMPLETED")
+        output = projected["terminal_metadata"]["output"]
+        draft["evidence"]["output"] = {
+            "artifact_ref": publication._original_ref(marker, receipt) + "#final_response",
+            "digest": "sha256:" + output["sha256"]}
+        draft["observation_availability"] = {"unavailable": [], "coverage": {
+            key: {"status": "COMPLETE", "reason": None}
+            for key in sorted(inputs.contracts.RUN_OBSERVATION_COVERAGE_KEYS)}}
+        run = finalize_run_receipt(scenario, config, marker["experiment"], draft,
+            validator_id=publication.VALIDATOR_ID, validator_version=publication.VALIDATOR_VERSION,
+            validator_code_ref=finalizer_ref, validated_at=now, created_at=now)
+        assert run["validity"]["status"] == "VALID"
+        return run
+    monkeypatch.setattr(publication, "_build_run", fixture_producer)
+    o.finish(answer=answer)
+    assert o.publish()["status"] == "PUBLISHED"
+    return answer
+
+
+def read_trial(original):
+    o = original
+    return publication.read_original_trial(o.runner, o.home,
+        {**o.params, "operation": "read_evaluation_trial"}, o.t.principal, owner=o.t.owner, role="mmmeta")
+
+
+def no_trial_writes(original, monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("a trial read must not publish, create, admit or write")
+    monkeypatch.setattr(original.a.db, "_execute_write", forbidden)
+    monkeypatch.setattr(original.t.owner.store, "create", forbidden)
+    monkeypatch.setattr(original.t.owner, "select", forbidden)
+    monkeypatch.setattr(publication, "publish_original", forbidden)
+
+
+@pytest.mark.parametrize("retired", [False, True])
+def test_trial_read_joins_actual_frozen_store_and_original_output(original, monkeypatch, retired):
+    from scripts.ohf.harness2_recursion import Trial
+    o = original
+    answer = complete_historical_trial_fixture(o, monkeypatch)
+    if retired:
+        o.retire()
+    frozen = canonical_json_bytes(o.frozen())
+    no_trial_writes(o, monkeypatch)
+    response = read_trial(o)
+    assert response["status"] == "TRIAL_OBSERVED"
+    assert response["trial_summary"]["eligible_for_consumption"] is True
+    assert response["trial_summary"]["run_id"] == o.marker["run_id"]
+    trial = publication.decode_trial(response["trial"], admission_id=o.row["admission_id"],
+        evaluation_binding=o.params["evaluation_binding"])
+    assert type(trial) is Trial and trial.output == answer.encode("utf-8")
+    from integrations.hermes_runtime import native_eval_operator as operator
+    recovery = {"schema": operator.RECOVERY_SCHEMA, "run_id": o.marker["run_id"],
+        **{key: value for key, value in o.params.items() if key != "operation"}}
+    receipt, summary = operator._trial_response(response, recovery, o.home,
+        expected_admission=response["admission"])
+    assert receipt == response["admission"] and summary == response["trial_summary"]
+    assert trial.run == o.t.owner.store.resolve_run(o.marker["run_id"])
+    assert canonical_json_bytes(o.frozen()) == frozen
+    # Returned data is detached from the frozen publication and store.
+    response["trial"]["run"]["execution"]["model_served"] = "caller-change"
+    assert canonical_json_bytes(o.frozen()) == frozen
+
+
+@pytest.mark.parametrize("outcome,answer", [
+    ("completed", "original public answer"), ("completed", ""), ("failed", ""),
+    ("failed", "x" * (control.MAX_ANSWER_BYTES + 1)),
+])
+def test_trial_read_preserves_current_invalid_run_without_returning_trial_or_answer(
+        original, monkeypatch, outcome, answer):
+    o = original
+    o.finish(outcome, answer=answer)
+    o.publish()
+    no_trial_writes(o, monkeypatch)
+    def cannot_construct(*_args, **_kwargs):
+        pytest.fail("ineligible original evidence must keep its summary without constructing a Trial")
+    monkeypatch.setattr(publication, "decode_trial", cannot_construct)
+    response = read_trial(o)
+    assert response["status"] == "REFUSED"
+    assert response["reason"] == "NATIVE_EFFECT_REQUIRES_RECONCILIATION"
+    assert response["trial_summary"] == publication._trial_summary(o.frozen()["run"],
+        eligible=False, reason=response["reason"])
+    assert response["trial_summary"]["validity"] == "INVALID_EFFECT_UNKNOWN"
+    assert "trial" not in response and b"original public answer" not in canonical_json_bytes(response)
+
+
+@pytest.mark.parametrize("boundary,reason", [
+    ("empty", "NATIVE_EVAL_TRIAL_OUTPUT_CONFLICT"),
+    ("limit", "NATIVE_EVAL_TRIAL_DOCUMENT_LIMIT"),
+    ("privacy", "NATIVE_EVAL_TRIAL_EVIDENCE_INVALID"),
+])
+def test_trial_read_preserves_valid_run_summary_when_output_cannot_be_consumed(
+        original, monkeypatch, boundary, reason):
+    o = original
+    complete_historical_trial_fixture(o, monkeypatch, answer="" if boundary == "empty" else "public output")
+    if boundary == "limit":
+        monkeypatch.setattr(publication, "MAX_TRIAL_BYTES", 1)
+    elif boundary == "privacy":
+        original_check = publication.assert_public_safe_evidence
+        def privacy_refusal(value):
+            if isinstance(value, dict) and value.get("schema") == publication.TRIAL_SCHEMA:
+                raise ContractError([ContractDefect("$.output", "PRIVACY_FIXTURE", "fixture privacy boundary refusal")])
+            return original_check(value)
+        monkeypatch.setattr(publication, "assert_public_safe_evidence", privacy_refusal)
+    no_trial_writes(o, monkeypatch)
+    response = read_trial(o)
+    assert response["status"] == "REFUSED" and response["reason"] == reason
+    assert response["trial_summary"] == publication._trial_summary(o.frozen()["run"], eligible=False, reason=reason)
+    assert response["trial_summary"]["validity"] == "VALID" and "trial" not in response
+    from integrations.hermes_runtime import native_eval_operator as operator
+    recovery = {"schema": operator.RECOVERY_SCHEMA, "run_id": o.marker["run_id"],
+        **{key: value for key, value in o.params.items() if key != "operation"}}
+    _, summary = operator._trial_response(response, recovery, o.home, expected_admission=response["admission"])
+    assert summary == response["trial_summary"]
+
+
+def test_trial_read_does_not_repair_a_frozen_but_unpublished_run(original, monkeypatch):
+    o = original
+    o.finish()
+    monkeypatch.setattr(o.t.owner.store, "create", lambda *_: (_ for _ in ()).throw(OSError("fixture publication loss")))
+    with pytest.raises(publication.PublicationEffectUnknown):
+        o.publish()
+    assert o.frozen() is not None and o.t.owner.store.resolve_run(o.marker["run_id"]) is None
+    no_trial_writes(o, monkeypatch)
+    with pytest.raises(RuntimeRefusal, match="TRIAL_ARTIFACT_NOT_RETAINED"):
+        read_trial(o)
+    assert o.t.owner.store.resolve_run(o.marker["run_id"]) is None
+
+
+def test_trial_read_refuses_actual_output_expiry_despite_surviving_publication(original, monkeypatch):
+    o = original
+    complete_historical_trial_fixture(o, monkeypatch)
+    o.retire()
+    o.a.retirement.time.time = lambda: 3000000
+    o.a.db._execute_write(lambda conn: o.a.retirement.prune_retired_tombstones(conn))
+    assert o.a.conn.execute("SELECT 1 FROM state_meta WHERE key=?",
+        (o.a.terminal.RESULT_PREFIX + o.row["admission_id"],)).fetchone() is None
+    assert o.frozen() is not None
+    no_trial_writes(o, monkeypatch)
+    response = read_trial(o)
+    assert response["status"] == "REFUSED" and response["reason"] == "NATIVE_EVAL_TRIAL_OUTPUT_NOT_RETAINED"
+    assert response["trial_summary"]["validity"] == "VALID"
+    assert response["trial_summary"]["eligible_for_consumption"] is False and "trial" not in response
+
+
+@pytest.mark.parametrize("change", ["run", "scenario", "root", "principal", "mid-read-owner"])
+def test_trial_read_refuses_changed_original_graph_or_owner(original, monkeypatch, change):
+    o = original
+    complete_historical_trial_fixture(o, monkeypatch)
+    if change == "run":
+        run = copy.deepcopy(o.frozen()["run"])
+        run["execution"]["model_served"] = "changed"
+        monkeypatch.setattr(o.t.owner.store, "resolve_run", lambda *_: run)
+    elif change == "scenario":
+        scenario = copy.deepcopy(o.marker["scenario"])
+        scenario["objective"] += " changed"
+        monkeypatch.setattr(o.t.owner.store, "resolve_scenario", lambda *_: scenario)
+    elif change == "root":
+        o.t.owner.publication = copy.deepcopy(o.t.owner.publication)
+        o.t.owner.publication["root_identity"]["inode"] += 1
+    elif change == "principal":
+        o.t.principal = "foreign"
+    else:
+        original_resolver = o.t.owner.store.resolve_run
+        def changed(run_id):
+            result = original_resolver(run_id)
+            o.runner.session_authority = SimpleNamespace(db=o.a.db, profile_id=o.t.owner.profile_id, epoch=2)
+            return result
+        monkeypatch.setattr(o.t.owner.store, "resolve_run", changed)
+    no_trial_writes(o, monkeypatch)
+    with pytest.raises(RuntimeRefusal):
+        read_trial(o)
+
+
+def test_trial_read_refuses_changed_original_output_bytes(original, monkeypatch):
+    o = original
+    complete_historical_trial_fixture(o, monkeypatch)
+    key = o.a.terminal.RESULT_PREFIX + o.row["admission_id"]
+    raw = o.a.conn.execute("SELECT value FROM state_meta WHERE key=?", (key,)).fetchone()[0]
+    saved = o.a.terminal.load_result(raw)
+    saved["result"]["final_response"] = "different output"
+    o.a.conn.execute("UPDATE state_meta SET value=? WHERE key=?", (json.dumps(o.a.terminal.encode_result(saved)), key))
+    no_trial_writes(o, monkeypatch)
+    response = read_trial(o)
+    assert response["status"] == "REFUSED" and response["reason"] == "NATIVE_EVAL_TRIAL_OUTPUT_CONFLICT"
+    assert "trial" not in response
+
+
+@pytest.mark.parametrize("change", ["admission", "binding", "stage", "output", "field", "limit"])
+def test_trial_decoder_cannot_move_evidence_or_truncate_it(original, monkeypatch, change):
+    o = original
+    complete_historical_trial_fixture(o, monkeypatch)
+    response = read_trial(o)
+    document = response["trial"]
+    admission, binding = o.row["admission_id"], copy.deepcopy(o.params["evaluation_binding"])
+    if change == "admission":
+        admission = "other-admission"
+    elif change == "binding":
+        binding["binding_sha256"] = "b" * 64
+    elif change == "stage":
+        document["output"]["stage"] = "raw_response"
+    elif change == "output":
+        document["output"]["text"] += " "
+    elif change == "field":
+        document["grant"] = True
+    else:
+        monkeypatch.setattr(publication, "MAX_TRIAL_BYTES", 1)
+    with pytest.raises(RuntimeRefusal):
+        publication.decode_trial(document, admission_id=admission, evaluation_binding=binding)
+
+
+def test_trial_private_read_loss_is_unavailable_and_uses_the_original_handler(original, monkeypatch):
+    o = original
+    o.finish()
+    o.publish()
+    async def install():
+        control.install_private_control(o.runner, o.home, "mmmeta", evaluation_owner=o.t.owner)
+    asyncio.run(install())
+    handler = o.runner.session_control_server.private_handlers[control.conversation_contract("mmmeta").native_verb]
+    request = {**o.params, "operation": "read_evaluation_trial"}
+    assert handler(request, "foreign")["status"] == "REFUSED"
+    no_trial_writes(o, monkeypatch)
+    response = handler(request, o.t.principal)
+    assert response["status"] == "REFUSED" and "trial_summary" in response
+    monkeypatch.setattr(o.t.owner.store, "resolve_run", lambda *_: (_ for _ in ()).throw(TimeoutError("read loss")))
+    assert handler(request, o.t.principal)["status"] == "UNAVAILABLE"
