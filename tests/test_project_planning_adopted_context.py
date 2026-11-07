@@ -66,6 +66,11 @@ def _composition(tmp_path, monkeypatch, *, large=False):
     assert receipt["degraded_count"] == len(bundle["degraded"])
     assert b"DNR:KEEP-OWNER" in raw and b"DEC:PLAN" in raw
 
+    return _planning_fixture(tmp_path, monkeypatch, raw, receipt, seen)
+
+
+def _planning_fixture(tmp_path, monkeypatch, raw, receipt, seen):
+    """Use adopted DATA only as the existing caller-authored planning input."""
     planning_root = tmp_path / "planning"
     planning_root.mkdir()
     factory, args, armed, observed = fixture(planning_root, monkeypatch)
@@ -96,8 +101,8 @@ def _native_supervisor(factory, tmp_path):
     return supervisor
 
 
-def test_actual_adopted_bytes_reach_original_sealed_planning_input_and_reconcile(tmp_path, monkeypatch):
-    factory, args, _, _, raw, receipt, seen = _composition(tmp_path, monkeypatch)
+def _prove_original_planning_input(tmp_path, factory, args, raw, receipt, seen):
+    """Assert the same retained S2 consumer contract for each genuine producer."""
     assert len(args["private_request"]) <= 32768
     runtime = factory.service.runtime
     supervisor = _native_supervisor(factory, tmp_path)
@@ -170,6 +175,11 @@ def test_actual_adopted_bytes_reach_original_sealed_planning_input_and_reconcile
     reopened = er.Runtime.at(runtime.store.root, create=False, existing_writable=True)
     assert reopened.jobs.direct_native_provenance(retained["job_id"]) == retained["material"]
     assert len(reopened.attempts.list_attempts()) == 1
+
+
+def test_actual_adopted_bytes_reach_original_sealed_planning_input_and_reconcile(tmp_path, monkeypatch):
+    factory, args, _, _, raw, receipt, seen = _composition(tmp_path, monkeypatch)
+    _prove_original_planning_input(tmp_path, factory, args, raw, receipt, seen)
 
 
 @pytest.mark.parametrize("withdrawal", ["grant", "expired", "source"])
