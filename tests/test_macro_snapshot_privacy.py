@@ -133,3 +133,14 @@ def test_archived_book_exposes_lifecycle_and_uses_frozen_performance(tmp_path, m
     assert book["archived"] is True
     assert book["superseded_by"] == "autonomous"
     assert book["performance"]["frozen_as_of"] == "2026-08-08"
+
+
+def test_snapshot_live_url_points_to_the_public_product() -> None:
+    """Public Macro pages must never send readers to the producer's loopback socket."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(macro_snapshot.LIVE_URL)
+    assert macro_snapshot.LIVE_URL == "https://bot.mastermind-x.com"
+    assert parsed.scheme == "https"
+    assert parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+    assert macro_snapshot.build()["live_url"] == macro_snapshot.LIVE_URL
