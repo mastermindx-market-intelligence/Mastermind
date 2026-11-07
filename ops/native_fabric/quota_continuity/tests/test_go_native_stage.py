@@ -105,10 +105,28 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
+def admission_pre_memory_source(relative):
+    """Exact public protected107 pair, not the prospective109 source label.
+
+    Source commit320611 retains task blob before the separately reviewed Memory
+    restriction. The immutable admission forward patch remains its own proof.
+    """
+    assert relative in builder.ADMISSION_INTEGRITY_DIGESTS
+    if relative=='ext/fabric_task.py':
+        path=ROOT.parents[2]/'tests/fixtures/memory-predecessor-fabric-task-320611.py.txt'
+        raw=path.read_bytes()
+        assert g.digest(raw)==builder.MEMORY_OWNER_PREIMAGES[relative]
+    else:raw=(ROOT/'candidate'/Path(relative).name).read_bytes()
+    assert g.digest(raw)==builder.ADMISSION_INTEGRITY_DIGESTS[relative]
+    return raw
+
+
 def before_admission_integrity(manifest):
     # Historical-generation cases retain their exact parent, while the current
     # build and the new successor tests below inspect the actual repaired bytes.
-    previous = dict(manifest)
+    # Historical107 fixtures first remove ONLY the exact validated Memory
+    # cohort. The actual109/Go/HTTP source outputs are checked separately.
+    previous = builder.before_memory_owner_integrity(manifest)
     if any(previous.get(name) == digest
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
@@ -169,11 +187,19 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
     application = json.loads((builds.application / "native-manifest.json").read_bytes())
+    actual_default = dict(default)
+    assert len(actual_default) == 109
+    default = builder.before_memory_owner_integrity(actual_default)
     assert len(default) == 107
+    assert set(actual_default)-set(default)==set(builder.MEMORY_OWNER_ADDITIONS)
+    assert {name for name in default if default[name]!=actual_default[name]}==set(builder.MEMORY_OWNER_DIGESTS)
+    assert {name:actual_default[name] for name in builder.MEMORY_OWNER_ADDITIONS}==builder.MEMORY_OWNER_ADDITIONS
+    assert {name:actual_default[name] for name in builder.MEMORY_OWNER_DIGESTS}==builder.MEMORY_OWNER_DIGESTS
+    assert g.digest((json.dumps(default,sort_keys=True,indent=2)+"\n").encode())==builder.MEMORY_OWNER_PARENT_MANIFEST_SHA256
     previous = before_original_artifact_recovery(default)
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
-    builder.validate_go_base_manifest(default, captured)
+    builder.validate_go_base_manifest(actual_default, captured)
     assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
     historical = before_participant_cohort(default)
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
@@ -201,11 +227,11 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
         assert default["ext/" + name] == digest
         del historical["ext/" + name]
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
-    assert {k: v for k, v in application.items() if k in default} == default
-    assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
-    assert len(application) == 109
+    assert {k: v for k, v in application.items() if k in actual_default} == actual_default
+    assert set(application) - set(actual_default) == {g.GO_ENTRY, g.GO_HANDLER}
+    assert len(application) == 111
     http = json.loads((builds.http / "native-manifest.json").read_bytes())
-    assert len(http) == 112
+    assert len(http) == 114
     assert set(http) - set(application) == set(g.HTTP_REQUIRED)
     inventory = json.loads((builds.application / "native-source-inventory.json").read_bytes())
     component = json.loads((builds.application / "external-go-component/component.json").read_bytes())
@@ -724,7 +750,7 @@ def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
 
 
 def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = builder.before_memory_owner_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     previous = before_admission_integrity(current)
@@ -738,6 +764,9 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     for output in (builds.default, builds.application, builds.http):
         manifest = json.loads((output / "native-manifest.json").read_bytes())
         for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
+            # Actual output carries the exact later Memory restriction while
+            # the immutable admission pair above is qualified separately.
+            digest = builder.MEMORY_OWNER_DIGESTS.get(name, digest)
             assert manifest[name] == digest
             assert g.digest((output / "native-code-stage" / name).read_bytes()) == digest
             assert g.digest((ROOT / "candidate" / Path(name).name).read_bytes()) == digest
@@ -750,7 +779,7 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = builder.before_memory_owner_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)
     if corruption in ("old-task", "old-runtime"):
@@ -792,7 +821,7 @@ def test_admission_integrity_forward_delta_is_reversible_and_source_exact(tmp_pa
     current = {}
     for relative, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
         name = Path(relative).name
-        current[name] = (ROOT / "candidate" / name).read_bytes()
+        current[name] = admission_pre_memory_source(relative)
         assert g.digest(current[name]) == digest
         (tmp_path / name).write_bytes(current[name])
     def apply(*options):
