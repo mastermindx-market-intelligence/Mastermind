@@ -61,7 +61,7 @@ export function fleetPreflightReason(error) {
 
 export const STUDIO_SELECT_HOST_TOOL = Object.freeze({
   name: 'studio_select_host',
-  title: 'Select Studio Fleet Host',
+  title: 'Select Remote Studio Host',
   description:
     'Bind this MCP session once to one operator-configured REMOTE fleet route before using Desktop Commander tools. ' +
     'For the local gateway host (including M2 Studio), leave the MCP session unselected and use local tools; ' +
@@ -75,6 +75,8 @@ export const STUDIO_SELECT_HOST_TOOL = Object.freeze({
     type: 'object',
     properties: {
       hostRef: {
+        description: 'Exact operator-configured remote fleetRouting.routes hostRef, not the local gateway name. ' +
+          'For local M2 Studio, leave this session unselected.',
         type: 'string',
         minLength: 1,
         maxLength: 64,
@@ -85,7 +87,7 @@ export const STUDIO_SELECT_HOST_TOOL = Object.freeze({
     additionalProperties: false,
   },
   annotations: {
-    title: 'Select Studio Fleet Host',
+    title: 'Select Remote Studio Host',
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
