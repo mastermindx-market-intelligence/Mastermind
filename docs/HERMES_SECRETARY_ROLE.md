@@ -25,12 +25,16 @@ trading actions.
 
 ## 3. Relationship to the Grok Secretary
 
-A separate Grok Secretary seat already exists (Slack user `U0BTCHX8HMF`,
-channel `#dotsandgroksecretary`; see
-`docs/evidence/2026-11-06-unified-project-instructions.txt`). That seat serves the
-ChatGPT-account side. This document creates no change to it. The two seats
-coordinate top-level in `#dotsandgroksecretary` (that channel's norm: new asks
-top-level, follow-ups in thread; never DM).
+A Grok Secretary seat already exists, serving the ChatGPT-account side; it is
+addressed as Slack user `U0BTCHX8HMF` in `#dotsandgroksecretary` (see
+`docs/evidence/2026-11-06-unified-project-instructions.txt`). **The Chairman
+connected that same Slack user to this seat's Hermes connector** (alias
+`secretary`), so on Slack the two seats share one identity: messages from that
+user may originate from either runtime, and message provenance alone does not
+distinguish them. The seats remain distinct runtimes; coordination happens
+top-level in `#dotsandgroksecretary` (that channel's norm: new asks top-level,
+follow-ups in thread; never DM). This document creates no change to the Grok
+Secretary seat itself.
 
 ## 4. Authority envelope
 
