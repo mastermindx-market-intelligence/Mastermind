@@ -4,9 +4,13 @@
 (worktree `mastermind-fable-ceo-rebuild-421ce3`, session `ed665c78-1bca-45e2-ba40-bc78b8444002`).
 **Program issue + risk register:** mastermindx-market-intelligence/Mastermind#1693.
 **Program carrier PR (docs/ledger only):** mastermindx-market-intelligence/Mastermind#1695.
-**Masterplan:** `./MASTERPLAN.md` — verbatim copy of
-`~/Downloads/Mastermind_Portfolio_Audit_and_Fable_CEO_Rebuild_Masterplan_2026-10-21.md`,
-sha256 `4c7a0d449f02de080e4d8d310af5db09515af86683ac6a3bca1298f2e034d970`, 804 lines.
+**Masterplan:** `./MASTERPLAN.md` — archival presentation of
+`~/Downloads/Mastermind_Portfolio_Audit_and_Fable_CEO_Rebuild_Masterplan_2026-10-21.md`.
+The [immutable original bytes](https://github.com/mastermindx-market-intelligence/Mastermind/blob/fc9133810a7d42ee8e2bd8f6c679b53c66ae0437/research/commission_pbr_fable_masterplan/2026-10-22/MASTERPLAN.md)
+retain SHA256 `4c7a0d449f02de080e4d8d310af5db09515af86683ac6a3bca1298f2e034d970` and 804 lines.
+The current presentation spells six Markdown hard line breaks with backslashes, delimits the
+Product URL as an autolink, and removes terminal blank lines for the repository whitespace check. All wording, evidence,
+tables, links and programme authority remain unchanged.
 **Procedure pin:** `docs/sol_skills/*` and `skills/mastermind-fabric-orchestration/*` at `origin/master`
 230e9a301 (the audit pin c9cbee556 is its ancestor; the two later commits touch no audited path).
 **Packets, owners, status:** `WORK_PACKAGES.md`. **Ledger:** `ORCHESTRATION.md`. **Lane packets/returns:** `lanes/`.

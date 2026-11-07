@@ -1,12 +1,12 @@
 # Mastermind Portfolio Bot
 # Recensus, Economic Audit, and Fable CEO Rebuild Masterplan
 
-**Version:** 1.0 — proposed execution charter and evidence-based program design  
-**Audit date:** October 21, 2026, America/Chicago  
-**Live evidence window:** approximately 11:15–11:39 p.m. CDT, October 21; 04:15–04:39 UTC, October 22, including the later historical decision-case capture  
-**Performance cutoff:** the stored October 21 observations; the overnight US October 22 duplicate is excluded  
-**Product:** https://bot.mastermind-x.com  
-**Protected source inspected:** `mastermindx-market-intelligence/Mastermind` at `c9cbee5569ba50e30e28715d930809061a169517`  
+**Version:** 1.0 — proposed execution charter and evidence-based program design\
+**Audit date:** October 21, 2026, America/Chicago\
+**Live evidence window:** approximately 11:15–11:39 p.m. CDT, October 21; 04:15–04:39 UTC, October 22, including the later historical decision-case capture\
+**Performance cutoff:** the stored October 21 observations; the overnight US October 22 duplicate is excluded\
+**Product:** <https://bot.mastermind-x.com>\
+**Protected source inspected:** `mastermindx-market-intelligence/Mastermind` at `c9cbee5569ba50e30e28715d930809061a169517`\
 **Document status:** AUDIT COMPLETE WITH EXPLICIT EVIDENCE LIMITS / REBUILD PLAN PROPOSED / NO IMPLEMENTATION OR CUTOVER PERFORMED
 
 This is the newly requested Fable CEO masterplan. It consolidates the current evidence and adds a complete delivery and investment-validation program. It preserves the approved September V3 architecture, the August V2 cohort, and incumbent repair ownership. It does not represent a new active trading book, an admitted executive job, a deployment, or a claim of demonstrated alpha.
@@ -800,5 +800,3 @@ Key preserved fingerprints:
 [R7]: #appendix-a-evidence-method-and-limitations
 [R8]: #appendix-a-evidence-method-and-limitations
 [R9]: #appendix-a-evidence-method-and-limitations
-
-
