@@ -1,8 +1,29 @@
 # Hermes APPLICATION qualification evidence
 
-## Current source composition
+## Current qualification target: the original APPLICATION owner
 
-The qualification entry points now pin Macro #10818 at
+S3 incorporated the six-path Hermes client/factory contribution into the original
+Macro #10740 carrier at **70447c5551675794eb3bdc58e1b1d566cb0c86ee**. The four
+non-engine contribution blobs are identical. The client differs only by removal
+of two trailing blank lines; independent AST comparison is identical. Its exact
+SHA256 is now **0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e**.
+The factory retains every Hermes relation and adds the owner's source-selected
+native-purpose policy. All four Hermes transports remain inference-only and
+held. Configuration, AUTO selection and the native wire protocol cannot grant
+native-worker purpose.
+
+Qualification entry points now consume that exact original-owner Macro source,
+with native APPLICATION enrollment 5fcb76e8274d28f37da6bb06583343c57fcdfc47.
+[Owner incorporation receipt](https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6704229101)
+records the preserved E3 source and separate 451-case/one-case results. Current
+Hermes composition must have its own result; preceding results below are not
+rewritten as proof of the updated factory. No installed-runtime test is repeated
+for the client's formatting-only change. Runtime package bytes and the completed
+real Chisel protocol proof remain unchanged.
+
+## Source composition of the completed e623fb16 and 5695de57 proofs
+
+Those qualification entry points pinned Macro #10818 at
 **669f2f185c86c4a2a8e9466deef051c01677ed4a** and native APPLICATION enrollment
 #2186 at **5fcb76e8274d28f37da6bb06583343c57fcdfc47**. Macro preserves the
 published #10740 E3 changes at 3c510817d9543b5b124a1b73277aa115883c7da7 verbatim;
