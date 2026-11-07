@@ -788,10 +788,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2', 'sites': ((1717, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -869,8 +866,7 @@ REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-jo
 }
 
 # Preserve the qualified Hermes contribution while composing the current original owner.
-REVIEWED_FILES['integrations/hermes_application_fabric/qualification/qualify_application_owner.py'] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da',
- 'sites': ((354, 37, 40, 'int', '409'),)}
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/qualify_application_owner.py'] = {'sha256': '192ff0bf4321f0006cb34ba68dd4d648da3a3825dccc8cd731f220f61e793f32', 'sites': ((367, 37, 40, 'int', '409'),)}
 REVIEWED_FILES['review_evidence/hermes_h4/profile-mapping-20261107.json'] = {'sha256': '6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53',
  'sites': (),
  'utf8_sites': ((20, 20, 23, 'int', '501'), (47, 20, 23, 'int', '501'), (70, 20, 23, 'int', '501'))}
@@ -907,3 +903,19 @@ REVIEWED_FILES['integrations/hermes_application_fabric/qualification/application
 # Preserve complete-path/postimage binding and every unreviewed identity token.
 REVIEWED_FILES['integrations/hermes_application_fabric/qualification/provider_preserving_application/application-provider-latency.patch'] = {'sha256': '02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919',
  'sites': ((918, 48, 51, 'int', '500'), (1051, 56, 59, 'int', '401'))}
+
+# Exact completed H4 primary postimage; drift remains unreviewed.
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py'] = {
+    "sha256": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
+    "sites": ((105, 39, 42, "int", "450"), (132, 27, 30, "int", "450")),
+}
+
+# Exact completed H4 primary postimage; drift remains unreviewed.
+REVIEWED_FILES['integrations/hermes_application_fabric/source_context.py'] = {'sha256': '887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597', 'sites': ((425, 36, 73, 'str', '"_mastermind_attended_native_sources"'), (444, 42, 78, 'str', '"_mastermind_attended_configuration"'))}
+
+# Exact completed H4 primary postimage; drift remains unreviewed.
+REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json'] = {
+    "sha256": '7b5af848fa6bdc47b178b73fc027a46c34f897e2a9bade655b9dec09af6d1a12',
+    "sites": (),
+    "utf8_sites": ((39, 18, 21, 'int', '501'), (52, 18, 21, 'int', '501'), (65, 18, 21, 'int', '501'), (78, 18, 21, 'int', '501'), (91, 18, 21, 'int', '501'), (104, 18, 21, 'int', '501'), (121, 18, 21, 'int', '501'), (134, 18, 21, 'int', '501'), (147, 18, 21, 'int', '501'), (160, 18, 21, 'int', '501'), (173, 18, 21, 'int', '501'), (186, 18, 21, 'int', '501'), (199, 18, 21, 'int', '501'), (212, 18, 21, 'int', '501'), (229, 18, 21, 'int', '501'), (242, 18, 21, 'int', '501'), (263, 18, 21, 'int', '501'), (276, 18, 21, 'int', '501'), (289, 18, 21, 'int', '501'), (302, 18, 21, 'int', '501'), (319, 18, 21, 'int', '501')),
+}

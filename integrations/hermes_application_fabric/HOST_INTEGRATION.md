@@ -14,23 +14,13 @@ does not authorize a new credential store, account ledger, service or retry path
 
 The attended row is the distinct relation from the original Macro owner. It
 uses workload `hermes_attended`; the two role rows use `site_interactive`.
-The five existing fixed/AUTO descriptors' source-support declarations are now
-adopted on original Macro #10740 at
-`12efe39a6b6e2f6d19f3a9893f978c55d4656681`, through its a43 contribution.
-The [original owner return](https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6710132854)
-records the resulting source and qualification. The frozen
-[source-support proposal](qualification/application_owner_support/README.md)
-remains a reproducible historical input; do not apply it again to that successor.
-Source support alone does not enroll a service: the existing runtime
+Published a577 keeps all five Hermes fixed/AUTO descriptors source-disabled.
+The exact [source-support proposal](qualification/application_owner_support/README.md)
+supplies their missing support declarations through that same owner; adoption
+is pending. Source support alone does not enroll a service: the existing
 qualification, capability, internal credential and admission checks still apply.
 Neither a role credential nor the ordinary default Hermes profile substitutes
 for the attended identity.
-
-Original Macro successor `913c8a874f21393e8f9b0a577ccb4863247b9903`
-preserves that adoption. Its actual hosted owner job passed 219 cases on merge
-`fc935c8cc6d48dac42789fa70124800ad1ae58f2` with the original nineteen pinned
-native fixture paths. [Hosted receipt](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42395459795/job/128471754020).
-This establishes the source join; installed activation remains a separate step.
 
 The numeric addresses preserve the existing Linux role network isolation.
 All three APPLICATION remotes, including the original 127.0.0.1:50142, use the
@@ -49,13 +39,6 @@ Source responsibilities:
   packages keep their existing custody.
 
 ## Implemented host join
-
-The optional expected-latency extension is separately packaged for the current
-APPLICATION/H6 writer in [application_latency](qualification/application_latency/README.md).
-It passed 28 focused and 117 incumbent cases against exact original source.
-It is not yet an installed picker capability or a measured account latency
-claim. The existing fixed/exact first Secretary conversation does not depend
-on publishing a latency-constrained purpose.
 
 The existing installation v4 primary_application field holds a closed nonsecret
 publication. It names the exact native role, enrollment request, principal,
@@ -137,7 +120,7 @@ already refuses before any provider request.
 
 ## Enrollment through the incumbent publisher
 
-The existing v9/v10 family service specifications retain two forms: one fixed grant, or a typed
+The closed v9 service specification has two forms: one fixed grant, or a typed
 route scope plus bounded explicit grants. Both preserve role, principal, host,
 APPLICATION purpose, the role-specific workload, lane, enabled state and the
 original internal credential reference. Secretary and meta-CEO retain
@@ -147,13 +130,10 @@ models/accounts/grant overlap. The original operation owns token generation,
 private binding, account publication and recovery.
 
 For a fresh Secretary or meta-CEO role, enroll its intended authorized scope
-once. An eligible owner-qualified account can run the first bounded fixed-model
-or v3 exact-model/pool canary under its applicable funding policy. Fixed v1 does
-not accept strict_pool. Later legitimate new turns can use AUTO within the
-original enrolled scope. The current qualified attended relation is fixed-only;
-the separately owned attended-AUTO extension must earn its own qualification,
-and must not borrow a role's transport or grant. A completed fixed slot cannot
-be rewritten into routed form.
+once. The fixed factory can run the first strict Go canary; later legitimate
+new turns can use AUTO with that exact scope. The current attended relation is
+fixed-only; it must not inherit a role's AUTO transport or grant. A completed
+fixed slot cannot be rewritten into routed form.
 No token remint, file deletion or remembered-ID replacement is an upgrade path.
 
 v1–v8 family readers remain unchanged. Startup aggregates only completed role
@@ -237,23 +217,8 @@ No part of this sequence authorizes bypassing active/unknown effects.
 
 ## Financial boundary required before the canary
 
-The first qualified account need not use a particular provider. Before dispatch,
-the existing provider/APPLICATION owners must bind the actual physical account,
-product, model, endpoint and configuration to the admitted service, fresh shared
-headroom and the enforceable financial boundary applicable to that route.
-Existing included-plan, prepaid or free funding may qualify under its actual
-owner policy; metadata authentication or a displayed balance alone does not
-prove APPLICATION entitlement or enforcement. Do not invent a new monthly ledger,
-provisioning key or USD reservation feature as an extra prerequisite. Preserve
-any stricter existing account/service budget and the provider's actual refusal.
-Missing USD valuation stays unknown; it does not by itself block a properly
-qualified included/prepaid/free turn or authorize replay after an unknown effect.
-
-### Original Go included-plan route
-
-For a Go route, the provider owner must supply a fresh receipt connecting the
-actual selected physical account to the qualifying transport/configuration,
-Extra Usage OFF,
+The provider owner must supply a fresh receipt connecting the actual selected
+physical account to the qualifying Go transport/configuration, Extra Usage OFF,
 included headroom and its validity window. The source default Go endpoint is
 https://opencode.ai/zen/go/v1, but GO_UPSTREAM_BASE is configurable; account
 identity alone does not establish the financial boundary.
@@ -276,7 +241,7 @@ Hermes must not assert it via prompt text, headers or model arguments. The
 declared quota scope can join multiple accounts/products, so another account's
 receipt is insufficient. Do not record a missing monetary amount as zero.
 
-For the original Go included-plan canary, the authoritative hard spending boundary and
+For this one included-plan canary, the authoritative hard spending boundary and
 the original Broker's durable per-dispatch SQLite token-usage settlement can
 satisfy budget and usage acceptance. A new general USD reservation feature is
 not a prerequisite. Preserve any stricter applicable existing account or service
@@ -302,7 +267,7 @@ alone is not proof that the provider request itself has an unknown outcome.
 | Selection | Actual provider, selected AND served model, physical account, applicable shared allowance scope, policy/recipe/configuration and original lease. |
 | Primary turn | Real authenticated APPLICATION dispatch through that account, bounded usable native output, observed usage. No provider credential inside Hermes. |
 | Tool continuation | Offered native tool ID, exactly one harmless read-only tool execution, original result in the next native request, same original owner/account commitment. |
-| Budget enforcement | Fresh owner evidence of the selected route's enforceable funding boundary and existing account/service admission limits, plus the original owner's deterministic refusal evidence at the applicable limit. A step ceiling alone is not monetary proof. Do not consume a real account just to exhaust it. |
+| Budget enforcement | Fresh owner evidence of the selected account's hard spending boundary and applicable admission policy, plus deterministic refusal evidence at its entitlement/budget limit. Do not consume a real account just to exhaust it. |
 | Settlement | Durable original dispatch/request-linked SQLite usage and truthful financial interpretation, original lease/close and any applicable reservation disposition. |
 | Recovery | Original result/unknown-effect readback after a controlled disruption, no second provider submission or duplicate tool effect. |
 | AUTO/strict policy | Eligible capability/complexity/latency/headroom/cost selection and strict model/pool refusal before effects, through the incumbent contract. |

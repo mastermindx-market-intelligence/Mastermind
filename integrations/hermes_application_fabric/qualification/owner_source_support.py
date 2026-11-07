@@ -17,6 +17,8 @@ import xml.etree.ElementTree as ET
 
 
 OWNER_COMMIT = "a577dbbf605474f97bbafa4ceeb0daf841292421"
+CURRENT_OWNER_COMMIT = "12efe39a6b6e2f6d19f3a9893f978c55d4656681"
+COMPOSED_OWNER_COMMIT = "fff0025e10de394c6a297c7878518513f1dbe633"
 CHANGED = frozenset({
     "engine/provider_production_modes.py",
     "tests/test_hermes_primary_fabric_identity.py",
@@ -44,7 +46,7 @@ def git(root, *arguments, input_data=None):
                GIT_NO_LAZY_FETCH="1", GIT_TERMINAL_PROMPT="0")
     stream = {"stdin": subprocess.DEVNULL} if input_data is None else {"input": input_data}
     try:
-        return subprocess.run(["git", "-c", "gc.auto=0", "-C", str(root), *arguments],
+        return subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(root), *arguments],
             env=env, capture_output=True, timeout=60, check=True, **stream).stdout
     except subprocess.CalledProcessError as error:
         diagnostic = error.stderr.decode("utf-8", errors="replace")
@@ -116,14 +118,7 @@ def inventory(root):
     return files
 
 
-def prepare(original, adapter, destination):
-    original = Path(original).resolve(strict=True)
-    adapter = Path(adapter).resolve(strict=True)
-    destination = Path(destination).resolve()
-    if destination.is_relative_to(original) or destination.is_relative_to(adapter):
-        raise RuntimeError("Proposal fixture must be outside the source checkouts")
-    if destination.exists():
-        raise RuntimeError("Proposal fixture must be new")
+def _support_contract(adapter):
     package = adapter / "integrations/hermes_application_fabric/qualification/application_owner_support"
     raw_contract = (package / "contract.json").read_bytes()
     contract = json.loads(raw_contract)
@@ -136,6 +131,18 @@ def prepare(original, adapter, destination):
             or contract.get("source_only") is not True
             or contract.get("operational_enrollment") is not False):
         raise RuntimeError("Source support proposal contract changed")
+    return raw_contract, contract, patch
+
+
+def prepare(original, adapter, destination):
+    original = Path(original).resolve(strict=True)
+    adapter = Path(adapter).resolve(strict=True)
+    destination = Path(destination).resolve()
+    if destination.is_relative_to(original) or destination.is_relative_to(adapter):
+        raise RuntimeError("Proposal fixture must be outside the source checkouts")
+    if destination.exists():
+        raise RuntimeError("Proposal fixture must be new")
+    raw_contract, contract, patch = _support_contract(adapter)
     if git(original, "rev-parse", "HEAD").decode().strip() != OWNER_COMMIT:
         raise RuntimeError("Original Macro source is not the proposal parent")
     git(original, "diff", "--exit-code", "HEAD", "--")
@@ -166,6 +173,66 @@ def prepare(original, adapter, destination):
         "contract_sha256": sha256(raw_contract), "patch_sha256": contract["patch_sha256"],
         "postimages": contract["postimages"], "fixture_files": len(after),
         "source_materialization": materialization,
+        "original_source_unchanged": True, "runtime_enrollment": False}
+
+
+def prepare_current(original, adapter, destination, *, composed=False):
+    """Qualify committed support without applying the historical proposal again."""
+    original = Path(original).resolve(strict=True)
+    adapter = Path(adapter).resolve(strict=True)
+    destination = Path(destination).resolve()
+    if destination.is_relative_to(original) or destination.is_relative_to(adapter):
+        raise RuntimeError("Current-source fixture must be outside the source checkouts")
+    if destination.exists():
+        raise RuntimeError("Current-source fixture must be new")
+    raw_contract, contract, _ = _support_contract(adapter)
+    owner_commit = CURRENT_OWNER_COMMIT
+    if composed:
+        path = adapter / "integrations/hermes_application_fabric/qualification/application_owner_support/attended-auto-current.json"
+        raw_composed = path.read_bytes()
+        current = json.loads(raw_composed)
+        keys = {"schema", "owner_commit", "previous_owner_commit", "historical_contract_sha256",
+                "postimages", "unchanged_inputs", "source_only", "operational_enrollment"}
+        if (type(current) is not dict or set(current) != keys
+                or current["schema"] != "mastermind.hermes_owner_committed_support.v1"
+                or current["owner_commit"] != COMPOSED_OWNER_COMMIT
+                or current["previous_owner_commit"] != CURRENT_OWNER_COMMIT
+                or current["historical_contract_sha256"] != sha256(raw_contract)
+                or type(current["postimages"]) is not dict or set(current["postimages"]) != CHANGED
+                or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                       for value in current["postimages"].values())
+                or current["unchanged_inputs"] != contract["unchanged_inputs"]
+                or current["source_only"] is not True
+                or current["operational_enrollment"] is not False):
+            raise RuntimeError("Composed current-source contract changed")
+        owner_commit = COMPOSED_OWNER_COMMIT
+        contract = {**contract, "postimages": current["postimages"]}
+        raw_contract = raw_composed
+    if git(original, "rev-parse", "HEAD").decode().strip() != owner_commit:
+        raise RuntimeError("Current Macro source differs from the qualified owner")
+    git(original, "diff", "--exit-code", "HEAD", "--")
+    destination.mkdir()
+    materialization = export_committed(original, destination, owner_commit,
+        ("engine", "lib", "config", "tests/__init__.py", *TESTS))
+    after = inventory(destination)
+    for path, expected in contract["postimages"].items():
+        if after.get(path) != expected:
+            raise RuntimeError("Committed support postimage differs: " + path)
+    for path, expected in contract["unchanged_inputs"].items():
+        raw = (destination / path).read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw,
+                            usedforsecurity=False).hexdigest()
+        if blob != expected:
+            raise RuntimeError("Unchanged owner input differs: " + path)
+    if git(original, "rev-parse", "HEAD").decode().strip() != owner_commit:
+        raise RuntimeError("Current source changed during fixture preparation")
+    git(original, "diff", "--exit-code", "HEAD", "--")
+    return {"owner_commit": owner_commit,
+        "contract_sha256": sha256(raw_contract),
+        "source_context": "committed_attended_auto" if composed else "committed_current",
+        ("historical_patch_sha256" if composed else "accepted_patch_sha256"): contract["patch_sha256"],
+        "patch_applied": False, "postimages": contract["postimages"],
+        "fixture_files": len(after), "source_materialization": materialization,
         "original_source_unchanged": True, "runtime_enrollment": False}
 
 
