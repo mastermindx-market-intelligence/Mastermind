@@ -79,13 +79,13 @@ class HostTests(unittest.TestCase):
     def test_failed_binding_is_terminal_without_replay(self):
         turn = self.turn()
         with patch.object(ApplicationBinding, "from_factory",
-                side_effect=HermesFabricError("owner_unqualified")) as factory:
+                side_effect=HermesFabricError("hermes_fabric_role_unqualified")) as factory:
             with self.host.activate(turn):
                 for _ in range(2):
                     with self.assertRaises(HermesFabricError):
                         self.host._resolve(self.call)
             self.assertEqual(factory.call_count, 1)
-            self.assertEqual(turn.refusal, ("owner_unqualified", False))
+            self.assertEqual(turn.refusal, ("hermes_fabric_role_unqualified", False))
 
     def test_unexpected_binding_failure_retains_uncertainty_without_raw_error(self):
         turn = self.turn()
