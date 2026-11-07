@@ -126,7 +126,7 @@ def before_admission_integrity(manifest):
     # build and the new successor tests below inspect the actual repaired bytes.
     # Historical107 fixtures first remove ONLY the exact validated Memory
     # cohort. The actual109/Go/HTTP source outputs are checked separately.
-    previous = builder.before_memory_owner_integrity(manifest)
+    previous = builder.before_qualification_quiescence(builder.before_memory_owner_integrity(manifest))
     if any(previous.get(name) == digest
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
@@ -750,7 +750,7 @@ def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
 
 
 def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
-    current = builder.before_memory_owner_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_qualification_quiescence(builder.before_memory_owner_integrity(json.loads((builds.default / "native-manifest.json").read_bytes())))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     previous = before_admission_integrity(current)
@@ -779,7 +779,7 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    current = builder.before_memory_owner_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_qualification_quiescence(builder.before_memory_owner_integrity(json.loads((builds.default / "native-manifest.json").read_bytes())))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)
     if corruption in ("old-task", "old-runtime"):

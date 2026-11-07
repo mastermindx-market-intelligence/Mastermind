@@ -232,22 +232,22 @@ ADMISSION_INTEGRITY_DIGESTS = {
 }
 
 
-# Prospective source-only Memory cohort over the exact protected320 107-file
-# parent. This restores only these accepted replacements/additions before the
+# Prospective source-only Memory cohort over the immutable accepted dd61
+# 107-file parent (not yet protected). This restores only these accepted replacements/additions before the
 # unchanged historical validator; it grants no install, issuer or study right.
-MEMORY_OWNER_PARENT_MANIFEST_SHA256 = '8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6'
+MEMORY_OWNER_PARENT_MANIFEST_SHA256 = '7b58e10efbf879ac6e2e3e4c6b89ddc2a79cba4f0b1b47f0131bbafc34bc1ce9'
 MEMORY_OWNER_PREIMAGES = {'ext/artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
  'ext/fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
  'ext/fabric_operator_owner.py': '90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7',
  'ext/fabric_task.py': '1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68',
- 'ext/lease_broker.py': '9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a',
+ 'ext/lease_broker.py': '5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a',
  'ext/provider_outcome.py': 'ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e',
  'ext/run_observation_delivery.py': 'c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b'}
 MEMORY_OWNER_DIGESTS = {'ext/artifact_delivery.py': 'ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a',
  'ext/fabric_operator_contract.py': '80358fb1fbb720441405f60cb419f659697d576bc0cdeaea0d1b8a30b78d6116',
  'ext/fabric_operator_owner.py': 'd53932a861fa7126740551ab75920a72c46f87c8a02bd40906c101898a82a2b3',
  'ext/fabric_task.py': 'ed05bfe80371301f39cb9765bda3cd59f2ed46b4357d06f33386f5f76c58dace',
- 'ext/lease_broker.py': '9f7c78e80e9c7cff5f7ece8df6e765a223eda07b32c739a422f3cecdedeec2b7',
+ 'ext/lease_broker.py': 'ac551b0c71fa13da0dad1b99a99bb51375233466062c8a447f06883d0fcb4385',
  'ext/provider_outcome.py': 'eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b',
  'ext/run_observation_delivery.py': '5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f'}
 MEMORY_OWNER_ADDITIONS = {'ext/fabric_memory_view.py': 'a7bfc2567c8abc6c27e3fe2277d8b21669420d90e547aafc42e1186ea0740081',
@@ -270,10 +270,30 @@ def before_memory_owner_integrity(manifest):
     return previous
 
 
+# Reviewed current-quiescence read/guard changes only Broker in exact raw107.
+# Validate the whole parent; never normalize a mixed or unrelated source set.
+QUALIFICATION_QUIESCENCE_PARENT_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE = "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a"
+QUALIFICATION_QUIESCENCE_BROKER_SHA256 = "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a"
+
+
+def before_qualification_quiescence(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("qualification quiescence manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        return previous
+    previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
+        raise ValueError("qualification quiescence parent closure differs")
+    return previous
+
+
 def before_admission_integrity(manifest):
     """Validate one exact forward cohort without mutating caller identity."""
     if type(manifest) is not dict:
         raise ValueError("native admission integrity manifest invalid")
+    manifest = before_qualification_quiescence(manifest)
     if not any(manifest.get(name) == digest
                for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
         return dict(manifest)
@@ -308,8 +328,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
-    actual_manifest = manifest
-    manifest = before_admission_integrity(before_memory_owner_integrity(manifest))
+    # Bind actual captured bytes independently of the historical parent proof.
+    # Both views start from this same exact-dict snapshot; normalization never
+    # substitutes predecessor bytes for the source captured by the Go component.
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    actual_manifest = dict(manifest)
+    manifest = before_admission_integrity(before_memory_owner_integrity(actual_manifest))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS} - set(MEMORY_OWNER_ADDITIONS)
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -379,10 +404,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        # A projected Memory broker must still equal the ACTUAL captured
-        # source dependency, never the older restored historical hash.
-        captured = actual_manifest if set(MEMORY_OWNER_ADDITIONS)<=set(actual_manifest) else manifest
-        if captured["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
