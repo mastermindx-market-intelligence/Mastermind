@@ -9,6 +9,7 @@ import { cp, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { seedCanonicalFixture, verifyNativeContinuity } from './native-continuity-steps.mjs'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const donor = resolve(process.env.MOBILE_QUALIFICATION_ROOT || '')
@@ -75,6 +76,7 @@ const waitForInteractive = async page => {
   }, undefined, { timeout: 60000, polling: 250 })
 }
 try {
+  const database = seedCanonicalFixture({ python, env, donor, hermesHome })
   gateway = spawn(python, ['-m', 'hermes_cli.main', 'gateway', 'run'], { cwd: donor, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   gateway.stdout.on('data', collect); gateway.stderr.on('data', collect)
   gatewayExit = new Promise(resolveExit => gateway.once('exit', (code, signal) => resolveExit({ code, signal })))
@@ -148,8 +150,9 @@ try {
   assert.equal(provider.completions.filter(row => row.marker === marker).length, 1)
   report.steps.push('native Markdown, bold text, monospace code and table render; reload retains the original session without redispatch')
   report.sessionHash = sessionHash
-  report.streamFrames = frames.length
   report.providerCallsForMarker = completed.length
+  await verifyNativeContinuity({ page, context, origin, provider, gate, within, report, output, database })
+  report.streamFrames = frames.length
   report.accepted = true
 } catch (error) {
   failure = error
