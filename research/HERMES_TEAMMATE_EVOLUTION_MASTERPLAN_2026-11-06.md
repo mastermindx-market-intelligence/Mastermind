@@ -2204,3 +2204,50 @@ Principal source judgments are examining actual credential-mechanism and native 
 Freshness/resume needs the original creation/history decisions; object identity or a new label cannot substitute. Existing capability/environment digests, effective server sampling, complete source/tool/network coverage, effects and cleanup remain unavailable until their actual owner facts can be obtained. No placeholder value, revised validity rule or synthetic production observation closes those gaps.
 
 Original Ubuntu1/root C26 journal-read permission denial remains closed. Original installed carrier **meta-ceo-byok-followon-parent-20261106-c35-01** and its return path remain authoritative. C3 is source validation only; paid Fabric refusal, both named AF_UNIX refusals, vault login entitlement and Outcome Learning #398/#409 holds remain unchanged. No fleet/browser/computer activation, inference, daemon, watcher, queue, outside message or duplicate control plane was started.
+
+
+## 50. Distinct held owners and next source contributions — 2026-11-07
+
+**Classification: MORE_WORK_EXISTS; MISSION_COMPLETE=false.** Current Chairman assignment remains full Hermes teammate implementation. Source acceptance, installed acceptance and learning efficacy remain separate.
+
+### Correction of held product identities
+
+Earlier shorthand grouping "Outcome Learning #398/#409" was incorrect. [#398](https://github.com/mastermindx-market-intelligence/Mastermind/pull/398) is **Outcome Learning V1**. [#409](https://github.com/mastermindx-market-intelligence/Mastermind/pull/409) is the **governed GitHub exact-branch repair owner app**. Both are held, for different reasons. This clarification supersedes the grouping, not their historical evidence. The current #2234 description has been corrected with exact returned-body readback.
+
+Outcome Learning's original operation is **mastermind-outcome-learning-v1-complete-vertical-20260902-sol-001**. Its current PR records a hold for actual non-author audit, explicit adjudication, CURRENT Agent OS source and the original compose/seal/one-apply/readback/restore/readback canary. Its old stale-state report is dated evidence; current Agent OS state has not been measured in this continuation. No synthetic freshness, acceptance or promotion is inferred.
+
+### Existing GitHub repair and real release boundary
+
+PR409 remains OPEN/Draft at **55155d33a51921a3b6d2cae2db49d31703a80b8a**, branch **sol/sol-capability-fabric-ghp2-20260902**, with an exact-head [CHANGES_REQUESTED review5330076741](https://github.com/mastermindx-market-intelligence/Mastermind/pull/409#pullrequestreview-5330076741). Its read-only reconciliation path can incorrectly turn a negative snapshot into terminal NOT_APPLIED while the original possible-send request remains pending.
+
+The repair already exists at **49917c21cf88095f777a1e79883e2d1ec7815cd3**, direct child of55155. It settles only complete exact APPLIED evidence; other reconciliation results stay EFFECT_UNKNOWN. It preserves typed definite pre-send NOT_APPLIED in the commit path, original historical token binding and one native attempt. Do not rediscover the same fix or add another attempt registry.
+
+[Independent narrow acceptance5989279252](https://github.com/mastermindx-market-intelligence/Mastermind/pull/409#issuecomment-5989279252) supports reuse of that repair but does not supply a final-head formal approval. [Combined proof6007678029](https://github.com/mastermindx-market-intelligence/Mastermind/pull/409#issuecomment-6007678029) already records265 passing focused/current-base tests with the effect repair plus three value-preserving D8 substitutions: TTL900 to15*60; path-byte512 to1<<9; schema maxLength512 to1<<9. The disposable proof had SOURCE_EFFECT:NONE; none of these proposals has become the incumbent branch head.
+
+Current55155 hosted test **35405622611 / job105794686576** failed. Final adopted source requires current integration checks and genuine non-author security approval. Root's current GitHub connector is a contributor and repair author for this change, so cannot supply that approval under another chat label. MastermindX1 is an existing plausible eligible reviewer, not an exclusive named-seat lock. The web review waiver does not lift this explicit effect-safety hold.
+
+**New capability result:** the principal judgment's GitHub branch-protection GET returned explicit403, "Resource not accessible by integration." That action stopped and is not replayed through C3, another account or another carrier. Historical protection receipts do not become a fresh protection read. The explicit security hold independently remains binding.
+
+### Original writer/effect reconciliation
+
+Root read the complete existing Slack carrier **C0BSBM78V1N/1788616338.591169**, read-only, with no further pages. Original operation remains **ghp2-current-base-release-maintenance-20260905-sol-001**. The thread preserves the actual historical PICKUP/START and published source, later corrections of erroneous PRE_START claims, the pending repair, and several non-owner proof-only contributions.
+
+The latest carrier evidence says the observed host's workspace status was NOT_APPLIED/not registered, no linked incumbent worktree was found there, and the technical writer gate was unavailable/RULES_ABSENT. A subsequent recovery inquiry records a historical app root as NOT_BOUND and asks for current writer/session/lease/effect disposition. None proves a live writer, release, terminal-no-effect or absence of unpublished work. Root has not replayed a source write, taken an uncertain effect to another carrier, sent a message, acquired an incumbent workspace or changed rulesets.
+
+Current outer Chairman assignment makes this session responsible for recovery; an old author/chat label is not an approver or indefinite wait condition. The exact current canonical writer/effect predicate is being resolved under compatible protected law before any incumbent409 mutation. The accepted repair and265-case proof are retained. A broader existing proposal5c27ecbcd0e241ca42eaf8d2add75c544a70f1a0 stays separate from this minimal repair.
+
+The existing GHP3 [composition checklist417](https://github.com/mastermindx-market-intelligence/Mastermind/issues/417) and [canary418](https://github.com/mastermindx-market-intelligence/Mastermind/issues/418) remain the production owner: verified Business principal/scope, server-resolved organizational target, owner-native atomic attempt authority, dedicated least-privilege GitHub App custody and authenticated private MCP transport. No generic GitHub write API, PAT fallback, new retry plane or production activation is introduced.
+
+### Native auth and history source rulings
+
+The accepted OHF bridge already defines auth_realm_class as the broad observed authentication type, such as API_KEY. A truthful native contribution must join the credential actually selected, actual copied request-client inputs including cache reuse, and the authentication material presented by each request. Secret comparisons stay inside the credential/client owner and emit only closed nonsecret status/type. Credential pools, scoped overrides, callables, alternate clients and changed authorization cannot inherit a configured label. API_KEY does not prove account identity, permissions, successful authentication or exact principal/realm generation. The current source has no qualifying linked witness yet.
+
+The smallest history contribution is the original qualified **agent.turn_context.build_turn_context -> _hydrate_from_history** seam, after rotated-session recovery and before current-user append. Positive adoption of prior native conversation rows, joined to the existing admission/claim/turn/request, can populate resume_used=true and fresh_session_observed=false. Empty history cannot prove no-resume or fresh-session. Cache identity alone proves neither; unjoined physical-session rotation withholds projection. Process and workspace freshness still need trial-relative creation/allocation facts from their incumbent owners.
+
+The history witness belongs in a new closed retained input-observation version, not a new registry. Retained v1 semantics must remain historical; v2 and the new version must both retain their strong six-field request correlation instead of dispatching merely on equality to CURRENT_INPUT_OBSERVATION. The native warm-session admission gate stays intact. No history source change is claimed yet.
+
+### Unchanged mission holds
+
+Latest observed protected master **0d68434c37692507f9f1a77152c32b1e11bb4388** adds seven fleet C3 design/plan documents afterf57. The bounded comparison changes no INDEX/kernel law. Compatible pin **66780ab7e3e9fdbfd40713bb5791fb1888529f7c** remains; new fleet plans must be considered before later fleet work.
+
+PR2217's original queue is preserved; #2242 is merged; #2234 remains Draftc194 with no release request. Original Ubuntu1/root C26 denial, Fabric refusal and the two named denied AF_UNIX tests remain closed/unretried. Local execution is unavailable and unretried. C3 remains source validation only, using the original source connection. No inference, vault login, browser/computer/fleet activation, runtime replacement, watcher, outside message or duplicate control plane occurred.
