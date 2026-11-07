@@ -2850,7 +2850,13 @@ def api_rejections() -> JSONResponse:
         from portfolio import rejections
         return JSONResponse(rejections.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
+        _log.warning("rejections read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "rejections_unavailable",
+            "coverage": None,
+            "scorecard": None,
+        })
 
 
 @router.get("/api/shadow_bandit")
