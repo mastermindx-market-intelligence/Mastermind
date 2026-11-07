@@ -27,7 +27,7 @@ const options={...parsed.options,noEmit:true,composite:false,incremental:false,d
     "@deepseek-ai/dsh-api-session-controller/src/*":[resolve(root,"*")],
   }};
 const names=parsed.fileNames.map(file=>file.replace(resolve(project,"src"),root));
-names.push(reader);
+names.push(reader,resolve(here,"../company_plugin/src/executive-read-port.ts"));
 const program=ts.createProgram({rootNames:names,options,projectReferences:parsed.projectReferences});
 const diagnostics=[...parsed.errors,...ts.getPreEmitDiagnostics(program)];
 const output=ts.formatDiagnosticsWithColorAndContext(diagnostics,{

@@ -1852,11 +1852,19 @@ def _service_from_config(
     plan_schema_version: str | None = None,
     fabric_worker_binding_source: Any | None = None,
     secretary_binding_source: Any | None = None,
+    deepseek_native_read_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
     byok_roles_reader: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
+    # A live inherited capability is supplied only by trusted host composition.
+    # No JSON/config/FD number can construct this source; production defaults off.
+    if deepseek_native_read_source is not None:
+        from integrations.session_bridge.deepseek_native import DeepSeekNativeReadSource
+        if type(deepseek_native_read_source) is not DeepSeekNativeReadSource:
+            raise ServiceError("native DeepSeek read requires trusted live composition")
+        deepseek_native_read_source.require_current()
     if "workspace_acquisition" in raw:
         # Closed unix/launchd stanza only. validate_workspace_control_room
         # refuses the legacy TCP port stanza and accepts no port or
@@ -2848,13 +2856,26 @@ def _service_from_config(
                         secretary_binding_source, read_guard=require_secretary_read,
                         submit_guard=require_secretary_submit)
 
+                deepseek_session = None
+                if deepseek_native_read_source is not None:
+                    from integrations.session_bridge.deepseek_native import DeepSeekNativeSession
+
+                    def require_deepseek_read():
+                        require_session_admission()
+                        service._namespace_custody.bound_runtime(runtime)
+                        if service._require_runtime() is not runtime:
+                            raise BridgeError("ingress_unavailable", "Executive Runtime changed")
+
+                    deepseek_session = DeepSeekNativeSession(
+                        deepseek_native_read_source, read_guard=require_deepseek_read)
+
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
                     attention_requester=attention,
                     authorized_policies=trusted_policies,
                     reference_cursor_key=session_reference_cursor_key,
-                    hermes_session=hermes_session)
+                    hermes_session=hermes_session, deepseek_session=deepseek_session)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
             if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
                 def project_conversation_read_factory(runtime):

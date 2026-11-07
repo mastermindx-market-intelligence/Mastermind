@@ -34,18 +34,22 @@ await rm(join(outDir,"client.cjs"));
 await writeFile(join(outDir,"index.js"),"// Client-only company presentation; no host execution capability.\nexport function apply() {}\n");
 const sha=bytes=>createHash("sha256").update(bytes).digest("hex");
 await build({
-  cwd:packageDir,config:false,entry:{"company-peer":"src/company-peer.ts"},outDir,
+  cwd:packageDir,config:false,entry:{"company-peer":"src/company-peer.ts","executive-read-port":"src/executive-read-port.ts"},outDir,
   format:"esm",platform:"node",target:"es2024",dts:false,clean:false,sourcemap:false,
+  // Reuse the original native Cordis scope implementation at runtime.
+  external:["@deepseek-ai/dsh-scope"],
   outExtensions:()=>({js:".js"}),
 });
 const host=await readFile(join(outDir,"company-peer.js"));
-const sources=["protocol.ts","index.ts","company-peer.ts","client/connection.ts","client/index.ts","client/styles.ts"];
+const port=await readFile(join(outDir,"executive-read-port.js"));
+const sources=["protocol.ts","index.ts","company-peer.ts","executive-read-port.ts","client/connection.ts","client/index.ts","client/styles.ts"];
 const sourceDigests={};
 for(const path of sources)sourceDigests["src/"+path]=sha(await readFile(join(packageDir,"src",path)));
 const manifest={
   schema:"mastermind.dsh.company_build.v1",donor_sha:DONOR,plugin:"@mastermind/dsh-company",
   source_sha256:sourceDigests,client_sha256:sha(bundled),
-  host_exports:{"./company-peer":{file:"company-peer.js",sha256:sha(host)}},
+  host_exports:{"./company-peer":{file:"company-peer.js",sha256:sha(host)},
+    "./executive-read-port":{file:"executive-read-port.js",sha256:sha(port)}},
   capabilities:["company_project_presentation","company_project_navigation"],
   provider_admission:false,
 };

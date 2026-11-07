@@ -391,3 +391,34 @@ existing SessionBridge/Runtime to the original native process with a trusted
 installed association; Send/resume/Stop and governed tools still require their
 original admission, operation and ACP owners. Provider sign-in, installed route,
 production browser journey and production acceptance remain open.
+
+
+## Finite native history consumer qualified; production join still open
+
+The existing private SessionBridge/Runtime now has an optional exact native read
+consumer. Actual original Runtime root/work evidence and current READ identity
+are checked around an owned socket-pair read into the original native process.
+The finite native port reuses Cordis scope, Gateway, non-owner Peer and cold
+SessionController reads; it creates no session/writer, retry or new transcript.
+
+The real cross-process source test recovered identical native snapshots and a
+page with original UTF-8 and stream chunks while the original writer stayed held.
+Original JSONL/zstd bytes did not change. Sixteen native port cases, thirty-one
+Python native-read cases including the real process case, strict native typing,
+thirteen package/export cases and three actual isolated App-peer/socket/factory
+cases, plus the92-case installed/Runtime regression, are retained in [the exact join frontier](NATIVE_COMPANY_JOIN_FRONTIER.md).
+The App-peer and native-process fixtures are separate evidence, not installed
+OAuth or production acceptance.
+
+The private host bundle now resolves the original packaged native scope module
+through one fixed internal link. The original company client and company-peer
+bundle stay byte-identical. New package staging requires both host exports;
+historical qualification remains tied to its exact old export set. The0f01
+attended-build publication is consumed as the original qualified cancellation-
+patch package and is not relabeled as a build containing this new port.
+
+Default installed source is still unavailable. The original native launcher has
+not supplied an endpoint/association handoff; stock browser-owner bypass,
+authenticated native foreground/ACP admission, production sign-in and the full
+Send/resume/Stop/restart/revocation journey remain open engineering and installed
+acceptance work. Source publication or CI green does not close those requirements.

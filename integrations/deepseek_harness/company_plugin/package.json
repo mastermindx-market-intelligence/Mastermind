@@ -9,6 +9,7 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./company-peer": "./lib/company-peer.js",
+    "./executive-read-port": "./lib/executive-read-port.js",
     "./package.json": "./package.json"
   },
   "dsh": {

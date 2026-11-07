@@ -70,17 +70,58 @@ def company_host_exports(root, build, *, required=False):
             raise ValueError("Company host reader build required")
         return None
     exports = build["host_exports"]
-    if type(exports) is not dict or set(exports) != {"./company-peer"}:
+    expected = {"./company-peer": "company-peer.js", "./executive-read-port": "executive-read-port.js"}
+    # Historical, already-qualified packages may have only the first leaf.
+    # Every new stage must contain both exact host exports from its build.
+    if (type(exports) is not dict
+            or set(exports) not in ({"./company-peer"}, set(expected))
+            or (required and set(exports) != set(expected))):
         raise ValueError("Company host export mapping refused")
-    row = exports["./company-peer"]
-    if (type(row) is not dict or set(row) != {"file", "sha256"}
-            or row["file"] != "company-peer.js" or type(row["sha256"]) is not str
-            or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])):
-        raise ValueError("Company host export identity refused")
-    file = root / row["file"]
-    if file.resolve(strict=True) != file or sha(file) != row["sha256"]:
-        raise ValueError("Company host export differs from compiled source mapping")
+    for name, row in exports.items():
+        if (type(row) is not dict or set(row) != {"file", "sha256"}
+                or row["file"] != expected[name] or type(row["sha256"]) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])):
+            raise ValueError("Company host export identity refused")
+        file = root / row["file"]
+        if file.resolve(strict=True) != file or sha(file) != row["sha256"]:
+            raise ValueError("Company host export differs from compiled source mapping")
     return exports
+
+
+def verify_company_scope(release):
+    """Resolve the host leaf to the original packaged native scope module."""
+    target = release / "app/packages/core/scope"
+    link = release / "company_plugin/node_modules/@deepseek-ai/dsh-scope"
+    if (target.resolve(strict=True) != target or not link.is_symlink()
+            or os.readlink(link) != "../../../app/packages/core/scope"
+            or link.resolve(strict=True) != target):
+        raise ValueError("Company host native scope link differs")
+    package = target / "package.json"
+    entry = target / "lib/index.js"
+    if (package.resolve(strict=True) != package or entry.resolve(strict=True) != entry
+            or not entry.is_file()
+            or json.loads(package.read_text()).get("name") != "@deepseek-ai/dsh-scope"):
+        raise ValueError("Company host native scope package differs")
+
+
+def package_company_scope(release):
+    """Reuse the existing native dependency; never bundle another Cordis owner."""
+    target = release / "app/packages/core/scope"
+    if (target.resolve(strict=True) != target
+            or not (target / "lib/index.js").is_file()
+            or json.loads((target / "package.json").read_text()).get("name") != "@deepseek-ai/dsh-scope"):
+        raise ValueError("Original native scope package required")
+    company = release / "company_plugin"
+    if release.resolve(strict=True) != release or company.resolve(strict=True) != company:
+        raise ValueError("Company dependency directory redirected")
+    parent = company / "node_modules/@deepseek-ai"
+    # The release is a newly owned staging tree. Never replace an existing link.
+    for ancestor in (parent.parent, parent):
+        if ancestor.exists() and (ancestor.is_symlink() or ancestor.resolve(strict=True) != ancestor):
+            raise ValueError("Company dependency directory redirected")
+        ancestor.mkdir(exist_ok=True)
+    (parent / "dsh-scope").symlink_to("../../../app/packages/core/scope", target_is_directory=True)
+    verify_company_scope(release)
 
 
 NATIVE_SESSION_SOURCE_PATH = "integrations/deepseek_harness/runtime_compat/native-session-source.json"
@@ -188,6 +229,7 @@ def stage(args):
         raise ValueError("Native company title did not reach the complete client build")
     shutil.copytree(company / "lib", release / "company_plugin/lib")
     shutil.copy2(company / "package.json", release / "company_plugin/package.json")
+    package_company_scope(release)
     shutil.copy2(donor / "LICENSE", release / "UPSTREAM-LICENSE")
     shutil.copy2(HERE / "launch_attended.mjs", release / "launch_attended.mjs")
     for child in ("home", "state/profiles/web", "workspace", "logs"):
@@ -349,6 +391,8 @@ def export_publication(*, release, source_repo, source_sha, out):
             or build["client_sha256"] != config["company_client_sha256"]):
         raise ValueError("Company client qualification differs")
     host_exports = company_host_exports(company, build)
+    if host_exports is not None and "./executive-read-port" in host_exports:
+        verify_company_scope(release)
     if (host_exports != config.get("company_host_exports")
             or host_exports != accepted_build.get("company_host_exports")):
         raise ValueError("Company host export differs from protected build qualification")

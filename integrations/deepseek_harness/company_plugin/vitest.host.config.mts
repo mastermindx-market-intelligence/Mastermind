@@ -24,6 +24,6 @@ export default defineConfig({
     ...aliases,
   ]},
   plugins:[shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:["native.host.test.ts"],maxWorkers:1,fileParallelism:false,
+  test:{environment:"node",include:["native.host.test.ts","native.executive.test.ts","native.executive.fixture.test.ts"],maxWorkers:1,fileParallelism:false,
     testTimeout:15000,hookTimeout:15000,execArgv:shared.vitestExecArgv},
 });

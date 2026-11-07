@@ -162,7 +162,8 @@ class RuntimeSessionReturn:
     def __init__(self, runtime: Runtime, *, fabric: RuntimeFabricTargetProjector,
                  codex: RuntimeCodexTargetProjector, socket_path: Path,
                  service_call=call_service, authorized_policies: AppPolicies | None = None,
-                 reference_cursor_key: bytes | None = None, hermes: Any | None = None):
+                 reference_cursor_key: bytes | None = None, hermes: Any | None = None,
+                 deepseek: Any | None = None):
         if (type(runtime) is not Runtime or type(fabric) is not RuntimeFabricTargetProjector
                 or type(codex) is not RuntimeCodexTargetProjector
                 or not Path(socket_path).is_absolute() or not callable(service_call)):
@@ -171,6 +172,10 @@ class RuntimeSessionReturn:
         if hermes is not None and type(hermes) is not HermesNativeSession:
             raise TypeError("installed native Secretary owner required")
         self.hermes = hermes
+        from .deepseek_native import DeepSeekNativeSession
+        if deepseek is not None and type(deepseek) is not DeepSeekNativeSession:
+            raise TypeError("installed native DeepSeek reader required")
+        self.deepseek = deepseek
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
         self.socket_path, self.service_call = Path(socket_path), service_call
         self._trusted_read_pair = _trusted_read_pair(authorized_policies)
@@ -311,6 +316,50 @@ class RuntimeSessionReturn:
                 or _principal(principal) != identity):
             raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
         return value["schema"]
+
+    async def deepseek_history(self, principal, arguments):
+        """One cold read, bound to the actual Runtime root and installed owner."""
+        from control_plane.executive_runtime import _admission_root_workstream
+        from .deepseek_native import (
+            RESULT_SCHEMA, bounded_native_result, principal_namespace, validate_native_read_arguments,
+        )
+        args = validate_native_read_arguments(arguments)
+        identity = _principal(principal)
+        native = self.deepseek
+        if native is None:
+            raise BridgeError("backend_unavailable", "installed native history is unavailable")
+        binding = native.selected_binding()
+        selection = {"work_ref": binding.work_ref, "root_job_id": binding.root_job_id}
+        if (args["selection"] != selection
+                or principal_namespace(principal) != binding.owner_principal_scope):
+            raise BridgeError("reply_unavailable", "authorized native history is unavailable")
+
+        def evidence():
+            if self.deepseek is not native or _principal(principal) != identity:
+                raise BridgeError("binding_unavailable", "original native read owner changed")
+            native.require_binding(binding)
+            root = self.runtime.store.unique_root_created_event(binding.root_job_id)
+            with self.runtime.store.read() as connection:
+                work = _admission_root_workstream(connection, binding.root_job_id)
+            if work != binding.work_ref:
+                raise BridgeError("binding_unavailable", "native history root responsibility differs")
+            # Existing Runtime provenance, not a native cwd/project-name guess.
+            return root.event_id, _digest(root.to_dict())
+
+        original = evidence()
+
+        def before_read():
+            if evidence() != original:
+                raise BridgeError("binding_unavailable", "original native history root changed")
+
+        data = await native.read_history(binding, principal, args["read"], before_read=before_read)
+        before_read()
+        return bounded_native_result({
+            "schema": RESULT_SCHEMA, "selection": selection, "read": args["read"],
+            "association_sha256": binding.digest, "root_event_id": original[0],
+            "root_event_sha256": original[1], "native_session_id": binding.native_session_id,
+            "native": data, "observational_only": True, "can_send": False, "parent_consumed": False,
+        })
 
     async def hermes_targets(self, principal):
         from control_plane.native_continuation import build_hermes_continuation_target

@@ -166,7 +166,18 @@ def test_company_host_output_must_match_closed_build_export(tmp_path):
     file.write_text("export const readOnly = true;\n")
     row = {"file": "company-peer.js", "sha256": native.sha(file)}
     build = {"host_exports": {"./company-peer": row}}
+    assert package.company_host_exports(tmp_path, build) == build["host_exports"]
+    with pytest.raises(ValueError, match="mapping refused"):
+        package.company_host_exports(tmp_path, build, required=True)
+    port = tmp_path / "executive-read-port.js"
+    port.write_text("export const finiteRead = true;\n")
+    build["host_exports"]["./executive-read-port"] = {
+        "file": port.name, "sha256": native.sha(port)}
     assert package.company_host_exports(tmp_path, build, required=True) == build["host_exports"]
+    port.write_text("unqualified port output\n")
+    with pytest.raises(ValueError, match="compiled source mapping"):
+        package.company_host_exports(tmp_path, build, required=True)
+    port.write_text("export const finiteRead = true;\n")
     file.write_text("stale host output\n")
     with pytest.raises(ValueError, match="compiled source mapping"):
         package.company_host_exports(tmp_path, build, required=True)
@@ -175,3 +186,36 @@ def test_company_host_output_must_match_closed_build_export(tmp_path):
     with pytest.raises(ValueError, match="build required"):
         package.company_host_exports(tmp_path, {}, required=True)
     assert package.company_host_exports(tmp_path, {}) is None
+
+
+def test_company_host_uses_the_original_packaged_scope_dependency(tmp_path):
+    target = tmp_path / "app/packages/core/scope"
+    (target / "lib").mkdir(parents=True)
+    (target / "package.json").write_text('{"name":"@deepseek-ai/dsh-scope"}')
+    (target / "lib/index.js").write_text("export const originalScope = true;\n")
+    (tmp_path / "company_plugin").mkdir()
+    package.package_company_scope(tmp_path)
+    link = tmp_path / "company_plugin/node_modules/@deepseek-ai/dsh-scope"
+    assert link.is_symlink() and link.resolve(strict=True) == target
+    package.verify_company_scope(tmp_path)
+    with pytest.raises(FileExistsError):
+        package.package_company_scope(tmp_path)
+    link.unlink()
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match="scope link differs"):
+        package.verify_company_scope(tmp_path)
+
+
+def test_company_host_dependency_refuses_redirected_directory(tmp_path):
+    target = tmp_path / "app/packages/core/scope"
+    (target / "lib").mkdir(parents=True)
+    (target / "package.json").write_text('{"name":"@deepseek-ai/dsh-scope"}')
+    (target / "lib/index.js").write_text("export const originalScope = true;\n")
+    company = tmp_path / "company_plugin"
+    company.mkdir()
+    elsewhere = tmp_path / "unrelated"
+    elsewhere.mkdir()
+    (company / "node_modules").symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(ValueError, match="directory redirected"):
+        package.package_company_scope(tmp_path)
+    assert list(elsewhere.iterdir()) == []

@@ -131,3 +131,63 @@ Cordis SlotRegistry and renderer; project rendering and revocation passed.
 The full donor Web application authenticated locally and included this plugin
 in its boot manifest. This proves local boot and native UI integration, not
 signed-in company production chat.
+
+
+## Finite Executive native history carrier
+
+The separate `./executive-read-port` host export attaches one already-connected
+Duplex to the original native Context. The injecting caller declares the exported
+`inject` dependencies (`connection`, `remoteAccess`, `typertGateway`) before
+calling `attachExecutiveReadPort`. The ordinary company plugin entry remains
+presentation-only. Importing or exporting this leaf does not activate it.
+
+The original host composition must supply an exact immutable association joining
+the company principal namespace, canonical Runtime work/root, native session,
+qualified package and composition. Its synchronous current guard and abort
+signal remain authoritative. Digest-shaped strings are not package attestation;
+a browser project, native cookie, caller session ID or JSON descriptor cannot
+construct this capability.
+
+Each bounded request creates a fresh non-owner reader and releases it after
+`projections`/`page`. The request ID is correlation for that finite lifetime,
+not the OS frontend authorization generation or a new grant. The port uses the
+donor's own `createScope` to own its policy and Peers. Disposal retires access
+immediately and waits for the active answer and port closure; it does not dispose
+the original Session/Agent or claim to stop a provider turn. No listener,
+reconnect, retry or queued second request is created.
+
+The Python consumer is `integrations/session_bridge/deepseek_native.py`, using
+`OwnedNativeReadPort` from `native_read_port.py`. The existing private bridge
+accepts the closed `session_native_read` selection/cursor request. The actual
+READ principal, original App binding, custody-bound Runtime, immutable root
+creation evidence, exact association and original port are rechecked around the
+read. The private caller cannot select a native address or promote a cold writer.
+Both the native frame and the complete final CeoIngress response are bounded;
+oversized pages are refused whole, including UTF-8 and the final newline.
+
+The real process qualification can be run from the Mastermind repository:
+
+```sh
+DSH_SOURCE=/absolute/clean/pinned/donor \
+DSH_NODE=/absolute/qualified/node \
+python -m pytest -q tests/test_deepseek_native_read.py
+```
+
+That optional test passes an actual socket-pair endpoint to a separate Node
+process. It exercises the original Gateway, SessionController and JSONL/zstd
+store while the original writer remains held. It proves repeat recovery,
+explicit paging, native event/stream content, unchanged stored bytes and no
+Agent creation/resume. Its named fixture principal and association are not
+installed OAuth or production package authority.
+
+The packaged host export imports the original native scope module through one
+fixed internal dependency link. It does not bundle another Cordis runtime.
+The attended packager validates that link and retains it in the complete package
+inventory. Historical build records remain tied to their exact old export set;
+every newly staged build requires both private host exports.
+
+Production is still unavailable until the original native launcher/bootstrap
+hands Executive a qualified endpoint and an accepted company/root/session
+association. The stock browser-owner boundary and authenticated native
+Send/resume/Stop remain separate open work. See
+[the exact native join frontier](../NATIVE_COMPANY_JOIN_FRONTIER.md).
