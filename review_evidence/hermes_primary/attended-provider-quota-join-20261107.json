@@ -1,0 +1,77 @@
+{
+  "actual_targeted_validation": {
+    "failures": 0,
+    "historical_and_corruption_controls_passed": 13,
+    "log_sha256": "cfc14fd2dc11c362cccf5421245ca5ab0e9d286b54a604a80bd2dd5522f6feb9"
+  },
+  "diff_check": {
+    "all_findings": "single_blank_patch_context",
+    "exact_owner_blobs_retained": true,
+    "frozen_patch_artifacts": [
+      "ops/native_fabric/quota_continuity/rollout/provider_application/fabric_task.py.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/pick.py.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/remote_sub.sh.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/slot.py.patch"
+    ],
+    "ordinary_paths": "passed",
+    "patch_reserialization": false
+  },
+  "hermes_runtime_projection_and_protected_auto_merges_exact_to_parent": true,
+  "installed_acceptance": false,
+  "latency_aware_auto": "not_adopted_incumbent_followthrough_required",
+  "live_provider_acceptance": false,
+  "macro_source": {
+    "archive_sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "archive_size": 75634300,
+    "commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "material_manifest_sha256": "0ba76aacfe1c86e524b883ca0a9465d74e2832a105760ea68c8f3b0ac15d87eb",
+    "projection": "engine-lib-config/v1",
+    "repository": "mastermindx-market-intelligence/macro",
+    "schema": "mastermind.hermes_attended_source_projection/v1",
+    "tree": "c2a4d629c87dec9381460560a31dffa4e2550917"
+  },
+  "merge_conflicts": [],
+  "native_owner_blobs": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "e5776548a1b75a128f4bbb4f29b478f1bed52280",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": "2de79611ce82e14b6a255bd1a4956fb5abbf7502",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/composition.json": "ce02d342778c060ab729839fd99689816bd77f74"
+  },
+  "native_source_tree": {
+    "exact_to_provider_owner": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+    "path": "ops/native_fabric/quota_continuity",
+    "tree": "e231e8ab2b171861620c49553e658a820fdb9d7d"
+  },
+  "new_committed_gate": "pending_final_commit",
+  "original_carrier_ancestor": "7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f",
+  "parents": [
+    "73fc80c1b736b4032ae6e969d5240e059a8113a8",
+    "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c"
+  ],
+  "prior_committed_gate": {
+    "head": "73fc80c1b736b4032ae6e969d5240e059a8113a8",
+    "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+    "passed": 1,
+    "seconds": 42.972
+  },
+  "protected_ancestor": "ad2484d2330a865f604c3c98abd20d20189cba29",
+  "protected_composition_receipt": "review_evidence/hermes_primary/attended-protected-source-join-20261107.json",
+  "qualified_hermes_evidence": {
+    "all_nine_focused_hosted_jobs": "success",
+    "receipt": "review_evidence/hermes_primary/attended-original-source-composition-20261107.json",
+    "scope": "exact_unchanged_hermes_source_and_current_macro_projection",
+    "source": "a3d4da4d79a5a0e7fe4a51d938a132f74f07c574",
+    "workflow_run": 42408825438
+  },
+  "qualified_owner_evidence": {
+    "nested_application_artifact_methods": 28,
+    "provider_auto_and_return_cases": 27,
+    "pytest_cases": 379,
+    "receipt": "review_evidence/fabric_application/provider-quota-joined-composition-20261107.json",
+    "scope": "retained_exact_native_tree_not_reexecuted_or_relabeled",
+    "source": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+    "subtests": 18
+  },
+  "schema": "mastermind.hermes_provider_quota_composition.v1",
+  "selected_sequence_and_j_effect_unchanged": true,
+  "source_body_denial_fences_preserved": true
+}

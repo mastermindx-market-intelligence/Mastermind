@@ -8,6 +8,14 @@ Fully connect Hermes primary inference, native workers, Capacity Fabric routing/
 
 Compatible protected law pin: de6966ce1524c01ab6ac06af5461370aa79f3994. Operation: hermes-native-worker-binding-20261107-c2. Branch: sol/web-hermes-native-worker-binding-20261107-c2. Root direct implementation remains under the earlier recorded paid-Fabric refusal; the native child supplied principal judgment only.
 
+## Current completed-input composition
+
+The current candidate joins protected-source commit73fc80c1b736b4032ae6e969d5240e059a8113a8 and completed provider/quota owner0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c as real parents. The merge has no conflicts. The entire native quota-continuity tree is exactly the qualified owner tree e231e8ab2b171861620c49553e658a820fdb9d7d; its original builder, both installation paths, provider capabilities and quota-recovery cohort remain exact. Hermes package/runtime/projection and both protected automatic merges remain byte-identical to73fc.
+
+All13 targeted current/historical controls passed with that native source. The published a3d4 Hermes input has passed all nine focused hosted jobs, including paired text/AUTO/tools and the original native conversation handler/Broker. Those parent results retain their exact source scope. Receipt: attended-provider-quota-join-20261107.json.
+
+Next: commit the joined source, run its actual committed D8, publish one current #2225 head and return it to the original #2175 release owner. Do not refresh unrelated protected changes or repeat accepted native/provider qualification. Required final-head CI and installed selection remain distinct. Latency-aware AUTO is explicitly still open with the incumbent source owner; retain multi-option AUTO, physical capacity, newly admitted model switching and worker-result consumption as real acceptance rows.
+
 ## Protected source join
 
 The current candidate extends published a3d4da4d79a5a0e7fe4a51d938a132f74f07c574 with protected ad2484d2330a865f604c3c98abd20d20189cba29 as real merge parents. Nineteen protected paths are preserved. The only conflict is an appended finite review record; both exact records remain. All governing scopes are unchanged at the compatible pin.

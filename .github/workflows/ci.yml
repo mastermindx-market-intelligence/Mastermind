@@ -361,6 +361,9 @@ jobs:
             ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
             ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \

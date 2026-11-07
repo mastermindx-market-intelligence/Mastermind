@@ -1,0 +1,179 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -2007,6 +2007,24 @@
+             return False, "provider quota cooldown"
+     except Exception:
+         return False, "provider quota state unavailable"
++    if pool in {"byteplus", "experiential"}:
++        try:
++            import sqlite3
++            from pathlib import Path
++            from lease_broker import default_broker
++            br = default_broker()
++            conn = sqlite3.connect(Path(br.db_path).resolve().as_uri()+"?mode=ro", uri=True, timeout=.25)
++            conn.row_factory = sqlite3.Row
++            try:
++                available = any(
++                    br._account_held(conn, pool, row["name"]) < row["_eff_cap"]
++                    for row in br.grantable_accounts(pool, conn=conn))
++            finally:
++                conn.close()
++            if not available:
++                return False, "plan account at shared cap or unavailable"
++        except Exception:
++            return False, "plan account capacity unavailable"
+     if pool in {"codex-native", "claude-native"}:
+         try:
+             from lease_broker import default_broker
+@@ -2071,7 +2089,7 @@
+     "go": ("go-codex",), "bailian": ("qwen",), "minimax": ("minimax",),
+     "glm": ("glm-codex", "glm"), "cursor": ("cursor",), "grok": ("grok",),
+     "codex-native": ("codex-native",), "claude-native": ("claude-native",),
+-    "ocfree": ("oc-free",),
++    "ocfree": ("oc-free",), "byteplus": ("byteplus",), "experiential": ("experiential",),
+ }
+ 
+ 
+@@ -2167,6 +2185,124 @@
+     return routes
+ 
+ 
++def _plan_active_directory():
++    """Resolve only the incumbent publisher's declared shared-active binding."""
++    from pathlib import Path
++    active = Path(HERE) / "active"
++    if active.is_symlink():
++        release = json.loads((Path(HERE).parent / "RELEASE.json").read_text())
++        stable = Path(release["stable_ext"])
++        expected = str(stable / "active")
++        if (not stable.is_absolute() or release["links"].get("ext/active") != expected
++                or os.readlink(active) != expected):
++            raise ValueError("plan shared active binding mismatch")
++        active = active.resolve(strict=True)
++    return active
++
++
++def _plan_auto_pick(task_class, *, context, host, pool, prefer, requested_model,
++                    needs, subject_pool, task_complexity, route_key,
++                    required_modes, required_platforms, excluded_hosts):
++    """Observe prepaid plan candidates inside this picker; never reserve or send.
++
++    The incumbent request owner supplies task/consent facts. Existing local
++    physical admission and Broker capacity remain the actual grantors.
++    """
++    if (type(context) is not dict or set(context) !=
++            {"schema", "root_id", "parent_run_id", "response_only", "consents"}
++            or context.get("schema") != "mastermind.provider_plan_auto_context.v1"
++            or type(context.get("root_id")) is not str
++            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", context["root_id"]) is None
++            or pool is not None or requested_model is not None
++            or prefer not in (None, "byteplus", "experiential")
++            or host not in ("auto", "m2") or needs
++            or os.environ.get("FABRIC_OPERATOR_CHILD_ID")
++            or os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0"
++            or os.environ.get("LANE_LEASED") == "1" or os.environ.get("POOL_LEASE_ID")
++            or task_complexity not in ("", "C0_MECHANICAL", "C1_ROUTINE_BOUNDED")
++            or task_class not in {"mechanical", "fix_build", "build", "fix", "execute",
++                                  "executor", "tests-only-repair", "census"}):
++        return None
++    consents = context.get("consents")
++    if (type(context.get("response_only")) is not bool
++            or type(consents) is not dict or set(consents) !=
++            {"retention_acknowledged", "sensitive_data_opt_in",
++             "proprietary_code", "code_exposure_opt_in"}
++            or any(type(value) is not bool for value in consents.values())):
++        return None
++    known_modes = {mode for values in _HOST_POOL_MODES.values() for mode in values}
++    if (required_modes is not None and (type(required_modes) is not list
++            or not 0 < len(required_modes) <= len(known_modes)
++            or any(type(x) is not str or x not in known_modes for x in required_modes))):
++        return None
++    if (required_platforms is not None and (type(required_platforms) is not list
++            or not 0 < len(required_platforms) <= 2 or "darwin" not in required_platforms
++            or any(type(x) is not str or x not in {"linux", "darwin"} for x in required_platforms))):
++        return None
++    if excluded_hosts is not None and (type(excluded_hosts) is not list
++            or len(excluded_hosts) > 64 or any(type(x) is not str
++                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", x) is None for x in excluded_hosts)
++            or len(set(excluded_hosts)) != len(excluded_hosts) or "m2" in excluded_hosts):
++        return None
++    from pathlib import Path
++    import socket
++    import slot
++    from lane_runtime import enforce_remote_first_lane_launch, read_lane_occupancy
++    candidates = ["experiential", "byteplus"]
++    if prefer in candidates:
++        candidates = [prefer] + [value for value in candidates if value != prefer]
++    for candidate in candidates:
++        if required_modes is not None and candidate not in required_modes:
++            continue
++        if candidate == "experiential" and not (
++                context["response_only"] and consents["retention_acknowledged"]
++                and consents["sensitive_data_opt_in"]
++                and (not consents["proprietary_code"] or consents["code_exposure_opt_in"])):
++            continue
++        try:
++            limits = enforce_remote_first_lane_launch(Path(HERE), requested_engines=(candidate,))
++            if limits is None or slot._local_host_admission_refusal(candidate):
++                continue
++            occupancy = read_lane_occupancy(_plan_active_directory())
++            if occupancy.status != "known" or occupancy.active_count >= limits["max_active"]:
++                continue
++            registry = json.loads((Path(HERE) / "hosts.json").read_text())
++            entry = registry.get("m2", {})
++            physical_host = socket.gethostname().split(".", 1)[0]
++            if (entry.get("local") is not True
++                    or physical_host not in entry.get("hostnames", [])):
++                continue
++            if candidate == "byteplus":
++                import byteplus_coding_plan
++                route = byteplus_coding_plan.native_route(task_class=task_class)
++            else:
++                import experiential_bridge
++                from experiential_plan_policy import FREE_CHAT_MODELS
++                route = experiential_bridge.qualified_route(
++                    run_id=route_key, task_class=task_class, runtime_root=Path(HERE),
++                    model=None, plan_lane="free")
++                if route.get("MODEL") not in FREE_CHAT_MODELS:
++                    continue
++            model = route["MODEL"]
++            if route.get("POOL") != candidate or route.get("MODE") != candidate or route.get("HOST") != "m2":
++                continue
++            if not policy_allows(candidate, task_class, model=model)[0]:
++                continue
++            if not _subject_ok(candidate, task_class, subject_pool, load_pools())[0]:
++                continue
++            if floor_demotes(candidate, task_class, model=model):
++                continue
++            if not hard_filter(candidate, task_class, model=model)[0]:
++                continue
++            return (f"POOL={candidate} KEY=- MODEL={model} "
++                    f"REASON=prepaid_plan_auto HOST=m2 MODE={candidate}")
++        except Exception:
++            # Unavailable observations remove this candidate. No request has
++            # been sent, and ordinary incumbent selection still runs once.
++            continue
++    return None
++
++
+ def format_pick(task_class: str, prefer: Optional[str] = None,
+                 host: Optional[str] = None, pool: Optional[str] = None,
+                 needs: Optional[List[str]] = None,
+@@ -2177,8 +2313,16 @@
+                 route_key: Optional[str] = None,
+                 required_modes: Optional[List[str]] = None,
+                 required_platforms: Optional[List[str]] = None,
+-                excluded_hosts: Optional[List[str]] = None) -> str:
++                excluded_hosts: Optional[List[str]] = None,
++                provider_plan_context: Optional[Dict[str, Any]] = None) -> str:
+     """Select a new request, preserving Grok model affinity on quota exhaustion."""
++    plan = _plan_auto_pick(task_class, context=provider_plan_context, host=host,
++        pool=pool, prefer=prefer, requested_model=requested_model, needs=needs,
++        subject_pool=subject_pool, task_complexity=task_complexity, route_key=route_key,
++        required_modes=required_modes, required_platforms=required_platforms,
++        excluded_hosts=excluded_hosts)
++    if plan is not None:
++        return plan
+     if os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0":
+         # Same model is not the same harness capability. The existing operator
+         # grant admits child-launch only on these modes; this can only narrow.

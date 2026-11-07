@@ -11,6 +11,8 @@ import json
 import re
 import io
 import zipfile
+import subprocess
+import tempfile
 from pathlib import Path
 
 BASE_FILES = frozenset("""
@@ -300,6 +302,169 @@ def before_host_pull_integrity(manifest):
     return previous
 
 
+# An explicit forward composition of the selected provider plan and the exact
+# current APPLICATION107 source. The historical provider composer stays frozen.
+PROVIDER_APPLICATION_RECORD_SHA256 = "04d6983e43eaaadeccaf847662a5b9b80b30af88e0e2c0a865f455522031e7f4"
+PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
+    "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
+    "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",
+    "experiential_transport.py", "fs_security.py", "native_plan_worker.py"))
+PROVIDER_ROUTING_DIGESTS = {
+    "ext/pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+    "ext/remote_sub.sh": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+    "ext/slot.py": "32809dd831e20711d30e07b956aa843de85edde5dc3965c002e522b4824d6ea7",
+    "ext/sub.sh": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",
+}
+
+
+def _manifest_digest(manifest):
+    return sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode())
+
+
+def _provider_source(path, expected):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("provider APPLICATION source must be a regular file")
+    raw = path.read_bytes()
+    if sha(raw) != expected:
+        raise ValueError("provider APPLICATION source commitment differs")
+    return raw
+
+
+def provider_application_record(root=None):
+    root = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    raw = _provider_source(root / "rollout/provider_application/composition.json",
+                           PROVIDER_APPLICATION_RECORD_SHA256)
+    record = json.loads(raw)
+    profile = json.loads(_provider_source(root / record["provider_profile_source"],
+                                         record["provider_profile_sha256"]))
+    if (record["schema"] != "native-provider-application-composition.v1"
+            or set(record["additions"]) != PROVIDER_APPLICATION_MEMBERS
+            or _manifest_digest(profile["files"]) != record["provider_manifest_sha256"]
+            or any(profile["files"].get(key) != digest
+                   for key, digest in PROVIDER_ROUTING_DIGESTS.items())):
+        raise ValueError("provider APPLICATION source cohort differs")
+    return record, profile["files"]
+
+
+def _has_provider_members(manifest):
+    return bool(PROVIDER_APPLICATION_MEMBERS & set(manifest)) or any(
+        manifest.get(key) == digest for key, digest in PROVIDER_ROUTING_DIGESTS.items())
+
+
+def before_provider_application(manifest):
+    """Invert only the complete116 source; never mutate the actual manifest."""
+    if type(manifest) is not dict:
+        raise ValueError("provider APPLICATION manifest differs")
+    if not _has_provider_members(manifest):
+        return manifest
+    record, _ = provider_application_record()
+    if len(manifest) != 116 or _manifest_digest(manifest) != record["manifest_sha256"]:
+        raise ValueError("provider APPLICATION source cohort differs")
+    previous = dict(manifest)
+    for key in record["additions"]:
+        del previous[key]
+    for key, row in record["replacements"].items():
+        previous[key] = row["preimage_sha256"]
+    if len(previous) != 107 or _manifest_digest(previous) != record["application_manifest_sha256"]:
+        raise ValueError("provider APPLICATION parent closure differs")
+    return previous
+
+
+def _application_base(manifest):
+    return {key: value for key, value in manifest.items()
+            if key not in {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+            | HTTP_GENERATION_MEMBERS}
+
+
+def go_staged_dependency_hashes(manifest, candidate_hashes):
+    """Keep original candidate provenance while binding actual combined bytes."""
+    result = dict(candidate_hashes)
+    base = _application_base(manifest)
+    parent = before_quota_reset_recovery(base)
+    if _has_provider_members(parent):
+        before_provider_application(parent)
+        record, _ = provider_application_record()
+        broker = record["replacements"]["ext/lease_broker.py"]
+        if parent != base:
+            # H2's reviewed dependency record carries both exact patch steps.
+            if candidate_hashes.get("lease_broker.py") != PROVIDER_QUOTA_RESET_DIGESTS["lease_broker.py"]:
+                raise ValueError("provider quota reset captured dependency differs")
+        else:
+            if candidate_hashes.get("lease_broker.py") != broker["preimage_sha256"]:
+                raise ValueError("provider APPLICATION broker preimage differs")
+            result["lease_broker.py"] = broker["sha256"]
+    return result
+
+
+def validate_go_source_transition(before, after):
+    """Check the frozen verified pair; CURRENT/CAS remains with the installer."""
+    if not (_has_provider_members(before) or _has_provider_members(after)):
+        return
+    record, provider = provider_application_record()
+    go_members = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+    http_members = HTTP_GENERATION_MEMBERS & set(after)
+    base = _application_base(after)
+    try:
+        parent = before_quota_reset_recovery(base)
+        before_provider_application(parent)
+    except ValueError:
+        raise ValueError("provider APPLICATION source transition differs") from None
+    if (before != provider or not go_members <= set(after)
+            or http_members and http_members != HTTP_GENERATION_MEMBERS
+            or len(base) != 116 or _manifest_digest(parent) != record["manifest_sha256"]):
+        raise ValueError("provider APPLICATION source transition differs")
+
+
+def compose_provider_application_stage(root, output, manifest, files):
+    """Build reviewed source in isolation; never publish or select a release."""
+    root, output = Path(root), Path(output)
+    record, _ = provider_application_record(root)
+    if len(manifest) != 107 or _manifest_digest(manifest) != record["application_manifest_sha256"]:
+        raise ValueError("provider APPLICATION requires the exact107 source")
+    stage = output / "native-code-stage"
+    for key, expected in manifest.items():
+        _provider_source(stage / key, expected)
+    updates = {}
+    # Apply only reviewed patch bytes to copied preimages outside any Git index.
+    with tempfile.TemporaryDirectory(prefix="native-provider-application-") as temporary:
+        scratch = Path(temporary)
+        for key, row in record["replacements"].items():
+            original = _provider_source(stage / key, row["preimage_sha256"])
+            target = scratch / key
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(original)
+            patch = _provider_source(root / row["source"], row["patch_sha256"])
+            subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                            "apply", "--whitespace=nowarn", "-"], input=patch, cwd=scratch,
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            raw = _provider_source(target, row["sha256"])
+            if len(raw) != row["bytes"]:
+                raise ValueError("provider APPLICATION postimage size differs")
+            updates[key] = raw
+        for key, row in record["additions"].items():
+            if key in manifest or (stage / key).exists() or (stage / key).is_symlink():
+                raise ValueError("provider APPLICATION addition already exists")
+            raw = _provider_source(root / row["source"], row["sha256"])
+            if len(raw) != row["bytes"]:
+                raise ValueError("provider APPLICATION addition size differs")
+            updates[key] = raw
+    composed = dict(manifest, **{key: sha(raw) for key, raw in updates.items()})
+    before_provider_application(composed)
+    for key, raw in updates.items():
+        (stage / key).write_bytes(raw)
+        if key in record["replacements"]:
+            row = record["replacements"][key]
+            files[key] = dict(files[key], source=row["source"], source_kind="verified_patch",
+                composition_preimage_source=files[key]["source"],
+                composition_preimage_sha256=row["preimage_sha256"], patch_sha256=row["patch_sha256"],
+                sha256=sha(raw), bytes=len(raw))
+        else:
+            row = record["additions"][key]
+            files[key] = dict(row, installed_preimage_sha256=None)
+    manifest.update(composed)
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
 
@@ -325,7 +490,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     be relabeled with either forward collector.
     """
     actual_manifest = manifest
-    manifest = normalize_application_carrier_base_manifest(before_host_pull_integrity(before_quota_reset_recovery(manifest)))
+    manifest = normalize_application_carrier_base_manifest(
+        before_provider_application(before_quota_reset_recovery(manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -516,6 +682,20 @@ QUOTA_RESET_PATCHES = {
 }
 
 
+# Exact H2 successor of the provider-preserving116 source. This is distinct
+# from the historical H2-only107 family; neither can impersonate the other.
+PROVIDER_QUOTA_RESET_PARENT_SHA256 = "f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4"
+PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "b49e1350b83afd4f2c439e7b13b2b7079a4db88dd7d9d6b0cf9801c423f29547"
+PROVIDER_QUOTA_RESET_PREIMAGES = dict(QUOTA_RESET_PREIMAGES, **{
+    "lease_broker.py": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+    "pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+})
+PROVIDER_QUOTA_RESET_DIGESTS = dict(QUOTA_RESET_DIGESTS, **{
+    "lease_broker.py": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+    "pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc",
+})
+
+
 def _quota_reset_file(path, expected):
     if path.is_symlink() or not path.is_file():
         raise ValueError("quota reset source must be a regular file")
@@ -568,13 +748,28 @@ def _quota_reset_patch(original, patch, name):
     return b"".join(output)
 
 
-def quota_reset_sources(root):
+def quota_reset_sources(root, *, preserve_provider=False):
     """Capture all four reviewed successors and their exact source provenance."""
     root = Path(root)
     overlay = root.parent / "grok47/quota_billing"
     captured = {}
+    provider_record = provider_application_record(root)[0] if preserve_provider else None
+    expected = PROVIDER_QUOTA_RESET_DIGESTS if preserve_provider else QUOTA_RESET_DIGESTS
     for name, preimage in QUOTA_RESET_PREIMAGES.items():
         original = _quota_reset_file(root / "candidate" / name, preimage)
+        provider_preimage = None
+        if preserve_provider and name in QUOTA_RESET_PATCHES:
+            row = provider_record["replacements"]["ext/" + name]
+            if row["preimage_sha256"] != preimage:
+                raise ValueError("provider quota reset candidate preimage differs")
+            patch = _provider_source(root / row["source"], row["patch_sha256"])
+            original = _quota_reset_patch(original, patch, name)
+            if sha(original) != PROVIDER_QUOTA_RESET_PREIMAGES[name] or sha(original) != row["sha256"]:
+                raise ValueError("provider quota reset preimage differs")
+            provider_preimage = {"composition_sha256": PROVIDER_APPLICATION_RECORD_SHA256,
+                "source": row["source"], "patch_sha256": row["patch_sha256"],
+                "preimage_sha256": preimage, "sha256": sha(original)}
+            preimage = sha(original)
         if name in QUOTA_RESET_PATCHES:
             patch_source = "../grok47/quota_billing/" + name + ".patch"
             patch = _quota_reset_file(overlay / (name + ".patch"), QUOTA_RESET_PATCHES[name])
@@ -585,13 +780,15 @@ def quota_reset_sources(root):
                 "patch_source": patch_source,
                 "patch_sha256": QUOTA_RESET_PATCHES[name],
             }
+            if provider_preimage is not None:
+                provenance["provider_preimage"] = provider_preimage
             source = "candidate/" + name
         else:
             source = "../grok47/quota_billing/" + name
             raw = _quota_reset_file(overlay / name, QUOTA_RESET_DIGESTS[name])
             provenance = {"schema": "native-exact-replacement.v1",
                           "preimage_sha256": preimage}
-        if sha(raw) != QUOTA_RESET_DIGESTS[name]:
+        if sha(raw) != expected[name]:
             raise ValueError("quota reset postimage differs")
         captured[name] = (raw, source, provenance)
     return captured
@@ -601,6 +798,19 @@ def before_quota_reset_recovery(manifest):
     """Reverse only the complete H2 successor of the exact APPLICATION parent."""
     if type(manifest) is not dict:
         return manifest
+    if _has_provider_members(manifest) and any(
+            manifest.get("ext/" + name) == digest
+            for name, digest in PROVIDER_QUOTA_RESET_DIGESTS.items()):
+        if (len(manifest) != 116 or _manifest_digest(manifest) != PROVIDER_QUOTA_RESET_MANIFEST_SHA256
+                or any(manifest.get("ext/" + name) != digest
+                       for name, digest in PROVIDER_QUOTA_RESET_DIGESTS.items())):
+            raise ValueError("provider quota reset cohort incomplete or foreign")
+        previous = dict(manifest)
+        previous.update({"ext/" + name: digest for name, digest in PROVIDER_QUOTA_RESET_PREIMAGES.items()})
+        if _manifest_digest(previous) != PROVIDER_QUOTA_RESET_PARENT_SHA256:
+            raise ValueError("provider quota reset parent closure differs")
+        before_provider_application(previous)
+        return previous
     if not any(manifest.get("ext/" + name) == digest
                for name, digest in QUOTA_RESET_DIGESTS.items()):
         return dict(manifest)
@@ -629,7 +839,7 @@ def go_application_dependencies(root, *, staged_manifest=None):
             del base[name]
         parent = before_quota_reset_recovery(base)
         if parent != base:
-            quota = quota_reset_sources(root)
+            quota = quota_reset_sources(root, preserve_provider=_has_provider_members(parent))
     dependencies = {}
     for name in GO_APPLICATION_DEPENDENCIES:
         if quota is not None and name in quota:
@@ -647,11 +857,14 @@ def go_application_dependencies(root, *, staged_manifest=None):
 
 def compose_quota_reset_stage(root, output, manifest, files):
     """Replace four existing members only after authenticating their whole parent."""
-    if sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()) != QUOTA_RESET_PARENT_SHA256:
+    identity = _manifest_digest(manifest)
+    preserve_provider = identity == PROVIDER_QUOTA_RESET_PARENT_SHA256
+    if identity not in (QUOTA_RESET_PARENT_SHA256, PROVIDER_QUOTA_RESET_PARENT_SHA256):
         raise ValueError("quota reset requires exact complete APPLICATION parent")
-    captured = quota_reset_sources(root)
+    captured = quota_reset_sources(root, preserve_provider=preserve_provider)
+    preimages = PROVIDER_QUOTA_RESET_PREIMAGES if preserve_provider else QUOTA_RESET_PREIMAGES
     targets = {}
-    for name, preimage in QUOTA_RESET_PREIMAGES.items():
+    for name, preimage in preimages.items():
         relative = "ext/" + name
         target = Path(output) / "native-code-stage" / relative
         if manifest.get(relative) != preimage:
@@ -664,6 +877,11 @@ def compose_quota_reset_stage(root, output, manifest, files):
         manifest[relative] = sha(raw)
         files[relative] = {**files[relative], "source": source, "sha256": sha(raw),
                            "bytes": len(raw), "composition": provenance}
+        if preserve_provider and name in QUOTA_RESET_PATCHES:
+            # The nested provenance now records both exact patch steps.
+            for key in ("source_kind", "composition_preimage_source",
+                        "composition_preimage_sha256", "patch_sha256"):
+                files[relative].pop(key, None)
     before_quota_reset_recovery(manifest)
 
 
@@ -690,12 +908,13 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
     dependencies = go_application_dependencies(root, staged_manifest=staged_manifest)
     staged_dependencies = None
     if staged_manifest is not None:
-        staged_dependencies = {}
+        staged_dependencies = go_staged_dependency_hashes(staged_manifest,
+            {name: row["sha256"] for name, row in dependencies.items()})
         for name, dependency in dependencies.items():
             relative = "ext/" + name
             staged = output / "native-code-stage" / relative
             expected = staged_manifest.get(relative)
-            if (not isinstance(expected, str) or expected != dependency["sha256"]
+            if (not isinstance(expected, str) or expected != staged_dependencies[name]
                     or staged.is_symlink() or not staged.is_file()
                     or sha(staged.read_bytes()) != expected):
                 raise ValueError("external Go dependency differs from captured native stage")
@@ -725,9 +944,10 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
 def compose_go_stage(root, output, manifest, files, component):
     """Join only the captured external B handler and the fixed native entry."""
     root, output = Path(root), Path(output)
-    validate_go_base_manifest(manifest,
+    staged_dependencies = go_staged_dependency_hashes(manifest,
         {name: row["sha256"] for name, row in component["dependencies"].items()})
-    expected = {"ext/" + name: row["sha256"] for name, row in component["dependencies"].items()}
+    validate_go_base_manifest(manifest, staged_dependencies)
+    expected = {"ext/" + name: digest for name, digest in staged_dependencies.items()}
     if (component.get("schema") != "native-external-go-component.v1"
             or component.get("component") != "go_application_handler"
             or component.get("destination_relative_to_stable_ext") != "go_shim/go_shim.py"
@@ -961,6 +1181,8 @@ def main():
                         help='include the fixed Go entry/handler source pair; does not enroll or start services')
     parser.add_argument('--include-application-http', action='store_true',
                         help='seal fixed HTTP transport metadata; requires Go ingress and grants no application permission')
+    parser.add_argument('--include-provider-plan-application', action='store_true',
+                        help='preserve the exact selected provider plan in the reviewed APPLICATION source')
     parser.add_argument('--include-quota-reset-recovery', action='store_true',
                         help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
     args = parser.parse_args()
@@ -1057,13 +1279,18 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
+    if args.include_provider_plan_application:
+        compose_provider_application_stage(root, output, manifest, files)
     if args.include_quota_reset_recovery:
         compose_quota_reset_stage(root, output, manifest, files)
-    normalize_application_carrier_base_manifest(manifest)
+    normalize_application_carrier_base_manifest(
+        before_provider_application(before_quota_reset_recovery(manifest)))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)
     extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
+    if args.include_provider_plan_application:
+        extra |= {Path(name).name for name in PROVIDER_APPLICATION_MEMBERS}
     if args.include_application_http:
         compose_application_http_stage(root, output, manifest, files)
         extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}
