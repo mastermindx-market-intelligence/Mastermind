@@ -1,0 +1,10 @@
+{
+  "before": {
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/config/executive_worker_routes.json": "32d3fb0e2813db6e4abcc9ecb0e10cc7facf4206ed20689a55728e26b6c93117",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/config/executive_agent_capabilities.json": "c6056f682376d8b248f8f6dfc6832968a675f95801d49fc49e3f02a28652f9af"
+  },
+  "after": {
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/config/executive_worker_routes.json": "32d3fb0e2813db6e4abcc9ecb0e10cc7facf4206ed20689a55728e26b6c93117",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/config/executive_agent_capabilities.json": "c6056f682376d8b248f8f6dfc6832968a675f95801d49fc49e3f02a28652f9af"
+  }
+}

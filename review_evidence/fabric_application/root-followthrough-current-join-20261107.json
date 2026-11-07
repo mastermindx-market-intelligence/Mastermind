@@ -1,0 +1,60 @@
+{
+  "all_other_registry_ast_units_unchanged_from_accepted_h6": true,
+  "auth_source": {
+    "both_qualified_parent_records_converge": true,
+    "composed_sha256": "3fcdab496225a384bf231b215e7e4426fb29985df8160e71f252233e6b297e3a",
+    "incoming_sha256": "b0b93acb01efd5765dd3b170464c7bbecf3b4bc81ee9503fb130402ce735c0d6",
+    "mapped_site_counts": {
+      "sites": 3
+    },
+    "ours_sha256": "ddbeb7e61ad3112edd798bddc47c35a3bd2deeea41d426e0bec1555f0475499e",
+    "unchanged_line_mapping_only": true
+  },
+  "head": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+  "incoming": "b0fd70202e9af4dbdccde4a12af348aab5faacdb",
+  "inherited_whitespace_paths_preserved": [
+    "app/mastermind_os/src/resources/ModelConfigurationRead.test.tsx",
+    "app/mastermind_os/src/resources/ModelConfigurationRead.tsx",
+    "app/mastermind_os/src/resources/model-configuration.css",
+    "integrations/hermes_application_fabric/qualification/application_owner_support/a577-hermes-source-support.patch",
+    "ops/native_fabric/grok47/quota_billing/lease_broker.py.patch",
+    "ops/native_fabric/grok47/quota_billing/quota_circuit.py",
+    "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-frontend-build.log",
+    "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-frontend-component.log",
+    "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-frontend-typecheck.log"
+  ],
+  "native_owner_scope_changed_since_b0fd": [
+    "control_plane/ceo_boot_packet.py",
+    "control_plane/chairman_control_room_remote.py",
+    "control_plane/claude_subscription_worker.py",
+    "control_plane/codex_provider_realm.py",
+    "control_plane/company_orientation.py",
+    "control_plane/experiential_harness_endpoint.py",
+    "control_plane/experiential_plan_policy.py",
+    "control_plane/subscription_catalog.py",
+    "control_plane/subscription_provider_profiles.py",
+    "ops/native_fabric/quota_continuity/candidate/byteplus_coding_plan.py",
+    "ops/native_fabric/quota_continuity/candidate/native_plan_worker.py"
+  ],
+  "preserved_current_paths": [
+    {
+      "path": "brain/research_paper.py",
+      "same_as_51": true,
+      "sha256": "b601b4fa84295aa19e2c4dd6331842824e99030b2499e995359a83250afe8ffb"
+    },
+    {
+      "path": "tests/fixtures/provider-plan-auto-predecessor.json",
+      "same_as_51": true,
+      "sha256": "7b95799a42583d400e2f66b89383e59052b2ad9305689af71713e60d9a800cb5"
+    },
+    {
+      "path": "tests/test_h1_native100_packaging.py",
+      "same_as_51": true,
+      "sha256": "7555800c5a45d3642c147a0da1e03a80370bf3c741d828792ed0f41519497457"
+    }
+  ],
+  "readiness_record_preserved": true,
+  "registry_result_sha256": "63c24f609c158f4d0b4f3b4b9556231e79a7aa31cac8d58cf37ef15f978ef3db",
+  "scope": "Current original51b plus qualified exact accepted H6 composition b0fd; candidate only, no active H3 input or source/runtime publication.",
+  "source_qualification": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711649944"
+}

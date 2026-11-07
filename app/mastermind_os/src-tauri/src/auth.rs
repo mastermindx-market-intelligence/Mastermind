@@ -2205,6 +2205,38 @@ impl RetainedActivitySelection {
         Ok(())
     }
 }
+const MODEL_CONFIGURATION_PATH: &str = "/workspace/resources/models/current";
+const MODEL_CONFIGURATION_SCHEMA: &str = "mastermind.workspace_model_configuration.v1";
+const MODEL_CONFIGURATION_CAP: usize = 278_528;
+
+/// Fixed read of configured routing through the existing Workspace identity.
+/// No caller URL, policy path, model activation, credentials or mutation.
+#[tauri::command]
+pub async fn read_model_configuration(app: AppHandle) -> Result<Value> {
+    let url = Url::parse(&format!("{ORIGIN}{MODEL_CONFIGURATION_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, MODEL_CONFIGURATION_CAP).await
+            .and_then(|value| typed_unavailable(value, MODEL_CONFIGURATION_SCHEMA, false))
+    } else {
+        bounded_json(response, MODEL_CONFIGURATION_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(MODEL_CONFIGURATION_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
 const RESOURCE_CAPACITY_PATH: &str = "/workspace/resources/capacity/current";
 const RESOURCE_CAPACITY_SCHEMA: &str = "mastermind.workspace_resource_capacity_result.v1";
 const RESOURCE_CAPACITY_CAP: usize = 16_384;

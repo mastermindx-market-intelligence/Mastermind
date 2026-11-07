@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/qualify_h3_outer_invalidation.py", line 133, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/qualify_h3_outer_invalidation.py", line 45, in main
+    spec.loader.exec_module(original)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 759, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "/private/tmp/h6-h3-exact-source-0q450sg1/ops/native_fabric/quota_continuity/tests/test_expiry_account_admission.py", line 22, in <module>
+    from _offline_boundary import acquire as offline_acquire, release as offline_release
+ModuleNotFoundError: No module named '_offline_boundary'

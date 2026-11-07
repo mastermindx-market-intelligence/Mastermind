@@ -1,0 +1,85 @@
+{
+  "holds": [
+    "Original M1 final worktree is unreachable; existing writer and Studio/native/J effects remain untouched.",
+    "Hosted Linux migration fixture refusal remains unresolved; Mac success is not Linux CI success.",
+    "Current source is not installed; no APPLICATION enrollment, provider request, primary/tool turn, OS acceptance, merge or approval.",
+    "H2 69ead1bdc1b7f6e1b62ef186d955d07cbd718dce, H3 ef95049fa2e1f8c981497c8a21b643fcbe59f25b and publisher b5d7ece3acac6569d60b428e63af535e81ddd417 require explicit remaining-delta composition.",
+    "New Hermes c821b2df717022e3f3b6abcebeabeb2eadeb35a6 changes HOST_INTEGRATION.md only and will be consumed next."
+  ],
+  "logs": {
+    "native-stage.log": {
+      "bytes": 240,
+      "sha256": "3a6d448bdce293ffbdd016e453d77f9295000170a2bc6267acf3e81622ae358a"
+    },
+    "studio-original-migration.log": {
+      "bytes": 302,
+      "sha256": "a199024c219317b048bef1c6ef7e8e7a2e8ac5a9ed4db6e8eaae0d385ee89c71"
+    },
+    "studio-status-successor.log": {
+      "bytes": 65795,
+      "sha256": "eef6b7f6c7e460b51b00a6869aa976cf214a17be1b6b5c93693a264a0be5f83a"
+    }
+  },
+  "merge_conflicts_resolved": 12,
+  "mission_complete": false,
+  "next_action": "Continue exact H2/H3/publisher contract joins and Linux preflight diagnosis in this isolated source contribution; return it to original PR2175 after custody reconciliation.",
+  "operation_root": "fabric-application-integration-20261104-sol",
+  "original_cohort": {
+    "accepted": true,
+    "disposition": "Consumed original return; its material source is already present; do not replay or reapply.",
+    "response_bytes": 16860,
+    "response_sha256": "14499ef9285da444b5801a50ded0615a4c114ff71750ae39a09bc4ed800f03df",
+    "run_id": "fabric-app-j-native-cohort-20261107-01",
+    "state": "TERMINAL"
+  },
+  "original_final_head": "cd557dc05e26b70f2d8f56ad0da2df76a15d74ca",
+  "paid_labor": {
+    "code": "UNCLASSIFIED_PRELAUNCH_REFUSAL",
+    "controller_inner_exit": 75,
+    "controller_pid": 8405,
+    "diagnostic_count": 1,
+    "retry_allowed": false,
+    "run_id": "h6-studio-fixture-diagnosis-20261107-c2-01",
+    "state": "REQUEST_REFUSED_BEFORE_LAUNCH",
+    "worker_start_proven": false
+  },
+  "protected_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
+  "purpose": "Path-isolated source contribution to original PR2175; not a replacement final carrier.",
+  "qualification": [
+    {
+      "command": "python3 -m unittest -v private_service_status_successor_test",
+      "cwd": "integrations/studio_direct_mcp",
+      "exit_code": 0,
+      "platform": "M2 macOS",
+      "seconds": 27.824,
+      "tests": 87
+    },
+    {
+      "command": "python3 -m unittest -v private_service_original_delivery_test.ComposedPreservingMigrationTests.test_composed_preserving_migration_imports_then_observes_once",
+      "cwd": "integrations/studio_direct_mcp",
+      "exit_code": 0,
+      "platform": "M2 macOS",
+      "seconds": 3.608,
+      "tests": 1
+    },
+    {
+      "command": "python3 -m pytest -q ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+      "exit_code": null,
+      "limitation": "The initial tool result was truncated; terminal process is absent. No invented exit receipt and no unchanged rerun.",
+      "platform": "M2 macOS",
+      "progress": "100%, no failure in retained log",
+      "tests_observed": 148
+    }
+  ],
+  "qualification_operation": "h6-contract-compose-20261107-c2",
+  "recorded_at": "2026-11-07T13:39:18.269812+00:00",
+  "resolution": {
+    "identity_review": "Preserve exact Hermes synthetic sites and protected held-provider exceptions without broadening.",
+    "native": "Retain complete APPLICATION closure, immutable WORKER history, and inverse order pool then admission then APPLICATION. Protected admission repair bytes are already present.",
+    "rollout_review": "Retain both source histories.",
+    "studio": "Preserve historical retained-file qualification and protected C4 publisher postimage check; retain both test classes."
+  },
+  "schema": "mastermind.fabric_application.h6_recovery.v1",
+  "source_parent": "a03e3672b1a144599488e33327e8762260ab9f75",
+  "tested_tree_before_evidence": "5b2358c5f0386557ed6895861a3de52f7c41ed5b"
+}

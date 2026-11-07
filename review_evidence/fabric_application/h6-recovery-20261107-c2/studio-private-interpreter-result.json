@@ -1,0 +1,13 @@
+{
+  "observed_at": "2026-11-07T14:03:54.128208+00:00",
+  "exit_code": 0,
+  "seconds": 31.739,
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "-v",
+    "control_bundle_closure_test",
+    "private_service_original_delivery_test"
+  ]
+}

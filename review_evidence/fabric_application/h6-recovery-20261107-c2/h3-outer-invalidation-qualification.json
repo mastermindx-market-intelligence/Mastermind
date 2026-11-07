@@ -1,0 +1,120 @@
+{
+  "exact_patch_apply_and_reverse": true,
+  "fixture_sha256": "63dda830a38f941323a9e37a3d2a40f3dad2b4a3c8bf41bfff4997e96822b87e",
+  "initial_import_failure": {
+    "cases": 0,
+    "cause": "Explicit importlib fixture load needed its original test directory for the unchanged offline boundary; added that directory and exact boundary hash verification.",
+    "log": "h3-outer-invalidation-import-failure.log"
+  },
+  "offline_boundary_sha256": "a89278e46aff2c71bffb2b8112eb55a09f6607c9c34812bd42f7fbebf146c9eb",
+  "patch_application": "Whole-file preimage authentication then git apply --unidiff-zero; exact whole-file postimage required.",
+  "patch_sha256": "97c2bcce1ca8b25d4536ad3131aba2aebdee7fa59a0f69f22b20fb896c9f9eac",
+  "proof_script_sha256": "b06b295734e02ab4c32c92c18b88cb9c9bc304a223a03779e4165d142e3c59ad",
+  "qualification": {
+    "broker_sha256": "760a4432373c5785d107096af410dbcae77cdd3c77cb8dc0cab54a2ca8fe0815",
+    "errors": 0,
+    "failures": 0,
+    "fixture_sha256": "63dda830a38f941323a9e37a3d2a40f3dad2b4a3c8bf41bfff4997e96822b87e",
+    "live_state_mutated": false,
+    "native_selection": false,
+    "observations": [
+      {
+        "application_turn_refused": true,
+        "claim_reason": "account_unavailable",
+        "claim_refused": true,
+        "original_liability_unchanged": true,
+        "outer_field": "refresh_pending",
+        "rows_after": {
+          "application_requests": 0,
+          "application_turns": 0,
+          "leases": 1
+        },
+        "rows_before": {
+          "application_requests": 0,
+          "application_turns": 0,
+          "leases": 1
+        }
+      },
+      {
+        "application_turn_refused": true,
+        "claim_reason": "account_unavailable",
+        "claim_refused": true,
+        "original_liability_unchanged": true,
+        "outer_field": "refresh_error",
+        "rows_after": {
+          "application_requests": 0,
+          "application_turns": 0,
+          "leases": 1
+        },
+        "rows_before": {
+          "application_requests": 0,
+          "application_turns": 0,
+          "leases": 1
+        }
+      },
+      {
+        "application_turn_refused": true,
+        "claim_reason": "account_unavailable",
+        "claim_refused": true,
+        "original_liability_unchanged": true,
+        "outer_field": "terminal_refusal",
+        "rows_after": {
+          "application_requests": 0,
+          "application_turns": 0,
+          "leases": 1
+        },
+        "rows_before": {
+          "application_requests": 0,
+          "application_turns": 0,
+          "leases": 1
+        }
+      },
+      {
+        "claim_granted": true,
+        "clean_observation": true,
+        "synthetic_only": true
+      }
+    ],
+    "open_contracts": [
+      "outer physical/configuration binding",
+      "whole-operation meter enforcement",
+      "publication and claim serialization",
+      "actual quantities and settlement coverage"
+    ],
+    "provider_calls": false,
+    "quota_sha256": "00e8614b35696607fed0455de1b617d70ab70ce822486efe44f742844b5d8c4e",
+    "schema": "mastermind.h6.h3_outer_invalidation_proof.v1",
+    "skips": 0,
+    "strict_scope_qualified": false,
+    "tests": 4
+  },
+  "quota_postimage_sha256": "00e8614b35696607fed0455de1b617d70ab70ce822486efe44f742844b5d8c4e",
+  "quota_preimage_sha256": "8218b1f98e4b20c1dbe4f34b2d9525532865f98f09954278cd28ad32a4deaa7a",
+  "run": {
+    "command": [
+      "python3",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/qualify_h3_outer_invalidation.py",
+      "--fixture",
+      "/private/tmp/h6-h3-exact-source-0q450sg1/ops/native_fabric/quota_continuity/tests/test_expiry_account_admission.py",
+      "--native-source",
+      "/private/tmp/h6-h3-outer-rejection-g2c8b8gl/native-code-stage/ext",
+      "--output",
+      "/private/tmp/h6-h3-outer-rejection-g2c8b8gl/proof-corrected.json"
+    ],
+    "elapsed_seconds": 0.433,
+    "returncode": 0
+  },
+  "runtime_selectable": false,
+  "schema": "mastermind.h6.h3_outer_invalidation_delta.v1",
+  "selectable_source_changed": false,
+  "source_head": "c78c77fd3b23d43fbddbce234642cad08696e369",
+  "stage": "/private/tmp/h6-h3-outer-rejection-g2c8b8gl/native-code-stage",
+  "unchanged_broker_sha256": "760a4432373c5785d107096af410dbcae77cdd3c77cb8dc0cab54a2ca8fe0815",
+  "unqualified_binding_enforcement_atomicity": true,
+  "upstream_guard": {
+    "blob": "4196345588cb35537f562acd19bed95c3a9be393",
+    "commit": "71cdb94bbad746fc7e39e8c37e58bfa7159b022c",
+    "path": "research/h6_account_publication/native.patch",
+    "repository": "mastermindx-market-intelligence/macro"
+  }
+}

@@ -117,3 +117,246 @@ Current publication, check and original runtime-effect observations belong to th
 ### CI structure reconciliation
 
 The first dedicated-job attempt produced a successful hosted 14-test composition but violated the protected four-job parallel-CI structure. It was replaced with a required step inside existing shard zero, before full-suite reuse. The normal vendor-bootstrap fixture passes all 14 tests; the unchanged protected `validate_parallel_workflow` accepts the revised YAML. No CI policy, fast-scope classifier, full-suite membership or fan-in rule was weakened. Fresh hosted full-CI evidence remains required for the revised source.
+
+## H6 assigned recovery — 2026-11-07 C2
+
+The assigned receiver resumed [the existing H6 handoff](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6707238210) under protected source `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c`. Root `fabric-application-integration-20261104-sol`, final Mastermind #2175 and paired Macro #10740 remain the owners. This plan's P1–P4 and original acceptance surfaces remain open.
+
+The original final M1 worktree is unreachable. Its current writer and retained Studio/native/J effects were not overwritten or replayed. An independently registered M2 workspace `h6-contract-compose-20261107-c2` holds a subordinate source qualification contribution, not another final composition carrier.
+
+Source convergence joined complete Hermes `a03e3672b1a144599488e33327e8762260ab9f75` with protected `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c` and resolved 12 conflicts. The combined Studio successor retains historical mode qualification and the protected C4 publisher postimage checks. The native builder retains the complete APPLICATION cohort, both immutable admission histories, corruption tests and the pool → admission → APPLICATION inverse order. The protected two-member admission repair is already byte-identical in that contribution.
+
+On the actual combined source, 87 Studio successor tests and the composed migration fixture passed on M2 macOS. The native-stage log reached all 148 cases with no failure output; the truncated initial tool result did not preserve its exit code, so it is not represented as a complete exit receipt. Hosted Linux still needs its own migration result. Exact commands, log hashes, tested tree and limitations are in `review_evidence/fabric_application/h6-recovery-20261107-c2/qualification.json`.
+
+The original accepted cohort return was collected without rerun and its existing changes were preserved. A distinct bounded paid diagnostic request refused before launch with `UNCLASSIFIED_PRELAUNCH_REFUSAL`; its one controller diagnostic exited internally 75. No replay or native labor substitution followed.
+
+Next in this same assignment: consume the documentation-only Hermes `c821b2df717022e3f3b6abcebeabeb2eadeb35a6` successor; compose exact H2 `69ead1bdc1b7f6e1b62ef186d955d07cbd718dce`, H3 `ef95049fa2e1f8c981497c8a21b643fcbe59f25b` and publisher `b5d7ece3acac6569d60b428e63af535e81ddd417` deltas; close native generation and installer/preimage/rollback evidence; diagnose the Linux preflight predicate. H2 percentage views remain insufficient for H3 integer-meter admission. Publish/claim atomicity and retained liabilities remain required source joins. Preserve no-overage, workload and physical-account qualification for the first legitimate primary/tool vertical.
+
+No runtime install/select, APPLICATION enrollment, provider call, protected merge, formal approval or live acceptance is claimed. MISSION_COMPLETE=false. Continue useful source work while the original custody and release lanes remain blocked.
+
+### H6 complete H2 artifact and fixture qualification
+
+Consumed the exact H2 69ead1bd source. Its 43 account, 16 reset-journey and 7 Grok
+component tests passed. Added one optional four-member successor to the existing
+native builder and one shared source resolver used by the existing installer.
+The complete 107/109/112 layouts were built and both APPLICATION variants passed
+the actual installer component validation. The historical default manifest and
+inventory remain byte-identical. The six-module native suite exited zero with
+292 testcase records and no failures/errors/skips (raw JUnit total counter301 is
+preserved separately); all sixteen reset journeys exercised actual emitted code.
+
+The original migration fixture and complete39-case original-delivery module pass
+on Linux. Its test-only interpreter now comes from a disposable stdlib venv copy,
+with a positive spawn diagnostic control and file metadata on refusal; production
+preflight remains unchanged. The combined M2 control/original-delivery suite passed
+74 cases. Hosted c821 CI42376517849 still records the original preflight failure;
+new exact-head hosted qualification is required before declaring it repaired.
+
+All16 H3 declared preimages match this source, and its exact patch reconstructed
+all3 declared outputs. H3 source composition, stale-envelope rejection, physical
+scope/quantity/enforcement joins and common publication fencing remain the next
+source slice. They are not enabled by the H2 artifact flag. The original Macro
+Metabolism contribution and authenticated product acceptance rows also remain.
+
+The reviewable component/preimage/rollback/enrollment sequence is in
+`review_evidence/fabric_application/h6-recovery-20261107-c2/installation-map.md`.
+Source custody and live effects retain the earlier holds. This milestone is a
+qualified source contribution; continue the next safe phase in this assignment.
+
+
+### H6 current-carrier convergence and H3 boundary qualification — 2026-11-07
+
+The assigned H6 source workspace composes complete Hermes `c40f58b42383684e0ded1db7a7cb48741ddb7abf`, including original carrier `da2db3909544137ca8b0602304a9b574b18f5277`, with the complete H2 contribution `a88488670bc99f7156eff193101b76795c16733f`. H2 emitted runtime bytes and the adopted Studio fixture pair are unchanged. All 70 release-identity entries are equal across the merge; original CI blob `7eb889d42f46724c939f1d7e62b3655ebc84c0f9` is preserved. The changed historical native assertion passed. At committed merge `ab4732a81e7101d137f6fe31dea2f17f8a536e1d`, the exact preserving-migration case passed both baseline and instrumented execution (one case each; the observed run captured exactly one driver). Hosted a884 run42380455963/job128426787642 now reports SUCCESS for the original Studio/private HTTP gate, native admission/dispatch custody and isolated closed-transport gate; full repository test completion is still pending. A Mac-only disposable observer selfcheck defect was repaired by canonicalizing its newly created temporary directory; the production custody guard is unchanged and all eight observed process surfaces passed.
+
+Macro original #10740 already incorporated #10832/#10833 at `c2261cb826d1bd76c2e980efb68edb9ed7d0829c`; its nineteen native candidate pins match a884/c40. Later exact head `a577dbbf605474f97bbafa4ceeb0daf841292421` adds AUTO source support and private fixture classifications while retaining runtime authority gates. Do not duplicate either contribution or relabel historical tests as emitted-H2/live proof.
+
+H3 was reconstructed from every exact upstream preimage, semantically joined to emitted H2 in a disposable complete stage, and passed its original 32 admission cases. Five additional counterexamples show the proposed join can accept pending/failed/refused/rebound outer cache evidence and prepare two application dispatches against a one-request reservation. The qualification patch is deliberately outside the native builder/installer. Strict expiry scope remains unqualified. Exact evidence, common-fence placements, bootstrap/helper/source-custody gates and next acceptance inputs are in `review_evidence/fabric_application/h6-recovery-20261107-c2/h3-contract-findings.md` and companion JSON files.
+
+P1–P4 and the handoff's phases B–D remain open. Original source/Studio/J/native/reload effects are preserved. Current-source CI, protected release, installation/enrollment, actual account/endpoint/product/workload qualification, enforceable consumption bounds, real primary/tool/settlement and original-result recovery are separate gates. The existing Agent OS plan-link/projection gap remains explicit; this unmerged source plan is not an adopted organizational status update. MISSION_COMPLETE=false.
+
+### H6 native entry repair and hosted CI reconciliation — 2026-11-07
+
+Actual complete H2 APPLICATION/HTTP stages exposed an entry-registry defect:
+quota_remote and glm_keys loaded lazily from the verified closure but were not
+owned by native_go_entry on repeat inspection. The existing byte-verified loader
+now preloads both; foreign-module rejection and all custody checks remain. The
+regression reproduced two failures before the fix. The corrected native suite
+passed140 testcase records with zero failures/errors/skips (the distinct JUnit
+suite total149 is retained). The source identity review passed. All six complete
+layouts rebuilt, and all four APPLICATION/HTTP variants passed the actual
+installer component checks. The default107 and H2base107 identities are unchanged;
+new109/112 identities and exact evidence are in the updated installation-map.md
+and native-loader qualification/build receipts.
+
+Hosted a884 run42380455963 is terminal failure, not pending or green. Its original
+Studio/private HTTP, native admission and isolated transport gates succeeded.
+Shard0 lacked the pinned earnings-worker plist in the existing Macro fixture;
+shard2 rejected the historical H3 URL shape in executable/config JSON. Added the
+original pinned ops/launchd fixture directory and represented H3 provenance as
+repository/commit/path metadata, with no read transport or guard exception.
+The target Qwen regression, all27 anonymous-read guard cases and the unchanged
+parallel-workflow validator pass. The local paired archive passed117/118; its
+single failure requires Git metadata absent from that disposable archive.
+New exact-head hosted CI remains required. Upstream H2's six shards and required
+test are now green; that does not qualify this changed integration source.
+
+Prepared the existing H2 reader's historical derived view and exact H2-to-H5
+consumer contract. Producer timestamps, missing physical bindings and quantities,
+staleness and not-evaluated admission/no-overage remain explicit. No percentage is
+converted into an integer budget or live capacity. H5's configured-read baseline
+and actual physical-pool join are not claimed incorporated. Its active consumer
+writer remains preserved.
+
+The next source phase reconciles current final-carrier/worker returns and the
+missing H5 baseline. Phase B can use a separately qualified primary without H3
+activation, but still requires actual account/product/workload authority,
+whole-operation limits, enforceable no-overage, current binding, installed
+service enrollment and original usage/settlement/recovery. No such live envelope
+is supplied by these source fixtures. The original effect and release holds,
+Agent OS plan-link gap and P1–P4/B–D acceptance rows remain. MISSION_COMPLETE=false.
+
+### H6 current final-carrier and H2 convergence — 2026-11-07
+
+Consumed current original carrier552375cd and protected320611 without changing
+the compatible4fb governing pin. Preserved the current C4 forward-original/native
+publication context, adopted Studio fixture pair, historical fixture acquisition,
+current Macro a577 CI pairing and sparse/exact-scoped native histories. H2's four
+pre/postimages are unchanged, but its surrounding107-file parent now includes the
+qualified sparse-commit repair. New H2 emission requires exact parentbcfb8c;
+the oldc7f5 parent remains a separately pinned historical inverse. H2 reverses
+before pool/exact-scoped, sparse-preflight, admission and APPLICATION inverses.
+The actual emitted broker remains the Go dependency authority.
+
+All six complete layouts rebuilt; the current unflagged manifest and inventory
+exactly equal552375cd source, and all four APPLICATION/HTTP installer component
+validations passed. Eight focused modules completed with533 testcase records and
+zero failures/errors/skips (separate JUnit suite total542). This covers both
+historical/current H2 parents, native histories, loader ownership, installer,
+release/service startup and source-identity review. Current artifact identities
+and raw evidence are in current-native-composition.json/log/xml. H5 baseline4fd
+and worker7425 remain the next source joins. No live effect or protected release
+is inferred from this source qualification.
+
+### H6 native worker source join — 2026-11-07
+
+Consumed worker7425d029 into the current H2/final-carrier composition. All16
+non-registry contribution paths equal their exact source, including the two
+already-adopted Studio fixtures; the release table preserves all current records
+and the worker's exact native.py record. The eight-file package projection
+c099a74d and sealed backendbcdf8f remain paired source inputs for the eventual
+single protected release and incumbent native installer.
+
+Current composed execution passed68 package and135 backend/capacity/diagnostic
+cases. The explicit native ABI run failed before cases after native startup
+relaunched its runpy entry and lost access to an existing committed ruamel
+dependency. This is an import/startup failure, not a provider/worker action or a
+permission denial. Its one bounded diagnostic, native source snapshot and
+unchanged committed dependency selection are retained; no environment repair or
+unchanged replay is attempted. The author's prior22-case native proof is not
+relabeled as a current integrated run. Native installation/enrollment, actual
+worker START, retained result and original-parent consumption remain separate
+H4-custody acceptance. H5 baseline composition continues in this assignment.
+
+
+### H6 H5 configured-read integration and primary preimage proof — 2026-11-07
+
+Composed frozen H5 baseline4fd801e, preserving the current ProjectExecutionHistory
+focus/listener fix and the complete identity-pin union. The actual signed mounted
+HTTP path reproduced404: the inner H5 route was absent from the outer Executive
+fixed GET list. Added that exact query-free read through the incumbent router.
+
+Qualified544 existing router/permission/identity cases and18 new signed HTTP/Unix
+integration cases. The initial broad invocation had3 new fixture failures;
+those fixtures were corrected to use the real permission-stamped transport and
+the18-case module then passed. UI10 cases, typecheck and production build passed.
+CLI inspect/unchanged-preview retained the source files and explicitly reported
+physical pools NOT_JOINED, capacity NOT_OBSERVED and admission false. Installed
+browser and the active H5 physical consumer join remain separate acceptance.
+
+Fresh read-only native qualification matched8 current Hermes core preimages and
+2 absent paths. The exact patch applied to a disposable copy, produced all10
+manifest postimages and reversed exactly. No live source, profile, generation,
+service, account or provider effect occurred. Evidence is in
+h5-composition-qualification.json and primary-core-preimages.json under the H6
+recovery evidence directory.
+
+A newer completed worker checker contributionc07bc854 now supersedes the earlier
+worker source tuple; incorporate that bounded delta while preserving #2225's
+active AUTO/catalog/PyYAML writer. Current exact-head hosted CI, final-carrier
+adoption, qualified release/account/enrollment and original primary/worker/OS
+acceptance remain open. Agent OS plan linkage remains unproven. MISSION_COMPLETE=false.
+
+
+### H6 completed worker isolation and H4 preparation composition — 2026-11-07
+
+Consumed completedc07bc854 through its actual552/9379 lineage without replacing
+the newer H2 loader/pin, native generation or H5 route repair. All17 incoming
+paths are exact source, including the worker checker isolation, its three inert
+regressions, H4's preparation utility/profile map and dated component evidence.
+Current repaired worker package7979dd4f and backend8ff1b90a must move together
+from the eventual single selected protected release.
+
+Current composed proof passes68 package,135 backend and36 H4/identity/guard cases.
+The c07 author's25 native cases are retained component evidence for identical
+bytes. The earlier zero-case native import/reexec failure remains explicit and
+was not retried. Native install, enrollment, actual worker result/consumption and
+primary/tool/settlement acceptance are not inferred.
+
+Original2175 remains552 and Macro10740 remainscc457 at canonical readback.
+Preserve their active writer, v10 enrollment, Macro contract/support/AUTO work,
+H5 physical join, worker AUTO/catalog/PyYAML lane and original J reconciliation.
+No current qualified one-account APPLICATION envelope is present. Complete
+source/CI/install receipts and remaining acceptance return to2175 and983.
+The Agent OS plan-link gap remains explicit. MISSION_COMPLETE=false.
+
+
+### H6 narrow H3 outer-invalidation qualification — 2026-11-07
+
+Reused only the existing three rejection guards from Macro71cdb94 in the
+qualification-only joined H3 quota reader. Four cases passed on the original
+fixture and actual Broker/SQLite owner: pending refresh, refresh failure and
+terminal refusal now reject both a new claim and APPLICATION turn, retain the
+original lease unchanged and create no turn/request; the clean synthetic
+observation preserves prior behavior. The exact forward delta, pre/postimages,
+independent apply/reverse and no-live-effects proof are retained.
+
+This closes three baseline rejection defects only in the unselectable artifact.
+Changed outer binding, whole-operation consumption, common publication/claim
+serialization, real quantities and liability coverage remain open. The broader
+H6 patch's different lock order is not imported. Current H2 native source and
+all selectable manifests are unchanged. The Phase B qualified account/service
+envelope remains the next product-critical lane; H3 activation is not added as
+a blanket prerequisite.
+
+
+### H6 committed owner source-support qualification — 2026-11-07
+
+Composed completed Hermes887f as a true merge atf71a354. On that exact clean
+source, the original qualifier passed383 owner cases plus21 native conversation
+cases with real APPLICATION handler/Broker and disposable provider fixture,
+without overriding source-support flags. The three committed-blob boundary cases
+also passed. Missing immutable Macro blobs were acquired through authenticated
+GitHub reads, independently object-verified, and written only to the disposable
+fixture. The original source checkouts and live Hermes environment were untouched.
+
+The retained evidence identity guard exposed immutable output tokens. Exact full
+file/token records preserve the historical logs and negative-test account names
+without changing the guard. The initial535-case and committed547-case iterations
+each retained one failing overall composition guard. The final single receipt-token
+correction passed the complete committed-source guard, both exact new receipt/drift
+controls and all27 anonymous-read checks:30/30 at650598ae. All failed receipts
+remain explicit in h1-source-support-composition.json.
+
+Refreshed compatible law at protected66780ab: same INDEX/active/reliability/review/
+delivery/continuity laws, with current bootstrap/account instruction changes read.
+Current original2175 publishes72ffa v10 and Macro10740 publishes12efe support.
+Do not reapply the historical Macro proposal or replace v10's native-entry pin
+with the older H2 pin. Preserve the active protected-base/v10/host-trio source
+join, workerAUTO and H5 physical-consumer writers.
+
+Original J's three source-linked host returns prove terminalrc0 and retained
+output; original collection/controller reconciliation, acceptance and settlement
+remain distinct unresolved work. No new collection or dispatch was attempted.
+Exact-head CI, protected release, authentic account/service/enrollment and
+original product/worker/OS acceptance remain open. PLAN_NOT_ORG_LINKED and
+MISSION_COMPLETE=false remain explicit.

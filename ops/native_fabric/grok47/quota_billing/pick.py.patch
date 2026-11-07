@@ -1,0 +1,32 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -1671,7 +1671,14 @@
+     try:
+         from lease_broker import default_broker
+         import quota_circuit
+-        if quota_circuit.pool_blocked(default_broker(), pool):
++        br = default_broker()
++        if (br.provider_name(pool) == "glm" and br.external_gates
++                and br.provider(pool).get("enabled") is not False):
++            # Refresh through the original owner before an old quota cooldown
++            # can short-circuit selection. No network I/O occurs in broker locks.
++            import quota_remote
++            quota_remote.glm_accounts_state()
++        if quota_circuit.pool_blocked(br, pool):
+             return False, "provider quota cooldown"
+     except Exception:
+         return False, "provider quota state unavailable"
+@@ -1787,6 +1794,13 @@
+                 from lease_broker import default_broker
+                 from glm_host_account_source import filter_observed_accounts
+                 br = default_broker()
++                if (provider == "glm" and br.external_gates
++                        and br.provider(provider).get("enabled") is not False):
++                    import quota_remote
++                    try:
++                        quota_remote.glm_accounts_state()
++                    except Exception:
++                        mode_excluded.update(registry)
+                 conn = br._conn()
+                 try:
+                     candidates = []

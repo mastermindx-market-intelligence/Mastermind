@@ -7745,7 +7745,15 @@ def _marker_adapter_bindings():
                 info.st_atime,
                 info.st_mtime,
                 info.st_ctime,
-            )
+            ),
+            # This adapter changes only privilege ownership. Keep the real
+            # high-resolution metadata so descriptor/path coherence checks in
+            # unrelated readers do not observe a fabricated file movement.
+            {
+                "st_atime_ns": info.st_atime_ns,
+                "st_mtime_ns": info.st_mtime_ns,
+                "st_ctime_ns": info.st_ctime_ns,
+            },
         )
 
     def privileged_fstat(descriptor):

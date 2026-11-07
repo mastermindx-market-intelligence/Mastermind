@@ -1,0 +1,64 @@
+FFFFFFFFFF                                                               [100%]
+=================================== FAILURES ===================================
+_ test_source_supported_factory_binds_without_flag_overrides[False-native_go_hermes_attended_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.1:50142/v1', secret_ref='HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN...native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=False, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[False-native_go_hermes_secretary_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.2:50142/v1', secret_ref='HERMES_SECRETARY_FABRIC_APPLICATION_TOKE...native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=False, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[False-native_go_hermes_meta_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.3:50142/v1', secret_ref='HERMES_META_FABRIC_APPLICATION_TOKEN', p...native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=False, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[False-native_fabric_hermes_secretary_auto_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.2:50142/v1', secret_ref='HERMES_SECRETARY_FABRIC_APPLICATION_TOKE...'native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=True, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[False-native_fabric_hermes_meta_auto_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.3:50142/v1', secret_ref='HERMES_META_FABRIC_APPLICATION_TOKEN', p...'native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=True, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[True-native_go_hermes_attended_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.1:50142/v1', secret_ref='HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN...native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=False, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[True-native_go_hermes_secretary_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.2:50142/v1', secret_ref='HERMES_SECRETARY_FABRIC_APPLICATION_TOKE...native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=False, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[True-native_go_hermes_meta_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.3:50142/v1', secret_ref='HERMES_META_FABRIC_APPLICATION_TOKEN', p...native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=False, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[True-native_fabric_hermes_secretary_auto_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.2:50142/v1', secret_ref='HERMES_SECRETARY_FABRIC_APPLICATION_TOKE...'native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=True, execution_surface='inference').qualified
+_ test_source_supported_factory_binds_without_flag_overrides[True-native_fabric_hermes_meta_auto_v1] _
+tests/test_hermes_application_source_support.py:65: in test_source_supported_factory_binds_without_flag_overrides
+    assert transport.qualified and transport.application_allowed
+E   AssertionError: assert (False)
+E    +  where False = _ApplicationFabricTransport(base_url='http://127.0.0.3:50142/v1', secret_ref='HERMES_META_FABRIC_APPLICATION_TOKEN', p...'native_application_v1', native_recipe_digest=None, metadata_read=False, automatic=True, execution_surface='inference').qualified
+=========================== short test summary info ============================
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[False-native_go_hermes_attended_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[False-native_go_hermes_secretary_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[False-native_go_hermes_meta_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[False-native_fabric_hermes_secretary_auto_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[False-native_fabric_hermes_meta_auto_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[True-native_go_hermes_attended_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[True-native_go_hermes_secretary_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[True-native_go_hermes_meta_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[True-native_fabric_hermes_secretary_auto_v1]
+FAILED tests/test_hermes_application_source_support.py::test_source_supported_factory_binds_without_flag_overrides[True-native_fabric_hermes_meta_auto_v1]
+10 failed, 83 deselected in 0.27s

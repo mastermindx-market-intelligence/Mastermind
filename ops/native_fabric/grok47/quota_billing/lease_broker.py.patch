@@ -1,0 +1,45 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -914,8 +914,8 @@
+         if pname == "bailian":
+             return self._bailian_effective_cap(name, base)
+         if pname == "glm" and self.external_gates:
+-            from quota_remote import cached_glm_account_parked
+-            if cached_glm_account_parked(name, now_ts=now):
++            from quota_circuit import glm_account_evidence
++            if glm_account_evidence(self, name) is None:
+                 return None
+         return base
+ 
+@@ -1641,6 +1641,15 @@
+         if purpose == "APPLICATION" and state == "rented":
+             use_ttl = min(use_ttl, RENT_TTL)
+         lid = uuid.uuid4().hex[:12]
++        try:
++            quota_generation, quota_recovery = __import__("quota_circuit").claim_binding(
++                self, conn, pool, picked)
++        except ValueError:
++            return (AcquireResult(ok=False, reason="quota_evidence_changed",
++                                  pool=pool, orchestrator_id=orch),
++                    waiter_id, "quota_evidence_changed")
++        # Evidence must precede the stored grant time. Keep all original
++        # deadline and authorization checks after this final timestamp.
+         now = self.now()
+         original_deadline = _ACQUIRE_DEADLINE_NS.get()
+         if original_deadline is not None:
+@@ -1659,10 +1668,12 @@
+         conn.execute(
+             "INSERT INTO leases "
+             "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
+-            "granted_at, ttl, last_heartbeat, state, renewable, quota_scope, purpose) "
+-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
++            "granted_at, ttl, last_heartbeat, state, renewable, quota_scope, purpose, "
++            "quota_config_generation, quota_recovery_json) "
++            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+             (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1,
+-             __import__("quota_circuit").scope_for(self, pool, picked), purpose),
++             __import__("quota_circuit").scope_for(self, pool, picked), purpose,
++             quota_generation, quota_recovery),
+         )
+         if operator_child_id is not None:
+             conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",

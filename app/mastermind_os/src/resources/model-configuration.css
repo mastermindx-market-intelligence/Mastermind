@@ -1,0 +1,52 @@
+.model-configuration-panel { min-width: 0; display: grid; gap: var(--sp-4); margin-block: var(--sp-5); }
+.model-configuration-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); }
+.model-configuration-heading h3 { margin-block: var(--sp-2); }
+.model-configuration-heading p { margin-block: var(--sp-2); }
+.model-configuration-heading button { flex: 0 0 auto; min-height: 44px; }
+.model-configuration-boundary { padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
+.model-configuration-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin: 0; }
+.model-configuration-metrics > div { padding: var(--sp-4); background: var(--panel); border-radius: var(--r-ctl); border: 1px solid var(--border); }
+.model-configuration-metrics dt { color: var(--muted); font-size: 12px; }
+.model-configuration-metrics dd { font-family: var(--font-display); font-size: 28px; margin: var(--sp-2) 0 0; }
+.model-configuration-readiness { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.model-configuration-readiness .model-evidence-unknown { font-family: inherit; font-size: 16px; color: var(--muted); }
+.model-capacity-evidence { border: 1px solid var(--border); border-radius: var(--r-ctl); padding: var(--sp-3) var(--sp-4); background: var(--panel); }
+.model-capacity-evidence p, .model-configuration-routes p { line-height: 1.6; }
+.model-route-preview-label { font-weight: 600; margin-block: var(--sp-2) var(--sp-4); }
+.model-configuration-filters.model-route-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.model-route-explanation { display: grid; gap: var(--sp-3); }
+.model-route-explanation > li { padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); }
+.model-route-explanation span, .model-observation-zone { display: block; color: var(--muted); margin-top: var(--sp-2); }
+.model-route-explanation p { margin-block: var(--sp-2); }
+.model-configuration-panel :where(button, input, select, summary):focus-visible { outline: 2px solid var(--focus-ring, var(--text)); outline-offset: 3px; }
+.model-configuration-filters { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--sp-4); }
+.model-configuration-filters label { display: grid; gap: var(--sp-2); font-size: 12px; color: var(--muted); min-width: 0; }
+.model-configuration-filters input, .model-configuration-filters select { width: 100%; min-width: 0; min-height: 44px; padding: var(--sp-3); border-radius: var(--r-ctl); border: 1px solid var(--border); background: var(--panel); color: var(--text); box-sizing: border-box; }
+.model-configuration-models { list-style: none; padding: 0; margin: 0; }
+.model-configuration-models > li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-3); border-bottom: 1px solid var(--border); padding-block: var(--sp-4); }
+.model-configuration-models strong, .model-configuration-models b, .model-configuration-models span { display: block; overflow-wrap: anywhere; }
+.model-configuration-models strong, .model-configuration-models b { font-size: 13px; font-weight: 600; }
+.model-configuration-models span { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: var(--sp-2); }
+.model-configuration-models details { grid-column: 1 / -1; margin: 0; }
+.model-configuration-panel details { min-width: 0; font-size: 12px; }
+.model-configuration-panel summary { cursor: pointer; min-height: 44px; align-content: center; }
+.model-configuration-panel details dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); margin: 0; }
+.model-configuration-panel details dt { color: var(--muted); }
+.model-configuration-panel details dd { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; }
+.model-configuration-panel code { overflow-wrap: anywhere; }
+.model-configuration-routes > section { padding-block: var(--sp-3); border-top: 1px solid var(--border); }
+.model-configuration-routes h4 { margin: var(--sp-2) 0; }
+.model-configuration-routes ol { padding-inline-start: 22px; }
+.model-configuration-routes li { margin-block: var(--sp-2); overflow-wrap: anywhere; }
+.model-configuration-panel button, .model-configuration-panel summary { touch-action: manipulation; }
+@media (max-width: 760px) {
+  .model-configuration-heading { flex-direction: column; }
+  .model-configuration-filters, .model-configuration-models > li, .model-configuration-panel details dl { grid-template-columns: minmax(0, 1fr); }
+  .model-configuration-metrics > div { padding: var(--sp-3); }
+  .model-configuration-metrics dt { font-size: 11px; }
+  .model-configuration-metrics dd { font-size: 24px; }
+  .model-configuration-readiness { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-configuration-filters.model-route-filters { grid-template-columns: minmax(0, 1fr); }
+  .model-configuration-readiness .model-evidence-unknown { font-size: 16px; }
+}
+

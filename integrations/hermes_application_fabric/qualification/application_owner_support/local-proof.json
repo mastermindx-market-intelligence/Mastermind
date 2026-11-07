@@ -1,0 +1,44 @@
+{
+  "baseline_expected_failures": {
+    "errors": 0,
+    "failures": 10,
+    "seconds": 0.246,
+    "sha256": "5f7baf0015a137d04d6bfb51f243b7c72b3f3206d3f766d8fe1085039d128681",
+    "skipped": 0,
+    "tests": 10
+  },
+  "candidate": {
+    "errors": 0,
+    "failures": 0,
+    "seconds": 2.589,
+    "sha256": "4662757c72074a2adca17cf2a24b82d1dabbbe0037028b946a4f276b1fa66a36",
+    "skipped": 0,
+    "tests": 383
+  },
+  "config_and_capabilities_changed": false,
+  "live_acceptance": false,
+  "log_sha256": {
+    "baseline.log": "d2b8f4095f254b55c1ad7c772b7477bdcb95b239696d59802b1529434d1da55b",
+    "candidate.log": "199f902e027fb0bcf3d57d6dbefeec3aacf8b2275da4517701bdf6d0af2016b2"
+  },
+  "native_proposal_qualification": "PENDING; new meta fixed/AUTO/exact native cases will execute through the existing qualification harness",
+  "owner_commit": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+  "patch_apply_and_reverse_verified": true,
+  "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+  "per_module": {
+    "test_fabric_application_binding": 168,
+    "test_fabric_application_inspection": 27,
+    "test_fabric_service_identity": 25,
+    "test_hermes_application_source_support": 93,
+    "test_hermes_attended_fabric_identity": 31,
+    "test_hermes_primary_fabric_endpoint": 16,
+    "test_hermes_primary_fabric_identity": 23
+  },
+  "provider_request": false,
+  "pytest": "9.2.0",
+  "python": "3.12.14",
+  "pyyaml": "6.0.3",
+  "runtime_enrollment": false,
+  "schema": "mastermind.hermes_owner_source_support_local_proof.v1",
+  "source_change": "Only five explicit Hermes source-support descriptors; defaults, identities, routes and runtime gates preserved"
+}

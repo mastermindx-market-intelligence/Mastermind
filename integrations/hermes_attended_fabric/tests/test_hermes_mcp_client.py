@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+import json
 
 from integrations.hermes_attended_fabric.hermes_mcp_client import (
     bind_native_mcp_client, EXECUTION_SERVER,
@@ -44,6 +45,17 @@ class TestNativeHermesMcpClient(unittest.TestCase):
             (EXECUTION_SERVER, "fabric_status",
              {"run_id": "hermes-native-1", "root_id": "root-1"}, 30),
         ])
+
+    def test_native_dual_emit_normalization_keeps_canonical_json_text(self):
+        ctx = OwnerContext()
+        original = ctx.reply["structuredContent"]
+        ctx.reply = {"ok": True, "result": json.dumps(original)}
+        self.assertEqual(bind_native_mcp_client(ctx)("fabric_status", {}), original)
+        for text in (json.dumps(json.dumps(original)), json.dumps({"schema": "other"}),
+                     "log prefix " + json.dumps(original)):
+            ctx.reply = {"ok": True, "result": text}
+            with self.assertRaisesRegex(Exception, "SCHEMA_INVALID"):
+                bind_native_mcp_client(ctx)("fabric_status", {})
 
     def test_read_only_capacity_enrollment_never_escalates_to_execution(self):
         ctx = OwnerContext(allowed=False)
