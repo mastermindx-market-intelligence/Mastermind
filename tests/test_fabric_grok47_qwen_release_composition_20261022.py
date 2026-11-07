@@ -64,7 +64,7 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
 # join and the composed application-turn/fair-share broker each have one exact
 # forward digest; remaining Qwen payloads retain their original bytes.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
-    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+    "lease_broker.py": "ac551b0c71fa13da0dad1b99a99bb51375233466062c8a447f06883d0fcb4385",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
