@@ -1,0 +1,191 @@
+{
+  "activation": {
+    "application_consumer_accepted": false,
+    "delegated_child_accepted": false,
+    "new_generation_published": false,
+    "new_generation_selected": false,
+    "provider_call": false
+  },
+  "financial_boundary": {
+    "new_accounting_owner": false,
+    "required": "fresh original-owner evidence for actual physical account and actual endpoint: included headroom plus hard no-overage boundary and any stricter existing budget; canonical original per-dispatch usage",
+    "source": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6703609820",
+    "status": "qualification_owed",
+    "unknown_est_usd": "remains unknown, not zero and not by itself provider EFFECT_UNKNOWN"
+  },
+  "forward_patch_sha256": "3fe89c2b49afc8b96352c339790d302806fb3d4516407c4476524168367b428c",
+  "inherited_ci_repair": {
+    "change": "qualify the synthetic transport and copied mode under the existing mastermind_chat_fabric relation; retain separate text consumer and unchanged production identity",
+    "path": "tests/integration/test_fabric_chat_inference_composition.py",
+    "source": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703255977"
+  },
+  "installed_predecessor_readback": {
+    "generation": "ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46",
+    "manifest_sha256": "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9",
+    "members": 107,
+    "read_only": true,
+    "sequence": 35,
+    "unchanged_during_read": true,
+    "verification_owner_sha256": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+    "verified_file_bytes": 3201105
+  },
+  "j_migration_source_candidate": {
+    "applied_to_runtime_sources": false,
+    "live_effects": "none",
+    "patch_sha256": "5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36",
+    "receipt": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703879773",
+    "remaining": "complete native/control closure, modern/legacy HTTP compatibility, original actual caller receipt, protected installer and single original reconciliation",
+    "source_blob": "59004a991ed644dd26c21eac2c39a7b00ce59861"
+  },
+  "material_source_revalidation": {
+    "overlap_paths": [
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+      "tests/executive_fabric_release_identity_review.py"
+    ],
+    "prior_suites_reused_only_where_unchanged": true,
+    "protected_merge": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+    "result": "all three original builder variants reproduce the previously qualified manifest and inventory hashes exactly; protected realm preimage and identity additions preserved"
+  },
+  "protected_procedure": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "purpose": "S3 exact source composition evidence; not runtime admission or acceptance",
+  "remaining": [
+    "original J retaining migration/driver/compiler/profile/parser joins",
+    "shared-account hard financial boundary and unknown-spending disposition",
+    "incumbent Hermes native and attended consumer composition",
+    "exact E3/fresh armed research/Metabolism positive native path",
+    "exact-head required CI and protected source integration",
+    "incumbent installer admission and real application plus delegated-child consumed results"
+  ],
+  "retained_non_green_evidence": [
+    {
+      "failed": 3,
+      "findings": [
+        "stale current-carrier assertion repaired",
+        "memfd sealing constants unavailable",
+        "copied bundled interpreter could not locate its standard library"
+      ],
+      "passed": 40,
+      "runtime": "bundled Python3.12",
+      "skipped": 0,
+      "tests": 43
+    },
+    {
+      "failed": 1,
+      "finding": "unchanged test_observer_directory_premise_is_exact_and_preserves_unmodeled_writes refused this container directory premise; no production guard was changed",
+      "passed": 75,
+      "runtime": "system Python3.13.5",
+      "skipped": 3,
+      "tests": 79
+    }
+  ],
+  "source_inputs": {
+    "admission_repair": "3b2338d3946209b6f6ce6a0b694cf609015fb07f",
+    "application_parent": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+    "application_repair_contribution": "4d0b4979711759bfe23725246daeae27a7ff94ca",
+    "observed_paired_macro_successor": "3c510817d9543b5b124a1b73277aa115883c7da7",
+    "paired_macro": "abab96df55f82cb5c26459a6f51b568d73a6a6f8",
+    "paired_macro_proof_basis": "abab96df55f82cb5c26459a6f51b568d73a6a6f8; successor only changes E3 source/tests, not the 46-case tested routing sources",
+    "previous_qualified_application_parent": "d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6",
+    "publisher": "b6174452467a458463b2592d15faeeb939f431d7"
+  },
+  "test_suites": [
+    {
+      "command": "python -m pytest -q ops/native_fabric/quota_continuity/tests/test_go_native_stage.py tests/test_native_pool_policy_publication.py",
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "e864e8c59a0ea29a4a96190410e4238008a946b2ce850514da8360cea6953a42",
+      "name": "closure_and_publisher",
+      "skipped": 0,
+      "tests": 188
+    },
+    {
+      "command": "python -m pytest -q tests/test_catalog_native_release_staging.py tests/test_h1_native100_packaging.py tests/test_host_pull_launchd_admission.py tests/test_paid_initializer.py::test_native_initializer_extends_only_exact_preimage_members ops/native_fabric/quota_continuity/tests/test_support_policy_source.py",
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "0c9e0708c01a786873515754c0a8bf0ee707519c0fdab8e3e6f78fba5d83822d",
+      "name": "affected_packaging",
+      "skipped": 0,
+      "tests": 15
+    },
+    {
+      "command": "python -m pytest -q tests/test_executive_fabric_release_identity_review.py -k 'go_shim or lane_runtime'",
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "98788807d6a8a09149842cff3d657ae2c42228ce5d6d4e2780f3ca752f181fea",
+      "name": "changed_identity",
+      "skipped": 0,
+      "tests": 6
+    },
+    {
+      "command": "python -m pytest -q ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_application_pool_forward_delta_is_reversible_and_source_exact",
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "4280ac24470a6bf34bbdbaf45224dbe7a3115c0487998ac1fa0b5b89ab659fa1",
+      "name": "whitespace_clean_source_forward_delta",
+      "skipped": 0,
+      "tests": 1
+    },
+    {
+      "command": "MM_REQUIRE_PRODUCTION_MODE_COMPOSITION=1 MM_REQUIRE_FABRIC_COMPOSITION=1 MM_FABRIC_FIXTURE_ROOT=<disposable-exact-macro-copy> PYTHONPATH=<disposable-mastermind-copy> python -m unittest discover -s tests/integration -p 'test_*inference_composition.py' -v",
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "log_sha256": "538ab4e43a16231ce543f33377c4ceb5f5e6a5444f1cc73790e969276bde795d",
+      "name": "paired_brain_inference_composition",
+      "paired_macro": "abab96df55f82cb5c26459a6f51b568d73a6a6f8",
+      "provider_responses": "synthetic",
+      "skipped": 0,
+      "tests": 46,
+      "verified_macro_source_files": 2530
+    },
+    {
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "6aeb87f3f447c3040c15976fbc0bd686e891698a92a9cea9e742867e11bb4c4e",
+      "name": "shared_account_and_original_effect_custody",
+      "skipped": 0,
+      "tests": 18
+    },
+    {
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "e70e6c22be3576b5946755565ff1a69686c68471b4c1adcaa06ce48b93b9f7bd",
+      "name": "distinct_model_shared_account_caps",
+      "skipped": 0,
+      "tests": 3
+    },
+    {
+      "errors": 0,
+      "exit_code": 0,
+      "failures": 0,
+      "junit_sha256": "fd6123b1b8a30acaf321205fd0b01f06abb30675551586ee6c0e15beef909d86",
+      "name": "protected_merge_material_source_revalidation",
+      "skipped": 0,
+      "tests": 46
+    }
+  ],
+  "variants": {
+    "application": {
+      "inventory_sha256": "d5aba23e26f5e7f9f57e1b6740efa5f0fe0abea88ffa68cfbac2bc0b63f42670",
+      "manifest_sha256": "9cad523f30aa098c71c0892005e32a706d1be91921e886e85aa1af0d52781255",
+      "members": 109
+    },
+    "base": {
+      "inventory_sha256": "fe542e742b2eb529db9bec2472d4cac236dba8d8403cb99d4d1b7f4ee8939119",
+      "manifest_sha256": "d8a112411c28c42e812907435f5b182ce351a4cb4c00e47b94ca1ddf58294ac9",
+      "members": 107
+    },
+    "http": {
+      "inventory_sha256": "4447318bcea36a4b5471e819d1790445dfbca2adeb2eada2d7db7353fab5fa45",
+      "manifest_sha256": "6cc737e65083c4af6bfd6f0e60b4de90e19c121148d748dba73271ba11f84771",
+      "members": 112
+    }
+  },
+  "whole_parent_manifest_sha256": "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+}

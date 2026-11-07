@@ -217,6 +217,43 @@ GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6
 # Older namespaces and the frozen Ubuntu4/poll generations retain their bytes.
 GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 
+# The same two-member repair has two separately qualified 107-member parents:
+# the protected WORKER closure and the installed APPLICATION carrier closure.
+# Temporary inverse views never replace the actual emitted repaired bytes;
+# unrelated or mixed complete parents remain ineligible.
+ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256 = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+ADMISSION_INTEGRITY_PREIMAGES = {
+    "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
+    "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
+}
+ADMISSION_INTEGRITY_DIGESTS = {
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/lane_runtime.py": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b",
+}
+
+
+def before_admission_integrity(manifest):
+    """Validate one exact forward cohort without mutating caller identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native admission integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(ADMISSION_INTEGRITY_PREIMAGES)
+    parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if parent_identity == ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
+        return previous
+    if (parent_identity == ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256
+            and all(previous.get("ext/" + name) == digest
+                    for name, digest in APPLICATION_CARRIER_DIGESTS.items())):
+        return previous
+    raise ValueError("native admission integrity parent closure differs")
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
@@ -239,6 +276,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
+    actual_manifest = manifest
     manifest = normalize_application_carrier_base_manifest(manifest)
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
@@ -309,7 +347,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        if manifest["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
@@ -523,14 +561,56 @@ APPLICATION_CARRIER_PREIMAGES = {
 APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
 
 
-def application_carrier_candidate_cohort(root):
+# One complete successor of #2194's exact two-repair APPLICATION closure.
+# It composes #2182's publisher into APPLICATION's support owner and preserves
+# #2175/d5df6b2's scoped-model dependencies. The publisher-only WORKER closure
+# is not this precursor. All other 104 members remain bound to this whole parent.
+APPLICATION_POOL_COMPOSITION_PARENT_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+APPLICATION_POOL_COMPOSITION_PREIMAGES = {
+    "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+APPLICATION_POOL_COMPOSITION_DIGESTS = {
+    "ext/support_bundle.py": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+
+
+def before_application_pool_composition(manifest):
+    """Validate the exact complete successor; return its private parent view."""
+    if type(manifest) is not dict:
+        return manifest
+    if not any(manifest.get(name) == digest
+               for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        raise ValueError("application pool composition cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != APPLICATION_POOL_COMPOSITION_PARENT_SHA256:
+        raise ValueError("application pool composition parent closure differs")
+    return previous
+
+
+def application_carrier_candidate_digests(root):
     observed = {name: sha((root / "candidate" / name).read_bytes())
                 for name in APPLICATION_CARRIER_DIGESTS}
+    composed = dict(APPLICATION_CARRIER_DIGESTS)
+    composed["support_bundle.py"] = APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]
+    if observed == composed:
+        return composed
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
                if observed[name] == expected}
     if present and observed != APPLICATION_CARRIER_DIGESTS:
         raise ValueError("application carrier candidate cohort is incomplete")
-    return bool(present)
+    return dict(APPLICATION_CARRIER_DIGESTS) if present else {}
+
+
+def application_carrier_candidate_cohort(root):
+    return bool(application_carrier_candidate_digests(root))
 
 
 def normalize_application_carrier_base_manifest(manifest):
@@ -541,6 +621,10 @@ def normalize_application_carrier_base_manifest(manifest):
     """
     if type(manifest) is not dict:
         return manifest
+    # Qualify the exact repaired parent before the existing APPLICATION inverse.
+    # main() and Go validation share this ordering and retain actual output hashes.
+    manifest = before_application_pool_composition(manifest)
+    manifest = before_admission_integrity(manifest)
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
                if manifest.get("ext/" + name) == expected}
     if not present:
@@ -580,12 +664,12 @@ def main():
     (stage / "ext").mkdir(parents=True, exist_ok=True)
     manifest = {}
     files = {}
-    application_carrier = application_carrier_candidate_cohort(root)
+    application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
         if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
             source = root / "candidate" / name
             raw = source.read_bytes()
-            if sha(raw) != APPLICATION_CARRIER_DIGESTS[name]:
+            if sha(raw) != application_carrier[name]:
                 raise ValueError("application carrier source changed during build")
         elif name in GROK47_MERGED_SOURCE_DIGESTS:
             source = root.parent / "grok47" / "overlay" / name
