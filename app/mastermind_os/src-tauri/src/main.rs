@@ -103,6 +103,8 @@ fn main() {
             terminal_sharing_navigation::open_terminal_sharing_request,
             auth::auth_status,
             auth::hermes_native::hermes_native,
+            auth::hermes_native::hermes_native_observe,
+            auth::hermes_native::hermes_native_unobserve,
             auth::native_draft_identity::read_native_draft_continuity,
             auth::sign_in,
             auth::sign_out,

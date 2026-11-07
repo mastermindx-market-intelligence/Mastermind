@@ -1,7 +1,7 @@
 import { parseProjectSourceWriteTarget, projectSourceWriteKeyMatches } from "./project-source-write-target";
 import { parseInstructionAdmissionTarget } from "./instruction-admission-target";
 import type { OperationPointer } from "./operation-controller";
-import { readNativePending } from "../hermes-native/pending-pointer";
+import { nativePendingPointer, readNativePending } from "../hermes-native/pending-pointer";
 import { parseDirectConsumeTarget } from "../direct-native-result";
 import { canonicalJson, sha256Hex } from "./operation-key";
 import {parseFreshConversationTarget} from './fresh-conversation-target';
@@ -16,6 +16,8 @@ export interface DurablePendingPointerStore {
     { readonly reserved: true } | { readonly reserved: false; readonly pointer: OperationPointer }
   >;
   clearIfEqual(scope: string, pointer: OperationPointer, signal?: AbortSignal): Promise<boolean>;
+  /** One-way dispatch fence on an existing original Hermes send, never a new operation. */
+  reserveNativeStop?(scope: string, pointer: OperationPointer, signal?: AbortSignal): Promise<boolean>;
 }
 
 export const PENDING_POINTER_DB_NAME = "mastermind-os-pending-v1";
@@ -73,6 +75,9 @@ type ClosedRecord = {
   readonly v: 13; readonly operationKey: string; readonly kind: "conversation_create"; readonly targetKey: string;
 } | {
   readonly v: 14; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
+} | {
+  /** Same original native send lookup, with a Stop dispatch already reserved. */
+  readonly v: 15; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -145,7 +150,8 @@ const KIND_RECORDS = {
  */
 const KIND_VARIANTS = {
   conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false }],
-  conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false }],
+  conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false },
+    { v: 15, key: /^mmos-hermes-stop-[0-9a-f]{32}$/, consume: false }],
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
   launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
     { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
@@ -195,7 +201,7 @@ function planningTargetMatches(targetKey: unknown): boolean {
 function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>, scope: string): boolean {
   if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
       || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
-  if (spec.v === 13 || spec.v === 14) {
+  if (spec.v === 13 || spec.v === 14 || spec.v === 15) {
     return readNativePending(raw as unknown as OperationPointer) !== null;
   }
   if (spec.v === 5) {
@@ -517,6 +523,23 @@ export function createIndexedDbPendingPointerStore(
       } finally {
         closeQuietly(db);
       }
+    },
+
+    async reserveNativeStop(scope: string, pointer: OperationPointer, signal?: AbortSignal): Promise<boolean> {
+      assertScope(scope);
+      const before = parsePointer(pointer, scope);
+      const original = readNativePending(pointer);
+      if (original?.kind !== "send" || original.stopReserved) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+      const after = parsePointer(nativePendingPointer({ ...original, stopReserved: true }), scope);
+      const db = await openDatabase(requireFactory(), signal);
+      try {
+        return await runTransaction(db, "readwrite", true, async store => {
+          const existing = await readInStore(store, scope);
+          if (!existing || !canonicalFieldsEqual(before, existing)) return false;
+          await requestToPromise(store.put(after, scope) as IDBRequest<IDBValidKey>);
+          return true;
+        }, signal);
+      } finally { closeQuietly(db); }
     },
 
     async clearIfEqual(scope: string, pointer: OperationPointer, signal?: AbortSignal): Promise<boolean> {

@@ -319,3 +319,113 @@ describe("native Hermes durable original-request recovery", () => {
     expect(h.invoke).toHaveBeenCalledTimes(1);
   });
 });
+
+
+describe("native Hermes Stop of the reserved original admission", () => {
+  const stopped = { ...original, stopReserved: true as const };
+  const stopView = (status = "terminal", extra: Record<string, unknown> = {}) =>
+    ({ ...receipt(status), operation: "stop", ...extra });
+  async function held(h: ReturnType<typeof harness>) {
+    await h.port.request({ operation: "status" });
+    await h.store.reserve(scope, nativePendingPointer(original));
+  }
+  it("durably fences the exact original before the single cancel and settles only its terminal receipt", async () => {
+    const h = harness(new IDBFactory(), async request => {
+      if (request.operation === "status") return view();
+      expect(request).toEqual({ operation: "stop_send", sessionId: original.sessionId, requestId: original.requestId });
+      expect(await rawRecord(h.factory)).toEqual({ v: 15, ...nativePendingPointer(stopped) });
+      return stopView();
+    });
+    await held(h);
+    const result = await h.port.request({ operation: "stop" });
+    expect(result.receipt?.status).toBe("terminal");
+    expect(result.pendingOperation).toBeNull();
+    expect(await h.store.read(scope)).toBeNull();
+    expect(h.invoke.mock.calls[1][1].expectedAuthGeneration).toBe(7);
+  });
+  it("has no cancellation target without an existing original send", async () => {
+    const h = harness(); await h.port.request({ operation: "status" });
+    expect((await h.port.request({ operation: "stop" })).state).toBe("REFUSED");
+    await h.store.reserve(scope, nativePendingPointer({ kind: "create", requestId: original.requestId }));
+    expect((await h.port.request({ operation: "stop" })).state).toBe("REFUSED");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+  });
+  it("retains a nonterminal Stop as the same original and never dispatches it twice", async () => {
+    const h = harness(new IDBFactory(), async request => request.operation === "status" ? view() : stopView("started"));
+    await held(h);
+    expect((await h.port.request({ operation: "stop" })).pendingOperation).toEqual(stopped);
+    expect((await h.port.request({ operation: "stop" })).state).toBe("EFFECT_UNKNOWN");
+    expect(h.invoke.mock.calls.filter(([, args]) => (args.request as Wire).operation === "stop_send")).toHaveLength(1);
+    expect((await h.port.request(send)).pendingOperation).toEqual(stopped);
+  });
+  it("reopens an interrupted Stop for original receipt recovery without a second cancel or send", async () => {
+    const factory = new IDBFactory();
+    const first = harness(factory, async request => {
+      if (request.operation === "status") return view();
+      throw new Error("response lost after cancel");
+    });
+    await held(first); await expect(first.port.request({ operation: "stop" })).rejects.toThrow("response lost");
+    const reopened = harness(factory, async request => request.operation === "recover_send" ? receipt() : view());
+    expect((await reopened.port.request({ operation: "status" })).pendingOperation).toEqual(stopped);
+    expect((await reopened.port.request({ operation: "stop" })).state).toBe("EFFECT_UNKNOWN");
+    expect(reopened.invoke).toHaveBeenCalledTimes(1);
+    expect((await reopened.port.request({ operation: "recover" })).pendingOperation).toBeNull();
+    expect(reopened.invoke.mock.calls.map(([, args]) => args.request)).toEqual([
+      { operation: "status" }, { operation: "recover_send", sessionId: original.sessionId, requestId: original.requestId }]);
+  });
+  it("allows only one dispatch when two independent ports contend for the original", async () => {
+    const factory = new IDBFactory();
+    const handle = vi.fn(async (request: Wire) => request.operation === "status" ? view() : stopView("started"));
+    const first = harness(factory, handle), second = harness(factory, handle);
+    await held(first); await second.port.request({ operation: "status" });
+    const results = await Promise.all([first.port.request({ operation: "stop" }), second.port.request({ operation: "stop" })]);
+    expect(handle.mock.calls.filter(([request]) => request.operation === "stop_send")).toHaveLength(1);
+    expect(results.every(result => result.pendingOperation?.kind === "send" && result.pendingOperation.stopReserved)).toBe(true);
+    expect(await first.store.read(scope)).toEqual(nativePendingPointer(stopped));
+  });
+  it("does not erase a newer Stop fence when an older terminal recovery finishes", async () => {
+    const factory = new IDBFactory(); let release!: (value: unknown) => void;
+    const recovery = harness(factory, async request => request.operation === "status" ? view()
+      : new Promise(resolve => { release = resolve; }));
+    await held(recovery);
+    const pending = recovery.port.request({ operation: "recover" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const stopper = harness(factory, async request => request.operation === "status" ? view() : stopView("started"));
+    await stopper.port.request({ operation: "status" }); await stopper.port.request({ operation: "stop" });
+    release(receipt());
+    expect((await pending).pendingOperation).toEqual(stopped);
+    expect(await recovery.store.read(scope)).toEqual(nativePendingPointer(stopped));
+  });
+  it.each([
+    { authGeneration: 8 }, { requestId: "b".repeat(32) }, { requestSessionId: "other-session" },
+    { receipt: { ...receipt().receipt, sessionId: "other-session" } },
+  ])("keeps the fence when response identity crosses: %j", async change => {
+    const h = harness(new IDBFactory(), async request => request.operation === "status" ? view() : stopView("terminal", change));
+    await held(h); await expect(h.port.request({ operation: "stop" })).rejects.toThrow();
+    expect(await h.store.read(scope)).toEqual(nativePendingPointer(stopped));
+  });
+  it("requires a durable Stop reservation method and never substitutes a new store", async () => {
+    const factory = new IDBFactory(), store = createIndexedDbPendingPointerStore(factory);
+    const h = harness(factory, undefined, { read: store.read, reserve: store.reserve, clearIfEqual: store.clearIfEqual });
+    await held(h);
+    expect((await h.port.request({ operation: "stop" })).state).toBe("EFFECT_UNKNOWN");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    expect(await store.read(scope)).toEqual(nativePendingPointer(original));
+  });
+  it("never dispatches after an unknown reservation failure and retains any committed marker", async () => {
+    const factory = new IDBFactory(), store = createIndexedDbPendingPointerStore(factory);
+    const h = harness(factory, undefined, { ...store, async reserveNativeStop(...args) {
+      await store.reserveNativeStop!(...args); throw new Error("PENDING_POINTER_TRANSACTION_FAILED");
+    } });
+    await held(h); await expect(h.port.request({ operation: "stop" })).rejects.toThrow("NATIVE_RECOVERY_UNAVAILABLE");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    expect(await store.read(scope)).toEqual(nativePendingPointer(stopped));
+  });
+  it("retains the original when cancellation is refused or definitely not dispatched", async () => {
+    for (const state of ["REFUSED", "NOT_SENT", "EFFECT_UNKNOWN"]) {
+      const h = harness(new IDBFactory(), async request => request.operation === "status" ? view()
+        : view({ operation: "stop", state, requestId: original.requestId, requestSessionId: original.sessionId, code: "NATIVE_NOT_SENT" }));
+      await held(h); expect((await h.port.request({ operation: "stop" })).pendingOperation).toEqual(stopped);
+    }
+  });
+});

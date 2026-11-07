@@ -23,7 +23,7 @@ import { freshConversationOriginalSelector, freshConversationTarget, parseFreshC
 import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
-import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { MetaCeoWorkspace as MetaCeoOffice } from "./meta-ceo/MetaCeoWorkspace";
 import {
   decideOfficeLaunchHandoff, officeLaunchWorkstreamAgrees, previewIsCurrent,
   type DirectionPreview, type OfficeLaunchOutcome,
@@ -5280,7 +5280,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     content = (
       <>
         <MetaCeoOffice
-          key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
+          key={authRevision}
           locale={locale}
           projection={office.projection}
           byokObservation={byokRoleView(byokRoles)}

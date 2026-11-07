@@ -1,0 +1,18 @@
+.office-chat-workspace { min-height: 0; min-width: 0; }
+.office-chat-workspace [hidden] { display: none !important; }
+.office-chat-workspace[data-view="chat"] { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.office-chat-tabs { display: flex; align-items: center; gap: 16px; min-height: 44px; border-bottom: 1px solid var(--border); padding: 0 24px; flex: 0 0 auto; }
+.office-chat-tabs button { min-height: 44px; padding: 8px 4px; font: 500 12px/20px var(--font-ui); border: 0; border-radius: 0; background: transparent; color: var(--muted); cursor: pointer; position: relative; }
+.office-chat-tabs button[aria-selected="true"] { color: var(--text); }
+.office-chat-tabs button[aria-selected="true"]::after { content: ""; height: 2px; background: var(--text); position: absolute; inset: auto 4px -1px; }
+.office-chat-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.office-chat-panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) { display: flex; flex-direction: column; height: 100dvh; min-height: 0; padding: 0; overflow: hidden; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header { min-height: 44px; flex: 0 0 auto; margin: 0; padding: 6px 24px; gap: 16px; align-items: center; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header h2 { font-size: 13px; line-height: 20px; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) > .build-details { display: none; }
+.hermes-chat-header { margin-bottom: 0; }
+@media (max-width: 600px) {
+  .office-chat-tabs { padding-inline: 16px; }
+  .shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header { padding-inline: 16px; }
+}
