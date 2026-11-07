@@ -622,10 +622,25 @@ def before_application_pool_composition(manifest):
 
 
 def application_carrier_candidate_digests(root):
-    observed = {name: sha((root / "candidate" / name).read_bytes())
-                for name in APPLICATION_CARRIER_DIGESTS}
+    # Every current APPLICATION cohort member must be a regular candidate
+    # file: a symlink to the exact reviewed bytes is not a regular file.
+    # A forward-composition member that is missing, swapped for a symlink,
+    # or carrying bytes outside its accepted carrier/preimage pins fails
+    # its own named forward guard instead of silently re-selecting an
+    # historical base for the remaining cohort.
     composed = dict(APPLICATION_CARRIER_DIGESTS)
     composed["support_bundle.py"] = APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]
+    observed = {}
+    for name in APPLICATION_CARRIER_DIGESTS:
+        source = root / "candidate" / name
+        if source.is_symlink() or not source.is_file():
+            observed[name] = None
+        else:
+            observed[name] = sha(source.read_bytes())
+        if (name in GROK47_CANDIDATE_COMPOSITION_DIGESTS
+                and observed[name] not in (composed[name],
+                                           GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])):
+            raise ValueError("accepted Grok forward composition mismatch: " + name)
     if observed == composed:
         return composed
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
@@ -694,7 +709,18 @@ def main():
     application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
         if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+            # The accepted historical overlay member stays authenticated even
+            # when the current APPLICATION carrier cohort supplies the staged
+            # bytes; a tampered or replaced overlay never rides through on
+            # carrier selection.
+            if name in GROK47_MERGED_SOURCE_DIGESTS:
+                historical = root.parent / "grok47" / "overlay" / name
+                if (historical.is_symlink() or not historical.is_file()
+                        or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
             source = root / "candidate" / name
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("application carrier source is not a regular file: " + name)
             raw = source.read_bytes()
             if sha(raw) != application_carrier[name]:
                 raise ValueError("application carrier source changed during build")
