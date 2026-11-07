@@ -7,6 +7,7 @@ import {createNativeClient,bindMissionHost} from "./host";
 import company from "./fixtures/office-company-priorities-source.json";
 import office from "./fixtures/office-existing-reads-source.json";
 import work from "./fixtures/work-service-available.json";
+import {companyPriorityDisplayName} from "./meta-ceo/CompanyPrioritiesRead";
 beforeEach(()=>{vi.spyOn(Date,"now").mockReturnValue(company.clock.verified_at*1000);history.replaceState(null,"","/os/");delete window.MastermindMissionHost});
 afterEach(()=>{cleanup();delete window.MastermindMissionHost;vi.restoreAllMocks()});
 async function setup(hold=false){let release!:(v:unknown)=>void;const pending=new Promise(r=>release=r),listeners=new Map<string,(e:{payload:unknown})=>void>();const invoke=vi.fn(async(command:string)=>{
@@ -24,7 +25,15 @@ it("explicit actual App read shows authored priorities/criteria and source, then
  const f=await setup();expect(f.invoke.mock.calls.filter(([c])=>c==="read_company_priorities")).toHaveLength(0);
  const draft=screen.getByRole("textbox",{name:"Direction to Meta-CEO"});fireEvent.change(draft,{target:{value:"Keep exactly this unsent company question."}});
  fireEvent.click(within(f.section).getByRole("button",{name:"Read company priorities"}));
- await within(f.section).findByText(company.response.priorities[0].objective,{exact:true});
+ const list=await within(f.section).findByRole("list",{name:"Active priorities"});
+ const rows=[...list.querySelectorAll<HTMLDetailsElement>("details[data-priority-id]")];
+ expect(rows.map(r=>r.dataset.priorityId)).toEqual(company.response.priorities.filter(p=>p.status==="active").map(p=>p.id));
+ expect(rows.every(r=>!r.open)).toBe(true);
+ expect(within(f.section).getAllByText("Authored company priorities")).toHaveLength(1);
+ const first=within(list).getByText(companyPriorityDisplayName(company.response.priorities[0].id,"en"),{exact:true});
+ fireEvent.click(first);expect(rows[0].open).toBe(true);
+ expect(within(rows[0]).getByText(company.response.priorities[0].objective,{exact:true})).toBeTruthy();
+ expect(within(rows[0]).getByText(new RegExp(company.response.priorities[0].id))).toBeTruthy();
  fireEvent.click(within(f.section).getByText("Declared phase-review criteria",{exact:true}));expect(within(f.section).getByText(company.response.phase_review_criteria.SELL_READY.criteria[0],{exact:true})).toBeTruthy();
  fireEvent.click(within(f.section).getByText("Company source details",{exact:true}));expect(within(f.section).getByText(new RegExp(company.response.source.revision))).toBeTruthy();
  expect(screen.getByText("The critical path is unavailable. The owner’s next action remains visible.")).toBeTruthy();
@@ -35,3 +44,5 @@ it.each(["globalHost","executiveEpoch"])("no-render %s withdrawal withholds late
 it("current Executive withdrawal clears already-read company text",async()=>{const f=await setup();fireEvent.click(within(f.section).getByRole("button",{name:"Read company priorities"}));await within(f.section).findByText(company.response.priorities[0].objective,{exact:true});await act(async()=>f.withdraw());await waitFor(()=>expect(screen.queryByText(company.response.priorities[0].objective,{exact:true})).toBeNull());expect(screen.getByText("Company priorities are unavailable. No company conclusion can be drawn from this read.")).toBeTruthy()});
 
 it("a replaced original Executive read method is not admitted by the bound Host",async()=>{const f=await setup();const replacement=vi.fn(async()=>structuredClone(company.response));Object.assign(f.client.executive!,{companyPriorities:replacement});fireEvent.click(within(f.section).getByRole("button",{name:"Read company priorities"}));await act(async()=>Promise.resolve());expect(replacement).not.toHaveBeenCalled();expect(f.invoke.mock.calls.filter(([c])=>c==="read_company_priorities")).toHaveLength(0);expect(screen.queryByText(company.response.priorities[0].objective,{exact:true})).toBeNull()});
+
+it("unknown priority identifiers keep a readable fallback without an invented summary",()=>{expect(companyPriorityDisplayName("UNKNOWN_SOURCE_PRIORITY","en")).toBe("Unknown source priority");expect(companyPriorityDisplayName("UNKNOWN_SOURCE_PRIORITY","zh-CN")).toBe("Unknown source priority")});

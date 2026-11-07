@@ -2,6 +2,16 @@ import "./CompanyPrioritiesRead.css";
 import {useEffect,useRef,useState} from "react";
 import type {MissionHost} from "../host";
 import type {CompanyPriorities,CompanyPrioritiesOwner} from "./company-priorities";
+/** Display-name translations of source identifiers, not new authored summaries or ranks. */
+export function companyPriorityDisplayName(id:string,locale:"en"|"zh-CN") {
+ const names:Record<string,readonly [string,string]>={
+  CORE_INTELLIGENCE_PRODUCTIZATION:["Core intelligence productization","核心情报产品化"],
+  PREMIUM_PRODUCT_EXPERIENCE:["Premium product experience","高端产品体验"],
+  DISTRIBUTION_AND_REVENUE:["Distribution and revenue","分发与营收"],
+  AUTONOMY_FORCE_MULTIPLIER:["Autonomy force multiplier","自主化增效"],
+ };
+ return names[id]?.[locale==="zh-CN"?1:0]??id.toLowerCase().replaceAll("_"," ").replace(/^./,c=>c.toUpperCase());
+}
 /** Explicit authored company READ, independent of selected project or unsent draft. */
 export function CompanyPrioritiesRead({host,locale="en"}:{host:MissionHost|undefined;locale?:"en"|"zh-CN"}){
  const t=(en:string,zh:string)=>locale==="zh-CN"?zh:en,owner=host?.companyPriorities;
@@ -18,17 +28,23 @@ export function CompanyPrioritiesRead({host,locale="en"}:{host:MissionHost|undef
  const status=(s:string)=>({paused:t("Paused","已暂停"),achieved:t("Achieved","已达成"),retired:t("Retired","已归档")}[s]??s);
  return <section className="office-panel office-company-priorities" aria-labelledby="office-company-priorities-title" lang={locale}>
   <h2 id="office-company-priorities-title">{t("Company priorities","公司优先事项")}</h2>
-  <p className="office-muted">{t("Authored strategy and declared review criteria. They do not establish adoption, readiness or permission to act.","已编写的战略与已声明的审查条件；不代表采纳、就绪或行动权限。")}</p>
+  <p className="office-muted">{t("Authored company priorities","已编写的公司优先事项")}</p>
   <button ref={button} type="button" disabled={!current()||phase==="pending"} onClick={()=>void acquire()}>{phase==="pending"?t("Reading company priorities…","正在读取公司优先事项…"):t("Read company priorities","读取公司优先事项")}</button>
   {(phase==="unavailable"||!current())&&<p role="status">{t("Company priorities are unavailable. No company conclusion can be drawn from this read.","公司优先事项暂不可用。不能据此次读取得出公司层面的结论。")}</p>}
   {value&&<>
    <p>{t("Authored as of","编写日期")} {value.as_of}</p>
-   <details className="office-disclosure"><summary>{t("Company direction in the source","来源中编写的公司方向")}</summary><ul>{value.north_star.map((n,i)=><li key={i}>{n}</li>)}</ul></details>
-   <h3>{t("Active priorities","当前优先事项")}</h3>
-   <ul className="office-lanes">{active.map(p=><li key={p.id}><div><p>{p.objective}</p><details className="office-raw"><summary>{t("Source reference","来源引用")}</summary><p className="office-ref">{p.id} · {p.department}</p></details></div></li>)}</ul>
+   <ul className="office-lanes office-company-priority-list" aria-label={t("Active priorities","当前优先事项")}>
+    {active.map(p=><li key={p.id}><details data-priority-id={p.id}>
+     <summary>{companyPriorityDisplayName(p.id,locale)}</summary>
+     <div className="office-company-priority-detail"><p>{p.objective}</p>
+      <p className="office-ref">{t("Source reference","来源引用")}: {p.id} · {p.department}</p>
+     </div>
+    </details></li>)}
+   </ul>
    {!active.length&&<p>{t("No active priority is declared in this source.","此来源未声明当前优先事项。")}</p>}
+   <details className="office-disclosure"><summary>{t("Company direction in the source","来源中编写的公司方向")}</summary><ul>{value.north_star.map((n,i)=><li key={i}>{n}</li>)}</ul></details>
    <details className="office-disclosure"><summary>{t("Declared phase-review criteria","已声明的阶段审查条件")}</summary><p>{t("These are review criteria, not evaluated results or a ranked critical path.","这些是审查条件，不是已评估的结果或已排序的关键路径。")}</p>{Object.entries(value.phase_review_criteria).map(([key,g])=><section key={key}><h3 className="office-ref">{key}</h3><p>{g.purpose}</p><ul>{g.criteria.map((c,i)=><li key={i}>{c}</li>)}</ul><p>{t("Declared follow-up after a qualified pass","确认通过后声明的后续事项")}: {g.on_pass}</p></section>)}</details>
-   <details className="office-raw"><summary>{t("Company source details","公司来源详情")}</summary><p className="office-ref">{value.source.path} · {value.source.revision}</p><p>{t("Observed","观测时间")}: {value.source.observed_at}</p><p className="office-ref">{value.authority} · {value.company_phase}</p>{other.map(p=><p key={p.id} className="office-ref">{p.id} · {status(p.status)} · {p.objective}</p>)}</details>
+   <details className="office-raw"><summary>{t("Company source details","公司来源详情")}</summary><p>{t("Authored strategy and declared review criteria. They do not establish adoption, readiness or permission to act.","已编写的战略与已声明的审查条件；不代表采纳、就绪或行动权限。")}</p><p className="office-ref">{value.source.path} · {value.source.revision}</p><p>{t("Observed","观测时间")}: {value.source.observed_at}</p><p className="office-ref">{value.authority} · {value.company_phase}</p>{other.map(p=><p key={p.id} className="office-ref">{p.id} · {status(p.status)} · {p.objective}</p>)}</details>
   </>}
  </section>;
 }
