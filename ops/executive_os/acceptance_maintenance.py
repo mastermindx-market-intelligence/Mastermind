@@ -2846,7 +2846,10 @@ class _UnstartedPreproofGuard:
         try:
             initial = os.fstat(fd)
             named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-            if (_identity(initial) != _identity(named)
+            # Shared ancestor metadata may change between these observations.
+            # Every file and exact namespace retains the full stat identity.
+            identity = self._ancestor_identity if directory and not exact else _identity
+            if (identity(initial) != identity(named)
                     or not (stat.S_ISDIR(initial.st_mode) if directory
                             else stat.S_ISREG(initial.st_mode))):
                 raise MaintenanceError("retained supersession entry is unsafe")
