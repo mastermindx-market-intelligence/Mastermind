@@ -187,7 +187,10 @@ def _book_rows(portfolio_id: str, benchmark: str, asof: date) -> list[dict]:
                 rows.append({"date": d_iso, "ticker": tk,
                              "outcome": 1 if r >= 0 else 0,
                              "conf": _calib._conviction_conf(h.get("conviction")),
-                             "rel": r, "verb": "hold", "benchmark": benchmark})
+                             "rel": r, "verb": "hold", "benchmark": benchmark,
+                             "decision_timestamp": row.get("ts"),
+                             "decision_id": row.get("decision_id"),
+                             "perception_input": row.get("perception_input")})
     except Exception:  # noqa: BLE001
         pass
     return rows

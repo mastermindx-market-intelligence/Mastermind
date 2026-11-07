@@ -1,0 +1,7 @@
+--- a/artifact_production.py
++++ b/artifact_production.py
+@@ -70 +70,3 @@
+-        path = Path(here) / name
++        path = (Path(here).parent / "orch/fabric/pools.yaml"
++                if name == "pools.yaml" and not os.path.lexists(Path(here) / name)
++                else Path(here) / name)

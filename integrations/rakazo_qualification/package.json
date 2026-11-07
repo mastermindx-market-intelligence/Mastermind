@@ -1,0 +1,14 @@
+{
+  "name": "rakazo-qualification",
+  "private": true,
+  "type": "module",
+  "description": "Hermetic observations of pinned Rakazo c5e66e010ee3f3166d2ad216f928a75a0b9a2218.",
+  "scripts": {
+    "test": "node ./run-tests.mjs"
+  },
+  "dependencies": {
+    "@orpc/contract": "1.15.7",
+    "croner": "10.0.1",
+    "zod": "4.6.7"
+  }
+}

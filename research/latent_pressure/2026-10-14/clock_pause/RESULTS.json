@@ -1,0 +1,303 @@
+{
+  "id": "LP-CLOCK-04",
+  "run_at": "2026-10-15T05:08:25.936007+00:00",
+  "status": "RESEARCH_ONLY_PREVIOUSLY_SEEN_SINGLE_DAY",
+  "training_n": 1511,
+  "evaluation_n": 2168,
+  "input_sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+  "code_sha256": "4a269a8836f84222ea2fd9b15b61af3f003519d709e7950a048dc8abde3d3f92",
+  "dependency_sha256": "32fed64cd891b662ec69253a0957fb43548e891ac305fed74394fc03a4548104",
+  "protocol_sha256": "b00591f62000091cd0b501dd6455638472f74b1092d55ac1a1497bc10ff6ec49",
+  "source_scope": "IEX displayed L executions only; source-send clock, not end-user availability",
+  "class_names": [
+    "NO_STANDARD_OBSERVATION",
+    "DOWN",
+    "SAME",
+    "UP"
+  ],
+  "coverage": {
+    "AAPL": {
+      "ELIGIBLE": 659,
+      "STANDARD_REFERENCE_OLDER_THAN_300_SECONDS": 2
+    },
+    "MSFT": {
+      "ELIGIBLE": 645,
+      "STANDARD_REFERENCE_OLDER_THAN_300_SECONDS": 16
+    },
+    "NVDA": {
+      "ELIGIBLE": 661
+    },
+    "AMD": {
+      "INSUFFICIENT_STANDARD_HISTORY": 352,
+      "ELIGIBLE": 232,
+      "STANDARD_REFERENCE_OLDER_THAN_300_SECONDS": 77
+    },
+    "MU": {
+      "ELIGIBLE": 434,
+      "STANDARD_REFERENCE_OLDER_THAN_300_SECONDS": 227
+    },
+    "INTC": {
+      "ELIGIBLE": 660,
+      "STANDARD_REFERENCE_OLDER_THAN_300_SECONDS": 1
+    },
+    "SPY": {
+      "ELIGIBLE": 661
+    },
+    "XLV": {
+      "INSUFFICIENT_STANDARD_HISTORY": 58,
+      "ELIGIBLE": 526,
+      "STANDARD_REFERENCE_OLDER_THAN_300_SECONDS": 77
+    }
+  },
+  "metrics": {
+    "constant": {
+      "n": 2168,
+      "class_counts": [
+        867,
+        565,
+        39,
+        697
+      ],
+      "brier4": 0.6805401784926582,
+      "logloss4": 1.1753682699017285,
+      "availability_brier": 0.2474424230812252,
+      "conditional_direction_n": 1301,
+      "conditional_direction_brier": 0.5240329227289886,
+      "conditional_direction_accuracy": 0.5357417371252883,
+      "availability_calibration": [
+        {
+          "lower": 0.6,
+          "n": 2168,
+          "predicted": 0.6864686468646866,
+          "observed": 0.6000922509225092
+        }
+      ],
+      "logloss_decomposition_exact": true
+    },
+    "baseline": {
+      "n": 2168,
+      "class_counts": [
+        867,
+        565,
+        39,
+        697
+      ],
+      "brier4": 0.7011975074987135,
+      "logloss4": 1.2468276187886982,
+      "availability_brier": 0.25844537893348657,
+      "conditional_direction_n": 1301,
+      "conditional_direction_brier": 0.5517724898231753,
+      "conditional_direction_accuracy": 0.5026902382782475,
+      "availability_calibration": [
+        {
+          "lower": 0.0,
+          "n": 495,
+          "predicted": 0.11298564112812465,
+          "observed": 0.33535353535353535
+        },
+        {
+          "lower": 0.2,
+          "n": 738,
+          "predicted": 0.280971628694555,
+          "observed": 0.5392953929539296
+        },
+        {
+          "lower": 0.4,
+          "n": 603,
+          "predicted": 0.5319911659876156,
+          "observed": 0.7694859038142621
+        },
+        {
+          "lower": 0.6,
+          "n": 332,
+          "predicted": 0.6438433919209348,
+          "observed": 0.822289156626506
+        }
+      ],
+      "logloss_decomposition_exact": true
+    },
+    "pause": {
+      "n": 2168,
+      "class_counts": [
+        867,
+        565,
+        39,
+        697
+      ],
+      "brier4": 0.6955062771939137,
+      "logloss4": 1.2403639034909322,
+      "availability_brier": 0.25443844112810515,
+      "conditional_direction_n": 1301,
+      "conditional_direction_brier": 0.5537037745298228,
+      "conditional_direction_accuracy": 0.5003843197540354,
+      "availability_calibration": [
+        {
+          "lower": 0.0,
+          "n": 485,
+          "predicted": 0.11564621082795751,
+          "observed": 0.33814432989690724
+        },
+        {
+          "lower": 0.2,
+          "n": 736,
+          "predicted": 0.29280654573896764,
+          "observed": 0.5244565217391305
+        },
+        {
+          "lower": 0.4,
+          "n": 616,
+          "predicted": 0.5251714016109832,
+          "observed": 0.7646103896103896
+        },
+        {
+          "lower": 0.6,
+          "n": 328,
+          "predicted": 0.65737984672009,
+          "observed": 0.8445121951219512
+        },
+        {
+          "lower": 0.8,
+          "n": 3,
+          "predicted": 0.8221583883616542,
+          "observed": 1.0
+        }
+      ],
+      "logloss_decomposition_exact": true
+    }
+  },
+  "fit": {
+    "baseline": {
+      "availability": {
+        "iterations": 27,
+        "converged": true
+      },
+      "conditional_direction": {
+        "iterations": 58,
+        "converged": true
+      },
+      "feature_count": 18
+    },
+    "pause": {
+      "availability": {
+        "iterations": 39,
+        "converged": true
+      },
+      "conditional_direction": {
+        "iterations": 66,
+        "converged": true
+      },
+      "feature_count": 24
+    }
+  },
+  "training_last_outcome_ns": "1791215970000000000",
+  "evaluation_first_origin_ns": "1791219600000000000",
+  "checks": {
+    "prefix_exact_equality": true,
+    "future_based_eligibility": false,
+    "unobserved_future_kept_distinct": true,
+    "strict_label_embargo": true
+  },
+  "gains": {
+    "joint": {
+      "mean": 0.005691230304799816,
+      "descriptive_block_interval95": [
+        -0.0006561106551715793,
+        0.011842558919050021
+      ],
+      "blocks": 5,
+      "replicates": 1000,
+      "independent_days": 1,
+      "population_significance_established": false
+    },
+    "availability": {
+      "mean": 0.004006937805381355,
+      "descriptive_block_interval95": [
+        0.0022374844377459637,
+        0.005742818661997981
+      ],
+      "blocks": 5,
+      "replicates": 1000,
+      "independent_days": 1,
+      "population_significance_established": false
+    },
+    "direction": {
+      "mean": -0.0019312847066475017,
+      "descriptive_block_interval95": [
+        -0.012608325509159494,
+        0.008188932883380346
+      ],
+      "blocks": 5,
+      "replicates": 1000,
+      "independent_days": 1,
+      "population_significance_established": false
+    }
+  },
+  "per_ticker": {
+    "AAPL": {
+      "n": 299,
+      "direction_n": 219,
+      "joint_gain": 0.02193459764753409,
+      "direction_gain": -0.009734703973272302,
+      "no_standard_observation_fraction": 0.26755852842809363
+    },
+    "AMD": {
+      "n": 224,
+      "direction_n": 54,
+      "joint_gain": -0.0006531061230721323,
+      "direction_gain": -0.001293097490932042,
+      "no_standard_observation_fraction": 0.7589285714285714
+    },
+    "INTC": {
+      "n": 300,
+      "direction_n": 211,
+      "joint_gain": -0.005466174144933961,
+      "direction_gain": -0.013994148387263533,
+      "no_standard_observation_fraction": 0.2966666666666667
+    },
+    "MSFT": {
+      "n": 286,
+      "direction_n": 161,
+      "joint_gain": 0.005973001267370594,
+      "direction_gain": 0.002412862147040916,
+      "no_standard_observation_fraction": 0.4370629370629371
+    },
+    "MU": {
+      "n": 190,
+      "direction_n": 43,
+      "joint_gain": 0.0022560279461597693,
+      "direction_gain": -0.005620665781712172,
+      "no_standard_observation_fraction": 0.7736842105263158
+    },
+    "NVDA": {
+      "n": 301,
+      "direction_n": 268,
+      "joint_gain": 0.014904844088663822,
+      "direction_gain": 0.007427218575379946,
+      "no_standard_observation_fraction": 0.10963455149501661
+    },
+    "SPY": {
+      "n": 301,
+      "direction_n": 239,
+      "joint_gain": 0.002613363002537175,
+      "direction_gain": 0.002510985255715343,
+      "no_standard_observation_fraction": 0.2059800664451827
+    },
+    "XLV": {
+      "n": 267,
+      "direction_n": 106,
+      "joint_gain": 0.0005857176500067664,
+      "direction_gain": -0.0009010461354394905,
+      "no_standard_observation_fraction": 0.602996254681648
+    }
+  },
+  "filtered_silence": {
+    "eligible_origins": 2168,
+    "standard_age_ge60_origins": 819,
+    "with_other_L_activity_in_last60s": 737,
+    "fraction_of_standard_quiet": 0.8998778998778999,
+    "not_market_wide_or_directional": true
+  },
+  "candidate_to_replicate_only_gate": false,
+  "forecast_authority": "NONE_REGARDLESS_OF_GATE",
+  "private_predictions_sha256": "a19071651576d11647dcb579cb6ca1064719995dd768b99eb535edd2b44b8c85"
+}

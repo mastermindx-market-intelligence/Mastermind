@@ -605,6 +605,52 @@ def test_merged_non_merge_completion_with_nonterminal_proof_is_proof_open(health
     assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
 
 
+@pytest.mark.parametrize(
+    "proof_state",
+    ["OPEN", "NOT_BUILT", "SPEC_ONLY", "PARTIAL", "BUILT_NOT_PROVEN", "BLOCKED"],
+)
+def test_uppercase_nonterminal_owner_proof_prevents_false_linear_done(healthy, proof_state):
+    """Real uppercase capability evidence must not be misclassified as unknown."""
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["proof_state"] = proof_state
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
+
+
+@pytest.mark.parametrize("proof_state", ["COMPLETE", "PROVEN_LIVE", "NOT_REQUIRED"])
+def test_uppercase_terminal_owner_proof_is_classified_without_false_green(healthy, proof_state):
+    """Only a *known* terminal proof value can satisfy an exact completion owner."""
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["proof_state"] = proof_state
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
+
+
+def test_uppercase_built_not_proven_merged_pr_reports_open_proof(healthy):
+    """A merged green implementation remains unfinished when canonical proof is uppercase."""
+    changed = copy.deepcopy(healthy)
+    changed["github"]["pull_requests"][0].update(
+        {"state": "merged", "merge_sha": SHA_C, "proof_state": "BUILT_NOT_PROVEN"}
+    )
+    codes = _codes(changed)
+    assert "GITHUB_MERGE_WITH_PROOF_OPEN" in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
+
+
+def test_unknown_uppercase_future_proof_remains_blocking_uncertainty(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["github"]["pull_requests"][0].update(
+        {"state": "merged", "merge_sha": SHA_C, "proof_state": "FUTURE_EVIDENCE_UNKNOWN"}
+    )
+    codes = _codes(changed)
+    assert "GITHUB_MERGE_WITH_PROOF_OPEN" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in codes
+
+
 def test_ordinary_open_carrier_progress_is_not_unexpected_head_movement(healthy):
     """The original pickup SHA is provenance and may differ after lawful commits."""
 

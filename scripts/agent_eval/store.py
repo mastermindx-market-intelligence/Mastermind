@@ -184,15 +184,32 @@ class ArtifactStore:
     ``MemoryArtifactResolver`` is a separate, narrower implementation under
     ``tests/agent_eval_factories.py``)."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, create_root: bool = True) -> None:
+        # Read-only consumers can require an existing store without creating a root.
+        # This narrows accidental init races; the existing trusted-root
+        # filesystem contract does not claim hostile same-user race immunity.
+        if type(create_root) is not bool:
+            raise TypeError("create_root must be a boolean")
         root_path = Path(root)
-        if root_path.exists() and root_path.is_symlink():
-            raise ContractError([ContractDefect("$", "ROOT_IS_SYMLINK", "artifact store root must not be a symlink")])
-        if not root_path.exists():
+        try:
+            before = root_path.lstat()
+        except FileNotFoundError:
+            if not create_root:
+                raise
             root_path.mkdir(parents=True, exist_ok=False, mode=0o700)
-        elif not root_path.is_dir():
+            before = root_path.lstat()
+        if stat.S_ISLNK(before.st_mode):
+            raise ContractError([ContractDefect("$", "ROOT_IS_SYMLINK", "artifact store root must not be a symlink")])
+        if not stat.S_ISDIR(before.st_mode):
             raise ContractError([ContractDefect("$", "ROOT_NOT_A_DIRECTORY", "artifact store root must be a directory")])
-        self._root = root_path.resolve(strict=True)
+        resolved = root_path.resolve(strict=True)
+        # Reject ordinary path substitution between root classification and
+        # canonicalization. No writes are performed when create_root=False.
+        after = root_path.lstat()
+        if (not stat.S_ISDIR(after.st_mode)
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+            raise ContractError([ContractDefect("$", "ROOT_CHANGED", "artifact store root changed during initialization")])
+        self._root = resolved
 
     @property
     def root(self) -> Path:

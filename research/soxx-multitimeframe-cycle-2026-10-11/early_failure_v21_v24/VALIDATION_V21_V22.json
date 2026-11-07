@@ -1,0 +1,14 @@
+{
+  "schema": "soxx.v21_v22.honest_derived_ledger_verification.v1",
+  "v21_records": 1638,
+  "v21_rule_accounting_verifications": 1092,
+  "v22_episode_stage_records": 182,
+  "walkforward_eligible_later_cases": 90,
+  "walkforward_action_count": 23,
+  "walkforward_no_prior_training_cases": 92,
+  "source_SHA_v21": "09154bc94d685cf11b9a7bd37570c2a5d7f517663f808da857f01db231b492d9",
+  "source_SHA_v22": "0349831747d5cc1c382618ce207f5cf17834dfffe2d0af39ff4c8e2e80601f60",
+  "true_tick_historical_fill_proven": false,
+  "unseen_market_history_proven": false,
+  "model_decision_not_accepted_for_trading": true
+}

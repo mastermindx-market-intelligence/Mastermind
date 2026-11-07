@@ -1,0 +1,4 @@
+{
+  "answer": "PRESERVE_DIRT_AND_RECONCILE_CUSTODY",
+  "rationale": "Remote CI does not erase local work or establish source-writer release."
+}

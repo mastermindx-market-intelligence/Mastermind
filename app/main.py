@@ -224,6 +224,9 @@ if FastAPI is not None:
         role: str = "deep"
         max_turns: int | None = None
         resume: str | None = None     # continue a prior research session by id
+        conversation_id: str | None = None  # Fabric protocol continuity; never an SDK token
+        turn_id: str | None = None
+        recover_only: bool = False
 
     def _reject_archived_run(portfolio_id: str) -> None:
         """HTTP 410 before locks/imports/model calls for a retired portfolio runner."""
@@ -615,6 +618,17 @@ if FastAPI is not None:
         searches the web/news, reasons through 2nd/3rd-order effects, and writes conclusions
         back to the app (research notes, proposed theses, emerging-theme flags). Paper-only —
         nothing auto-executes."""
+        if req.turn_id is not None and not req.conversation_id:
+            raise HTTPException(status_code=400, detail="conversation_id_required_with_turn_id")
+        if req.recover_only and (not req.turn_id or not req.conversation_id):
+            raise HTTPException(status_code=400, detail="recovery_identity_required")
+        from brain import fabric_chat
+        if fabric_chat.selected():
+            return await fabric_chat.research(
+                req.prompt, role=req.role, max_turns=req.max_turns, resume=req.resume,
+                conversation_id=req.conversation_id, turn_id=req.turn_id, recover_only=req.recover_only)
+        if req.recover_only:
+            raise HTTPException(status_code=409, detail="fabric_recovery_unavailable")
         return await cli_bridge.research(
             req.prompt, role=req.role, max_turns=req.max_turns, resume=req.resume)
 
@@ -624,6 +638,8 @@ if FastAPI is not None:
     class ChatReq(BaseModel):
         message: str
         conversation_id: str | None = None   # carry across turns to keep context
+        turn_id: str | None = None            # stable across recovery of this message
+        recover_only: bool = False             # receipt lookup; never fresh inference
 
     def _sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, default=str)}\n\n"
@@ -637,13 +653,37 @@ if FastAPI is not None:
         Each SSE frame is a JSON event: start | text | tool | tool_result | done | error.
         Pass back `conversation_id` (from the `start` frame) on the next turn for continuity.
         """
-        from brain import advisor
+        from brain import advisor, fabric_chat
 
+        if req.turn_id is not None and not req.conversation_id:
+            raise HTTPException(status_code=400, detail="conversation_id_required_with_turn_id")
+        if req.recover_only and (not req.turn_id or not req.conversation_id):
+            raise HTTPException(status_code=400, detail="recovery_identity_required")
         conv_id = req.conversation_id or advisor.new_conversation_id()
+        if fabric_chat.selected():
+            from contextlib import aclosing
+
+            async def fabric_events():
+                async with aclosing(fabric_chat.chat_stream(
+                        req.message, conversation_id=conv_id, turn_id=req.turn_id,
+                        recover_only=req.recover_only)) as events:
+                    async for event in events:
+                        yield _sse(event)
+
+            return StreamingResponse(fabric_events(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        if req.recover_only:
+            raise HTTPException(status_code=409, detail="fabric_recovery_unavailable")
+        try:
+            if advisor.conversation_backend(conv_id) == "fabric":
+                raise HTTPException(status_code=409, detail="conversation_backend_mismatch")
+        except advisor.FabricConversationError:
+            raise HTTPException(status_code=409, detail="conversation_unavailable") from None
         resume = advisor.get_session(conv_id)
 
         async def gen():
-            yield _sse({"type": "start", "conversation_id": conv_id})
+            yield _sse({"type": "start", "conversation_id": conv_id,
+                        "backend": cli_bridge._selected_backend()})
             advisor.append_turn(conv_id, "user", req.message)
             last_sid, acc, tools, papers = resume, "", [], []
             try:
@@ -661,8 +701,8 @@ if FastAPI is not None:
                     elif et == "done" and ev.get("session_id"):
                         last_sid = ev["session_id"]
                     yield _sse(ev)
-            except Exception as exc:                       # never leave the stream hanging
-                yield _sse({"type": "error", "error": repr(exc)[:300]})
+            except Exception:                              # never leave the stream hanging
+                yield _sse(cli_bridge.public_chat_error_event())
             finally:
                 advisor.set_session(conv_id, last_sid)
                 advisor.append_turn(conv_id, "brain", acc, tools, papers)
