@@ -198,6 +198,22 @@ class PolicyEnrollment(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'fixed_account_home'):
                 policy._scope(None, os.getuid(), 'linux', 'ubuntu4', 'ubuntu4-MS-7E61')
 
+    def test_public_reasons_are_closed_and_never_exception_text(self):
+        import errno
+        cases = [(policy.storage.InstallHeld('active_or_unknown_marker'),'ACTIVE_OR_UNKNOWN_MARKER'),
+                 (policy.storage.InstallHeld('owner_or_mode'),'OWNER_OR_MODE_UNQUALIFIED'),
+                 (FileNotFoundError(errno.ENOENT,'private path token'),'REQUIRED_PATH_ABSENT'),
+                 (PermissionError(errno.EACCES,'private path token'),'OS_ACCESS_REFUSED'),
+                 (OSError(errno.ELOOP,'private path token'),'SYMLINK_REFUSED'),
+                 (ValueError('private path token'),'UNCLASSIFIED'),
+                 (policy.storage.InstallHeld('private path token'),'UNCLASSIFIED'),
+                 (OSError(errno.EIO,'private path token'),'OS_ERROR_UNCLASSIFIED')]
+        for exc,expected in cases:
+            self.assertEqual(policy.public_reason(exc),expected)
+            self.assertNotIn('private',policy.public_reason(exc))
+        class Foreign(OSError):pass
+        self.assertEqual(policy.public_reason(Foreign(errno.ENOENT,'private')),'UNCLASSIFIED')
+
     def test_plan_has_no_dispatch_and_rejects_pin_drift(self):
         class Driver:
             SSH = ['existing-ssh-owner']

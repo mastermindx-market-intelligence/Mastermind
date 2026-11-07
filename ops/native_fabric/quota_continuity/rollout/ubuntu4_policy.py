@@ -193,6 +193,39 @@ def operate(*, kind, payload=None, expected_after=None, expected_before=None,
             os.close(fd)
 
 
+
+def public_reason(exc):
+    """Closed diagnostic labels only; never expose exception prose or paths."""
+    if type(exc) is storage.InstallHeld and len(exc.args) == 1:
+        code = exc.args[0]
+        allowed = {
+            'fixed_host_account': 'HOST_ACCOUNT_MISMATCH',
+            'fixed_account_home': 'ACCOUNT_HOME_MISMATCH',
+            'owner_or_mode': 'OWNER_OR_MODE_UNQUALIFIED',
+            'directory_identity': 'DIRECTORY_UNQUALIFIED',
+            'file_identity': 'FILE_UNQUALIFIED',
+            'file_changed': 'FILE_CHANGED',
+            'admission_lock_identity': 'ADMISSION_LOCK_UNQUALIFIED',
+            'admission_lock_busy': 'ADMISSION_LOCK_BUSY',
+            'admission_lock_changed': 'ADMISSION_LOCK_CHANGED',
+            'directory_changed': 'DIRECTORY_CHANGED',
+            'active_or_unknown_marker': 'ACTIVE_OR_UNKNOWN_MARKER',
+            'active_history_unknown': 'ACTIVE_HISTORY_UNKNOWN',
+            'policy_changed': 'POLICY_CHANGED',
+            'preimage_changed_or_prior_install_hold': 'PREIMAGE_OR_PRIOR_INSTALL_HOLD',
+            'install_effect_unknown_no_replay': 'INSTALL_EFFECT_UNKNOWN',
+        }
+        if type(code) is str:
+            return allowed.get(code, 'UNCLASSIFIED')
+    if type(exc) in {OSError, FileNotFoundError, NotADirectoryError, PermissionError,
+                     FileExistsError, BlockingIOError}:
+        import errno
+        return {errno.ENOENT: 'REQUIRED_PATH_ABSENT', errno.ENOTDIR: 'DIRECTORY_UNQUALIFIED',
+                errno.ELOOP: 'SYMLINK_REFUSED', errno.EACCES: 'OS_ACCESS_REFUSED',
+                errno.EPERM: 'OS_ACCESS_REFUSED', errno.EEXIST: 'TARGET_ALREADY_EXISTS',
+                errno.EBUSY: 'OWNER_BUSY', errno.EAGAIN: 'OWNER_BUSY'}.get(exc.errno, 'OS_ERROR_UNCLASSIFIED')
+    return 'UNCLASSIFIED'
+
 def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
                    expected_module_sha, expected_storage_sha, payload=None,
                    expected_before=None, operation_id=None, original_settled=False,
@@ -239,7 +272,7 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
             'r=json.loads(' + repr(json.dumps(request)) + ')\n'
             'if "payload" in r:r["payload"]=base64.b64decode(r["payload"])\n'
             'try: print(json.dumps(p["operate"](**r),sort_keys=True))\n'
-            'except (OSError,ValueError): print(json.dumps({"state":"HELD_OR_UNKNOWN","replay":False}));raise SystemExit(78)\n')
+            'except (OSError,ValueError) as e: print(json.dumps({"state":"HELD_OR_UNKNOWN","replay":False,"reason":p["public_reason"](e)}));raise SystemExit(78)\n')
     command = shlex.join(['python3', '-c', code])
     return {'kind': kind, 'target': binding, 'argv': driver.SSH + [binding['alias'], command],
             'timeout': 20, 'dispatch_authorized': False,
