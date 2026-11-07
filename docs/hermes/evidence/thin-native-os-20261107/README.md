@@ -24,5 +24,20 @@ conversation, new session/controller owner or automatic resend was performed.
 The single intentional native Create's exact request is
 `9fbc8f4abb944ab1a170b4990e59f729`; canonical session is
 `local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb`.
-The continuation has dispatched zero native Send calls. Remaining real-path
-acceptance must use this existing original through the app after sign-in returns.
+The386 package recovered that original through the actual signed-in UI at
+08:11:32Z. One useful Send UI attempt followed at08:12:38Z; its first status text
+was not captured. Subsequent canonical evidence shows zero messages/admissions,
+and a live no-submit preflight identifies an added unqualified mmx_omh toolset.
+That evidence is distinct from a proven useful answer. The original remains the
+only target; its history and canonical admission owner are preserved.
+
+## Source386 continuation evidence
+
+The386-prefixed receipts record exact package identity, signed-in source/build,
+normal process close/reopen, same-PID minimize/reopen, original9fbc UI recovery,
+and the bounded canonical/preflight diagnostics. See manifest.json for hashes.
+The preflight subscribes once to the existing original; it never creates,
+submits or cancels. The earlier source-equivalence record covers486→8c only,
+not later window/auth changes. The existing source-qualified handoff records
+the new auth-timer and exact review-fixture repairs. Public distribution and
+full useful Send/answer/reconnect acceptance remain unclaimed.

@@ -629,3 +629,90 @@ profile compiled and refresh disabled. Green log:
 Verified source SHA256s: main.rs
 `14be131790c3cb8f4e4e70c20af3c17e360926ba36d2e0725238809d576e0f4d`;
 auth.rs `55844330ebbcd982692bdf867ed766c5ed9e909ee9f64ac8c7900e5e28f643d5`.
+
+
+## Continued native acceptance:386 window, original recovery and scope composition
+
+The current single local debug package is source
+`386578f66392ae79a1759a0d216c102509277fba`, build
+`hermes-thin-native-386578f66392-20261107-pro-04`, app tree
+`f716e579e2ecea103faf610d79af48628c7fe94f`. Binary SHA256:
+`9477afc7ea6aa96ee106931ce367aadc6943d4138344800218b53a57f03d2b16`;
+build receipt SHA256:
+`b9607de94be02b0e6c3cfa374ae7f5166662102344b4d57857b5f7c5de0a8301`.
+The old486 process's AppleEvent quit timed out. After exact PID/UID/executable
+and zero-window reconciliation, one guarded SIGTERM ended that UI before386
+launched. This was not a clean graceful quit; no Hermes service was restarted.
+
+Actual386 close exited PID10887; opening the same bundle restored one window in
+PID31049. A subsequent minimize/open restored that same PID31049 with one
+unminimized window and the callback routed to the exact386 bundle. The
+absent-window reconstruction branch is not claimed exercised. At08:09:26Z the
+app showed Signed in; no completion actor/cause is attributed. At08:11:20Z its
+actual source/build/client, Signed in, Hermes0.23.0 and retained Organization and
+goal lineage were observed. This supersedes the earlier human sign-in request.
+
+At08:11:32Z, one Check previous request recovered the original9fbc creation.
+Readback at08:11:40Z opened the same empty conversation and cleared its hold.
+The original pointer was settled through its owner, not deleted or replaced.
+No new conversation was created.
+
+One actual Check and send message action at08:12:38Z submitted a drafted
+four-bullet internal release-note request through the UI. Its first error/status
+text was not captured; the UI returned to an enabled Send/draft and later reset
+to Not connected while the sidebar stayed Signed in. A reconnect exposed no
+pending pointer. A canonical read-only reconciliation at08:21:44Z found the
+original session with zero messages and no admission rows. This is stored-state
+evidence, not a standalone no-send proof or an accepted answer.
+
+A live, identified preflight at08:24:37Z attached only to that existing original
+session, without create, submit or cancel. It found running=false, pending=[],
+no prompts, generation0, frozen source=tool / toolsets=[] / hooks=false /
+follow_profile_config=false. The effective toolsets were
+`["mastermind-fabric-capacity","mmx_omh"]`, with three deferred bridge schemas.
+The existing adapter correctly classified that extra scope UNQUALIFIED.
+Capacity source qualification was true. The added OMH tool is being traced to
+its exact installed read-only source closure before any scope recognition;
+three visible bridge functions alone do not prove capacity-only reachability.
+Do not blindly replay the message or weaken scope checks. Current useful
+Send/answer/history acceptance remains open.
+
+All386 receipts above are in the
+[existing evidence bundle](evidence/thin-native-os-20261107/README.md), with
+original paths and exact hashes in its manifest. Current386 OS42353143020,
+Hermes42353142768 and CodeQL42353140126 succeeded. OS frontend:384 files,
+6671passed/12skipped. Native:258passed/8ignored in each default/opt-in rotating
+refresh configuration, plus unsigned package/locked-input verification.
+OS/Hermes checked synthetic merge4713daf6814aa0cc25aab3ddaeb7c1aa5aecbe96
+of386 into protected5199647e89166d163392905574097b2cfa16ca5b.
+General CI42353142892 shard5 exposed a stale exact-auth-source review record,
+not a new identity defect: its three unchanged HTTP503 operands moved.
+
+### Completed-transaction timer and exact review-fixture repair
+
+Source inspection found that open_transaction's five-minute timer always emitted
+an auth event, even after its transaction completed. Every such event advances the
+frontend privacy epoch and can remount Hermes while the display still says Signed
+in. This source defect matches the observed reset shape; the actual08:14 event
+is not causally attributed without an event receipt.
+
+The repair emits only when the exact pending transaction's generation and
+deadline are current and due. Completed, consumed/exchanging, replaced and
+logout-stale timers return without announcement. Genuine expiry still uses the
+existing resource-specific failure path and notifies once. No frontend auth-event
+deduplication, timer owner, token refresh or auth authority was added.
+
+Four regressions exercise completed three-resource login, in-progress exchange,
+replacement/logout fencing and one-time real expiry including Executive-resource
+isolation. Full local application tests under the original public Executive
+profile pass242tests/8existing ignored, exit0; refresh remains disabled.
+Log: `/tmp/hermes-thin-auth-timer-native-20261107-pro-05.log`.
+Verified auth.rs SHA256:
+`2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499`.
+
+The exact-source review registry now pins those bytes and only the unchanged
+HTTP503 sites at3613/3618/3622 with their original columns and spellings. Scanner
+and all existing positive/negative assertions are retained. The existing full
+review-fixture test module passes, exit0:
+`/tmp/hermes-thin-auth-review-fixture-20261107-pro-05.log`.
+These source repairs are not relabelled as behavior of the still-running386 app.
