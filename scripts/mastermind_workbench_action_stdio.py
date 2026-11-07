@@ -52,6 +52,7 @@ def main(argv=None) -> int:
                         "prepare_project_command",
                         "run_project_command",
                         "read_action_result",
+                        "read_action_artifact",
                         "reconcile_action",
                     ],
                     "config_schema": "mastermind.workbench_action_tunnel.v1",
