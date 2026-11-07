@@ -121,7 +121,19 @@ class CurrentGenerationClosure(unittest.TestCase):
         manifest=json.loads(raw)
         self.assertEqual(set(manifest), {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e')
+                         '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a')
+        inventory=json.loads((built/'native-source-inventory.json').read_bytes())
+        predecessor=json.loads((rollout/'native-preimages.json').read_bytes())
+        for name in ('host_pull.sh','host_pull_backend.py','host_pull_daemon.sh'):
+            relative='ext/'+name
+            source=(harness.ROOT/'candidate'/name).read_bytes()
+            staged=(built/'native-code-stage'/relative).read_bytes()
+            self.assertEqual(staged,source)
+            self.assertEqual(manifest[relative],hashlib.sha256(source).hexdigest())
+            self.assertEqual(inventory['files'][relative],{
+                'source':'candidate/'+name,'sha256':hashlib.sha256(source).hexdigest(),
+                'bytes':len(source),'installed_preimage_sha256':predecessor['files'].get(name),
+            })
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])
