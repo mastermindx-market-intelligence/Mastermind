@@ -215,4 +215,3 @@ actual authorized M2 host connection exists.
 Do not claim `PROVEN_LIVE`, make a model key visible to Hermes, create a
 shadow router, bypass a safety refusal, or mark a controller PID as a
 successful worker until those exact installed receipts exist.
-

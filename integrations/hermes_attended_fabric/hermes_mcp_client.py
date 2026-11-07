@@ -103,4 +103,3 @@ def bind_native_mcp_client(ctx: Any) -> Callable[[str, Mapping[str, Any]], Mappi
         return dict(document)
 
     return call_tool
-

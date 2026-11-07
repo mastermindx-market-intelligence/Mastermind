@@ -44,4 +44,3 @@ def test_modified_source_or_limit_cannot_inherit_review():
         assert _scan_added_identity_diff(
             _added_diff(changed), source_postimages={PATH: changed}
         ), "changed or identity-bearing source must remain guarded"
-

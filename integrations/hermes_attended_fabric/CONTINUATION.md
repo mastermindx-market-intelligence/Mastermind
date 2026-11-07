@@ -76,15 +76,25 @@ or alternate audit carrier is claimed. The refusal cause remains unresolved.
 
 ## Remaining actions and original custody
 
-D.3: publish this same branch, consume exact-head diff and required CI, and
-use the existing protected merge queue only after applicable gates.
+D.3: PR #2184 is Ready. The original head
+`c9e6100a27b419274b40fd33a2b6a8e89fc2342b` was published and read back.
+Its protected auto-merge request was recorded at 2026-11-07 04:14:35 UTC
+through the head-leased native CLI on M1. The enforced queue owns the SQUASH
+strategy; required GitHub test status remains binding and no formal approval
+is required by the observed native protection. No self-merge or bypass ran.
+CI run `42337509424`, job `128297724897`, stopped at `git diff --check`
+because source materialization added trailing blank lines at EOF. This same
+candidate removes those lines and updates the finite native source digest;
+the functional logic and two reason-limit literal sites are unchanged.
+Consume the corrected exact-head checks and original merge request before
+claiming a protected merged SHA.
 D.4-D.5: the original M2 route preflight refusal is still NOT_APPLIED.
 No enrollment, native plugin installation, gateway restart, provider call,
 real worker START/return or fleet recovery proof ran. The authenticated
 native session/admission owner and execution-MCP enrollment remain required.
-The last published starting checkpoint is commit
-`6e0ff0f29728e5f6410bc189aa7c1cb55000a1a4`; the next code commit carries
-these source results. Preserve both refused operations and all neighboring
+The source checkpoint and first implementation commits are
+`6e0ff0f29728e5f6410bc189aa7c1cb55000a1a4` and
+`c9e6100a27b419274b40fd33a2b6a8e89fc2342b`.
+Preserve both refused operations and all neighboring
 active source/host carriers. No programme completion or production SLA is
 claimed from this source qualification.
-

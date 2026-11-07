@@ -386,4 +386,3 @@ def register_native_tool(ctx: Any, *, authorize_session: Callable[[str], Session
                 raise
             raise FabricNativeRefusal("HERMES_REGISTRATION_READBACK_UNAVAILABLE") from None
         return handle
-

@@ -233,4 +233,3 @@ class FabricFacadePort:
         return {**self._identity(grant, run_id), "state": "TERMINAL",
                 "result_digest": digest, "result_text": body,
                 "worker_started": False}
-
