@@ -116,6 +116,7 @@ def before_admission_integrity(manifest):
         assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) in {
             builder.ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256,
             builder.ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256,
+            builder.ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256,
         }
     return previous
 
@@ -175,7 +176,8 @@ def before_original_artifact_recovery(manifest):
     prior = before_census_runtime(manifest)
     assert prior["ext/original_delivery_collector.py"] in {
         "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
-        "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"}
+        "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
+        "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"}
     prior["ext/original_delivery_collector.py"] = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
     assert len(prior) == 107
     assert prior.pop("ext/original_advertised_artifact.py") == "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0"
@@ -495,9 +497,13 @@ def test_original_collection_successor_preserves_prior_releases_without_backdati
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     key = "ext/original_delivery_collector.py"
     old = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
-    new = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+    prior_forward = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+    new = "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
+    assert (builder.GO_BASE_ORIGINAL_COLLECTOR_SHA256,
+            builder.GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+            builder.GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256) == (old, prior_forward, new)
     assert current[key] == new
-    for digest in (old, new):
+    for digest in (old, prior_forward, new):
         exact = dict(current, **{key: digest})
         before = dict(exact)
         builder.validate_go_base_manifest(exact, captured)
@@ -515,12 +521,113 @@ def test_original_collection_successor_preserves_prior_releases_without_backdati
     for predecessor in (previous, prior, historical):
         assert predecessor[key] == old
         builder.validate_go_base_manifest(predecessor, captured)
-        backdated = dict(predecessor, **{key: new})
-        with pytest.raises(ValueError, match="original collector"):
-            builder.validate_go_base_manifest(backdated, captured)
+        for digest in (prior_forward, new):
+            backdated = dict(predecessor, **{key: digest})
+            with pytest.raises(ValueError, match="original collector"):
+                builder.validate_go_base_manifest(backdated, captured)
     for digest in ("f" * 64, "", None):
         with pytest.raises(ValueError, match="original collector"):
             builder.validate_go_base_manifest(dict(current, **{key: digest}), captured)
+
+
+def test_committed_original_collection_successor_carries_one_qualified_member(builds):
+    """The committed J collector is one exact member of the current closure.
+
+    The successor replaces exactly one source member, so the published
+    generation keeps validating and no other source or entrypoint hash moves.
+    """
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    key = "ext/original_delivery_collector.py"
+    successor = builder.GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256
+    assert current[key] == successor
+    assert g.digest((ROOT / "candidate/original_delivery_collector.py").read_bytes()) == successor
+    # Only that one member differs from the prior published forward lineage.
+    prior_forward = dict(current, **{key: builder.GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256})
+    assert {name for name in current if current[name] != prior_forward[name]} == {key}
+    # The prior lineage is still an accepted complete current closure.
+    for view in (current, prior_forward):
+        before = dict(view)
+        builder.validate_go_base_manifest(view, captured)
+        assert view == before
+
+
+def test_committed_original_collection_successor_keeps_parent_closures_exact(builds):
+    """Each successor parent closure is an exact whole-manifest identity."""
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    key = "ext/original_delivery_collector.py"
+    parent = builder.before_application_pool_composition(current)
+    assert g.digest((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()) == (
+        "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552")
+    installed = builder.before_admission_integrity(parent)
+    assert g.digest((json.dumps(installed, sort_keys=True, indent=2) + "\n").encode()) == (
+        "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82")
+    historical = builder.normalize_application_carrier_base_manifest(current)
+    assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == (
+        "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35")
+    assert (builder.APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256,
+            builder.ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256,
+            builder.APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256) == (
+        "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552",
+        "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82",
+        "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35")
+    # The prior published closures stay accepted for the same projections.
+    prior = dict(current, **{key: builder.GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256})
+    prior_parent = builder.before_application_pool_composition(prior)
+    assert g.digest((json.dumps(prior_parent, sort_keys=True, indent=2) + "\n").encode()) == (
+        builder.APPLICATION_POOL_COMPOSITION_PARENT_SHA256)
+    prior_installed = builder.before_admission_integrity(prior_parent)
+    assert g.digest((json.dumps(prior_installed, sort_keys=True, indent=2) + "\n").encode()) == (
+        builder.ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256)
+    prior_historical = builder.normalize_application_carrier_base_manifest(prior)
+    assert g.digest((json.dumps(prior_historical, sort_keys=True, indent=2) + "\n").encode()) == (
+        builder.APPLICATION_CARRIER_BASE_SHA256)
+    # A single mutated member leaves every successor closure unmatched.
+    for name in ("ext/lease_broker.py", "ext/fabric_task.py", "ext/lane_runtime.py",
+                 "ext/original_delivery_collector.py"):
+        mutated = dict(current)
+        mutated[name] = "f" * 64
+        with pytest.raises(ValueError):
+            builder.normalize_application_carrier_base_manifest(mutated)
+
+
+def test_flagged_build_publishes_the_committed_collector_in_the_complete_release(builds):
+    """The real Go + APPLICATION HTTP build carries the committed collector."""
+    manifest = json.loads((builds.http / "native-manifest.json").read_bytes())
+    inventory = json.loads((builds.http / "native-source-inventory.json").read_bytes())
+    assert len(manifest) == len(inventory["files"]) == 112
+    key = "ext/original_delivery_collector.py"
+    assert manifest[key] == builder.GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256
+    staged = (builds.http / "native-code-stage" / key).read_bytes()
+    assert g.digest(staged) == manifest[key]
+    row = inventory["files"][key]
+    assert row["sha256"] == manifest[key]
+    assert row["bytes"] == len(staged)
+    assert row["source"] == "candidate/original_delivery_collector.py"
+    # Every other member keeps its reviewed source identity.
+    for name, digest in manifest.items():
+        assert inventory["files"][name]["sha256"] == digest
+        assert g.digest((builds.http / "native-code-stage" / name).read_bytes()) == digest
+
+
+def test_installer_go_validation_accepts_the_committed_collector_release(builds):
+    """The unchanged installer's own validation input accepts the new release.
+
+    native_install validates the base closure exactly as the installed owner
+    does: the 112-member bundle manifest minus the Go pair and the HTTP
+    members, with the captured application dependency digests.
+    """
+    manifest = json.loads((builds.http / "native-manifest.json").read_bytes())
+    http_members = builder.HTTP_GENERATION_MEMBERS & set(manifest)
+    assert http_members == builder.HTTP_GENERATION_MEMBERS
+    base = {key: value for key, value in manifest.items()
+            if key not in {g.GO_ENTRY, g.GO_HANDLER} | http_members}
+    assert len(base) == 107
+    dependencies = {name: g.digest((ROOT / "candidate" / name).read_bytes())
+                    for name in builder.GO_APPLICATION_DEPENDENCIES}
+    before = dict(base)
+    builder.validate_go_base_manifest(base, dependencies)
+    assert base == before
 
 
 @pytest.mark.parametrize("corruption", ["binding-absent", "owner-absent", "binding-hash",
@@ -730,7 +837,9 @@ def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(buil
     assert current["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST
     previous = before_request_refusal_task(current)
     historical = before_application_auto_dependencies(previous)
-    assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == "c7cf946bc1d8f13ef7b512d071d85097e1ddc58979af76bf367a7707aa90617d"
+    # This projection keeps the committed collector member, so its exact
+    # identity follows that member and nothing else.
+    assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == "e839488576241625875b01a1b4be23dca342f65636e1a48891a8546ea50e4e4a"
     for manifest in (current, previous):
         before = dict(manifest)
         builder.validate_go_base_manifest(manifest, captured)
@@ -771,7 +880,7 @@ def test_application_carrier_preserves_actual_and_historical_manifest_identity(b
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(current, captured)
     prior = before_application_carrier(current)
-    assert g.digest((json.dumps(prior, sort_keys=True, indent=2) + "\n").encode()) == "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+    assert g.digest((json.dumps(prior, sort_keys=True, indent=2) + "\n").encode()) == "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
     builder.validate_go_base_manifest(prior, captured)
     assert current == before
     assert current != prior
@@ -848,7 +957,7 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     previous = before_admission_integrity(current)
     assert previous != current
     assert {name for name in current if current[name] != previous[name]} == set(builder.ADMISSION_INTEGRITY_DIGESTS)
-    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256
     for manifest in (current, previous):
         unchanged = dict(manifest)
         builder.validate_go_base_manifest(manifest, captured)
@@ -941,9 +1050,9 @@ def test_both_exact_admission_repair_lineages_remain_distinct(builds, lineage):
     else:
         prior = builder.before_application_pool_composition(json.loads((builds.default / "native-manifest.json").read_bytes()))
         raw = (json.dumps(prior, sort_keys=True, indent=2) + "\n").encode()
-        current_identity = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
-        parent_identity = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
-        historical_identity = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+        current_identity = "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
+        parent_identity = "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82"
+        historical_identity = "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
     assert g.digest(raw) == current_identity
     current = json.loads(raw)
     original = dict(current)
@@ -998,11 +1107,11 @@ def test_application_pool_composition_has_one_exact_parent_and_actual_dependenci
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     original = dict(current)
     parent = builder.before_application_pool_composition(current)
-    assert g.digest((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()) == "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+    assert g.digest((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()) == "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
     assert len(current) == len(parent) == 107
     assert {key for key in current if current[key] != parent[key]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
     installed = builder.before_admission_integrity(parent)
-    assert g.digest((json.dumps(installed, sort_keys=True, indent=2) + "\n").encode()) == "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+    assert g.digest((json.dumps(installed, sort_keys=True, indent=2) + "\n").encode()) == "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82"
     assert {key for key in current if current[key] != installed[key]} == (
         set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS) | set(builder.ADMISSION_INTEGRITY_DIGESTS))
     for view in (current, parent):

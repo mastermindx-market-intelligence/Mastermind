@@ -1236,14 +1236,14 @@ _SERVICE_PREDECESSOR = "application-service.predecessor.private.json"
 def _completed_go_for_service(bundle):
     """Read completed original ingress; never call a transition as inspection."""
     bundle = _successor_directory(bundle)
-    origin = _successor_json(bundle / "PLAN.json")
-    schema = origin.get("schema") if type(origin) is dict else None
+    envelope = _successor_json(bundle / "PLAN.json")
+    schema = envelope.get("schema") if type(envelope) is dict else None
     if schema == GO_SCHEMA:
         plan, payloads = read_go(bundle)
     elif schema == GO_RETAINED_SCHEMA:
         plan, payloads = read_retained_go(bundle)
     else:
-        raise ValueError("service enrollment requires a reviewed Go ingress schema")
+        raise ValueError("unsupported completed Go ingress schema")
     intent_name, suffix, _, intent, selected, receipt = _transition_records(plan)
     store = Path(plan["store"])
     if (_successor_json(store / "bootstrap" / intent_name) != intent

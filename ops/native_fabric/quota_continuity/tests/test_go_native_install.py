@@ -450,3 +450,62 @@ def test_interrupted_retained_transition_reconciles_without_second_selection(ret
         receipt = installer.apply_retained_go(case.retained_bundle)
     assert receipt["selection"]["sequence"] == case.retained_plan["expected_selection"]["sequence"] + 1
     assert_retained_history(case)
+
+
+def test_completed_retained_go_proof_is_available_to_service_owner(retained_go_owner):
+    case = retained_go_owner
+    with pytest.raises((ValueError, OSError)):
+        installer._completed_go_for_service(case.retained_bundle)
+    installer.apply_retained_go(case.retained_bundle)
+    with mock.patch.object(g, "atomic_bytes", side_effect=AssertionError("inspection wrote")), \
+            mock.patch.object(g, "_select_locked", side_effect=AssertionError("inspection selected")):
+        plan, selected, root, metadata = installer._completed_go_for_service(case.retained_bundle)
+    assert plan == case.retained_plan
+    assert selected == g.current(case.store)
+    assert root == case.go_target
+    assert metadata["entrypoints"]["go"] == g.GO_ENTRY
+    assert_retained_history(case)
+
+
+@pytest.mark.parametrize("fault", ["receipt", "intent", "pointer", "bridge", "launcher"])
+def test_completed_retained_go_service_proof_keeps_all_native_fences(retained_go_owner, fault):
+    case = retained_go_owner
+    installer.apply_retained_go(case.retained_bundle)
+    if fault == "receipt":
+        (case.store / "bootstrap" / (case.retained_plan["digest"] + ".go.json")).unlink()
+    elif fault == "intent":
+        (case.store / "bootstrap/.go-application-ingress-v1.json").write_bytes(b"{}\n")
+    elif fault == "pointer":
+        current = g.current(case.store)
+        g.select(case.store, current["generation"], current["generation"])
+    elif fault == "bridge":
+        Path(case.retained_plan["entries"]["pool"]["target"]).write_bytes(b"foreign\n")
+    else:
+        (case.store / "launchers" / (case.retained_plan["to_launcher"] + ".py")).unlink()
+    with mock.patch.object(g, "atomic_bytes", side_effect=AssertionError("inspection repaired")), \
+            mock.patch.object(g, "_select_locked", side_effect=AssertionError("inspection selected")), \
+            pytest.raises((ValueError, OSError)):
+        installer._completed_go_for_service(case.retained_bundle)
+
+
+def test_completed_go_service_owner_refuses_unknown_schema_before_reader(go_owner):
+    case = go_owner
+    path = case.go_bundle / "PLAN.json"
+    plan = json.loads(path.read_bytes())
+    plan["schema"] = "foreign.ingress.v1"
+    path.write_text(json.dumps(plan))
+    with mock.patch.object(installer, "read_go", side_effect=AssertionError("unknown strict reader")), \
+            mock.patch.object(installer, "read_retained_go", side_effect=AssertionError("unknown retained reader")), \
+            pytest.raises(ValueError, match="unsupported completed Go ingress schema"):
+        installer._completed_go_for_service(case.go_bundle)
+
+
+def test_completed_go_service_owner_never_falls_back_from_invalid_intact_plan(go_owner):
+    case = go_owner
+    path = case.go_bundle / "PLAN.json"
+    plan = json.loads(path.read_bytes())
+    del plan["target_generation"]
+    path.write_text(json.dumps(plan))
+    with mock.patch.object(installer, "read_retained_go", side_effect=AssertionError("invalid strict plan fell back")), \
+            pytest.raises(ValueError, match="invalid Go ingress plan"):
+        installer._completed_go_for_service(case.go_bundle)
