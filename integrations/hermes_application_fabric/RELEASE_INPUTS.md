@@ -1,5 +1,38 @@
 # Hermes primary release inputs
 
+## Historical APPLICATION v10 composition at 12f57f41
+
+This section records the earlier H4 source join. Its runtime and patch hashes,
+Macro adoption state and proof counts are historical; the installed-source
+qualification and current source inputs below supersede them.
+
+That contribution consumed original #2175 at72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0.
+Its fourteen nonoverlapping changed blobs are retained unchanged; the sole shared
+identity-review registry is composed against552 from both complete sources. All
+edit spans are disjoint, the independent line composition matches Git's merge,
+and every published review entry is retained. The resulting registry blob is
+97b9b771664b978d19a0f60e7dfbfeaea47f76f3. No held implementation was read or rewritten.
+
+This also consumes the original owner's structured-provenance correction for
+the anonymous-Macro-read guard failure observed in887f general CI. The guard and
+its exemptions remain unchanged. Original v10 enrollment, namespace-isolation
+fixtures and the existing enrollment workflow are adopted intact. Current-head
+qualification remains required; the nine successful887f inference jobs do not
+claim execution of this newer native owner.
+
+The primary runtime c8bb8e02 and native patch0029f3c8 are unchanged. The exact
+four-file Macro support proposal has a qualified receiving-contribution return
+ata43c7c2c with383 passed cases and matching postimages. Final-carriercd2ba479 has
+not yet incorporated it. The existing Macro job also has a prepared two-line
+selection/trigger addition for the new93-case module; [original-owner return](https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6709710657).
+
+[Exact composition and prior proof](../../review_evidence/hermes_primary/application-v10-join-20261107.json)
+retain source attribution. Original protected release, actual service/enrollment,
+account qualification and primary/tool/usage/budget/recovery acceptance remain
+separate required receipts. The H6/v10 production-source join remains with its
+original active owner; the earlier87cc/887f registry proposal is only for those
+older exact inputs.
+
 This is the source dependency map for the existing APPLICATION and Hermes
 installation owners. It is not an installed generation, service grant, provider
 credential, routing registry or permission to replay an original effect.
