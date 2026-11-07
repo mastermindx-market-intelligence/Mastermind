@@ -862,6 +862,15 @@ class _EvidenceGuard:
         self.backup_databases: set[Path] = set()
         self.host_roots: tuple[Path, Path] | None = None
         self.system_alias_identity: tuple[Any, ...] | None = None
+        self.current_volume = None
+        self.historical_device: int | None = None
+
+    def persistent_match(self, expected: dict, observed: dict) -> bool:
+        if self.current_volume is None:
+            return expected == observed
+        from ops.executive_os.persistent_origin import persistent_record_matches
+        return persistent_record_matches(expected, observed,
+            volume=self.current_volume, historical_device=self.historical_device)
 
     def temp_directory(self) -> Path:
         self._temp_counter += 1
@@ -876,10 +885,14 @@ class _EvidenceGuard:
 
     def hold(self, item: _HeldFile) -> _HeldFile:
         self.files.append(item)
+        if self.current_volume is not None:
+            self.current_volume.require_path_device(item.path, item.held)
         return item
 
     def check(self) -> list[dict[str, Any]]:
         """Revalidate every retained FD, name, namespace, and hash."""
+        if self.current_volume is not None:
+            self.current_volume.check()
         if self.host_roots is not None:
             if (_host_layout() != self.host_roots
                     or _system_alias_identity(self.host_roots[0]) != self.system_alias_identity):
@@ -927,11 +940,15 @@ class _EvidenceGuard:
             _require_no_sidecars(database, label="retained backup custody")
         for path in self.initial_paths_absent:
             _require_absent(path, label=f"retained custody artifact {path.name}")
+        if self.current_volume is not None:
+            self.current_volume.check()
         return records
 
     def _check_file(self, item: _HeldFile) -> dict[str, Any]:
         held = os.fstat(item.descriptor)
         named = os.lstat(item.path)
+        if self.current_volume is not None:
+            self.current_volume.require_path_device(item.path, held)
         if (
             not stat.S_ISREG(held.st_mode)
             or item.identity() != _identity_tuple(held)
@@ -954,6 +971,9 @@ class _EvidenceGuard:
         return item.origin_record()
 
     def close(self) -> None:
+        # Retain the closed object's identity: a disposed persistent opening
+        # must refuse, never silently fall back to the generic strict reader.
+        volume = self.current_volume
         for item in self.files:
             try:
                 os.close(item.descriptor)
@@ -969,6 +989,8 @@ class _EvidenceGuard:
         if self.temp_root is not None:
             shutil.rmtree(self.temp_root, ignore_errors=True)
             self.temp_root = None
+        if volume is not None:
+            volume.close()
 
 
 def _limit_for(item: _HeldFile) -> int:
@@ -1250,9 +1272,11 @@ def _load_spent_ctime_reconciliation(guard, preflight, state_directory):
         held = dataclasses.replace(held, payload=value, payload_digest=backup._upgrade_digest(value))
         guard.files[-1] = held
         identity = _artifact_reference(held, value)
-        if refs[ref] != identity:
+        if not guard.persistent_match(refs[ref], identity):
             raise RetainedChainInvalid("spent ctime preflight origin differs")
-        identities[ref] = identity
+        # Stored-to-stored joins retain original observations. Current physical
+        # facts stay separately owned by the held guard.
+        identities[ref] = dict(refs[ref])
         records.append(held.origin_record()); payloads.append(value)
     qualification, spent, reconciliation, continuation = payloads
     original = qualification.get("original_barrier", {})
@@ -1904,9 +1928,9 @@ def _verify_current_initial(
         "size": int(held_database.held.st_size),
         "sha256": held_database.sha256,
     }
-    if identity != {key: authoritative[key] for key in (
+    if not guard.persistent_match({key: authoritative[key] for key in (
         "path", "device", "inode", "size", "sha256"
-    )}:
+    )}, identity):
         raise RetainedChainInvalid(
             "INITIAL live v7 database differs from the retained completion identity"
         )
@@ -2063,6 +2087,8 @@ class RetainedV5ToV7Evidence:
         backup_root: Path,
         pre_census_qualification: dict[str, Any] | None = None,
         prepared_reader_record: dict[str, str] | None = None,
+        source_v5_database_identity: dict[str, Any] | None = None,
+        source_v5_preflight_created_at: str | None = None,
     ) -> None:
         self.phase = phase
         self._prepared_reader_record = dict(prepared_reader_record) if prepared_reader_record is not None else None
@@ -2071,6 +2097,11 @@ class RetainedV5ToV7Evidence:
         self.material = material
         self.source_v5_database = source_v5_database
         self.source_v5_content_digest = source_v5_content_digest
+        # Authenticated P56 DATA, distinct from the temporary source copy.
+        # Kept outside material: existing receipt wires and hashes do not change.
+        self._source_v5_database_identity = (dict(source_v5_database_identity)
+            if source_v5_database_identity is not None else None)
+        self._source_v5_preflight_created_at = source_v5_preflight_created_at
         self.target_v7_database = target_v7_database
         self.target_v7_database_identity = target_v7_database_identity
         self.control_config_bytes = control_config_bytes
@@ -2080,6 +2111,20 @@ class RetainedV5ToV7Evidence:
         )
         self._guard = guard
         self._backup_root = backup_root
+
+    @property
+    def source_v5_database_identity(self) -> dict[str, Any]:
+        """Detached authoritative P56 identity; never the verification-copy inode."""
+        if self._source_v5_database_identity is None:
+            raise RetainedChainInvalid("qualified P56 source identity is unavailable")
+        return dict(self._source_v5_database_identity)
+
+    @property
+    def source_v5_preflight_created_at(self) -> str:
+        """Authenticated retained value; consumers own any chronology comparison."""
+        if not isinstance(self._source_v5_preflight_created_at, str):
+            raise RetainedChainInvalid("qualified P56 preflight time is unavailable")
+        return self._source_v5_preflight_created_at
 
     def check(self) -> dict[str, Any]:
         """Revalidate every retained FD, name, namespace, and hash identity."""
@@ -2091,6 +2136,23 @@ class RetainedV5ToV7Evidence:
             "held_files": len(records),
             "held_directories": len(self._guard.dirs),
         }
+
+    def _persistent_record_matches(self, expected: dict, observed: dict) -> bool:
+        """Compare a Maintenance-owned reobservation under this held opening.
+
+        Later acceptance artifacts can have a different historical observation
+        from the migration cohort. This reuses only the independent current
+        anchor, never an assertion about historical volume continuity.
+        """
+        if self._guard.current_volume is None:
+            return expected == observed
+        from ops.executive_os.persistent_origin import persistent_record_matches
+        return persistent_record_matches(expected, observed,
+            volume=self._guard.current_volume, historical_device=expected.get("device"))
+
+    def _require_current_path(self, path: Path, info=None) -> None:
+        if self._guard.current_volume is not None:
+            self._guard.current_volume.require_path_device(path, info)
 
     def check_prepared_sources(self) -> None:
         """Re-pin the actual reader and original executor at a new-mode write edge."""
@@ -2249,7 +2311,20 @@ def _open_chain_evidence(
     # Every failure from here on must release every already-held descriptor
     # and private temporary copy before the error reaches the caller.
     try:
+        original = prepared if prepared is not None else pinned
+        if (original is not None
+                and original["schema_version"] == SPENT_CTIME_MATERIAL_SCHEMA_VERSION):
+            from ops.executive_os.persistent_origin import CurrentDataVolumeGuard
+            devices = {record["device"] for record in original["origin_records"]}
+            if (len(devices) != 1 or any(type(record["device"]) is not int
+                    or record["device"] <= 0 for record in original["origin_records"])):
+                raise RetainedChainInvalid("sixteen-origin historical device cohort differs")
+            guard.historical_device = next(iter(devices))
+            guard.current_volume = CurrentDataVolumeGuard()
         runtime_physical, backup_physical = _host_layout()
+        if guard.current_volume is not None:
+            for root in (runtime_physical, backup_physical, _control_config_path().parent):
+                guard.current_volume.require_path_device(root)
         guard.host_roots = (runtime_physical, backup_physical)
         guard.system_alias_identity = _system_alias_identity(runtime_physical)
         _resolve_runtime_root_argument(
@@ -2481,6 +2556,19 @@ def _open_chain_evidence(
             "origin_records": origin_records,
             "chain": chain,
         }
+        original = prepared if prepared is not None else pinned
+        if guard.current_volume is not None:
+            # Only the finite top-level origin records are observations across
+            # time. Host/chain/role joins retain the exact historical wire.
+            if (set(material) != set(original)
+                    or any(material[key] != original[key]
+                           for key in material if key != "origin_records")
+                    or len(origin_records) != len(original["origin_records"])):
+                raise RetainedChainInvalid("persistent original material shape or chain differs")
+            for expected, observed in zip(original["origin_records"], origin_records):
+                if not guard.persistent_match(expected, observed):
+                    raise RetainedChainInvalid("persistent original nondevice identity differs")
+            material = json.loads(json.dumps(original))
         if pinned is not None and material != dict(pinned):
             raise RetainedChainInvalid(
                 "retained evidence does not match the exact pinned material"
@@ -2498,6 +2586,8 @@ def _open_chain_evidence(
             material=material,
             source_v5_database=pairs["P56"]["copy"],
             source_v5_content_digest=chain["original_full_v5_content_digest"],
+            source_v5_database_identity=receipts["P56"][0]["database"],
+            source_v5_preflight_created_at=receipts["P56"][0]["created_at"],
             target_v7_database=target_copy,
             target_v7_database_identity=target_identity,
             control_config_bytes=config_raw,

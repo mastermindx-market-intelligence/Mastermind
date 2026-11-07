@@ -14,11 +14,12 @@ Run in the existing PR worktree:
 
 The output must say evidence_scope=SOURCE_ONLY, credential_read=false,
 provider_network_called=false, production_start_authorized=false. It validates
-the distinct commercial realm and two exact Flash models, that Personal Coding
-Plan remains held, and that all commercial candidates remain out of live tiers.
+the distinct commercial realm, the two exact Flash models and the exact Dola
+candidate, that Personal Coding Plan remains held, and that all commercial
+candidates remain out of live tiers.
 The SHA-256 of ModelRouter source is diagnostic, not installed provenance.
 
-## 2. Credential-owner canary after review acceptance
+## 2. Credential-owner canary after source validation
 
 Owner inputs, never shared with PR, Web session, or CI:
 
@@ -37,15 +38,23 @@ Owner inputs, never shared with PR, Web session, or CI:
 Never use the Personal Coding Plan endpoints /api/coding or /api/coding/v3,
 ARK_API_KEY, individual cookies, or subscriber usage balances.
 
-Once independent semantic review passes, the existing credential owner should:
+After focused source validation and applicable release requirements, use the
+existing credential owner for one authorized bounded Flash-model canary.
+A separate reviewer is required only when an actual protected rule requires
+one; the current session-local policy is not a blanket review hold.
+
+The credential-owner operation must:
 1. Verify the real commercial account/region, activated exact model IDs, and
    Responses + Codex tool schema compatibility from issuer-owned facts.
 2. Bind the commercial key only through the existing worker-private provider
    home loader in control_plane.codex_provider_realm. Never store it in source,
    command argv, global/shared environment files, shell history, or CI.
-3. Qualify a pinned Codex binary in a bounded, isolated, non-production
-   Responses transport canary using the source realm's config_overrides.
-   Do not use the ordinary Worker START path until the transport is reviewed.
+3. Qualify the actual selected transport in a bounded, isolated,
+   non-production Responses canary. For the Codex journey, pin the binary
+   and use the source realm's config_overrides. For the application journey,
+   use the existing commercial Responses transport and its settlement owner.
+   The ordinary CodexWorkerAdapter still explicitly refuses ModelArk START;
+   changing transport registry membership cannot authorize it.
 4. Observe the terminal response, actually served model, finite nonzero
    provider-issued usage and a billable token/debit reference. A free-trial
    zero-debit response does not establish commercial accounting.
@@ -102,16 +111,50 @@ Qualify the compatible execution profile and actual Worker binding first.
 
 Use the incumbent Executive Job/Attempt/Worker, Capacity, ModelRouter,
 ProviderRealm and installed release owners. Admit ONE bounded commercial
-Flash worker only after accepted review and a verified immutable generation.
+Flash worker only after genuine Worker/claim qualification and a verified
+immutable generation. The source-only adapter refusal must not be bypassed;
+its eventual successor must consume the actual owner-bound admission facts.
 Observe separate QUEUED, STARTED, terminal, provider-origin debit/usage,
 collected result, accepted result and quota lease release.
 
 Before-START zero headroom, 429, 401/403 and unqualified host must fail closed.
-Fallback may use another already-lawful same-tier candidate only when the
-original effect is proven absent. After START or EFFECT_UNKNOWN, no duplicate
-request, carrier change or provider rehome. Full GLM 5.3 tasks never demote
-to Flash merely to save capacity.
+This recovery authorizes no provider fallback. After START or EFFECT_UNKNOWN,
+retain the original request, account and settlement owner until reconciled;
+never duplicate the request, change carrier or rehome it. Full GLM 5.3 tasks
+never demote to Flash merely to save capacity.
 
-Current outcome classification: source contract BUILT_NOT_PROVEN. Key, real
-transport, issuance/capacity facts, live Worker and production acceptance
-are NOT ATTESTED. This runbook adds no control plane or release authority.
+## 5. Application Capacity consumer contract
+
+Application HTTP uses the incumbent broker's account binding, finite lease
+and dispatch permission, one-send transport and terminal usage settlement.
+It does not acquire an Executive Worker identity merely to make an HTTP
+request. Keep the autonomous Worker qualification in sections 3-4 separate.
+
+At the November 7 UTC protected-source integration, the native application
+HTTP binding admits Bailian, and the sealed metadata contains only Bailian
+and MiniMax. ModelArk has no admitted native HTTP account/pool binding.
+Macro #10521's commercial provider modes supply transport and accounting;
+they do not supply Fabric admission. Macro #10740 carries the application
+Fabric client/factory absent from the inspected Macro main. Compose those
+existing owners; never add a direct Hermes pool controller, a provider
+waterfall fallback, or a wrapper that emits a second usage charge.
+
+Before selecting a commercial application model, require the distinct
+byteplus-modelark provider and byteplus-modelark-commercial realm in the
+existing native registration, a qualified account/region and exact model,
+the credential-owner binding, verified generation, bounded spend/tokens
+and fresh admission. Preserve the existing Personal Coding Plan's identity,
+eligibility and accounting. No alias or synthetic test account satisfies
+these requirements.
+
+The successful consumer receipt must link the original operation and
+account reference to its selected and actually served model, transport
+request/response reference, provider-origin input/output usage and debit
+reference, terminal response, broker settlement and released lease.
+Credential values must never enter the receipt. Record any unknown effect
+against the original operation before further work.
+
+Current outcome classification: source contract BUILT_NOT_PROVEN. Real
+account/credential enrollment, transport qualification, fresh issuer quota,
+commercial native admission and consumer acceptance are not attested by
+this runbook. It adds no control plane or release authority.

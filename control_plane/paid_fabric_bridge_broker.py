@@ -47,7 +47,8 @@ class PaidFabricBridgeBroker(FabricBridgeBroker):
         if len(_canonical(request))+1 > self.config.max_request_bytes:
             raise BridgeProtocolError('BrokerProtocolError')
         operation = request['operation']
-        if operation not in {'start','status','collect','service-readiness','native-capacity-observation'}:
+        if operation not in {'start','status','collect','service-readiness','native-capacity-observation',
+                             'native-fabric-status'}:
             raise BridgeProtocolError('BackendRefusedError', 'Operation is outside the paid sealed-input profile')
         payload = _strict_json(_canonical(request['payload']))
         if operation=='service-readiness':
@@ -101,6 +102,11 @@ class PaidFabricBridgeBroker(FabricBridgeBroker):
             self._check_start(result,payload,digest)
         else:
             fields = {'binding','run_id','physical_binding_sha256'}
+            if operation == 'native-fabric-status':
+                fields.update({'start_request_sha256','process_ref_sha256','parent_run_id'})
+                _digest(payload.get('start_request_sha256'))
+                _digest(payload.get('process_ref_sha256'))
+                _identifier(payload.get('parent_run_id'))
             if operation == 'status' and 'start_request_sha256' in payload:
                 fields.add('start_request_sha256')
                 _digest(payload['start_request_sha256'])
@@ -132,7 +138,15 @@ class PaidFabricBridgeBroker(FabricBridgeBroker):
 
     @classmethod
     def _check_result(cls,result,payload,operation):
-        if operation=='status' and 'start_request_sha256' in payload:
+        if operation == 'native-fabric-status':
+            cls._common(result,payload,{'status','request_sha256','process_ref_sha256'})
+            from common.executive_workspace_fabric_contract import status_metadata
+            if (result['request_sha256'] != payload['start_request_sha256']
+                    or result['process_ref_sha256'] != payload['process_ref_sha256']
+                    or result['status'] != status_metadata(result['status'], run_id=payload['run_id'],
+                        root_id=payload['binding']['root_id'], parent_run_id=payload['parent_run_id'])):
+                raise BridgeProtocolError('EFFECT_UNKNOWN')
+        elif operation=='status' and 'start_request_sha256' in payload:
             state=result.get('start_state')
             extras={'request_sha256','start_state'}
             if state=='EXISTS':

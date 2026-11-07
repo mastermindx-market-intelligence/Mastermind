@@ -34,11 +34,12 @@ until actual transport identity and owner facts are proven. Commercial
 permission is granted by the Chairman, but source candidate status itself
 does not prove an installed or running worker.
 
-The incumbent canonical-paid-fabric implementation is GLM-only. It cannot
-be relabeled as ModelArk. Integration must use existing Codex/ProviderRealm,
-ModelRouter, Capacity Fabric, Executive/Job/Attempt/Worker, native Fabric
-generation release and result-consumption ownership, not another registry,
-scheduler, subscription harness or credential plane.
+Integration uses the existing ProviderRealm, ModelRouter, Capacity Fabric,
+native generation release and result-consumption owners. The autonomous
+Codex journey uses Executive/Job/Attempt/Worker; application HTTP uses the
+incumbent broker admission and settlement path. Existing pools cannot be
+relabeled as ModelArk. No additional registry, scheduler, subscription
+harness, Hermes pool controller or credential plane is introduced.
 
 Autonomous admission requires a private API credential owned by the existing
 ProviderRealm owner, correct account-region model activation, a verified
@@ -54,27 +55,29 @@ Pre-START failures may be rerouted only after the original effect is
 proven absent. A STARTed or EFFECT_UNKNOWN operation remains on its original
 provider/account/carrier. Handle 401/403 by parking the source, 429 by its
 existing cooldown mechanism, unknown or stale quota as ineligible, and
-provider outages with existing traceable fallback. Never arm an unbounded
+provider outages by retaining the original operation and its evidence.
+This integration authorizes no provider fallback. Never arm an unbounded
 spend plan, guess capacity, rehome a started job, or confuse a successful
 shell exit with accepted intelligence.
 
 ## Reviewed-commercial adapter and load-balancer bridge
 
-The existing CodexWorkerAdapter's ordinary start path now has a narrow
-conditional commercial transport gate. Only the EXACT provider-realm object
-registered in REVIEWED_CODEX_PROVIDER_REALMS, using the existing credential
-loader, and with no subscription canary owner/claim, may reach the normal
-WorkerLaunchSpec validation and subprocess. The current ModelArk realm is
-still SPEC_ONLY in the candidate registry: no plain commercial START is
-authorized until independent transport validation and exact promotion.
+The existing CodexWorkerAdapter's ordinary start path explicitly refuses
+commercial ModelArk START. Transport registry membership cannot grant
+autonomous execution: the registered Worker, owner-bound Executive claim,
+issuer-attested quota and installed generation must be qualified separately.
+The ModelArk realm remains SPEC_ONLY. Merely inserting it into
+REVIEWED_CODEX_PROVIDER_REALMS must not bypass the current START refusal.
 
 The incumbent capacity_economics_projection retains the full Personal
 Coding Plan and ambiguous-BytePlus-name exclusion. It will project a
 commercial ModelArk first-lawful-tier economic preference ONLY when a
-separately supplied exact ModelRouter instance identifies an enabled,
+canonical-source-verified ModelRouter instance identifies an enabled,
 autonomous, worker-eligible, codex-cli commercial model in its own FIRST
-tier, and the exact commercial realm is transport-reviewed. It remains
-preview-only, never grants Capacity or overrides missing provider quota.
+tier, the exact commercial realm is transport-reviewed, and owner-supplied
+preview timestamps pass bounded freshness checks. Substitution retains the
+original suggestion in its audit fields. It remains preview-only, never
+grants Capacity or overrides missing provider quota.
 This is a source/consumer preparation seam, not an installed production
 load-balancer, a secret enrollment, or a new control plane.
 
@@ -111,7 +114,7 @@ implements an advisory preference inside the EXISTING source-owner preview:
 when a Z.AI GLM Flash option was suggested and the SAME validated first lawful
 tier contains a reviewed, active, worker-eligible BytePlus commercial Flash
 option with positive preview capacity, prefer the commercial Flash candidate.
-A separate exact ModelRouter and reviewed CodexProviderRealm are required.
+A canonical-source-verified ModelRouter and reviewed CodexProviderRealm are required.
 Never promote a BytePlus-looking preview label or a new lower suitability
 tier. Of the two BytePlus Flash options, projected parallelism/headroom ranks
 candidates; exact ties give the GLM Flash alias stable preference. A 401/403,
@@ -158,24 +161,65 @@ or START. Its successful result still says production_start_authorized=false.
 See docs/runbooks/BYTEPLUS_MODELARK_COMMERCIAL_CANARY_HANDOFF.md for exact
 credential-owner canary obligations, issuer evidence requirements, real
 Worker/Capacity receipt checks and one-job Executive acceptance gates.
-This does not replace independent semantic review, source CI, selected native
-generation, account-secret custody or provider-origin billing. A forced
+This does not replace focused source validation, required CI, applicable
+protected release controls, selected native generation, account-secret
+custody or provider-origin billing. The current session-local review policy
+does not require a separate reviewer unless an actual rule requires one. A forced
 non-Qwen Fabric review request was NOT launched on October 24 because the
 installed native Fabric router reported no eligible host for the inspected
 non-Qwen pools; eligibility must recover without overriding host gates.
 
+## Current Capacity composition (November 7 recovery)
+
+The original #1824 carrier now composes protected Mastermind
+0bf1d891e6e22a938f184e7df02481c52f3aa2a4. The commercial provider and three
+disabled aliases coexist with the newer Experiential configuration.
+
+The protected native HTTP framework already owns request compilation,
+account binding, finite dispatch permission, one-send transport,
+effect-unknown retention and usage settlement. Its admitted HTTP binding is
+Bailian-specific; the sealed metadata contains only Bailian and MiniMax.
+Neither this commercial source candidate nor #2175's broader selection
+work creates a ModelArk HTTP enrollment. Commercial registration must extend
+those existing owners with the distinct byteplus-modelark identity; it
+cannot borrow a Bailian/GLM/Personal Plan pool or skip account qualification.
+
+Adding the commercial realm changed the current realm source bytes and
+invalidated the native builder's historical input pin. The builder now
+reads the exact accepted realm preimage as AST evidence, just as it already
+does for the transport preimage. The compiler's full-byte pins remain
+unchanged. The historical preimage is never imported or installed; the
+generated two-driver metadata and runtime member inventory stay unchanged.
+This compatibility repair confers no ModelArk runtime readiness.
+
+Macro #10521 supplies the existing commercial Responses transport and usage
+recording. Its DeepSeek settlement now supplies the UTC observation time
+required by temporal pricing. Macro #10740 supplies the application Fabric
+factory/client absent from the inspected protected Macro main. Compose
+those APIs on their existing carriers; wrapping direct provider calls in a
+second Fabric client would duplicate accounting and bypass admission.
+
+Source-linked contracts:
+- [Capacity #2109](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2109)
+- [Capacity #2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175)
+- [Commercial upstream #10521](https://github.com/mastermindx-market-intelligence/macro/pull/10521)
+- [Application consumer #10740](https://github.com/mastermindx-market-intelligence/macro/pull/10740)
+
 ## Completion gates
 
-Source CI and independent review; native commercial transport canary;
-provider-origin response/usage; canonical realm/Capacity receipts; reviewed
-model quality and suitability; protected merge; immutable selected native
-runtime generation; verified end-to-end commissioned Fabric run including
-parent/root, Attempt START, terminal/result and acceptance. No source-only
-artifact is itself production acceptance.
+Validate composed source and required CI, satisfy applicable protected merge
+and release rules, and qualify one authorized commercial transport canary.
+Then require authentic account/region, actual served model and provider
+usage/debit receipts, issuer quota, model suitability and the selected
+immutable generation before one bounded consumer turn.
 
-The next actionable engineering step is a commercially scoped Codex provider
-transport plus positive Capacity and result-consumption paths; do not
-change the old Personal Coding Plan's held alias or borrow MiniMax's receipt.
+For application HTTP, prove the incumbent broker's admission, single
+dispatch, terminal response and settlement. For the autonomous Codex journey,
+also prove registered Worker identity, the Executive Job/Attempt claim and
+START, collected result and acceptance. These are distinct consumer contracts.
+No source-only artifact, inert alias, green CI or successful merge establishes
+live commercial provider readiness. Preserve the Personal Coding Plan hold
+and all missing runtime facts until directly evidenced.
 
 ## Verified public protocol references
 

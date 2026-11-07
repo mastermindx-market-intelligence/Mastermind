@@ -177,14 +177,14 @@ def source_preflight(
         "claim_time_capacity_verified": False,
         "production_start_authorized": False,
         "next_owner_actions": [
-            "reviewer: approve exact source and merge/release independently",
-            "credential_owner: verify private commercial ModelArk account, region and active model IDs",
+            "source integrator: validate the exact composed source, satisfy required CI and applicable protected release rules",
+            "credential_owner: verify private commercial ModelArk account, region and one activated Flash model ID",
             "credential_owner: bind BYTEPLUS_MODELARK_API_KEY only via existing private provider-home loader",
-            "credential_owner: one isolated bounded Codex Responses canary per qualified model with provider-origin response and usage/debit evidence",
-            "ProviderRealm owner: promote exact transport only after real canary and source review",
-            "Worker/Capacity owner: issue real registered worker/quota fact and fresh provider-origin headroom",
-            "Executive owner: revalidate current host/quota at claim, START one canary Job/Attempt, verify terminal result and acceptance",
-            "release owner: select immutable generation only after independent review, CI and native consumer proof",
+            "credential_owner: one authorized bounded Responses transport canary with actual served model and provider-origin usage/debit evidence",
+            "ProviderRealm owner: qualify exact transport only from authentic canary evidence; registry membership alone never grants START",
+            "Capacity owner: bind the distinct commercial account and fresh issuer quota to the incumbent admission and settlement path",
+            "consumer integrator: prove one bounded admitted turn and its terminal model/account/usage receipts; application HTTP and Executive Worker admission are distinct",
+            "release owner: select the verified immutable generation through existing release controls; source preflight never authorizes production",
         ],
     }
 

@@ -1,0 +1,31 @@
+{
+  "status": "PASSED_NORMALIZED_SYNTHETIC_CONTRACT_ONLY",
+  "before": "2dd591f3d93e866c8e4448cdc36ea4d4637102cb",
+  "new_atomic_tests": 20,
+  "affected_original_recovery_tests": 18,
+  "affected_incidence_tests": 16,
+  "randomized_dictionary_oracle": {
+    "seeds": 40,
+    "batches_per_seed": 80,
+    "total_batches_checked": 3200,
+    "market_data_used": false
+  },
+  "source_sha256": "1da1104e9b66f6fc0f85a539a335cff2719357b131b4bb3f572bce90399e0e6a",
+  "test_sha256": "6b39ac6090a63c628fd0a5d65bdfa95eb7d7c38430ae6333eda00e791b6b7aad",
+  "red_log_sha256": "d1fc6222e241f942151d7b87833994debad1e337d9e5860931add7918d75244a",
+  "green_log_sha256": "38e7e8f13fb0668d590240c5b132e3372a152d101997fe06e84383a0a4f73ac5",
+  "corrections": [
+    "Commit-aware atomic batch API, full-tail validation before any mutation",
+    "Outcomes assessed only at declared complete batch availability",
+    "Same-batch resolved shocks are not credited as future forecasts",
+    "Exact fraction threshold for verylarge quantities",
+    "Typedpositivehorizon/identifiers andlosslessnestedJSONintegers"
+  ],
+  "semantics_not_claimed": [
+    "No equal-timestamp inference of real atomic boundaries",
+    "No actualDEEP+bookmapping or empiricalrecoveryvalidation",
+    "No worker-returnstatus orlegacylabellingimpactaudit",
+    "No predictive,ranking,alertortradingauthority"
+  ],
+  "source_revision_note": "The exactmedian half-nanosecond repair was added after the atomic-only commit; these hashes refer to the final verified working source."
+}

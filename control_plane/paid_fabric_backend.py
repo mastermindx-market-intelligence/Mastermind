@@ -127,7 +127,14 @@ def qualify_paid_startup(release_root, *, config):
     required = ('remote_sub.sh', 'paid_controller_spawn.py', 'paid_controller_channel.py',
                 'paid_model_owner.py', 'paid_glm_model_client.py', 'linux_process_identity.py',
                 'paid_incumbent_state.py','host_pull.sh','host_pull_backend.py',
-                'host_pull_probe.template','paid_host_qualification.py')
+                'host_pull_probe.template','paid_host_qualification.py',
+                'paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py',
+                'paid_provider_entry.py','paid_host_readiness.py',
+                'fabric_task.py','pool_ledger.py','pick.py','remote_sub_helpers.py',
+                'artifact_delivery.py','native_runtime_bindings.py','quota_circuit.py',
+                'provider_outcome.py','a04_terminal_reconcile.py',
+                'native_completion_reconcile.py','native_prestart_reconcile.py',
+                'native_preexec_reconcile.py','native_host_review_controller_reconcile.py')
     manifest = json.loads(_root_source(root / '.executive-release-manifest.json'))
     if (type(manifest) is not dict
             or set(manifest) != {'schema_version', 'commit_sha', 'tree_sha', 'entries'}
@@ -428,6 +435,30 @@ class CanonicalPaidBackend:
                 or account!=payload['paid_account']):_refuse()
         self._require_account_status(account)
 
+    def _provider_entry_descriptor(self, payload):
+        """Re-open the actual installed owner, not a supplied context dictionary."""
+        self._require_source_context(payload)
+        import paid_host_readiness as readiness
+        from control_plane.paid_fabric_wire import provider_entry_descriptor
+        from ops.native_fabric.quota_continuity.candidate import paid_provider_entry
+        if Path(readiness.__file__).resolve()!=self._startup.native_ext/'paid_host_readiness.py':_refuse()
+        with readiness.open_installed_context() as context:
+            context.check()
+            source = payload['paid_source_config']
+            if context.initializer_commitment != source['qualification']['initializer_commitment']:_refuse()
+            hashes = {}
+            for name in paid_provider_entry.SOURCE_NAMES:
+                path = self._startup.native_ext/name
+                raw = _root_source(path)
+                sha = hashlib.sha256(raw).hexdigest()
+                if self._startup.sources.get(str(path.relative_to(self._startup.release_root))) != sha:_refuse()
+                hashes[name] = sha
+            value = provider_entry_descriptor(payload, sources_sha256=hashes,
+                readiness_binding=context.binding,
+                config_identity=readiness.qualified_config_identity(context))
+            context.check()
+        return value
+
     def require_original_controller(self, payload, lease, *, expected=None):
         self.require_gateway(self._gateway)
         self._require_source_context(payload)
@@ -512,6 +543,9 @@ class CanonicalPaidBackend:
             capsule = self._gateway._issue_canonical(operation.payload,
                 authority=operation.authority, lease_id=lease_id, ttl=ttl,
                 request_body=json.loads(compile_request(operation.payload)))
+            # This addition is correlation DATA on the already authenticated
+            # original channel. Only the actual issuer/Control/lease owns auth.
+            capsule['provider_entry'] = self._provider_entry_descriptor(operation.payload)
             operation.capsule = capsule
             self._channel.answer_lease(sock, run_id=operation.payload['binding']['attempt_id'],
                 lease_id=lease_id, nonce=operation.nonce, capsule=capsule)
@@ -539,6 +573,7 @@ class CanonicalPaidBackend:
             _refuse()
         operation.authority.require(operation.payload)
         self.require_original_controller(operation.payload, operation.lease)
+        if operation.capsule.get('provider_entry') != self._provider_entry_descriptor(operation.payload):_refuse()
 
     def consume_provider_intent(self, claims):
         self.require_canonical_request(claims)
@@ -553,6 +588,9 @@ class CanonicalPaidBackend:
         if operation.launch_frame is not None:
             _refuse()
         self.require_original_controller(operation.payload, operation.lease)
+        if (operation.capsule is None
+                or operation.capsule.get('provider_entry') != self._provider_entry_descriptor(operation.payload)):
+            _refuse()
         support = json.loads(_private_read(
             self._startup.log_dir/(operation.payload['binding']['attempt_id']+'.support.json'), 65536))
         if type(support) is not dict:
@@ -633,6 +671,7 @@ class CanonicalPaidBackend:
         authority.require(payload)
         body = compile_request(payload)
         self._require_source_context(payload)
+        self._provider_entry_descriptor(payload)
         from control_plane.paid_fabric_wire import require_paid_physical
         require_paid_physical(payload)
         run_id = payload['binding']['attempt_id']
@@ -841,6 +880,42 @@ class CanonicalPaidBackend:
                         start_state='NO_RETAINED_START')
         if not starts:
             _refuse()
+        if operation == 'native-fabric-status':
+            # The authenticated Control reader has already joined the current
+            # principal/root to this exact immutable original paid launch. Its
+            # selectors alone cannot substitute a successor or another process.
+            original = starts[0]
+            if (original['request_sha256'] != payload['start_request_sha256']
+                    or digest(original['process_ref']) != payload['process_ref_sha256']):
+                _refuse()
+            before = self._installed_source()
+            rows = [row for row in before['bindings']
+                    if digest(row['physical_binding']) == payload['physical_binding_sha256']]
+            if len(rows) != 1:
+                _refuse()
+            self._require_source_data(rows[0]['physical_binding'], rows[0]['source_config'])
+            import fabric_task
+            if Path(fabric_task.__file__).resolve() != self._startup.native_ext / 'fabric_task.py':
+                _refuse()
+            # This is the actual incumbent status/ledger reader, using fixed
+            # original-owner data. It does not collect, adjudicate or refresh.
+            from control_plane.workspace_owned_task import await_owned
+            status = await await_owned(asyncio.create_task(asyncio.to_thread(
+                fabric_task.inspect_run, payload['run_id'], owner_ext=self._startup.owner_ext)))
+            if self._installed_source() != before:
+                _refuse()
+            self._require_source_data(rows[0]['physical_binding'], rows[0]['source_config'])
+            self.require_gateway(self._gateway)
+            # Re-read the HMAC journal after the native observation. Appending
+            # an original collection is fine; replacing its start is not.
+            after = [r['value'] for r in self._records(payload) if r['kind'] == 'start']
+            if after != [original]:
+                _refuse()
+            from common.executive_workspace_fabric_contract import status_metadata
+            status = status_metadata(status, run_id=payload['run_id'], root_id=payload['binding']['root_id'],
+                                     parent_run_id=payload['parent_run_id'])
+            return dict(common, status=status, request_sha256=payload['start_request_sha256'],
+                        process_ref_sha256=payload['process_ref_sha256'])
         if operation == 'status':
             collections = [r['value'] for r in records if r['kind'] == 'collection']
             if len(collections) > 1:

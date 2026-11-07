@@ -19,6 +19,7 @@ JOURNAL_CONF="/etc/datadog-agent/conf.d/journald.d/conf.yaml"
 DATADOG_YAML="/etc/datadog-agent/datadog.yaml"
 INSTALL_URL="https://install.datadoghq.com/scripts/install_script_agent7.sh"
 SSI_PRELOAD_FILE="${SSI_PRELOAD_FILE:-/etc/ld.so.preload}"
+DD_HOST_INSTALL_BIN="${DD_HOST_INSTALL_BIN:-dd-host-install}"
 
 fail() { printf 'datadog setup failed: %s\n' "$*" >&2; exit 1; }
 log() { printf '[mastermind-datadog] %s\n' "$*"; }
@@ -36,6 +37,18 @@ resolve_release_sha() {
 ssi_is_armed() {
   [[ -r "$SSI_PRELOAD_FILE" ]] || return 1
   grep -Eq '(^|[[:space:]])/[^[:space:]]*datadog[^[:space:]]*/launcher\.preload\.so([[:space:]]|$)' "$SSI_PRELOAD_FILE"
+}
+ensure_ssi_armed() {
+  if ssi_is_armed; then
+    return 0
+  fi
+  log "Agent/package setup left host SSI unarmed; invoking Datadog host instrumentation"
+  if ! command -v "$DD_HOST_INSTALL_BIN" >/dev/null 2>&1; then
+    log "$DD_HOST_INSTALL_BIN unavailable; cannot arm host SSI"
+    return 1
+  fi
+  "$DD_HOST_INSTALL_BIN" || return 1
+  ssi_is_armed
 }
 
 render_app_dropin() {
@@ -134,8 +147,8 @@ rollback_application_instrumentation() {
   fi
   if [[ "$SSI_PREEXISTING" == "0" ]] && ssi_is_armed; then
     log "removing Single Step Instrumentation introduced by this rollout"
-    if command -v dd-host-install >/dev/null 2>&1; then
-      dd-host-install --uninstall || rollback_failed=1
+    if command -v "$DD_HOST_INSTALL_BIN" >/dev/null 2>&1; then
+      "$DD_HOST_INSTALL_BIN" --uninstall || rollback_failed=1
     else
       log "dd-host-install unavailable; cannot remove newly introduced SSI"
       rollback_failed=1
@@ -171,6 +184,16 @@ rollback_on_exit() {
 }
 trap 'rollback_on_exit $?' EXIT
 
+# This mode can mutate host instrumentation. Keep it behind the same root,
+# release and health preflight and compensation trap as the normal installer.
+if [[ "${1:-}" == "--ensure-ssi-only" ]]; then
+  if ensure_ssi_armed; then
+    printf '%s\n' armed
+    exit 0
+  fi
+  fail "Datadog host SSI-only instrumentation failed; reconciling through rollback"
+fi
+
 log "installing/updating Agent 7 with Python Single Step Instrumentation"
 if ! DD_API_KEY="$DD_API_KEY" \
   DD_SITE="$DD_SITE" \
@@ -180,8 +203,8 @@ if ! DD_API_KEY="$DD_API_KEY" \
   bash -c "$(curl -fsSL "$INSTALL_URL")"; then
   fail "Datadog Agent/SSI installer failed"
 fi
-if [[ "$SSI_PREEXISTING" == "0" ]] && ! ssi_is_armed; then
-  fail "Datadog host SSI did not arm after installer success"
+if ! ensure_ssi_armed; then
+  fail "Datadog host SSI did not arm after installer success and explicit host instrumentation"
 fi
 
 log "enabling host log collection and Mastermind journald intake"

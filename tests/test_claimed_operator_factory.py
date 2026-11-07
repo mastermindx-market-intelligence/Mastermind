@@ -119,8 +119,15 @@ def test_stale_claim_refuses_before_factory(tmp_path, field, value):
     runtime, supervisor, lease, requested = claimed(tmp_path)
     supervisor._claimed_adapter_factory = lambda *a, **k: pytest.fail('stale claim reached factory')
     bad = dataclasses.replace(lease, attempt=dataclasses.replace(lease.attempt, **{field: value}))
-    with pytest.raises(ExecutiveOperatorSupervisorError, match='no longer current'):
+    expected_refusal = (
+        'planner Job disappeared before construction'
+        if field == 'job_id' else 'claimed operator identity is no longer current'
+    )
+    with pytest.raises(ExecutiveOperatorSupervisorError) as refused:
         supervisor._adapter_for_attempt(bad, requested, lambda turn: '', recovery=False)
+    assert str(refused.value) == expected_refusal
+    # An invalid claim must not mutate the original assigned Attempt.
+    assert runtime.attempts.get_attempt(lease.attempt.attempt_id) == lease.attempt
 
 
 @pytest.mark.parametrize('field,value', [('worker_id', 'foreign'), ('authority_policy_hash', 'f' * 64)])

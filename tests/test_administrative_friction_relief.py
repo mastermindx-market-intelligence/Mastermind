@@ -29,9 +29,9 @@ def test_active_owner_recovery_distinguishes_absence_from_effect_uncertainty():
         "Responsibility survives a chat; a chat does not own work forever",
         "fresh live claim, source-writer custody and pending effects",
         "unknown is not expired",
-        "compare-and-swap/fencing",
-        "Do not wait indefinitely for an abandoned conversation to ACK",
-        "no lease, writer or pending effect is displaced",
+        'CAS/fencing',
+        'act without a ghost ACK',
+        'With assignment and no displaced writer/effect',
     ):
         assert phrase in source
 
@@ -63,7 +63,7 @@ def test_delivery_wait_is_nonblocking_and_sha_bound():
     for phrase in (
         "CI blocks merge/release, not independent useful work",
         "repository, PR, exact head SHA and workflow run IDs",
-        "one existing Class-E or Class-T observer",
+        "Reuse one existing observer when it reduces a genuinely long wait",
         "No merge/deploy action belongs in the observer",
         "do not push empty/rebase-only commits to restart CI",
         "repair it within the assigned scope",
@@ -73,22 +73,22 @@ def test_delivery_wait_is_nonblocking_and_sha_bound():
 
 def test_action_gates_do_not_require_all_future_capabilities_before_first_work():
     source = text("docs/sol_skills/INDEX.md")
-    assert "Apply gates to the specific next action, not every possible future action" in source
-    assert "Repository-only source work does not require a healthy Executive runtime" in source
-    assert "No new permission is created by this scoping rule" in source
+    assert 'Gate the next action/dependency, not the mission' in source
+    assert 'Source work needs Executive only when it invokes/depends on that authority' in source
+    assert 'Assignment, pin, custody, resource permission and effect fences still bind' in source
 
 
 def test_pre_dispatch_platform_refusal_is_recoverable_without_effect_confusion():
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     for phrase in (
         "A platform refusal is action-scoped until evidence proves otherwise",
-        "before tool dispatch",
+        "Verify the original typed receipt and dispatch",
         "TOOL_DEGRADED / EFFECT_NONE",
-        "one bounded same-carrier retry may reshape the call",
+        'Diagnose and repair technical failures within grants',
         "do not enter an identical third loop",
-        "If dispatch may have occurred or effect cannot be proven absent",
-        "continue only the missing suffix on the same carrier",
-        "Never overwrite a known-good prefix",
+        '`EFFECT_UNKNOWN` must be reconciled at the original target',
+        'only a permitted missing suffix may continue on the same carrier',
+        'Preserve acknowledged chunk prefixes',
     ):
         assert phrase in source
 
@@ -97,10 +97,10 @@ def test_repeated_refusals_preserve_provider_capacity_and_do_not_become_filter_p
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     for phrase in (
         "Preserve provider capacity; do not turn a refusal into filter-probing",
-        "scarce-capacity pressure",
-        "do not repeatedly rephrase the same effect",
+        'Unknown throttling thresholds do not justify blocked-call experiments',
+        'no rephrasing or tool/carrier/account/model/provider substitution',
         "first explicit safety or permission denial ends retry",
-        "never as refusal evasion",
+        'other-account work requires ordinary routing and genuine independence',
     ):
         assert phrase in source
 
@@ -124,9 +124,9 @@ def test_transport_outage_is_not_misclassified_as_provider_safety_pressure():
     spec = text("docs/superpowers/specs/2026-09-22-administrative-friction-relief.md")
     for phrase in (
         "Do not contaminate provider-refusal evidence with transport loss",
-        "not a blocked-call datum for throttling analysis",
-        "Cause and effect state stay separate",
-        "explicit supported refusal/classification",
+        'Offline/timeout without explicit safety evidence is transport, not throttling',
+        'Cause differs from effect',
+        'without explicit safety evidence is transport',
     ):
         assert phrase in active
     for phrase in (
@@ -163,9 +163,9 @@ def test_blocker_resolution_is_owned_and_not_new_paperwork():
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     for phrase in (
         "The active assigned session owns the next recovery action",
-        "not merely an historical owner name",
-        "These are decision checks, not additional forms or approval messages",
-        "Two equivalent failures without new evidence",
+        'The active assigned session owns the next recovery action',
+        'These are action checks for all assigned provider sessions, not additional forms',
+        'Two unchanged failures require new evidence/hypothesis',
     ):
         assert phrase in source
 
@@ -173,9 +173,9 @@ def test_blocker_resolution_is_owned_and_not_new_paperwork():
 def test_current_handoff_does_not_need_another_human_confirmation():
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     assert "Do not ask the Chairman to re-approve routine in-scope execution" in source
-    assert "material scope, risk, spend or authority expansion" in source
-    assert "must not create a second human-approval round" in source
-    assert "platform-required confirmation" in source
+    assert 'material scope/risk/spend/authority expansions' in source
+    assert 'playbooks add no approval round' in source
+    assert 'actual platform confirmation/authentication/consent' in source
 
 
 def test_root_delivery_summary_cannot_restore_a_global_wait():
@@ -187,7 +187,7 @@ def test_root_delivery_summary_cannot_restore_a_global_wait():
 def test_cold_start_does_not_assign_work_to_a_ghost_owner():
     source = text("docs/sol_skills/COLD_START.md")
     assert "Historical ownership is not current liveness" in source
-    assert "active assigned session retains the recovery action" in source
+    assert 'Current assignment owns the next recovery action' in source
 
 
 def test_relief_does_not_waive_real_boundaries():
@@ -197,7 +197,7 @@ def test_relief_does_not_waive_real_boundaries():
         "source-writer custody",
         "independent review",
         "no new lifecycle",
-        "current admission",
+        'INDEX admission',
     ):
         assert phrase in source
 
@@ -217,7 +217,8 @@ def test_fable_is_not_a_universal_routing_or_merge_prerequisite(path):
     source = text(path)
     assert "Fable is not a mandatory relay or universal merge approver" in source
     assert "currently authorized role and operation" in source
-    assert "Independent review and source/release protections still apply" in source
+    assert "Independent review is not mandatory for CEO Web work" in source
+    assert "protected source/release controls still apply" in source
     assert "Owns adjudication, routing, and merges" not in source
 
 
@@ -229,7 +230,7 @@ def test_effect_absence_never_grants_permission_to_evade_a_denial(path):
     source = text(path)
     assert "EFFECT_NONE is not retry permission" in source
     assert "first explicit safety or permission denial ends retry" in source
-    assert "permitted technical" in source
+    assert ("Diagnose and repair technical failures within grants" if path.endswith("ACTIVE_EXECUTION.md") else "permitted technical recovery") in source
 
 def test_legacy_original_writer_note_does_not_override_current_assignment():
     for rel in ("AGENTS.md", "CLAUDE.md", "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"):
@@ -238,7 +239,8 @@ def test_legacy_original_writer_note_does_not_override_current_assignment():
         assert "current" in source and "recovery" in source
         assert "lease" in source or "custody" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert 'Current assigned receiver owns recovery even if a handoff says "original writer"' in kernel
+    assert 'Assigned session owns recovery, not old chats/authors/roles' in kernel
+    assert 'No dead-chat handback' in kernel
 
 
 def test_web_scenarios_distinguish_ghost_parent_from_real_sticky_effect():
@@ -274,7 +276,8 @@ def test_handoff_writer_never_disclaims_to_ghost_parent():
         assert "When writing a handoff, name a safe next action" in source
         assert "original parent" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert "Handoffs name an executable successor action" in kernel
+    assert "HANDOFF_SOURCE_LINK_V1: full brief in GitHub" in kernel
+    assert "Delivery != pickup/START" in kernel
     import json
     cases = json.loads((ROOT / "tests/fixtures/web_ceo_skill_cases.json").read_text())["cases"]
     case = next(c for c in cases if c["id"] == "ceo-handoff-writer-no-ghost-receiver")

@@ -56,7 +56,10 @@ type DurableReservation =
 
 const SCOPE_RE = /^[0-9a-f]{64}$/;
 const SESSION_KEY_RE = /^session-continue-[0-9a-f]{64}$/;
-const TARGET_REF_RE = /^fabric_attempt:[0-9a-f]{64}$/;
+/** The closed canonical target-prefix union. The record shape, the database
+ * name and version, the one slot per principal and the atomic read/reserve/
+ * clearIfEqual operations are unchanged; only the closed prefix union widens. */
+const TARGET_REF_RE = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
 const POINTER_INPUT_KEYS: ReadonlySet<string> = new Set(["operationKey", "kind", "targetKey"]);
 const RECORD_KEYS: ReadonlyArray<string> = ["v", "operationKey", "kind", "targetKey"];
 

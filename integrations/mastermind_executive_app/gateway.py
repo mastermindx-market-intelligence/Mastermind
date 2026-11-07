@@ -44,6 +44,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -116,6 +117,8 @@ class AppPolicies:
             raise ValueError(
                 f"submit policy must require exactly {expected_submit!r}"
             )
+        from integrations.mastermind_executive_app.installed_principal_read_pair import bind_installed_read_pair
+        object.__setattr__(self, "_installed_read_pair", bind_installed_read_pair(self))
 
 
 def load_app_policies(payload: Mapping[str, Any]) -> AppPolicies:
@@ -395,6 +398,26 @@ class CeoIngressClient:
         return await self._send_frame(socket_path, wire_frame, keep_write_open=True,
                                       foreground_source=source)
 
+    async def send_project_planning_frame(self,socket_path,frame):
+        from common.project_planning_private_contract import frame as validate
+        from integrations.session_bridge.http_foreground import current_request,HttpForegroundClosed
+        try:
+            frame=validate(frame)
+            source=current_request()
+        except (ValueError,HttpForegroundClosed):
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning original foreground unavailable')
+        return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
+
+    async def send_project_execution_frame(self,socket_path,frame):
+        from common.project_execution_private_contract import frame as validate
+        from integrations.session_bridge.http_foreground import current_request,HttpForegroundClosed
+        try:
+            frame=validate(frame)
+            source=current_request()
+        except (ValueError,HttpForegroundClosed):
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project execution original foreground unavailable')
+        return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
+
     async def _send_frame(
         self, socket_path: "Path | str", frame: Mapping[str, Any], *,
         keep_write_open: bool,
@@ -405,6 +428,86 @@ class CeoIngressClient:
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
         principal_encoded = None
+        direct_encoded = None
+        conversation_read_encoded = None
+        from common.direct_native_result_contract import PRIVATE_SCHEMA as direct_schema, validate_private_frame
+        from control_plane.direct_native_execution import SUBMIT_SCHEMA as direct_submit_schema
+        direct_result_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
+        direct_submit_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_submit_schema
+        direct_frame = direct_result_frame or direct_submit_frame
+        from common import project_planning_private_contract as planning_wire
+        planning_frame=isinstance(frame,Mapping) and frame.get('schema')==planning_wire.SCHEMA
+        from common import fresh_conversation_contract as fresh_wire
+        fresh_frame=isinstance(frame,Mapping) and frame.get("schema")==fresh_wire.SCHEMA
+        if fresh_frame:
+            try: frame=fresh_wire.validate_private_frame(dict(frame))
+            except (ValueError,TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail="conversation frame invalid")
+        from common import project_conversation_read_contract as conversation_read_wire
+        conversation_read_frame = isinstance(frame, Mapping) and frame.get("schema") == conversation_read_wire.SCHEMA
+        if conversation_read_frame:
+            try:
+                frame = conversation_read_wire.frame(dict(frame))
+                conversation_read_encoded = conversation_read_wire.encode_frame(frame)[:-1]
+            except (ValueError, TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="project conversation read frame invalid")
+            request_ceiling = conversation_read_wire.MAX_REQUEST_BYTES
+            response_ceiling = conversation_read_wire.MAX_RESPONSE_BYTES
+            stream_limit = response_ceiling + 4096
+        from common import project_execution_private_contract as execution_wire
+        execution_frame=isinstance(frame,Mapping) and frame.get('schema')==execution_wire.SCHEMA
+        if execution_frame:
+            try:frame=execution_wire.frame(dict(frame))
+            except (ValueError,TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project execution frame invalid')
+            request_ceiling=execution_wire.MAX_BYTES
+            response_ceiling=execution_wire.MAX_BYTES
+            stream_limit=response_ceiling+4096
+        strict_response=direct_frame or planning_frame or execution_frame or fresh_frame or conversation_read_frame
+        if planning_frame:
+            try: frame=planning_wire.frame(dict(frame))
+            except (ValueError,TypeError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning frame invalid')
+            request_ceiling=planning_wire.MAX_BYTES
+            response_ceiling=planning_wire.MAX_BYTES
+            stream_limit=response_ceiling+4096
+        if direct_result_frame:
+            try:
+                frame = validate_private_frame(dict(frame))
+            except ValueError:
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="direct-native frame is invalid")
+        elif direct_submit_frame:
+            from control_plane import ceo_request
+            from common.direct_native_result_contract import hex_digest
+
+            try:
+                frame = dict(frame)
+                if set(frame) != {"schema", "request_ref", "observed_grounding", "request", "principal_scope"}:
+                    raise ValueError("direct submit keys")
+                normalized = ceo_request.normalize_automated_request(frame["request"])
+                if (normalized["execution_profile"] != "native_research_only"
+                        or normalized != frame["request"]):
+                    raise ValueError("direct submit request")
+                # App admission derives this ref before removing operation_key.
+                # Transport can validate its canonical shape, not reconstruct
+                # the omitted logical key or issue receiving-side authority.
+                request_ref = frame["request_ref"]
+                if (type(request_ref) is not str or re.fullmatch(
+                    re.escape(ceo_request.APP_REQUEST_REF_PREFIX)
+                    + rf"[0-9a-f]{{{ceo_request.INTENT_ID_DIGEST_CHARS}}}", request_ref
+                ) is None):
+                    raise ValueError("direct submit request identity")
+                ceo_request.automated_intent_id(request_ref)
+                hex_digest(frame["principal_scope"])
+                ceo_ingress._validate_observed_grounding(frame["observed_grounding"])
+                direct_encoded = json.dumps(frame, ensure_ascii=False,
+                    sort_keys=True, allow_nan=False).encode("utf-8")
+            except (ValueError, TypeError, RecursionError, ceo_request.CeoRequestError,
+                    ceo_ingress.CeoIngressError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="direct-native submit frame is invalid")
         # This closed source-only frame has its own canonical byte bounds.
         # Selecting transport limits grants no receiving-side admission.
         from integrations.company_dialogue_principal_app_contract import (
@@ -440,8 +543,14 @@ class CeoIngressClient:
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
         try:
-            encoded = principal_encoded if principal_encoded is not None else json.dumps(
-                frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            if conversation_read_encoded is not None:
+                encoded = conversation_read_encoded
+            elif principal_encoded is not None:
+                encoded = principal_encoded
+            elif direct_encoded is not None:
+                encoded = direct_encoded
+            else:
+                encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
         except (TypeError, ValueError) as exc:
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
@@ -525,11 +634,36 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
             try:
-                parsed = json.loads(raw.decode("utf-8"))
+                if strict_response:
+                    def unique(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value:
+                                raise ValueError("duplicate direct response key")
+                            value[key] = item
+                        return value
+                    def nonfinite(_value):
+                        raise ValueError("nonfinite direct response")
+                    parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                                        parse_constant=nonfinite)
+                    # JSON number exponents can overflow to inf without
+                    # parse_constant being called. Reject those and escaped
+                    # lone surrogates in either strict direct response shape.
+                    json.dumps(parsed, ensure_ascii=False, allow_nan=False).encode("utf-8")
+                    if (type(parsed) is not dict or type(parsed.get("ok")) is not bool
+                            or set(parsed) != ({"ok", "result"} if parsed["ok"] else {"ok", "error"})):
+                        raise ValueError("invalid direct response envelope")
+                else:
+                    parsed = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response was not valid JSON"
                 )
+            except (ValueError, RecursionError):
+                if not strict_response:
+                    raise
+                return CeoIngressResponse(
+                    transport=TRANSPORT_SENT_UNKNOWN, detail="direct-native response was invalid")
             if not isinstance(parsed, dict) or "ok" not in parsed or not isinstance(
                 parsed.get("ok"), bool
             ):
@@ -826,9 +960,16 @@ class CeoIngressReadGateway:
 
         if value is None:
             return True
-        if type(value) is not dict or set(value) != {
+        legacy_keys = {
             "schema", "company_phase", "north_star", "p0", "constraints"
-        }:
+        }
+        extension_keys = {
+            "resource_policy", "core_product_value_model", "phase_gates",
+            "review_triggers",
+        }
+        if type(value) is not dict or set(value) not in (
+            legacy_keys, legacy_keys | extension_keys
+        ):
             return False
         receipts = receipts or {}
         consumed = consumed if consumed is not None else set()
@@ -881,7 +1022,7 @@ class CeoIngressReadGateway:
         current_constraint_keys = set(strategic_state.REQUIRED_CONSTRAINTS) | {
             "unbounded_autonomous_strategic_modification"
         }
-        return (
+        if not (
             set(value["constraints"]) == current_constraint_keys
             and all(
                 type(name) is str
@@ -890,7 +1031,80 @@ class CeoIngressReadGateway:
                 and level
                 for name, level in value["constraints"].items()
             )
-        )
+        ):
+            return False
+        if set(value) == legacy_keys:
+            return True
+
+        # The v1 producer now includes the complete strategy review rubric.
+        # Keep its wire shape closed, then reuse the strategy owner's semantic
+        # validators after authenticating every bounded narrative leaf.
+        policy = value["resource_policy"]
+        model = value["core_product_value_model"]
+        gates = value["phase_gates"]
+        if (
+            type(policy) is not dict
+            or not policy
+            or any(type(name) is not str or not name.strip() for name in policy)
+            or any(type(weight) not in (int, float) for weight in policy.values())
+            or type(model) is not dict
+            or set(model) != {
+                "products", "dimensions", "evidence_rule", "production_readiness"
+            }
+            or type(model["products"]) is not list
+            or not model["products"]
+            or any(type(item) is not str or not item.strip() for item in model["products"])
+            or type(model["dimensions"]) is not dict
+            or not model["dimensions"]
+            or any(type(name) is not str or not name.strip() for name in model["dimensions"])
+            or any(type(weight) not in (int, float) for weight in model["dimensions"].values())
+            or type(gates) is not dict
+            or not gates
+        ):
+            return False
+        narratives = [
+            (model["evidence_rule"], "strategic_state.core_product_value_model.evidence_rule")
+        ]
+        lists = [
+            (model["production_readiness"], "strategic_state.core_product_value_model.production_readiness"),
+            (value["review_triggers"], "strategic_state.review_triggers"),
+        ]
+        for name, gate in gates.items():
+            if (
+                type(name) is not str
+                or re.fullmatch(r"[A-Z][A-Z0-9_]*", name) is None
+                or type(gate) is not dict
+                or set(gate) != {"purpose", "criteria", "on_pass"}
+            ):
+                return False
+            prefix = f"strategic_state.phase_gates.{name}"
+            narratives.extend((gate[field], f"{prefix}.{field}") for field in ("purpose", "on_pass"))
+            lists.append((gate["criteria"], f"{prefix}.criteria"))
+        for items, field in lists:
+            if type(items) is not list or not items:
+                return False
+            narratives.extend((item, f"{field}[{index}]") for index, item in enumerate(items))
+        if not all(
+            CeoIngressReadGateway._valid_bounded_text(
+                item, field=field, receipts=receipts, consumed=consumed,
+                allow_empty=False,
+            )
+            for item, field in narratives
+        ):
+            return False
+        projected = {
+            key: CeoIngressReadGateway._fabric_preview_projection(value[key])
+            for key in extension_keys
+        }
+        try:
+            where = Path("<executive strategic summary>")
+            strategic_state._validate_resource_policy(projected, where)
+            strategic_state._validate_core_product_value_model(projected, where)
+            strategic_state._validate_phase_gates(projected, where)
+            strategic_state._str_list(projected, "review_triggers", where)
+        except strategic_state.StrategicStateError:
+            return False
+        return True
 
     @staticmethod
     def _valid_runtime_counts(value: object) -> bool:
@@ -3131,6 +3345,9 @@ class CeoIngressReadGateway:
         elif schema == ceo_intent.RECEIPT_SCHEMA_V2:
             if keys not in (base_keys, base_keys | {"work_ref"}):
                 return False
+        elif schema == ceo_intent.RECEIPT_SCHEMA_DIRECT:
+            if keys != base_keys | {"work_ref"} or type(value.get("status")) is not str:
+                return False
         elif schema == ceo_intent.RECEIPT_SCHEMA_PRINCIPAL:
             if keys != base_keys | {"principal", "request_ref"}:
                 return False
@@ -3178,10 +3395,15 @@ class CeoIngressReadGateway:
             )
         ):
             return False
-        if schema == ceo_intent.RECEIPT_SCHEMA_V2:
+        if schema == ceo_intent.RECEIPT_SCHEMA_DIRECT and (
+            len(authority["requested"]) != 2
+            or set(authority["requested"]) != {"READ", "RESEARCH"}
+        ):
+            return False
+        if schema in {ceo_intent.RECEIPT_SCHEMA_V2, ceo_intent.RECEIPT_SCHEMA_DIRECT}:
             work_ref = value.get("work_ref")
             return (
-                work_ref is None
+                (schema == ceo_intent.RECEIPT_SCHEMA_V2 and work_ref is None)
                 or (
                     type(work_ref) is str
                     and re.fullmatch(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", work_ref)
