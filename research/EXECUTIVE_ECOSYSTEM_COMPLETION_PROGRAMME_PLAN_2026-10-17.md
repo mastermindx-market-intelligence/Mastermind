@@ -290,3 +290,201 @@ enrollment ceremonies (human/provider) · Fable `intent.submit` enrollment (`REJ
   Discovered: the `91c1cac5` acceptance is a prepared `supersede_unstarted_v1` lineage bound to `JOB-003`
   (PD-2). Next exact action: ship ledger+plan PR; write Agent OS records (C1); read `acceptance.py`
   preconditions for R1; commission the R2/A1 read-only audits; start A3 in W.
+
+
+## 8. Unified Hermes and DeepSeek workforce — November 7 continuation
+
+**Assignment:** Chairman's Unified Hermes + DeepSeek Harness + Subagent Fabric
+commission; operation `unified-workforce-20261107-c2-01`. Existing programmes
+`WS:EXECUTIVE-CAPACITY-FABRIC` / #983 and
+`WS:EXECUTIVE-ECOSYSTEM-COMPLETION` remain the owners. This section extends this
+task tree and its existing F/H acceptance rows; it is not a new task or runtime
+registry. Historical roots, active writers and unresolved effects above remain
+unchanged. Source procedure: `93861e9ab2e75176108bb357bd9e81b54307981d`.
+[Initial recovered frontier](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6705537725).
+
+### 8.1 Outcome and architecture ruling
+
+Keep Executive OS, Model Router and Capacity as the company control owners, and
+retain Hermes and DeepSeek as distinct native execution engines and applications.
+The company operating contract is shared; the executable agent loops need not be.
+A persistent role can own a native session on an admitted host without making
+continuous model calls. A remote child must execute its workload on the selected
+remote machine, not merely run a command there while its agent loop stays on M2.
+
+| Alternative | Decision and tradeoff |
+| --- | --- |
+| A: existing Executive/Capacity owners plus separate engines | Selected. Preserves native features, shared admission and source custody; narrow adapters still require complete identity, interruption and result semantics. |
+| B: Hermes absorbs DeepSeek | Rejected for this programme. Rebuilding the adopted DeepSeek app and its sessions/plugins increases migration and upstream-maintenance work without resolving shared admission. |
+| C: DeepSeek absorbs Hermes | Rejected for this programme. Replacing Hermes gateway/profile/memory behavior is unnecessary to distribute work and does not repair fleet admission. |
+| D: native gateway federation | Useful within A for remote application access. Gateway connectivity alone provides no company Job, account reservation or physical placement authority. |
+
+This is an evidence-led design decision, not a measured performance claim.
+The adopted DeepSeek pin is
+`687f282e8625c6b8d11ff58211a90524be2e4317`; current upstream claims must not be
+silently applied to other adopted revisions. Preserve its MIT attribution and the
+full company app under #2177. Hermes native integration uses its qualified donor
+and original #2147/#2155/#2166 carriers.
+
+| Fact or operation | Existing authority / binding |
+| --- | --- |
+| Organizational bot identity and responsibility | Agent OS organizational records joined to existing Executive responsibility/worker identities; no new workforce registry |
+| Authoritative Job / Attempt / Worker | Executive Runtime |
+| Native conversations and session history | Original Hermes or DeepSeek session owner |
+| Parent commissions company work | Authenticated existing Executive/Fabric ingress with original root, true parent and native session binding |
+| Engine selection | Existing WorkerExecutionAdapter / Operator Harness capability selection |
+| Model, provider and account suitability | Model Router followed by eligible Capacity selection and existing account reservation |
+| Physical host placement | Existing Capacity/host admission and bound worker transport |
+| Company context and decisions | Agent OS through accepted scoped readers; native episodic history remains native |
+| Native helpers versus company children | Native helper stays inside the admitted ceiling; independent recoverable company work receives an Executive child |
+| Result and acceptance | Existing retained result owner, exact-parent delivery/consumption and separate acceptance |
+| Interruption, cancellation and unknown effects | Original Executive/worker/process owner; no inferred absence or replay |
+| Workforce interface | Existing Mastermind OS projections join canonical identities, native sessions, attempts, hosts and results |
+
+```mermaid
+flowchart TD
+  UI["Mastermind OS"] --> E["Executive lifecycle"]
+  UI --> N["Native Hermes and DeepSeek sessions"]
+  N --> E
+  E --> C["Model Router and Capacity"]
+  C --> W["Bound worker adapter"]
+  W --> H["Admitted physical host"]
+  H --> R["Canonical result and cleanup"]
+  R --> E
+  E --> N
+  A["Agent OS context"] --> E
+  A --> N
+```
+
+Trust boundaries: browser/model authors task content, not authority. The native
+host supplies the actual Agent/session association and authenticated transport.
+Company admission supplies worker grants, account/host placement and process
+identity. Results cross back only after original-root/parent verification and
+bounded-byte/digest checks. Role names, MCP availability and source hashes alone
+authenticate none of those bindings.
+
+### 8.2 Current capability census and custody
+
+Observation time is November 7; source and runtime facts below are distinct.
+Original source carriers can advance independently; consume their exact subsequent
+returns rather than treating this snapshot as a release selector.
+
+| Capability | State | Evidence and next missing proof |
+| --- | --- | --- |
+| Hermes attended Fabric ingress | BUILT_NOT_PROVEN | Merged #2147; real session grant, separately enrolled execution MCP and original admission must be composed by their owners |
+| Hermes primary APPLICATION inference | BUILT_NOT_PROVEN | #2155 and gateway #2166; installed model turn and settlement remain separate |
+| APPLICATION shared pools | PARTIAL | Original #2175 paired with Macro #10740; #2187 admission/recovery, #2194 composition and #2186 role enrollment remain original contributions |
+| DeepSeek full app / native ACP | BUILT_NOT_PROVEN | #2177 at `691f2207a3ca6facfc8411b37efaf254701005d1`; actual native fixture proof is not installed provider/browser acceptance |
+| DeepSeek parent to Fabric native tool | NOT_BUILT at census | No equivalent consumer in the cited active paths; implement a disjoint native tool package |
+| DeepSeek Fabric external SubagentProvider | REJECTED_BY_DESIGN for the current facade | Required remote cancellation/quiescence is not exposed by request/status/result/accept |
+| Hermes Agent OS memory | BUILT_NOT_PROVEN for this journey | #2195 merged; live restart and parent-consumption proof still required |
+| OS Hermes conversations | BUILT_NOT_PROVEN for production | Original #2180; preserve its source and installed-owner custody |
+| Physical Ubuntu availability | PARTIAL | Advisory view: five online hosts, 152 logical CPUs; all modes ineligible in that view, no authoritative free-slot claim |
+| Executive installed read surface | DARK_OR_DISCONNECTED in this connection | V3 `executive_state` returned `backend_unavailable`; no activation is inferred |
+| Attended paid Fabric labor | BROKEN for the one observed request | Run `unified-workforce-hermes-seam-20261107-c2-01`, controller 34659: REQUEST_REFUSED_BEFORE_LAUNCH, UNCLASSIFIED_PRELAUNCH_REFUSAL, exit75, no result/retry |
+| 25/50/100 real active tasks | NOT_BUILT as an acceptance campaign | Admission, real provider results and original-parent consumption must precede scale claims |
+
+The first request's retained correlation does not establish a canonical worker
+root or permission to replay. The one controller diagnostic returned only begin
+and exit75. Source work continues directly under NO_ELIGIBLE_PRE_EFFECT_WORKER;
+native assistance is reserved architectural judgment, not substitute labor.
+
+### 8.3 Native delegation decision and failure semantics
+
+DeepSeek's adopted `SubagentRun.dispose()` must cancel remaining work, reach child
+quiescence and release resources. Cancellation applies before and after handle
+publication. Disabling optional provider capabilities does not waive that contract.
+The Fabric-only MCP has no cancellation operation. Hermes's unbound carrier and
+selected-child composition do not supply the missing qualified cancellation path.
+
+The first DeepSeek integration therefore registers a native **company-job tool**,
+not a `ctx.subagents` provider. The model can submit, inspect and retrieve the
+original job through the existing Fabric. Local interruption marks the native
+invocation interrupted while any already-started owner call settles; it neither
+cancels the remote worker nor frees its reservation. A post-send lost
+reply stays EFFECT_UNKNOWN. The original native session and task key recover the
+same run after reconnect, never a replacement keyed by process generation.
+
+An eventual external provider must bind to the incumbent Executive/broker cancel
+owner and observe exact worker/process cleanup. Existing ACP cancellation and
+settled-completion contracts are reusable on the reverse worker path, not authority
+for an unbound parent to cancel arbitrary Fabric jobs. Completion-versus-cancel
+races retain the original result; uncertain cleanup rejects disposal.
+
+### 8.4 Implementation nodes within the existing programme
+
+| Node | Dependencies and source owner | Independently useful output / acceptance |
+| --- | --- | --- |
+| F3.U1 — Hermes remote round trip | Original #2147/#2166 session and transport owners; F3/F4 actual admission | Native parent -> admitted Ubuntu worker -> retained digest -> same parent consumes result. Controller creation alone fails. |
+| F3.U2 — DeepSeek native company-job consumer | Adopted native tool registry plus existing Fabric-only contract; path-disjoint package `integrations/deepseek_attended_fabric/` | Actual pinned native tool invocation with host-bound parent, stable original request, verified result, revocation and lost-response negatives. Live enrollment remains a separate gate. |
+| F3.U3 — Native worker engines and cancellation | Existing WorkerExecutionAdapter/OHF, ACP process and Executive cancel owners | Select Hermes or DeepSeek independently of model/host; exact process start/result/cleanup. Only then expose a DeepSeek managed external provider. |
+| F3.U4 — Shared primary inference | Original #2175/#2194 and #2155/#2186 compositions | Real provider/model/account attribution, aggregate parent/child reservation, cancellation settlement and zero direct-provider replay |
+| F4.U1 — Remote persistent services | Current host admission, existing supervisor, runtime identity and native service installers | One qualified remote service and cross-host child; idle service has no unnecessary inference. No implicit session migration. |
+| A4.U1 — Joined workforce journey | Existing #2177/#2180 app owners plus canonical runtime/result projections | Signed-in project -> parent -> child -> host -> evidence -> parent decision; truthful unavailable and reconnect states |
+| F4.U2 — Scale and reliability | Accepted U1/U2/U3/U4 and host ceilings | Measured real active-task stages, no duplicate effects under faults, preserved M2 responsiveness and observed safe ceiling |
+
+Release order: source-qualify independent U2 while original shared-pool and native
+Hermes carriers progress; consume protected release/runtime holds before installed
+U1/U2; qualify one reverse engine/host before widening services; prove the app
+journey before load. No change on this branch publishes a native generation,
+restarts a service, selects a provider/account or modifies an incumbent branch.
+
+### 8.5 Test and production qualification strategy
+
+Source tests must falsify wrong native Agent/session, forged model authority,
+revocation before dispatch and during await, duplicate task keys, stale generation,
+foreign result root/parent, changed effective run, truncated/incorrect digest,
+original retained prelaunch refusal and lost post-send response. Concurrency tests
+must keep distinct parents/children isolated and must rely on incumbent admission
+for duplicate prevention; no new in-memory set may become the durable effect owner.
+
+Real journeys must additionally bind Job/Attempt, worker process and host, engine
+revision, model/account reservation, retained result, native parent consumption and
+the OS display. Test disconnection after dispatch and after result persistence,
+provider throttling, host loss, cancellation, cleanup failure and process restart.
+Keep injected infrastructure tests separate from actual provider/model results.
+
+Measure five separate quantities: registered identities, idle services, active
+tasks, concurrent inference and concurrent tool/browser processes. At each allowed
+25/50/100 active-task stage record admission/refusal, queue latency, runtime,
+CPU/memory/swap/disk pressure, per-account concurrency/cost and correctness.
+Increase only within observed authoritative ceilings. Report the measured limit;
+do not infer 100-task support from 100 idle bots or synthetic tests. Reliability
+claims require an observation window and successful/failed journey counts.
+
+### 8.6 Next action and contingency
+
+First implement F3.U2 in the isolated managed workspace at this continuation's
+protected base. Preserve all #2177 app/ACP/launcher, #2166 gateway, #2175 publisher
+and #2186 enrollment paths. Use the actual pinned DeepSeek tool registry for a
+native source qualification, not just a mocked exported function.
+
+If runtime admission remains unavailable, complete source composition and exact
+negative tests, then recover the incumbent installation/control dependency through
+its original carrier. Do not remove guards, fabricate grants, rerun refused
+requests, move uncertain effects or substitute an unqualified SubagentProvider.
+
+MISSION_COMPLETE: false. This plan's publication is an intermediate deliverable.
+
+
+### 8.7 F3.U2 source implementation receipt
+
+The path-disjoint native tool is implemented in
+[integrations/deepseek_attended_fabric](../integrations/deepseek_attended_fabric/README.md).
+Its actual adopted native AgentLoop, scoped Tools and Session integration passed
+**39 tests** (five native integration tests and 34 contract negatives/positives).
+The original parent retains the verified fixture result in native history;
+another Agent cannot see or call its tool. The native interrupted-call test
+recovers the original run without a second submission. Exact receipts and proof
+limits are in [EVIDENCE.md](../integrations/deepseek_attended_fabric/EVIDENCE.md).
+
+This is BUILT_NOT_PROVEN for installed production. The native application must
+still supply its authentic original-session/currentness grant, original-owner
+durable new-run admission and enrolled Fabric transport. No allow-all test
+binding, new auth service, transport, queue or lifecycle is an acceptable
+substitute. Continue on the original native installation/runtime carriers for
+those bindings; while they are blocked, inspect the existing reverse native
+worker-engine and host admission contracts for the next safe independent slice.
+
+The programme's seven production slices remain open until their original
+real-path acceptance is met. The passing source tests do not close F3.U1/F3.U2.

@@ -531,3 +531,73 @@ def test_signed_mcp_roundtrip_compiles_exact_context_without_a_job(tmp_path, mon
             finally:
                 await service.close()
     asyncio.run(exercise())
+
+
+# Actual compiler-backed wire, in-memory streams; no socket or installed effect.
+@pytest.mark.parametrize("trigger", ["caller", "request_deadline", "cleanup_error"])
+def test_original_context_request_preserves_cancellation_during_cleanup(
+        actual_result, monkeypatch, trigger):
+    from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
+
+    frame, value, _ = actual_result
+    envelope = {"ok": True, "result": value}
+    raw = wire.encode(envelope) + b"\n"
+    seen = {"opens": 0, "writes": [], "closed": 0}
+
+    async def exercise():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class Reader:
+            async def readuntil(self, separator):
+                assert separator == b"\n"
+                return raw
+
+        class Writer:
+            def write(self, contents):
+                seen["writes"].append(contents)
+
+            async def drain(self):
+                pass
+
+            def close(self):
+                seen["closed"] += 1
+
+            async def wait_closed(self):
+                entered.set()
+                if trigger == "cleanup_error":
+                    raise OSError("explicit in-memory cleanup failure")
+                await release.wait()
+
+        async def open_stream(path, *, limit):
+            assert path == "/test-only/context-cancellation.sock"
+            assert limit == wire.MAX_RESPONSE_BYTES
+            seen["opens"] += 1
+            return Reader(), Writer()
+
+        monkeypatch.setattr(asyncio, "open_unix_connection", open_stream)
+        client = CeoIngressWorkspaceClient(
+            "/test-only/context-cancellation.sock",
+            acceptance_timeout_seconds=0.1 if trigger == "request_deadline" else 2)
+        task = asyncio.create_task(client.request(frame))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            if trigger == "caller":
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            elif trigger == "request_deadline":
+                with pytest.raises(ValueError, match="source_unavailable"):
+                    await task
+            else:
+                assert await task == envelope
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert entered.is_set()
+
+    asyncio.run(exercise())
+    assert seen["opens"] == seen["closed"] == len(seen["writes"]) == 1
+    assert wire.decode(seen["writes"][0]) == frame

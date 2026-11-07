@@ -1,0 +1,22 @@
+{
+  "observedAt": "2026-11-07T08:43:13.074104+00:00",
+  "qualification": true,
+  "elapsedSeconds": 0.345,
+  "bridgeSha256": "9b267a5b9697bb1f327f4e2c1d8526b24694bda679b5d3bd5f83ed2dd0e786a8",
+  "scope": "trusted installed-source qualification only; not live runtime or hostile-host attestation",
+  "pluginImports": 0,
+  "runtimeCalls": 0,
+  "pins": {
+    "release": "58ac65ae47824750cae32c5ab85b58b6f38e6d5e",
+    "plugin.yaml": "a426392c03a151903f3376a3343d666372c206cd04a244937291fe263ca64b22",
+    "__init__.py": "e72da67dfb64314c849c8b44b44c25e7707e3576f003df7a3ccabf3326a2cb70",
+    "descriptor": "7aa738444942825ef223c8af773c7541b678898686a184efa1ca47236ef1bf3b",
+    "python": "87d4df53fd91304be5bac391fb204643c36b7df2023c04a0953bcbc7d4fdf634",
+    "pyvenv.cfg": "a4b4a334bb8aa27404a11068ba34f3f0f3470a6d5d109f0e6a9587e60422945c",
+    "metadata": "b3ac978c27cdbb94a1e17a0ee0035fc54c14c6ccc53fa7879dcb137e6e8fdc1a",
+    "dependency": "5178ac807671d0218b7668ebc3cd5d24a2d8fc4459ec245142cabc149afc03e4",
+    "dependency_files": 1240,
+    "stdlib_sitecustomize": "cbf9d8d0f07943b63ed5e5983e2b33d91fadc54251e66df7eb7c31f1b816b5d6",
+    "model_tools": "24850d5ce74f7bcf17e58638fc787d6b955bfb89f4980e74b361d7927de74581"
+  }
+}
