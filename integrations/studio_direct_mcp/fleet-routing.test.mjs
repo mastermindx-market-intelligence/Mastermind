@@ -131,6 +131,13 @@ test('preflight binds one configured host only after exact tool schema match', a
     router.preflight('not-configured', expected),
     /HOST_NOT_CONFIGURED/,
   );
+  // Even an online/local fleet name is not a remote route unless configured.
+  await assert.rejects(
+    router.preflight('m2', expected),
+    /HOST_NOT_CONFIGURED/,
+  );
+  assert.equal(h.created.length, 1); // no extra remote client or preflight dispatch
+  assert.equal(h.created[0].calls, 0);
   await router.close();
   assert.equal(h.created[0].clientCloses, 1);
 });
@@ -379,6 +386,11 @@ test('fleet selector teaches that typed Git/Paper remain independent of remote h
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /NOT required for studio_git_\*/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /studio_fleet_status or paper_\*/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /only routed Desktop Commander operations/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /operator-configured REMOTE fleet route/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /leave the MCP session unselected and use local tools/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /do NOT select the gateway host as a remote hostRef/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /Only fleetRouting.routes entries are selectable/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.description, /physicalFleet is advisory, not the route allowlist/);
 });
 
 test('host preflight reason exposes only the closed diagnostic vocabulary', () => {
