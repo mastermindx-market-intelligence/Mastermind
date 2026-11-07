@@ -247,10 +247,23 @@ class _Snapshot:
     receipt_sha256: str
     rendered_context_sha256: str
     rendered_context_bytes: int
+    record_sources_json: str | None = None
 
 
 def _render(observation: dict, raw: bytes) -> str:
     """Wrap the owner's exact bytes in a small, explicit evidence envelope."""
+    from control_plane.agentos_context_bundle import CURRENT_RECEIPT_SCHEMA_V2, canonical_digest
+    if observation.get("schema") == CURRENT_RECEIPT_SCHEMA_V2:
+        # Machine evidence stays private. The model sees an explicitly named
+        # projection, never an incomplete object mislabeled as the full receipt.
+        inventory = observation["selected_record_sources"]
+        observation = {**{key: value for key, value in observation.items()
+                         if key != "selected_record_sources"},
+            "schema": "mastermind.agentos_context_prompt_observation.v1",
+            "source_receipt_schema": CURRENT_RECEIPT_SCHEMA_V2,
+            "source_receipt_sha256": canonical_digest(observation),
+            "selected_record_sources_summary": {key: value for key, value in inventory.items()
+                                                 if key != "entries"}}
     envelope = {
         "context_focus": observation["workstream"],
         "agentos_read_observation": observation,
@@ -598,6 +611,16 @@ class AgentOsMemoryProviderCore:
                     "rendered_context_bytes": snapshot.rendered_context_bytes,
                     "remaining_ms": max(0, int((snapshot.expires_at - self._clock()) * 1000))}
 
+    def _record_sources_observation(self, *, rendered_context_sha256: str) -> dict | None:
+        """Private evidence for this exact current snapshot; no delivery claim."""
+        with self._lock:
+            state = self._status_locked()
+            snapshot = self._snapshot
+            if (state["state"] != "READY" or snapshot is None or snapshot.record_sources_json is None
+                    or snapshot.rendered_context_sha256 != rendered_context_sha256):
+                return None
+            return json.loads(snapshot.record_sources_json)
+
     def _status_locked(self, guard_reason: Any = _GUARD_UNCHECKED) -> dict:
         """The bounded state of this instance. The caller holds the lock.
 
@@ -856,6 +879,17 @@ class AgentOsMemoryProviderCore:
         repo_sha = observation.get("repo_sha")
         if type(repo_sha) is not str or not repo_sha:
             raise AgentOsRefusal(REASON_OBSERVATION_MISMATCH)
+        record_sources = None
+        from control_plane.agentos_context_bundle import (
+            CURRENT_RECEIPT_SCHEMA_V2, validate_current_context_read,
+        )
+        if observation.get("schema") == CURRENT_RECEIPT_SCHEMA_V2:
+            try:
+                validate_current_context_read(raw, observation, work_ref=binding.workstream)
+                record_sources = json.dumps(observation["selected_record_sources"], sort_keys=True,
+                    ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                raise AgentOsRefusal(REASON_OBSERVATION_MISMATCH) from None
         try:
             text = _render(observation, raw)
         except (ValueError, TypeError):
@@ -874,6 +908,7 @@ class AgentOsMemoryProviderCore:
                 ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")).hexdigest(),
             rendered_context_sha256=hashlib.sha256(rendered).hexdigest(),
             rendered_context_bytes=len(rendered),
+            record_sources_json=record_sources,
         )
 
     def _guard_reason(self, binding: AgentOsBinding, epoch: int) -> Optional[str]:
