@@ -448,8 +448,12 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert {
         path for path in manifest["files"] if path.endswith(".py")
     } == _repo_python_import_closure(source)
+    assert "control_plane/company_orientation.py" in manifest["files"]
+    # The exact predecessor closure remains eight modules, plus only the
+    # accepted pure value projector required by the boot packet.
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
+        and path != "control_plane/company_orientation.py"
         for path in manifest["files"]
     ) == 8
     assert "config/strategic_state.yml" in manifest["files"]

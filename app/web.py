@@ -2996,8 +2996,13 @@ def api_readiness() -> JSONResponse:
         import bot  # noqa: F401
         from portfolio import readiness
         return JSONResponse({"status": readiness.status(), "alerts": readiness.alerts()})
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": {}, "alerts": [], "error": str(exc)})
+    except Exception:  # noqa: BLE001
+        return JSONResponse({
+            "status": None,
+            "alerts": None,
+            "read_status": "unavailable",
+            "error": "readiness_unavailable",
+        })
 
 
 @router.get("/api/portfolio_learning")
