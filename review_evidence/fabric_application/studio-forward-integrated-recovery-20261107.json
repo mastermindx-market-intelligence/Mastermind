@@ -1,0 +1,377 @@
+{
+  "schema": "mastermind.studio_forward_integrated_recovery.v1",
+  "base_head": "aa26c40fab5a587809485d426dcf8462a27d0f9a",
+  "merge_parent": "f523c3e26c346beb81b899f6092d6935102fefd8",
+  "input_sha256": {
+    "integrations/studio_direct_mcp/private_service_workspaces_test.py": "3a7fe30a69ef3d2863d4df2132ed2af6ee4b16aeef57ee08061efa6ca61cc49d",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "4426a5eba0c9a88a3257196366253c7100b3024a0fe51fc755f76764de83cb89",
+    "integrations/studio_direct_mcp/private_service_commission_test.py": "092e83d549adb5ceac854c8bbcdee52646f39f217b29ab86568bdc8ca09d68e8",
+    "integrations/studio_direct_mcp/private_service_stop_settle_test.py": "a28ae23776bf7e2f18db4ef9a627b7f37b36b54b9c4e0e408b4edebb58cb3d2f",
+    "integrations/studio_direct_mcp/private_service_original_delivery_test.py": "2016e53cf85294d553a45255ed0dc2e13e3eb9cc10b626643c089c306dd2511b",
+    "integrations/studio_direct_mcp/private_service_pin_forward_recovery_test.py": "aa8d5502f891a77e8d91033b9a5b6bf8139e1a4e46026aeac9c8cbc2083b2dee",
+    "integrations/studio_direct_mcp/private_service_status_paper_v20_test.py": "db67e40cd5b13bd57edba28924c183535a842d0716811ab9983c51f7f8becc5c",
+    "integrations/studio_direct_mcp/private_service_pin_tailnet_protocol_test.py": "3df6465408d1232a836a606aa6db34f5da8624632c263c538e5675155bbe4b0e",
+    "integrations/studio_direct_mcp/private_service_fleet_git_failure_test.py": "3bc380558cc7489623e7b1602b01e35ba46bb9797c64f9572f0dade31dc3b6b3",
+    "integrations/studio_direct_mcp/private_service_pin_tailnet_guard_test.py": "fa2b324c97953a60c93eb8f86bce67a5a0fb01faed20afb93cf7d1171f4eff3d",
+    "integrations/studio_direct_mcp/private_service_pin_paper_v20_start_test.py": "d1ed282bed26fc529e510adc0fb810285051d1b27fc9f4e097d41655db43d797",
+    "integrations/studio_direct_mcp/private_service_pin_fleet_v20_start_test.py": "da3e04bd3f268652a0bc6b56b0930d9d7ed324545ee45a4c5a6d144b21aa0734",
+    "integrations/studio_direct_mcp/private_service_status_successor_test.py": "77a216b6be5e307f2a86a300cadd6869cf385e6bb0408d788d1a23b312376f33",
+    "integrations/studio_direct_mcp/private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+    "integrations/studio_direct_mcp/private_service_pin_transition_test.py": "d14ca40e3af11969246aad3d597af9d20664551ac632fc614016f9be223722a4",
+    "integrations/studio_direct_mcp/private_service_pin_forward_selection_test.py": "69653ce276856a59075b93579664310a78560c7651601dfa0535759ea10b95f0",
+    "integrations/studio_direct_mcp/private_service_modern_test.py": "d8428ba3ac705a5377e10b949447445bb76ad0615c9fd9077671f41b9d3857c5",
+    "integrations/studio_direct_mcp/private_service_pin_tailnet_profile_test.py": "8ba429cb6706ab4e9327289496939a1cb0db2d2b452f2483f9e0d1047a364e97",
+    "integrations/studio_direct_mcp/private_service_pin_c4_profile_test.py": "8766872d2380411c4dc089211dce5eca59a4992d932ec38d2116d981d9b65b83",
+    "integrations/studio_direct_mcp/private_service_paper_m1_v20_test.py": "8a49d29cae6cfb055c730a04d96ac35fa830b113faeceffd74c204122549c376",
+    "integrations/studio_direct_mcp/private_service_fabric_test.py": "a145d033080b83a5577f1add3c7ab1b9fad604a1685fdbabcbd9a04fcc1f1693",
+    "integrations/studio_direct_mcp/private_service_status_successor.py": "44889e23b6d8e0eb70ca7de40f26a94f90853d1cea1b6529248c92a349df9198",
+    "integrations/studio_direct_mcp/private_service_backend_release_test.py": "b5937140c1591f4e045a690af8666df1062c580dea58ef01c906d822a9cb0307",
+    "integrations/studio_direct_mcp/private_service_pin_tailnet_test.py": "922bb2e69557106839c5e173c6a18e829349b6c99944dd939856ce6836f81435",
+    "integrations/studio_direct_mcp/private_service_pin.py": "1e20ef4f9e049c5937bcb9b1b095991854e97bd9dc1eefeb36d2c2bef0f581a4",
+    "integrations/studio_direct_mcp/private_service_paper_v20_fleet_test.py": "659753eab576acfbd3f8ec488d11736e895b4b138c9b7f13fcd71f21576a745c",
+    "integrations/studio_direct_mcp/private_service_test.py": "eb2a252e6620bc4937134f40210d57978da5677334e77206a51e3cdd26018ec1",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment_test.py": "af3b96403de9e03ba69ad5a13eae513e59d89cd3e7c01fdf55e354153c1a0a47",
+    "integrations/studio_direct_mcp/control_bundle.py": "9d3f8a73cf4982d6ca492edee4f6ee4b471ff20cacc58971716a08898537e7ca",
+    "integrations/studio_direct_mcp/control_bundle_test.py": "d5b8491538f4ad433256f390810ac339daa17e87812cdb2bd38ce1e2c361f586",
+    "integrations/studio_direct_mcp/control_bundle_closure_test.py": "773176a0f0909b04172f5a8c88baf40bf0e6175c5bc271a9c6a2bb40d1365641"
+  },
+  "state": "PASSED",
+  "live_effects": "NONE; disposable fixture paths only",
+  "runs": [
+    {
+      "label": "private",
+      "command": [
+        "/opt/homebrew/bin/python3.12",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        ".",
+        "-p",
+        "private_service*test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 147.66,
+      "log": "/tmp/mmx-studio-final-private-02.log",
+      "log_sha256": "5055837a3e00548269666a92fcffdfc69b940485ae9d11ecf483e54aa8400352",
+      "summary": [
+        "Ran 664 tests in 146.871s",
+        "OK"
+      ]
+    },
+    {
+      "label": "control_bundle",
+      "command": [
+        "/opt/homebrew/bin/python3.12",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        ".",
+        "-p",
+        "control_bundle*test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "seconds": 13.455,
+      "log": "/tmp/mmx-studio-final-control_bundle-02.log",
+      "log_sha256": "711e16cb8b1ec63c246dae1196fec6dbb72e52ede6840e1dff534306ff7e8a09",
+      "summary": [
+        "Ran 53 tests in 13.250s",
+        "OK"
+      ]
+    }
+  ],
+  "source_unchanged": true,
+  "governing_source": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+  "operation_id": "fabric-app-admission-compose-20261107-sol-001",
+  "qualification": "SOURCE_QUALIFIED_NOT_INSTALLED",
+  "behavior": [
+    "Complete forward intent is atomically published through the existing exclusive rename owner before either live pair write.",
+    "Every incumbent native pin, enrollment and fleet-status predecessor remains authenticated from retained before bytes.",
+    "Lost writes, rename replies, file sync and directory sync remain with the same original transaction for reconciliation.",
+    "Genuine intact and retained native Go fixture transitions qualify forward startup after their old live bridge reader correctly refuses."
+  ],
+  "test_boundary": "Disposable paths only. Real retained-Go fixture uses test-local trust anchors for fixture status proof; no production override, live service or provider.",
+  "prior_failures": [
+    {
+      "receipt": "mmx-studio-f523-joined-focused.json",
+      "sha256": "532150f17c7a8a8fd9f7692d9a67e4e35e3418fb6108b2435a5e93980faeb139",
+      "result": {
+        "schema": "studio-forward-joined-proof.v1",
+        "base_head": "aa26c40fab5a587809485d426dcf8462a27d0f9a",
+        "merge_parent": "f523c3e26c346beb81b899f6092d6935102fefd8",
+        "source_sha256": {
+          "private_service_pin.py": "ae9cfd09d776251c9335d5c1a0bc4aeda38b567500feed6ceb8a8e25cad7c21e",
+          "private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+          "private_service_pin_enrollment.py": "4426a5eba0c9a88a3257196366253c7100b3024a0fe51fc755f76764de83cb89",
+          "private_service_status_successor.py": "7964f7f08e8ae9eee1ff68244c1a255d11d001e3500a7aee1b0d61a03c8436c0",
+          "private_service_pin_forward_recovery_test.py": "44e4c5322ae041b302883cfae3c01aa44ffef70bdb294680a153e07ce74656d6",
+          "private_service_pin_transition_test.py": "0181c25e08652e4ab4d53505d499540a6ccfe08b30f273f7859a22d14c62debe",
+          "private_service_pin_forward_selection_test.py": "69653ce276856a59075b93579664310a78560c7651601dfa0535759ea10b95f0"
+        },
+        "python": "/opt/homebrew/bin/python3.12",
+        "state": "COMPLETED",
+        "live_effects": "NONE; disposable fixture roots only",
+        "command": [
+          "/opt/homebrew/bin/python3.12",
+          "-B",
+          "-m",
+          "unittest",
+          "private_service_pin_transition_test.ForwardPinTransitionTests",
+          "private_service_pin_transition_test.RealIntactGoForwardTests",
+          "private_service_pin_forward_selection_test",
+          "private_service_pin_forward_recovery_test",
+          "-v"
+        ],
+        "exit_code": 1,
+        "seconds": 26.004,
+        "log": "/tmp/mmx-studio-f523-joined-focused.log",
+        "log_sha256": "cf8f54c7f85438c4dedf1bc62d43efc9e5326dbeba7198b411732bb30d3129f1",
+        "summary": [
+          "ERROR: test_status_and_start_hold_when_visible_receipt_cannot_be_synchronized (private_service_pin_transition_test.ForwardPinTransitionTests.test_status_and_start_hold_when_visible_receipt_cannot_be_synchronized)",
+          "ERROR: test_forward_start_keeps_the_enrollment_module_seal (private_service_pin_forward_recovery_test.ForwardEnrollmentTests.test_forward_start_keeps_the_enrollment_module_seal)",
+          "ERROR: test_forward_start_keeps_the_enrollment_receipt_fence (private_service_pin_forward_recovery_test.ForwardEnrollmentTests.test_forward_start_keeps_the_enrollment_receipt_fence)",
+          "ERROR: test_real_enrollment_and_forward_owners_admit_the_same_start (private_service_pin_forward_recovery_test.ForwardEnrollmentTests.test_real_enrollment_and_forward_owners_admit_the_same_start)",
+          "ERROR: test_forward_start_requires_the_original_status_receipt (private_service_pin_forward_recovery_test.ForwardStatusSuccessorTests.test_forward_start_requires_the_original_status_receipt)",
+          "ERROR: test_forward_start_retains_qualified_status_module_bytes (private_service_pin_forward_recovery_test.ForwardStatusSuccessorTests.test_forward_start_retains_qualified_status_module_bytes)",
+          "ERROR: test_real_status_and_forward_owners_admit_the_same_start (private_service_pin_forward_recovery_test.ForwardStatusSuccessorTests.test_real_status_and_forward_owners_admit_the_same_start)",
+          "FAIL: test_changed_original_custody_blocks_partial_reconciliation (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_changed_original_custody_blocks_partial_reconciliation)",
+          "FAIL: test_completed_go_allows_only_same_complete_pair_acknowledgment (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_completed_go_allows_only_same_complete_pair_acknowledgment)",
+          "FAIL: test_completed_go_cannot_resume_a_partial_pair (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_completed_go_cannot_resume_a_partial_pair)",
+          "FAIL: test_file_sync_failure_cannot_become_committed_status (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_file_sync_failure_cannot_become_committed_status)",
+          "FAIL: test_lost_intent_rename_reply_reconciles_the_original_complete_intent (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_lost_intent_rename_reply_reconciles_the_original_complete_intent)",
+          "FAIL: test_visible_receipt_requires_durability_before_acknowledgment (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_visible_receipt_requires_durability_before_acknowledgment)",
+          "Ran 92 tests in 25.809s",
+          "FAILED (failures=6, errors=7)"
+        ],
+        "source_unchanged": true
+      }
+    },
+    {
+      "receipt": "mmx-studio-f523-joined-focused-02.json",
+      "sha256": "e5cc1abf1e735a8c07aef7ca56f6a01544d10b7003ff1df67240e0472c9acad6",
+      "result": {
+        "schema": "studio-forward-joined-proof.v1",
+        "base_head": "aa26c40fab5a587809485d426dcf8462a27d0f9a",
+        "merge_parent": "f523c3e26c346beb81b899f6092d6935102fefd8",
+        "source_sha256": {
+          "private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+          "private_service_pin.py": "1e20ef4f9e049c5937bcb9b1b095991854e97bd9dc1eefeb36d2c2bef0f581a4",
+          "private_service_pin_enrollment.py": "4426a5eba0c9a88a3257196366253c7100b3024a0fe51fc755f76764de83cb89",
+          "private_service_status_successor.py": "7964f7f08e8ae9eee1ff68244c1a255d11d001e3500a7aee1b0d61a03c8436c0",
+          "private_service_pin_forward_recovery_test.py": "0b2b60383795c88aac2bd8860abdf8d01cfb5f9a11e63597fda5e2a07fa75899",
+          "private_service_pin_transition_test.py": "aae1fcf64e62c68e5291ea7ff018c484dad450c538a812950a87f5ffce3833b0",
+          "private_service_pin_forward_selection_test.py": "69653ce276856a59075b93579664310a78560c7651601dfa0535759ea10b95f0"
+        },
+        "state": "COMPLETED",
+        "live_effects": "NONE; disposable fixture roots only",
+        "command": [
+          "/opt/homebrew/bin/python3.12",
+          "-B",
+          "-m",
+          "unittest",
+          "private_service_pin_transition_test.ForwardPinTransitionTests",
+          "private_service_pin_transition_test.RealIntactGoForwardTests",
+          "private_service_pin_forward_selection_test",
+          "private_service_pin_forward_recovery_test",
+          "-v"
+        ],
+        "exit_code": 1,
+        "seconds": 38.155,
+        "log": "/tmp/mmx-studio-f523-joined-focused-02.log",
+        "log_sha256": "e15430ff01c9b05d2003853a8f03826e29551083d6973286c374cb859b2554b7",
+        "summary": [
+          "ERROR: test_forward_start_keeps_the_enrollment_module_seal (private_service_pin_forward_recovery_test.ForwardEnrollmentTests.test_forward_start_keeps_the_enrollment_module_seal)",
+          "ERROR: test_forward_start_keeps_the_enrollment_receipt_fence (private_service_pin_forward_recovery_test.ForwardEnrollmentTests.test_forward_start_keeps_the_enrollment_receipt_fence)",
+          "ERROR: test_real_enrollment_and_forward_owners_admit_the_same_start (private_service_pin_forward_recovery_test.ForwardEnrollmentTests.test_real_enrollment_and_forward_owners_admit_the_same_start)",
+          "FAIL: test_visible_intent_with_failed_parent_sync_cannot_change_live_pair (private_service_pin_forward_recovery_test.ForwardRecoveryTests.test_visible_intent_with_failed_parent_sync_cannot_change_live_pair)",
+          "Ran 93 tests in 37.807s",
+          "FAILED (failures=1, errors=3)"
+        ],
+        "source_unchanged": true
+      }
+    },
+    {
+      "receipt": "mmx-studio-final-composed-full-proof.json",
+      "sha256": "376794384a689c93830443ca456e08e24d73dd8cd0df4dc24fb9ece165aab521",
+      "result": {
+        "schema": "studio-forward-final-composed-proof.v1",
+        "base_head": "aa26c40fab5a587809485d426dcf8462a27d0f9a",
+        "merge_parent": "f523c3e26c346beb81b899f6092d6935102fefd8",
+        "input_sha256": {
+          "integrations/studio_direct_mcp/private_service_workspaces_test.py": "3a7fe30a69ef3d2863d4df2132ed2af6ee4b16aeef57ee08061efa6ca61cc49d",
+          "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "4426a5eba0c9a88a3257196366253c7100b3024a0fe51fc755f76764de83cb89",
+          "integrations/studio_direct_mcp/private_service_commission_test.py": "092e83d549adb5ceac854c8bbcdee52646f39f217b29ab86568bdc8ca09d68e8",
+          "integrations/studio_direct_mcp/private_service_stop_settle_test.py": "a28ae23776bf7e2f18db4ef9a627b7f37b36b54b9c4e0e408b4edebb58cb3d2f",
+          "integrations/studio_direct_mcp/private_service_original_delivery_test.py": "2016e53cf85294d553a45255ed0dc2e13e3eb9cc10b626643c089c306dd2511b",
+          "integrations/studio_direct_mcp/private_service_pin_forward_recovery_test.py": "aa8d5502f891a77e8d91033b9a5b6bf8139e1a4e46026aeac9c8cbc2083b2dee",
+          "integrations/studio_direct_mcp/private_service_status_paper_v20_test.py": "db67e40cd5b13bd57edba28924c183535a842d0716811ab9983c51f7f8becc5c",
+          "integrations/studio_direct_mcp/private_service_pin_tailnet_protocol_test.py": "3df6465408d1232a836a606aa6db34f5da8624632c263c538e5675155bbe4b0e",
+          "integrations/studio_direct_mcp/private_service_fleet_git_failure_test.py": "3bc380558cc7489623e7b1602b01e35ba46bb9797c64f9572f0dade31dc3b6b3",
+          "integrations/studio_direct_mcp/private_service_pin_tailnet_guard_test.py": "fa2b324c97953a60c93eb8f86bce67a5a0fb01faed20afb93cf7d1171f4eff3d",
+          "integrations/studio_direct_mcp/private_service_pin_paper_v20_start_test.py": "d1ed282bed26fc529e510adc0fb810285051d1b27fc9f4e097d41655db43d797",
+          "integrations/studio_direct_mcp/private_service_pin_fleet_v20_start_test.py": "da3e04bd3f268652a0bc6b56b0930d9d7ed324545ee45a4c5a6d144b21aa0734",
+          "integrations/studio_direct_mcp/private_service_status_successor_test.py": "77a216b6be5e307f2a86a300cadd6869cf385e6bb0408d788d1a23b312376f33",
+          "integrations/studio_direct_mcp/private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+          "integrations/studio_direct_mcp/private_service_pin_transition_test.py": "28e6bb14cb49bb6df35d7f731269d1be5d4ae1508a50aba5f7ce167b2804fb14",
+          "integrations/studio_direct_mcp/private_service_pin_forward_selection_test.py": "69653ce276856a59075b93579664310a78560c7651601dfa0535759ea10b95f0",
+          "integrations/studio_direct_mcp/private_service_modern_test.py": "d8428ba3ac705a5377e10b949447445bb76ad0615c9fd9077671f41b9d3857c5",
+          "integrations/studio_direct_mcp/private_service_pin_tailnet_profile_test.py": "8ba429cb6706ab4e9327289496939a1cb0db2d2b452f2483f9e0d1047a364e97",
+          "integrations/studio_direct_mcp/private_service_pin_c4_profile_test.py": "8766872d2380411c4dc089211dce5eca59a4992d932ec38d2116d981d9b65b83",
+          "integrations/studio_direct_mcp/private_service_paper_m1_v20_test.py": "8a49d29cae6cfb055c730a04d96ac35fa830b113faeceffd74c204122549c376",
+          "integrations/studio_direct_mcp/private_service_fabric_test.py": "a145d033080b83a5577f1add3c7ab1b9fad604a1685fdbabcbd9a04fcc1f1693",
+          "integrations/studio_direct_mcp/private_service_status_successor.py": "7964f7f08e8ae9eee1ff68244c1a255d11d001e3500a7aee1b0d61a03c8436c0",
+          "integrations/studio_direct_mcp/private_service_backend_release_test.py": "b5937140c1591f4e045a690af8666df1062c580dea58ef01c906d822a9cb0307",
+          "integrations/studio_direct_mcp/private_service_pin_tailnet_test.py": "922bb2e69557106839c5e173c6a18e829349b6c99944dd939856ce6836f81435",
+          "integrations/studio_direct_mcp/private_service_pin.py": "1e20ef4f9e049c5937bcb9b1b095991854e97bd9dc1eefeb36d2c2bef0f581a4",
+          "integrations/studio_direct_mcp/private_service_paper_v20_fleet_test.py": "659753eab576acfbd3f8ec488d11736e895b4b138c9b7f13fcd71f21576a745c",
+          "integrations/studio_direct_mcp/private_service_test.py": "eb2a252e6620bc4937134f40210d57978da5677334e77206a51e3cdd26018ec1",
+          "integrations/studio_direct_mcp/private_service_pin_enrollment_test.py": "af3b96403de9e03ba69ad5a13eae513e59d89cd3e7c01fdf55e354153c1a0a47",
+          "integrations/studio_direct_mcp/control_bundle.py": "9d3f8a73cf4982d6ca492edee4f6ee4b471ff20cacc58971716a08898537e7ca",
+          "integrations/studio_direct_mcp/control_bundle_test.py": "d5b8491538f4ad433256f390810ac339daa17e87812cdb2bd38ce1e2c361f586",
+          "integrations/studio_direct_mcp/control_bundle_closure_test.py": "773176a0f0909b04172f5a8c88baf40bf0e6175c5bc271a9c6a2bb40d1365641"
+        },
+        "state": "NOT_PASSED",
+        "live_effects": "NONE; disposable fixture paths only",
+        "retained_fixture": "Actual retained_go_owner artifacts/readers/CAS; two fixture-derived trust anchors preloaded only in test isolated importer",
+        "runs": [
+          {
+            "label": "private",
+            "command": [
+              "/opt/homebrew/bin/python3.12",
+              "-B",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              ".",
+              "-p",
+              "private_service*test.py",
+              "-v"
+            ],
+            "exit_code": 1,
+            "seconds": 209.491,
+            "log": "/tmp/mmx-studio-final-private.log",
+            "log_sha256": "598d37f769620f7276a74c768964157da5dae26d126914603d909a1713ecc502",
+            "summary": [
+              "ERROR: test_existing_pin_and_c4_enrollment_are_checked_sequentially (private_service_status_successor_test.SelectedC4LockTests.test_existing_pin_and_c4_enrollment_are_checked_sequentially)",
+              "FAIL: test_real_forward_pin_commits_after_retained_go_replaces_old_bridges (private_service_pin_transition_test.RealIntactGoForwardTests.test_real_forward_pin_commits_after_retained_go_replaces_old_bridges)",
+              "FAILED test_forward_pin_proof.py::test_real_forward_pin_moves_a_seat_onto_the_go_ingress",
+              "FAIL: test_real_forward_pin_commits_with_the_native_go_transition (private_service_pin_transition_test.RealIntactGoForwardTests.test_real_forward_pin_commits_with_the_native_go_transition)",
+              "FAILED test_forward_pin_proof.py::test_real_forward_pin_moves_a_seat_onto_the_go_ingress",
+              "Ran 664 tests in 208.551s",
+              "FAILED (failures=2, errors=1)"
+            ]
+          },
+          {
+            "label": "control_bundle",
+            "command": [
+              "/opt/homebrew/bin/python3.12",
+              "-B",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              ".",
+              "-p",
+              "control_bundle*test.py",
+              "-v"
+            ],
+            "exit_code": 0,
+            "seconds": 29.038,
+            "log": "/tmp/mmx-studio-final-control_bundle.log",
+            "log_sha256": "5b908e4989098f17a18d6f209e1312878a6aaaede7642fa9469c219c37eb276d",
+            "summary": [
+              "Ran 53 tests in 28.725s",
+              "OK"
+            ]
+          }
+        ],
+        "source_unchanged": true
+      }
+    }
+  ],
+  "recovery_regressions": {
+    "schema": "studio-forward-joined-recovery-proof.v1",
+    "state": "COMPLETED",
+    "command": [
+      "/opt/homebrew/bin/python3.12",
+      "-B",
+      "-m",
+      "unittest",
+      "private_service_pin_forward_recovery_test",
+      "-v"
+    ],
+    "source_sha256": {
+      "private_service_workspaces_test.py": "3a7fe30a69ef3d2863d4df2132ed2af6ee4b16aeef57ee08061efa6ca61cc49d",
+      "private_service_pin_enrollment.py": "4426a5eba0c9a88a3257196366253c7100b3024a0fe51fc755f76764de83cb89",
+      "private_service_commission_test.py": "092e83d549adb5ceac854c8bbcdee52646f39f217b29ab86568bdc8ca09d68e8",
+      "private_service_stop_settle_test.py": "a28ae23776bf7e2f18db4ef9a627b7f37b36b54b9c4e0e408b4edebb58cb3d2f",
+      "private_service_original_delivery_test.py": "2016e53cf85294d553a45255ed0dc2e13e3eb9cc10b626643c089c306dd2511b",
+      "private_service_pin_forward_recovery_test.py": "aa8d5502f891a77e8d91033b9a5b6bf8139e1a4e46026aeac9c8cbc2083b2dee",
+      "private_service_status_paper_v20_test.py": "db67e40cd5b13bd57edba28924c183535a842d0716811ab9983c51f7f8becc5c",
+      "private_service_pin_tailnet_protocol_test.py": "3df6465408d1232a836a606aa6db34f5da8624632c263c538e5675155bbe4b0e",
+      "private_service_fleet_git_failure_test.py": "3bc380558cc7489623e7b1602b01e35ba46bb9797c64f9572f0dade31dc3b6b3",
+      "private_service_pin_tailnet_guard_test.py": "fa2b324c97953a60c93eb8f86bce67a5a0fb01faed20afb93cf7d1171f4eff3d",
+      "private_service_pin_paper_v20_start_test.py": "d1ed282bed26fc529e510adc0fb810285051d1b27fc9f4e097d41655db43d797",
+      "private_service_pin_fleet_v20_start_test.py": "da3e04bd3f268652a0bc6b56b0930d9d7ed324545ee45a4c5a6d144b21aa0734",
+      "private_service_status_successor_test.py": "77a216b6be5e307f2a86a300cadd6869cf385e6bb0408d788d1a23b312376f33",
+      "private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+      "private_service_pin_transition_test.py": "aae1fcf64e62c68e5291ea7ff018c484dad450c538a812950a87f5ffce3833b0",
+      "private_service_pin_forward_selection_test.py": "69653ce276856a59075b93579664310a78560c7651601dfa0535759ea10b95f0",
+      "private_service_modern_test.py": "d8428ba3ac705a5377e10b949447445bb76ad0615c9fd9077671f41b9d3857c5",
+      "private_service_pin_tailnet_profile_test.py": "8ba429cb6706ab4e9327289496939a1cb0db2d2b452f2483f9e0d1047a364e97",
+      "private_service_pin_c4_profile_test.py": "8766872d2380411c4dc089211dce5eca59a4992d932ec38d2116d981d9b65b83",
+      "private_service_paper_m1_v20_test.py": "8a49d29cae6cfb055c730a04d96ac35fa830b113faeceffd74c204122549c376",
+      "private_service_fabric_test.py": "a145d033080b83a5577f1add3c7ab1b9fad604a1685fdbabcbd9a04fcc1f1693",
+      "private_service_status_successor.py": "7964f7f08e8ae9eee1ff68244c1a255d11d001e3500a7aee1b0d61a03c8436c0",
+      "private_service_backend_release_test.py": "b5937140c1591f4e045a690af8666df1062c580dea58ef01c906d822a9cb0307",
+      "private_service_pin_tailnet_test.py": "922bb2e69557106839c5e173c6a18e829349b6c99944dd939856ce6836f81435",
+      "private_service_pin.py": "1e20ef4f9e049c5937bcb9b1b095991854e97bd9dc1eefeb36d2c2bef0f581a4",
+      "private_service_paper_v20_fleet_test.py": "659753eab576acfbd3f8ec488d11736e895b4b138c9b7f13fcd71f21576a745c",
+      "private_service_test.py": "eb2a252e6620bc4937134f40210d57978da5677334e77206a51e3cdd26018ec1",
+      "private_service_pin_enrollment_test.py": "af3b96403de9e03ba69ad5a13eae513e59d89cd3e7c01fdf55e354153c1a0a47"
+    },
+    "live_effects": "NONE; disposable fixture roots only",
+    "exit_code": 0,
+    "seconds": 9.286,
+    "log": "/tmp/mmx-studio-f523-recovery-03.log",
+    "log_sha256": "d04f4e1ba14705c75efd191bfbd593fe47f14a3f07f514a1f610debfc45da130",
+    "summary": [
+      "Ran 19 tests in 8.920s",
+      "OK"
+    ],
+    "source_unchanged": true
+  },
+  "real_go_and_c4": {
+    "schema": "studio-native-go-and-c4-composed-proof.v1",
+    "state": "COMPLETED",
+    "command": [
+      "/opt/homebrew/bin/python3.12",
+      "-B",
+      "-m",
+      "unittest",
+      "private_service_pin_transition_test.RealIntactGoForwardTests",
+      "private_service_status_successor_test.SelectedC4LockTests",
+      "-v"
+    ],
+    "live_effects": "NONE; authentic disposable native chains with fixture trust anchors",
+    "exit_code": 0,
+    "seconds": 47.067,
+    "log": "/tmp/mmx-studio-real-go-and-c4.log",
+    "log_sha256": "246b717f1513a4087256c8f6b0202551c5d3f006be49addb8d7ff01815d47528",
+    "summary": [
+      "Ran 3 tests in 46.105s",
+      "OK"
+    ]
+  },
+  "limits": [
+    "No installed Studio successor change.",
+    "No M2 Hermes installation or live provider proof.",
+    "Hosted original-J preserving-migration preflight failure remains open separately."
+  ]
+}

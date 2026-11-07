@@ -160,7 +160,7 @@ def pin_fingerprint(svc, pin, path):
 
 
 @contextmanager
-def original_pin(svc, roots, operation, profile):
+def original_pin(svc, roots, operation, profile, *, forward_original=None):
     """Authenticate retained proof with the actual existing native selection owner."""
     pin = svc._pin_owner_module()
     path = roots["state"] / "native-pool-pin"
@@ -172,6 +172,14 @@ def original_pin(svc, roots, operation, profile):
             or p.get("manifest_after") != profile["before_manifest"]
             or p.get("config_after") != profile["before_config"]):
         fail("ORIGINAL_PIN_REFUSED")
+    if forward_original is not None:
+        if (p != forward_original["plan"]
+                or fingerprint != forward_original["fingerprint"]):
+            fail("ORIGINAL_PIN_REFUSED")
+        yield pin, forward_original["raw"], fingerprint
+        if pin_fingerprint(svc, pin, path) != fingerprint:
+            fail("ORIGINAL_PIN_REFUSED")
+        return
     args = SimpleNamespace(
         account=profile["account"], expected_manifest_sha256=p["manifest_before"],
         successor_bundle=p["successor_bundle"],
@@ -239,14 +247,15 @@ def static_seal(svc, pin, roots, original):
         fail("STATIC_SEAL_REFUSED")
 
 
-def observe(svc, roots, plan, raw):
+def observe(svc, roots, plan, raw, *, forward_pair=None):
     """Only a prefix of the fixed manifest-last commit order is owned progress."""
     seen_old = False
     progress = 0
     for name in ORDER:
         path = destination(roots, name)
         if os.path.lexists(path):
-            actual = svc._fabric_release_bytes(path)
+            actual = (forward_pair[name] if forward_pair is not None and name in ("config", "manifest")
+                      else svc._fabric_release_bytes(path))
             if mode(path) != plan["files"][name]["mode"]:
                 fail("FOREIGN_STATE")
         else:
@@ -463,7 +472,7 @@ C4_PAPER_V20_CONFIG_SHA256 = "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f3
 C4_PAPER_V20_MANIFEST_SHA256 = "06fd20cb3f50e0e7f909506e90773c80c228556eff8e7aba6bdb6085dcfc7de8"
 
 
-def _c4_paper_v20_post_enrollment(svc, roots, plan, raw):
+def _c4_paper_v20_post_enrollment(svc, roots, plan, raw, *, forward_pair=None):
     """Read-only proof of exactly Paper-only v20 after completed enrollment.
 
     Called ONLY after retained original/second pin proofs, immutable enrollment
@@ -499,8 +508,11 @@ def _c4_paper_v20_post_enrollment(svc, roots, plan, raw):
     if any(mode(roots[name]) != plan["files"][name]["mode"]
            for name in ("config", "manifest")):
         return False
-    return (svc._fabric_release_bytes(roots["config"]) == config
-            and svc._fabric_release_bytes(roots["manifest"]) == manifest_bytes)
+    current_config = (forward_pair["config"] if forward_pair is not None
+                      else svc._fabric_release_bytes(roots["config"]))
+    current_manifest = (forward_pair["manifest"] if forward_pair is not None
+                        else svc._fabric_release_bytes(roots["manifest"]))
+    return current_config == config and current_manifest == manifest_bytes
 
 
 def require_start(svc, account, roots):
@@ -518,6 +530,31 @@ def require_start(svc, account, roots):
         except SystemExit as exc:
             if (exc.code != "NATIVE_PIN_ENROLLMENT_FOREIGN_STATE"
                     or not _c4_paper_v20_post_enrollment(svc, roots, plan, raw)):
+                raise
+            complete = True
+        if not complete:
+            fail("START_REFUSED")
+
+def require_forward_predecessor(svc, account, roots, config, manifest, original):
+    """Qualify this incumbent enrollment against the forward before pair."""
+    profile = frozen_profile(account)
+    pin = svc._pin_owner_module()
+    path = roots["state"] / TRANSACTION
+    stored = pin.decode(svc._fabric_release_bytes(path / "plan.json"))
+    with original_pin(svc, roots, "status", profile, forward_original=original) as (
+            pin, retained_original, fingerprint):
+        plan, raw = retained(svc, pin, roots, path, digest(encode(stored)),
+                             retained_original, fingerprint, profile)
+        static_seal(svc, pin, roots, retained_original)
+        if pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan):
+            fail("START_REFUSED")
+        pair = {"config": config, "manifest": manifest}
+        try:
+            complete = observe(svc, roots, plan, raw, forward_pair=pair) == len(ORDER)
+        except SystemExit as exc:
+            if (exc.code != "NATIVE_PIN_ENROLLMENT_FOREIGN_STATE"
+                    or not _c4_paper_v20_post_enrollment(
+                        svc, roots, plan, raw, forward_pair=pair)):
                 raise
             complete = True
         if not complete:
