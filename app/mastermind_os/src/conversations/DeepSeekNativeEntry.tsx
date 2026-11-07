@@ -23,10 +23,10 @@ export function DeepSeekNativeEntry({ locale = "en" }: { locale?: string }) {
   };
   return <section className="native-chat-entry" aria-label={zh ? "DeepSeek 原生聊天" : "DeepSeek native chat"}>
     <div className="native-chat-entry-mark" aria-hidden="true">D</div>
-    <h2>{zh ? "与 DeepSeek 一起工作" : "Work with DeepSeek"}</h2>
-    <p>{zh ? "在专属窗口继续你的对话，使用 DeepSeek 原有的模型、实时回复和历史记录。" : "Continue in its dedicated window, with DeepSeek’s models, live replies, and conversation history."}</p>
+    <h2>{zh ? "连接 DeepSeek" : "Connect DeepSeek"}</h2>
+    <p>{zh ? "完成连接设置后，即可在专属窗口使用 DeepSeek 的实时回复和会话历史。" : "Complete connection setup to use DeepSeek’s live replies and conversation history in its dedicated window."}</p>
     <button type="button" disabled={busy} onClick={() => void open()}>{busy ? zh ? "正在打开…" : "Opening…" : zh ? "打开 DeepSeek" : "Open DeepSeek"}</button>
-    <p className="native-chat-entry-note">{zh ? "首次连接需要完成原生应用登录。" : "The first connection requires the native application’s sign-in."}</p>
+    <p className="native-chat-entry-note">{zh ? "连接设置尚未完成。打开窗口后仍需完成原生应用登录。" : "Connection setup is still required. Opening the window does not complete the native application’s sign-in."}</p>
     {notice && <p role="status">{notice}</p>}
   </section>;
 }

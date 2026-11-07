@@ -25,11 +25,12 @@ fn only_the_local_main_view_can_reach_application_commands() {
             assert!(get_ipc_response(view, request(origin)).is_err(), "remote command reached a handler: {command}");
         }
     }
-    let listen = tauri::webview::InvokeRequest {
+    let listen = |origin: &str| tauri::webview::InvokeRequest {
         cmd: "plugin:event|listen".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
-        url: "https://chat.mastermind-x.com/".parse().unwrap(),
+        url: origin.parse().unwrap(),
         body: tauri::ipc::InvokeBody::Json(serde_json::json!({"event":"mastermind-auth-state","target":{"kind":"Any"},"handler":0})),
         headers: Default::default(), invoke_key: INVOKE_KEY.to_string(),
     };
-    assert!(get_ipc_response(&remote, listen).is_err(), "remote native event subscription must be denied");
+    get_ipc_response(&local, listen("tauri://localhost")).expect("local event subscription proves the request and fixture are valid");
+    assert!(get_ipc_response(&remote, listen("https://chat.mastermind-x.com/")).is_err(), "remote native event subscription must be denied");
 }
