@@ -453,6 +453,7 @@ jobs:
             tests/integration/test_fabric_inference_composition.py \
             tests/integration/test_fabric_translation_composition.py \
             tests/integration/test_fabric_chat_inference_composition.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
             tests/integration/test_fabric_chat_buffered_delivery.py \
             tests/integration/test_fabric_text_native_application.py \
             tests/integration/test_fabric_text_cross_pool_auto.py \
