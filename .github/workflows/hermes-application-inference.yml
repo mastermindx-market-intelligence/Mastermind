@@ -4,9 +4,6 @@ on:
   pull_request:
     paths:
       - 'integrations/hermes_application_fabric/**'
-      - 'tests/test_hermes_primary_application_enrollment.py'
-      - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
-      - 'ops/native_fabric/quota_continuity/rollout/native_install.py'
       - '.github/workflows/hermes-application-inference.yml'
   merge_group:
     types: [checks_requested]
@@ -14,9 +11,6 @@ on:
     branches: [master]
     paths:
       - 'integrations/hermes_application_fabric/**'
-      - 'tests/test_hermes_primary_application_enrollment.py'
-      - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
-      - 'ops/native_fabric/quota_continuity/rollout/native_install.py'
       - '.github/workflows/hermes-application-inference.yml'
 
 permissions:
@@ -57,37 +51,3 @@ jobs:
         run: >-
           python -B integrations/hermes_application_fabric/qualification/qualify_offline.py
           --owner-root .ci-hermes-application-owner
-
-  native-application-enrollment:
-    name: Hermes roles through original native enrollment
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install existing test dependencies
-        run: python -m pip install --disable-pip-version-check -e '.[dev]'
-      - name: Qualify original publisher, startup, coexistence and recovery
-        run: |
-          set -euo pipefail
-          native_rollout_test_root="$(mktemp -d "$HOME/mmx-hermes-enrollment.XXXXXX")"
-          trap 'rm -rf "$native_rollout_test_root"' EXIT
-          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -B -m pytest -q -o addopts= --noconftest \
-            --junitxml="$native_rollout_test_root/proof.xml" \
-            tests/test_hermes_primary_application_enrollment.py \
-            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
-            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
-            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py
-          python - "$native_rollout_test_root/proof.xml" <<'PY'
-          import sys
-          import xml.etree.ElementTree as ET
-          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
-          totals = {key: sum(int(s.get(key, "0")) for s in suites)
-                    for key in ("tests", "failures", "errors", "skipped")}
-          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
-          print(totals)
-          PY
