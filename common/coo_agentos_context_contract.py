@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import math
 import re
 
 from common.workspace_project_plan_contract import validate_selection
@@ -78,8 +79,14 @@ def decode(raw, *, limit=MAX_RESPONSE_BYTES):
         return value
     def nonfinite(value):
         _refuse()
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            _refuse()
+        return number
     try:
-        return json.loads(raw.decode("utf-8", "strict"), object_pairs_hook=unique, parse_constant=nonfinite)
+        return json.loads(raw.decode("utf-8", "strict"), object_pairs_hook=unique,
+                          parse_constant=nonfinite, parse_float=finite_float)
     except (ValueError, TypeError, UnicodeError, RecursionError):
         _refuse()
 
@@ -121,6 +128,10 @@ def validate_result(value, *, expected_context, capability_profile_digest):
     if base64.b64encode(raw).decode("ascii") != encoded:
         _refuse()
     raw, receipt = validate_context_read(raw, value["receipt"], work_ref=expected.work_ref)
+    # The base64 body must also be strict finite JSON. The incumbent bundle
+    # validator rejects named nonfinite constants but exponent overflow takes
+    # json.loads' separate parse_float path. Preserve the original bytes.
+    decode(raw, limit=MAX_BUNDLE_BYTES)
     bundle = validate_bundle(raw, expected.work_ref)
     if (bundle.get("repo_sha") != receipt["repo_sha"]
             or type(bundle.get("token_budget")) is not int or bundle["token_budget"] != TOKEN_BUDGET

@@ -153,7 +153,7 @@ def test_actual_compiler_result_keeps_bytes_and_binds_receipt(actual_result):
     assert not seen["child_macro"].exists()
 
 
-@pytest.mark.parametrize("bad", ["unknown", "profile", "context", "encoding", "bad_base64", "extra_padding", "base64_limit", "raw_limit", "hash", "work", "repo", "generated", "budget", "degraded", "omitted"])
+@pytest.mark.parametrize("bad", ["unknown", "profile", "context", "encoding", "bad_base64", "extra_padding", "base64_limit", "raw_limit", "hash", "work", "repo", "generated", "budget", "degraded", "omitted", "overflow_float"])
 def test_wire_rejects_conflicts_without_rewriting_original_bytes(actual_result, bad):
     frame, original, _ = actual_result
     value = copy.deepcopy(original)
@@ -174,7 +174,9 @@ def test_wire_rejects_conflicts_without_rewriting_original_bytes(actual_result, 
         elif bad == "budget": bundle["token_budget"] = 3999
         elif bad == "degraded": bundle["degraded"].append("fixture-extra")
         elif bad == "omitted": bundle["omitted_due_to_budget"].append("fixture-extra")
+        elif bad == "overflow_float": bundle["source_metric"] = "__overflow__"
         raw = json.dumps(bundle, ensure_ascii=False).encode()
+        if bad == "overflow_float": raw = raw.replace(b'"__overflow__"', b'1e999')
         value["bundle_base64"] = base64.b64encode(raw).decode()
         value["receipt"]["bundle_sha256"] = hashlib.sha256(raw).hexdigest()
         from control_plane.agentos_context_bundle import validate_context_read
@@ -185,7 +187,7 @@ def test_wire_rejects_conflicts_without_rewriting_original_bytes(actual_result, 
     assert original != value
 
 
-@pytest.mark.parametrize("raw", [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'\xff', b'[' * 2000, b' ' * (wire.MAX_RESPONSE_BYTES + 1)])
+@pytest.mark.parametrize("raw", [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'{"a":1e999}', b'{"a":-1e999}', b'\xff', b'[' * 2000, b' ' * (wire.MAX_RESPONSE_BYTES + 1)])
 def test_strict_decoder_refuses_ambiguous_or_oversized_json(raw):
     with pytest.raises(ValueError): wire.decode(raw)
 
