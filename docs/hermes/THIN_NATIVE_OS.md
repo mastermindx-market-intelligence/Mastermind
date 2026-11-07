@@ -287,6 +287,26 @@ The continuing session's Browser initialization lacks its originating browser co
 no alternate browser-control route is permitted by that failure. Existing pending
 sign-in must be reconciled before another sign-in or candidate replacement.
 
+### Protected ModelArk catalog test reconciliation
+
+The final native repair and protected composition were published at
+`fcce6cfcc43f7ce5882719fa16a8112430951020`. Its hosted Hermes run
+[42344633300](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42344633300)
+failed on both Python versions because the loaded-router test still required
+ModelArk aliases to be absent after protected #1824 added them. This was a stale
+integration assertion; no provider activation or native binding failure occurred.
+
+The corrected test requires the exact current aliases/models, disabled providers,
+false worker eligibility, and unchanged provider enabled/autonomous flags. A
+separate legacy fixture retains absent-catalog coverage. All 23 hermes_models
+contract/failure/profile/secrets/turn tests pass in
+`/tmp/hermes-thin-modelark-catalog-regression-20261107-c1.log`.
+Only tests and this record change: the application subtree remains exactly
+`4a4c0fdd06f2065b8a1abe176b092276738947c2`, identical to fcce6cfc. A compiled
+fcce candidate must retain its actual identity; this test-only successor does not
+require relabelling it or rebuilding identical application bytes. New-head CI and
+protected source merge still need their own canonical receipts.
+
 ## Remaining acceptance and protected release
 
 THIN-1/THIN-2 source candidates and reopened-request behavior are qualified by the
