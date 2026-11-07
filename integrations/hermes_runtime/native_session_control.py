@@ -302,6 +302,7 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
             # Active-row absence is not proof of nonexecution or permission to resend.
             return _result("EFFECT_UNKNOWN", role=role)
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
+                or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
                 or row.get("request_id") != submission or row.get("intent") != "queue"
                 or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
                 or row["payload"].get("finite") is not True

@@ -606,3 +606,10 @@ def test_admission_fence_uses_same_transaction_and_native_busy_owner(monkeypatch
         guard(conn)
     assert checks == ["lineage", "idle", "lineage", "idle"]
     conn.close()
+
+
+def test_explicit_original_admission_mismatch_refuses_before_result_read(original_terminal):
+    original_terminal.params["admission_id"] = "different-original"
+    with pytest.raises(RuntimeRefusal, match="NATIVE_SECRETARY_ORIGINAL_MISMATCH"):
+        original_terminal.read()
+    assert original_terminal.stored_reads == []
