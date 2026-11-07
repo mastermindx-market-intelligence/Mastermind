@@ -58,6 +58,30 @@ source/relevant PRs; Linear projection comparisons; relevant Slack hot state/exa
 child thread; advisory Project history for unresolved provenance. Do not scan every
 surface by habit.
 
+### M2 Studio local access versus remote fleet host selection
+
+When diagnosing an M2 host-access failure, distinguish the Studio Direct gateway's
+**local** Desktop Commander backend from its explicitly configured **remote**
+fleet routes. On the installed M2 Studio gateway, a fresh **unselected** Studio
+Direct MCP session reaches local `m2studio`; `studio_select_host` is only
+for configured remote targets. Do **not** call
+`studio_select_host({hostRef: "m2"})` to access the gateway's own M2 host.
+The `studio_fleet_status.physicalFleet` advisory census is **not** the remote
+route allowlist. Inspect the actual installed `fleetRouting.routes` through
+an authorized read-only configuration path; for permitted local diagnostic
+calls, confirm `hostname` on that **same unselected session**.
+
+A `FLEET_ROUTE_PREFLIGHT_REFUSED / NOT_APPLIED` response to the mistaken
+M2 remote-selection request is a *pre-dispatch route/configuration failure*,
+not proof that M2 is offline or that the local backend is denied. Preserve
+the refused original request; **never replay it through another host,
+account, connector or identity**. Using the independently authorized local
+backend for a distinct read-only diagnostic is not replay of that selector.
+This correction does **not** clear an existing Ubuntu1/root C26 admin denial,
+admit Hermes/Fabric workers or authorize installation/restart. See
+`integrations/studio_direct_mcp/README.md` (Local M2 versus remote routes)
+and the original evidence in Mastermind PR #2184 comment 6702814736.
+
 ## Step 4 — Build the capability ledger
 
 Use `PROVEN_LIVE`, `BUILT_NOT_PROVEN`, `PARTIAL`, `DARK_OR_DISCONNECTED`, `BROKEN`,
