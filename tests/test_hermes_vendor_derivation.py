@@ -19,6 +19,7 @@ from ops.executive_os import native_gateway_sources as source
 from ops.executive_os import release_manifest as manifest
 from integrations.hermes_qualification.computer_env_guard import qualify as guard
 from integrations.hermes_qualification.diagnostic_privacy import qualify as privacy_guard
+from integrations.hermes_qualification.workspace_oauth_privacy import qualify as workspace_guard
 from tests.test_hermes_diagnostic_privacy import privacy_sources
 from integrations.hermes_runtime import install as installer
 from integrations.hermes_runtime.errors import RuntimeRefusal
@@ -32,17 +33,21 @@ def git(root, *args):
     return result.stdout.strip()
 
 
-@pytest.fixture(params=["computer_env_guard", "diagnostic_privacy"])
+@pytest.fixture(params=["computer_env_guard", "diagnostic_privacy", "workspace_oauth_privacy"])
 def world(tmp_path, monkeypatch, request):
     kind = request.param
     patch, postimages, _ = source._derivation_policy(kind)
-    selected_guard = guard if kind == source.DERIVATION_KIND else privacy_guard
+    selected_guard = {source.DERIVATION_KIND: guard, source.PRIVACY_DERIVATION_KIND: privacy_guard,
+                      source.WORKSPACE_OAUTH_DERIVATION_KIND: workspace_guard}[kind]
     base = tmp_path / "base"
     base.mkdir(mode=0o755)
     git(base, "init", "--quiet")
     originals = {name: (guard.ROOT / "fixtures" / (name + ".source")).read_bytes()
                  for name in source.DERIVATION_POSTIMAGES}
     originals.update(privacy_sources("upstream"))
+    provenance = json.loads((workspace_guard.ROOT / "fixtures/provenance.json").read_bytes())
+    originals.update({name: (workspace_guard.ROOT / "fixtures" / provenance["files"][name]["fixture"]).read_bytes()
+                      for name in workspace_guard.PATHS})
     for name, data in originals.items():
         target = base / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -264,7 +269,7 @@ def test_installer_uses_real_frozen_closure_and_original_recipe(world, monkeypat
         installer._qualify_native_derivation(world.recipe, profile, lifetime)
 
 
-@pytest.mark.parametrize("kind", ["computer_env_guard", "diagnostic_privacy"])
+@pytest.mark.parametrize("kind", ["computer_env_guard", "diagnostic_privacy", "workspace_oauth_privacy"])
 def test_actual_installed_receipt_and_launch_compare_explicit_derivation(tmp_path, kind):
     from integrations.hermes_harness.stack import compose_profile
     state = tmp_path / "state"
@@ -404,7 +409,7 @@ def test_selected_derivation_refuses_other_or_combined_postimages(world, change)
         source.verify_vendor_derivation(world.owner, world.recipe, world.acl)
 
 
-@pytest.mark.parametrize("kind", ["computer_env_guard", "diagnostic_privacy"])
+@pytest.mark.parametrize("kind", ["computer_env_guard", "diagnostic_privacy", "workspace_oauth_privacy"])
 def test_closed_recipe_admits_only_matching_fixed_patch(kind):
     native = native_recipe()
     native["vendor_derivation"] = derivation(kind)
