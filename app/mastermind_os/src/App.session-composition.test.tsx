@@ -5,7 +5,8 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createOsExecutiveSessionHost } from './orchestration/os-executive-session-host';
-import type { ExecutiveSessionTransport } from './orchestration/executive-session-command-port';
+import { decodeHermesPublicResult, type ExecutiveSessionTransport, type QualifiedSessionAnswerRead } from './orchestration/executive-session-command-port';
+import metaFixture from './fixtures/native-hermes-meta-session-send-producer.json';
 import type { OperationPointer, PendingPointerStore } from './orchestration/operation-controller';
 import type { AuthState } from './host';
 
@@ -395,4 +396,53 @@ it('opens the genuine Executive-only session source without a Window read and re
  expect(f.readCurrentWindow).not.toHaveBeenCalled();expect(f.transport.reply).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
  fireEvent.click(screen.getByRole('button',{name:'Back to conversations'}));
  await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('button',{name:'Open session requests'})));
+});
+
+it("never retags an original Meta phase to a replacement web host while its answer is awaited", async () => {
+  const original: OperationPointer = {kind: "message",
+    operationKey: metaFixture.arguments.operation_key,
+    targetKey: metaFixture.arguments.target_ref};
+  const f = fixture(original, false, true);
+  const held = deferred<QualifiedSessionAnswerRead>();
+  const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockReturnValueOnce(held.promise);
+  const phases: string[] = [];
+  const observer = new MutationObserver(records => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (!(node instanceof Element)) continue;
+      if (node.matches(".session-native-phase")) phases.push(node.textContent ?? "");
+      for (const phase of node.querySelectorAll(".session-native-phase")) phases.push(phase.textContent ?? "");
+    }
+  });
+  observer.observe(document.body, {childList: true, subtree: true});
+  let replacement: ReturnType<typeof createOsExecutiveSessionHost> | null = null;
+  try {
+    render(<App/>); await panel();
+    fireEvent.click(await screen.findByRole("button", {name: "Check status"}));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    replacement = createOsExecutiveSessionHost(f.transport, f.store);
+    await replacement.ready;
+    await replacement.refresh({workRef: "WS:ALPHA", rootJobId: "JOB-1"});
+    const owner = window.MastermindMissionHost!;
+    window.MastermindMissionHost = {...owner, sessionCommandBinding: replacement.binding,
+      session: {refresh: selected => replacement!.refresh(selected as Parameters<typeof replacement.refresh>[0]),
+        setStopCondition: replacement.setStopCondition}};
+    const result = await decodeHermesPublicResult(metaFixture.reply.data);
+    expect(result).not.toBeNull();
+    await act(async () => {
+      held.resolve({receipt: {...original, disposition: "accepted", reason: "ACCEPTED"},
+        nativeResult: result,
+        answer: {kind: "hermes_meta", text: result!.answer!, successful: result!.successful!,
+          readRef: result!.read_ref, parentConsumed: false, nextStep: null}});
+      await held.promise;
+    });
+    await act(async () => {await Promise.resolve();});
+    expect(phases).toEqual([]);
+    expect(screen.queryByText(metaFixture.reply.data.answer)).toBeNull();
+    expect(f.saved()).toEqual(original);
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+    expect(f.store.reserve).not.toHaveBeenCalled();
+    expect(f.transport.send).not.toHaveBeenCalled();
+  } finally {
+    observer.disconnect(); replacement?.dispose(); f.host.dispose(); dispose = undefined;
+  }
 });

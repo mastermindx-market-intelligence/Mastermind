@@ -24,6 +24,8 @@ MAX_WIRE_BYTES = 512 * 1024
 _TARGET = frozenset({"profile_id", "session_id", "principal_id", "instance_id",
                      "authority_epoch", "revision", "execution_generation"})
 
+from .constants import conversation_contract
+
 
 def _canonical(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"),
@@ -55,8 +57,8 @@ def validate_target(value) -> dict:
     return dict(value)
 
 
-def _result(status: str, **fields):
-    return {"schema": SCHEMA, "status": status, **fields}
+def _result(status: str, *, role: str = "mmsecretary", **fields):
+    return {"schema": conversation_contract(role).native_schema, "status": status, **fields}
 
 
 def _db(home: Path):
@@ -126,7 +128,7 @@ def _admission(row, home: Path, session_id: str, *, stored=False):
     return result
 
 
-def _read_original(home: Path, params, principal: str):
+def _read_original(home: Path, params, principal: str, *, role: str = "mmsecretary"):
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
     required = {"operation", "profile_id", "session_id", "submission_id", "input_sha256", "admission_id"}
@@ -141,7 +143,7 @@ def _read_original(home: Path, params, principal: str):
             row = get_session_admission(db, admission_id=_id(params["admission_id"]))
         if row is None:
             # Active-row absence is not proof of nonexecution or permission to resend.
-            return _result("EFFECT_UNKNOWN")
+            return _result("EFFECT_UNKNOWN", role=role)
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
                 or row.get("request_id") != submission or row.get("intent") != "queue"
                 or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
@@ -149,7 +151,7 @@ def _read_original(home: Path, params, principal: str):
                 or input_digest(row["payload"].get("text")) != params["input_sha256"]):
             raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
         receipt = _admission(row, home, sid, stored=True)
-        result = _result("OBSERVED", admission=receipt)
+        result = _result("OBSERVED", role=role, admission=receipt)
         saved = admission_result(db, receipt["admission_id"])
         if saved is not None and receipt["status"] == "terminal":
             value = saved.get("result")
@@ -232,7 +234,9 @@ def _admission_guard(authority, actor, target):
     return authorize
 
 
-async def _submit(runner, home, params, principal):
+async def _submit(runner, home, params, principal, *, role: str = "mmsecretary"):
+    def result(status, **fields):
+        return _result(status, role=role, **fields)
     from gateway.session_controls import AuthorityConnection
     from gateway.run_api import _embedded_chat_enabled
     from gateway.session_authorities import owner_scope
@@ -242,16 +246,16 @@ async def _submit(runner, home, params, principal):
         target = validate_target(params["target"])
         observed = await asyncio.to_thread(_target, runner, home, target["session_id"], principal)
     except (RuntimeRefusal, OSError, ValueError, KeyError):
-        return _result("REFUSED", reason="TARGET_UNAVAILABLE")
+        return result("REFUSED", reason="TARGET_UNAVAILABLE")
     if target != observed or not _embedded_chat_enabled():
-        return _result("REFUSED", reason="TARGET_UNAVAILABLE")
+        return result("REFUSED", reason="TARGET_UNAVAILABLE")
     try:
         grant = runner.session_ticket_store.redeem(params["ticket"], profile_id=str(home), purpose="interactive")
     except PermissionError:
-        return _result("REFUSED", reason="TICKET_REFUSED")
+        return result("REFUSED", reason="TICKET_REFUSED")
     if (grant.get("subject") != principal or grant.get("scope") != "profile"
             or grant.get("instance_id") != target["instance_id"]):
-        return _result("REFUSED", reason="TICKET_MISMATCH")
+        return result("REFUSED", reason="TICKET_MISMATCH")
     identity = {"user_id": grant["subject"], "provider": "local", "profile_id": grant["profile_id"],
                 "instance_id": grant["instance_id"], "capabilities": grant["capabilities"],
                 "native_bootstrap": True, "profile_scope": "profile"}
@@ -271,7 +275,7 @@ async def _submit(runner, home, params, principal):
                         or value.get("authority_epoch") != target["authority_epoch"]
                         or value.get("revision") != target["revision"]
                         or value.get("execution_generation") != target["execution_generation"]):
-                    return _result("NOT_SUBMITTED", reason="TARGET_CHANGED_AFTER_RESUME")
+                    return result("NOT_SUBMITTED", reason="TARGET_CHANGED_AFTER_RESUME")
                 from dataclasses import asdict
                 from gateway.session_contract import SessionRef
                 ref = SessionRef(connection.actor.profile_id, target["session_id"])
@@ -284,11 +288,11 @@ async def _submit(runner, home, params, principal):
                     connection.actor, submission,
                     _authorize_write=_admission_guard(connection.authority, connection.actor, target),
                     queue_while_restarting=False)
-                return _result("ADMITTED", admission=_admission(asdict(receipt), home, target["session_id"]))
+                return result("ADMITTED", admission=_admission(asdict(receipt), home, target["session_id"]))
         except _AdmissionRefused:
-            return _result("NOT_SUBMITTED", reason="TARGET_CHANGED_BEFORE_ADMISSION")
+            return result("NOT_SUBMITTED", reason="TARGET_CHANGED_BEFORE_ADMISSION")
         except Exception:
-            return _result("EFFECT_UNKNOWN")
+            return result("EFFECT_UNKNOWN")
         finally:
             try:
                 if connection is not None:
@@ -305,6 +309,125 @@ async def _submit(runner, home, params, principal):
 ENROLLMENT_SCHEMA = "mastermind.hermes_secretary_session_enrollment/v1"
 ENROLLMENT_RESULT_SCHEMA = "mastermind.hermes_secretary_enrollment_result/v1"
 _ENROLLMENT_STATUSES = frozenset({"ENROLLED", "ABSENT", "REFUSED", "UNAVAILABLE", "EFFECT_UNKNOWN"})
+
+# The one native extension tool the qualified consumer may install. It is a
+# model-facing tool of the plugin, not an MCP server tool: the raw Executive
+# tools of that server stay non-model-facing.
+CONSUMER_EXTENSION_TOOL = "mmx_delegate"
+
+# The process-local held-release owner identity. It is bound exactly once, by
+# the native gateway entry that entered this process through the held
+# release, and it is what the plugin loader checks the owner-private
+# consumer slot against. It is never replaced and never derived from a role
+# label.
+_RUNTIME_OWNER: str | None = None
+_RUNTIME_OWNER_LOCK = threading.Lock()
+
+
+def install_runtime_owner(implementation_sha: str) -> str:
+    """Bind this process's held-release owner identity, exactly once."""
+    global _RUNTIME_OWNER
+    value = _implementation(implementation_sha)
+    with _RUNTIME_OWNER_LOCK:
+        if _RUNTIME_OWNER is None:
+            _RUNTIME_OWNER = value
+        elif _RUNTIME_OWNER != value:
+            raise RuntimeRefusal("NATIVE_RUNTIME_OWNER_CONFLICT")
+    return _RUNTIME_OWNER
+
+
+def current_runtime_owner() -> str | None:
+    """The held-release owner identity of this process, when it is bound."""
+    return _RUNTIME_OWNER
+
+
+def _callable_identity(value) -> str | None:
+    """A stable identity for one registered callable, never its source."""
+    if value is None:
+        return None
+    module = getattr(value, "__module__", None)
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if type(module) is not str or type(name) is not str:
+        return None
+    return f"{module}:{name}"
+
+
+def _consumer_extension(runner, home: Path) -> dict:
+    """Prove this slot's exact C28 registration in the live native scope."""
+    from hermes_cli.plugins import get_plugin_manager
+    from tools.registry import registry
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_SLOT_ATTRIBUTE, CONSUMER_PLUGIN_NAME, ConsumerSlot,
+        NativeConsumerCurrentness, schema_digest)
+    from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
+    descriptor = runner.session_runtime_descriptor
+    if descriptor.get("state") != "ready" or runner._draining:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_NOT_READY")
+    manager = get_plugin_manager()
+    slot = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
+    if not isinstance(slot, ConsumerSlot):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    with slot._lock:
+        registration = slot.registration
+        binding = slot.startup.binding
+        loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
+        if (slot.manager is not manager or slot.scope != manager.scope_key
+                or slot.owner != current_runtime_owner() or str(slot.scope) != str(home)
+                or slot.load_outcome != "REGISTERED" or slot.registration_error is not None
+                or registration is None or binding is None
+                or loaded is not slot.loader_record or loaded is None
+                or getattr(loaded, "enabled", None) is not True
+                or getattr(loaded, "error", None) is not None
+                or getattr(slot.registration_context, "_manager", None) is not manager):
+            raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    guard = binding.currentness_guard
+    publication = slot.publication
+    if (not isinstance(guard, NativeConsumerCurrentness) or guard() is not True
+            or guard.session_id != binding.session_id
+            or guard.instance_id != descriptor.get("instance_id")
+            or guard.authority_epoch != descriptor.get("authority_epoch")
+            or registration.scope != slot.scope
+            or registration.profile_id != binding.profile_id
+            or registration.profile_id != slot.profile_id
+            or registration.session_id != binding.session_id
+            or registration.command != publication.command
+            or registration.job_id != publication.job_id):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+
+    def matches(entry):
+        return (entry is not None and entry.handler is registration.handler
+                and entry.check_fn is registration.check_fn
+                and entry.toolset == registration.toolset
+                and entry.schema == NATIVE_TOOL_SCHEMA)
+    if not matches(registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=slot.scope)):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    if guard() is not True or registration.check_fn() is not True:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    with slot._lock:
+        if (slot.registration is not registration or slot.startup.binding is not binding
+                or slot.load_outcome != "REGISTERED"
+                or getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME) is not loaded
+                or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot):
+            raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    if not matches(registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=slot.scope)):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    return {
+        "tool": CONSUMER_EXTENSION_TOOL, "scope": slot.scope, "profile_id": str(home),
+        "present": True, "toolset": registration.toolset,
+        "schema_sha256": schema_digest(NATIVE_TOOL_SCHEMA),
+        "implementation_sha": slot.owner,
+        "instance_id": guard.instance_id, "authority_epoch": guard.authority_epoch,
+        "enrollment_request_id": publication.session.request_id,
+        "principal_id": publication.session.principal_id, "session_id": binding.session_id,
+        "command_id": publication.command, "job_id": publication.job_id,
+        "target_digest": publication.target_digest,
+        "principal_binding_digest": publication.principal_binding_digest,
+        "authority_generation_digest": publication.authority_generation_digest,
+        "capability_profile_digest": publication.capability_profile_digest,
+        "plugin_sha256": publication.plugin.digest,
+        "mcp_tools_schema_sha256": publication.tools_schema_digest,
+    }
+
 
 
 def _implementation(value):
@@ -325,18 +448,20 @@ def _enrollment_id(value):
     return value
 
 
-def validate_enrollment_capability(value):
+def validate_enrollment_capability(value, *, role: str = "mmsecretary"):
+    schema = conversation_contract(role).enrollment_schema
     if (type(value) is not dict or set(value) != {"schema", "request_id"}
-            or value["schema"] != ENROLLMENT_SCHEMA):
+            or value["schema"] != schema):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_CAPABILITY_INVALID")
-    return {"schema": ENROLLMENT_SCHEMA, "request_id": _enrollment_id(value["request_id"])}
+    return {"schema": schema, "request_id": _enrollment_id(value["request_id"])}
 
 
 def validate_enrollment_result(value, *, implementation_sha=None, request_id=None,
-                               profile_id=None, principal_id=None):
+                               profile_id=None, principal_id=None, role: str = "mmsecretary"):
+    schema = conversation_contract(role).enrollment_result_schema
     if (type(value) is not dict
             or set(value) != {"schema", "implementation_sha", "request_id", "status", "target"}
-            or value["schema"] != ENROLLMENT_RESULT_SCHEMA
+            or value["schema"] != schema
             or type(value["status"]) is not str or value["status"] not in _ENROLLMENT_STATUSES):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_RESULT_INVALID")
     _implementation(value["implementation_sha"])
@@ -361,13 +486,14 @@ def validate_enrollment_result(value, *, implementation_sha=None, request_id=Non
     return result
 
 
-def enrollment_result(implementation_sha, request_id, status, target=None):
+def enrollment_result(implementation_sha, request_id, status, target=None, *, role: str = "mmsecretary"):
     return validate_enrollment_result({
-        "schema": ENROLLMENT_RESULT_SCHEMA, "implementation_sha": implementation_sha,
-        "request_id": request_id, "status": status, "target": target})
+        "schema": conversation_contract(role).enrollment_result_schema, "implementation_sha": implementation_sha,
+        "request_id": request_id, "status": status, "target": target}, role=role)
 
 
-def _inspect_enrollment(runner, home, implementation_sha, request_id, principal, *, own_task=None):
+def _inspect_enrollment(runner, home, implementation_sha, request_id, principal, *, own_task=None,
+                        route_out=None, role: str = "mmsecretary"):
     """Read one bounded native snapshot; never restore or create."""
     from hermes_state_keys import local_identity
     from hermes_state_local import POLICY_PREFIX, same_create_retry
@@ -379,7 +505,7 @@ def _inspect_enrollment(runner, home, implementation_sha, request_id, principal,
     from gateway.session_runtime_workers import mutation_tasks
 
     def result(status, target=None):
-        return enrollment_result(implementation_sha, request_id, status, target)
+        return enrollment_result(implementation_sha, request_id, status, target, role=role)
 
     try:
         authority = runner.session_authority
@@ -467,6 +593,10 @@ def _inspect_enrollment(runner, home, implementation_sha, request_id, principal,
                     "profile_id": str(home), "session_id": sid, "principal_id": principal,
                     "instance_id": epoch["instance_id"], "authority_epoch": epoch["epoch"],
                     "revision": row["runtime_revision"], "execution_generation": row["runtime_generation"]})
+                if route_out is not None:
+                    # The route key the native owner bound to this session. It
+                    # is read from the same bounded snapshot, never recomputed.
+                    route_out["route"] = route
                 return result("ENROLLED", target)
             finally:
                 conn.rollback()
@@ -474,7 +604,24 @@ def _inspect_enrollment(runner, home, implementation_sha, request_id, principal,
         # Corruption, storage failure and unknown native state are never absence.
         return result("UNAVAILABLE")
 
-async def _create_enrollment(runner, home, params, principal):
+def read_enrolled_session(runner, home: Path, implementation_sha, request_id,
+                          principal, *, role: str = "mmsecretary") -> dict:
+    """The bounded ENROLLED facts of the original native session.
+
+    This reads the same bounded snapshot the enrollment result uses. It never
+    creates, restores or resumes a session: an absent enrollment is ABSENT,
+    and anything unknown is UNAVAILABLE, never absence.
+    """
+    route_out: dict = {}
+    outcome = _inspect_enrollment(runner, home, implementation_sha, request_id,
+                                   principal, route_out=route_out, role=role)
+    if outcome["status"] != "ENROLLED":
+        return {"status": outcome["status"], "target": None, "route": None}
+    return {"status": "ENROLLED", "target": outcome["target"],
+            "route": route_out.get("route")}
+
+
+async def _create_enrollment(runner, home, params, principal, *, role: str = "mmsecretary"):
     """The existing authority creates once and owns all work through detach."""
     from gateway.session_controls import AuthorityConnection
     from gateway.run_api import _embedded_chat_enabled
@@ -486,22 +633,22 @@ async def _create_enrollment(runner, home, params, principal):
 
     def inspect():
         return _inspect_enrollment(runner, home, implementation_sha, request_id,
-                                   principal, own_task=own_task)
+                                   principal, own_task=own_task, role=role)
 
     prior = inspect()
     if prior["status"] != "ABSENT":
         return prior
     if not _embedded_chat_enabled():
-        return enrollment_result(implementation_sha, request_id, "REFUSED")
+        return enrollment_result(implementation_sha, request_id, "REFUSED", role=role)
     try:
         grant = runner.session_ticket_store.redeem(
             params["ticket"], profile_id=str(home), purpose="interactive")
     except PermissionError:
-        return enrollment_result(implementation_sha, request_id, "REFUSED")
+        return enrollment_result(implementation_sha, request_id, "REFUSED", role=role)
     if (grant.get("subject") != principal or grant.get("scope") != "profile"
             or grant.get("profile_id") != str(home)
             or grant.get("instance_id") != runner.session_authority.instance_id):
-        return enrollment_result(implementation_sha, request_id, "REFUSED")
+        return enrollment_result(implementation_sha, request_id, "REFUSED", role=role)
     identity = {"user_id": grant["subject"], "provider": "local", "profile_id": grant["profile_id"],
                 "instance_id": grant["instance_id"], "capabilities": grant["capabilities"],
                 "native_bootstrap": True, "profile_scope": "profile"}
@@ -532,33 +679,48 @@ async def _create_enrollment(runner, home, params, principal):
     if observed["status"] == "ENROLLED":
         return observed
     if explicit_refusal and observed["status"] in {"ABSENT", "REFUSED"}:
-        return enrollment_result(implementation_sha, request_id, "REFUSED")
-    return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN")
+        return enrollment_result(implementation_sha, request_id, "REFUSED", role=role)
+    return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN", role=role)
 
 
-async def _enrollment_operation(runner, home, params, principal):
+async def _enrollment_operation(runner, home, params, principal, *, consumer_transition=None,
+                                role: str = "mmsecretary"):
     if params["operation"] == "inspect_enrollment":
-        return _inspect_enrollment(runner, home, params["implementation_sha"], params["request_id"], principal)
+        return _inspect_enrollment(runner, home, params["implementation_sha"], params["request_id"], principal, role=role)
     from gateway.session_runtime_workers import track_mutation
     # The native task set covers create, resume and cleanup. A private response
     # deadline cannot cancel it or make another observer infer absence.
-    task = track_mutation(runner.session_authority, _create_enrollment(runner, home, params, principal))
-    return await asyncio.shield(task)
+    task = track_mutation(runner.session_authority, _create_enrollment(runner, home, params, principal, role=role))
+    result = await asyncio.shield(task)
+    if result.get("status") == "ENROLLED" and consumer_transition is not None:
+        try:
+            consumer_transition(runner)
+        except Exception:
+            pass  # Consumer qualification cannot rewrite native enrollment truth.
+    return result
 
 
 def install_private_control(runner, home: Path, role: str, *,
                             implementation_sha: str | None = None,
-                            session_enrollment: dict | None = None) -> None:
-    if role != "mmsecretary":
+                            session_enrollment: dict | None = None,
+                            consumer_transition=None) -> None:
+    if type(role) is not str or role not in {"mmsecretary", "mmmeta"}:
         return
+    contract = conversation_contract(role)
     server = runner.session_control_server
-    if VERB in server.private_handlers:
+    if any(conversation_contract(selected).native_verb in server.private_handlers
+           for selected in ("mmsecretary", "mmmeta")):
         raise RuntimeRefusal("NATIVE_SECRETARY_CONTROL_ALREADY_INSTALLED")
+    def role_result(status, **fields):
+        return _result(status, role=role, **fields)
+
     loop = asyncio.get_running_loop()
+    import contextvars
+    owner_context = contextvars.copy_context()
     frozen = None
     if session_enrollment is not None:
         _implementation(implementation_sha)
-        frozen = validate_enrollment_capability(session_enrollment)
+        frozen = validate_enrollment_capability(session_enrollment, role=role)
 
     def enrollment(params, peer_subject):
         # V1 has no enrollment capability. The native server, not caller input,
@@ -567,8 +729,8 @@ def install_private_control(runner, home: Path, role: str, *,
             _implementation(implementation_sha)
             request_id = _enrollment_id(params.get("request_id"))
         except RuntimeRefusal:
-            return _result("REFUSED")
-        refused = enrollment_result(implementation_sha, request_id, "REFUSED")
+            return role_result("REFUSED")
+        refused = enrollment_result(implementation_sha, request_id, "REFUSED", role=role)
         keys = {"operation", "profile_id", "implementation_sha", "request_id"}
         modifying = params["operation"] == "enroll_session"
         if modifying:
@@ -580,7 +742,10 @@ def install_private_control(runner, home: Path, role: str, *,
                 or (modifying and (type(params["ticket"]) is not str
                                    or not 1 <= len(params["ticket"]) <= 256))):
             return refused
-        coroutine = _enrollment_operation(runner, home, dict(params), peer_subject)
+        options = {"role": role}
+        if consumer_transition is not None:
+            options["consumer_transition"] = consumer_transition
+        coroutine = _enrollment_operation(runner, home, dict(params), peer_subject, **options)
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except Exception:
@@ -591,21 +756,42 @@ def install_private_control(runner, home: Path, role: str, *,
         except Exception:
             # No cancel: the original native mutation remains tracked.
             return enrollment_result(implementation_sha, request_id,
-                                     "EFFECT_UNKNOWN" if modifying else "UNAVAILABLE")
+                                     "EFFECT_UNKNOWN" if modifying else "UNAVAILABLE", role=role)
 
     def handle(params, peer_subject):
         if type(params) is dict and params.get("operation") in {"inspect_enrollment", "enroll_session"}:
             return enrollment(params, peer_subject)
         if peer_subject != f"uid:{os.getuid()}" or type(params) is not dict:
-            return _result("REFUSED", reason="PEER_REFUSED")
+            return role_result("REFUSED", reason="PEER_REFUSED")
         operation = params.get("operation")
         try:
             if operation == "observe":
                 if set(params) != {"operation", "profile_id", "session_id"} or params["profile_id"] != str(home):
                     raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
-                return _result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
+                return role_result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
-                return _read_original(home, params, peer_subject)
+                return _read_original(home, params, peer_subject, role=role)
+            if operation == "consumer_extension":
+                # A finite read-only qualification of the serving process. The
+                # caller selects no target and no route: the profile is the
+                # one this private socket belongs to.
+                if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
+                    raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_REQUEST_INVALID")
+                async def observe_extension():
+                    return role_result("OBSERVED", extension=_consumer_extension(runner, home))
+                coroutine = observe_extension()
+                try:
+                    future = owner_context.copy().run(
+                        asyncio.run_coroutine_threadsafe, coroutine, loop)
+                except Exception:
+                    coroutine.close()
+                    return role_result("UNAVAILABLE")
+                try:
+                    return future.result(timeout=5)
+                except Exception:
+                    from integrations.hermes_harness.native_executive_consumer import _consume_future_result
+                    future.add_done_callback(_consume_future_result)
+                    return role_result("UNAVAILABLE")
             if operation != "submit" or set(params) != {"operation", "target", "submission_id", "text", "ticket"}:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
             _id(params["submission_id"])
@@ -613,28 +799,31 @@ def install_private_control(runner, home: Path, role: str, *,
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         except Exception:
-            return _result("UNAVAILABLE" if operation in {"observe", "read_original"} else "REFUSED")
+            return role_result("UNAVAILABLE" if operation in {"observe", "read_original", "consumer_extension"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
-        coroutine = _submit(runner, home, params, peer_subject)
+        coroutine = _submit(runner, home, params, peer_subject, role=role)
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except Exception:
             coroutine.close()
-            return _result("REFUSED", reason="OWNER_LOOP_UNAVAILABLE")
+            return role_result("REFUSED", reason="OWNER_LOOP_UNAVAILABLE")
         try:
             return future.result(timeout=25)
         except Exception:
             # Do not cancel/replay an admission when the control response is lost.
-            return _result("EFFECT_UNKNOWN")
+            return role_result("EFFECT_UNKNOWN")
 
-    server.private_handlers[VERB] = handle
+    server.private_handlers[contract.native_verb] = handle
 
 
 class NativeSecretaryClient:
     """Actual selected same-UID native client; each operation sends once."""
 
-    def __init__(self, home: Path, *, expected_pid: int | None = None):
+    def __init__(self, home: Path, *, expected_pid: int | None = None,
+                 role: str = "mmsecretary"):
+        self._contract = conversation_contract(role)
+        self._role = self._contract.role
         self.home = home.resolve(strict=True)
         if expected_pid is not None and (type(expected_pid) is not int or expected_pid <= 0):
             raise RuntimeRefusal("NATIVE_SECRETARY_OWNER_INVALID")
@@ -655,6 +844,8 @@ class NativeSecretaryClient:
         if type(request) is not dict:
             raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         operation = request.get("operation")
+        if operation == "consumer_extension" and set(request) == {"operation"}:
+            return self.consumer_extension()
         if operation == "observe" and set(request) == {"operation", "session_id"}:
             return self.observe(request["session_id"])
         if operation == "submit" and set(request) == {"operation", "target", "submission_id", "text"}:
@@ -670,13 +861,17 @@ class NativeSecretaryClient:
             return self.read_original(**{key: value for key, value in request.items() if key != "operation"})
         raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
 
-    def _call(self, params, *, result_schema=SCHEMA):
+    def _call(self, params, *, result_schema=None):
+        if result_schema is None:
+            result_schema = self._contract.native_schema
+        if result_schema not in {self._contract.native_schema, self._contract.enrollment_result_schema}:
+            raise RuntimeRefusal("NATIVE_CONVERSATION_SCHEMA_INVALID")
         from hermes_cli.gateway_runtime_discovery import connect_private
         if self.expected_pid is not None:
             observed = self._identify()
             if observed.state != "ready" or observed.endpoint is None:
                 raise RuntimeRefusal("NATIVE_SECRETARY_OWNER_CHANGED")
-        request = _canonical({"protocol": 1, "id": 1, "verb": VERB, "params": params}) + b"\n"
+        request = _canonical({"protocol": 1, "id": 1, "verb": self._contract.native_verb, "params": params}) + b"\n"
         if len(request) > 64 * 1024:
             raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_TOO_LARGE")
         deadline = time.monotonic() + 30
@@ -697,10 +892,10 @@ class NativeSecretaryClient:
         if (response.get("ok") is not True or response.get("protocol") != 1 or response.get("id") != 1
                 or type(value) is not dict or value.get("schema") != result_schema):
             raise RuntimeRefusal("NATIVE_SECRETARY_RESPONSE_INVALID")
-        if result_schema == ENROLLMENT_RESULT_SCHEMA:
+        if result_schema == self._contract.enrollment_result_schema:
             return validate_enrollment_result(
                 value, implementation_sha=params["implementation_sha"], request_id=params["request_id"],
-                profile_id=str(self.home), principal_id=f"uid:{os.getuid()}")
+                profile_id=str(self.home), principal_id=f"uid:{os.getuid()}", role=self._role)
         return value
 
     def inspect_enrollment(self, implementation_sha: str, request_id: str):
@@ -712,9 +907,9 @@ class NativeSecretaryClient:
             return self._call({
                 "operation": "inspect_enrollment", "profile_id": str(self.home),
                 "implementation_sha": implementation_sha, "request_id": request_id},
-                result_schema=ENROLLMENT_RESULT_SCHEMA)
+                result_schema=self._contract.enrollment_result_schema)
         except Exception:
-            return enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+            return enrollment_result(implementation_sha, request_id, "UNAVAILABLE", role=self._role)
 
     def enroll_session(self, implementation_sha: str, request_id: str):
         _implementation(implementation_sha)
@@ -725,17 +920,17 @@ class NativeSecretaryClient:
         try:
             observed = self._identify()
             if observed.state != "ready" or observed.endpoint is None:
-                return enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+                return enrollment_result(implementation_sha, request_id, "UNAVAILABLE", role=self._role)
             ticket = _session_ticket(self.home, observed.endpoint)
         except Exception:
-            return enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+            return enrollment_result(implementation_sha, request_id, "UNAVAILABLE", role=self._role)
         try:
             return self._call({
                 "operation": "enroll_session", "profile_id": str(self.home),
                 "implementation_sha": implementation_sha, "request_id": request_id, "ticket": ticket},
-                result_schema=ENROLLMENT_RESULT_SCHEMA)
+                result_schema=self._contract.enrollment_result_schema)
         except Exception:
-            return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN")
+            return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN", role=self._role)
 
     def observe(self, session_id: str):
         return self._call({"operation": "observe", "profile_id": str(self.home), "session_id": _id(session_id)})
@@ -751,15 +946,24 @@ class NativeSecretaryClient:
                 or set(target) != _TARGET or endpoint.profile_id != target["profile_id"]
                 or endpoint.instance_id != target["instance_id"]
                 or endpoint.authority_epoch != target["authority_epoch"]):
-            return _result("REFUSED", reason="TARGET_CHANGED")
+            return _result("REFUSED", role=self._role, reason="TARGET_CHANGED")
         ticket = _session_ticket(self.home, endpoint)
         try:
             return self._call({"operation": "submit", "target": target,
                                "submission_id": _id(submission_id), "text": text, "ticket": ticket})
         except Exception:
-            return _result("EFFECT_UNKNOWN")
+            return _result("EFFECT_UNKNOWN", role=self._role)
 
     def read_original(self, *, session_id, submission_id, input_sha256, admission_id=None):
         return self._call({"operation": "read_original", "profile_id": str(self.home),
                            "session_id": _id(session_id), "submission_id": _id(submission_id),
                            "input_sha256": input_sha256, "admission_id": admission_id})
+
+    def consumer_extension(self):
+        """Read the serving process's actual scoped native extension entry.
+
+        This is the serving-process extension proof. It is a finite read-only
+        observation over the existing same-UID private socket: it starts no
+        owner, creates no session and mutates nothing.
+        """
+        return self._call({"operation": "consumer_extension", "profile_id": str(self.home)})

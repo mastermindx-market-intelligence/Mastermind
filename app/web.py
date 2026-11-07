@@ -3662,13 +3662,18 @@ def api_scheduler() -> JSONResponse:
     Returns per-job records: id, next_run_time, last_started, last_finished, last_skipped,
     last_status, last_severity.  Reads the run_events JSONL tail and the live APScheduler
     instance.  Auth-gated via the same app-level middleware as all other /api/* routes.
-    Never 500s — degrades to an empty list on any failure.
+    Failed reads return a closed unavailable state; a successful read may have no job rows.
     """
     try:
         from app.scheduler import scheduler_health
-        return JSONResponse({"jobs": scheduler_health()})
+        return JSONResponse({"scheduler_status": "available", "jobs": scheduler_health()})
     except Exception as exc:  # noqa: BLE001 — operator endpoint; must never raise
-        return JSONResponse({"jobs": [], "note": f"Scheduler health unavailable: {exc}"})
+        _log.warning("scheduler health read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "scheduler_status": "unavailable",
+            "jobs": None,
+            "error": "scheduler_health_unavailable",
+        })
 
 
 @router.get("/api/provenance")

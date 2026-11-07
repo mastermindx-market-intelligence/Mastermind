@@ -59,6 +59,11 @@ def test_real_transition_preserves_predecessor_and_changes_only_fixed_route_path
     expected = copy.deepcopy(old)
     method_routes(expected)[0]["match"][0]["path"] = sorted(set(edge.GET_ROUTES) | set(edge.asset_routes(manifest())))
     method_routes(expected)[1]["match"][0]["path"] = list(edge.POST_ROUTES)
+    for route in method_routes(expected)[3:5]:
+        route["match"][0]["path"] = (
+            list(edge.COMPLETE_MCP_METADATA_ROUTES)
+            if route["match"][0]["method"] == ["GET"]
+            else list(edge.COMPLETE_MCP_ROUTES))
     assert result == expected and old == before
     for suffix in ("/", "-other", "/*"):
         malformed = copy.deepcopy(old)

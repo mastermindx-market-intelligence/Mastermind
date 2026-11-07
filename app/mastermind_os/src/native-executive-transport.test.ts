@@ -328,7 +328,7 @@ it("retains only the context READ refusal code and preserves every public reject
 });
 
 describe("native Secretary selection beside qualified Fabric SEND", () => {
-  it("carries the closed Secretary selection while keeping its SEND unavailable", async () => {
+  it.each([false, true])("preserves the qualified Secretary SEND capability %s on the same native route", async (send) => {
     const f = await fixture(), signal = new AbortController().signal;
     const selection = { workRef: "WS:ALPHA", rootJobId: "JOB-1", targetKind: "hermes_secretary" as const };
     const target = "hermes_secretary:" + "a".repeat(64);
@@ -342,18 +342,19 @@ describe("native Secretary selection beside qualified Fabric SEND", () => {
         selection_state: "RESOLVED", target: { target_ref: target, generation: "a".repeat(24),
           addressable: true, kind: "hermes_secretary", continuation_operation_key: key,
           work_ref: selection.workRef, root_job_id: selection.rootJobId },
-        capabilities: { send: true, reply_read: true, stop: false } } };
+        capabilities: { send, reply_read: true, stop: false } } };
     f.invoke.mockResolvedValueOnce(raw);
     const result = await f.sessionTransport.context(selection, signal);
     expect(decodeSessionContext(result, selection)?.capabilities)
-      .toEqual({ send: false, reply_read: true, stop: false });
-    expect(raw.data.capabilities.send).toBe(true);
-    await expect(f.sessionTransport.send({ target_ref: target, operation_key: key,
-      instruction: "One native question", stop_condition: "Return once" }, signal))
-      .rejects.toThrow("SESSION_SEND_INVALID");
+      .toEqual({ send, reply_read: true, stop: false });
+    expect(raw.data.capabilities.send).toBe(send);
+    const arguments_ = { target_ref: target, operation_key: key,
+      instruction: "One native question", stop_condition: "Return once" };
+    if (send) await f.sessionTransport.send(arguments_, signal);
     expect(f.invoke.mock.calls).toEqual([
       ["executive_auth_status"],
       ["executive_session_context", { selection: raw.data.selection }],
+      ...(send ? [["executive_session_send", { arguments: arguments_ }]] : []),
     ]);
   });
 });
