@@ -1712,18 +1712,137 @@ source acquisition and admitted capacity still prevent a five-minute claim.
 No protected merge, queue, main-admission activation, held #10086 release, or
 retry of operation 26751 or the denied rule lookup occurred.
 
+### Native evidence and bounded follow-ups — 2026-11-07 16:00 UTC
+
+This checkpoint supersedes the c854/030c/eb307 pending observations above.
+The five-minute targets and the independent release/effect holds remain open.
+
+**Mastermind native verdict and comparison boundary.** Required run
+[42385010390](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42385010390)
+passed in **17m26s**; the serial RWE shadow
+[42385010193](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42385010193)
+passed in **37m01s**. Both actually check out
+`63c5a4236a5e0eed75c0e51abdf0c3ae714b32e8`, the merge of c854 with 7ccb.
+These are successful native verdicts, not full case/outcome equivalence or
+five-minute acceptance. The required run has 24 valid exit-zero child receipts,
+2,332 selected modules and 70,461 collected/finished outer cases. Six
+FixedDiagnostics ZIPs were retrieved and verified against canonical digests.
+
+The explicit companion correctly refuses to claim complete evidence when its
+observation fails. Required CI has **312 incomplete module rows** across three
+real canonical children: 79 modules share one serializer-observation error,
+106 another, and 127 one sticky bounds overflow. These are not nested-output
+duplicates. Exact sources identify tests that patch shared `json.dumps`
+through their call report and the observer's own tests that temporarily lower
+module-global limits. The private receipt remains independently valid.
+
+A bounded repair is committed **locally, not yet pushed**, on original #2065:
+`ce7ab5c955cd50b670ba7b1dc22bdbc1b64d3f8b`, parent c854, tree
+`7ab5005c80eb5b6afb6163108ac6366c6d1728bd`. It captures the serializer callable
+and all four finite bounds per observer instance. Actual negative-test observers
+constructed after a limit patch still receive that smaller limit; overflow,
+unavailable histories and guard-v1 remain unchanged. The real reproduction
+passed 187 tests but produced three incomplete observations before repair.
+Final qualification passes **537 tests, zero skips/failures**, with four complete
+source-bound module rows, including all 65 Session Truth / 195 phase reports and
+100 price-evidence / 300 phase reports. A real nested pytest regression covers
+the shared serializer patch, all four limit patches and a following ordinary
+case. Existing outcome expectations now use an independent canonical serializer.
+AST comparison proves all source outside the observer and all other existing
+test functions unchanged. The separate gateway Release HOLD is not cleared.
+
+A separate [controlled ACL-bracket diagnostic](CI_GATEWAY_ACL_BRACKET_DIAGNOSTIC_20261107.md)
+also passed both injected and stable-control cases. A real owned child addition
+between ACL observation and the unchanged nine-field comparison reproduces the
+expected masked exception chain, retaining LOCKED, all public preimages and the
+0400 private predecessor. The fresh stable control completes both successors.
+This supports investigating fixture namespace interference; it does not identify
+the historical native cause or clear the gateway hold.
+
+**Serial identity compatibility is still unresolved.** All 2,332 serial companion
+rows are unavailable, including shards without the temporarily patched limits.
+Required CI installs pytest **9.2.0**, while the RWE lock supplies **9.1.1**.
+[Pytest 9.2's actual source](https://github.com/pytest-dev/pytest/blob/9.2.0/src/_pytest/python.py#L1018-L1073)
+defaults long automatic string/bytes IDs to short argument/index names; 9.1.1
+retains the escaped full value. A bounded local collect-only probe of 409 modules
+observed 12,082 cases and seven IDs above 16 KiB, including IDs above one MiB.
+It exited 2 with collection errors, so this is a partial diagnostic, not a complete
+inventory or test pass. No parameter contents were recorded. The required and
+serial modes therefore have different identity-generating environments even on
+the same source. Do not normalize these differences away, discard oversized
+selected cases, weaken deselection or raise observer limits merely to obtain
+parity. The next source action is to qualify the incumbent lock/profile path
+for a common pytest identity configuration and then obtain a genuinely matched
+serial/parallel observation. No new identity or telemetry owner is introduced.
+
+**Terminal context repair and evidence delivery.** Original #1338 source 030c
+completed all twelve native browser jobs at merge `30e7a4bd94b74711619b3db922b0111818c5113f`;
+that tree equals the source head's `6c0c174f0386ec0def59d8c7ba881d75b3168cb0`.
+The fourteen browser invocations selected **4,693** cases: **3,691 passed,
+999 skipped, three flaky, zero final failures**. Skip reasons were not all
+audited. The three retries were unrelated drawing-save, chart-accessibility
+and sector-leadership cases. J1's original attempt artifacts exist for all three
+projects, with successful zero-flaky carrier jobs and no J1 retry/failure artifacts.
+The native aggregate reports E2E success and unit failure: the one failing unit
+check was the existing AnalysisWorkspace visual-source lock; 20,404 tests passed.
+
+That delivery gap is now published on original #1338 as
+**`2a99682df136c5501dbda03f95f3bcd2913245aa`**, parent 030c. The original producer
+captured fresh six-case NVDA context/thesis-entry images in EN/ZH at 1440/820/390,
+with only its OUT declaration redirected to
+`terminal/docs/pr-crops/company-origin-context-20261107/theses-entry-20261107`.
+All six actual images were inspected; 1,878 source hashes match, with source
+unchanged during capture. The canonical manifest advances only the Analysis
+source row and appends the new evidence pointer. Historical images, raw capture
+identity, CSS row, lex projection and prior records remain unchanged.
+The existing five evidence-owner tests plus fourteen navigation tests pass
+19/19 locally. Typed original-carrier commit/push were APPLIED and canonical
+PR/source/body readbacks match. New native run **42387278303** is in progress;
+the prior browser run was fully reconciled before publication. No protected
+merge or topology activation is claimed.
+
+The Options trace-on/off/on experiment is complete: case times 31.722s / about
+8.6s / about 16.6s, with original assertions and product captures retained.
+The held #1223 already authors the relevant CI trace-on-first-retry policy.
+Do not duplicate that change or infer hosted p95 from this local sample.
+#1223's original remote create-commit remains EFFECT_UNKNOWN, with original
+tree/parents/actor/message retained; unchanged branch refs do not prove that
+the commit object was never created.
+
+**Macro calibration prepared through the existing owner.** eb307 native run
+**42385192083** is still running. Its previous measured run 42375466781 shows
+that failed pack 6 contains no FIF job. Original command service is materially
+underweighted: FIF B 1,706.863s, International 851.708s excluding browser install
+but including its 77.841s canonical-main guard, ontology 349.994s excluding
+browser install, government-revenue candidate 435.744s and BioCatalyst serving
+308.285s. Checkout, separate ancestry acquisition, Python/browser installation,
+queue and exact-base replay remain distinct.
+
+Original #10788 now has a clean **local, not yet pushed** calibration commit
+`4281c1886f52a93913f6eec85f9f4407fd738fb6`, parent eb307, tree
+`9e276d5e892190ae1d9ff51ab2f3250dc4317d90`. Its five measured table entries become
+**1,707 / 852 / 350 / 436 / 308** respectively; it changes no commands,
+dependencies, selectors, timeouts, workflow or admission rule. Five existing
+planning contracts pass in 141.55s pytest time, including exact eligible/skipped
+membership, per-job execution digests/steps, exactly-once accounting, deterministic
+plan hash, the 120-module FIF partition and the original packing-probe ceilings.
+The current native run will be reconciled before pushing the prepared follow-up.
+Balancing cannot remove FIF B's roughly 28-minute indivisible command. Per-case
+setup/call/teardown attribution and the already-authored worker/compaction lanes
+remain necessary; do not recreate those held implementations.
+
 ### Remaining cross-repository execution order
 
 | Ready or held lane | Next concrete action | Completion proof / blocker |
 | --- | --- | --- |
-| Mastermind source qualification | Consume c854 required/serial receipts and its finite actuator refusal code if it recurs; keep the separate gateway/initializer diagnosis | Preserve 473-case local evidence qualification, exact actual checkout, strict aggregate and gateway Release HOLD; no blind rerun |
-| Mastermind collection/placement | Consume published explicit-argv case/outcome rows; diagnose first initializer custody refusal before location changes, then measure bounded fixture work reduction | Same-source identity/outcome conservation, valid receipts and lower complete critical path; default RWE serial and full-p95 targets remain |
+| Mastermind source qualification | Preserve c854 native required/serial successes; publish the qualified observer isolation through the original carrier after resolving the serial identity profile | 537 local tests and complete four-module observations; actual native parity remains unavailable; gateway Release HOLD remains |
+| Mastermind collection/placement | Align the existing pytest identity profile and obtain matched serial/parallel evidence; retain initializer custody diagnosis before location changes | No oversized-case truncation, unqualified cross-version parity or false full-p95 claim |
 | Mastermind qualification chain | Preserve the concrete native-custody extraction design, aggregate and eleven-job proof contract | Take it when the native critical path makes its added setup/concurrency worthwhile |
 | Terminal scope | Preserve **accepted #1297 / 90ddc139** and selector/fanin behavior | DO_NOT_REDO; actual accepted merge is recorded independently from this session's denied rule lookup |
-| Terminal News runtime | Preserve accepted #1334/81ff; consume native proof for published #1338/030c first-link repair and continue the measured Options tracing-cost experiment | Proven initial-render red/green and complete original local browser suite; hosted acceptance still owed; no accepted News reimplementation |
+| Terminal News runtime | Preserve accepted #1334/81ff and successful #1338 context browser proof; consume 2a996/42387278303 evidence-repair qualification | Original J1 first attempts passed in all three projects; required new-head aggregate still owed |
 | Terminal held topology | Preserve #1223’s original uncertain create-commit, authored 7/5/5 placement, Node discovery, trace and attempt-timing work | Reconcile that original effect before any further publication; independent profiling need not wait |
 | Macro integration | Preserve **#10755 already merged (cap 640) + #10674 held → #10745 → #10735** | Original #10674 operation26751 remains EFFECT_UNKNOWN; #10656 remains held and main admission OFF. Rule-read 403 blocks this session’s release path |
-| Macro duration truth | Consume new eb307/42385192083 native aggregate after accepted #10834 composition and NBBO proof repair; then use retained slow-pack constituent evidence | Preserve 120 FIF modules, 1,139-path closures and accepted S1 routing; record 559s contract, 94s planner, 179s checkout and 253s final-gate queue distinctly |
+| Macro duration truth | Consume eb307/42385192083 native aggregate, then push qualified local 4281 calibration once on original #10788 | Preserve 120 FIF modules, 1,139-path closures, original packing ceilings and accepted S1 routing; then qualify the new native placement |
 | Source continuity | Update #2191 and the fresh #10827 follow-up at material milestones | Exact readback, Agent OS validation and preserved accepted #10825; actual handoff only at a real continuity boundary |
 | Program acceptance | Measure successive eligible natural cohorts per risk class and cold/warm mix | At least 30 initial observations/class, failures/fallback/cancellation and original journeys included; all final p95 targets remain unproved |
 
