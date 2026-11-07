@@ -68,8 +68,58 @@ def successor(gateway, monkeypatch):
     return gateway, request, prior
 
 
+def _publication_failure_notes(error):
+    """Expose bounded source locations and the incumbent reader's closed notes.
+
+    Production deliberately hides post-effect exceptions. These disposable tests
+    need the original cause to distinguish fixture interference from a real
+    transaction regression, without printing exception payloads or local values.
+    """
+    from ops.executive_os import os_gateway_studio_reader as reader
+
+    allowed_sources = {
+        "ops.executive_os.autonomy_control",
+        "ops.executive_os.os_gateway_studio_reader",
+        "ops.executive_os.mcp_auth_audit_directories",
+    }
+    pending = [error.__cause__, error.__context__]
+    seen = {id(error)}
+    notes = []
+    while pending and len(seen) < 9:
+        cause = pending.pop()
+        if cause is None or id(cause) in seen:
+            continue
+        seen.add(id(cause))
+        kind = type(cause).__name__
+        record = {"type": kind if kind.isidentifier() and len(kind) <= 80 else "exception"}
+        traceback = cause.__traceback__
+        while traceback is not None:
+            module = traceback.tb_frame.f_globals.get("__name__")
+            function = traceback.tb_frame.f_code.co_name
+            if module in allowed_sources and function.isidentifier():
+                record["source"] = [module, function, traceback.tb_lineno]
+            traceback = traceback.tb_next
+        notes.append("fixture-publication-cause: " + json.dumps(record, sort_keys=True))
+        if type(cause) is reader.StudioObservationError:
+            sanitized = reader.StudioObservationError()
+            reader._merge_failure(sanitized, cause)
+            notes.extend("fixture-studio-observation: " + note
+                         for note in getattr(sanitized, "__notes__", ())[:8])
+        pending.extend((cause.__cause__, cause.__context__))
+    return notes[:16]
+
+
 def publish(s, request):
-    return control.execute_gateway_publication(s.host, request, now=incumbent.NOW)
+    try:
+        return control.execute_gateway_publication(s.host, request, now=incumbent.NOW)
+    except control.TransactionEffectUnknown as error:
+        try:
+            for note in _publication_failure_notes(error):
+                BaseException.add_note(error, note)
+        except Exception:
+            # Diagnostics must preserve the original fail-closed exception.
+            BaseException.add_note(error, "fixture-publication-diagnostic-unavailable")
+        raise
 
 
 def history(request):

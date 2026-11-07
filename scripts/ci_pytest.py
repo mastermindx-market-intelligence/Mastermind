@@ -243,6 +243,8 @@ _MEASURED_THREE_JOB_PLACEMENT = {
     # ran in shard 1. Move the long capacity module to shard 1 only while
     # moving ALL three other measured modules back to shard 0. This balances
     # both runners without dropping tests or changing other SHA-256 placements.
+    # The historical weights above precede the capacity test-file partition.
+    # Retain this pin; new files use the incumbent ordinary hash placement.
     "tests/test_capacity_host_artifacts.py": 1,
     "tests/test_native_fabric_quota_continuity.py": 0,
     "tests/test_trend_persistence_walkforward.py": 0,
@@ -267,7 +269,9 @@ _MEASURED_SIX_JOB_PLACEMENT = {
     'tests/test_advisor_paper_selection.py': 3,  # 15.7s
     'tests/test_c1_installer_control_config.py': 4,  # 6.5s
     'tests/test_cap_s1_mastermind_operator_canary.py': 5,  # 18.2s
-    'tests/test_capacity_host_artifacts.py': 2,  # 788.9s
+    # Keep the original-file pin; 788.9s measured the former complete module.
+    # Split capacity files use ordinary hash placement until new hosted timings.
+    'tests/test_capacity_host_artifacts.py': 2,
     'tests/test_ceo_submit_armed_composition.py': 4,  # 16.7s
     'tests/test_chairman_control_room.py': 5,  # 7.7s
     'tests/test_chairman_control_room_remote.py': 4,  # 12.0s
