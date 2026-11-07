@@ -280,3 +280,29 @@ def test_launch_argv_builder_refuses_unattested_or_invalid_exec_before_spawn(
     with pytest.raises(AcpNativeProcessError, match="launch argv"):
         asyncio.run(owner.open_run(spec))
     assert calls == []
+
+
+def test_completed_native_child_gets_existing_budget_for_cooperative_teardown(launch, tmp_path):
+    profile, spec = launch
+    probe = tmp_path / "cooperative-teardown.py"
+    probe.write_text(
+        "import sys,time\n"
+        "print('READY', flush=True)\n"
+        "sys.stdin.read()\n"
+        "time.sleep(0.45)\n"
+        "print('CLEAN_SHUTDOWN', flush=True)\n"
+    )
+    profile = dataclasses.replace(profile, argv=(profile.argv[0], "-B", str(probe)))
+    owner = AcpNativeProcessOwner(profile, environment_loader=lambda: {})
+
+    async def run():
+        resources = await owner.open_run(spec)
+        assert await asyncio.wait_for(resources.reader.readline(), 3) == b"READY\n"
+        completion = await asyncio.wait_for(resources.finish(None), spec.cancel_grace_seconds)
+        assert completion.settled
+        assert completion.exit_code == 0
+        assert completion.cancellation is None
+        assert b"CLEAN_SHUTDOWN" in Path(resources.process_ref.stdout_path).read_bytes()
+        assert owner._active is None and not owner._identity_matches(resources.process_ref)
+
+    asyncio.run(run())

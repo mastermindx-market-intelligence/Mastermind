@@ -171,12 +171,63 @@ class FreshConversationTurnSource:
         return event, payload
 
 
-def _preview_digest(request, identity, consumption, captured):
+def _recorded_reply(owner, requested):
+    """Rejoin a reply to its exact native candidate; UNKNOWN never grants a turn."""
+    runtime = owner._runtime
+    payload, root_id = requested.payload, requested.payload["root_job_id"]
+    unknown = _event(runtime, requested.command_id + ":unknown", _UNKNOWN, root_id)
+    if unknown is not None:
+        if unknown.payload.get("request_event_id") != requested.event_id:
+            raise ValueError("CONVERSATION_TURN_SOURCE_CHANGED")
+        return None
+    replied = _event(runtime, requested.command_id + ":reply", _REPLY, root_id)
+    if replied is None:
+        return None
+    data, locator = replied.payload, payload["identity"]["locator"]
+    candidate = runtime.events.get_event_by_command_id("ohf-candidate:" + data["turn_id"])
+    if (data.get("request_event_id") != requested.event_id
+            or data.get("request_event_sha256") != wire.canonical_digest(requested.to_dict())
+            or data.get("operation_id") != payload["operation_id"]
+            or data.get("native_acknowledged") is not True or data.get("parent_consumed") is not False
+            or data["result"]["digest"] != wire.canonical_digest(data["result"]["envelope"])
+            or candidate is None or candidate.event_type != "OHF_CANDIDATE_RESULT_RECORDED"
+            or candidate.aggregate_id != data["turn_id"] or candidate.job_id != locator["job_id"]
+            or candidate.attempt_id != locator["attempt_id"] or candidate.event_id != data["candidate_event_id"]
+            or replied.attempt_id != locator["attempt_id"]
+            or wire.canonical_digest(candidate.to_dict()) != data["candidate_event_sha256"]
+            or len(json.dumps(data["result"]["envelope"], ensure_ascii=False).encode()) > 16384):
+        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    return replied
+
+
+def _settled_history_head(owner, identity, consumption, connection=None):
+    """Bound previews/reservations to the latest settled immutable request."""
+    if connection is None:
+        with owner._runtime.store.read() as reader:
+            return _settled_history_head(owner, identity, consumption, reader)
+    row = connection.execute(
+        "SELECT command_id FROM events WHERE aggregate_type=? AND aggregate_id=? AND event_type=? ORDER BY event_id DESC LIMIT 1",
+        (_AGGREGATE, identity["root_job_id"], _REQUEST)).fetchone()
+    if row is None:
+        return None
+    requested = _event(owner._runtime, row["command_id"], _REQUEST, identity["root_job_id"])
+    payload = requested.payload
+    if (payload.get("identity") != identity or payload.get("consumption") != consumption
+            or requested.command_id != _command("turn", identity["principal"], identity["root_job_id"], payload["turn_key"])):
+        raise ValueError("CONVERSATION_TURN_HISTORY_CHANGED")
+    replied = _recorded_reply(owner, requested)
+    if replied is None:
+        raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
+    return dict(request_event_id=requested.event_id, request_event_sha256=wire.canonical_digest(requested.to_dict()),
+        reply_event_id=replied.event_id, reply_event_sha256=wire.canonical_digest(replied.to_dict()))
+
+
+def _preview_digest(request, identity, consumption, captured, history_head):
     # Correlation DATA only. Each preview/send independently obtains current
     # source, project, principal and actual retained writer/ACK qualification.
     return wire.canonical_digest(dict(
         request={k: v for k, v in request.items() if k != "preview_digest"},
-        identity=identity, consumption=consumption, writer_digest=captured[1],
+        identity=identity, consumption=consumption, history_head=history_head, writer_digest=captured[1],
         profile_digest=wire.canonical_digest(captured[2]),
         project_digest=wire.canonical_digest(captured[3])))
 
@@ -188,19 +239,19 @@ async def preview_turn(owner, principal, workspace, request, *, host_current):
     if consumption is None:
         raise ValueError("CONVERSATION_INITIAL_NOT_CONSUMED")
     captured = _live(owner, principal, workspace, request, host_current, identity)
-    if captured[0].continuation.done() or any(event.event_type == _REQUEST
-            for event in owner._runtime.events.list_events(job_id=root.job_id)):
-        # A recorded/unknown original is recoverable through status/read only;
-        # preview never reserves, resends or reports that operation ready.
+    if (captured[0].continuation.done() or _event(owner._runtime,
+            _command("turn", identity["principal"], root.job_id, request["turn_key"]), _REQUEST, root.job_id) is not None):
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
+    history_head = _settled_history_head(owner, identity, consumption)
     if (_live(owner, principal, workspace, request, host_current, identity) != captured
-            or _consumption(owner, identity) != consumption):
+            or _consumption(owner, identity) != consumption
+            or _settled_history_head(owner, identity, consumption) != history_head):
         raise ValueError("CONVERSATION_CONTEXT_CHANGED")
     return dict(schema="mastermind.executive.fresh_conversation_turn_preview.v1",
         work_ref=request["work_ref"], operation_key=request["operation_key"], reference=None,
         turn_key=request["turn_key"], state="TURN_READY", effect="NONE",
         initial_consumption=consumption, locator=identity["locator"],
-        preview_digest=_preview_digest(request, identity, consumption, captured),
+        preview_digest=_preview_digest(request, identity, consumption, captured, history_head),
         parent_consumed=False, can_send=True)
 
 
@@ -226,15 +277,12 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
             raise ValueError("CONVERSATION_TURN_CONFLICT")
         return await read_turn(owner, principal, request)
     captured = _live(owner, principal, workspace, request, host_current, identity)
+    history_head = _settled_history_head(owner, identity, consumption)
     if ("preview_digest" in request
-            and request["preview_digest"] != _preview_digest(request, identity, consumption, captured)):
+            and request["preview_digest"] != _preview_digest(request, identity, consumption, captured, history_head)):
         raise ValueError("CONVERSATION_TURN_PREVIEW_CHANGED")
     dispatch = captured[0]
     if dispatch.continuation.done():
-        raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
-    prior_turns = [event for event in owner._runtime.events.list_events(job_id=root.job_id)
-        if event.event_type == _REQUEST]
-    if prior_turns:
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
     def guard():
         if (_live(owner, principal, workspace, request, host_current, identity) != captured
@@ -246,13 +294,13 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
     payload = dict(schema="mastermind.fresh_conversation_turn_request.v1", root_job_id=root.job_id,
         identity=identity, consumption=consumption, request_sha256=request_sha,
         turn_key=request["turn_key"], message=request["message"], operation_id=operation.command_id,
-        writer_digest=captured[1], profile_digest=wire.canonical_digest(captured[2]),
+        previous_turn=history_head, writer_digest=captured[1], profile_digest=wire.canonical_digest(captured[2]),
         project_digest=wire.canonical_digest(captured[3]))
     with owner._runtime.store.transaction() as connection:
         guard()
-        if connection.execute("SELECT event_id FROM events WHERE aggregate_type=? AND aggregate_id=? AND event_type=? LIMIT 1",
-                (_AGGREGATE, root.job_id, _REQUEST)).fetchone() is not None:
-            raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
+        if (dispatch.continuation.done()
+                or _settled_history_head(owner, identity, consumption, connection) != history_head):
+            raise ValueError("CONVERSATION_TURN_PREVIEW_CHANGED")
         _append(owner._runtime, connection, command=command, kind=_REQUEST, root_id=root.job_id,
             payload=payload, attempt_id=identity["locator"]["attempt_id"])
         guard()
@@ -273,13 +321,22 @@ async def execute_attended_turn(service, dispatch, source):
     """Exact private service branch; public DATA/type labels cannot enter it."""
     if type(source) is not FreshConversationTurnSource or source._dispatch is not dispatch:
         raise ValueError("CONVERSATION_TURN_SOURCE_REQUIRED")
-    event, payload = source.check()
     owner, retained = source._owner, dispatch.retained
-    if service is not owner._service:
-        raise ValueError("CONVERSATION_TURN_SOURCE_REQUIRED")
-    supervisor = service._require_operator_supervisor()
-    operation = OperationId(payload["operation_id"])
+    # This sealed request already owns the reservation even when its live
+    # reader closes before the service begins executing it.
+    payload = json.loads(source._payload)
+    event = None
     try:
+        event = _event(owner._runtime, source._command, _REQUEST, payload["root_job_id"])
+        if service is not owner._service:
+            raise ValueError("CONVERSATION_TURN_SOURCE_REQUIRED")
+        supervisor = service._require_operator_supervisor()
+        operation = OperationId(payload["operation_id"])
+        event, payload = source.check()
+        # Renew only for this newly qualified request, under the incumbent
+        # Attempt owner. Idle waiting never renews a lease or retries a turn.
+        supervisor.retain_native_wait_window(retained)
+        source.check()
         from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
         if isinstance(retained.adapter, RemoteOperatorHarnessAdapter):
             retained.adapter.bind_native_continuation_guard(source.check,
@@ -330,16 +387,20 @@ async def execute_attended_turn(service, dispatch, source):
                 root_id=payload["root_job_id"], payload=reply,
                 attempt_id=retained.session.attempt_id)
             source.check()
-        if not source._completion.done(): source._completion.set_result(None)
+        # The service rearms its same waiter before acknowledging the HTTP
+        # result, so an immediate next send cannot race a completed Future.
     except BaseException as exc:
         # The original request record remains the sole recovery identity.
         # Never infer a second request is permitted from an absent reply.
-        with owner._runtime.store.transaction() as connection:
-            _append(owner._runtime, connection, command=source._command + ":unknown", kind=_UNKNOWN,
-                root_id=payload["root_job_id"], payload=dict(schema="mastermind.fresh_conversation_turn_unknown.v1",
-                    request_event_id=event.event_id, reason="ORIGINAL_TURN_REQUIRES_RECONCILIATION"),
-                attempt_id=retained.session.attempt_id)
-        if not source._completion.done(): source._completion.set_result(None)
+        try:
+            if event is not None and event.payload == payload:
+                with owner._runtime.store.transaction() as connection:
+                    _append(owner._runtime, connection, command=source._command + ":unknown", kind=_UNKNOWN,
+                        root_id=payload["root_job_id"], payload=dict(schema="mastermind.fresh_conversation_turn_unknown.v1",
+                            request_event_id=event.event_id, reason="ORIGINAL_TURN_REQUIRES_RECONCILIATION"),
+                        attempt_id=retained.session.attempt_id)
+        finally:
+            if not source._completion.done(): source._completion.set_result(None)
         raise
 
 
@@ -399,21 +460,11 @@ async def read_turn(owner, principal, request):
         raise ValueError("CONVERSATION_CONSUMPTION_CHANGED")
     if requested.payload.get("identity") != identity or requested.payload.get("turn_key") != request["turn_key"]:
         raise ValueError("CONVERSATION_TURN_SOURCE_CHANGED")
-    replied = _event(owner._runtime, command + ":reply", _REPLY, root.job_id)
+    replied = _recorded_reply(owner, requested)
     if replied is None:
         return _response(request, "RECONCILIATION_REQUIRED", consumption=consumption,
             locator=identity["locator"], effect="UNKNOWN")
     data = replied.payload
-    candidate = owner._runtime.events.get_event_by_command_id("ohf-candidate:" + data["turn_id"])
-    if (data.get("request_event_id") != requested.event_id
-            or data.get("request_event_sha256") != wire.canonical_digest(requested.to_dict())
-            or data.get("operation_id") != requested.payload["operation_id"]
-            or data.get("native_acknowledged") is not True or data.get("parent_consumed") is not False
-            or data["result"]["digest"] != wire.canonical_digest(data["result"]["envelope"])
-            or candidate is None or candidate.event_type != "OHF_CANDIDATE_RESULT_RECORDED"
-            or candidate.aggregate_id != data["turn_id"]
-            or wire.canonical_digest(candidate.to_dict()) != data["candidate_event_sha256"]):
-        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
     owner._current(principal, read_only=True)
     return _response(request, "RECORDED", consumption=consumption, locator=identity["locator"],
         effect="COMMITTED", result=data["result"])

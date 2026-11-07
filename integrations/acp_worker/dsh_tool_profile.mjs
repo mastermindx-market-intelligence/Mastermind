@@ -10,6 +10,8 @@ import { qualifyLoadedDispatchRuntime } from './dsh_dispatch_preflight.mjs'
  * in the host's exclusive provider-free phase BEFORE publishing ACP/model work.
  * The host supplies already-admitted immutable artifact/endpoint/profile policy;
  * this factory does not authenticate it or grant execution authority.
+ * The native host supplies its already-validated Agent as an optional input;
+ * legacy root-context callers retain their original dependency closure.
  *
  * The donor plugin owns namespace reservation, readiness, startup rollback and
  * connection disposal. This module adds no worker/process/result lifecycle.
@@ -25,15 +27,15 @@ export function createDshToolProfile(options) {
 
 // Private composition hook: a grant-bound host rechecks after asynchronous
 // preflight, immediately before the existing plugin can start its transport.
-function composeDshToolProfile({ admitGeneration, signal }, assertBeforeTransport) {
-  const admitted = createAdmittedPlugin(admitGeneration, signal)
+function composeDshToolProfile({ admitGeneration, signal, protocolMode = 'auto', agent }, assertBeforeTransport) {
+  const admitted = createAdmittedPlugin(admitGeneration, signal, protocolMode)
   return Object.freeze({
     ...admitted,
     name: 'mastermind-dsh-tool-profile',
     async apply(ctx, config) {
       signal.throwIfAborted()
       const snapshot = structuredClone(config)
-      await qualifyLoadedDispatchRuntime(ctx, { signal })
+      await qualifyLoadedDispatchRuntime(ctx, { signal, agent })
       signal.throwIfAborted()
       assertBeforeTransport?.(snapshot)
       signal.throwIfAborted()
@@ -50,7 +52,7 @@ function composeDshToolProfile({ admitGeneration, signal }, assertBeforeTranspor
  * and donor plugin still own activation, namespace, cancellation and disposal.
  */
 export function createDshGrantedToolProfile({
-  projection, isCurrentBinding, signal, attemptOverlay,
+  projection, isCurrentBinding, signal, attemptOverlay, agent,
 }) {
   const bound = compileDshAttemptOverlay(projection, attemptOverlay)
   // This remains the incumbent host's ONE binding callback, with the exact
@@ -67,7 +69,9 @@ export function createDshGrantedToolProfile({
     bound?.assertConfig(config)
   }
   const profile = composeDshToolProfile(
-    { admitGeneration: grant.admitGeneration, signal }, assertBeforeTransport,
+    // The fixed ACP reader uses pinned Python MCP1.28.1. Declare its known
+    // protocol to the native SDK; do not spawn a speculative discovery sibling.
+    { admitGeneration: grant.admitGeneration, signal, agent, protocolMode: bound ? 'legacy' : 'auto' }, assertBeforeTransport,
   )
   return Object.freeze({
     ...profile,

@@ -16,6 +16,9 @@ _NOIR = (
     (r"assets/Manrope-Variable-[A-Za-z0-9_-]+\.ttf", "font/ttf"),
     (r"assets/Inter-Variable-[A-Za-z0-9_-]+\.woff2", "font/woff2"),
 )
+_AUTH_ENTRY = (
+    (r"assets/private-entry-[A-Za-z0-9_-]+\.jpg", "image/jpeg"),
+)
 _LICENSES = (
     "licenses/fonts/Inter-OFL.txt",
     "licenses/fonts/Manrope-OFL.txt",
@@ -39,11 +42,13 @@ OS_ASSET_PROFILE_FILE_COUNTS = (
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES),
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES),
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_AUTH_ENTRY),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT) + len(_AUTH_ENTRY),
 )
 
 
 def os_asset_mimes(names) -> dict[str, str]:
-    """Exactly legacy3, Noir9, licensed Noir11, or rich Noir13.
+    """Exactly the existing profiles or complete licensed auth-entry12/rich14.
 
     There is no wildcard asset directory, arbitrary chunk name, optional partial
     profile or caller-supplied MIME. File custody and bytes stay with the launcher.
@@ -53,15 +58,17 @@ def os_asset_mimes(names) -> dict[str, str]:
             or len(names) not in OS_ASSET_PROFILE_FILE_COUNTS or len(set(names)) != len(names)):
         raise ValueError("fixed OS asset set required")
     expected = {"index.html": "text/html; charset=utf-8"}
-    patterns = _BASE + (_NOIR if len(names) in (9, 11, 13) else ()) + (_RICH_CLIENT if len(names) == 13 else ())
+    patterns = (_BASE + (_NOIR if len(names) in (9, 11, 12, 13, 14) else ())
+                + (_RICH_CLIENT if len(names) in (13, 14) else ())
+                + (_AUTH_ENTRY if len(names) in (12, 14) else ()))
     for pattern, mime in patterns:
         matches = [name for name in names if re.fullmatch(pattern, name)]
         if len(matches) != 1:
             raise ValueError("fixed OS asset set required")
         expected[matches[0]] = mime
-    if len(names) in (9, 11, 13):
+    if len(names) in (9, 11, 12, 13, 14):
         expected.update({name: "text/plain; charset=utf-8" for name in _LICENSES})
-    if len(names) in (11, 13):
+    if len(names) in (11, 12, 13, 14):
         expected.update({name: "text/plain; charset=utf-8" for name in _THIRD_PARTY_NOTICES})
     if set(names) != set(expected):
         raise ValueError("fixed OS asset set required")

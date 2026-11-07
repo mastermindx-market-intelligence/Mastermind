@@ -233,7 +233,7 @@ PROFILE_MUTATIONS = {
             'admission refusal rolls back namespace so a later explicit instance can activate',
         }),
     'required_preflight': ('dsh_tool_profile.mjs',
-        'await qualifyLoadedDispatchRuntime(ctx, { signal })',
+        'await qualifyLoadedDispatchRuntime(ctx, { signal, agent })',
         'void ctx // deliberately skipped preflight', {
             'Mastermind runtime profile rejects disabled dispatch enforcement before spawning',
             'Mastermind runtime profile rejects deny-all false readiness before spawning',

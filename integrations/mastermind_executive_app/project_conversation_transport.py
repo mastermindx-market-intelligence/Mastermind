@@ -248,57 +248,69 @@ def validate_result(value, operation, arguments):
         for row in data['entries']:
             _closed(row, ('kind', 'reference', 'initial_message', 'root_state'))
             ref = wire.arguments(row['reference'], 'fresh_read')
-            if (ref['work_ref'] != work or ref['root_job_id'] in roots or row['kind'] != 'fresh_native'
+            if ('before_event_id' in ref or ref['work_ref'] != work or ref['root_job_id'] in roots or row['kind'] != 'fresh_native'
                     or row['root_state'] not in ('QUEUED', 'RUNNING', 'CHECKPOINTED', 'RATE_LIMITED', 'FAILED', 'LOST', 'CANCEL_REQUESTED', 'COMPLETED', 'CANCELLED')):
                 _fail()
             roots.add(ref['root_job_id'])
             _message(row['initial_message'])
     elif operation == 'fresh_read':
-        _closed(data, ('schema', 'kind', 'reference', 'state', 'locator', 'epoch', 'initial_message',
-                       'initial_result', 'initial_consumption', 'turns', 'can_send', 'parent_consumed'))
-        locator = _closed(data['locator'], ('work_ref', 'root_job_id', 'job_id', 'attempt_id'))
-        if (data['schema'] != 'mastermind.fresh_conversation_window.v1' or data['kind'] != 'fresh_native'
-                or wire.arguments(data['reference'], 'fresh_read') != arguments or data['can_send'] is not False
-                or data['parent_consumed'] is not False or locator['work_ref'] != work
-                or locator['root_job_id'] != arguments['root_job_id']
-                or data['state'] not in ('ADMITTED', 'RETAINED', 'SETTLED', 'RECONCILIATION_REQUIRED')):
+        version=data.get('schema')
+        v2=version=='mastermind.fresh_conversation_window.v2'
+        if version not in ('mastermind.fresh_conversation_window.v1','mastermind.fresh_conversation_window.v2'):
             _fail()
-        for key in ('job_id', 'attempt_id'):
-            if locator[key] is not None:
-                _literal(locator[key], 128)
-        if locator['attempt_id'] is not None and locator['job_id'] is None:
+        keys=('schema','kind','reference','state','locator','epoch','initial_message',
+              'initial_result','initial_consumption','turns','can_send','parent_consumed')
+        _closed(data,keys+(('initial_digest','page') if v2 else ()))
+        base={key:value for key,value in arguments.items() if key!='before_event_id'}
+        before=arguments.get('before_event_id')
+        locator=_closed(data['locator'],('work_ref','root_job_id','job_id','attempt_id'))
+        if (data['kind']!='fresh_native' or wire.arguments(data['reference'],'fresh_read')!=base
+                or data['can_send'] is not False or data['parent_consumed'] is not False
+                or locator['work_ref']!=work or locator['root_job_id']!=base['root_job_id']
+                or data['state'] not in ('ADMITTED','RETAINED','SETTLED','RECONCILIATION_REQUIRED')):
             _fail()
+        for key in ('job_id','attempt_id'):
+            if locator[key] is not None:_literal(locator[key],128)
+        if locator['attempt_id'] is not None and locator['job_id'] is None:_fail()
         _message(data['initial_message'])
-        if (data['state'] == 'RETAINED') != (data['epoch'] is not None):
-            _fail()
+        if (data['state']=='RETAINED')!=(data['epoch'] is not None):_fail()
         if data['epoch'] is not None:
-            epoch = _closed(data['epoch'], ('attempt_id', 'binding_digest', 'generation_digest'))
-            if epoch['attempt_id'] != locator['attempt_id'] or epoch['attempt_id'] is None:
-                _fail()
-            _hex(epoch['binding_digest']); _hex(epoch['generation_digest'])
-        initial = data['initial_result']
-        if initial is not None:
-            _payload(initial, locator)
-        if data['state'] == 'SETTLED' and initial is None:
-            _fail()
-        consumed = data['initial_consumption']
+            epoch=_closed(data['epoch'],('attempt_id','binding_digest','generation_digest'))
+            if epoch['attempt_id']!=locator['attempt_id'] or epoch['attempt_id'] is None:_fail()
+            _hex(epoch['binding_digest']);_hex(epoch['generation_digest'])
+        initial=data['initial_result']
+        if initial is not None:_payload(initial,locator)
+        digest=initial['digest'] if initial is not None else None
+        if v2:
+            page=_closed(data['page'],('kind','before_event_id','next_before_event_id'))
+            if page['kind']!=('initial' if before is None else 'history') or page['before_event_id']!=before:_fail()
+            for cursor in (page['before_event_id'],page['next_before_event_id']):
+                if cursor is not None and (type(cursor) is not int or not 1<=cursor<=2**53-1):_fail()
+            if (before is not None and (initial is not None or page['next_before_event_id'] is not None
+                    and page['next_before_event_id']>=before)):_fail()
+            if data['initial_digest'] is not None:_hex(data['initial_digest'])
+            if before is None and data['initial_digest']!=digest:_fail()
+            digest=data['initial_digest']
+        elif before is not None:_fail()
+        if data['state']=='SETTLED' and digest is None:_fail()
+        consumed=data['initial_consumption']
         if consumed is not None:
-            _closed(consumed, ('state', 'event_id', 'event_sha256', 'initial_digest'))
-            if (consumed['state'] != 'CONSUMED' or type(consumed['event_id']) is not int or consumed['event_id'] <= 0
-                    or initial is None or consumed['initial_digest'] != initial['digest']):
-                _fail()
+            _closed(consumed,('state','event_id','event_sha256','initial_digest'))
+            if (consumed['state']!='CONSUMED' or type(consumed['event_id']) is not int or consumed['event_id']<=0
+                    or digest is None or consumed['initial_digest']!=digest):_fail()
             _hex(consumed['event_sha256'])
-        if type(data['turns']) is not list or len(data['turns']) > 1:
-            _fail()
+        if type(data['turns']) is not list or len(data['turns'])>(8 if v2 else 1):_fail()
+        if v2 and before is not None and not data['turns'] and page['next_before_event_id'] is not None:_fail()
+        keys=set()
         for turn in data['turns']:
-            _closed(turn, ('turn_key', 'message', 'state', 'result', 'parent_consumed'))
-            if turn['parent_consumed'] is not False or consumed is None or turn['state'] not in ('RECORDED', 'RECONCILIATION_REQUIRED'):
-                _fail()
-            _literal(turn['turn_key'], 128); _message(turn['message'])
-            if (turn['state'] == 'RECORDED') != (turn['result'] is not None):
-                _fail()
-            if turn['result'] is not None:
-                _payload(turn['result'], locator)
+            _closed(turn,('turn_key','message','state','result','parent_consumed'))
+            if (turn['parent_consumed'] is not False or consumed is None
+                    or turn['state'] not in ('RECORDED','RECONCILIATION_REQUIRED')):_fail()
+            _literal(turn['turn_key'],128);_message(turn['message'])
+            if turn['turn_key'] in keys:_fail()
+            keys.add(turn['turn_key'])
+            if (turn['state']=='RECORDED')!=(turn['result'] is not None):_fail()
+            if turn['result'] is not None:_payload(turn['result'],locator)
     else:
         _fail()
     return data

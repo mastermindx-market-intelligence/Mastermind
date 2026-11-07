@@ -41,7 +41,7 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
   },[entry.kind,source,witness]);
   const selection=entry.kind==="initial"?entry.read.selection:
     {work_ref:entry.window.reference.work_ref,reference:entry.window.reference};
-  const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.length>0);
+  const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.some(turn=>turn.state==="RECONCILIATION_REQUIRED"));
   const readIsCurrent=props.active&&read?.current()===true;
   useLayoutEffect(()=>{
     props.onReadCurrent?.(props.active&&read?.current()===true?read:null);

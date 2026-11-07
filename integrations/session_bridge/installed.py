@@ -104,6 +104,9 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool == "session_native_read":
+        from .deepseek_native import validate_native_read_arguments
+        return validate_native_read_arguments(arguments)
     if tool == "session_summon":
         from .schemas import validate_installed_summon_arguments
         return validate_installed_summon_arguments(arguments)
@@ -146,6 +149,7 @@ class InstalledSessionBridgeProvider:
         summon_handler: Callable[[NeutralPrincipalProjection, Mapping[str, Any]], Any],
         reply_read_handler: Callable | None = None,
         reference_handler: Callable | None = None,
+        native_read_handler: Callable | None = None,
     ) -> None:
         for name, value in (
             ("target_projector", target_projector),
@@ -163,6 +167,9 @@ class InstalledSessionBridgeProvider:
         if reference_handler is not None and not callable(reference_handler):
             raise TypeError("reference handler must be callable")
         self._reference_handler = reference_handler
+        if native_read_handler is not None and not callable(native_read_handler):
+            raise TypeError("native read handler must be callable")
+        self._native_read_handler = native_read_handler
 
     async def handle_frame(self, frame: Any) -> dict[str, Any]:
         tool, principal, arguments = validate_private_frame(frame)
@@ -180,7 +187,11 @@ class InstalledSessionBridgeProvider:
                         "authorized target projection is unavailable",
                     )
                 return _result(tool, data=[dict(item) for item in data])
-            if tool == "session_reply_read":
+            if tool == "session_native_read":
+                if self._native_read_handler is None:
+                    raise BridgeError("backend_unavailable", "installed native history is unavailable")
+                data = await _maybe(self._native_read_handler(principal, dict(arguments)))
+            elif tool == "session_reply_read":
                 if self._reply_read_handler is None:
                     raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
                 data = await _maybe(self._reply_read_handler(principal, dict(arguments)))
@@ -202,6 +213,9 @@ class InstalledSessionBridgeProvider:
                         else "installed Session Bridge owner is unavailable"
                     ),
                 )
+            if tool == "session_native_read":
+                from .deepseek_native import bounded_native_result
+                data = bounded_native_result(data)
             return _result(tool, data=dict(data))
         except BridgeError as exc:
             return _result(tool, code=exc.code, message=exc.message)
@@ -298,7 +312,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  attention_requester: Callable | None = None,
                                  authorized_policies: Any = None,
                                  reference_cursor_key: bytes | None = None,
-                                 hermes_session: Any | None = None):
+                                 hermes_session: Any | None = None,
+                                 deepseek_session: Any | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
@@ -321,7 +336,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                    socket_path=dialogue_socket_path,
                                    authorized_policies=authorized_policies,
                                    reference_cursor_key=reference_cursor_key,
-                                   hermes=hermes_session)
+                                   hermes=hermes_session, deepseek=deepseek_session)
     reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
                                     projected_principal=True)
     reader = CanonicalTargetReader(
@@ -396,7 +411,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
 
     return private_ingress_owner(InstalledSessionBridgeProvider(
         target_projector=targets, reply_handler=send, reply_read_handler=read_reply,
-        reference_handler=references,
+        reference_handler=references, native_read_handler=returns.deepseek_history,
         summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 
 
@@ -507,6 +522,9 @@ class InstalledSessionBridgeClient:
                 "installed Session Bridge response is unavailable",
             )
         return payload.get("data")
+
+    async def native_read(self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]) -> Any:
+        return await self._call(principal, "session_native_read", arguments)
 
     async def targets(
         self, principal: VerifiedPrincipal, kind: str | None = None

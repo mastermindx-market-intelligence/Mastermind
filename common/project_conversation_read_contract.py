@@ -274,14 +274,16 @@ def _fresh_references(value):
 
 
 def _fresh_read(value):
-    _exact_keys(value, frozenset((
+    _mapping(value)
+    keys = frozenset((
         'schema',
         'work_ref',
         'root_job_id',
         'root_event_id',
         'root_event_sha256',
         'principal_scope_sha256',
-    )))
+    ))
+    _exact_keys(value, keys | ({'before_event_id'} if 'before_event_id' in value else set()))
     schema = _text(value['schema'])
     if schema != _FRESH_REFERENCE_SCHEMA:
         _fail()
@@ -292,6 +294,7 @@ def _fresh_read(value):
         'root_event_id': _root_event_id(value['root_event_id']),
         'root_event_sha256': _digest(value['root_event_sha256']),
         'principal_scope_sha256': _digest(value['principal_scope_sha256']),
+        **({'before_event_id': _root_event_id(value['before_event_id'])} if 'before_event_id' in value else {}),
     }
 
 

@@ -1,0 +1,337 @@
+diff --git a/packages/mcp/mcp-client/src/tools.ts b/packages/mcp/mcp-client/src/tools.ts
+--- a/packages/mcp/mcp-client/src/tools.ts
++++ b/packages/mcp/mcp-client/src/tools.ts
+@@ -22,7 +22,20 @@
+ import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+ import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
+ import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
+-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
++import { deepFreeze, type JsonValue } from '@deepseek-ai/dsh-util-values'
++
++type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number]
++/** Detached complete discovery, observed by trusted host code. */
++export interface McpToolGeneration {
++  readonly serverName: string
++  readonly serverInfo: ReturnType<Client['getServerVersion']>
++  readonly tools: readonly ListedMcpTool[]
++}
++export interface McpToolAdmission {
++  readonly rawName: string
++  readonly allow: (execution: Readonly<ToolExecution>) => boolean
++}
++export type McpGenerationAdmission = (generation: McpToolGeneration) => readonly McpToolAdmission[]
+ 
+ /** Resolved options relevant to tool bridging. */
+ export interface ToolBridgeOptions {
+@@ -30,6 +43,8 @@
+   registrationFailure: 'contain' | 'throw'
+   serverName: string
+   toolCallTimeoutMs: number
++  admitGeneration?: McpGenerationAdmission
++  isCurrentGeneration?: () => boolean
+ }
+ 
+ /** State for one sync generation: the current set of disposers keyed by public name. */
+@@ -116,18 +131,52 @@
+   opts: ToolBridgeOptions,
+   previous: ToolDisposers,
+ ): Promise<ToolDisposers> {
+-  // Phase 1: fetch and build the next generation without touching the registry.
+-  const definitions = new Map<string, ToolDefinition>()
++  const admission = opts.admitGeneration
++  const current = opts.isCurrentGeneration
++  const strict = admission !== undefined
++  const isCurrent = () => typeof current === 'function' && current() === true
++  let active = true
++  if (strict) {
++    // Revoke the prior generation before discovery can suspend or fail.
++    for (const dispose of previous.values()) dispose()
++    if (typeof admission !== 'function' || !isCurrent()) {
++      throw new Error('MCP_GENERATION_ADMISSION_UNAVAILABLE')
++    }
++  }
+   const response = client.getServerCapabilities()?.tools === undefined
+     ? { tools: [] }
+     : await client.listTools(undefined, { cacheMode: 'refresh' })
+-  for (const tool of response.tools) {
++  const tools = strict ? deepFreeze(structuredClone(response.tools)) : response.tools
++  const publicNames = new Set<string>()
++  for (const tool of tools) {
+     const publicName = publicToolName(opts.serverName, tool.name)
+-    if (definitions.has(publicName)) {
+-      throw new Error(
+-        `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
+-      )
+-    }
++    if (publicNames.has(publicName)) {
++      throw new Error('MCP_DUPLICATE_TOOL_IDENTITY')
++    }
++    publicNames.add(publicName)
++  }
++  let grants: Map<string, McpToolAdmission['allow']> | undefined
++  if (strict) {
++    if (!isCurrent()) throw new Error('MCP_GENERATION_NOT_CURRENT')
++    const selected = admission(deepFreeze({
++      serverName: opts.serverName,
++      serverInfo: structuredClone(client.getServerVersion()),
++      tools,
++    }))
++    if (!Array.isArray(selected)) throw new Error('MCP_GENERATION_ADMISSION_INVALID')
++    grants = new Map()
++    const rawNames = new Set(tools.map(tool => tool.name))
++    for (const grant of selected) {
++      if (!grant || !rawNames.has(grant.rawName) || grants.has(grant.rawName)
++        || typeof grant.allow !== 'function') throw new Error('MCP_GENERATION_ADMISSION_INVALID')
++      grants.set(grant.rawName, grant.allow)
++    }
++  }
++  const definitions = new Map<string, ToolDefinition>()
++  for (const tool of tools) {
++    const allow = grants?.get(tool.name)
++    if (strict && allow === undefined) continue
++    const publicName = publicToolName(opts.serverName, tool.name)
+     definitions.set(publicName, createMcpToolDefinition(ctx, {
+       name: publicName,
+       rawName: tool.name,
+@@ -135,26 +184,44 @@
+       inputSchema: tool.inputSchema,
+       outputSchema: tool.outputSchema,
+       taskRequired: tool.execution?.taskSupport === 'required',
+-      call: (args, execution) => client.callTool(
+-        { name: tool.name, arguments: args },
+-        { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+-      ),
++      call: (args, execution) => {
++        // No await separates final permission/currentness from the SDK call.
++        if (strict && (!active || !isCurrent() || allow?.(execution) !== true
++          || !active || !isCurrent())) throw new Error('MCP_TOOL_ADMISSION_REFUSED')
++        return client.callTool(
++          { name: tool.name, arguments: args },
++          // This exact definition also disables SDK schema-mismatch replay.
++          { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
++        ).then(result => {
++          // This first admitted profile is text/structured data only. Rich
++          // projection can otherwise write attachments or resolve a model route.
++          if (strict && Array.isArray(result.content)
++            && result.content.some(block => block.type !== 'text')) {
++            throw new Error('MCP_RICH_RESULT_NOT_ADMITTED')
++          }
++          return result
++        })
++      },
+     }))
+   }
+-
+-  // Phase 2: swap generations.
+-  for (const dispose of previous.values()) dispose()
++  if (strict && !isCurrent()) throw new Error('MCP_GENERATION_NOT_CURRENT')
++  if (!strict) for (const dispose of previous.values()) dispose()
+   const disposers: ToolDisposers = new Map()
+   try {
+     for (const [publicName, definition] of definitions) {
+-      disposers.set(publicName, ctx.tools.register(definition))
++      const dispose = ctx.tools.register(definition)
++      let registered = true
++      disposers.set(publicName, strict ? () => {
++        active = false
++        if (!registered) return
++        registered = false
++        dispose()
++      } : dispose)
+     }
+   } catch (error) {
+-    // A conflict on an `mcp__<serverName>__`-qualified name means a foreign
+-    // registration occupies this server's namespace. Roll back so the model
+-    // sees either the full generation or none of it — never a partial set.
++    active = false
+     for (const dispose of disposers.values()) dispose()
+-    ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered: ${String(error)}`)
++    ctx.logger.error('mcp-client: tool registration failed, no tools registered: ' + String(error))
+     if (opts.registrationFailure === 'throw') throw error
+     return new Map()
+   }
+diff --git a/packages/mcp/mcp-client/src/connection.ts b/packages/mcp/mcp-client/src/connection.ts
+--- a/packages/mcp/mcp-client/src/connection.ts
++++ b/packages/mcp/mcp-client/src/connection.ts
+@@ -22,7 +22,7 @@
+ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+ import { createTransport } from './transport.ts'
+ import { syncTools } from './tools.ts'
+-import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
++import type { McpGenerationAdmission, ToolBridgeOptions, ToolDisposers } from './tools.ts'
+ import type { Config } from './index.ts'
+ 
+ /** Automatic reconnect policy for one MCP server connection. */
+@@ -124,13 +124,17 @@
+  * @param policy - Resolved reconnect policy from {@link resolveReconnectPolicy}.
+  * @returns Handle with a `ready` promise for startup-await and a `dispose` for teardown.
+  */
+-export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy): ConnectionHandle {
++export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy,
++  admitGeneration?: McpGenerationAdmission,
++  protocolMode: 'auto' | 'legacy' = 'auto'): ConnectionHandle {
++  const toolOnly = admitGeneration !== undefined
+   const label = `mcp-client(${config.serverName})`
+   const incompleteDisposalMessage = `${label}: transport closure could not be confirmed during disposal — server shutdown may be incomplete`
+   const opts: ToolBridgeOptions = {
+     registrationFailure: 'contain',
+     serverName: config.serverName,
+     toolCallTimeoutMs: config.toolCallTimeoutMs,
++    ...admitGeneration === undefined ? {} : { admitGeneration },
+   }
+   // The initial sync uses 'throw' when failOnStartupError is configured, so
+   // a registration conflict propagates to the startup-await path. Re-syncs
+@@ -169,7 +173,9 @@
+   function enqueueSync(generation: Client, syncOpts: ToolBridgeOptions = opts): Promise<void> {
+     const run = syncChain.then(async () => {
+       if (!isCurrent(generation)) return
+-      disposers = await syncTools(generation, ctx, syncOpts, disposers)
++      const currentOpts = admitGeneration === undefined ? syncOpts
++        : { ...syncOpts, isCurrentGeneration: () => isCurrent(generation) }
++      disposers = await syncTools(generation, ctx, currentOpts, disposers)
+     })
+     // The chain tail must survive a failed sync; the enqueuing caller owns reporting.
+     syncChain = run.catch(() => {})
+@@ -259,7 +265,9 @@
+       { name: 'dsh-mcp-client', version: '0.0.1' },
+       {
+         capabilities: {},
+-        versionNegotiation: { mode: 'auto' },
++        // A trusted host may pin the known Python SDK1 stdio protocol. This
++        // avoids SDK2's disposable discovery process and legacy probe timeout.
++        versionNegotiation: { mode: protocolMode },
+         listChanged: {
+           tools: {
+             autoRefresh: false,
+@@ -304,7 +312,7 @@
+     }
+     let instructions: string
+     try {
+-      transport = createTransport(config)
++      transport = createTransport(config, toolOnly)
+       await generation.connect(transport)
+       if (hasClosed()) {
+         attemptSettled = true
+@@ -362,9 +370,10 @@
+ 
+   return {
+     ready,
+-    instructions: () => serverInstructions,
++    instructions: () => toolOnly ? '' : serverInstructions,
+     resources: {
+       async request(request, exec): Promise<JsonValue> {
++        if (toolOnly) throw new Error('MCP_RESOURCE_NOT_ADMITTED')
+         const generation = client
+         if (!generation || connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
+         const options = { signal: exec.signal, timeout: config.toolCallTimeoutMs }
+diff --git a/packages/mcp/mcp-client/src/index.ts b/packages/mcp/mcp-client/src/index.ts
+--- a/packages/mcp/mcp-client/src/index.ts
++++ b/packages/mcp/mcp-client/src/index.ts
+@@ -19,11 +19,15 @@
+ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+ import { DEFAULT_MAX_INSTRUCTION_BYTES, RECONNECT_DEFAULTS, resolveReconnectPolicy, startConnection } from './connection.ts'
+ import type { ReconnectConfig } from './connection.ts'
++import type { McpGenerationAdmission } from './tools.ts'
++import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+ import { registerServerContext } from './server-context.ts'
+ // Side-effect type import: declaration-merges `ctx.tools` onto Context.
+ import type {} from '@deepseek-ai/dsh-tools'
+ 
+ export { createMcpToolDefinition } from './tools.ts'
++export { startConnection, resolveReconnectPolicy } from './connection.ts'
++export type { McpGenerationAdmission, McpToolAdmission, McpToolGeneration } from './tools.ts'
+ export type { McpResult, McpToolDefinitionOptions } from './tools.ts'
+ export type { ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
+ 
+@@ -152,6 +156,40 @@
+  * @returns startup readiness after connection and initial tool discovery settle.
+  */
+ export async function apply(ctx: Context, config: Config): Promise<void> {
++  await activate(ctx, config)
++}
++
++/** Trusted tool-only admission shares the native connection and namespace owner. */
++export function createAdmittedPlugin(admitGeneration: McpGenerationAdmission, signal: AbortSignal,
++  protocolMode: 'auto' | 'legacy' = 'auto') {
++  if (typeof admitGeneration !== 'function' || !(signal instanceof AbortSignal)
++    || !['auto', 'legacy'].includes(protocolMode)) {
++    throw new TypeError('Trusted admission function and owner AbortSignal required')
++  }
++  return {
++    name: 'mcp-client-admitted', inject, Config,
++    async apply(ctx: Context, config: Config): Promise<void> {
++      signal.throwIfAborted()
++      const fixedConfig = deepFreeze(structuredClone(config))
++      if (fixedConfig.failOnStartupError !== true || fixedConfig.reconnect?.enabled !== false) {
++        throw new Error('MCP_ADMITTED_STARTUP_POLICY_REFUSED')
++      }
++      await activate(ctx, fixedConfig, admitGeneration, signal, protocolMode)
++    },
++  }
++}
++
++async function activate(ctx: Context, config: Config,
++  admitGeneration?: McpGenerationAdmission, signal?: AbortSignal,
++  protocolMode: 'auto' | 'legacy' = 'auto'): Promise<void> {
++  signal?.throwIfAborted()
++  if (signal !== undefined) {
++    const abort = () => { void ctx.fiber.dispose().catch(() => {}) }
++    ctx.effect(() => {
++      signal.addEventListener('abort', abort, { once: true })
++      return () => signal.removeEventListener('abort', abort)
++    }, 'mcp-client.owner-abort')
++  }
+   // Fail loud at load: reconnect misconfiguration (including programmatic
+   // construction that bypassed Schemastery) rejects THIS instance before any
+   // effect registers.
+@@ -178,8 +216,8 @@
+   // The supervisor owns the client/transport generations, the reconnect
+   // loop, and the live tool registrations; disposal stops reconnection,
+   // quiesces in-flight work, and unregisters the current generation.
+-  const connection = startConnection(ctx, config, reconnect)
+-  registerServerContext(ctx, config.serverName, connection)
++  const connection = startConnection(ctx, config, reconnect, admitGeneration, protocolMode)
++  if (admitGeneration === undefined) registerServerContext(ctx, config.serverName, connection)
+   let stopping: Promise<void> | undefined
+   const dispose = (): Promise<void> => stopping ??= connection.dispose()
+   // Cordis announces unload before awaiting an unfinished apply(). Closing
+@@ -197,6 +235,7 @@
+   // fiber (Cordis rolls it back); otherwise the error is logged and the
+   // supervisor enters its reconnect loop.
+   const outcome = await connection.ready
++  signal?.throwIfAborted()
+   if (outcome.error !== undefined && config.failOnStartupError) {
+     throw new Error(`mcp-client(${config.serverName}): initial connection or tool synchronization failed`, { cause: outcome.error })
+   }
+diff --git a/packages/mcp/mcp-client/src/transport.ts b/packages/mcp/mcp-client/src/transport.ts
+--- a/packages/mcp/mcp-client/src/transport.ts
++++ b/packages/mcp/mcp-client/src/transport.ts
+@@ -28,19 +28,25 @@
+  * @param config - Resolved plugin config discriminated on `transport`.
+  * @returns A connected-ready MCP Transport (stdio or Streamable HTTP).
+  */
+-export function createTransport(config: Config): Transport {
++export function createTransport(config: Config, explicitEnvironment = false): Transport {
+   switch (config.transport) {
+     case 'stdio':
+       return new StdioClientTransport({
+         command: config.command,
+         args: config.args,
+-        env: buildChildEnv(config.env),
++        env: explicitEnvironment ? { ...config.env } : buildChildEnv(config.env),
+         cwd: config.cwd,
+       })
+     case 'streamable-http':
+       return new StreamableHTTPClientTransport(
+         new URL(config.url),
+-        { requestInit: { headers: config.headers } },
++        {
++          requestInit: { headers: config.headers },
++          ...explicitEnvironment ? { reconnectionOptions: {
++            maxRetries: 0, maxReconnectionDelay: 30000,
++            initialReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1.5,
++          } } : {},
++        },
+       )
+   }
+ }

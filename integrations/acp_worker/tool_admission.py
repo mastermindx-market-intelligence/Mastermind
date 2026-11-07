@@ -120,6 +120,7 @@ class AcpToolAdmission:
     projection_sha256: str
     artifact_sha256: str
     tools: tuple[AcpObservedTool, ...]
+    native_session_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tools", _tools(self.tools))
@@ -131,13 +132,20 @@ class AcpToolAdmission:
         for value in (self.job_id, self.worker_id, self.session_id, self.model):
             if not isinstance(value, str) or not value or len(value) > 128:
                 raise ValueError("invalid ACP admission binding")
+        if self.native_session_id is not None and (
+            type(self.native_session_id) is not str
+            or _NAME.fullmatch(self.native_session_id) is None
+            or self.native_session_id != self.session_id
+        ):
+            raise ValueError("ACP native session observation differs from the admitted session")
 
     def matches(self, spec: WorkerLaunchSpec, ref: WorkerProcessRef,
                 session_id: str, model: str) -> bool:
         return (self.process_ref == ref and self.process_ref.run_id == spec.run_id
                 and self.job_id == spec.job_id and self.worker_id == spec.worker_id
                 and self.session_id == session_id and self.model == model == spec.model
-                and self.process_ref.base_sha == spec.expected_base_sha)
+                and self.process_ref.base_sha == spec.expected_base_sha
+                and (self.native_session_id is None or self.native_session_id == session_id))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -152,8 +160,11 @@ class AcpNativeToolGate:
     artifact_sha256: str
     tools: tuple[AcpObservedTool, ...]
     artifacts: tuple[tuple[str, str], ...]
+    native_session_required: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.native_session_required) is not bool:
+            raise ValueError("ACP native session requirement must be a boolean")
         object.__setattr__(self, "tools", _tools(self.tools))
         object.__setattr__(self, "artifacts", tuple(tuple(row) for row in self.artifacts))
         if not 1 <= len(self.artifacts) <= 16:
@@ -195,6 +206,10 @@ class AcpAdmissionChannel:
         attempt_overlay: Mapping | None = None,
     ) -> None:
         self.gate = gate
+        self._native_session_required = gate.native_session_required
+        self._native_session_id: str | None = None
+        if self._native_session_required and (spec is None or attempt_overlay is None):
+            raise ValueError("ACP native session observation requires the exact Attempt overlay")
         if (spec is None) != (attempt_overlay is None):
             raise ValueError("ACP Attempt channel requires exact spec and overlay")
         self.attempt_spec = spec
@@ -208,6 +223,11 @@ class AcpAdmissionChannel:
         self.task: asyncio.Task[None] | None = None
         self.close_task: asyncio.Task[None] | None = None
         self.used = False
+
+    @property
+    def native_session_id(self) -> str | None:
+        """Original startup observation; not durable or current session authority."""
+        return self._native_session_id
 
     def close_unstarted(self) -> None:
         self.parent.close()
@@ -225,7 +245,9 @@ class AcpAdmissionChannel:
         reader, self.writer = await asyncio.open_connection(sock=self.parent, limit=_LIMIT)
         self.spec, self.ref, self.identity_matches = spec, ref, identity_matches
         self.seed = {
-            "schema": "mastermind.acp_tools_ready/v2" if self.attempt_overlay else "mastermind.acp_tools_ready/v1",
+            "schema": ("mastermind.acp_tools_ready/v3" if self._native_session_required
+                       else "mastermind.acp_tools_ready/v2" if self.attempt_overlay
+                       else "mastermind.acp_tools_ready/v1"),
             "run_id": spec.run_id, "job_id": spec.job_id, "worker_id": spec.worker_id,
             "launch_nonce": ref.launch_nonce, "pid": ref.pid, "base_sha": ref.base_sha,
             "projection_sha256": self.gate.projection_sha256,
@@ -258,13 +280,25 @@ class AcpAdmissionChannel:
                     json.dumps(self.attempt_overlay, sort_keys=True,
                                separators=(",", ":"), ensure_ascii=True).encode()
                 ).hexdigest()
+            native_session_id = None
+            if self._native_session_required:
+                native_session_id = value.get("native_session_id") if type(value) is dict else None
+                if (type(native_session_id) is not str
+                        or _NAME.fullmatch(native_session_id) is None):
+                    raise ValueError("ACP native session observation refused")
+                expected_reply["native_session_id"] = native_session_id
             if (json.dumps(value, sort_keys=True, separators=(",", ":"))
                     != json.dumps(expected_reply, sort_keys=True, separators=(",", ":"))
                     or not identity_matches(ref)):
                 raise ValueError("ACP readiness identity refused")
             self.gate.verify_artifacts()
+            if self._native_session_required:
+                _sealed_attempt_overlay(spec, self.attempt_overlay)
+                if not identity_matches(ref):
+                    raise ValueError("ACP native session process changed before ACK")
             self.writer.write(b'{"accepted":true}\n')
             await self.writer.drain()
+            self._native_session_id = native_session_id
             # Stop the one-shot evidence transport; no later message can replace
             # or revoke this receipt. Live revocation stays with the grant owner.
 
@@ -285,9 +319,15 @@ class AcpAdmissionChannel:
         if not self.identity_matches(self.ref):
             raise ValueError("ACP ready process generation changed")
         self.gate.verify_artifacts()
+        if self._native_session_required:
+            _sealed_attempt_overlay(self.spec, self.attempt_overlay)
+            if (self._native_session_id is None or session_id != self._native_session_id
+                    or not self.identity_matches(self.ref)):
+                raise ValueError("ACP prompt does not address the observed native session")
         return AcpToolAdmission(self.ref, self.spec.job_id, self.spec.worker_id,
                                 session_id, model, self.gate.projection_sha256,
-                                self.gate.artifact_sha256, self.gate.tools)
+                                self.gate.artifact_sha256, self.gate.tools,
+                                native_session_id=self._native_session_id)
 
     async def close(self) -> None:
         if self.task is not None:
