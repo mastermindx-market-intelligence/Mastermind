@@ -80,7 +80,7 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
   'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
   'uses': 'actions/checkout@v4',
   'with': {'repository': 'mastermindx-market-intelligence/macro',
-           'ref': 'f769c2b879797e0237429dd011a5c6b7e7bc0bc7',
+           'ref': '91add9613ad29dcfb82ff75036dd6519cfc6c06f',
            'path': 'vendor/macro_src',
            'sparse-checkout': 'engine\nlib\nscripts\n',
            'persist-credentials': False,
