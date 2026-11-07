@@ -17,7 +17,7 @@ production_effect: NONE
 
 # Web-Sol Fleet C3 — protected Steward S1 compatibility addendum
 
-**Date:** 2026-09-08  
+**Date:** 2026-09-08\
 **Status:** `CURRENT-SOURCE-COMPATIBILITY / RECORDS_ONLY / IMPLEMENTATION_PRE_START / PRODUCTION_INERT`
 
 This addendum has narrow precedence over the parent C3 design and implementation plan only for the protected-source movement and downstream-consumer proof described below. It does not change the Chairman-approved product direction, the four-adapter/sequential/40-second acquisition law, the C3 wire contract, the implementation branch, or any production effect.

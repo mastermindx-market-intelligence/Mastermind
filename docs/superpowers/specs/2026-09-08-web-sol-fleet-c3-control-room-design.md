@@ -16,9 +16,9 @@ production_effect: NONE
 
 # Web-Sol Fleet Census C3 — Advanced Control Room design
 
-**Date:** 2026-09-08  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
+**Date:** 2026-09-08\
+**Owner:** Sol, AI CEO\
+**Chairman:** Chris\
 **Status:** `CHAIRMAN_APPROVED / SELF_REVIEW_REPAIRED / SPEC_ONLY / IMPLEMENTATION_PRE_START / PRODUCTION_INERT`
 
 This record freezes the Chairman-approved C3 architecture. It changes no browser, profile, account, extension, native host, socket, RuntimeBinding, Executive lifecycle, Control Room route, cache, service, provider state, installation, deployment, or production capability.

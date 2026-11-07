@@ -10,10 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-08-web-sol-fleet-c3-control-room-design.md`
 
-**Operation:** `web-sol-fleet-c3-source-20260908-sol-001`  
-**Parent:** Mastermind issue #501 / approval comment `5592792563`  
-**Plan source operation:** `web-sol-fleet-c3-design-plan-source-20260908-sol-001`  
-**Self-review parent:** `b45f042040157c03fc97c5d6ad27acaa4c5b93e4`  
+**Operation:** `web-sol-fleet-c3-source-20260908-sol-001`\
+**Parent:** Mastermind issue #501 / approval comment `5592792563`\
+**Plan source operation:** `web-sol-fleet-c3-design-plan-source-20260908-sol-001`\
+**Self-review parent:** `b45f042040157c03fc97c5d6ad27acaa4c5b93e4`\
 **Admission state:** `PRE_START / DEPENDENCY_HELD / effect=NONE`
 
 The self-review repair freezes exact C2 receipt/null mapping, rejects duplicate case-folded binding IDs, bounds pure inputs, caps displayed navigation matches at six, and removes the contradictory synthetic payload fallback. These are plan corrections, not C3 implementation.

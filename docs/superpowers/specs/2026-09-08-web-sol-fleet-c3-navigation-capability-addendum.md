@@ -14,9 +14,9 @@ production_effect: NONE
 
 # Web-Sol Fleet Census C3 — navigation-capability correction
 
-**Date:** 2026-09-08  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
+**Date:** 2026-09-08\
+**Owner:** Sol, AI CEO\
+**Chairman:** Chris\
 **Status:** `CHAIRMAN_APPROVED_DIRECTION / CURRENT-SOURCE-CORRECTION / SPEC_ONLY / IMPLEMENTATION_PRE_START / PRODUCTION_INERT`
 
 This addendum has narrow precedence over the parent C3 design and implementation plan wherever they require an active **Open** control or exact binding navigation in C3. It also closes opaque adapter-label ambiguity. Every other C3 architecture, count, coverage, deadline, privacy, payload, Today, remote-X1, Steward, installation, and production-proof law remains unchanged.

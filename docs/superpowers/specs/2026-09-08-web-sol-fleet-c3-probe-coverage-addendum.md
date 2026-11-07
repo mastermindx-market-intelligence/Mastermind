@@ -14,9 +14,9 @@ production_effect: NONE
 
 # Web-Sol Fleet Census C3 — probe-coverage totality addendum
 
-**Date:** 2026-09-08  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
+**Date:** 2026-09-08\
+**Owner:** Sol, AI CEO\
+**Chairman:** Chris\
 **Status:** `CHAIRMAN_APPROVED_DIRECTION / SELF_REVIEW_REPAIR / SPEC_ONLY / IMPLEMENTATION_PRE_START / PRODUCTION_INERT`
 
 This addendum has narrow precedence over only:
