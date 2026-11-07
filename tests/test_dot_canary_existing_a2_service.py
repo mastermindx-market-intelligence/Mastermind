@@ -26,7 +26,7 @@ from test_dot_canary_reader import (
 )
 
 
-def create(tmp_path,*,enabled=True,raw=None):
+def create(tmp_path,*,enabled=True,raw=None,selected_policy=POLICY):
     http=FakeSlack() if raw is None else raw
     client=SlackWebApiDialogueClient(
         token="fixture-token",workspace_id=TEAM,channel_id=CHANNEL,
@@ -52,7 +52,7 @@ def create(tmp_path,*,enabled=True,raw=None):
             request["operation"],request["args"],
         )}
     client=InstalledA2CanaryReader(
-        AGENT_RELAY_SOCKET_PATH,POLICY,transport=transport,
+        AGENT_RELAY_SOCKET_PATH,selected_policy,transport=transport,
     )
     return client,http,service
 
