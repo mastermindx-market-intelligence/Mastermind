@@ -1,0 +1,92 @@
+{
+  "automatic_merge_proof": [
+    {
+      "all_modified_units_match_owning_parent": true,
+      "overlap": [],
+      "owned_changed_functions": [
+        "_inference_tool_view",
+        "inference_tool_catalog",
+        "invoke_inference_tool"
+      ],
+      "path": "brain/bot_mcp.py",
+      "protected_changed_functions": [
+        "_feed_ticker_checked",
+        "_list_field_checked",
+        "_mapping_field_checked",
+        "_read_first_nonempty_mapping_checked",
+        "_read_ticker_feed_checked",
+        "_single_name_ticker",
+        "_ticker_record_checked",
+        "get_altdata",
+        "get_anticipation",
+        "get_daily_briefing",
+        "get_fundamentals",
+        "get_intel_hub",
+        "get_intelligence",
+        "get_news",
+        "get_options",
+        "get_portfolio",
+        "get_regime"
+      ],
+      "sha256": "c41e917c1ef075dc058ab41b89d3eb5e41c3a53a12fa130e604520593a5d4667"
+    },
+    {
+      "all_modified_units_match_owning_parent": true,
+      "overlap": [],
+      "owned_changed_functions": [
+        "load_control_config"
+      ],
+      "path": "scripts/executive_os_phase1c.py",
+      "protected_changed_functions": [
+        "_service_from_config"
+      ],
+      "sha256": "2216eecd0b53534f0b211c5bd408ce23cfc3d4108be220144b87db27a92de17e"
+    }
+  ],
+  "changed_governing_scopes": [],
+  "committed_source_gate": "pending_actual_merge_commit",
+  "conflict_resolution": {
+    "method": "exact_owned_prefix_plus_exact_protected_observation_entry",
+    "no_new_general_exemption": true,
+    "path": "tests/executive_fabric_release_identity_review.py",
+    "protected_source_sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
+    "sha256": "3739cb871df8176a023321f5769ec16cba3d6c321e7216ca5fa7df4e0064a0e9",
+    "source_and_token_readback": true
+  },
+  "exact_nonoverlapping_protected_paths": 16,
+  "governing_pin": "de6966ce1524c01ab6ac06af5461370aa79f3994",
+  "hermes_package_projection_worker_backend_and_native_patch_unchanged": true,
+  "local_observation_regression": {
+    "attempts": [
+      {
+        "log": "protected-ad2484-installed-observation-composition.log",
+        "observed_cause": "system_interpreter_missing_jwt_and_mcp",
+        "sha256": "7cd228f9b5e87d688d18361f3c2f942658df0a95ec101e6be3c0ffd61a1784d8"
+      },
+      {
+        "log": "protected-ad2484-installed-observation-qualified-env.log",
+        "observed_cause": "private_sdk_environment_missing_pytest_at_default_site",
+        "sha256": "5e517fb75b7d82e2cd406bf46278ad4b06ef0ec5f2eb58a7f918ec43165abb41"
+      },
+      {
+        "log": "protected-ad2484-observation-real-dependencies.log",
+        "observed_cause": "private_sdk_environment_missing_numpy_for_repository_conftest",
+        "sha256": "a1c578a82cdda92fe0b625bfd4d4fc3bcb2e27af94daf21274fd404b919193b4"
+      }
+    ],
+    "extra_local_environment_reconstruction_stopped": true,
+    "next_owner": "configured_repository_hosted_ci",
+    "qualification_not_claimed": true,
+    "tests_executed": 0
+  },
+  "merge_base": "3f79e30ae184dc991102f6044f7c74f677a86040",
+  "original_selected_generation_and_active_effects_unchanged": true,
+  "parents": [
+    "a3d4da4d79a5a0e7fe4a51d938a132f74f07c574",
+    "ad2484d2330a865f604c3c98abd20d20189cba29"
+  ],
+  "production_or_installed_acceptance": false,
+  "protected_incoming_paths": 19,
+  "qualified_parent_receipt": "review_evidence/hermes_primary/attended-original-source-composition-20261107.json",
+  "schema": "mastermind.hermes_protected_source_join.v1"
+}

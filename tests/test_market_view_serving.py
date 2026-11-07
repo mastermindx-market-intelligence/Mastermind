@@ -487,6 +487,9 @@ def test_current_mcp_retains_source_date_and_unavailability(monkeypatch, tmp_pat
     reader = PM._read_market_view
     monkeypatch.setattr(PM, "_read_market_view", lambda: reader(now=NOW))
     monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    core = tmp_path / "data" / "regime" / "latest.json"
+    core.parent.mkdir(parents=True, exist_ok=True)
+    core.write_text(json.dumps({"date": FRESH, "quad": "Q1", "sector_rs": []}))
     monkeypatch.setattr(DC, "prompt_summary", lambda *a, **k: {})
     result = asyncio.run(bot_mcp.get_regime.handler({}))
     payload = json.loads(result["content"][0]["text"])
