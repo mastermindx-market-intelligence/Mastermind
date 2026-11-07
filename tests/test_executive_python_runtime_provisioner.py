@@ -292,7 +292,11 @@ def test_installer_projects_exact_validated_python_runtime_provenance() -> None:
     for key, value in identity_fields.items():
         assert f'    "{key}": {value},' in derivation
     assert '"python_runtime_provenance_digest": python_runtime_provenance_digest,' in generator
-    assert "python_runtime_provenance_digest,\n) = sys.argv[1:]" in generator
+    assert (
+        "python_runtime_provenance_digest,\n"
+        "    hermes_attended_configuration_sha256,\n"
+        ") = sys.argv[1:]"
+    ) in generator
     assert install.index('"$PYTHON_RUNTIME_PROVENANCE_DIGEST"') < install.index(
         "if source:"
     )
