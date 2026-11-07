@@ -251,4 +251,8 @@ Explanatory audit evidence is not lifecycle truth or a substitute for admission/
 
 ## 11. Default principle
 
-Apply Sections 1-10: least-scarce qualified work, included/non-Pro defaults, separately complete Pro/metered exceptions, and evidence-based escalation. No default Fable, Pro or metered route.
+Apply Sections 1-10. No default Fable, Pro or metered route.
+
+## 12. Capacity-conserving orchestration
+
+Apply [amendment](EXECUTIVE_FABRIC_CAPACITY_ORCHESTRATION_AMENDMENT.md) at the same protected pin; runtime gates remain.
