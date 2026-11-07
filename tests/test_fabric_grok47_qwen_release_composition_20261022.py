@@ -39,9 +39,14 @@ QWEN = ("bailian_keys.py", "lease_broker.py",
         "glm_host_account_probe.py", "glm_host_account_source.py")
 HISTORICAL_FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
 LONG_HORIZON_FORWARD_NAMES = ("fabric_operator_contract.py", "native_remote.py", "sub.sh")
+# Current delivery forward composes S14 with the exact reviewed advertised
+# recovery. The historical nine-source Grok map stays unchanged below.
 S14_FORWARD_DIGESTS = {
-    "artifact_delivery.py": "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1",
+    "artifact_delivery.py": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
 }
+# Exact prospective Memory privacy/economic forward bodies; prior S14 and
+# immutable Grok overlay maps above remain historical and byte-exact.
+MEMORY_FORWARD_DIGESTS = {'artifact_delivery.py': 'ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a', 'fabric_operator_contract.py': '80358fb1fbb720441405f60cb419f659697d576bc0cdeaea0d1b8a30b78d6116'}
 FORWARD_NAMES = HISTORICAL_FORWARD_NAMES + LONG_HORIZON_FORWARD_NAMES + tuple(S14_FORWARD_DIGESTS)
 BASE_ONLY_OVERLAY_NAMES = ("fabric_operator_client.py",)
 PROTECTED_QWEN_SOURCE_DIGESTS = {
@@ -56,10 +61,10 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
 }
 
 # Keep the exact historical Qwen map above. The restrictive context-reader
-# join and fair-share queue repair advance as explicit candidate bytes; the
-# other Qwen payloads remain exact.
+# join and the composed application-turn/fair-share broker each have one exact
+# forward digest; remaining Qwen payloads retain their original bytes.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
-    "lease_broker.py": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
+    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
@@ -252,7 +257,7 @@ def test_approved_grok_bytes_stay_pinned_after_concurrent_source_change(tmp_path
     manifest = json.loads((stage / "native-manifest.json").read_text())
     base_pin = read_builder().GROK47_MERGED_SOURCE_DIGESTS["artifact_delivery.py"]
     assert base_pin == "447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3"
-    pin = S14_FORWARD_DIGESTS["artifact_delivery.py"]
+    pin = MEMORY_FORWARD_DIGESTS["artifact_delivery.py"]
     assert builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["artifact_delivery.py"] == pin
     assert manifest["ext/artifact_delivery.py"] == pin
     assert digest((stage / "native-code-stage/ext/artifact_delivery.py").read_bytes()) == pin
@@ -333,7 +338,7 @@ def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
     assert set(S14_FORWARD_DIGESTS) == {"artifact_delivery.py"}
     assert set(forward) == set(FORWARD_NAMES) and len(forward) == 8
     for name, value in S14_FORWARD_DIGESTS.items():
-        assert forward[name] == value
+        assert forward[name] == MEMORY_FORWARD_DIGESTS.get(name, value)
     assert set(forward) < set(merged)
     assert set(merged) - set(forward) == set(BASE_ONLY_OVERLAY_NAMES)
     for name, value in sorted(forward.items()):

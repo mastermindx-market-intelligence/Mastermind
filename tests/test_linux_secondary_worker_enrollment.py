@@ -11,6 +11,7 @@ import sys
 import tarfile
 
 import pytest
+from test_executive_fabric_composition import root_stats
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "enroll_linux_secondary_worker.py"
@@ -175,8 +176,8 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
     decoys = (
         "vendor/hermes/secret.txt", "integrations/unrelated/secret.txt",
         "integrations/business_mcp_auth/server.py", "integrations/business_mcp_auth/jwks.py",
-        "integrations/mastermind_secretary_mcp/adapter.py", "integrations/hermes_delegate/policy.py",
-        "unrelated/private.txt",
+        "integrations/mastermind_secretary_mcp/adapter.py",
+        "unrelated/private.txt", "scripts/ohf/private-probe.py",
     )
     for relative in decoys:
         path = repo / relative
@@ -188,6 +189,9 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
     (repo / "common/untracked-private.txt").write_bytes(b"untracked fixture\n")
     required = (
         "common/__init__.py", "integrations/__init__.py",
+        "scripts/ohf/__init__.py", "scripts/ohf/redaction.py",
+        "scripts/ohf/capability_skill_projection.py", "scripts/ohf/laboratory.py",
+        "scripts/ohf/protocol.py", "scripts/ohf/fixtures/__init__.py",
         "ops/native_fabric/quota_continuity/candidate/paid_yaml_runtime.py",
         "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_6_0_3.zip",
         "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_provenance.json",
@@ -197,6 +201,12 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
         "integrations/business_mcp_auth/__init__.py", "integrations/business_mcp_auth/claims.py",
         "integrations/business_mcp_auth/contracts.py", "integrations/mastermind_secretary_mcp/__init__.py",
         "integrations/mastermind_secretary_mcp/schemas.py",
+        *(f"integrations/hermes_delegate/{name}.py" for name in
+          ("__init__", "admission", "bridge", "carriers", "executive", "handoff",
+           "policy", "schema", "tool")),
+        "integrations/hermes_harness/native_executive_consumer.py",
+        "integrations/hermes_harness/native_tool_registration.py",
+        "integrations/hermes_runtime/native_gateway_entry.py",
         *(f"integrations/hermes_runtime/profiles/{role}.yaml" for role in ("mmmeta", "mmsecretary")),
         *(f"integrations/hermes_qualification/profiles/{role}/{name}"
           for role in ("mmmeta", "mmsecretary") for name in ("config.yaml", "SOUL.md")),
@@ -219,6 +229,11 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
         "integrations.hermes_runtime.install", "integrations.hermes_runtime.system_service",
         "integrations.hermes_runtime.profile", "integrations.hermes_harness.native_mcp",
         "integrations.hermes_models.profile_config", "integrations.hermes_steward.client",
+        "integrations.hermes_harness.native_executive_consumer",
+        "integrations.hermes_harness.native_tool_registration",
+        "integrations.hermes_runtime.native_gateway_entry",
+        # The selected-child reply decoder imports this canonical envelope owner.
+        "integrations.hermes_delegate.executive",
     ]
     probe = (
         "import importlib,json,pathlib,sys\n"
@@ -241,6 +256,47 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
     )
     assert result.returncode == 0, result.stderr[-3000:]
     assert result.stdout.strip() == "ISOLATED_RUNTIME_BYOK_IMPORTS_OK"
+
+    # Reach the actual installed entrypoints with no checkout/site fallback.
+    # The gateway deliberately has no --help option; its closed parser refusal
+    # proves import closure, while an arbitrary failure must never count as proof.
+    from ops.executive_os.remote_worker_gateway_service import SERVICE_CHECK_SCHEMA
+    for entrypoint, expected_rc in (
+        ("executive_os_linux_worker.py", 0),
+        ("executive_os_remote_worker_gateway.py", 64),
+    ):
+        invocation = subprocess.run(
+            [sys.executable, "-I", "-S", "-B", str(extracted / "scripts" / entrypoint), "--help"],
+            cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        )
+        assert invocation.returncode == expected_rc, invocation.stderr[-3000:]
+        if expected_rc == 0:
+            assert "usage:" in invocation.stdout and not invocation.stderr
+        else:
+            assert not invocation.stdout
+            assert json.loads(invocation.stderr) == {
+                "schema": SERVICE_CHECK_SCHEMA, "ok": False, "code": "ARGUMENTS_INVALID",
+            }
+
+
+    # A checkout or the explicit third-party dependency path cannot supply a
+    # missing first-party consumer member in a fresh isolated interpreter.
+    for leaf in ("policy", "executive"):
+        member = extracted / "integrations/hermes_delegate" / f"{leaf}.py"
+        retained = member.read_bytes()
+        member.unlink()
+        try:
+            refused = subprocess.run(
+                [sys.executable, "-I", "-S", "-B", "-c", probe, str(extracted),
+                 str(Path(yaml.__file__).resolve().parent.parent), json.dumps(modules)],
+                cwd=tmp_path, capture_output=True, text=True, timeout=20,
+            )
+            assert refused.returncode != 0
+            assert "ISOLATED_RUNTIME_BYOK_IMPORTS_OK" not in refused.stdout
+            assert "ModuleNotFoundError" in refused.stderr
+            assert f"integrations.hermes_delegate.{leaf}" in refused.stderr
+        finally:
+            member.write_bytes(retained)
 
 
 def test_linux_identities_are_consumed_from_canonical_bootstrap_source(tmp_path: Path) -> None:
@@ -372,8 +428,8 @@ def test_enrollment_source_never_logs_in_or_arms_provider_or_gateway() -> None:
         "device-auth",
         "auth.json",
         "provider-readiness",
-        "certificate",
-        "private key",
+        "openssl req",
+        "openssl x509",
         "systemctl daemon-reload",
         "systemctl enable",
         "systemctl start",
@@ -382,6 +438,121 @@ def test_enrollment_source_never_logs_in_or_arms_provider_or_gateway() -> None:
         "sqlite3",
     ):
         assert forbidden not in source
+
+
+def test_observation_cli_does_not_require_or_allow_worker_inputs(monkeypatch, capsys):
+    m = _load()
+    flags = ['--source-repo', '/root/source', '--expected-sha', 'c' * 40,
+             '--expected-tree', 'd' * 40, '--component', 'hermes-host-observation',
+             '--gateway-config-file', '/etc/mastermind-executive/remote-worker-gateway/input.json',
+             '--gateway-config-sha256', 'e' * 64]
+    args = m._parser().parse_args(flags)
+    assert args.codex_source_binary is None and args.codex_version is None
+    monkeypatch.setattr(m, 'apply_enrollment', lambda *_: pytest.fail('invalid inputs reached enrollment'))
+    assert m.main(flags + ['--codex-version', '0.157.1']) == 64
+    assert m.main(flags[:-2]) == 64
+
+
+def test_observation_identity_plan_ignores_worker_collision():
+    m = _load(); identities = _identities(m)
+    state = dict(users_by_name={}, users_by_uid={'451': 'unrelated'},
+                 groups_by_name={}, groups_by_gid={'451': 'unrelated'})
+    assert m.classify_identity_plan(state, identities, gateway_only=True) == {'control': 'create'}
+    with pytest.raises(m.EnrollmentError, match='already assigned'):
+        m.classify_identity_plan(state, identities)
+
+
+def test_observation_directories_and_unit_have_no_worker_surface(monkeypatch):
+    m = _load(); identities = _identities(m)
+    directories = []
+    monkeypatch.setattr(m, '_mkdir', lambda path, uid, gid, mode: directories.append((path, uid, gid, mode)))
+    m.ensure_directories(identities, gateway_only=True)
+    assert (m.CONFIG_ROOT, 0, 0, 0o755) in directories
+    assert (m.CONFIG_ROOT / 'remote-worker-gateway', 0, identities.control_gid, 0o750) in directories
+    assert all(uid != identities.worker_uid and 'workers' not in path.parts for path, uid, _, _ in directories)
+    assert all(path not in (m.RUN_ROOT, m.WORKSPACE_ROOT, m.BIN_ROOT) for path, *_ in directories)
+    units = m.render_systemd_units(release_root=ROOT, codex_binary=None, identities=identities, gateway_only=True)
+    assert set(units) == {'mastermind-executive-remote-worker-gateway.service'}
+    unit = next(iter(units.values()))
+    assert '/remote-worker-gateway/host-observation.json' in unit
+    assert f'{ROOT}/scripts/executive_os_remote_worker_gateway.py' in unit
+    active = [line.strip() for line in unit.splitlines() if not line.lstrip().startswith('#')]
+    assert '[Install]' not in active and '__' not in unit
+
+
+def test_observation_config_is_digest_bound_exact_adoption_and_never_replaced(tmp_path, root_stats, monkeypatch):
+    import dataclasses
+    import hashlib
+    from tests.test_remote_worker_gateway_service import _observation_fixture, _write
+    m = _load()
+    root, destination, document = _observation_fixture(tmp_path, monkeypatch)
+    raw = destination.read_bytes(); destination.unlink()
+    staged = root / 'operator-input.json'; staged.write_bytes(raw); staged.chmod(0o440)
+    identities = dataclasses.replace(_identities(m), control_gid=root.stat().st_gid)
+    args = m.Args(source_repo=ROOT, expected_sha='c' * 40, expected_tree='d' * 40,
+                  component='hermes-host-observation', gateway_config_file=staged,
+                  gateway_config_sha256=hashlib.sha256(raw).hexdigest())
+    qualified, config = m._observation_input(args, identities)
+    assert qualified == raw and config.hermes_role_metadata_read.implementation_sha == args.expected_sha
+    monkeypatch.setattr(m.os, 'fchown', lambda fd, uid, gid: None)  # fixture metadata only
+    digest = m._install_observation_config(raw, identities)
+    original_inode = destination.stat().st_ino
+    assert m._install_observation_config(raw, identities) == digest
+    assert destination.stat().st_ino == original_inode
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o440
+    assert destination.read_bytes() == raw
+    with pytest.raises(m.EnrollmentError, match='input_changed'):
+        m._observation_input(dataclasses.replace(args, gateway_config_sha256='0' * 64), identities)
+    with pytest.raises(m.EnrollmentError, match='release_pin'):
+        m._observation_input(dataclasses.replace(args, expected_sha='e' * 40), identities)
+    replacement_args = dataclasses.replace(
+        args, expected_sha='e' * 40, expected_gateway_unit_sha256='f' * 64)
+    preserved, preserved_config = m._observation_input(replacement_args, identities)
+    assert preserved == raw
+    assert preserved_config.hermes_role_metadata_read.implementation_sha == args.expected_sha
+    assert destination.stat().st_ino == original_inode
+    destination.unlink()
+    with pytest.raises(m.EnrollmentError, match='predecessor_config_required'):
+        m._observation_input(replacement_args, identities)
+    _write(destination, '{}', 0o440)
+    with pytest.raises(m.EnrollmentError, match='conflict'):
+        m._install_observation_config(raw, identities)
+    assert destination.read_bytes() == b'{}'
+
+
+def test_observation_enrollment_reuses_release_owner_and_is_inert(monkeypatch):
+    m = _load(); identities = _identities(m); events = []
+    monkeypatch.setattr(m, '_require_hermes_source_checkout', lambda _: None)
+    monkeypatch.setattr(m.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(m, 'assert_central_control_absent', lambda: None)
+    monkeypatch.setattr(m, 'verify_root_source_custody', lambda _: None)
+    monkeypatch.setattr(m, 'verify_source_identity', lambda *_: {'commit': 'c' * 40, 'tree': 'd' * 40})
+    monkeypatch.setattr(m, 'load_canonical_identities', lambda _: identities)
+    monkeypatch.setattr(m, '_observation_input', lambda *_: (b'qualified input', object()))
+    monkeypatch.setattr(m, '_observation_config_adoption', lambda *_: False)
+    monkeypatch.setattr(m, 'expected_hermes_role_units', lambda *_: {})
+    monkeypatch.setattr(m, '_assert_release_input_adoption', lambda *_: None)
+    monkeypatch.setattr(m, 'read_identity_state', lambda: {})
+    monkeypatch.setattr(m, 'classify_identity_plan', lambda *a, **kw: {'control': 'create'})
+    def gateway_step(*a, **kw):
+        assert kw == {'gateway_only': True}; events.append('gateway-only')
+    monkeypatch.setattr(m, 'ensure_service_identities', gateway_step)
+    monkeypatch.setattr(m, 'ensure_directories', gateway_step)
+    monkeypatch.setattr(m, 'install_release', lambda *a, **kw: ROOT)
+    monkeypatch.setattr(m, '_install_observation_config', lambda *_: 'e' * 64)
+    def units(release, codex, received, *, gateway_only):
+        assert release == ROOT and codex is None and received is identities and gateway_only is True
+        return ('mastermind-executive-remote-worker-gateway.service',)
+    monkeypatch.setattr(m, 'install_inert_units', units)
+    def forbidden(*a, **kw): pytest.fail('observation attempted Worker or lifecycle effect')
+    for name in ('inspect_codex_source', 'install_codex_binary', '_run'):
+        monkeypatch.setattr(m, name, forbidden)
+    receipt = m.apply_enrollment(m.Args(source_repo=ROOT, expected_sha='c' * 40,
+                                       expected_tree='d' * 40, hermes_runtime={},
+                                       component='hermes-host-observation'))
+    assert receipt['outcome'] == 'HOST_OBSERVATION_INSTALLED_INERT'
+    assert receipt['services_activated'] is False and events == ['gateway-only', 'gateway-only']
 
 
 def test_apply_order_freezes_antidup_source_and_binary_before_identity_mutation() -> None:

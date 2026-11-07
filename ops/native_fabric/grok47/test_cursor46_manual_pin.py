@@ -208,6 +208,34 @@ class Cursor46ExplicitPin(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sealed_picker_preimage_changed"):
             qualifier.patched(stale, "0" * 64)
 
+    def test_current_application_branch_preserves_explicit_observation_and_no_ambient_read(self):
+        path = PICKERS[-1]
+        raw = path.read_bytes()
+        self.assertEqual(qualifier.sha(raw), qualifier.APPLICATION_PICKER_SHA256)
+        qualified = load(path)
+        spec = importlib.util.spec_from_file_location("original_application_picker", path)
+        original = importlib.util.module_from_spec(spec)
+        exec(compile(raw, str(path), "exec"), original.__dict__)
+        for model in (ALIAS, "composer-2.5"):
+            for task in ("review", "high_level", "fix_build", "orchestration"):
+                for exhausted in (None, False, True):
+                    with self.subTest(model=model, task=task, exhausted=exhausted):
+                        with patch.object(original, "_grok_exhausted", side_effect=AssertionError("ambient observation")), \
+                             patch.object(qualified, "_grok_exhausted", side_effect=AssertionError("ambient observation")):
+                            self.assertEqual(
+                                qualified._cursor_grok_quota_affinity(model, task, POLICY,
+                                    exhausted=exhausted, application=True),
+                                original._cursor_grok_quota_affinity(model, task, POLICY,
+                                    exhausted=exhausted, application=True))
+
+    def test_current_application_qualification_refuses_source_drift_and_sealed_relabel(self):
+        raw = PICKERS[-1].read_bytes()
+        with self.assertRaisesRegex(ValueError, "reviewed_selector_hunk_identity_mismatch"):
+            qualifier.apply_reviewed_hunks(raw + b"\n# unqualified change\n")
+        for predecessor in qualifier.SEALED_PREDECESSORS:
+            with self.assertRaisesRegex(ValueError, "sealed_picker_preimage_changed"):
+                qualifier.patched(raw, predecessor)
+
     def test_canonical_historical_picker_is_not_mutated_by_in_memory_candidate(self):
         for source in PICKERS:
             with self.subTest(source=str(source)):
@@ -216,7 +244,11 @@ class Cursor46ExplicitPin(unittest.TestCase):
                 self.assertNotEqual(candidate, raw)
                 self.assertEqual(source.read_bytes(), raw)
                 self.assertIn(b"cursor-grok-4.6-high", candidate)
-                self.assertIn(b"and _grok_exhausted()", raw)
+                if qualifier.sha(raw) == qualifier.APPLICATION_PICKER_SHA256:
+                    self.assertIn(qualifier.APPLICATION_AFFINITY_BEFORE.encode(), raw)
+                    self.assertIn(qualifier.APPLICATION_AFFINITY_AFTER.encode(), candidate)
+                else:
+                    self.assertIn(b"and _grok_exhausted()", raw)
 
 
 if __name__ == "__main__":

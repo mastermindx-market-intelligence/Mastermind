@@ -11,7 +11,8 @@ from typing import Callable
 import weakref
 
 _ISSUE_KEY = object()
-_METHODS = {"project_instructions": "read_project_instructions", "project_plan": "read_project_plan", "project_journal": "read_project_journal",
+_METHODS = {"agentos_context": "read_agentos_context",
+            "project_instructions": "read_project_instructions", "project_plan": "read_project_plan", "project_journal": "read_project_journal",
             "project_creation_source": "read_project_creation_source",
             "project_direction": "read_project_direction", "project_archive": "read_project_archive",
             "project_knowledge_catalogue": "read_project_knowledge_catalogue",

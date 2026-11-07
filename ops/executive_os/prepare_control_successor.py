@@ -166,6 +166,23 @@ def _validate_document(document: dict[str, Any]) -> None:
         raise PreparationError(str(exc)) from exc
 
 
+def _changed_keys(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
+    """The changed keys of TWO documents, with EXPLICIT presence semantics.
+
+    The comparison covers the UNION of both key sets: a key that only one
+    side carries is a change, so a newly added key is never silently
+    accepted because the prior document did not mention it.
+    """
+
+    changed: set[str] = set()
+    for key in set(before) | set(after):
+        if (key in before) != (key in after):
+            changed.add(key)
+        elif before[key] != after[key]:
+            changed.add(key)
+    return changed
+
+
 def build_successor(document: dict[str, Any], *, source_sha: str,
                     macro_root: str) -> dict[str, Any]:
     """Return a separate mapping; never mutate or normalize unrelated input."""
@@ -178,6 +195,49 @@ def build_successor(document: dict[str, Any], *, source_sha: str,
     successor["proof_source_repository"] = str(_ADMIN_CHECKOUT_ROOT / source_sha)
     successor["ceo_ingress_app_macro_root"] = macro_root
     _validate_document(successor)
+    return successor
+
+
+def build_component_successor(
+    document: dict[str, Any],
+    *,
+    source_sha: str,
+    fabric_bindings: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return a successor that moves ONLY the source and selection coordinates.
+
+    A Control *component* update retargets the installed source, not the
+    approved Macro root.  The already-installed Macro root is therefore
+    preserved verbatim: it is read from the supplied document and handed
+    straight back to the existing pure producer, so no Macro path is exported,
+    logged or re-attested by this function.  Only ``proof_base_sha`` and the
+    installer-owned ``proof_source_repository`` may differ afterwards; every
+    other supplied value -- host policy, arming, identities and the Macro
+    binding -- is preserved exactly.
+
+    When ``fabric_bindings`` is supplied it is the EXACT selector this
+    update publishes: a mapping with the derived ``path`` and the exact
+    ``sha256`` of the published bytes.  Only the two selector coordinates
+    may then differ as well, and the comparison covers the UNION of the two
+    key sets with EXPLICIT presence semantics, so a newly added key is never
+    silently accepted.
+    """
+    macro_root = document.get("ceo_ingress_app_macro_root")
+    if type(macro_root) is not str or not macro_root:
+        raise PreparationError("an existing Macro root binding is required")
+    successor = build_successor(document, source_sha=source_sha, macro_root=macro_root)
+    allowed = {"proof_base_sha", "proof_source_repository"}
+    if fabric_bindings is not None:
+        if (type(fabric_bindings) is not dict
+                or set(fabric_bindings) != {"path", "sha256"}):
+            raise PreparationError("an exact Fabric binding selector is required")
+        successor["fabric_bindings_path"] = fabric_bindings["path"]
+        successor["fabric_bindings_sha256"] = fabric_bindings["sha256"]
+        _validate_document(successor)
+        allowed |= {"fabric_bindings_path", "fabric_bindings_sha256"}
+    changed = _changed_keys(document, successor)
+    if changed != allowed:
+        raise PreparationError("only the source and selection coordinates may change")
     return successor
 
 

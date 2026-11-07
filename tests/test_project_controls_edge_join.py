@@ -36,9 +36,8 @@ def test_only_four_fixed_reads_and_one_instruction_action_extend_the_actual_pred
     assert edge.PRE_MISSION_RESULT_GET_ROUTES == edge.PRE_PROJECT_INSTRUCTIONS_GET_ROUTES + (
         "/workspace/project-instructions/current", "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation", "/workspace/project-access/current")
-    assert edge.GET_ROUTES == edge.PRE_MISSION_RESULT_GET_ROUTES + (
-        "/workspace/mission-result/current",)
-    assert edge.POST_ROUTES == edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
+    assert edge.MISSION_RESULT_GET_ROUTES == edge.PRE_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
+    assert edge.PRE_MISSION_RESULT_POST_ROUTES == edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
     assert edge.SOURCE_POST_ROUTES == (
         "/workspace/source-operation/prepare", "/workspace/source-operation/submit",
         "/workspace/source-operation/reconcile", "/workspace/source-operation/advance")
@@ -57,6 +56,11 @@ def test_real_2055_caddy_predecessor_preserves_all_non_route_configuration(maker
     expected_routes[0]["match"][0]["path"] = sorted(set(edge.GET_ROUTES) | set(edge.asset_routes(candidate)) |
         (set(edge.asset_routes(current)) if maker is prepare_config else set()))
     expected_routes[1]["match"][0]["path"] = list(edge.POST_ROUTES)
+    for route in method_routes(expected)[3:5]:
+        route["match"][0]["path"] = (
+            list(edge.COMPLETE_MCP_METADATA_ROUTES)
+            if route["match"][0]["method"] == ["GET"]
+            else list(edge.COMPLETE_MCP_ROUTES))
     actual = maker(fullconfig=old, current_manifest=current, candidate_manifest=candidate, relay_port=49152)
     assert actual == expected
     assert old == predecessor()

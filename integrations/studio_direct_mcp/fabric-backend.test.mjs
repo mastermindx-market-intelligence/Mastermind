@@ -66,6 +66,40 @@ test('cross-root or substituted successor envelopes cannot supply results',async
 });
 function facade(e) { assert.ok(api?.createFabricFacade, 'the Fabric-only MCP facade must exist');return api.createFabricFacade(e,{ adapterPath:'/host/fabric_task.py', python:'python3', workerCwd:'~' }); }
 
+test('delayed capability probe completes through bounded reads of its original PID',async()=>{
+ const e=engine([pending(741),pending(741),captured('usage: request status result accept')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.equal(out.adapter_available,true);
+ assert.equal(out.worker_start,'UNPROBED');
+ assert.equal(e.calls.length,3);
+ assert.equal(e.calls[0].name,'start_process');
+ assert.deepEqual(e.calls.slice(1).map(x=>x.name),['read_process_output','read_process_output']);
+ assert.deepEqual(e.calls.slice(1).map(x=>x.arguments.pid),[741,741]);
+ assert.deepEqual(e.calls.slice(1).map(x=>x.arguments.timeout_ms),[3000,3000]);
+});
+
+test('incomplete capability probe has a finite same-handle read budget and never dispatches',async()=>{
+ const e=engine([pending(741),...Array.from({length:4},()=>pending(741))]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.equal(out.error,'OBSERVATION_INCOMPLETE');
+ assert.equal(out.failure_diagnosis.classification,'TECHNICAL_INTERFACE_OR_TRANSPORT');
+ assert.equal(out.failure_diagnosis.policy_denial_evidence,'NOT_ESTABLISHED');
+ assert.equal(out.controller_pid,741);
+ assert.equal(out.execution_absence_proven,false);
+ assert.equal(out.retry_allowed,false);
+ assert.equal(e.calls.length,5);
+ assert.deepEqual(e.calls.map(x=>x.name),['start_process',...Array(4).fill('read_process_output')]);
+ assert.ok(e.calls.slice(1).every(x=>x.arguments.pid===741));
+});
+
+test('a failed original-PID read does not launch another adapter command',async()=>{
+ const e=engine([pending(741),new Error('transport unavailable')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.equal(out.error,'ADAPTER_OBSERVATION_UNAVAILABLE');
+ assert.equal(out.retry_allowed,false);
+ assert.deepEqual(e.calls.map(x=>x.name),['start_process','read_process_output']);
+});
+
 test('closed, correctly annotated catalog with no generic command tools',()=>{
  assert.ok(api?.FABRIC_TOOLS, 'the Fabric-only tool catalog must exist');
  assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_result_page','fabric_status','fabric_wait'].sort());
@@ -977,5 +1011,18 @@ test('parent attention: malformed or contradictory claims stay untrusted',()=>{
  assert.equal(api.projectFabricParentRecovery({...s,acceptance_state:'ACCEPTED'},'other-root').disposition,'VERIFY_ORIGINAL_LINEAGE');
  for(const bad of [null,{}, {...s,schema:'fake'}, {...s,run_id:'../escape'}]){
   assert.throws(()=>api.projectFabricParentRecovery(bad,id.root_id),/FABRIC_PARENT_RECOVERY_STATUS_INVALID/);
+ }
+});
+
+test('fresh backend generations cannot redispatch an original run with orphan evidence',async()=>{
+ const orphan={...absent,state:'STATUS_UNREADABLE',rc:null,signal:null,result_bytes:null,
+   accepted_by:null,acceptance_state:'UNVERIFIED',acceptance_reason:'ARTIFACT_UNVERIFIED'};
+ for(const generation of [1,2]){
+   const e=engine([capturedJSON(orphan)]);
+   const out=unwrap(await facade(e).call('fabric_request',packet));
+   assert.equal(out.error,'RUN_EXISTS','generation '+generation);
+   assert.equal(e.calls.length,1);
+   assert.match(e.calls[0].arguments.command,/'status'/);
+   assert.doesNotMatch(e.calls[0].arguments.command,/'request'/);
  }
 });

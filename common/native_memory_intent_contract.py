@@ -23,4 +23,3 @@ def normalize_memory_runtime_intent(value):
         if type(intent[key]) is not str or not _IDS.fullmatch(intent[key]):
             raise ValueError('native_memory_intent_invalid')
     return json.loads(_canonical(value))
-
