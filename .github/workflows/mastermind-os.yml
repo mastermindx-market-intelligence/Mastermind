@@ -54,6 +54,8 @@ jobs:
             npm run build
           )
           test -s "$release_root/app/mastermind_os/dist/index.html"
+          # Never mingle generated test/checkout assets with the sealed archive output.
+          rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"
           cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"
       - name: Build isolated browser source fixture
         run: npx vite build --config vite.browser-proof.config.ts
