@@ -27,10 +27,11 @@
 # the fence. A proven new selector is CAS-rolled back only while that service
 # preimage is still proven. Anything else keeps the fence, the install
 # marker, and an EFFECT_UNKNOWN receipt. Bootstrap is refused until the old
-# pid is dead and the label is absent. A later path that restores the old
-# plist and proves the service CAS-selects back to --advance-from. An unknown
-# service state leaves the selector where the first CAS put it and records
-# EFFECT_UNKNOWN. Rebinding launchd while CURRENT names a different
+# pid is dead and the label is absent. A proven pre-effect failure may reverse
+# the selector only after re-proving the original service and plist identity.
+# An unproven effect preserves the observed plist, CURRENT, backup and marker,
+# records EFFECT_UNKNOWN, and issues no recovery bootstrap. Rebinding launchd
+# while CURRENT names a different
 # generation, without --advance-from, fails before launchctl.
 #
 # Single-collector exclusion is /usr/bin/lockf -t 0 (contention status 75).
@@ -77,6 +78,14 @@
 set -u
 set -o pipefail
 
+# Canonicalize caller temp root: macOS TMPDIR commonly ends with a slash.
+# The strict no-follow path guard must never see a double path separator.
+TMPROOT=${TMPDIR:-/tmp}
+while [ "${TMPROOT%/}" != "$TMPROOT" ]; do
+  TMPROOT=${TMPROOT%/}
+done
+[ -n "$TMPROOT" ] || { printf '%s\n' 'HOST_PULL_LIFECYCLE_REFUSED: unsafe TMPDIR' >&2; exit 78; }
+
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 LABEL="com.mastermind.host-pull"
 PHASE=START
@@ -85,6 +94,7 @@ HAD_PLIST=0
 BACKUP=""
 DEST_PLIST=""
 RENDERED=""
+RENDERED_SHA=""
 BOOTSTRAP_NEW=0
 BOOTSTRAP_ROLLBACK=0
 BOOTED=0
@@ -136,9 +146,10 @@ die() {
   local code=$1
   shift
   release_admission
-  # A clean preflight refusal has not mutated. A crash cannot run this path,
+  # A clean START/VERIFIED preflight refusal has not mutated. A crash cannot run this path,
   # so an abandoned marker stays for the next installer.
-  if [ "${PHASE:-START}" = "START" ] && [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
+  if { [ "${PHASE:-START}" = "START" ] || [ "${PHASE:-START}" = "VERIFIED" ]; } \
+      && [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
     py install-transaction-complete "$STORE" || true
     MARKER_OWNED=0
   fi
@@ -151,7 +162,7 @@ die() {
 }
 
 complete_clean_marker() {
-  # Called only AFTER the original owner proved NO_EFFECT or RECOVERED and
+  # Called only AFTER the original owner proved NO_EFFECT and
   # durably wrote that outcome. This is never used for unknown or crash paths.
   if [ "${MARKER_OWNED:-0}" -eq 1 ]; then
     prove_install_holder
@@ -162,22 +173,23 @@ complete_clean_marker() {
 
 finish_install_success() {
   prove_install_holder
+  # Bootstrap success proves only the running job. Before declaring the
+  # transaction complete, re-prove the exact on-disk reviewed plist identity.
+  # A changed, absent, symlinked, wrong-owner or wrong-mode plist must retain
+  # CURRENT and marker with an explicit EFFECT_UNKNOWN; no restore/rebootstrap.
+  local proof_phase=POST_BOOTSTRAP_VERIFY
+  # The already-running target is a success path too. A byte-equal symlink or
+  # wrong-mode plist can pass same-file while remaining mutable/untrusted on
+  # the next launch. Recheck every success before marker release or exit.
+  [ "${PHASE:-}" = "BOOTSTRAPPED" ] || proof_phase=ALREADY_RUNNING_VERIFY
+  [ -n "${RENDERED_SHA:-}" ] && py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA" \
+    || stop_uncertain "$proof_phase" "installed plist identity unproven"
   if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
     py install-transaction-complete "$STORE" || die 78 "install transaction marker"
     MARKER_OWNED=0
   fi
   release_install_holder
   exit 0
-}
-
-restore_plist() {
-  [ -n "$DEST_PLIST" ] || return 1
-  if [ "$HAD_PLIST" -eq 1 ]; then
-    [ -n "$BACKUP" ] && [ -f "$BACKUP" ] || return 1
-    py atomic-restore "$BACKUP" "$DEST_PLIST" || return 1
-  else
-    py atomic-remove "$DEST_PLIST" || return 1
-  fi
 }
 
 on_signal() {
@@ -218,20 +230,27 @@ on_signal() {
       # out, so a proven pre-effect signal rolls that CAS back. A failed
       # rollback is not claimed as a restored pair.
       if [ "${SELECTED_ADVANCE:-0}" -eq 1 ]; then
-        rollback_advanced_selector \
-          || write_receipt EFFECT_UNKNOWN "signal-$PHASE" "selector rollback failed" \
-          || true
+        # The selector CAS was acknowledged, but bootout has not started.
+        # Re-prove the saved launchd class/PID/argv/plist and process before
+        # reversing CURRENT. Unknown identity must retain the marker/CURRENT.
+        if ! service_still_snapshot; then
+          stop_uncertain "signal-$PHASE" "original service identity unproven before selector rollback"
+        fi
+        if ! rollback_advanced_selector; then
+          stop_uncertain "signal-$PHASE" "selector rollback failed"
+        fi
       fi
       release_install_holder
       exit "$code"
       ;;
     PLIST_REPLACED)
-      # The signal itself makes launchd timing uncertain. Restore the plist
-      # bytes and report a stopped receipt. Do not bootstrap.
-      restore_plist || true
+      # The rendered plist was installed but bootstrap has not begun.
+      # A peer may have edited/replaced the destination since our install.
+      # An unconditional restore/remove would destroy that peer's bytes.
+      # Keep the observed plist, CURRENT and marker for reconciliation;
+      # issue no additional launchctl or plist write on this signal.
       write_receipt EFFECT_UNKNOWN "signal-$PHASE" "signal during $PHASE" || true
-      release_install_holder
-      exit 78
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: signal during $PHASE"
       ;;
     *)
       # Bootout, pid wait, or bootstrap already started. Another launchctl
@@ -1025,6 +1044,55 @@ elif cmd == "file-sha":
         fail("plist owner")
     sys.stdout.write(hashlib.sha256(open(path, "rb").read()).hexdigest() + "\n")
 
+elif cmd == "verify-installed-plist":
+    # Read the final on-disk plist through an O_NOFOLLOW descriptor. A path
+    # check alone is TOCTOU and may describe the wrong inode. Check the fd,
+    # path identity before/after, owner, mode, bounded size and rendered SHA.
+    dest, expected_sha = sys.argv[2:4]
+    require_safe(dest, "installed plist")
+    if HEX.fullmatch(expected_sha) is None:
+        fail("installed plist expected digest")
+    try:
+        before_path = lstat_nofollow(dest)
+        if (not stat.S_ISREG(before_path.st_mode)
+                or before_path.st_uid != os.geteuid()
+                or stat.S_IMODE(before_path.st_mode) != 0o600
+                or before_path.st_size > 1048576):
+            fail("installed plist identity")
+        fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before_fd = os.fstat(fd)
+            if (not stat.S_ISREG(before_fd.st_mode)
+                    or before_fd.st_uid != os.geteuid()
+                    or stat.S_IMODE(before_fd.st_mode) != 0o600
+                    or before_fd.st_dev != before_path.st_dev
+                    or before_fd.st_ino != before_path.st_ino
+                    or before_fd.st_size > 1048576):
+                fail("installed plist fd identity")
+            raw = bytearray()
+            while len(raw) <= 1048576:
+                chunk = os.read(fd, min(65536, 1048577 - len(raw)))
+                if not chunk:
+                    break
+                raw.extend(chunk)
+            after_fd = os.fstat(fd)
+            after_path = lstat_nofollow(dest)
+            stable = (before_fd.st_dev == after_fd.st_dev == after_path.st_dev
+                      and before_fd.st_ino == after_fd.st_ino == after_path.st_ino
+                      and before_fd.st_size == after_fd.st_size == after_path.st_size
+                      and before_fd.st_mtime_ns == after_fd.st_mtime_ns
+                      and before_fd.st_ctime_ns == after_fd.st_ctime_ns
+                      and stat.S_ISREG(after_path.st_mode)
+                      and after_path.st_uid == os.geteuid()
+                      and stat.S_IMODE(after_path.st_mode) == 0o600)
+            if (not stable or len(raw) > 1048576
+                    or hashlib.sha256(raw).hexdigest() != expected_sha):
+                fail("installed plist drift")
+        finally:
+            os.close(fd)
+    except OSError:
+        fail("installed plist unreadable")
+
 elif cmd == "write-select-fence":
     store, prior, generation = sys.argv[2:5]
     require_safe(store, "store")
@@ -1140,8 +1208,8 @@ launchctl_print() {
   local out err rc
   # Every launchd read is inside the helper's lifetime, including preflight.
   prove_install_holder
-  out=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-out.XXXXXX")
-  err=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-err.XXXXXX")
+  out=$(mktemp "$TMPROOT/host-pull-lc-out.XXXXXX")
+  err=$(mktemp "$TMPROOT/host-pull-lc-err.XXXXXX")
   "$LAUNCHCTL" print "$DOMAIN/$LABEL" >"$out" 2>"$err"
   rc=$?
   if ! parse_launchctl "$rc" "$out" "$err"; then
@@ -1157,7 +1225,7 @@ launchctl_print() {
 
 ps_state() {
   local pid=$1 out rc observed
-  out=$(mktemp "${TMPDIR:-/tmp}/host-pull-ps.XXXXXX")
+  out=$(mktemp "$TMPROOT/host-pull-ps.XXXXXX")
   "$PS" -p "$pid" -o pid= >"$out" 2>"$out.err"
   rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -1202,6 +1270,9 @@ write_receipt() {
   local outcome=$1 phase=$2
   shift 2
   [ -n "${BACKUP_DIR:-}" ] || return 1
+  # Fresh installs have no old plist to back up, yet uncertain effects
+  # must still leave a durable receipt in the publisher's receipt store.
+  py ensure-receipt-dir "$BACKUP_DIR" || return 1
   py write-receipt "$BACKUP_DIR" "$GENERATION" "$outcome" "$phase" "$*"
 }
 
@@ -1215,11 +1286,12 @@ note_install_blocked() {
 
 # The private fence flock is the lifetime proof. Process-liveness alone is not.
 lose_install_holder() {
-  if [ "${PHASE:-START}" = "PLIST_REPLACED" ]; then
-    restore_plist || true
-  fi
+  # Losing the private effect-fence does not prove continued ownership of
+  # the destination plist. Never restore/remove peer bytes even when the
+  # locked-effect started marker is absent. Leave CURRENT and marker held.
   note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
-  die 78 "install transaction holder lost"
+  die 78 "EFFECT_UNKNOWN service stopped pending repair: install transaction holder lost"
+
 }
 
 prove_install_holder() {
@@ -1237,12 +1309,12 @@ acquire_install_transaction() {
   local lockpath status line waited fence
   lockpath="$STORE/.install-transaction.lock"
   py install-transaction-prepare "$lockpath" || die 78 "install transaction lock refused"
-  status=$(mktemp "${TMPDIR:-/tmp}/host-pull-tx.XXXXXX")
+  status=$(mktemp "$TMPROOT/host-pull-tx.XXXXXX")
   if [ -n "${HOLDER_REPORT:-}" ]; then
     [ "$HERMETIC" -eq 1 ] || die 78 "holder report is hermetic-only"
     fence=$HOLDER_REPORT
   else
-    fence=$(mktemp "${TMPDIR:-/tmp}/host-pull-fence.XXXXXX")
+    fence=$(mktemp "$TMPROOT/host-pull-fence.XXXXXX")
   fi
   INSTALL_FENCE=$fence
   "$PYTHON" - "$STORE" "$GENERATION" "$status" "$$" "$fence" "${FAULT:-}" >"$status.out" 2>"$status.err" <<'PY' &
@@ -1448,9 +1520,8 @@ stop_uncertain() {
   shift
   local reason="$*"
   release_admission
-  if [ "$PHASE" = "PLIST_REPLACED" ]; then
-    restore_plist || true
-  fi
+  # A phase flag cannot prove exclusive ownership of a later plist.
+  # Preserve the observed destination for operator reconciliation.
   write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
   die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
 }
@@ -1459,62 +1530,28 @@ recover_or_stop() {
   local phase=$1
   shift
   local reason="$*"
-  local rc
   release_admission
-  if [ "$BOOTED" -ne 1 ]; then
-    die 78 "admission refused: $reason"
-  fi
-  # A known-absent label can take the original plist back. Any other read
-  # is uncertain: restore bytes when we already replaced them, and do not
-  # bootstrap.
-  if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-    if [ "$PHASE" = "PLIST_REPLACED" ]; then
-      restore_plist || true
-    fi
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  fi
-  restore_plist || {
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  }
-  if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  fi
-  bootstrap_once rollback
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN rollback bootstrap failed: $reason"
-  fi
-  if ! launchctl_print; then
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  fi
-  case "$LC_CLASS" in
-    loaded-running|loaded-idle) ;;
-    *)
-      write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-      die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-      ;;
-  esac
-  # The service preimage is proven. Only then is the selector CAS reversed.
-  if ! rollback_advanced_selector; then
-    write_receipt EFFECT_UNKNOWN "$phase" "selector rollback failed" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"
-  fi
-  write_receipt RECOVERED "$phase" "$reason" || die 78 "receipt failed"
-  complete_clean_marker
-  die 78 "recovered original service: $reason"
+  # After bootout or candidate installation, a later peer may own DEST_PLIST.
+  # Checking the SHA followed by an unconditional rename/remove is TOCTOU;
+  # no host-wide compare-and-restore authority is proven. No second launchctl
+  # effect, plist write, or selector rollback on this uncertain path.
+  # Leave captured original backup, CURRENT and marker for reconciliation.
+  write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+  die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+
 }
 
 run_locked() {
   local kind=$1
   shift
   local pause rc
+  # Leave the pre-bootstrap phase in place until holder admission succeeds.
+  # Refusal does not authorize a write to the observed destination plist.
   prove_install_holder
-  LOCKED_DIR=$(mktemp -d "${TMPDIR:-/tmp}/host-pull-lock.XXXXXX") || return 78
+  if [ "$kind" = "bootstrap" ] && [ "${PHASE:-START}" = "PLIST_REPLACED" ]; then
+    PHASE=BOOTSTRAP_STARTED
+  fi
+  LOCKED_DIR=$(mktemp -d "$TMPROOT/host-pull-lock.XXXXXX") || return 78
   LOCKED_DETAIL=""
   STOP_LOCKED=0
   pause="${HOLD_DURING_LOCK:-"-"}"
@@ -1522,7 +1559,12 @@ run_locked() {
   py locked-effect "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" \
     "$LOCKED_DIR" "$pause" "$kind" "$INSTALL_FENCE" "$@" 2>"$LOCKED_DIR/err"
   rc=$?
-  if [ "$rc" -eq 79 ]; then
+  # An effect command may itself exit 79 AFTER mark_started. Only a
+  # missing started marker proves the pre-effect transaction-fence refusal.
+  if [ "$rc" -eq 79 ] && [ ! -f "$LOCKED_DIR/started" ]; then
+    # The locked child refused before mark_started: expose positive pre-effect
+    # evidence before the holder-loss handler records the refusal.
+    STOP_LOCKED=1
     lose_install_holder
   fi
   LOCKED_DETAIL=$(cat "$LOCKED_DIR/err" 2>/dev/null || true)
@@ -1561,7 +1603,7 @@ bootstrap_once() {
   if [ "$kind" = "new" ]; then
     [ "$BOOTSTRAP_NEW" -eq 0 ] || die 78 "second bootstrap refused"
     BOOTSTRAP_NEW=1
-    PHASE=BOOTSTRAP_STARTED
+    # run_locked sets BOOTSTRAP_STARTED only after proving the install holder.
   else
     [ "$BOOTSTRAP_ROLLBACK" -eq 0 ] || die 78 "second rollback bootstrap refused"
     BOOTSTRAP_ROLLBACK=1
@@ -1671,7 +1713,7 @@ keep_select_unknown() {
 rollback_unacked_select() {
   local out verr rc
   SELECT_ROLLBACK=1
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-select-back.XXXXXX")
   out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
@@ -1724,9 +1766,22 @@ advance_selector() {
   [ "$SELECTED_ADVANCE" -eq 0 ] || die 78 "selector already advanced"
   [ "$SELECT_FENCE" -eq 0 ] || die 78 "select fence already armed"
   prove_install_holder
+  # The already-running target service can pair CURRENT without reaching the
+  # normal backup/marker-arm path. A successful CAS followed by an ambiguous
+  # select-fence unlink/fsync still needs a durable transaction marker.
+  # Arm it here if this is the idempotent fast path; the ordinary path owns one.
+  if [ "${MARKER_OWNED:-0}" -eq 0 ]; then
+    py install-transaction-arm "$STORE" "$GENERATION" "$$" "$INSTALL_FENCE" \
+      || lose_install_holder
+    MARKER_OWNED=1
+    # The service was already the TARGET: if a signal follows the selector
+    # CAS, rolling CURRENT back as BACKED_UP would mispair launchd again.
+    # PAIRING takes the signal handler's EFFECT_UNKNOWN/no-mutation path.
+    PHASE=PAIRING
+  fi
   snapshot_service
   arm_select_fence
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-select.XXXXXX")
   out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$GENERATION" --expect "$ADVANCE_FROM" 2>"$verr") && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
@@ -1741,7 +1796,10 @@ advance_selector() {
   if [ "$SELECT_GENERATION" != "$GENERATION" ] || [ "$SELECT_PREVIOUS" != "$ADVANCE_FROM" ]; then
     settle_failed_select "selector advance output"
   fi
-  clear_select_fence || die 78 "select fence"
+  # CURRENT may already name the target; a failed fence unlink/fsync cannot
+  # be treated as a clean refusal. Preserve both transaction and selector
+  # uncertainty without replaying CAS or touching launchd.
+  clear_select_fence || keep_select_unknown "select fence cleanup after committed advance"
   SELECT_FENCE=0
   EXPECT_CURRENT=$GENERATION
   SELECTED_ADVANCE=1
@@ -1755,7 +1813,7 @@ rollback_advanced_selector() {
   local out verr rc
   [ "$SELECTED_ADVANCE" -eq 1 ] || return 0
   prove_install_holder
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-select-back.XXXXXX")
   out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
@@ -1786,7 +1844,7 @@ require_advance_pin() {
   PIN="$STORE/$GENERATION/ext/host_pull.sh"
   py check-advance "$STORE" "$GENERATION" "$ADVANCE_FROM" "$PUBLISHER" "$PIN" "$owner" >/dev/null \
     || die 78 "pin checks failed"
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-verify.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-verify.XXXXXX")
   verify_out=$("$PYTHON" "$PUBLISHER" verify --store "$STORE" --generation "$GENERATION" 2>"$verr") \
     || { rm -f -- "$verr"; die 78 "publisher verify failed"; }
   rm -f -- "$verr"
@@ -1813,7 +1871,7 @@ require_verified_pin() {
   PIN="$STORE/$GENERATION/ext/host_pull.sh"
   py check-pin "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" "$PIN" "$owner" >/dev/null \
     || die 78 "pin checks failed"
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-verify.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-verify.XXXXXX")
   verify_out=$("$PYTHON" "$PUBLISHER" verify --store "$STORE" --generation "$GENERATION" 2>"$verr") \
     || { rm -f -- "$verr"; die 78 "publisher verify failed"; }
   rm -f -- "$verr"
@@ -1846,8 +1904,10 @@ FIXTURE_ROOT=""
 TEMPLATE=""
 HOLD_MUTATION=""
 HOLD_BOOTSTRAP=""
+HOLD_AFTER_BOOTSTRAP=""
 HOLD_BOOTOUT=""
 HOLD_PLIST=""
+HOLD_INSTALL_FAILURE=""
 HOLD_DURING_LOCK=""
 HOLD_ARM=""
 LOCK_DESCENDANT=""
@@ -1885,7 +1945,9 @@ while [ "$#" -gt 0 ]; do
     --hold-before-mutation) HOLD_MUTATION=${2:-}; shift 2 ;;
     --hold-before-bootout) HOLD_BOOTOUT=${2:-}; shift 2 ;;
     --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
+    --hold-after-install-failure) HOLD_INSTALL_FAILURE=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
+    --hold-after-bootstrap) HOLD_AFTER_BOOTSTRAP=${2:-}; shift 2 ;;
     --hold-during-lock) HOLD_DURING_LOCK=${2:-}; shift 2 ;;
     --hold-before-arm) HOLD_ARM=${2:-}; shift 2 ;;
     --lock-descendant) LOCK_DESCENDANT=${2:-}; shift 2 ;;
@@ -1922,8 +1984,9 @@ if [ "$HERMETIC" -eq 1 ]; then
   esac
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
-  [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
-    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
+  [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_AFTER_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
+    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_INSTALL_FAILURE" ] \
+    && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
     && [ -z "$LOCK_DESCENDANT" ] && [ -z "$HOLDER_REPORT" ] \
     && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] && [ -z "$TEMPLATE" ] \
     || die 78 "test hooks are hermetic-only"
@@ -1983,15 +2046,27 @@ case "$COMMAND" in
     py paths-ready "$LOCK" "$LOG_PATH" || die 78 "lock or log path"
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH" "$COLLECTOR_MODE") \
       || die 78 "render failed"
+    # Pin the reviewed render before the staging file is removed. A running
+    # launchctl argv is not proof that the plist on disk still binds this pin.
+    RENDERED_SHA=$(py file-sha "$RENDERED") || die 78 "rendered plist seal failed"
     launchctl_print || die 78 "launchctl state uncertain"
+    # Capture the old identity before a marker, selector CAS or launchd effect.
+    # advance_selector may refresh this while the old service is still intact.
+    snapshot_service
     NEED_BOOTOUT=0
     case "$LC_CLASS" in
       loaded-running)
         ps_state "$LC_PID"
         [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
         if argv_matches && py same-file "$RENDERED" "$DEST_PLIST"; then
-          # Launchd already runs the target collector. Pair the selector
-          # without a second bootout. A refused CAS leaves both sides as found.
+          # Launchd already runs the target collector. A byte-equal plist
+          # alone is not trusted: same-file follows symlinks and cannot prove
+          # owner/mode/inode. Prove the reviewed destination BEFORE any CURRENT
+          # selector CAS; the later success check also catches subsequent drift.
+          if [ -z "${RENDERED_SHA:-}" ] || ! py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA"; then
+            stop_uncertain ALREADY_RUNNING_VERIFY "installed plist identity unproven before selector advance"
+          fi
+          # Pair the selector without a second bootout only after this proof.
           if [ -n "$ADVANCE_FROM" ]; then
             advance_selector
           fi
@@ -2070,8 +2145,12 @@ case "$COMMAND" in
         launchctl_print || stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
         [ "$LC_CLASS" = "absent" ] || stop_uncertain POST_BOOTOUT_PRINT "service still loaded after bootout"
       elif [ "$boot_rc" -eq 76 ]; then
-        # The same pid is still loaded, so launchd did not move. Roll the
-        # selector back. If that CAS fails, the pair is unknown.
+        # The helper proved only that the same PID was observable. That is
+        # insufficient for NO_EFFECT: re-check full original launchd identity
+        # and the plist digest before any selector reversal or receipt.
+        if ! service_still_snapshot; then
+          stop_uncertain BOOTOUT_ROLLBACK "original service identity unproven after failed bootout"
+        fi
         if ! rollback_advanced_selector; then
           write_receipt EFFECT_UNKNOWN BOOTOUT_ROLLBACK \
             "selector rollback failed after bootout had no effect" \
@@ -2103,6 +2182,8 @@ case "$COMMAND" in
     run_locked install "$RENDERED" "$DEST_PLIST" "$install_fault"
     install_rc=$?
     if [ "$install_rc" -ne 0 ]; then
+      # Hermetic-only pause after the failed effect, before classification.
+      hold_if_requested "$HOLD_INSTALL_FAILURE"
       if selector_moved_before_effect; then
         if [ "$BOOTED" -eq 1 ]; then
           recover_or_stop PLIST_ADMIT "selector moved before plist replace"
@@ -2118,7 +2199,16 @@ case "$COMMAND" in
       if [ "$BOOTED" -eq 1 ]; then
         recover_or_stop INSTALL "plist install failed"
       fi
-      restore_plist || die 78 "rollback restore failed"
+      # No bootout has occurred. The failed install may have replaced the
+      # plist, or a peer may have changed it independently. Do NOT restore
+      # here: unconditional atomic-restore can overwrite the peer and
+      # conceal its drift in the subsequent preimage check.
+      # If saved class/PID/argv/plist/liveness are still proven, the old
+      # bytes are already intact and need no write. Otherwise preserve
+      # observed bytes, CURRENT and marker and report EFFECT_UNKNOWN.
+      if ! service_still_snapshot; then
+        stop_uncertain INSTALL "original service/plist identity unproven after failed plist install"
+      fi
       if ! rollback_advanced_selector; then
         write_receipt EFFECT_UNKNOWN INSTALL "selector rollback failed" || true
         die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"
@@ -2147,38 +2237,21 @@ case "$COMMAND" in
       recover_or_stop BOOTSTRAP_ADMIT "admission holder died before bootstrap"
     fi
     if [ "$new_rc" -ne 0 ]; then
-      if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-        stop_uncertain BOOTSTRAP "bootstrap failed"
-      fi
-      restore_plist || stop_uncertain BOOTSTRAP "rollback restore failed"
-      if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-        stop_uncertain BOOTSTRAP "bootstrap failed"
-      fi
-      bootstrap_once rollback
-      roll_rc=$?
-      if [ "$roll_rc" -ne 0 ]; then
-        stop_uncertain BOOTSTRAP "rollback bootstrap failed"
-      fi
-      if ! launchctl_print; then
-        stop_uncertain BOOTSTRAP "recovered bootstrap unproven"
-      fi
-      case "$LC_CLASS" in
-        loaded-running|loaded-idle) ;;
-        *) stop_uncertain BOOTSTRAP "recovered bootstrap unproven" ;;
-      esac
-      if ! rollback_advanced_selector; then
-        stop_uncertain BOOTSTRAP "selector rollback failed"
-      fi
-      write_receipt RECOVERED BOOTSTRAP "bootstrap failed" || die 78 "receipt failed"
-      complete_clean_marker
-      die 78 "recovered original service: bootstrap failed"
+      # Failed bootstrap is not exclusive ownership of the installed plist.
+      # Do not overwrite a peer or issue an unverified rollback bootstrap.
+      stop_uncertain BOOTSTRAP "bootstrap failed"
     fi
     PHASE=BOOTSTRAPPED
-    launchctl_print || die 78 "launchctl state uncertain"
-    [ "$LC_CLASS" = "loaded-running" ] || die 78 "launchctl state uncertain"
+    # Inert fixture seam after a completed bootstrap, before final verification.
+    hold_if_requested "$HOLD_AFTER_BOOTSTRAP"
+    # A zero bootstrap rc is an effect, not proof of a verified live collector.
+    # In this phase die() must keep the owned marker; stop_uncertain adds a
+    # durable EFFECT_UNKNOWN receipt and never issues another launchd command.
+    launchctl_print || stop_uncertain POST_BOOTSTRAP_VERIFY "launchctl state uncertain"
+    [ "$LC_CLASS" = "loaded-running" ] || stop_uncertain POST_BOOTSTRAP_VERIFY "launchctl state uncertain"
     ps_state "$LC_PID"
-    [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
-    argv_matches || die 78 "bootstrap did not pin the verified collector"
+    [ "$PS_RESULT" = "alive" ] || stop_uncertain POST_BOOTSTRAP_VERIFY "process state uncertain"
+    argv_matches || stop_uncertain POST_BOOTSTRAP_VERIFY "bootstrap did not pin the verified collector"
     finish_install_success
     ;;
   *)

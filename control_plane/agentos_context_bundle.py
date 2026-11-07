@@ -16,6 +16,8 @@ from common.workspace_project_plan_contract import validate_selection
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
 RECEIPT_SCHEMA = "mastermind.agentos_adopted_context_receipt.v1"
 SOURCE_MODE = "ADOPTED_SNAPSHOT"
+CURRENT_RECEIPT_SCHEMA = "mastermind.agentos_current_context_receipt.v1"
+CURRENT_SOURCE_MODE = "CANONICAL_PROJECT_DATA"
 IMPORT_POLICY = "qualified_runtime_paths_v1"
 DEADLINE_SEMANTICS = "cooperative_result_deadline_v1"
 TOKEN_BUDGET = 4000
@@ -32,6 +34,7 @@ _RECEIPT_FIELDS = frozenset({
 })
 _RUNTIME_FIELDS = frozenset({"owner", "python_version", "python_binary_sha256", "pyyaml_version",
                              "pyyaml_record_sha256", "runtime_tree_sha256"})
+_CURRENT_FIELDS = _RECEIPT_FIELDS | {"data_observation"}
 
 
 class AgentOsContextUnavailable(ValueError):
@@ -58,17 +61,28 @@ def compiler_closure_digest(sources, runtime, source_inventory_sha256):
 
 def validate_context_read(raw, receipt, *, work_ref):
     """Validate the closed owner receipt without changing the exact bundle bytes."""
+    return _validate_context_read(raw, receipt, work_ref=work_ref, current=False)
+
+
+def validate_current_context_read(raw, receipt, *, work_ref):
+    """Validate explicitly current DATA, never reinterpret an adopted v1 read."""
+    return _validate_context_read(raw, receipt, work_ref=work_ref, current=True)
+
+
+def _validate_context_read(raw, receipt, *, work_ref, current):
     validate_selection({"work_ref": work_ref})
     if (type(raw) is not bytes or not 0 < len(raw) <= MAX_BUNDLE_BYTES
-            or type(receipt) is not dict or receipt.keys() != _RECEIPT_FIELDS):
+            or type(receipt) is not dict or receipt.keys() != (_CURRENT_FIELDS if current else _RECEIPT_FIELDS)):
         _refuse()
     try:
         raw.decode("utf-8", "strict")
         encoded = json.dumps(receipt, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8", "strict")
     except (ValueError, TypeError, UnicodeError, RecursionError):
         _refuse()
-    if (len(encoded) > MAX_RECEIPT_BYTES or receipt["schema"] != RECEIPT_SCHEMA
-            or receipt["owner"] != "agent_os" or receipt["source_mode"] != SOURCE_MODE
+    if (len(encoded) > MAX_RECEIPT_BYTES
+            or receipt["schema"] != (CURRENT_RECEIPT_SCHEMA if current else RECEIPT_SCHEMA)
+            or receipt["owner"] != "agent_os"
+            or receipt["source_mode"] != (CURRENT_SOURCE_MODE if current else SOURCE_MODE)
             or receipt["compiler_sources_scope"] != "fixed_macro_entry_and_helper"
             or receipt["import_policy"] != IMPORT_POLICY or receipt["deadline_semantics"] != DEADLINE_SEMANTICS
             or receipt["workstream"] != work_ref or type(receipt["token_budget"]) is not int
@@ -77,8 +91,22 @@ def validate_context_read(raw, receipt, *, work_ref):
         _refuse()
     for field in ("mastermind_source_sha", "compiler_code_commit", "data_commit", "repo_sha"):
         if not _hex(receipt[field], 40): _refuse()
-    if not receipt["compiler_code_commit"] == receipt["data_commit"] == receipt["repo_sha"]:
+    if (receipt["data_commit"] != receipt["repo_sha"]
+            or (not current and receipt["compiler_code_commit"] != receipt["data_commit"])):
         _refuse()
+    if current:
+        from common.canonical_project_data_observation_contract import validate
+        try:
+            observation = validate(receipt["data_observation"])
+        except (ValueError, TypeError):
+            _refuse()
+        if (observation["executable_macro_commit"] != receipt["compiler_code_commit"]
+                or observation["canonical_data_commit"] != receipt["data_commit"]
+                or "data_continuity" in observation):
+            _refuse()
+        if (observation["source_operation"] is not None
+                and observation["source_operation"]["selection"]["work_ref"] != work_ref):
+            _refuse()
     if not _hex(receipt["source_inventory_sha256"], 64): _refuse()
     seals = receipt["source_observation"]
     if (type(seals) is not dict or seals.keys() != {"mastermind_generation", "macro_generation", "materialized_generation"}

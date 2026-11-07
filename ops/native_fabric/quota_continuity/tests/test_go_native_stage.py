@@ -105,10 +105,15 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
+def before_source_successors(manifest):
+    return builder.before_qualification_quiescence(
+        builder.before_host_pull_integrity(manifest))
+
+
 def before_admission_integrity(manifest):
     # Historical-generation cases retain their exact parent, while the current
     # build and the new successor tests below inspect the actual repaired bytes.
-    previous = builder.before_qualification_quiescence(manifest)
+    previous = before_source_successors(manifest)
     if any(previous.get(name) == digest
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
@@ -724,9 +729,8 @@ def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
 
 
 def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
-    # Isolate the admission cohort on its exact authenticated Broker parent.
-    # The default-build/capture cases separately prove the emitted current bytes.
-    current = builder.before_qualification_quiescence(
+    # Isolate the admission cohort after both exact source-successor proofs.
+    current = before_source_successors(
         json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
@@ -753,9 +757,8 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    # Isolate the admission cohort on its exact authenticated Broker parent.
-    # The default-build/capture cases separately prove the emitted current bytes.
-    current = builder.before_qualification_quiescence(
+    # Isolate the admission cohort after both exact source-successor proofs.
+    current = before_source_successors(
         json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)

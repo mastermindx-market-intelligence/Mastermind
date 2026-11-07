@@ -77,6 +77,13 @@ __all__ = [
 CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v1"
 CONTEXT_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v2"
 CONTEXT_TOOLS_SCHEMA_DIGEST = "5fa24aa1d907d66d0ca0a56168617f955e09d063f532cf527fe0d7b923fb50af"
+CURRENT_CONTEXT_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v3"
+CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST = "41644c90bbd8b5927c5cc7f97f65fef144ba9f9ca6e0277d702d7a8a26fa0da0"
+_WORKSPACE_RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
+_WORKSPACE_SCOPE = "mastermind.workspace.read"
+_CURRENT_PRIMARY_RESOURCE = "https://mcp.mastermind-x.com/mcp"
+_CURRENT_PRIMARY_URL = "https://mcp.mastermind-x.com/mcp/coo"
+_CURRENT_PRIMARY_SCOPE = "mastermind.executive.coo.act mastermind.executive.read"
 
 # The fixed typed owner-private slot on the ACTUAL per-profile PluginManager.
 # It is a private attribute on an object the upstream owner created; this
@@ -250,6 +257,23 @@ class ConsumerPrincipal:
         )
 
 
+def workspace_principal_frame(publication) -> dict:
+    """Project already validated nonsecret facts for the existing wire owner."""
+    principal = publication.workspace_principal
+    if type(principal) is not ConsumerPrincipal:
+        raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+    return {"policy_id": principal.policy_id, "issuer_digest": principal.issuer_digest,
+            "subject_digest": principal.subject_digest, "client_ref": principal.client_ref,
+            "resource": principal.resource_ref, "scopes": list(principal.scopes)}
+
+
+def workspace_oauth_descriptor(principal_scope: str) -> dict:
+    _digest(principal_scope, "workspace principal scope")
+    return {"schema": "mastermind.hermes_workspace_oauth.v1", "resource": _WORKSPACE_RESOURCE,
+            "identity_url": "https://mcp.mastermind-x.com/workspace/native-draft-identity/current",
+            "scope": _WORKSPACE_SCOPE, "principal_scope": principal_scope}
+
+
 @dataclass(frozen=True)
 class ConsumerMcp:
     """The approved MCP/public client metadata of the Executive connection.
@@ -265,6 +289,8 @@ class ConsumerMcp:
     scope: str
     server_name: str
     server_version: str
+    # Derived from a validated v3 principal. Never an independent public field.
+    _workspace_principal_scope: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.server, "server")
@@ -287,6 +313,8 @@ class ConsumerMcp:
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         _text(self.server_name, "server_name")
         _text(self.server_version, "server_version")
+        if self._workspace_principal_scope is not None:
+            _digest(self._workspace_principal_scope, "workspace principal scope")
 
     def matches_config(self, config: Any) -> bool:
         """Compare the live connection's own config with the approved facts."""
@@ -294,6 +322,17 @@ class ConsumerMcp:
             return False
         oauth = config.get("oauth")
         if not isinstance(oauth, Mapping):
+            return False
+        if self._workspace_principal_scope is None:
+            if "workspace" in oauth:
+                return False
+        elif (type(oauth) is not dict or set(oauth) != {"client_id", "scope", "workspace"}
+                or oauth["workspace"] != workspace_oauth_descriptor(self._workspace_principal_scope)
+                or config.get("transport") != "streamable-http"
+                or config.get("strict_redirect_headers") is not True
+                or config.get("ssl_verify", True) is not True or config.get("headers")
+                or any(config.get(key) is not None for key in (
+                    "server_json", "identity_header", "client_cert", "client_key"))):
             return False
         return (
             config.get("url") == self.url
@@ -396,7 +435,8 @@ class ConsumerContext:
         from .agentos_memory_provider import (
             MAX_HOST_CONTEXT_BYTES, AgentOsRefusal, _freshness_seconds)
         if (type(self.provider) is not str or self.provider != "agentos"
-                or type(self.source_mode) is not str or self.source_mode != "ADOPTED_SNAPSHOT"
+                or type(self.source_mode) is not str
+                or self.source_mode not in {"ADOPTED_SNAPSHOT", "CANONICAL_PROJECT_DATA"}
                 or type(self.max_context_bytes) is not int
                 or not 0 < self.max_context_bytes <= MAX_HOST_CONTEXT_BYTES):
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
@@ -444,10 +484,12 @@ class ExecutiveContextConsumerPublication:
     tools_schema_digest: str
     context: ConsumerContext
     selected_child: ConsumerSelectedChild | None
+    workspace_principal: ConsumerPrincipal | None = None
 
     def __post_init__(self):
         from common.workspace_project_plan_contract import validate_selection
-        from integrations.executive_mcp.coo import coo_context_tool_schema_digest
+        from integrations.executive_mcp.coo import (
+            coo_context_tool_schema_digest, coo_current_context_tool_schema_digest)
         from integrations.mastermind_executive_app.coo_binding import _digest as binding_record_digest
         try:
             validate_selection({"work_ref": self.work_ref})
@@ -457,13 +499,33 @@ class ExecutiveContextConsumerPublication:
         for name in ("authority_generation_digest", "capability_profile_digest",
                      "principal_binding_digest", "permission_digest", "tools_schema_digest"):
             _digest(getattr(self, name), name)
-        if (self.tools_schema_digest != CONTEXT_TOOLS_SCHEMA_DIGEST
-                or coo_context_tool_schema_digest() != CONTEXT_TOOLS_SCHEMA_DIGEST
-                or type(self.principal) is not ConsumerPrincipal
+        if (type(self.principal) is not ConsumerPrincipal
                 or type(self.mcp) is not ConsumerMcp or type(self.session) is not ConsumerSession
                 or type(self.plugin) is not ConsumerPlugin or type(self.context) is not ConsumerContext
                 or (self.selected_child is not None and type(self.selected_child) is not ConsumerSelectedChild)):
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        if self.workspace_principal is None:
+            if (self.context.source_mode != "ADOPTED_SNAPSHOT"
+                    or self.tools_schema_digest != CONTEXT_TOOLS_SCHEMA_DIGEST
+                    or coo_context_tool_schema_digest() != CONTEXT_TOOLS_SCHEMA_DIGEST
+                    or self.mcp._workspace_principal_scope is not None):
+                raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        else:
+            wp, principal = self.workspace_principal, self.principal
+            if (type(wp) is not ConsumerPrincipal or self.context.source_mode != "CANONICAL_PROJECT_DATA"
+                    or self.tools_schema_digest != CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+                    or coo_current_context_tool_schema_digest() != CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+                    or wp.resource_ref != _WORKSPACE_RESOURCE or wp.scopes != (_WORKSPACE_SCOPE,)
+                    or wp.policy_id == principal.policy_id
+                    or any(getattr(wp, key) != getattr(principal, key)
+                           for key in ("issuer_digest", "subject_digest", "client_ref"))
+                    or principal.resource_ref != _CURRENT_PRIMARY_RESOURCE
+                    or principal.scopes != tuple(_CURRENT_PRIMARY_SCOPE.split())
+                    or self.mcp.server != CONSUMER_MCP_SERVER or self.mcp.url != _CURRENT_PRIMARY_URL
+                    or self.mcp.scope != _CURRENT_PRIMARY_SCOPE
+                    or self.mcp._workspace_principal_scope != hashlib.sha256(
+                        _canonical(workspace_principal_frame(self))).hexdigest()):
+                raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         # The incumbent digest covers all seven enrolled-record fields,
         # including the enrollment owner's opaque permission receipt. The six
         # public principal facts alone cannot recreate this binding identity.
@@ -495,8 +557,10 @@ def selected_child_publication(publication: ConsumerPublication) -> ExecutiveCon
 
 
 def _validate_context_publication(value):
-    if (type(value) is not dict or set(value) != _CONTEXT_PUBLICATION_KEYS
-            or value.get("schema") != CONTEXT_CONSUMER_SCHEMA):
+    current = type(value) is dict and value.get("schema") == CURRENT_CONTEXT_CONSUMER_SCHEMA
+    keys = _CONTEXT_PUBLICATION_KEYS | {"workspace_principal"} if current else _CONTEXT_PUBLICATION_KEYS
+    if (type(value) is not dict or set(value) != keys
+            or value.get("schema") not in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA}):
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     for name, keys in (("principal", _PRINCIPAL_KEYS), ("mcp", _MCP_KEYS),
                        ("session", _SESSION_KEYS), ("plugin", _PLUGIN_KEYS),
@@ -504,6 +568,10 @@ def _validate_context_publication(value):
         if type(value[name]) is not dict or set(value[name]) != keys:
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     if type(value["principal"]["scopes"]) is not list:
+        raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+    if current and (type(value["workspace_principal"]) is not dict
+            or set(value["workspace_principal"]) != _PRINCIPAL_KEYS
+            or type(value["workspace_principal"]["scopes"]) is not list):
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     child = value["selected_child"]
     if child is not None and (type(child) is not dict or set(child) != _CHILD_KEYS):
@@ -521,8 +589,17 @@ def _typed_context_publication(document):
         "capability_profile_digest", "principal_binding_digest", "permission_digest", "tools_schema_digest")}
     principal = dict(document["principal"])
     principal["scopes"] = tuple(principal["scopes"])
+    workspace = None
+    mcp = dict(document["mcp"])
+    if document["schema"] == CURRENT_CONTEXT_CONSUMER_SCHEMA:
+        raw_workspace = dict(document["workspace_principal"])
+        raw_workspace["scopes"] = tuple(raw_workspace["scopes"])
+        workspace = ConsumerPrincipal(**raw_workspace)
+        frame = dict(raw_workspace, resource=raw_workspace["resource_ref"], scopes=list(workspace.scopes))
+        frame.pop("resource_ref")
+        mcp["_workspace_principal_scope"] = hashlib.sha256(_canonical(frame)).hexdigest()
     return ExecutiveContextConsumerPublication(
-        **common, principal=ConsumerPrincipal(**principal), mcp=ConsumerMcp(**document["mcp"]),
+        **common, principal=ConsumerPrincipal(**principal), mcp=ConsumerMcp(**mcp), workspace_principal=workspace,
         session=ConsumerSession(**document["session"]), plugin=ConsumerPlugin(**document["plugin"]),
         context=ConsumerContext(**document["context"]), selected_child=(None
             if document["selected_child"] is None else ConsumerSelectedChild(**document["selected_child"])))
@@ -535,7 +612,7 @@ def validate_consumer_publication(value: Any) -> dict[str, Any]:
     here. No credential, bearer template, client secret, private path or
     authority boolean is accepted: the closed key set cannot carry one.
     """
-    if type(value) is dict and value.get("schema") == CONTEXT_CONSUMER_SCHEMA:
+    if type(value) is dict and value.get("schema") in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA}:
         return _validate_context_publication(value)
     if type(value) is not dict or set(value) != _PUBLICATION_KEYS:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
@@ -611,7 +688,7 @@ def publication_from_document(document: Mapping[str, Any]) -> ConsumerPublicatio
 
 def _typed_publication(document: Mapping[str, Any]) -> ConsumerPublication:
     """Build the typed publication from an already validated document."""
-    if document["schema"] == CONTEXT_CONSUMER_SCHEMA:
+    if document["schema"] in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA}:
         return _typed_context_publication(document)
     principal = document["principal"]
     mcp = document["mcp"]
@@ -1052,9 +1129,17 @@ class NativeExecutiveTransport:
 def _native_result_body(raw):
     if raw is None:
         return None
+    if not isinstance(raw, Mapping) and callable(getattr(raw, "model_dump", None)):
+        # Both reviewed SDK generations serialize the same wire aliases.
+        # In particular, SDK 2.3's is_error must not bypass the error check.
+        raw = raw.model_dump(by_alias=True)
+        if type(raw) is not dict:
+            return None
     def member(name, fallback=None):
         return raw.get(name, fallback) if isinstance(raw, Mapping) else getattr(raw, name, fallback)
-    if member("isError") is True:
+    if member("isError") is True or member("is_error") is True:
+        return None
+    if member("resultType", member("result_type", "complete")) != "complete":
         return None
     body = member("structuredContent", member("structured_content"))
     if body is None:
@@ -1139,12 +1224,20 @@ def capture_native_mcp_owner(publication: ExecutiveConsumerPublication, *, inclu
         try:
             with core._lock:
                 same_owner = core._servers.get(key) is server
-            info = getattr(getattr(server, "initialize_result", None), "serverInfo", None)
+            initialized = getattr(server, "initialize_result", None)
+            if callable(getattr(initialized, "model_dump", None)):
+                value = initialized.model_dump(by_alias=True, exclude_none=True)
+                info = value.get("serverInfo") if type(value) is dict else None
+                name = info.get("name") if type(info) is dict else None
+                version = info.get("version") if type(info) is dict else None
+            else:
+                info = getattr(initialized, "serverInfo", None)
+                name, version = getattr(info, "name", None), getattr(info, "version", None)
             return (server is not None and session is not None and loop is not None
                     and same_owner and _running_loop() is loop
                     and getattr(server, "session", None) is session
-                    and getattr(info, "name", None) == publication.mcp.server_name
-                    and getattr(info, "version", None) == publication.mcp.server_version
+                    and name == publication.mcp.server_name
+                    and version == publication.mcp.server_version
                     and tools_schema_digest(getattr(server, "_tools", ())) == publication.tools_schema_digest
                     and publication.mcp.matches_config(getattr(server, "_config", None)))
         except Exception:

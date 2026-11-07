@@ -22,9 +22,9 @@ class Cohort(unittest.TestCase):
         parent=builder.before_qualification_quiescence(original)
         self.assertEqual({k for k in parent if parent[k]!=original[k]},{'ext/lease_broker.py'})
         self.assertEqual(parent['ext/lease_broker.py'],builder.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE)
-        raw=(json.dumps(parent,sort_keys=True,indent=2)+'\n').encode()
+        raw=(json.dumps(builder.before_host_pull_integrity(parent),sort_keys=True,indent=2)+'\n').encode()
         self.assertEqual(hashlib.sha256(raw).hexdigest(),builder.QUALIFICATION_QUIESCENCE_PARENT_SHA256)
-        builder.before_admission_integrity(original)
+        builder.before_admission_integrity(builder.before_host_pull_integrity(original))
         self.assertEqual(original,self.manifest)
 
     def test_foreign_or_mixed_member_is_rejected(self):
@@ -49,7 +49,7 @@ class Cohort(unittest.TestCase):
     def test_captured_parent_remains_valid_without_relabel(self):
         parent=dict(self.manifest);parent['ext/lease_broker.py']=builder.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
         self.assertEqual(builder.before_qualification_quiescence(parent),parent)
-        builder.before_admission_integrity(parent)
+        builder.before_admission_integrity(builder.before_host_pull_integrity(parent))
 
 
     def test_go_current_capture_and_exact_parent_are_independent_obligations(self):
@@ -87,6 +87,47 @@ class Cohort(unittest.TestCase):
             with self.assertRaises(ValueError):
                 builder.validate_go_base_manifest(source, captured)
         self.assertEqual(original, self.manifest)
+
+
+    def test_both_exact_source_deltas_retain_their_separate_historical_parents(self):
+        current = dict(self.manifest)
+        base = dict(current)
+        base.update(builder.HOST_PULL_INTEGRITY_PREIMAGES)
+        base['ext/lease_broker.py'] = builder.QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+        host_only = dict(base, **builder.HOST_PULL_INTEGRITY_DIGESTS)
+        broker_only = dict(base)
+        broker_only['ext/lease_broker.py'] = builder.QUALIFICATION_QUIESCENCE_BROKER_SHA256
+        for source, expected_sha in [
+            (base, '8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6'),
+            (host_only, 'a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3'),
+            (broker_only, '7b58e10efbf879ac6e2e3e4c6b89ddc2a79cba4f0b1b47f0131bbafc34bc1ce9'),
+            (current, '45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18'),
+        ]:
+            with self.subTest(cohort=expected_sha):
+                original = dict(source)
+                self.assertEqual(hashlib.sha256((json.dumps(source,sort_keys=True,indent=2)+'\n').encode()).hexdigest(),expected_sha)
+                q = builder.before_qualification_quiescence(source)
+                h = builder.before_host_pull_integrity(source)
+                self.assertLessEqual({k for k in q if q[k] != source[k]}, {'ext/lease_broker.py'})
+                self.assertLessEqual({k for k in h if h[k] != source[k]}, set(builder.HOST_PULL_INTEGRITY_PREIMAGES))
+                self.assertEqual(builder.before_host_pull_integrity(q), base)
+                self.assertEqual(builder.before_qualification_quiescence(h), base)
+                captured = {name: source['ext/'+name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+                builder.validate_go_base_manifest(source, captured)
+                self.assertEqual(source, original)
+
+    def test_combined_parent_cannot_hide_partial_host_pull_or_foreign_broker(self):
+        for member, predecessor in builder.HOST_PULL_INTEGRITY_PREIMAGES.items():
+            for value in (predecessor, '0'*64):
+                broken = dict(self.manifest); broken[member] = value
+                captured = {name: broken['ext/'+name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+                with self.subTest(member=member,value=value):
+                    with self.assertRaises(ValueError): builder.before_qualification_quiescence(broken)
+                    with self.assertRaises(ValueError): builder.before_host_pull_integrity(broken)
+                    with self.assertRaises(ValueError): builder.validate_go_base_manifest(broken,captured)
+        broken = dict(self.manifest); broken['ext/lease_broker.py'] = '0'*64
+        with self.assertRaises(ValueError): builder.before_host_pull_integrity(broken)
+        with self.assertRaises(ValueError): builder.before_admission_integrity(broken)
 
 
 if __name__=='__main__':unittest.main()
