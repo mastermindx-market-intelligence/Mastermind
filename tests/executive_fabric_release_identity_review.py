@@ -79,9 +79,9 @@ REVIEWED_FILES = {
                    (3502, 31, 34, 'int', '429'))},
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
         # v9 keeps the original private account directory permission check.
-        "sha256": '36128047df407955975392e3daffe53aa080bb7488c693154357fe6d35f1e47e',
+        "sha256": 'c927a1fef740467518efb32f4809d4c9720a337ee1b7079cc5f2f6891c6f8e5a',
         "sites": (
-            (818, 60, 65, 'int', '0o700'),
+            (822, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -803,3 +803,21 @@ REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {
+    "sha256": "09b3d29643aefc783e4d531dbaf679061f918fec5b72ba2e1b6398efddf12473",
+    "sites": ((341, 37, 40, "int", "409"),),
+}
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
+}

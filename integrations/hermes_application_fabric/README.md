@@ -5,6 +5,14 @@ Operation: hermes-primary-fabric-inference-20261106-sol-01.
 Compatible governing pin: e4bfd5efccc9df4d42fafedd1a75ca730de04f54.
 Current owner brief: [source, evidence and financial acceptance](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6703609820).
 
+Current composition, exact source/dependency inputs and installation predicates:
+[release inputs](RELEASE_INPUTS.md). The current branch also consumes the original
+attended #2166 source, with a native route-marker repair that keeps ordinary CLI
+turns and held secretary/meta-CEO turns on their original admission paths.
+Its fixed attended service remains held until the APPLICATION owner qualifies
+that dedicated relation. Prior installed/fixture receipts retain their exact
+source attribution; they are not current production acceptance.
+
 ## Implemented path
 
 The adapter, native host integration, role enrollment proposal, fixed/AUTO/exact factory
@@ -22,8 +30,9 @@ plane. Provider credentials never enter Hermes.
 | Proposal | Source responsibility |
 | --- | --- |
 | [Mastermind #2155](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2155) | Adapter, native host/release/profile/supervisor composition, original tunnel role aliases and tests. |
-| [Mastermind #2186](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2186) | Closed v9 role enrollment through the incumbent native publisher, stacked on #2175. |
-| [Macro #10818](https://github.com/mastermindx-market-intelligence/macro/pull/10818) | Additive role-specific fixed/AUTO declarations and numeric loopback endpoints, stacked on #10740. |
+| [Mastermind #2186](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2186) | Combined primary, native v9 enrollment and attended-source contribution, stacked on #2175. |
+| [Macro #10818](https://github.com/mastermindx-market-intelligence/macro/pull/10818) | Role-specific fixed/AUTO declarations incorporated into original #10740; contribution closed. |
+| [Mastermind #2166](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166) | Original ordinary attended gateway/plugin and exact native-core extension, consumed without overwriting newer shared runtime code. |
 | [Mastermind #2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175) / [Macro #10740](https://github.com/mastermindx-market-intelligence/macro/pull/10740) | Existing final APPLICATION composition and provider/request/lease/settlement ownership. |
 
 The protected Brain consumer and attended-worker package remain unchanged.

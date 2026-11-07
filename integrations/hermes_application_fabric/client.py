@@ -132,7 +132,8 @@ class ApplicationBinding:
         # The existing owner's closed service registry must independently accept
         # this exact relation. Today it does not; these paths remain fail-closed.
         relations = {"mmmeta": ("hermes-meta-ceo", "hermes_meta_fabric"),
-                     "mmsecretary": ("hermes-secretary", "hermes_secretary_fabric")}
+                     "mmsecretary": ("hermes-secretary", "hermes_secretary_fabric"),
+                     "attended": ("hermes-attended", "hermes_attended_fabric")}
         if (type(factory) is not ApplicationFabricFactory or profile_id not in relations
                 or (factory.lane, factory.service_mode_id) != relations[profile_id]):
             raise HermesFabricError("hermes_fabric_role_unqualified")

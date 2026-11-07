@@ -1,0 +1,93 @@
+{
+  "schema": "mastermind.hermes_gateway_native_qualification.v1",
+  "observed_at": "2026-11-07T01:29:21Z",
+  "candidate": "83f78197ad0c21ade49059b880582c1fc9f7c61b",
+  "base_adapter": "72aeadc949a7a9b2c809ecaee9f9da1f658fa770",
+  "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "owner": "2ef828e569b683b9dfaa94f81116da3ac55f6186",
+  "owner_source_verified": true,
+  "python": "3.14.9",
+  "jsonschema": "4.26.0",
+  "mode": "pinned-native-host-patch-loopback-fixture",
+  "live_provider_acceptance": false,
+  "result": {
+    "blocked_external_connections": 0,
+    "errors": 0,
+    "failures": 0,
+    "live_provider_acceptance": false,
+    "sdk_constructions": [],
+    "skips": 0,
+    "tests_run": 81
+  },
+  "log_sha256": "abf569ee65e7fb795fe9c470c8b4cb3070fe9a550d1e28d0c4c2fe93e949fc38",
+  "log_bytes": 14605,
+  "files": {
+    "integrations/hermes_application_fabric/ENROLLMENT_CONTRACT.md": "92557f310c68f57157a85aa0b160d658c499001010695298e99f251aaab48292",
+    "integrations/hermes_application_fabric/GATEWAY_COMPOSITION.md": "cf1e947e24ad79d43a060b700e3483a060aa539d74e3baf08306faad78a1e728",
+    "integrations/hermes_application_fabric/__init__.py": "6f64c01a7a1a499009d7526559f0bb8ef952d0a20f39275992187f62e611d42d",
+    "integrations/hermes_application_fabric/attended_host.py": "8afe89f852e015f0ef868cbd13cfaa08d30f70846ff0d2fbf99ff463d654b56a",
+    "integrations/hermes_application_fabric/client.py": "e5271e294d0122b8df434e7be016e2a1070c349562a4dd07dd8ff404508f5161",
+    "integrations/hermes_application_fabric/codec.py": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "integrations/hermes_application_fabric/errors.py": "c0290f842ea9a072688730131d1aa865b3fa4a1bbff00cd1823a32987a1ed1ba",
+    "integrations/hermes_application_fabric/gateway_plugin.py": "569c904b55c9cc43aaa03119594f240ee19a204e87f712965ed415008b0a0c13",
+    "integrations/hermes_application_fabric/gateway_plugin_entry/__init__.py": "0405a5846e7a03e9a82674fa3348c881d3a2a0e558696b60598ce3bce13779bb",
+    "integrations/hermes_application_fabric/gateway_plugin_entry/plugin.yaml": "7428da6a3f3ba672d93f4c77f57cc44ca5110472b7fb51272446a92b0bedaaa3",
+    "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.patch": "f52f49ebefccead2ac29c52917439888c652db36c081f93c6c58994f51baedac",
+    "integrations/hermes_application_fabric/model_provider/__init__.py": "6d99a3fb9c351e4e9ceb02b0298f94af915dd529185a856eb0d01c2e13f1ab86",
+    "integrations/hermes_application_fabric/native.py": "b37dfdf747bd6fc2a17c46bcbed55eaf026f946d1e87c95755de0bdfcec63b15",
+    "integrations/hermes_application_fabric/qualification/qualify_gateway.py": "f59f87cafe20f60bcd7a0e7fce91b49c3ff979a35dbd91dbe24e50fd933d1c2f",
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": "6ed56eb1ab586997ebd8f0f5d134b3f29cfc26514a4b0ea1af787e89191258b9",
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": "a92dc3c7b066a2af3d1085c13e11925bbc0cb3fde91a1236daa667bc1891e012",
+    "integrations/hermes_application_fabric/qualification/test_attended_native.py": "728297578397b9090cba2d5d0a819655cc97c10b2247cd511ac2dcff6daaf025",
+    "integrations/hermes_application_fabric/qualification/test_gateway_bound.py": "95abb26672cefbc400af3f42f4a7c1b51b0bc0f5b08b4d6095a98044cff600e5",
+    "integrations/hermes_application_fabric/qualification/test_installed_native.py": "dab148df6f94c3c06347bae5deb9a2977102d0859c1e2a9b2d472b313171540d",
+    "integrations/hermes_application_fabric/qualification/test_native_schema.py": "23ee6856606a30066e3ffb3d4c033e7b482a0bd357e84500c879abfed1354962",
+    "integrations/hermes_application_fabric/structured.py": "23dc144518f22e7da96bfee42be6d89c16ea5e4103dc9faa6f619b85cc6f3623",
+    "integrations/hermes_application_fabric/tests/test_attended_host.py": "160a120d0bd4a0e65699b7d936d0f0dc3ce85f44e103fa761f221733ea16535f",
+    "integrations/hermes_application_fabric/tests/test_codec.py": "3a01e3c1d01b9edf0ba1eb709e0827986084ad6b0acbfbe4971c9cd009a2b96d",
+    "integrations/hermes_application_fabric/tests/test_owner_integration.py": "71338c0bdfe2519d775fc5911056053e5e0c18f9791c538e21a3a14087e16165"
+  },
+  "core_files": {
+    "gateway/run_turn_runner.py": "4d775d0cf16e11838710ff87b62153c010f9c67f30932b0d2695acacb1c7103a",
+    "gateway/session_authority.py": "e4b1dcb9e61a94f39ca620c2349d35d4713b1b4d56943186296ce352cb9816be",
+    "gateway/session_provider_context.py": "b1ef18a90fc056fe8f8f3b1ecc418208fa2b33d03e1ccbecb587caecac1cdf08",
+    "hermes_cli/cli_agent_setup_mixin.py": "2aef5fda6f5bd6687bd675027d12ed0a7c867d17c642569fa5f7496d8d133d66",
+    "hermes_cli/plugins.py": "56503d6897b570b3c8ff8d568f8c1a5952c5207131319b883ea910744b3436f5",
+    "hermes_cli/runtime_provider.py": "b85334ca6ef45a24c7c37a311b66b4ec5f700ed2a3b9b55d097f01dd19fae515",
+    "hermes_cli/runtime_provider_host.py": "39caeb4b4653b3db25b8a237912f6fcc2b3f0529f8f9f3899a41a4fb7fa8f6cc",
+    "providers/base.py": "018fb53d9213b4e3a5fe79522bca60e920569a7ddbbadecf79c55e64328d13fe"
+  },
+  "execution": "Existing installed runtime launcher holds its dependency lease; a clean child uses those in-memory dependency search paths and the pinned patched-source fixture. No selected dependency generation is persisted.",
+  "native_sqlite_admission": "fixture database using original admit/claim/settle/recover functions",
+  "canonical_factory_qualification": "fixture_only",
+  "installed_source_changed": false,
+  "config_changed": false,
+  "services_restarted": false,
+  "live_cli_rpc_acceptance": false,
+  "account_balancing_proven": false,
+  "limits": [
+    "Original attended factory/service/workload/capability enrollment absent",
+    "Original application endpoint absent on M2 ports 4142 and 50142",
+    "Original C1/C3/C4 and release holds retained",
+    "Managed workers, API direct path and non-local roles unqualified",
+    "GLM 5.3, Experiential, AUTO strict-model, effort and streaming not qualified"
+  ],
+  "hosted_ci": [
+    {
+      "name": "Hermes APPLICATION inference contract",
+      "run_id": 42323910202,
+      "conclusion": "success",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42323910202",
+      "python": [
+        "3.12",
+        "3.13"
+      ]
+    },
+    {
+      "name": "CI",
+      "run_id": 42323910176,
+      "conclusion": "success",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42323910176"
+    }
+  ]
+}

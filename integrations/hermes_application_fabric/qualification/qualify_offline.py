@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 
-OWNER_COMMIT = "9eb5cb6b28b510ea9e2bf05ae9040528523339df"
+OWNER_COMMIT = "c1647bf55ad5faf07e682f7055e3791280d6d41f"
 OWNER_SHA256 = "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e"
 
 
@@ -63,7 +63,7 @@ def main():
             "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),
             "blocked_external_connections": len(blocked), "live_provider_acceptance": False}, sort_keys=True))
-        return 0 if result.wasSuccessful() and result.testsRun == 54 and not result.skipped and not blocked else 1
+        return 0 if result.wasSuccessful() and result.testsRun == 66 and not result.skipped and not blocked else 1
 
 
 if __name__ == "__main__":
