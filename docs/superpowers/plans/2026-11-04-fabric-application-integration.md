@@ -236,3 +236,23 @@ release/service startup and source-identity review. Current artifact identities
 and raw evidence are in current-native-composition.json/log/xml. H5 baseline4fd
 and worker7425 remain the next source joins. No live effect or protected release
 is inferred from this source qualification.
+
+### H6 native worker source join — 2026-11-07
+
+Consumed worker7425d029 into the current H2/final-carrier composition. All16
+non-registry contribution paths equal their exact source, including the two
+already-adopted Studio fixtures; the release table preserves all current records
+and the worker's exact native.py record. The eight-file package projection
+c099a74d and sealed backendbcdf8f remain paired source inputs for the eventual
+single protected release and incumbent native installer.
+
+Current composed execution passed68 package and135 backend/capacity/diagnostic
+cases. The explicit native ABI run failed before cases after native startup
+relaunched its runpy entry and lost access to an existing committed ruamel
+dependency. This is an import/startup failure, not a provider/worker action or a
+permission denial. Its one bounded diagnostic, native source snapshot and
+unchanged committed dependency selection are retained; no environment repair or
+unchanged replay is attempted. The author's prior22-case native proof is not
+relabeled as a current integrated run. Native installation/enrollment, actual
+worker START, retained result and original-parent consumption remain separate
+H4-custody acceptance. H5 baseline composition continues in this assignment.

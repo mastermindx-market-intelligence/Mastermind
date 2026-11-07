@@ -40,7 +40,7 @@
     "runtime_h2_members_changed": false,
     "source": "552375cd288ebe3c417d10afa17f47114c6319db",
     "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
-    "worker_2225_incorporated": false
+    "worker_2225_incorporated": true
   },
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
   "h2_runtime_sources_changed": false,
@@ -75,5 +75,13 @@
   "schema": "mastermind.h6-current-source-composition.v1",
   "selected": false,
   "studio_fixture_pair_changed": false,
-  "successor_source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f"
+  "successor_source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+  "worker_join": {
+    "backend_sha256": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
+    "current_native_abi_qualification": "IMPORT_FAILED_BEFORE_CASES",
+    "live_acceptance": false,
+    "qualification": "current-worker-composition.json",
+    "runtime_package_sha256": "c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927",
+    "source": "7425d029c7e2afbe38d07abfa3cf95c1527d4439"
+  }
 }

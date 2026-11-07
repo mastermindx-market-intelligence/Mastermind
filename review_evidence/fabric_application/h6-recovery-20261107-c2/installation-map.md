@@ -165,3 +165,32 @@ loader, actual installer, release/service startup and the release-identity revie
 Current-source artifacts and raw proof are in current-native-composition.json,
 its log and XML. This qualification supersedes earlier native candidate output
 identities; it does not claim hosted CI, installation, enrollment or live use.
+
+## Native attended-worker source tuple
+
+Worker contribution7425d029c7e2afbe38d07abfa3cf95c1527d4439 is composed separately
+from the primary APPLICATION package. Its eight-file runtime projection remains
+c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927.
+The matching fabric-backend.mjs SHA256 is
+bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5.
+The final protected release must supply that backend, the plugin full revision
+and its runtime projection together. The install revision must identify that
+actual final release; it is not automatically the contribution SHA.
+
+Use the existing Hermes plugin installer, fixed plugin slot, native install
+metadata and H4 profile/lifecycle custody described in
+integrations/hermes_attended_fabric/NATIVE_ENROLLMENT.md. Preserve the existing
+native namespace, original worker roots and result recovery. The raw Fabric tool
+inventory is not model execution authority. Real worker START, retained result,
+original-parent consumption and acceptance remain unproven.
+
+On this composed source,68 package tests and135 existing backend/capacity/
+diagnostic tests passed. The explicit native ABI command failed during import
+before any cases: native startup relaunched runpy and its child could not import
+ruamel, although the selected committed site-packages contains it. One bounded
+diagnostic was retained; no dependency installation/repair or unchanged replay
+was attempted. The prior author's22 native cases remain historical contribution
+evidence. The current native worktree contains active fallback/TUI edits; its
+tracked-byte snapshot and committed environment selection remained unchanged
+across this test attempt. Preserve those writers. Exact current evidence is in
+current-worker-composition.json and the three retained logs.
