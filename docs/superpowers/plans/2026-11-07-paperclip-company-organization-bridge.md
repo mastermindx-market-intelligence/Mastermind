@@ -87,3 +87,24 @@ An additional client component `app/mastermind_os/src/organization/OrganizationW
 
 - Local checks on the staged extension: `npx vitest run src/organization/OrganizationWorkspace.test.tsx src/meta-ceo/MetaCeoOffice.test.tsx` = **41/41 passed**, `npm run typecheck` = success, `npm run build` = success (existing Vite chunk/dynamic-import advisories only).
 - This is **not** live O3 acceptance. Original authenticated host-binding to Hermes's `organization_context` read is still dependent on the current team/runtime owners and a genuine user-path proof. Never fill the optional prop with a synthetic, cached or cross-session organizational snapshot.
+
+## O3 product leadership continuation — 2026-11-07
+
+Current Chairman assignment: complete the native signed-in organizational dashboard from genuine retained Mission, Agent OS, Executive and Fabric evidence. This continues O3 and preserves O1/O2, merged foundation #2173 at `70781ecc797872341ccf2c2eaa78deb145b09361`; it does not reopen O4 dispatch or create Paperclip's task database, scheduler, identity or control plane.
+
+- Procedure/source pin: `23c9b011e30a4acc6892a59d67a629f74b07a491`, skillpack v1.0.1, bootstrap-major 1 compatible.
+- Operation: `organization-live-experience-20261107-c3`; native workspace `/Volumes/Mastermind 2/agent-workspaces/web/organization-live-experience-20261107-c3`; branch `sol/web-organization-live-experience-20261107-c3`.
+- The acquire response was `EFFECT_UNKNOWN / WORKSPACE_ACQUISITION_UNQUALIFIED`. Original-owner `mmx-workspace status --operation-id organization-live-experience-20261107-c3 --lane web --repository mastermind` reconciled one clean registered workspace at the exact base. No second acquire or replacement branch was issued.
+- Reserved source: #2180 at `b805a3ca2b7b458cc2f5f935894f977c89e1f5e8` owns Office/native conversation paths; #2179 at `0545e8a374e45a31f93505fe198f7a18ee5de1b6` owns leadership reader/Workspace client and continuity. Do not edit `MetaCeoOffice.tsx`, `App.tsx`, native auth/bridge or active leadership reader files without writer reconciliation.
+- Current safe custody: `app/mastermind_os/src/organization/**` and this existing O3 plan. Further paths require overlap inspection.
+- Live evidence gap: Executive connector returned `backend_unavailable` for its read. This proves no global outage and blocks no independent source/tests. Browser/native signed-in source acquisition remains to be inspected; no fixtures may be presented as live evidence.
+- Direct principal work reason: `PRINCIPAL_JUDGMENT` for authenticated cross-system contract and product composition. One native read-only architecture adviser is bounded to that judgment, not implementation, formal GitHub review or runtime action. Routine separable implementation will use admitted Fabric where total overhead and source custody permit.
+
+| O3 step | Concrete output | Proof / remaining dependency |
+| --- | --- | --- |
+| O3.1 | Reuse existing qualified owner contracts; derive only retained relationships, work, dependency and result facts | Auth/selection/revision/freshness and source disagreement negatives; no fabricated role activity |
+| O3.2 | Extend existing OrganizationWorkspace with clear hierarchy, responsive navigation, loading/degraded states and progressive disclosure | Keyboard/mobile, EN/ZH and dark/light checks; original accepted qualification tests retained |
+| O3.3 | Mount through incumbent authenticated app owner | Exact scoped integration diff and current writer reconciliation; no competing app writer |
+| O3.4 | Signed-in real-data acceptance | Exact source/PR/test/browser receipts, actual selection-to-agent/result navigation; fixtures/build/CI alone do not satisfy |
+
+O3 remains `in_progress`; the mission is incomplete until O3.4. Save milestones in this existing plan and the source PR, with exact current head and readback. Agent OS remains the organizational owner; this appendix creates no new workstream, task registry, admission or watcher.
