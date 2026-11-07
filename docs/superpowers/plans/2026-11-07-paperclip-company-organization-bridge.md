@@ -1,8 +1,8 @@
 # Paperclip-inspired company organization bridge — MastermindX
 
-**Operation:** paperclip-organization-bridge-20261107-c2  
-**Editorial home:** existing WS:CHAIRMAN-CONTROL-ROOM (Hermes/Chairman cross-session organization); related WS:EXECUTIVE-ECOSYSTEM-COMPLETION and WS:EXECUTIVE-CAPACITY-FABRIC retain their own original-root owners.  
-**Protected source / compatible procedure pin:** `af18454f0cd2086c7976e55e16fee1d8dd70f405`.  
+**Operation:** paperclip-organization-bridge-20261107-c2
+**Editorial home:** existing WS:CHAIRMAN-CONTROL-ROOM (Hermes/Chairman cross-session organization); related WS:EXECUTIVE-ECOSYSTEM-COMPLETION and WS:EXECUTIVE-CAPACITY-FABRIC retain their own original-root owners.
+**Protected source / compatible procedure pin:** `af18454f0cd2086c7976e55e16fee1d8dd70f405`.
 **Upstream inspected:** [paperclipai/paperclip](https://github.com/paperclipai/paperclip) at `f09b4704b6573d6ccc4c35e65ba56ca2930160e9`, MIT license. Concepts only; no Paperclip code, assets or DB imported.
 
 ## Product decision and DONE_WHEN
@@ -39,8 +39,8 @@ The existing true owners are:
 
 | ID | Scope and observable output | Dependency | Acceptance | State |
 | --- | --- | --- | --- | --- |
-| O1 | Native pure company reporting tree and goal-lineage projection over one already-authenticated Mission v3 summary; role-qualified and bounded | #2169 source | Exact source/selection, distinction of configured reporting versus live role, malformed/partial/revoke/oversize negatives, no new IO/state/queue | in_progress |
-| O2 | Integrate O1 into existing `mmx_leadership_brief`, preserving same session/role/currentness/size fences | O1 | Actual host-bound tool call yields role + program lineage with no extra fetch, session swap or authority uplift; native tests | proposed |
+| O1 | Native pure company reporting tree and goal-lineage projection over one already-authenticated Mission v3 summary; role-qualified and bounded | #2169 source | Exact source/selection, distinction of configured reporting versus live role, malformed/partial/revoke/oversize negatives, no new IO/state/queue | implementation_complete (source only) |
+| O2 | Integrate O1 into existing `mmx_leadership_brief`, preserving same session/role/currentness/size fences | O1 | Actual host-bound tool call yields role + program lineage with no extra fetch, session swap or authority uplift; native tests | implementation_complete (source only; live binding open) |
 | O3 | Compose an authenticated, responsive organization view in Mastermind OS from existing Workspace/Agent OS and Executive sources; show goal/work/result/uncertainty | O1–O2 and active #2136 source/release | Real web/native UI, mobile/keyboard/empty/denied/stale cases; no shadow API/DB | blocked: active overlapping compositor/release |
 | O4 | Chairman goal assignment through original authenticated intent and selected-child route | O2, #2134, #2166 and effective runtime holds | One actual admitted job on a qualified Fabric host, no-host/duplicate/restart/cancel proof, retained result consumed by original Hermes parent | blocked: current release/installed gate |
 | O5 | Org-wide cost, health and reviewed skill feedback through existing owners | O3–O4 and native capacity/memory/skill qualification | Meter attribution, failover and no-phantom-spend; skill proposal/eval/rollback; measured success+interruption over accepted observation window | proposed |
@@ -67,3 +67,14 @@ Keep source in the unique isolated branch `sol/paperclip-organization-bridge-202
 1. Save/read back this plan on GitHub, then implement/test O1/O2 against source `af18454f...` and inspect exact diff.
 2. Publish a scoped PR with current-head CI proof; preserve native/runtime holds and never self-approve/self-merge.
 3. Reconcile #2136/#2134/#2166 current heads and their release/installed state before O3/O4. Bind the next visible UI and executable journey to the original source and authenticated host.
+
+## Verified source milestone — 2026-11-07
+
+At source head `88091f2a5de7230e28a8da3329992253b4e3cde1`, `organization.py` projects all nine charter roles under a non-executing Chairman root, with a caller-only reporting path and one source-qualified workstream/Executive-root/evidence lineage. The existing `LeadershipReader` includes it in the original `mmx_leadership_brief` without another API call. Invalid or partial sources, stale guard, wrong session, root mismatch and unknown role refuse; no status escalation, cross-role lookup, assignment or second run-loop is created.
+
+- **211 passed, 0 failed, 0 skipped** in **37.60 seconds** on Python 3.12 in a transient scratch test environment. Exact command: `HERMES_LEADERSHIP_UPSTREAM=/workspace/scratch/696c5204a324/hermes-reference python -m pytest -q -o addopts='' tests/test_hermes_leadership_organization.py tests/test_hermes_leadership.py tests/test_hermes_leadership_budget.py tests/test_hermes_leadership_native.py tests/test_hermes_leadership_cli.py tests/test_executive_responsibility.py tests/test_secretary_team_mission.py tests/test_secretary_team_access.py --tb=short --maxfail=1`. The interpreter used was `/workspace/scratch/696c5204a324/paperclip-test-venv/bin/python`.
+- The actual upstream Hermes PluginContext/ToolRegistry code was checked out at exact `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`; native tests exercised registration, caller-scoped sessions, lease disposal, collisions and failure/revocation. This is an offline source interface test, **not M2 installation or a live conversation**.
+- `git diff` exposes only new plan, organization pure function/new tests and the existing leadership reader/export/docs. No active H24/#2134/Capacity/App source touched. Current-head CI, PR release and live acceptance are not inferred.
+- One earlier local `pytest` run stopped because the scratch venv lacked `socksio`; missing `ops` sparse checkout also stopped another. Those are test-environment gaps corrected before the above final green run, not semantic source fixes.
+
+Next action after this plan save: inspect exact branch source diff/whitespace; open one scoped PR; consume hosted checks. Keep O3's App.tsx collision with #2136/#2109/#2134 as a real path dependency, not a reason to duplicate their active writer. Continue disjoint original-owner integration as it becomes available.
