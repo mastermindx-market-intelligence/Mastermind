@@ -106,8 +106,26 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_request_refusal_task(manifest):
+def before_policy_publisher(manifest):
+    """Restore the retained publisher before constructing historical cohorts.
+
+    The current publisher is valid only in its complete reviewed107 closure.
+    Historical picker/task/census fixtures must start from its exact predecessor;
+    the production validator must continue rejecting mixed current publishers.
+    """
     prior = dict(manifest)
+    if prior["ext/support_bundle.py"] == builder.POLICY_PUBLISHER_SUCCESSOR:
+        retained = (ROLLOUT / "preimages/support_bundle_e5e6153.py").read_bytes()
+        assert g.digest(retained) == builder.POLICY_PUBLISHER_PREDECESSOR
+        prior["ext/support_bundle.py"] = g.digest(retained)
+        assert len(prior) == 107
+        assert g.digest((json.dumps(prior, sort_keys=True, indent=2) + "\n").encode()) == builder.POLICY_PUBLISHER_BASE_MANIFEST
+    assert prior["ext/support_bundle.py"] == builder.POLICY_PUBLISHER_PREDECESSOR
+    return prior
+
+
+def before_request_refusal_task(manifest):
+    prior = before_policy_publisher(manifest)
     if prior["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST:
         prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
     return prior
@@ -207,7 +225,7 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
 
 
 def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_member(builds):
-    manifest = json.loads((builds.default / "native-manifest.json").read_bytes())
+    manifest = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     historical = dict(manifest)
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
@@ -270,7 +288,7 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
     assert not (output / "native-code-stage" / g.GO_HANDLER).exists()
 
 def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_participant_cohort(current)
     prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
@@ -305,7 +323,7 @@ def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
 
 
 def test_old_and_updated_post_failure_pairs_remain_exact_cohorts(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     pairs = (
         {
@@ -328,7 +346,7 @@ def test_old_and_updated_post_failure_pairs_remain_exact_cohorts(builds):
 
 
 def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(current, captured)
     # Isolate the original poll pair after reversing the whole Ubuntu4 cohort.
@@ -354,7 +372,7 @@ def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds)
 
 
 def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     previous = dict(current)
@@ -390,7 +408,7 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
 
 
 def test_protected_process_custody_is_one_exact_reversible_source_cohort(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name]
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
@@ -417,7 +435,7 @@ def test_protected_process_custody_is_one_exact_reversible_source_cohort(builds)
     assert current == original
 
 def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     previous = dict(current)
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
@@ -436,7 +454,7 @@ def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(
 
 
 def test_participant_cohort_preserves_prior_104_and_input_identity(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_participant_cohort(current)
@@ -447,7 +465,7 @@ def test_participant_cohort_preserves_prior_104_and_input_identity(builds):
 
 
 def test_original_collection_successor_preserves_prior_releases_without_backdating(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     key = "ext/original_delivery_collector.py"
     old = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
@@ -482,7 +500,7 @@ def test_original_collection_successor_preserves_prior_releases_without_backdati
 @pytest.mark.parametrize("corruption", ["binding-absent", "owner-absent", "binding-hash",
     "owner-hash", "old-operator-with-pair", "new-operator-without-pair", "participants-without-diagnostics"])
 def test_participant_cohort_cannot_relabel_legacy_namespace(builds, corruption):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)
     if corruption == "binding-absent": del bad["ext/participant_binding.py"]
@@ -503,7 +521,7 @@ def test_participant_cohort_cannot_relabel_legacy_namespace(builds, corruption):
 
 @pytest.mark.parametrize("count", [104, 102])
 def test_protected_custody_cannot_relabel_prior_namespace(builds, count):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_participant_cohort(current)
     if count == 102:
@@ -522,7 +540,7 @@ def test_protected_custody_cannot_relabel_prior_namespace(builds, count):
 
 
 def test_original_artifact_recovery_preserves_exact_previous106_and_raw_identity(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     previous = before_original_artifact_recovery(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     for manifest in (previous, current):
@@ -535,7 +553,7 @@ def test_original_artifact_recovery_preserves_exact_previous106_and_raw_identity
 @pytest.mark.parametrize("corruption", ["reader-missing", "reader-hash", "delivery-hash",
     "new-reader-old-delivery", "new-delivery-without-reader", "pair-in104", "pair-in102"])
 def test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace(builds, corruption):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)
     if corruption == "reader-missing":
@@ -564,7 +582,7 @@ def test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace(bu
 
 
 def test_exact_census_successor_preserves_original_107_without_mutation(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     assert current["ext/lane_runtime.py"] == builder.GO_CENSUS_EXIT_RUNTIME_DIGEST
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     previous = dict(current, **{"ext/lane_runtime.py": builder.GO_CENSUS_RUNTIME_DIGEST})
@@ -578,7 +596,7 @@ def test_exact_census_successor_preserves_original_107_without_mutation(builds):
 @pytest.mark.parametrize("runtime_digest", [builder.GO_CENSUS_RUNTIME_DIGEST,
                                              builder.GO_CENSUS_EXIT_RUNTIME_DIGEST])
 def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, namespace, runtime_digest):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
     if namespace == "102":
@@ -596,7 +614,7 @@ def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, 
 
 @pytest.mark.parametrize("digest", ["f" * 64, ""])
 def test_unknown_census_bytes_refuse_without_changing_the_manifest(builds, digest):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     current["ext/lane_runtime.py"] = digest
     before = dict(current)
@@ -606,7 +624,7 @@ def test_unknown_census_bytes_refuse_without_changing_the_manifest(builds, diges
 
 
 def test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest(builds):
-    current = before_request_refusal_task(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = before_request_refusal_task(before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes())))
     before = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     assert current["ext/fabric_task.py"] == "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
@@ -630,7 +648,7 @@ def test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest(builds
     (builder.GO_REQUEST_REFUSAL_TASK_DIGEST, "refusal task cannot relabel"),
 ])
 def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, namespace, task_digest, error):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
     if namespace == "102":
@@ -655,7 +673,7 @@ def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, n
 @pytest.mark.parametrize("task_digest", [builder.GO_REMOTE_CWD_TASK_DIGEST,
                                          builder.GO_REQUEST_REFUSAL_TASK_DIGEST])
 def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, members, task_digest):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     current["ext/fabric_task.py"] = task_digest
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     for member in members:
@@ -669,7 +687,7 @@ def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, memb
 @pytest.mark.parametrize("digest", ["f" * 64, "",
     "0a6cb393fc30d978a78686b9e588f6f51b1b9ec191e291aea4ccf96a4d7bdaa0"])
 def test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest(builds, digest):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     current["ext/fabric_task.py"] = digest
     before = dict(current)
@@ -679,7 +697,7 @@ def test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest(buil
 
 
 def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     assert len(current) == 107
     assert current["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST
@@ -693,7 +711,7 @@ def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(buil
 
 
 def test_refusal_task_cannot_mix_the_predecessor_poll_helper(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     current["ext/remote_sub_helpers.py"] = builder.GO_COMPLETED_POLL_PREIMAGES["remote_sub_helpers.py"]
     before = dict(current)
@@ -704,10 +722,32 @@ def test_refusal_task_cannot_mix_the_predecessor_poll_helper(builds):
 
 @pytest.mark.parametrize("missing", ["pool", "ext/participant_binding.py"])
 def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_policy_publisher(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     del current[missing]
     before = dict(current)
     with pytest.raises(ValueError, match="dependency closure"):
         builder.validate_go_base_manifest(current, captured)
     assert current == before
+
+
+@pytest.mark.parametrize("member", ["ext/pick.py", "ext/fabric_task.py", "ext/lane_runtime.py"])
+def test_current_publisher_cannot_mix_a_historical_member(builds, member):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(current, captured)
+    before = dict(current)
+    previous = before_policy_publisher(current)
+    builder.validate_go_base_manifest(previous, captured)
+    assert current == before
+    assert {key for key in current if current[key] != previous[key]} == {"ext/support_bundle.py"}
+    historical = {
+        "ext/pick.py": builder.GO_BASE_PICKER_SHA256,
+        "ext/fabric_task.py": builder.GO_REMOTE_CWD_TASK_DIGEST,
+        "ext/lane_runtime.py": builder.GO_CENSUS_RUNTIME_PREIMAGE,
+    }
+    current[member] = historical[member]
+    mixed = dict(current)
+    with pytest.raises(ValueError, match="publisher successor is not one exact107 closure"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == mixed
