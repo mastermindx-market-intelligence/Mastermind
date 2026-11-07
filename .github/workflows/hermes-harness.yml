@@ -11,6 +11,7 @@ on:
       - 'integrations/hermes_secretary/**'
       - 'docs/hermes/**'
       - '.github/workflows/hermes-harness.yml'
+      - 'requirements/executive-mcp-macos-arm64-py312.in'
   workflow_dispatch:
 
 permissions:
@@ -32,8 +33,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install the audited YAML parser and pinned test runner
-        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2' 'pytest==9.1.1'
+      - name: Install the reviewed edge package pins and test runner
+        # Reuse package inputs for the real SDK/HTTP fixtures. This Linux test
+        # matrix does not attest the production macOS runtime or its hash lock.
+        run: python -m pip install --disable-pip-version-check -r requirements/executive-mcp-macos-arm64-py312.in 'pytest==9.1.1'
       - name: Compile the harness and the five packages
         run: python -m compileall -q integrations/hermes_harness integrations/hermes_runtime integrations/hermes_models integrations/hermes_steward integrations/hermes_delegate integrations/hermes_secretary
       - name: Run the offline harness and all five dependency contracts

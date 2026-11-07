@@ -107,7 +107,7 @@ class ContractTests(unittest.TestCase):
         from control_plane.model_router import ModelRouter
 
         router = ModelRouter.load()
-        before = (router.providers["byteplus"].enabled, router.providers["minimax"].enabled)
+        before = {alias: provider.enabled for alias, provider in router.providers.items()}
         report = bind_model_router(router)
         self.assertFalse(report["authority_granted"])
         self.assertFalse(report["production_armed"])
@@ -116,8 +116,12 @@ class ContractTests(unittest.TestCase):
         self.assertFalse(report["personal_coding_plan_used"])
         self.assertEqual(report["minimax_attended_model"], "MiniMax-M3")
         self.assertEqual(report["personal_coding_plan_alias"], "byteplus.attended")
-        self.assertTrue(all(row["status"] == "absent_until_pr_1824_merges" for row in report["modelark_aliases"]))
-        self.assertEqual(before, (router.providers["byteplus"].enabled, router.providers["minimax"].enabled))
+        # The commercial contract is now in protected source. Presence still
+        # grants no admission and the read cannot change any provider's state.
+        self.assertEqual({row["alias"] for row in report["modelark_aliases"]},
+                         set(MODELARK_CONTRACT["aliases"]))
+        self.assertTrue(all(row["status"] == "present" for row in report["modelark_aliases"]))
+        self.assertEqual(before, {alias: provider.enabled for alias, provider in router.providers.items()})
 
     def test_router_model_drift_is_refused(self):
         class Alias:
