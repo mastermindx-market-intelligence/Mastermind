@@ -122,16 +122,25 @@ def main():
             factory = factory_owner.make_application_fabric_factory(mode_id="shared_fabric",
                 lane="hermes-secretary", root=self.config_root, service_mode_id="hermes_secretary_fabric",
                 workload_cfg={"workload_profile": "site_interactive", "provider_order": ["fabric"]})
+            # Inspect outside native middleware so a fixture authority error
+            # remains a useful qualification failure instead of a masked
+            # missing-host-binding response. This performs no admission.
+            self.assertEqual(factory.inspect()["model"], "fixture-model")
             self.binding = None
             self.native_calls = []
+            self.binding_errors = []
 
             def resolve(call):
                 self.native_calls.append(call)
                 if self.binding is None:
-                    self.binding = ApplicationBinding.from_factory(factory, profile_id="mmsecretary",
-                        operation_id="hermes-owner-proof", session_id=call.session_id, turn_id=call.turn_id,
-                        requested_model="host-selection", authorized=lambda current: current.session_id == call.session_id,
-                        prior_admission_possible=False, strict_model="fixture-model", max_output_tokens=256)
+                    try:
+                        self.binding = ApplicationBinding.from_factory(factory, profile_id="mmsecretary",
+                            operation_id="hermes-owner-proof", session_id=call.session_id, turn_id=call.turn_id,
+                            requested_model="host-selection", authorized=lambda current: current.session_id == call.session_id,
+                            prior_admission_possible=False, strict_model="fixture-model", max_output_tokens=256)
+                    except Exception as error:
+                        self.binding_errors.append((type(error).__name__, getattr(error, "code", None)))
+                        raise
                 return self.binding
 
             register_native_provider()
@@ -175,8 +184,10 @@ def main():
             self.on_upstream = provider_reply
 
         def conversation(self):
-            return self.native.run_conversation("Read the immutable fixture once and report it.",
-                                                task_id="original-owner-conversation")
+            result = self.native.run_conversation("Read the immutable fixture once and report it.",
+                                                 task_id="original-owner-conversation")
+            self.assertEqual(self.binding_errors, [])
+            return result
 
         def assert_original_requests(self, count):
             requests = self.rows("application_requests")
