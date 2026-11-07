@@ -1,0 +1,294 @@
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -2328,7 +2328,9 @@
+
+ def _runtime_agent_kwargs(runtime: dict) -> dict:
+     """AIAgent constructor kwargs shared by every runtime-provider resolution.
+-    ``request_overrides`` passes through as resolved so the provider's request body reaches each turn."""
++    ``request_overrides`` passes through as resolved so the provider's request body reaches each turn.
++    The host-bound resolver marker is retained only as gateway metadata; the
++    turn projection moves it outside the final AIAgent constructor kwargs."""
+     return {
+         "api_key": runtime.get("api_key"),
+         "base_url": runtime.get("base_url"),
+@@ -2338,7 +2340,8 @@
+         "command": runtime.get("command"),
+         "args": list(runtime.get("args") or []),
+         "credential_pool": runtime.get("credential_pool"),
+-        "request_overrides": runtime.get("request_overrides")}
++        "request_overrides": runtime.get("request_overrides"),
++        **({"source": "host_bound"} if runtime.get("source") == "host_bound" else {})}
+
+
+ @dataclasses.dataclass(frozen=True)
+--- a/gateway/run_turn_prepare.py
++++ b/gateway/run_turn_prepare.py
+@@ -239,6 +239,9 @@
+                 runtime["api_mode"], runtime["command"], tuple(runtime["args"]),
+             ),
+         }
++        if runtime_kwargs.get("source") == "host_bound":
++            # Admission metadata belongs to the route, never AIAgent kwargs.
++            route["source"] = "host_bound"
+         if tier is _TIER_FROM_RUNNER:
+             tier = getattr(self, "_service_tier", None)
+         if tier not in STATIC_TIERS:
+--- a/gateway/run_turn_runner.py
++++ b/gateway/run_turn_runner.py
+@@ -1225,7 +1225,7 @@
+             else:
+                 scope.enter_context(api_policy_scope())
+                 bind_turn_workspace(policy, self._ctx.session_id)
+-                result = self._run_sync_scoped()
++                result = self._run_sync_scoped(scope)
+             from gateway.session_results import execution_result
+             captured = execution_result.get()
+             if captured is not None:
+@@ -1238,7 +1238,7 @@
+                 )
+             return result
+
+-    def _run_sync_scoped(self):
++    def _run_sync_scoped(self, scope):
+         """Executor-thread body of the turn; returns the gateway result dict.
+
+         The turn message lives on the shared TurnContext (``ctx.message``) so ``_run_agent_inner`` sees
+@@ -1339,6 +1339,8 @@
+         runner._reasoning_config = reasoning_config
+         stream_consumer, stream_delta_cb, interim_cb, want_interim = self._setup_stream_consumer(platform_key)
+         turn_route = runner._resolve_turn_agent_config(ctx.message, model, runtime_kwargs)
++        from gateway.session_provider_context import provider_turn_scope
++        scope.enter_context(provider_turn_scope(runner, ctx, turn_route))
+         agent, reused_cached_agent = self._resolve_turn_agent(
+             turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+         )
+--- a/gateway/session_authority.py
++++ b/gateway/session_authority.py
+@@ -92,6 +92,9 @@
+     retire_timer: object = None
+     # Last-viewer detaches between losing their subscriber and recording the close (``detach``).
+     detaching: int = 0
++    # Last host-provider attempt on this original admission, retained after local close.
++    # A repeated executor cannot reconstruct it; the next native claim has a new stamp.
++    host_provider_claim: tuple | None = None
+
+     def __post_init__(self):
+         self.controls = PendingControls(self.event_stream)
+@@ -196,6 +199,11 @@
+         # route -> the compression-exhaustion auto-reset its LOCAL turn deferred: the store refuses a
+         # reset while that turn's admission is started, so the drain runs it once the turn settles.
+         self.deferred_resets = {}
++
++    def bind_provider_turn(self, context):
++        """Consume the host-provider entry for this already admitted native turn."""
++        from gateway.session_provider_context import bind_provider_turn
++        return bind_provider_turn(self, context)
+
+     def authorize(self, actor, ref, capability):
+         """Every handler calls this first, so a later ``self.sessions[ref.session_id]`` is
+--- /dev/null
++++ b/gateway/session_provider_context.py
+@@ -0,0 +1,97 @@
++"""Provider composition consumes the original admitted turn; it never admits work."""
++from contextlib import contextmanager
++from dataclasses import dataclass
++
++from hermes_cli.runtime_provider_host import is_host_bound_runtime
++from hermes_state_runtime import RuntimeStoreError
++
++
++@dataclass(frozen=True)
++class AdmittedProviderTurn:
++    authority: object
++    context: object
++    live: object
++    stamp: object
++    operation_id: str
++    epoch: int
++    generation: int
++
++    def current(self, _call=None):
++        a, c, live = self.authority, self.context, self.live
++        with live.event_stream.lock:
++            return (not a.retiring and not a.retired and not a.runner._draining
++                and a.epoch == self.epoch and a.sessions.get(c.session_id) is live
++                and live.event_stream.execution is self.stamp
++                and self.stamp == {"authority_epoch": self.epoch,
++                                   "execution_generation": self.generation,
++                                   "admission_id": self.operation_id}
++                and a.executing.get(c.session_id) == self.generation
++                and a.pending_stops.get(c.session_id) != self.generation
++                and a.delivered_stops.get(c.session_id) != self.generation
++                and callable(c._run_still_current) and c._run_still_current() is True)
++
++
++def bind_provider_turn(authority, context):
++    """The existing SessionAuthority's once-only entry, under its session lock."""
++    from gateway.session_authority import LiveSession
++    from gateway.turn_context import TurnContext
++    from hermes_state_runtime import get_session_admission
++    if type(context) is not TurnContext:
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    live = authority.sessions.get(context.session_id)
++    if (type(live) is not LiveSession or live.route != context.session_key
++            or live.source.platform != context.source.platform
++            or live.source.user_id != context.source.user_id):
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    with live.event_stream.lock:
++        stamp = live.event_stream.execution
++        epoch, generation = stamp.get("authority_epoch"), stamp.get("execution_generation")
++        admission_id = stamp.get("admission_id")
++    if (type(epoch) is not int or type(generation) is not int
++            or epoch < 1 or generation < 1 or not isinstance(admission_id, str)):
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    binding = AdmittedProviderTurn(authority, context, live, stamp, admission_id, epoch, generation)
++    if not binding.current():
++        raise RuntimeStoreError("stale_generation")
++    row = get_session_admission(authority.db, admission_id=admission_id)
++    if (not row or row["status"] != "started" or row["owner_epoch"] != epoch
++            or row["generation"] != generation or row["target_session_id"] != context.session_id):
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    claim = (epoch, generation, admission_id)
++    with live.event_stream.lock:
++        if not binding.current():
++            raise RuntimeStoreError("stale_generation")
++        if live.host_provider_claim == claim:
++            raise RuntimeStoreError("provider_turn_recovery_required")
++        # Provider/model/plugin replacement cannot make the same native admission new.
++        # Never clear on failure, close or unload. Native restart recovery fences started rows.
++        live.host_provider_claim = claim
++    return binding
++
++
++@contextmanager
++def provider_turn_scope(runner, turn_context, turn_route):
++    if turn_route.get("source") != "host_bound":
++        # A separately held role host already owns its original capability.
++        # Its runtime does not originate from the attended keyless resolver.
++        yield
++        return
++    if not is_host_bound_runtime(turn_route["runtime"]):
++        raise RuntimeStoreError("provider_turn_binding_invalid")
++    from gateway.session_authorities import require_active_authority
++    from gateway.session_authority import SessionAuthority
++    from hermes_cli.plugins import invoke_hook
++    authority = require_active_authority(runner)
++    if type(authority) is not SessionAuthority or authority.runner is not runner:
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    admitted = authority.bind_provider_turn(turn_context)
++    contexts = invoke_hook("provide_gateway_turn_context",
++        provider=turn_route["runtime"]["provider"], runner=runner,
++        turn_context=turn_context, turn_route=turn_route, admitted=admitted)
++    if len(contexts) != 1:
++        raise RuntimeStoreError("provider_turn_binding_required")
++    binding = contexts[0]
++    if not callable(getattr(binding, "__enter__", None)) or not callable(getattr(binding, "__exit__", None)):
++        raise RuntimeStoreError("provider_turn_binding_invalid")
++    with binding:
++        yield
+--- a/hermes_cli/cli_agent_setup_mixin.py
++++ b/hermes_cli/cli_agent_setup_mixin.py
+@@ -304,7 +304,9 @@
+             list(runtime.get("args") or []))
+         # A callable api_key is a bearer-token provider (Azure Entra ID): the OpenAI SDK
+         # invokes it per request, so skip string validation / placeholder substitution.
+-        if not callable(api_key) and not (isinstance(api_key, str) and api_key):
++        from hermes_cli.runtime_provider_host import is_host_bound_runtime
++        host_bound = is_host_bound_runtime(runtime)
++        if not host_bound and not callable(api_key) and not (isinstance(api_key, str) and api_key):
+             if _keyless_custom_base(base_url):
+                 # Placeholder key so the SDK doesn't reject the keyless local endpoint.
+                 api_key = "no-key-required"
+@@ -320,7 +322,7 @@
+                     print(f"\n{t('cli.startup.no_provider_configured')}")
+                 print(f"   {t('cli.startup.run_model_or_setup')}")
+                 return False
+-        if not isinstance(base_url, str) or not base_url:
++        if not host_bound and (not isinstance(base_url, str) or not base_url):
+             print(f"\n{t('cli.startup.empty_base_url')}")
+             return False
+         credentials_changed = api_key != self.api_key or base_url != self.base_url
+@@ -439,6 +441,9 @@
+             return False, exc
+         if not isinstance(runtime, dict):
+             return False, None
++        from hermes_cli.runtime_provider_host import is_host_bound_runtime
++        if is_host_bound_runtime(runtime):
++            return True, None
+         api_key = runtime.get("api_key")
+         base_url = runtime.get("base_url")
+         if callable(api_key) or (isinstance(api_key, str) and api_key):
+--- a/hermes_cli/plugins.py
++++ b/hermes_cli/plugins.py
+@@ -136,7 +136,7 @@
+     # pre_gateway_dispatch: once per incoming MessageEvent, after the internal-event guard, BEFORE
+     # auth/pairing and dispatch. Kwargs: event, gateway, session_store. Return {"action": "skip",
+     # "reason"} -> drop; {"action": "rewrite", "text"} -> replace event.text; "allow"/None -> normal.
+-    "pre_gateway_dispatch", "post_gateway_admission",  # post_*: fail-open consume, gateway/run_inbound_consumer.py
++    "pre_gateway_dispatch", "post_gateway_admission", "provide_gateway_turn_context",
+     # agent_loop_stopped: an agent turn was interrupted mid-run (/stop, or the running-agent
+     # fast-path of /new; see gateway/run.py::_interrupt_and_clear_session). Kwargs: session_key,
+     # platform, reason, invalidation_reason. Return values are ignored.
+--- a/hermes_cli/runtime_provider.py
++++ b/hermes_cli/runtime_provider.py
+@@ -1111,6 +1111,8 @@
+ def _ladder_rungs(requested_provider, explicit_api_key, explicit_base_url, target_model):
+     """Ladder rungs 2-8, yielded lazily so each is evaluated only when the previous one returned
+     nothing; the last rung (OpenRouter / bare-custom fallback) always yields a runtime."""
++    from hermes_cli.runtime_provider_host import resolve_host_bound_runtime
++    yield resolve_host_bound_runtime(requested_provider, explicit_api_key, explicit_base_url, _get_model_config())
+     yield _resolve_requested_shortcuts(requested_provider, explicit_api_key, explicit_base_url, target_model)
+     yield _named_custom_rung(requested_provider, explicit_api_key, explicit_base_url, target_model)
+     # If provider is "auto" (or unset) but config.yaml has an explicit base_url pointing at a custom/local
+--- /dev/null
++++ b/hermes_cli/runtime_provider_host.py
+@@ -0,0 +1,36 @@
++"""Registered gateway-bound providers: a keyless route is not an admission."""
++from __future__ import annotations
++
++from collections.abc import Mapping
++
++
++def resolve_host_bound_runtime(requested, explicit_api_key, explicit_base_url, model_config):
++    from providers import get_provider_profile
++    profile = get_provider_profile(requested) if requested and requested != "auto" else None
++    if profile is None or profile.host_bound_runtime is not True:
++        return None
++    if (explicit_api_key not in (None, "") or explicit_base_url not in (None, "")
++            or model_config.get("api_key") not in (None, "")
++            or model_config.get("base_url") not in (None, "")):
++        raise RuntimeError("Host-bound providers cannot accept endpoint or credential overrides")
++    return {"provider": profile.name, "requested_provider": requested,
++            "api_mode": profile.api_mode, "api_key": None, "base_url": None,
++            "credential_pool": None, "source": "host_bound"}
++
++
++def is_host_bound_runtime(runtime):
++    if not isinstance(runtime, Mapping):
++        return False
++    from providers import get_provider_profile
++    name = runtime.get("provider")
++    profile = get_provider_profile(name) if isinstance(name, str) else None
++    if profile is None or profile.host_bound_runtime is not True:
++        return False
++    if (runtime.get("requested_provider", name) not in (profile.name, *profile.aliases)
++            or runtime.get("api_mode") != profile.api_mode
++            or any(runtime.get(key) not in (None, "")
++                   for key in ("api_key", "base_url", "command", "acp_command"))
++            or any(runtime.get(key) not in (None, [], {})
++                   for key in ("credential_pool", "args", "acp_args", "fallback_model"))):
++        raise RuntimeError("Invalid host-bound provider runtime")
++    return True
+--- a/providers/base.py
++++ b/providers/base.py
+@@ -169,6 +169,10 @@
+     supports_health_check: bool = True  # False → doctor skips /models probe for this provider
+     # False → fetch_models returns None without a network call (catalog comes from an SDK/subprocess).
+     supports_model_listing: bool = True
++    # An explicitly registered provider may delegate credentials and admission to the
++    # authenticated gateway. Its provide_gateway_turn_context hook must bind each turn;
++    # this descriptor alone never authorizes inference or exempts an ordinary API provider.
++    host_bound_runtime: bool = field(default=False, kw_only=True)
+
+     # ── Provider-owned auth (optional; non-api-key plugins) ──────────
+     # ``auth_handler(action, args) -> bool``: ``hermes auth add|status|logout|refresh <name>`` calls it

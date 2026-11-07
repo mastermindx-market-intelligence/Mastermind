@@ -80,14 +80,18 @@ def main():
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
-    for directory in (package / "tests", package / "qualification"):
-        suite.addTests(unittest.TestLoader().discover(str(directory), pattern="test_*.py"))
+    suite.addTests(unittest.TestLoader().discover(str(package / "tests"), pattern="test_*.py"))
+    # The original unpatched ABI and the attended patched ABI have separate
+    # exact-source jobs. Keep every unpatched case, including attended agent
+    # construction; the gateway extension is exercised by qualify_gateway.py.
+    for pattern in ("test_installed_native.py", "test_native_schema.py", "test_attended_native.py"):
+        suite.addTests(unittest.TestLoader().discover(str(package / "qualification"), pattern=pattern))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({"tests_run": result.testsRun, "failures": len(result.failures),
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and result.testsRun == 69 and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 85 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":
