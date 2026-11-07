@@ -22,7 +22,8 @@
     "d833_head": "d833bd07819086908c7e6b4695c5da3b389eb2aa",
     "d833_reconciliation": "ci-d833-reconciliation.json",
     "d833_run": 42390001239,
-    "d833_status": "SHARD4_FAILED_OTHERS_SUCCESS_OR_RUNNING",
+    "d833_shard0_failure_receipt": "ci-d833-shard0-failure.json",
+    "d833_status": "TERMINAL_FAILURE_SHARDS_0_AND_4",
     "h2_upstream_required_test": "SUCCESS",
     "h2_upstream_run": 42376635292,
     "new_exact_head_hosted_result_required": true,
@@ -30,6 +31,11 @@
     "repair_qualification": "ci-repair-qualification.json"
   },
   "compatible_law_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+  "completed_hermes_successor": {
+    "head": "c71cc56c3631183efed8eccdb6a6c5060b1050a5",
+    "incorporated": false,
+    "return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710374623"
+  },
   "current_final_join": {
     "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
     "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
@@ -49,7 +55,7 @@
   },
   "current_original_carriers": {
     "Macro10740": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
-    "Mastermind2175": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
+    "Mastermind2175": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
     "contribution_adoption": "NOT_OBSERVED",
     "protected_Macro": "a83cfac0845baf5687d0864d56765973f69fe98d",
     "protected_Mastermind": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c"
@@ -66,6 +72,18 @@
     "source_flag_overrides": false
   },
   "h2_runtime_sources_changed": false,
+  "h3_origin": {
+    "cases_passed": 54,
+    "inherited_v2_fixture_cases": 32,
+    "new_origin_cases": 22,
+    "patch": "h3-origin-only.patch",
+    "patch_sha256": "4c05f0e022e3aa4c793dc7d86a18b08a37e260f2ab1256a83e27db038bfaa231",
+    "qualification": "h3-origin-qualification.json",
+    "reconstruction": "h3-origin-reconstruction.json",
+    "selectable_source_changed": false,
+    "strict_scope_qualified": false,
+    "whole_operation_meter_enforced": false
+  },
   "h3_outer_invalidation": {
     "cases_passed": 4,
     "guards": [

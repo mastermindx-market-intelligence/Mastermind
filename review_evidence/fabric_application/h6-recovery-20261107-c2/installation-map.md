@@ -291,3 +291,29 @@ source-linked983 returns6709365383/6709540563/6709649691. Its original controlle
 collection remains unreconciled, the destination absent, and acceptance/settlement
 NOT_RECORDED. The active root is pursuing the existing original collection
 contract. No replacement collection, acceptance or dispatch was attempted here.
+
+
+## H6 H3 origin qualification and terminal CI reconciliation — 2026-11-07
+
+H6 retains the same isolated registered contribution and original A–D mission.
+The unselectable H3 origin delta passed 54 cases (32 explicit-v2 fixture adaptations
+and 22 new cases), with exact two-file forward/reverse reconstruction. It closes
+coherent-origin/rebinding acceptance in the qualification artifact while preserving
+original request recovery and settlement. Whole-operation consumption, real
+quantities/physical entitlement, participating-writer fences and actual Go binding
+remain open. See h3-origin-qualification.json, h3-origin-reconstruction.json and
+h3-contract-findings.md in this evidence directory.
+
+Existing d833 CI42390001239 is terminal FAILURE: shards1/2/3/5 passed, shard4's
+retained-evidence findings are corrected at e65, and shard0 had20 namespace-conflict
+failures in the Hermes primary/retained enrollment fixtures. The completed
+Hermes c71cc56 contribution reports producer-scoped restoration; its actual source
+must be inspected and joined before claiming the repair here. No duplicate run
+was dispatched and no CI cancellation occurred.
+
+Original #2175 has now published bd119dfd protected-host/v10 source. Preserve
+its real parents, host-trio inverse, current entry semantics and active writer.
+The next source action is to compose completed bd119 and c71 into this isolated
+contribution while retaining H2's verified preloads, H5's actual outer GET, the
+coupled c07 worker owner and every exact retained identity record. Resulting-head
+CI and original runtime/product acceptance remain owed. MISSION_COMPLETE=false.

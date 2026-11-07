@@ -74,3 +74,46 @@ rejection defects are now closed only in this qualification delta. The changed
 outer physical/configuration binding, whole-operation meter enforcement,
 publication serialization, real quantities and settlement coverage remain open.
 No selectable native source, builder, installer or selected generation changed.
+
+
+## Observation-origin slice qualified; source remains unselectable
+
+The fourth baseline counterexample is now closed in a second, exact qualification-only
+delta, h3-origin-only.patch. Apply it after h3-outer-invalidation-only.patch and only
+after verifying the whole preimages and postimages in h3-origin-reconstruction.json.
+The original five-counterexample file remains unchanged as baseline evidence.
+
+The explicit v2 integer observation binds its inner origin to the outer successful
+observation's original attempt ID and binding, and to the incumbent current
+configuration owner. Missing/old-schema/unsupported origin refuses. The existing
+cache publisher retains its own matched attempt ID, never creates a replacement
+identity, and refuses removed/mismatched original completions or a changed current
+binding. MiniMax reads its canonical provider row rather than a manufactured
+accounts copy. Legacy percentage publication does not acquire strict authority.
+
+For a new APPLICATION request, the actual Broker also retains the admitted
+configuration document, capacity generation, scope and window definitions. It
+refuses rebinding, observation-time regression, reused observation IDs with changed
+content, contradictory same-clock data, or a different epoch/unit/limit/boundary.
+Original request recovery runs first; prior pending/unknown/terminal requests and
+settlement remain accessible after binding changes. A newer coherent observation
+does not enlarge or replenish the original reservation.
+
+The v2 observed_at clock is explicitly the incumbent original refresh-start clock,
+normalized from an aware ISO timestamp to epoch seconds. It must equal the retained
+outer refreshed_at; a distinct provider snapshot time must not be relabeled as this
+clock. This contract does not manufacture a current observation from the wall clock.
+
+The exact joined source passed 54 cases: 32 inherited cases using explicit synthetic
+v2 origins plus 22 new origin/recovery/publisher cases, with no failures/errors/skips.
+h3-origin-qualification.json and its retained log record that run. Independent
+forward and reverse application reproduced every regular file in the disposable
+stage; only quota_remote.py and lease_broker.py changed.
+
+The tests use a clearly synthetic binding lookup. Actual Go has no joined incumbent
+binding producer and remains strict-unqualified. No real integer capacity producer,
+physical subscription/entitlement, billable transport bound or participating-writer
+serialization is established. The existing cache lock does not fence a configuration
+writer that ignores it, and a Broker read does not seal credential use through send.
+The fifth whole-operation consumption counterexample remains open. No native
+builder, installer, selected generation, live cache or provider was changed.

@@ -1,0 +1,123 @@
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -961,0 +962,3 @@
++        if attempt_id is not None and not matched:
++            # Superseded or removed original completion cannot recreate a row.
++            return False, current
+@@ -967,0 +971,5 @@
++        # Recheck the incumbent local configuration owner at publication.
++        # This is a source-origin fence, not proof that every writer shares it.
++        if (attempt_id is not None and provider in ("glm", "minimax")
++                and _config_binding(provider) != binding):
++            return False, current
+@@ -969,0 +978,5 @@
++        # Keep the existing successful refresh identity; never mint a second one.
++        # Legacy unbound publication may still support a percentage read view,
++        # but cannot supply a strict integer-capacity origin.
++        if matched:
++            row["observation_id"] = attempt_id
+@@ -1222 +1235,2 @@
+-    entry = cache[provider]["accounts"][account]
++    # MiniMax is canonically a provider row; never admit an accounts copy.
++    entry = cache[provider] if provider == "minimax" else cache[provider]["accounts"][account]
+@@ -1228 +1242 @@
+-              "source", "observed_at", "windows"}
++              "source", "observed_at", "windows", "origin"}
+@@ -1230 +1244 @@
+-            or envelope["schema"] != "mastermind.account_capacity_observation.v1"
++            or envelope["schema"] != "mastermind.account_capacity_observation.v2"
+@@ -1235,0 +1250,16 @@
++    # Current origin comes from the incumbent configuration owner, not the
++    # row being admitted. Unsupported owners (including the unjoined Go owner)
++    # remain unqualified; a cache field cannot create that capability.
++    binding = _config_binding(provider)
++    origin = envelope["origin"]
++    if (type(binding) is not dict or set(binding) != {"config_generation", "endpoint"}
++            or not isinstance(binding["config_generation"], str)
++            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", binding["config_generation"])
++            or not isinstance(binding["endpoint"], str)
++            or _public_endpoint(binding["endpoint"]) != binding["endpoint"]
++            or type(origin) is not dict or set(origin) != {"binding", "observation_id"}
++            or origin["binding"] != binding or entry.get("binding") != binding
++            or not isinstance(origin["observation_id"], str)
++            or not re.fullmatch(r"[0-9a-f]{32}", origin["observation_id"])
++            or origin["observation_id"] != entry.get("observation_id")):
++        raise ValueError("capacity_origin_unqualified")
+@@ -1236,0 +1267,5 @@
++    # v2 observed_at is the incumbent original refresh-start clock, expressed
++    # as an aware ISO timestamp and compared as normalized epoch seconds. A
++    # distinct provider snapshot time must not be substituted into this field.
++    if number(entry.get("refreshed_at"), positive=True) != observed:
++        raise ValueError("capacity_origin_clock_changed")
+@@ -1268 +1303,2 @@
+-            "source": envelope["source"], "observed_at": observed, "windows": windows}
++            "source": envelope["source"], "observed_at": observed, "windows": windows,
++            "origin": {"binding": dict(binding), "observation_id": origin["observation_id"]}}
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -3140,0 +3141,63 @@
++    def _application_account_origin(self, turn, lease, document, now):
++        """Refuse new strict dispatch after rebind without changing original recovery."""
++        raw = lease["account_admission_json"]
++        if raw is None:
++            return None
++        try:
++            import quota_circuit
++            import quota_remote
++            if hashlib.sha256(raw.encode()).hexdigest() != lease["account_admission_digest"]:
++                raise ValueError("retained account evidence changed")
++            prior = json.loads(raw)
++            provider = self.provider_name(turn["pool"])
++            if (prior.get("schema") != "mastermind.account_admission.v1"
++                    or any(prior.get(key) != turn[key] for key in ("account", "model"))
++                    or prior.get("pool") != provider):
++                raise ValueError("retained account identity changed")
++            # Pin the admitted owner document, including shared-scope membership
++            # and policy. A new observation cannot silently revise that contract.
++            if hashlib.sha256(_application_json(document).encode()).hexdigest() != prior["config_digest"]:
++                raise ValueError("account configuration changed")
++            spec = document["providers"][provider]
++            members = [a for a in spec["accounts"] if a["name"] == turn["account"]]
++            if len(members) != 1 or spec.get("enabled", True) is not True:
++                raise ValueError("account unavailable")
++            account = members[0]
++            if (account.get("enabled", True) is not True
++                    or account["capacity_generation"] != prior["capacity_generation"]):
++                raise ValueError("capacity generation changed")
++            token = _APPLICATION_ACCOUNTS.set(document)
++            try:
++                scope = quota_circuit.scope_for(self, provider, turn["account"])
++            finally:
++                _APPLICATION_ACCOUNTS.reset(token)
++            if scope != prior["quota_scope"]:
++                raise ValueError("account scope changed")
++            retained = prior["windows"]
++            required = [row["kind"] for row in retained]
++            if not required or len(required) != len(set(required)):
++                raise ValueError("retained windows invalid")
++            cache, _ = quota_remote.read_account_admission_cache()
++            current = quota_remote.account_admission_observation(
++                cache, provider=provider, account=turn["account"],
++                generation=account["capacity_generation"], quota_scope=scope,
++                required_windows=required, now_ts=now)
++            previous = prior["observation"]
++            if (previous["schema"] != "mastermind.account_capacity_observation.v2"
++                    or current["origin"]["binding"] != previous["origin"]["binding"]
++                    or current["observed_at"] < previous["observed_at"]
++                    or (current["origin"]["observation_id"] == previous["origin"]["observation_id"]
++                        and current != previous)
++                    or (current["observed_at"] == previous["observed_at"]
++                        and current["windows"] != previous["windows"])
++                    or set(previous["windows"]) != set(required)
++                    or any(any(current["windows"][kind][key] != previous["windows"][kind][key]
++                               for key in ("epoch", "unit", "limit", "starts_at_epoch", "reset_at_epoch"))
++                           for kind in required)):
++                raise ValueError("admitted account origin changed")
++            # A newer coherent observation of the same binding does not erase
++            # this lease's reservation or give it a new upstream window.
++            return prior
++        except (OSError, KeyError, TypeError, ValueError, OverflowError):
++            raise ApplicationAdmissionError("account_origin_unqualified") from None
++
+@@ -3420,0 +3484 @@
++            self._application_account_origin(turn, lease, document, now)

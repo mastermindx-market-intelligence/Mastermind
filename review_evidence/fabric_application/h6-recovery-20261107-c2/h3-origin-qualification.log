@@ -1,0 +1,60 @@
+test_active_claim_cannot_be_acknowledged_away (__main__.main.<locals>.OriginTests.test_active_claim_cannot_be_acknowledged_away) ... ok
+test_actual_claim_chooses_near_and_retains_complete_evidence (__main__.main.<locals>.OriginTests.test_actual_claim_chooses_near_and_retains_complete_evidence) ... ok
+test_coverage_is_independent_for_each_window (__main__.main.<locals>.OriginTests.test_coverage_is_independent_for_each_window) ... ok
+test_cumulative_reserve_is_independent_of_short_window (__main__.main.<locals>.OriginTests.test_cumulative_reserve_is_independent_of_short_window) ... ok
+test_duplicate_or_nonfinite_cache_is_refused (__main__.main.<locals>.OriginTests.test_duplicate_or_nonfinite_cache_is_refused) ... ok
+test_fractional_or_boolean_meter_cannot_become_a_hard_budget (__main__.main.<locals>.OriginTests.test_fractional_or_boolean_meter_cannot_become_a_hard_budget) ... ok
+test_gateway_dispatch_and_terminal_receipt_retain_selected_account (__main__.main.<locals>.OriginTests.test_gateway_dispatch_and_terminal_receipt_retain_selected_account) ... ok
+test_lease_binding_is_immutable (__main__.main.<locals>.OriginTests.test_lease_binding_is_immutable) ... ok
+test_legacy_terminal_lease_needs_qualified_migration_coverage (__main__.main.<locals>.OriginTests.test_legacy_terminal_lease_needs_qualified_migration_coverage) ... ok
+test_missing_h2_envelope_fails_closed (__main__.main.<locals>.OriginTests.test_missing_h2_envelope_fails_closed) ... ok
+test_monthly_exhaustion_is_independent_of_near_weekly_reset (__main__.main.<locals>.OriginTests.test_monthly_exhaustion_is_independent_of_near_weekly_reset) ... ok
+test_null_clock_is_not_expiry_or_unknown_remaining (__main__.main.<locals>.OriginTests.test_null_clock_is_not_expiry_or_unknown_remaining) ... ok
+test_observation_replay_cannot_restore_previous_allowance (__main__.main.<locals>.OriginTests.test_observation_replay_cannot_restore_previous_allowance) ... ok
+test_origin_actual_go_owner_remains_unsupported (__main__.main.<locals>.OriginTests.test_origin_actual_go_owner_remains_unsupported) ... ok
+test_origin_clock_normalized_and_original (__main__.main.<locals>.OriginTests.test_origin_clock_normalized_and_original) ... ok
+test_origin_coherent_rebind_cannot_fund_old_turn (__main__.main.<locals>.OriginTests.test_origin_coherent_rebind_cannot_fund_old_turn) ... ok
+test_origin_cross_epoch_refuses_new_request_preserves_recovery (__main__.main.<locals>.OriginTests.test_origin_cross_epoch_refuses_new_request_preserves_recovery) ... ok
+test_origin_current_owner_rebound (__main__.main.<locals>.OriginTests.test_origin_current_owner_rebound) ... ok
+test_origin_legacy_percentage_publish_never_mints_strict_origin (__main__.main.<locals>.OriginTests.test_origin_legacy_percentage_publish_never_mints_strict_origin) ... ok
+test_origin_minimax_uses_canonical_provider_row (__main__.main.<locals>.OriginTests.test_origin_minimax_uses_canonical_provider_row) ... ok
+test_origin_missing_old_schema_invalid_origin_refused (__main__.main.<locals>.OriginTests.test_origin_missing_old_schema_invalid_origin_refused) ... ok
+test_origin_new_coherent_observation_preserves_admitted_reservation (__main__.main.<locals>.OriginTests.test_origin_new_coherent_observation_preserves_admitted_reservation) ... ok
+test_origin_old_inner_spliced_into_new_outer (__main__.main.<locals>.OriginTests.test_origin_old_inner_spliced_into_new_outer) ... ok
+test_origin_outer_binding_rebound (__main__.main.<locals>.OriginTests.test_origin_outer_binding_rebound) ... ok
+test_origin_pending_error_refusal_remain_closed (__main__.main.<locals>.OriginTests.test_origin_pending_error_refusal_remain_closed) ... ok
+test_origin_publisher_owner_rebind_preserves_pending (__main__.main.<locals>.OriginTests.test_origin_publisher_owner_rebind_preserves_pending) ... ok
+test_origin_publisher_removed_marker_never_recreates_row (__main__.main.<locals>.OriginTests.test_origin_publisher_removed_marker_never_recreates_row) ... ok
+test_origin_publisher_retains_original_matched_attempt (__main__.main.<locals>.OriginTests.test_origin_publisher_retains_original_matched_attempt) ... ok
+test_origin_publisher_wrong_original_identity_preserves_marker (__main__.main.<locals>.OriginTests.test_origin_publisher_wrong_original_identity_preserves_marker) ... ok
+test_origin_same_clock_cannot_change_observation (__main__.main.<locals>.OriginTests.test_origin_same_clock_cannot_change_observation) ... ok
+test_origin_same_id_cannot_change_content (__main__.main.<locals>.OriginTests.test_origin_same_id_cannot_change_content) ... ok
+test_origin_scope_membership_document_cannot_change (__main__.main.<locals>.OriginTests.test_origin_scope_membership_document_cannot_change) ... ok
+test_origin_terminal_recovery_after_rebind (__main__.main.<locals>.OriginTests.test_origin_terminal_recovery_after_rebind) ... ok
+test_origin_unknown_recovery_and_settlement_after_rebind (__main__.main.<locals>.OriginTests.test_origin_unknown_recovery_and_settlement_after_rebind) ... ok
+test_origin_window_definition_cannot_change (__main__.main.<locals>.OriginTests.test_origin_window_definition_cannot_change) ... ok
+test_original_claim_recovers_after_response_loss_without_reallocation (__main__.main.<locals>.OriginTests.test_original_claim_recovers_after_response_loss_without_reallocation) ... ok
+test_original_usage_settles_on_selected_account_after_unknown_response (__main__.main.<locals>.OriginTests.test_original_usage_settles_on_selected_account_after_unknown_response) ... ok
+test_other_window_exhaustion_beats_expiry (__main__.main.<locals>.OriginTests.test_other_window_exhaustion_beats_expiry) ... ok
+test_policy_removal_cannot_bypass_retained_liability (__main__.main.<locals>.OriginTests.test_policy_removal_cannot_bypass_retained_liability) ... ok
+test_real_fixed_policy_reader_supplies_existing_r31_thresholds (__main__.main.<locals>.OriginTests.test_real_fixed_policy_reader_supplies_existing_r31_thresholds) ... ok
+test_real_policy_reader_refuses_malformed_promotion (__main__.main.<locals>.OriginTests.test_real_policy_reader_refuses_malformed_promotion) ... ok
+test_release_does_not_replenish_unrefreshed_allowance (__main__.main.<locals>.OriginTests.test_release_does_not_replenish_unrefreshed_allowance) ... ok
+test_reserves_survive_expiry_ranking (__main__.main.<locals>.OriginTests.test_reserves_survive_expiry_ranking) ... ok
+test_reset_never_discards_a_cross_window_terminal_liability (__main__.main.<locals>.OriginTests.test_reset_never_discards_a_cross_window_terminal_liability) ... ok
+test_revocation_between_preview_and_claim_same_mtime (__main__.main.<locals>.OriginTests.test_revocation_between_preview_and_claim_same_mtime) ... ok
+test_scope_change_cannot_hide_original_account_liability (__main__.main.<locals>.OriginTests.test_scope_change_cannot_hide_original_account_liability) ... ok
+test_shared_aliases_and_consumers_do_not_duplicate_budget (__main__.main.<locals>.OriginTests.test_shared_aliases_and_consumers_do_not_duplicate_budget) ... ok
+test_source_change_before_insert_refuses_without_a_lease (__main__.main.<locals>.OriginTests.test_source_change_before_insert_refuses_without_a_lease) ... ok
+test_stale_future_past_null_and_wrong_generation_observations (__main__.main.<locals>.OriginTests.test_stale_future_past_null_and_wrong_generation_observations) ... ok
+test_strict_pin_never_substitutes (__main__.main.<locals>.OriginTests.test_strict_pin_never_substitutes) ... ok
+test_two_claims_compete_for_one_window_budget_across_models (__main__.main.<locals>.OriginTests.test_two_claims_compete_for_one_window_budget_across_models) ... ok
+test_unconfigured_policy_preserves_incumbent_selection (__main__.main.<locals>.OriginTests.test_unconfigured_policy_preserves_incumbent_selection) ... ok
+test_unjoined_shared_alias_cannot_bypass_strict_owner (__main__.main.<locals>.OriginTests.test_unjoined_shared_alias_cannot_bypass_strict_owner) ... ok
+test_unknown_or_zero_claim_ceiling_fails_closed (__main__.main.<locals>.OriginTests.test_unknown_or_zero_claim_ceiling_fails_closed) ... ok
+
+----------------------------------------------------------------------
+Ran 54 tests in 2.327s
+
+OK
+{"output": "/private/tmp/h6-h3-origin-xsvqchj_/qualification.json", "tests": 54, "success": true}
