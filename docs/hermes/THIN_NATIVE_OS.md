@@ -813,3 +813,106 @@ outstanding pointer; absence of database rows alone cannot prove NOT_SENT.
 No historical refusal code or original request ID is fabricated. The completed
 canary remains preserved and must never be recreated or resent. Final useful
 native answer/history/reopen acceptance and the protected queue remain owed.
+
+## Native original journey proven on 1f and presentation follow-up
+
+This section supersedes the earlier “useful answer/history/reopen owed” frontier.
+The original operation, managed M2 workspace, branch and one native UI carrier
+remain in use. Protected composition 77d6eab59feb688e95caf203aa53e592189d1d1f
+retains the 1f application tree e3bd08a36c4ea2363a12b061bf47f70639dd3dbe;
+the running package is still truthfully identified as source
+1f431c6c4087656ae3dbdc683d96ee2572f061c9, build
+hermes-thin-native-1f431c6c4087-20261107-pro-05. Its raw binary SHA256 is
+1e29d9c645207703feaea54b9281708a357f1728b43c7a9a5ecdf3c9a8db2d93.
+[Build receipt](evidence/thin-native-os-20261107/1f431c6c4087-candidate-build-receipt.json)
+SHA256 47a59f7a77c7ea9d6a246f61611db822ebe92608a032b3fe17ff315fc564e702.
+
+The original creation 9fbc8f4abb944ab1a170b4990e59f729 was already recovered
+through the real 386 app, without a replacement create. All work below uses its
+same logical and stored session:
+local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb.
+
+### Actual packaged path, 2026-11-07 UTC
+
+| Time | Observed result |
+| --- | --- |
+| 08:55:03 | Source/build/native-client identity and Signed in confirmed in one 1f window, PID 80261. Authentication remained stable beyond the old 300-second timer. |
+| 08:55:45–08:58:17 | Connect returned Hermes 0.23.0 with no held pointer. Local history opened the original empty conversation; qualified mode=ro metadata bound selected row 3 to the exact 9fbc receipt/session. |
+| 08:59:13.851 | One explicit useful acceptance-checklist request was sent from the native composer. Exact draft and enabled action were read before dispatch. |
+| 08:59:26 | The app displayed request 5226a1441f084477a0fc523796fbe55f, admission d901546607d64c1e9c7cd195e4ddf532, status started. It cleared that draft and held further sending. |
+| 09:02:06–09:02:43 | A subsequent original-request observation displayed Outcome unknown and retained the same pointer/admission. One Check previous request at 09:02:17.551 recovered terminal/completed and rendered the original answer. No resend, replacement create or cancel occurred. The cause of the unresolved read is not attributed. |
+| 09:03:29 | Canonical mode=ro corroboration matched request, admission, original create receipt and session: exactly one user message plus one assistant answer, no pending admissions, no transcript truncation. |
+| 09:03:41–09:04:45 | Explicit Sign out removed the private conversation. Normal window close exited 80261; one normal reopen created PID 75264 with one signed-out window. No Hermes service was restarted. |
+| 09:05:04–09:11:31 | One reconnect Sign in completed. Connect and Local history reopened both original messages, each exactly matching the canonical transcript; no held pointer and no additional submit/create/cancel. Credential-ceremony actor is not attributed. |
+| 09:13:11 | The existing Organization and goal lineage disclosure opened the Paperclip Organization consumer. Its read-only/source-not-qualified notice remains intact; absence of selected-mission qualification is not claimed as no team or no work. |
+
+The new useful prompt is a requirements-to-checklist request, not a second canary
+and not a replay of the earlier 386 draft. The earlier draft's unobserved refusal
+code remains unclaimed. The accepted native canary and its source receipt are
+unchanged.
+
+### Exact evidence and effect disposition
+
+All copied receipts and their SHA256s are indexed in
+[the evidence manifest](evidence/thin-native-os-20261107/manifest.json).
+Material links:
+
+- [Started original request](evidence/thin-native-os-20261107/1f431c6c4087-uat-useful-started-projection.json):
+  dbe12a5d23783bdcd50e032762da065a1ad0ee9ffb9be15a42e7dfb30d838a7d.
+  This declared projection omits unrelated history-row titles and retains the
+  original raw receipt SHA256 56ca2869e10c12a7149a50d032ca11b3871725ba3749fa6404f406ae551c142e.
+- [Unknown-outcome UI](evidence/thin-native-os-20261107/1f431c6c4087-uat-useful-original-result.json):
+  bff4790985a048d979267d018c90d8488f864d44136a816f345e76b7d4dff976.
+- [Original recovery and answer](evidence/thin-native-os-20261107/1f431c6c4087-uat-original-recovery-result.json):
+  30a5678d00fecee8ae2984654188e5dd29e770020f0922bba5c5b57170cfe03a.
+- [Canonical original admission/transcript](evidence/thin-native-os-20261107/1f431c6c4087-uat-useful-canonical-answer.json):
+  f128fe6d3cbd90cf0bbf1505d4dd2030d7f90d88d66224e47a3993c58ba92f51.
+- [Logout cleared private content](evidence/thin-native-os-20261107/1f431c6c4087-uat-logout-cleared.json):
+  472797caf3f9eea5bcb66391e9a3e8fe0d3835e4ae3136e691c54061ed08535a.
+- [Reconnected exact original answer](evidence/thin-native-os-20261107/1f431c6c4087-uat-reconnect-original-answer.json):
+  e004e3e8286029ed4a5b613002d4ff88b118cabbea7675b8a42c94e699ea81c0.
+- [Preserved organization consumer](evidence/thin-native-os-20261107/1f431c6c4087-uat-organization-preserved.json):
+  ac1545f7e8d0ad7c08592fc352492684661d0e7588c9acc2c7005ca03e6bb806.
+
+Current original effect is terminal/completed, with its pointer settled by the
+incumbent native port. The single 1f app remains PID 75264, signed in with the
+original answer displayed. No new conversation/session owner, pointer deletion,
+worker dispatch, accepted-canary replay or active-service restart was introduced.
+
+### Two observed presentation repairs
+
+The real logout correctly returned USER_SIGNED_OUT, but App's generic nonempty
+reason handler displayed “Sign-in could not complete.” The presenter now excludes
+only signed_out/USER_SIGNED_OUT from failure feedback. The native reason,
+credential deletion, privacy epoch and genuine failure/expiry paths remain intact.
+
+During an admitted original request, the retained historical session could still
+have toolAccess=UNQUALIFIED after recovery cleared stale send eligibility.
+The panel now says sending is paused until that same session's original outcome
+is confirmed. A terminal original awaiting a successful history refresh says to
+refresh before sending. These are display-only distinctions, bound to the
+selected session; they neither infer qualified tools nor change send eligibility.
+
+The existing logout and recovery assertions were preserved and extended.
+App 107 tests pass, HermesNativePanel 19 tests pass, TypeScript noEmit passes.
+The first combined run exposed one invalid newly added negative fixture
+(null live-state flags without a history-check marker); the fixture was corrected
+to a valid genuinely unqualified live session, and all 19 panel cases then passed.
+[Exact test/source receipt](evidence/thin-native-os-20261107/ui-feedback-tests-20261107-pro-06.json)
+records both runs, log hashes and the four changed-file hashes. No native bridge,
+auth or ownership implementation changed in this presentation follow-up.
+
+### Next permitted release milestone
+
+Continue with one package of the presentation follow-up source, retain its own
+identity, and verify the changed installed feedback without replaying accepted
+model work. Consume exact-current-head trusted required CI, then the permitted
+normal protected squash queue and actual merged-source qualification before the
+incumbent app-only installation. Do not relabel the 1f proof as execution of the
+later package or treat source tests/green CI/queue admission as installation.
+
+Apple DeveloperID signing, notarization and updater distribution remain
+unqualified. The unimported S1 Stop patch and advanced remote/worker scopes remain
+separate holds. The mounted organization consumer has no new selected-mission
+source qualification. Retained installed fca, backend 09b/call 5913 and all accepted
+canary evidence remain untouched.

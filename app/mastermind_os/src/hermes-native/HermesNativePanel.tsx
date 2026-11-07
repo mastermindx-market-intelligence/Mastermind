@@ -144,6 +144,13 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
   const unresolved = Boolean(held || unknownAdmission);
   const pending = Boolean(session?.running || activeAdmission);
   const sendEligible = Boolean(session?.canSend || session?.sendCheckRequired);
+  // Describe the original effect without inferring a new tool-policy observation.
+  const sessionIds = session ? [session.id, session.storedId] : [];
+  const receiptForSession = receipt && sessionIds.includes(receipt.sessionId) ? receipt : undefined;
+  const originalUnsettledForSession = Boolean(
+    (held?.kind === "send" && sessionIds.includes(held.sessionId)) ||
+    (receiptForSession && receiptForSession.status !== "terminal") ||
+    session?.pending.some(row => row.status !== "terminal"));
   const canSend = sendEligible && !busy && !unresolved && !pending && !session?.promptsPending && draft.trim().length > 0 && new TextEncoder().encode(draft).length <= 32768;
 
   if (!port.available()) return <section className="hermes-native-panel" aria-label={t("Native Hermes", "原生 Hermes")}>
@@ -188,9 +195,11 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       <p className="hermes-native-muted">{t("Configured model", "已配置模型")}: {session.requestedModel || t("Not reported", "未提供")} · {
         session.toolAccess === "ADVISORY_READ_ONLY" ? t("Local planning advice and capacity previews", "本地规划建议与容量预览")
           : session.toolAccess === "CAPACITY_READ_ONLY" ? t("Capacity catalog and route preview only", "仅容量目录与路由预览")
-          : session.toolAccess === "NONE" ? t("Text only", "仅文本") : session.sendCheckRequired
-            ? t("Saved history · current send access is checked when you send", "已保存的历史 · 发送时检查当前权限")
-            : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送")}</p>
+          : session.toolAccess === "NONE" ? t("Text only", "仅文本")
+          : originalUnsettledForSession ? t("Sending is paused until the original request’s outcome is confirmed.", "确认原请求的结果前，发送已暂停。")
+          : session.sendCheckRequired ? t("Saved history · current send access is checked when you send", "已保存的历史 · 发送时检查当前权限")
+          : receiptForSession?.status === "terminal" && !sendEligible ? t("Refresh the original conversation before sending again.", "请先刷新原会话，再继续发送。")
+          : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送")}</p>
       <div className="hermes-native-messages" tabIndex={0} role="log" aria-label={t("Native conversation messages", "原生会话消息")} aria-live="polite">
         {session.historyTruncated && <p>{t("Showing the latest available messages, up to 100.", "显示最近可用的消息，最多 100 条。")}</p>}
         {session.messages.length === 0 && <p className="hermes-native-muted">{t("The native conversation is ready. Start with your question or project context.", "原生会话已就绪。请输入问题或项目背景。")}</p>}
