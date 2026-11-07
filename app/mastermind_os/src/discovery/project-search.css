@@ -1,0 +1,395 @@
+/*
+ * ProjectSearchWorkspace styles — scoped `project-search` family.
+ *
+ * Quiet Noir panel treatment (dark) and quiet cool-canvas panel (light), built
+ * only from the existing shell token aliases (--bg/--panel/--raised/--border/
+ * --text/--muted/--brass/--focus). No hex colors, no palette, no new root
+ * tokens, no runtime injection, no colored edge accents.
+ *
+ * AT06 desktop geometry: results 460 + gap 44 + quiet preview 768 = 1272 max.
+ * The shell owns the outer gutters, so this component has no horizontal
+ * padding; the minmax(0, Nfr) slots keep the proportions as width shrinks.
+ */
+
+.project-search {
+  color: var(--text);
+  padding: 0;
+  max-width: 1272px;
+}
+
+.project-search__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  text-transform: none;
+  color: var(--text);
+}
+
+@media (max-width: 600px) {
+  .project-search__title {
+    font-size: 30px;
+    line-height: 36px;
+  }
+}
+
+.project-search--zh .project-search__title,
+.project-search--zh .project-search__previewTitle,
+.project-search--zh .project-search__filter {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.project-search__scope {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* --- Panels ------------------------------------------------------------- */
+
+.project-search__controls,
+.project-search__results,
+.project-search__preview {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.project-search__controls {
+  padding: 14px 16px;
+  margin-top: 16px;
+}
+
+.project-search__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 460fr) minmax(0, 768fr);
+  gap: 44px;
+  align-items: start;
+  margin-top: 20px;
+}
+
+/* Structural slots never overflow their fraction columns. */
+.project-search__body,
+.project-search__queryRow,
+.project-search__previewBody {
+  min-width: 0;
+}
+
+.project-search__queryRow {
+  margin-top: 10px;
+}
+
+.project-search__results {
+  padding: 4px 0 8px;
+}
+
+.project-search__preview {
+  padding: 16px 18px;
+}
+
+/* Theme material differences: same IA, quieter layering in dark. */
+.project-search--dark .project-search__preview {
+  background: var(--raised);
+}
+
+.project-search--light .project-search__preview {
+  background: var(--bg);
+}
+
+/* --- Controls ------------------------------------------------------------ */
+
+.project-search__filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.project-search__filter {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.project-search__filter[aria-pressed='true'] {
+  color: var(--brass);
+  background: var(--raised);
+}
+
+.project-search__queryLabel {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.project-search__queryCluster {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+.project-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+
+.project-search__input::placeholder {
+  color: var(--muted);
+}
+
+.project-search__submit,
+.project-search__rowAction,
+.project-search__pagerButton {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 16px;
+  cursor: pointer;
+}
+
+.project-search__submit:hover:enabled,
+.project-search__rowAction:hover:enabled,
+.project-search__pagerButton:hover:enabled,
+.project-search__filter:hover:enabled {
+  background: var(--panel);
+}
+
+.project-search--dark .project-search__submit:hover:enabled,
+.project-search--dark .project-search__rowAction:hover:enabled,
+.project-search--dark .project-search__pagerButton:hover:enabled,
+.project-search--dark .project-search__filter:hover:enabled {
+  background: var(--panel);
+}
+
+.project-search button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.project-search button:focus-visible,
+.project-search input:focus-visible,
+.project-search summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.project-search__status {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-height: 1.2em;
+  overflow-wrap: anywhere;
+}
+
+.project-search__empty {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* --- Results list -------------------------------------------------------- */
+
+.project-search__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.project-search__row {
+  padding: 14px 16px;
+}
+
+.project-search__row + .project-search__row {
+  border-top: 1px solid var(--border);
+}
+
+.project-search__rowBody {
+  min-width: 0;
+}
+
+.project-search__rowTitle {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.project-search__rowMeta {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.project-search__rowExcerpt {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.project-search__rowActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.project-search__rowAction[aria-pressed='true'] {
+  color: var(--brass);
+}
+
+.project-search__pager {
+  padding: 12px 16px 6px;
+}
+
+/* --- Details / provenance ------------------------------------------------ */
+
+.project-search__details {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.project-search__details summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.project-search__provenance {
+  margin: 8px 0 0;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-search__provenance dt {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.project-search__provenance dd {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* --- Selected preview ---------------------------------------------------- */
+
+.project-search__previewTitle {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.project-search__previewHeading {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.project-search__previewMeta {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.project-search__previewExcerpt {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.project-search__previewProvenanceLabel {
+  margin: 14px 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.project-search__previewEmpty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* --- Narrow shell (mobile 390: 24px gutters each side -> 342 content) ---- */
+
+@media (max-width: 720px) {
+  .project-search__columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    margin-top: 16px;
+  }
+
+  /* Intentional reduced metadata: excerpts are read through explicit Inspect,
+     never stacked automatically after every row. */
+  .project-search__rowExcerpt {
+    display: none;
+  }
+
+  .project-search__rowAction,
+  .project-search__submit,
+  .project-search__pagerButton {
+    min-height: 44px;
+  }
+
+  .project-search__input {
+    min-height: 44px;
+  }
+
+  .project-search__rowAction {
+    flex: 1 1 auto;
+  }
+
+  .project-search__rowAction--open {
+    flex: 0 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-search *,
+  .project-search *::before,
+  .project-search *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* All pointer targets, including filters and provenance disclosure. */
+.project-search button,
+.project-search input,
+.project-search summary { min-height:44px; }
+.project-search summary { display:flex; align-items:center; cursor:pointer; }
+.project-search__resultsHeading { margin:0 0 16px; font-family:var(--font-ui); font-size:16px; font-weight:500; color:var(--text); }

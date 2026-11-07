@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import ssl
+import sys
 
 import pytest
 
@@ -284,3 +286,52 @@ def test_default_transport_refuses_unreviewed_method_path_before_network():
             await transport.aclose()
 
     assert asyncio.run(exercise()) == "SLACK_API_REQUEST_REFUSED"
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
+def test_default_transport_uses_platform_trust_with_certificate_verification(
+    monkeypatch, platform
+):
+    slack_web_api = _module()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    calls = []
+
+    def create_context(**kwargs):
+        calls.append(kwargs)
+        return context
+
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(slack_web_api.ssl, "create_default_context", create_context)
+    transport = slack_web_api.UrllibSlackHttpTransport()
+
+    assert calls == ([{"cafile": "/etc/ssl/cert.pem"}] if platform == "darwin" else [{}])
+    assert transport._ssl_context is context
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+
+def test_missing_macos_trust_fails_without_falling_back_to_unverified_tls(monkeypatch):
+    slack_web_api = _module()
+    calls = []
+
+    def missing_bundle(**kwargs):
+        calls.append(kwargs)
+        raise FileNotFoundError("missing system CA bundle")
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(slack_web_api.ssl, "create_default_context", missing_bundle)
+    with pytest.raises(RuntimeError, match="^SLACK_TLS_TRUST_UNAVAILABLE$"):
+        slack_web_api.UrllibSlackHttpTransport()
+    assert calls == [{"cafile": "/etc/ssl/cert.pem"}]
+
+
+def test_explicit_transport_context_preserves_the_existing_injection_seam(monkeypatch):
+    slack_web_api = _module()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+    def unexpected_default_context(**kwargs):
+        pytest.fail("explicit transport context must not load default trust")
+
+    monkeypatch.setattr(slack_web_api.ssl, "create_default_context", unexpected_default_context)
+    transport = slack_web_api.UrllibSlackHttpTransport(ssl_context=context)
+    assert transport._ssl_context is context

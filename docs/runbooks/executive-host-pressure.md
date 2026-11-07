@@ -1,0 +1,254 @@
+# Executive host-pressure snapshot
+
+## Status and boundary
+
+`mastermind.host_pressure_snapshot/v1` is a read-only source capability. It
+captures one bounded Darwin observation for an already-established opaque host
+and boot/generation reference. It does not own host identity, process identity,
+thresholds, admission, placement, lifecycle, persistence, retries, cleanup, or
+service supervision.
+
+The existing owners remain authoritative:
+
+- Executive OS owns Job, Attempt, Worker, Event, process generation, cleanup,
+  and absence proof.
+- Capacity and `control_plane/executive_physical_resources.py` own physical
+  reservation and begin admission.
+- The existing SCF operations surface owns `host_fleet_health` and
+  `disk_pressure` presentation.
+- The worker broker owns dedicated-worker-UID containment.
+
+HP0 neither edits nor arms `config/executive_physical_resources.json`. A source
+snapshot is evidence, not a resource grant.
+
+## Command
+
+Run from an exact reviewed source checkout on Darwin:
+
+```bash
+python3 ops/executive_os/host_pressure_probe.py \
+  --host-ref 'host-<64 lowercase hexadecimal characters>' \
+  --boot-ref 'boot-<64 lowercase hexadecimal characters>'
+```
+
+The references must come from the existing authorized host/Runtime binding
+owner. The probe never derives organizational identity from a hostname, serial,
+process title, network address, or caller guess.
+
+Success writes exactly one compact, sorted-key UTF-8 JSON document plus one
+newline to standard output and exits 0. A refusal before output emission begins
+writes one closed line to standard error, writes no snapshot to standard output,
+and exits 65. Once the first output write is attempted, a write sequence that
+cannot complete because a later write fails, returns an invalid/zero count, or
+raises—or because flush fails—exits 74 with exactly `OUTPUT_EFFECT_UNKNOWN`;
+every stdout byte from that invocation is then untrusted and must be discarded
+even when it looks like complete canonical JSON. Recoverable short writes are
+completed before flush and remain a normal exit-0 success.
+Output uncertainty never authorizes a retry. The command performs no shell
+invocation, network call, file write, retry, observed-process signal, browser or
+provider action. On a timeout or output-cap violation it may terminate and reap
+only the fixed `/bin/ps` child it created; it never signals a process reported by
+that census.
+
+## Snapshot contract
+
+The exact keys are:
+
+| Field | Type and unit | Meaning |
+|---|---|---|
+| `schema` | string | `mastermind.host_pressure_snapshot/v1` |
+| `host_ref` | opaque string | Existing host-owner reference |
+| `boot_ref` | opaque string | Existing boot/generation reference |
+| `observed_at_ms` | integer, Unix ms | Observation wall time |
+| `sample_window_ms` | integer ms | Bounded elapsed probe window |
+| `logical_cpu_count` | integer count | Current logical CPU count |
+| `load1_milli` | integer, load × 1,000 | One-minute load average |
+| `load_ratio_milli` | integer, ratio × 1,000 | `load1_milli // logical_cpu_count` |
+| `fseventsd_process_count` | integer count | Exact-basename rows observed |
+| `fseventsd_cpu_milli_pct` | integer, percent × 1,000 or null | Aggregated `%CPU` |
+| `fseventsd_rss_bytes` | integer bytes or null | Aggregated RSS converted from KiB |
+| `telemetry_status` | enum | `COMPLETE` or `PARTIAL` |
+| `unknown_fields` | sorted string list | Exact null optional fields |
+
+All public numeric values are integers. Booleans do not satisfy integer fields.
+Unknown, missing, duplicate, oversized, negative, nonfinite, overflowed, or
+noncanonical values refuse. A successful complete process census that finds no
+`fseventsd` row reports an observed zero. A failed or malformed census never
+becomes zero.
+
+HP0 currently emits `COMPLETE` only. The validator reserves `PARTIAL` for a
+future accepted producer that explicitly pairs each optional null with the same
+field in `unknown_fields`.
+
+## Probe method
+
+The production path is Darwin-only. It reads:
+
+1. wall and monotonic clocks;
+2. the logical CPU count;
+3. the one-minute load average;
+4. one bounded, headerless `/bin/ps -axo pid=,ppid=,%cpu=,rss=,comm=`
+   projection.
+
+The process table is capped before full capture: stdout is read incrementally
+through a nonblocking pipe up to 4 MiB plus one discriminator byte, while stderr
+is discarded rather than buffered. A three-second observation deadline starts
+before launch and spans stdout read plus normal child exit; timeout or overflow
+then receives at most one additional second of bounded TERM/KILL reaping. The
+whole public sample remains capped at five seconds. The parser validates every
+row, not only matching rows. PID, PPID, RSS,
+and CPU tokens use one canonical unsigned decimal grammar before conversion. It
+aggregates only rows whose executable basename is exactly `fseventsd`; similar
+names are excluded.
+Raw process rows, executable paths, PIDs, parent PIDs, arguments, environment,
+stderr, account information, provider/session data, credentials, prompts, and
+transcripts never enter the public snapshot or refusal.
+
+The entire sample window must not exceed five seconds. Timeout, process launch
+failure, non-zero status, empty output, malformed required fields, arithmetic
+overflow, clock reversal, unsupported platform, or invalid core telemetry
+refuses without retry.
+
+## Closed refusal families
+
+Output delivery uncertainty is separate from probe refusal. It emits exactly:
+
+```text
+host pressure probe output uncertain: OUTPUT_EFFECT_UNKNOWN
+```
+
+and exits 74. A caller accepts a snapshot only after exit 0 plus complete
+canonical validation; every non-zero exit discards all stdout.
+
+The emitted refusal is one of these closed codes:
+
+- `ARGUMENTS_INVALID`
+- `REFERENCE_INVALID`
+- `PLATFORM_UNAVAILABLE`
+- `UNSUPPORTED_PLATFORM`
+- `WALL_CLOCK_INVALID`
+- `MONOTONIC_CLOCK_INVALID`
+- `CPU_COUNT_UNAVAILABLE`
+- `LOAD_AVERAGE_INVALID`
+- `PROCESS_CENSUS_TIMEOUT`
+- `PROCESS_CENSUS_UNAVAILABLE`
+- `PROCESS_CENSUS_NONZERO`
+- `PROCESS_CENSUS_EMPTY`
+- `PROCESS_CENSUS_TOO_LARGE`
+- `PROCESS_CENSUS_MALFORMED`
+- `PROCESS_CENSUS_OVERFLOW`
+- `SAMPLE_WINDOW_EXCEEDED`
+- `PROBE_INTERNAL_ERROR`
+- `SNAPSHOT_CONTRACT_INVALID` at the CLI projection boundary
+
+Unexpected exception text is collapsed to a closed code. Do not use a refusal
+as proof that the host is idle or healthy.
+
+## Test and real-canary procedure
+
+Source proof:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -W error -m pytest -q -p no:cacheprovider \
+  tests/test_executive_host_pressure.py \
+  tests/test_executive_physical_resources.py \
+  tests/test_executive_worker_broker.py
+python3 -W error -m py_compile \
+  control_plane/executive_host_pressure.py \
+  ops/executive_os/host_pressure_probe.py \
+  tests/test_executive_host_pressure.py
+```
+
+A real canary must use the currently authorized host and boot references, write
+the snapshot to a separately owned evidence location, validate it again through
+`validate_host_pressure_snapshot`, record exact source/head/tree identity, and
+scan the artifact for prohibited raw fields. It must not install a daemon,
+modify policy, kill a process, create a reservation, or claim an idle baseline.
+
+
+## Operational fleet-hygiene guardrails
+
+These guardrails record operator lessons for integrating temporary/local execution
+harnesses with the existing Capacity and physical-resource owners. They do not arm
+HP0, create a host registry, define production thresholds, or make a local harness
+canonical.
+
+1. **Provider concurrency is not physical-host capacity.** A provider/account pool
+   may admit more model calls than one Mac can execute safely. Provider leases and
+   physical host admission remain separate gates. A launcher must not translate a
+   provider cap directly into local CPU/process concurrency.
+2. **Control-plane seats fail closed for autonomous execution.** A machine serving
+   interactive control, browser, or principal duties should not become a generic
+   worker merely because a caller sets an environment flag. Any local-only
+   exception must be a bounded capability requirement (for example, an engine that
+   is genuinely unavailable on qualified remote hosts), declared by the existing
+   placement policy and still subject to physical load and active-lane limits.
+3. **Remote binding is physical, not nominal.** A logical host key must reconcile to
+   the observed physical host/generation before execution. Copying a launcher or
+   registry file to another machine must not make that machine impersonate the
+   selected host.
+4. **Recheck at launch.** Load, active-lane count, disk headroom and required power/
+   availability gates are observation-time facts. Long-lived queue daemons must
+   reload accepted policy or be recycled only at a proven idle boundary; a stale
+   daemon must not preserve older, looser startup limits.
+5. **Started work stays on its carrier.** Once a lane or external process has
+   STARTED, host pressure does not authorize re-home, duplicate launch or blind
+   retry. Lower scheduling priority when appropriate, preserve the carrier, and
+   reconcile its terminal/effect state there.
+6. **Terminalization includes bounded workspace hygiene.** After the durable result
+   is written, a lane may remove only its own clean, registered worktree under the
+   configured worktree root. Dirty, locked, unregistered, process-referenced or
+   path-ambiguous worktrees are preserved. Cleanup precedes the terminal success
+   marker so a completed lane does not silently leak disk indefinitely.
+7. **Orphan cleanup requires ownership proof.** High CPU alone is not permission to
+   kill a process. Trace parentage, open file/pipe endpoints, current output
+   progress and the owning service/session. A process whose parent/control path is
+   gone and whose output cannot be consumed may be terminated only after preserving
+   ambiguous/incomplete output as evidence. Active CI workers, browser realms and
+   other sessions remain intact.
+8. **Storage pressure is a placement concern.** Remote execution can fail from
+   accumulated worktrees long before CPU or memory is exhausted. Reclaim only
+   clean, inactive, registered worktrees with an immediate pre-remove process
+   recheck; never use broad raw deletion as a substitute for owner-aware cleanup.
+9. **Investigation should be bounded.** Avoid filesystem-wide scans and recursive
+   disk walks on a pressured host. Prefer owner metadata, exact worktree registries,
+   process trees and bounded roots. Completed search helpers that outlive their
+   owner should be reconciled as support-process leaks rather than left consuming
+   I/O indefinitely.
+10. **Persistent support loops need a durable supervisor, not a chat lifetime.**
+    A queue consumer or feeder that must survive login, session rotation or process
+    death should be owned by the existing host service supervisor and restart the
+    same carrier/queue identity. Prove one bounded crash/restart recovery. Supervisor
+    recovery must never mint a second queue, placement authority or duplicate
+    in-flight operation, and policy must still be re-read after restart.
+11. **Proof-only browser/server resources have a terminal lifecycle.** Headless
+    browsers, CDP endpoints and local proof servers used for a bounded acceptance
+    journey should be retired after the owning proof is terminal and recent-use,
+    port and process-owner checks show no continuing consumer. Never infer
+    orphanhood from CPU alone, and never kill an active browser realm to improve a
+    load number.
+12. **Physical recovery readiness is independent from load admission.** A low-load
+    host can still be unrecoverable after power loss, while an intentionally busy
+    host may be perfectly recoverable. Use the existing host-recovery readiness
+    owner for sleep, auto-restart, Remote Login, preboot and required control-service
+    predicates. Do not start an intentionally unarmed Executive service merely to
+    make a recovery check green, and do not let a recovery result rank or reserve
+    workload capacity.
+13. **Useful-idle is subordinate to real queued work.** Optional quota-saturation
+    or audit work may consume only spare physical/provider capacity. Before an idle
+    launch, consult the existing real-work queues/backlog and recheck immediately
+    before provider/physical admission. If real work is pending, yield. This is a
+    priority guard on the incumbent owners, not permission to create a second
+    scheduler, reservation service, queue or retry plane.
+
+A local seat harness that implements these rules remains an interim operational
+consumer of Capacity/Fleet policy. It does not become a second scheduler, resource
+authority, lifecycle owner or production-armed physical-resource registry.
+
+## Continuation
+
+HP0 stops at a reviewed Draft/Hold source and one read-only Mac canary. A later,
+separately admitted HP1 may map accepted snapshot evidence into the existing
+physical-resource observation and Capacity reservation owner, calibrate policy
+from sustained measurements, and prove reserve/recheck behavior. HP0 itself
+cannot authorize HP1 or production arming.

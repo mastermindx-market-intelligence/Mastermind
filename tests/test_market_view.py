@@ -678,3 +678,85 @@ class TestBuild:
                             Path("/proc/nonexistent/market_view/latest.json"), raising=False)
         v = MV.build("us", write=True)   # must not raise
         assert v["schema_version"] == "market_view.v1"
+
+# The legacy negative-age test above stubs a value the real calendar helper does
+# not produce for future dates. These cases freeze UTC time, not age arithmetic.
+@pytest.fixture
+def native_source_clock(monkeypatch):
+    from datetime import datetime, timezone
+
+    def freeze(iso_timestamp):
+        instant = datetime.fromisoformat(iso_timestamp)
+
+        class FrozenUTCDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return instant.astimezone(tz or timezone.utc)
+
+        monkeypatch.setattr(MV, "datetime", FrozenUTCDateTime)
+        monkeypatch.setattr(RF, "datetime", FrozenUTCDateTime)
+        monkeypatch.setattr(MV, "_cfg", lambda: {"stale_after_trading_days": 5})
+
+    return freeze
+
+
+@pytest.mark.parametrize("source_date", ["2026-07-18", "2099-01-01"])
+def test_native_source_date_future_radar_is_excluded(source_date, native_source_clock):
+    native_source_clock("2026-07-17T23:59:59+00:00")
+    regime = FIX.incident_regime("2026-07-17")
+    regime["risk_radar"]["asof"] = source_date
+    # Keep the shared helper's existing contract, including a future Saturday.
+    assert RF._trading_days_since(source_date) == 0
+    rec = MV._adapt_risk_radar(regime)
+    assert rec["freshness"]["asof"] == source_date
+    assert rec["freshness"]["age_sessions"] == 0
+    assert rec["freshness"]["future_dated"] is True
+    assert rec["freshness"]["stale"] is True
+    assert rec["status"] == "advisory"
+    assert MV._net_posture_tilt({"risk_radar": rec})["n_validated"] == 0
+
+
+@pytest.mark.parametrize(
+    "source_date,age,stale",
+    [("2026-07-06", 0, False), ("2026-07-02", 1, False),
+     ("2026-06-26", 5, False), ("2026-06-25", 6, True)],
+)
+def test_native_source_date_prior_calendar_and_limit_are_preserved(
+    source_date, age, stale, native_source_clock
+):
+    # July 3 is the observed US Independence Day closure; weekend days also
+    # remain excluded by the existing native market calendar.
+    native_source_clock("2026-07-06T12:00:00+00:00")
+    rec = MV._adapt_risk_radar(FIX.incident_regime(source_date))
+    assert rec["freshness"]["age_sessions"] == age
+    assert rec["freshness"]["stale_after_sessions"] == 5
+    assert rec["freshness"]["future_dated"] is False
+    assert rec["freshness"]["stale"] is stale
+    assert rec["status"] == ("advisory" if stale else "validated")
+    assert MV._net_posture_tilt({"risk_radar": rec})["n_validated"] == (0 if stale else 1)
+
+
+def test_native_source_date_same_utc_day_remains_eligible(native_source_clock):
+    native_source_clock("2026-07-18T00:00:00+00:00")
+    # Preserve UTC source-date semantics even when New York is still on Friday.
+    rec = MV._adapt_risk_radar(FIX.incident_regime("2026-07-18"))
+    assert rec["freshness"]["age_sessions"] == 0
+    assert rec["freshness"]["future_dated"] is False
+    assert rec["freshness"]["stale"] is False
+    assert rec["status"] == "validated"
+
+
+@pytest.mark.parametrize("source_date", [None, "", "not-a-date", "2026-07-32",
+                                         "2026-07-02T16:00:00Z"])
+def test_native_source_date_missing_or_invalid_stays_unavailable(
+    source_date, native_source_clock
+):
+    native_source_clock("2026-07-06T12:00:00+00:00")
+    regime = FIX.incident_regime("2026-07-06")
+    regime["risk_radar"]["asof"] = source_date
+    rec = MV._adapt_risk_radar(regime)
+    assert rec["freshness"]["age_sessions"] is None
+    assert rec["freshness"]["future_dated"] is False
+    assert rec["freshness"]["stale"] is True
+    assert rec["status"] == "advisory"
+    assert MV._net_posture_tilt({"risk_radar": rec})["n_validated"] == 0

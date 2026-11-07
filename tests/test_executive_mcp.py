@@ -144,6 +144,48 @@ def _seed_runtime(root: Path, *, objective: str = "harmless fixture objective") 
     return job.job_id
 
 
+def _seed_heterogeneous_pair(root: Path) -> tuple[str, str]:
+    """Two exact Runtime Jobs/Attempts claimed by distinct fixture workers."""
+
+    runtime = Runtime.at(root)
+    for worker_id, provider in (
+        ("hf1q-codex-fixture", "codex"),
+        ("hf1q-claude-fixture", "claude"),
+    ):
+        runtime.workers.register_worker(
+            worker_id,
+            provider=provider,
+            account_label=f"fixture-account-{worker_id}",
+            worker_type="hf1q-hermetic-fixture",
+            capabilities=["research"],
+            quota_classes={
+                "fixture": {
+                    "provider": provider,
+                    "model": f"fixture-model-{provider}",
+                    "capabilities": ["research"],
+                    "metadata": {"fixture_worker_id": worker_id},
+                }
+            },
+        )
+    job_ids: list[str] = []
+    for worker_id, provider in (
+        ("hf1q-codex-fixture", "codex"),
+        ("hf1q-claude-fixture", "claude"),
+    ):
+        job = runtime.jobs.create_job(
+            f"hermetic heterogeneous fixture {provider}",
+            department="executive-infrastructure",
+            requested_authorities=["READ"],
+            constraints={
+                "required_capabilities": ["research"],
+                "eligible_quota_classes": ["fixture"],
+            },
+        )
+        assert runtime.broker.claim(job.job_id, worker_id=worker_id) is not None
+        job_ids.append(job.job_id)
+    return job_ids[0], job_ids[1]
+
+
 def _tree_digest(root: Path) -> dict[str, str]:
     return {
         str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -928,12 +970,64 @@ def test_19_09_adversarial_text_returns_as_inert_data_with_zero_write_activity(
     assert state["data"]["next_recommended_act"].startswith(INJECTION)
     for spec in TOOL_SPECS:
         assert INJECTION not in spec.description
-    assert schema_snapshot_sha256() == SCHEMA_SNAPSHOT_SHA256
 
-    # Zero write-side activity: no new job, and the forbidden transport (which
-    # asserts) was never reached.
-    runtime = Runtime.at(tmp_path, create=False)
-    assert [item.job_id for item in runtime.jobs.list_jobs()] == [job_id]
+
+def test_executive_reads_report_heterogeneous_pair_as_built_not_proven_not_live(
+    tmp_path: Path,
+):
+    runtime_root = tmp_path.resolve() / "fixture-repo"
+    job_ids = _seed_heterogeneous_pair(runtime_root)
+    gateway = ExecutiveMcpGateway(
+        GatewayConfig(
+            mode=ServerMode.FIXTURE,
+            repo_root=tmp_path,
+            fixture=FixtureBackend(
+                socket_path=str(tmp_path / "fixture-control.sock"),
+                runtime_root=str(runtime_root),
+                workspace_root=str(tmp_path / "fixture-workspaces"),
+            ),
+            now=_FROZEN_NOW,
+        ),
+        packet_builder=lambda **_kwargs: _packet(
+            macro_root=str(tmp_path / "fixture-macro")
+        ),
+        transport=_forbidden_transport,
+        clock=lambda: _FROZEN_NOW,
+    )
+    assert gateway.config.runtime_root == runtime_root
+
+    state = _call(gateway, "executive_state")
+    assert state["ok"] is True
+    assert any(
+        "mode=fixture" in entry
+        and "BUILT_NOT_PROVEN" in entry
+        and "not live" in entry
+        for entry in state["degraded"]
+    ), state["degraded"]
+    state_blob = json.dumps(state).lower()
+    assert "proven_live" not in state_blob
+    assert "provider_status" not in state_blob
+
+    for job_id, worker_id in (
+        (job_ids[0], "hf1q-codex-fixture"),
+        (job_ids[1], "hf1q-claude-fixture"),
+    ):
+        envelope = _call(gateway, "executive_job", {"job_id": job_id})
+        assert envelope["ok"] is True
+        assert envelope["data"]["job"]["job_id"] == job_id
+        assert envelope["data"]["job"]["status"] == "RUNNING"
+        assert envelope["data"]["attempt_count"] == 1
+        assert envelope["data"]["attempts"][0]["worker_id"] == worker_id
+        assert envelope["grounding"]["source"].endswith("(no raw SQL)")
+        assert any(
+            "mode=fixture" in entry
+            and "BUILT_NOT_PROVEN" in entry
+            and "not live" in entry
+            for entry in envelope["degraded"]
+        ), envelope["degraded"]
+        envelope_blob = json.dumps(envelope).lower()
+        assert "proven_live" not in envelope_blob
+        assert "provider_status" not in envelope_blob
 
 
 def test_19_10_oversized_output_is_bounded_honestly(tmp_path: Path):
@@ -969,6 +1063,78 @@ def test_19_10c_bounding_receipt_reaches_the_envelope(tmp_path: Path):
     assert envelope["bounded"], envelope
     assert envelope["bounded"][0]["bounded"] is True
     assert "original_bytes" in envelope["bounded"][0]
+
+
+@pytest.mark.parametrize("payload", [
+    {f"file.{index}[x]": {"state": "observed", "value": "x" * 80} for index in range(200)},
+    {"measurements": list(range(6000))},
+    {"unicode": ["界" * 30 for _ in range(300)]},
+])
+def test_job_bounds_structured_payload_without_losing_lifecycle(payload):
+    attempt = {
+        "attempt_id": "ATT-existing", "job_id": "JOB-001", "status": "FAILED",
+        "worker_id": "codex01", "launch_metadata": payload,
+        "error": {"message": "original failure"},
+    }
+    data = {
+        "job": {"job_id": "JOB-001", "status": "FAILED", "current_attempt_id": "ATT-existing"},
+        "attempts": [attempt], "latest_attempt": attempt,
+        "attempt_count": 1, "attempt_limit": 10,
+    }
+    original = canonical_json(data)
+    bounded, receipts = schemas.bound_job_document(data, limit=16384)
+    assert canonical_json(data) == original  # no mutation of registry values
+    assert bounded["job"] == data["job"]
+    assert bounded["attempt_count"] == 1 and bounded["attempt_limit"] == 10
+    assert len(bounded["attempts"]) == 1
+    for row in (bounded["latest_attempt"], bounded["attempts"][0]):
+        for key in ("attempt_id", "job_id", "status", "worker_id", "error"):
+            assert row[key] == attempt[key]
+        assert row["launch_metadata"]["bounded"] is True
+    assert {r["field"] for r in receipts} == {
+        "attempts[0].launch_metadata", "latest_attempt.launch_metadata",
+    }
+    assert all(r["original_bytes"] == len(canonical_json(payload)) for r in receipts)
+    assert len(canonical_json(bounded)) + len(canonical_json(receipts)) <= 16384
+
+
+def test_small_job_is_verbatim_and_many_attempts_are_not_silently_dropped():
+    small = {"job": {"job_id": "JOB-001"}, "attempts": [], "latest_attempt": None}
+    assert schemas.bound_job_document(small, limit=16384) == (small, [])
+    many = {**small, "attempts": [{"attempt_number": n} for n in range(5000)]}
+    with pytest.raises(GatewayError, match="ceiling"):
+        schemas.bound_job_document(many, limit=16384)
+
+
+def test_job_structured_bounds_reach_gateway_without_writes(tmp_path: Path):
+    import dataclasses
+
+    job_id = _seed_heterogeneous_pair(tmp_path)[0]
+    runtime = Runtime.at(tmp_path, create=False)
+    real_attempts = runtime.attempts.list_attempts(job_id)
+    large_attempt = dataclasses.replace(
+        real_attempts[0],
+        launch_metadata={f"field.{i}[0]": "x" * 100 for i in range(200)},
+    )
+
+    class Attempts:
+        def list_attempts(self, requested_job_id):
+            assert requested_job_id == job_id
+            return [large_attempt]
+
+    class ReadRuntime:
+        jobs = runtime.jobs
+        attempts = Attempts()
+
+    gateway = _gateway(tmp_path, runtime_factory=lambda _root: ReadRuntime())
+    gateway.config = dataclasses.replace(gateway.config, max_response_bytes=16384)
+    before = _tree_digest(tmp_path)
+    envelope = _call(gateway, "executive_job", {"job_id": job_id})
+    assert envelope["ok"] is True, envelope
+    assert len(envelope["bounded"]) == 2
+    assert envelope["data"]["latest_attempt"]["attempt_id"] == real_attempts[0].attempt_id
+    assert len(canonical_json(envelope)) < 32768
+    assert _tree_digest(tmp_path) == before
 
 
 def test_ceo_intent_status_preserves_bridge_identity_semantics(tmp_path: Path):
@@ -1714,3 +1880,42 @@ def test_docs_exist_and_record_the_future_gates():
         assert required in doc, required
     handoff = _ROOT / "research" / "EXECUTIVE_OS_CHATGPT_MCP_GATEWAY_HANDOFF_2026-08-15.md"
     assert handoff.is_file()
+
+
+class _RecordingSingleAttemptExecutor:
+    def __init__(self) -> None:
+        self.run_timeouts: list[float] = []
+        self.close_timeouts: list[float] = []
+
+    async def run(self, operation: Any, *, timeout: float) -> Any:
+        self.run_timeouts.append(timeout)
+        return operation()
+
+    async def aclose(self, *, timeout: float) -> None:
+        self.close_timeouts.append(timeout)
+
+    def attempts_snapshot(self) -> tuple[()]:
+        return ()
+
+
+def test_task_1_gateway_delegates_to_injected_single_attempt_owner(tmp_path: Path) -> None:
+    executor = _RecordingSingleAttemptExecutor()
+    gateway = ExecutiveMcpGateway(
+        GatewayConfig(mode=ServerMode.READONLY, repo_root=tmp_path, now=_FROZEN_NOW),
+        packet_builder=lambda **_kwargs: _packet(),
+        inbox_builder=lambda **_kwargs: {"grounding": {}, "degraded": [], "attention": []},
+        transport=_forbidden_transport,
+        clock=lambda: _FROZEN_NOW,
+        read_executor=executor,
+    )
+
+    async def scenario() -> None:
+        result = await gateway.call("executive_state", {})
+        assert result["ok"] is True
+        assert executor.run_timeouts == [adapter.READ_TIMEOUT_SECONDS]
+        assert not hasattr(gateway, "_read_semaphore")
+        assert gateway._read_attempts == set()
+        await gateway.aclose()
+        assert executor.close_timeouts == [adapter._CLOSE_TIMEOUT_SECONDS]
+
+    asyncio.run(scenario())

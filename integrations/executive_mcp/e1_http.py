@@ -1,6 +1,7 @@
 """Bounded, SDK-free inner HTTP boundary for the temporary E1 read profile."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
@@ -8,6 +9,7 @@ from typing import Any
 
 MAX_REQUEST_BYTES = 65_536
 MAX_RESPONSE_BYTES = 262_144
+PREAUTH_RECEIVE_DEADLINE_SECONDS = 5.0
 E1_READ_PATHS = frozenset(
     {
         "/v1/tools/executive_state",
@@ -199,6 +201,85 @@ class BoundedRequestApp:
             return {"type": "http.disconnect"}
 
         await self._app(scope, replay_receive, send)
+
+
+class PreAuthMcpBodyApp:
+    """Measure received POST /mcp bytes before Authentication/RequireAuth.
+
+    Generic ``BoundedRequestApp`` still replays empty bodies for direct
+    non-MCP mounts. This wrapper is the MCP-only empty-transport guard.
+    """
+
+    def __init__(
+        self,
+        app: Callable[[Mapping[str, Any], _Receive, _Send], Awaitable[None]],
+        *,
+        deadline_seconds: float | None = None,
+        foreground_requests: bool = False,
+    ):
+        self._app = app
+        self._deadline_seconds = deadline_seconds
+        if type(foreground_requests) is not bool:
+            raise ValueError("compiled foreground selection must be boolean")
+        self._foreground_requests = foreground_requests
+
+    async def __call__(self, scope: Mapping[str, Any], receive: _Receive, send: _Send) -> None:
+        if (
+            scope.get("type") != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") != "/mcp"
+        ):
+            await self._app(scope, receive, send)
+            return
+        timeout = (
+            PREAUTH_RECEIVE_DEADLINE_SECONDS
+            if self._deadline_seconds is None
+            else self._deadline_seconds
+        )
+        try:
+            request_body = await asyncio.wait_for(
+                BoundedE1App._bounded_request(receive),
+                timeout=timeout,
+            )
+        except _RequestTooLarge:
+            await _error(send, 413, "invalid_input", "request body exceeds 65536 bytes")
+            return
+        except RuntimeError:
+            await _error(send, 400, "invalid_input", "request body is incomplete")
+            return
+        except asyncio.TimeoutError:
+            await _error(send, 400, "invalid_input", "request body receive deadline exceeded")
+            return
+        if not request_body:
+            await _error(send, 400, "invalid_input", "request body is empty")
+            return
+        replayed = False
+
+        async def replay_receive() -> Mapping[str, Any]:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": request_body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        # Only this compiled MCP composition can enable the finite lifetime.
+        # Selection is not authentication; the real call handler still validates
+        # arguments and verifies its current principal before binding it.
+        eligible = False
+        if self._foreground_requests:
+            try:
+                body = json.loads(request_body)
+                eligible = (isinstance(body, dict) and body.get("method") == "tools/call"
+                    and "id" in body and isinstance(body.get("params"), dict)
+                    and body["params"].get("name") == "session_summon")
+            except (ValueError, TypeError):
+                pass
+        if eligible:
+            from integrations.session_bridge.http_foreground import owned_request
+            async with owned_request(scope, receive) as current:
+                await self._app(current, replay_receive, send)
+        else:
+            await self._app(scope, replay_receive, send)
 
 
 class FixedE1App(BoundedE1App):

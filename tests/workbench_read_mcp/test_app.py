@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives import serialization
 
 from integrations.business_mcp_auth.contracts import load_resource_policy, subject_digest
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
-from integrations.workbench_read_mcp.app import create_authenticated_read_server, ProjectReadRefused
+from integrations.workbench_read_mcp.app import create_authenticated_read_server, ProjectReadRefused, ReadCaller
 
 ISSUER = 'https://identity.workbench.example'
 RESOURCE = 'https://workbench.example/mcp'
@@ -88,6 +88,9 @@ class AuthenticatedReadTests(unittest.IsolatedAsyncioTestCase):
         self.file_reads = 0
         self.mode = 'normal'
         self.seen_callers = []
+        self.final_auth_captures = 0
+        self.final_auth_checks = 0
+        self.final_auth_mode = 'pass'
         async def port(caller, request):
             self.port_calls += 1
             self.seen_callers.append(caller)
@@ -120,9 +123,27 @@ class AuthenticatedReadTests(unittest.IsolatedAsyncioTestCase):
             elif self.mode == 'policy-drift':
                 self.auth._policy = dataclasses.replace(self.policy, policy_id='changed.policy')
             return result
+        def final_authorization(caller, request):
+            self.final_auth_captures += 1
+            # Fixture-only authority: remember the exact caller/project pair.
+            original = (caller, request['project_ref'])
+            def revalidate():
+                self.final_auth_checks += 1
+                if self.final_auth_mode == 'fail':
+                    raise ProjectReadRefused('READ_BINDING_CHANGED')
+                if self.final_auth_mode == 'raise':
+                    raise RuntimeError('PRIVATE_FINAL_AUTH_FAILURE')
+                # Expire/revoke simulation after the last auth await: clock advanced
+                # or explicit revoke must fail closed even with a still-valid JWT path.
+                if self.mode == 'expire' or self.final_auth_mode == 'revoke':
+                    raise ProjectReadRefused('READ_BINDING_CHANGED')
+                if original[0] != caller or original[1] != request['project_ref']:
+                    raise ProjectReadRefused('READ_BINDING_CHANGED')
+            return revalidate
         self.server = create_authenticated_read_server(
             authenticator=self.auth, policy=self.policy, now=lambda: self.clock,
             audit_sink=self.audit, read_port=port, output_schema=OUTPUT,
+            final_authorization=final_authorization,
             allowed_hosts=('127.0.0.1', '127.0.0.1:*'),
         )
         self.app = self.server.streamable_http_app()
@@ -349,6 +370,293 @@ class AuthenticatedReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(r['isError'])
         self.assertLess(len(json.dumps(r).encode('utf-8')), 512)
         self.assertEqual(self.port_calls, 0)
+
+
+    async def test_final_authorization_runs_after_successful_read(self):
+        data = self.result(await self.read())
+        self.assertFalse(data.get('isError', False), data)
+        self.assertEqual(self.final_auth_captures, 1)
+        self.assertEqual(self.final_auth_checks, 1)
+        self.assertEqual(self.file_reads, 1)
+
+    async def test_final_authorization_revoke_withholds_buffered_content(self):
+        self.final_auth_mode = 'revoke'
+        r = self.result(await self.read())
+        self.assertTrue(r['isError'])
+        self.assertNotIn('Alpha project', json.dumps(r))
+        self.assertEqual(self.file_reads, 1)
+        self.assertEqual(self.final_auth_checks, 1)
+
+    async def test_final_authorization_failure_is_not_disclosed(self):
+        self.final_auth_mode = 'raise'
+        r = self.result(await self.read())
+        self.assertTrue(r['isError'])
+        self.assertNotIn('PRIVATE_FINAL_AUTH_FAILURE', json.dumps(r))
+        self.assertEqual(self.final_auth_checks, 1)
+
+
+class FinalAuthorizationContractTests(unittest.IsolatedAsyncioTestCase):
+    """F1 borrowed-resolver + F2 callback-contract discriminators (production bytes static)."""
+
+    async def asyncSetUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='mmx-final-auth-contract-')
+        self.root = pathlib.Path(self.directory.name)
+        (self.root / 'alpha').mkdir()
+        (self.root / 'alpha' / 'CLAUDE.md').write_text('Alpha project instructions\n')
+        self.clock = int(time.time())
+        self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.pem = self.key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                         serialization.NoEncryption())
+        self.public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.key.public_key()))
+        self.public.update(kid='fixture-key', alg='RS256', use='sig')
+        self.keys = Keys(self.public)
+        self.audit = Audit()
+        self.subjects = {u: subject_digest(issuer=ISSUER, subject=u) for u in ['reader-a']}
+        self.policy = load_resource_policy({
+            'schema': 'mastermind.business_mcp_auth_policy.v1', 'policy_id': 'fixture.workbench.read',
+            'resource': RESOURCE, 'resource_metadata_url': 'https://workbench.example/.well-known/oauth-protected-resource/mcp',
+            'issuer': ISSUER, 'authorization_servers': [ISSUER], 'jwks_uri': ISSUER + '/jwks',
+            'required_scopes': [SCOPE], 'allowed_subject_digests': sorted(self.subjects.values()),
+            'allowed_algorithms': ['RS256'], 'clock_skew_seconds': 0,
+            'max_token_lifetime_seconds': 3600, 'jwks_cache_ttl_seconds': 60,
+            'unknown_kid_refresh_cooldown_seconds': 1, 'fetch_failure_backoff_seconds': 1,
+        })
+        self.auth = JwtAuthenticator(policy=self.policy, jwks_cache=self.keys)
+        self.file_reads = 0
+        self.coro_bodies = 0
+
+    async def asyncTearDown(self):
+        if getattr(self, 'client', None) is not None:
+            await self.client.aclose()
+        if getattr(self, 'lifespan_stop', None) is not None:
+            self.lifespan_stop.set()
+            await asyncio.wait_for(self.lifespan_task, timeout=5)
+        self.directory.cleanup()
+
+    def token(self, user='reader-a', **changes):
+        payload = {'iss': ISSUER, 'sub': user, 'aud': RESOURCE, 'iat': self.clock - 1,
+                   'exp': self.clock + 600, 'scope': SCOPE, 'client_id': 'fixture-client'}
+        payload.update(changes)
+        return jwt.encode(payload, self.pem, algorithm='RS256', headers={'kid': 'fixture-key'})
+
+    async def _boot(self, final_authorization):
+        async def port(caller, request):
+            self.file_reads += 1
+            data = (self.root / 'alpha' / 'CLAUDE.md').read_bytes()
+            await asyncio.sleep(0)
+            return {'status': 'OK', 'content': data.decode(), 'project_ref': 'alpha',
+                    'file_sha256': hashlib.sha256(data).hexdigest()}
+        self.server = create_authenticated_read_server(
+            authenticator=self.auth, policy=self.policy, now=lambda: self.clock,
+            audit_sink=self.audit, read_port=port, output_schema=OUTPUT,
+            final_authorization=final_authorization,
+            allowed_hosts=('127.0.0.1', '127.0.0.1:*'),
+        )
+        self.app = self.server.streamable_http_app()
+        self.lifespan_ready = asyncio.Event()
+        self.lifespan_stop = asyncio.Event()
+        async def own_lifespan():
+            async with self.app.router.lifespan_context(self.app):
+                self.lifespan_ready.set()
+                await self.lifespan_stop.wait()
+        self.lifespan_task = asyncio.create_task(own_lifespan())
+        await asyncio.wait_for(self.lifespan_ready.wait(), timeout=5)
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url='http://127.0.0.1')
+
+    async def _read(self):
+        headers = {'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-03-26'}
+        await self.client.post('/mcp', headers={**headers, 'Authorization': 'Bearer ' + self.token()},
+                               json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                                     'params': {'protocolVersion': '2025-03-26', 'capabilities': {},
+                                                'clientInfo': {'name': 'c', 'version': '1'}}})
+        r = await self.client.post('/mcp', headers={**headers, 'Authorization': 'Bearer ' + self.token()},
+                                   json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                                         'params': {'name': 'read_project_file',
+                                                    'arguments': {'project_ref': 'alpha',
+                                                                  'relative_path': 'CLAUDE.md'}}})
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        return r.json()['result']
+
+    def _scope(self, expires_at_ms, **changes):
+        from integrations.workbench_read_mcp.observer import ReadScope
+        base = dict(root_fd=3, root_device=1, root_inode=2, context_ref='ctx', owner_ref='own',
+                    generation='gen-1', allowed_paths=('CLAUDE.md',), expires_at_ms=expires_at_ms)
+        base.update(changes)
+        return ReadScope(**base)
+
+    def _caller(self, expires_at):
+        return ReadCaller(
+            subject_digest=self.subjects['reader-a'],
+            client_ref='fixture-client-digest',
+            resource=RESOURCE,
+            scopes=(SCOPE,),
+            expires_at=expires_at,
+        )
+
+    def test_make_final_authorization_borrowed_resolver_deadline_seam(self):
+        """F1/R3-T2: borrowed lease expiry precedes valid caller/JWT; equality code exact."""
+        from integrations.workbench_read_mcp.deployment import make_final_authorization
+        from integrations.workbench_read_mcp.read_port import ProjectReadBinding
+
+        deadline_ms = (self.clock + 60) * 1000
+        clock = [deadline_ms - 1]
+        scope = self._scope(deadline_ms)
+        # R3-T2: caller/JWT expiry STRICTLY LATER than borrowed lease deadline so
+        # existing caller-timestamp guard cannot mask the new borrowed equality seam.
+        caller = self._caller(self.clock + 3600)
+
+        def resolver(active_caller, project):
+            # Identical valid scope across deadline-1 and equality.
+            return ProjectReadBinding(active_caller, project, scope)
+
+        factory = make_final_authorization(resolve_binding=resolver, clock_ms=lambda: clock[0])
+        revalidate = factory(caller, {'project_ref': 'alpha'})
+        # Unchanged positive at deadline-1 while caller still valid.
+        revalidate()
+        # Advance ONLY lease clock to exact equality; caller/JWT remains valid.
+        clock[0] = deadline_ms
+        with self.assertRaises(ProjectReadRefused) as ctx:
+            revalidate()
+        self.assertEqual(ctx.exception.code, 'PROJECT_READ_REFUSED')
+        self.assertGreater(caller.expires_at * 1000, deadline_ms)
+
+        # Invalid expiry type / bounds on borrowed scope.
+        for bad in (None, 1.5, -1, 2**63):
+            clock[0] = deadline_ms - 1
+            bad_scope = self._scope(deadline_ms)
+
+            def bad_resolver(active_caller, project, _bad=bad, _scope=bad_scope):
+                return ProjectReadBinding(
+                    active_caller, project,
+                    dataclasses.replace(_scope, expires_at_ms=_bad),  # type: ignore[arg-type]
+                )
+
+            with self.assertRaises(ProjectReadRefused) as bad_ctx:
+                make_final_authorization(
+                    resolve_binding=bad_resolver, clock_ms=lambda: clock[0]
+                )(caller, {'project_ref': 'alpha'})
+            self.assertEqual(bad_ctx.exception.code, 'PROJECT_READ_REFUSED')
+
+    def test_make_final_authorization_same_project_binding_change_refused(self):
+        """Same project_ref with changed generation/owner/paths refuses after capture."""
+        from integrations.workbench_read_mcp.deployment import make_final_authorization
+        from integrations.workbench_read_mcp.read_port import ProjectReadBinding
+
+        deadline_ms = (self.clock + 60) * 1000
+        clock = [deadline_ms - 1]
+        current = {
+            'generation': 'gen-1',
+            'owner_ref': 'own',
+            'allowed_paths': ('CLAUDE.md',),
+            'root_fd': 3,
+            'root_device': 1,
+            'root_inode': 2,
+            'context_ref': 'ctx',
+        }
+        caller = self._caller(self.clock + 60)
+
+        def resolver(active_caller, project):
+            return ProjectReadBinding(
+                active_caller, project,
+                self._scope(deadline_ms, **current),
+            )
+
+        factory = make_final_authorization(resolve_binding=resolver, clock_ms=lambda: clock[0])
+        revalidate = factory(caller, {'project_ref': 'alpha'})
+        revalidate()  # unchanged positive
+        # Retain small root/owner/full-binding cases (R3-T4).
+        for key, value in (
+            ('generation', 'gen-OTHER'),
+            ('owner_ref', 'other-owner'),
+            ('allowed_paths', ('OTHER.md',)),
+            ('root_fd', 99),
+            ('root_device', 999),
+            ('root_inode', 9999),
+            ('context_ref', 'ctx-OTHER'),
+        ):
+            previous = current[key]
+            current[key] = value
+            with self.assertRaises(ProjectReadRefused) as ctx:
+                revalidate()
+            self.assertEqual(ctx.exception.code, 'READ_BINDING_CHANGED')
+            current[key] = previous
+            revalidate()
+
+    async def test_callback_contract_async_and_awaitable_outcomes_refuse_without_body(self):
+        """F2: async/asyncgen/async-callable/native+custom awaitable/non-None → sanitized refuse."""
+
+        class CustomAwaitable:
+            entered = 0
+
+            def __await__(self):
+                type(self).entered += 1
+                self.ran = True
+                if False:
+                    yield None
+                return None
+
+        cases = []
+        custom_witnesses: list = []
+
+        async def async_revalidator():
+            self.coro_bodies += 1
+            return None
+        cases.append(('async_def', lambda c, r: async_revalidator))
+
+        async def asyncgen_revalidator():
+            self.coro_bodies += 1
+            yield None
+        cases.append(('asyncgen', lambda c, r: asyncgen_revalidator))
+
+        outer = self
+        class AsyncCallableCounting:
+            async def __call__(self_inner):
+                outer.coro_bodies += 1
+        cases.append(('async_callable', lambda c, r: AsyncCallableCounting()))
+
+        async def _body():
+            outer.coro_bodies += 1
+        cases.append(('native_coro', lambda c, r: (lambda: _body())))
+
+        def _custom_factory(c, r):
+            def _make():
+                witness = CustomAwaitable()
+                custom_witnesses.append(witness)
+                return witness
+            return _make
+        cases.append(('custom_awaitable', _custom_factory))
+
+        cases.append(('non_none', lambda c, r: (lambda: 'NOT_NONE')))
+
+        CustomAwaitable.entered = 0
+        for label, factory in cases:
+            self.file_reads = 0
+            self.coro_bodies = 0
+            self.client = None
+            self.lifespan_stop = None
+            before_custom = len(custom_witnesses)
+            await self._boot(factory)
+            try:
+                result = await self._read()
+                self.assertTrue(result.get('isError'), (label, result))
+                dumped = json.dumps(result)
+                self.assertNotIn('Alpha project', dumped, label)
+                self.assertNotIn('PRIVATE', dumped, label)
+                # Contract violations: accepted app203/241/243 return READ_BINDING_CHANGED.
+                # Retain PROJECT_READ_REFUSED for borrowed-expiry / runtime lease-revoke elsewhere.
+                self.assertIn('READ_BINDING_CHANGED', dumped, label)
+                self.assertEqual(self.coro_bodies, 0, label)
+                if label == 'custom_awaitable':
+                    self.assertEqual(len(custom_witnesses), before_custom + 1, label)
+                    witness = custom_witnesses[-1]
+                    self.assertFalse(getattr(witness, 'ran', False), label)
+                    self.assertEqual(CustomAwaitable.entered, 0, label)
+            finally:
+                await self.client.aclose()
+                self.lifespan_stop.set()
+                await asyncio.wait_for(self.lifespan_task, timeout=5)
+                self.client = None
+                self.lifespan_stop = None
 
 
 if __name__ == '__main__':

@@ -16,9 +16,10 @@ from integrations.business_mcp_auth.contracts import (
     AuthAuditSink, ResourcePolicy, validate_resource_policy,
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
-from .app import create_authenticated_read_server
-from .observer import MAX_FILE_BYTES, MAX_TEXT_BYTES
-from .read_port import BindingResolver, ReadExecutor, create_descriptor_read_port
+import dataclasses
+from .app import ProjectReadRefused, ReadCaller, create_authenticated_read_server
+from .observer import MAX_FILE_BYTES, MAX_TEXT_BYTES, ReadScope
+from .read_port import BindingResolver, ProjectReadBinding, ReadExecutor, create_descriptor_read_port
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,69 @@ def validate_incoming_authority(services: RuntimeServices, authority: str) -> No
         raise ValueError('INCOMING_AUTHORITY_MISMATCH')
 
 
+
+
+def make_final_authorization(
+    *, resolve_binding: BindingResolver, clock_ms: Callable[[], int],
+):
+    """Build the mandatory app final-authorization contract from existing owners.
+
+    Captures the original request-local ProjectReadBinding before the awaited
+    read, then synchronously revalidates that SAME binding after the last
+    authorization await. Replacement grants that merely share project_ref are
+    refused. No await occurs inside the returned revalidator.
+    """
+    if not callable(resolve_binding) or not callable(clock_ms):
+        raise ValueError('FINAL_AUTHORIZATION_INVALID')
+
+    def factory(caller: ReadCaller, request):
+        if type(caller) is not ReadCaller:
+            raise ProjectReadRefused()
+        try:
+            project = request['project_ref']
+        except Exception as error:
+            raise ProjectReadRefused() from error
+        if type(project) is not str:
+            raise ProjectReadRefused()
+        expected_caller = dataclasses.replace(caller)
+
+        def snapshot() -> ProjectReadBinding:
+            try:
+                timestamp = clock_ms()
+                if (type(timestamp) is not int or timestamp < 0
+                        or timestamp >= expected_caller.expires_at * 1000):
+                    raise ProjectReadRefused()
+                value = resolve_binding(expected_caller, project)
+                if (type(value) is not ProjectReadBinding or type(value.caller) is not ReadCaller
+                        or value.caller != expected_caller or type(value.project_ref) is not str
+                        or value.project_ref != project or type(value.scope) is not ReadScope):
+                    raise ProjectReadRefused()
+                raw_expiry = value.scope.expires_at_ms
+                if (type(raw_expiry) is not int or not 0 <= raw_expiry < 2**63):
+                    raise ProjectReadRefused()
+                capped = min(raw_expiry, expected_caller.expires_at * 1000)
+                # Match observer/runtime equality refusal: timestamp at/after deadline.
+                if timestamp >= capped:
+                    raise ProjectReadRefused()
+                scope = dataclasses.replace(value.scope, expires_at_ms=capped)
+                return ProjectReadBinding(expected_caller, project, scope)
+            except ProjectReadRefused:
+                raise
+            except Exception as error:
+                raise ProjectReadRefused() from error
+
+        original = snapshot()
+
+        def revalidate() -> None:
+            current = snapshot()
+            if current != original:
+                raise ProjectReadRefused('READ_BINDING_CHANGED')
+
+        return revalidate
+
+    return factory
+
+
 def create_deployment(services: RuntimeServices):
     """Construct the real server; the existing host owns all acquired services.
 
@@ -120,8 +184,12 @@ def create_deployment(services: RuntimeServices):
             raise ValueError('TRANSPORT_POLICY_INVALID')
     port = create_descriptor_read_port(resolve_binding=services.resolve_binding,
                                       clock_ms=services.clock_ms, run_io=services.run_io)
+    final_authorization = make_final_authorization(
+        resolve_binding=services.resolve_binding, clock_ms=services.clock_ms,
+    )
     return create_authenticated_read_server(
         authenticator=services.authenticator, policy=services.policy, now=services.now,
         audit_sink=services.audit_sink, read_port=port, output_schema=observation_schema(),
+        final_authorization=final_authorization,
         allowed_hosts=services.allowed_hosts, allowed_origins=services.allowed_origins,
     )

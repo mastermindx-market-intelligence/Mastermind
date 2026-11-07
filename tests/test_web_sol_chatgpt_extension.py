@@ -87,6 +87,14 @@ def receipt_for(
         "observed_at": "2026-08-29T06:00:01Z",
         "observation": observation(),
     }
+    if request["action"] == "TYPED_REENTRY":
+        result.update(
+            {
+                "operation_id": request["operation_id"],
+                "result_digest": request["result_digest"],
+                "obligation_digest": request["obligation_digest"],
+            }
+        )
     result.update(overrides)
     return result
 
@@ -97,6 +105,14 @@ def call_kwargs() -> dict:
         "issued_at": ISSUED,
         "expires_at": EXPIRES,
         "nonce": NONCE,
+    }
+
+
+def typed_reentry_kwargs() -> dict:
+    return call_kwargs() | {
+        "operation_id": "e" * 64,
+        "result_digest": "c" * 64,
+        "obligation_digest": "d" * 64,
     }
 
 
@@ -195,6 +211,36 @@ def test_foreground_builds_one_closed_request_and_never_retries(monkeypatch):
     assert calls == 1
 
 
+def test_typed_reentry_builds_one_closed_fingerprinted_request_without_retry(monkeypatch):
+    row = binding()
+    calls = 0
+
+    def exchange(request, *, path, expected_instance_id):
+        nonlocal calls
+        calls += 1
+        assert request == {
+            "schema": wsp.ACTION_SCHEMA,
+            "binding_id": row["binding_id"],
+            "conversation_fingerprint": client.conversation_fingerprint(row),
+            "binding_fingerprint": client.binding_fingerprint(row),
+            "action": "TYPED_REENTRY",
+            "operation_key": OPERATION,
+            "operation_id": "e" * 64,
+            "result_digest": "c" * 64,
+            "obligation_digest": "d" * 64,
+            "issued_at": ISSUED,
+            "expires_at": EXPIRES,
+            "nonce": NONCE,
+        }
+        return receipt_for(request, status="CONSUMED")
+
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    result = client.typed_reentry_via_extension(row, **typed_reentry_kwargs())
+    assert result["status"] == "CONSUMED"
+    assert result["conversation_fingerprint"] == client.conversation_fingerprint(row)
+    assert calls == 1
+
+
 def test_invalid_binding_refuses_before_transport(monkeypatch):
     row = binding()
     row["status"] = "running"
@@ -290,8 +336,8 @@ def test_legacy_open_surface_remains_fail_closed_and_chatgpt_module_stays_socket
     assert "AF_UNIX" not in source
 
 
-def test_derived_socket_exchange_round_trips_one_request_without_retry(tmp_path):
-    private = tmp_path / "private"
+def test_derived_socket_exchange_round_trips_one_request_without_retry(short_socket_root):
+    private = short_socket_root / "private"
     private.mkdir(mode=0o700)
     private.chmod(0o700)
     path = private / "wsx-fixture.sock"

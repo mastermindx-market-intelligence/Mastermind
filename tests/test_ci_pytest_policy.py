@@ -218,6 +218,14 @@ jobs:
     with pytest.raises(cip.PolicyError, match="positive tests/test_"):
         cip.validate_workflow(allowlist)
     comments_only = """
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches:
+      - master
+  workflow_dispatch:
 name: CI
 jobs:
   test:
@@ -230,6 +238,609 @@ jobs:
 # tests/test_baz.py
 """
     cip.validate_workflow(comments_only)
+
+
+def _workflow_text(on_block: str) -> str:
+    return (
+        f"{on_block}\n"
+        "name: CI\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+
+
+def _valid_on_block() -> str:
+    return (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+
+
+def test_validate_workflow_accepts_exact_event_contract():
+    cip.validate_workflow(_workflow_text(_valid_on_block()))
+
+
+def test_validate_workflow_rejects_missing_on_key():
+    text = (
+        "name: CI\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="missing an 'on' trigger"):
+        cip.validate_workflow(text)
+
+
+@pytest.mark.parametrize(
+    "on_block",
+    [
+        "on:\n",
+        "on: push\n",
+        "on:\n  - push\n  - pull_request\n",
+    ],
+)
+def test_validate_workflow_rejects_malformed_on_shapes(on_block):
+    with pytest.raises(cip.PolicyError, match="must be a mapping"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_missing_event():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="missing required event"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_extra_event():
+    on_block = _valid_on_block() + "  schedule:\n    - cron: '0 0 * * *'\n"
+    with pytest.raises(cip.PolicyError, match="unexpected event"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_unexpected_event_error_is_redacted():
+    literal_secret = "ghp_should_not_leak_1234567890abcdef"
+    # RFC 4648 SS10 base64 test vector (base64("foobar") == "Zm9vYmFy"),
+    # used as an accurately-known encoded-shaped secret stand-in alongside
+    # the literal-shaped one above, without hand-computing base64 for an
+    # arbitrary string.
+    encoded_form_secret = "Zm9vYmFy"
+    on_block = (
+        _valid_on_block()
+        + f"  {literal_secret}:\n"
+        + f"  {encoded_form_secret}:\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(_workflow_text(on_block))
+    message = str(excinfo.value)
+    assert message == "workflow 'on' has unexpected event(s)"
+    assert literal_secret not in message
+    assert encoded_form_secret not in message
+
+
+def test_validate_workflow_rejects_wrong_merge_group_types():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested, labeled]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="merge_group"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_wrong_push_branches():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - main\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="push"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_pull_request_with_filters():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "    types: [opened]\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="pull_request"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_missing_pull_request():
+    on_block = (
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="missing required event"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_empty_merge_group():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group: {}\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="merge_group"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_filtered_workflow_dispatch():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "    inputs:\n"
+        "      reason:\n"
+        "        required: false\n"
+        "        type: string\n"
+    )
+    with pytest.raises(cip.PolicyError, match="workflow_dispatch"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+@pytest.mark.parametrize("keyword", ["On", "ON", "oN"])
+def test_validate_workflow_rejects_cased_on_key_variant(keyword):
+    on_block = _valid_on_block().replace("on:", f"{keyword}:", 1)
+    with pytest.raises(cip.PolicyError, match="literal lowercase 'on'"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+@pytest.mark.parametrize("on_key_spelling", ["on", "'on'", '"on"'])
+def test_validate_workflow_accepts_lowercase_on_key_spellings(on_key_spelling):
+    # Permanent coverage that the literal lowercase "on" key is accepted
+    # regardless of quoting style: unquoted, single-quoted, and
+    # double-quoted forms all construct to the identical Python string
+    # "on" and must all be treated as the valid trigger key.
+    on_block = _valid_on_block().replace("on:", f"{on_key_spelling}:", 1)
+    cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_merge_key_in_on_block():
+    # Permanent regression guard: _reject_duplicate_mapping_keys replaces
+    # PyYAML's default map constructor entirely, which also replaces the
+    # default merge-key (`<<`) flattening behavior it would otherwise
+    # perform. A `<<: *anchor` entry inside `on:` must never be silently
+    # expanded (which would let an event get injected without appearing as
+    # a literal key anyone reviewing the file would see) - it must fail
+    # closed instead. The exact internal classification (generic YAML
+    # error vs. unhashable-key error) is not asserted here since it
+    # depends on unexecuted PyYAML internals; only the fail-closed
+    # PolicyError outcome is asserted.
+    text = (
+        "name: CI\n"
+        "hidden_defaults: &hidden_defaults\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "on:\n"
+        "  <<: *hidden_defaults\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_duplicate_key_cause_chain_is_redacted():
+    sentinel = "DUPLICATE_KEY_SENTINEL_9f3ac21"
+    text = (
+        "name: CI\n"
+        f"{sentinel}: first\n"
+        f"{sentinel}: second\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    assert str(excinfo.value) == "workflow YAML contains a duplicate mapping key"
+    assert sentinel not in str(excinfo.value)
+    cause = excinfo.value.__cause__
+    assert cause is not None
+    assert sentinel not in str(cause)
+
+
+def test_validate_workflow_unhashable_key_cause_chain_is_redacted():
+    sentinel = "UNHASHABLE_KEY_SENTINEL_7be04d9"
+    text = (
+        "name: CI\n"
+        f"? [{sentinel}, other]\n"
+        ": value\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    assert str(excinfo.value) == "workflow YAML contains an unhashable mapping key"
+    assert sentinel not in str(excinfo.value)
+    cause = excinfo.value.__cause__
+    assert cause is not None
+    assert sentinel not in str(cause)
+
+
+def test_validate_workflow_rejects_duplicate_unquoted_on():
+    text = (
+        "name: CI\n"
+        "on:\n"
+        "  pull_request:\n"
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="duplicate"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_duplicate_quoted_on():
+    text = (
+        "name: CI\n"
+        '"on":\n'
+        "  pull_request:\n"
+        '"on":\n'
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="duplicate"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_quoted_and_unquoted_on():
+    text = (
+        "name: CI\n"
+        '"on":\n'
+        "  pull_request:\n"
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="duplicate"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_loader_keeps_true_false_but_not_on_off_yes_no():
+    import yaml
+
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    flag_true: true\n"
+        "    flag_false: false\n"
+        "    literal_on: on\n"
+        "    literal_off: off\n"
+        "    literal_yes: yes\n"
+        "    literal_no: no\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    cip.validate_workflow(text)
+    payload = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    job = payload["jobs"]["test"]
+    assert job["flag_true"] is True
+    assert job["flag_false"] is False
+    assert job["literal_on"] == "on"
+    assert job["literal_off"] == "off"
+    assert job["literal_yes"] == "yes"
+    assert job["literal_no"] == "no"
+
+
+@pytest.mark.parametrize("keyword", ["On", "ON", "oN"])
+def test_validate_workflow_rejects_on_alongside_case_variant(keyword):
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + f"{keyword}:\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="literal lowercase 'on'"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_unhashable_event_level_key():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "  ? [a, b]\n"
+        "  : nested\n"
+    )
+    with pytest.raises(cip.PolicyError, match="unhashable"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_unhashable_mapping_key():
+    text = (
+        "name: CI\n"
+        "? [1, 2]\n"
+        ": three\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="unhashable"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_reports_unrecognized_tag_as_generic_not_duplicate():
+    # Regression fixture for the R3 version of this test: it replaced the
+    # entire `jobs:` value with the bad-tag node, so the raw text no longer
+    # contained the authoritative runner/step-name substrings and
+    # validate_workflow raised its "must invoke" error before ever parsing
+    # YAML - never exercising the tag-error path at all. Keep a fully valid
+    # workflow/runner body and add the unsupported tag as an unrelated
+    # extra field instead.
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "extra: !!python/object:builtins.object {}\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="not valid YAML"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_literal_boolean_key_as_on_alias():
+    text = (
+        "name: CI\n"
+        "true:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_boolean_scalar_on_value():
+    text = _workflow_text("on: true\n")
+    with pytest.raises(cip.PolicyError, match="must be a mapping"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_numeric_top_level_key():
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "404: not-a-real-field\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_non_string_key_error_is_redacted():
+    secret_like_value = "super-secret-token-should-not-leak"
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + f"12345: {secret_like_value}\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    message = str(excinfo.value)
+    assert message == "workflow top-level keys must be strings"
+    assert "12345" not in message
+    assert secret_like_value not in message
+
+
+def test_validate_workflow_rejects_decoded_binary_top_level_key_without_leaking():
+    # RFC 4648 SS10 base64 test vector: base64("foobar") == "Zm9vYmFy".
+    # !!binary decodes to bytes (hashable, non-str), so this exercises a
+    # top-level-key type distinct from the int/bool cases above, while
+    # letting both the decoded and encoded forms be asserted accurately
+    # without executing code to compute them.
+    encoded = "Zm9vYmFy"
+    decoded = "foobar"
+    text = (
+        "name: CI\n"
+        f"? !!binary {encoded}\n"
+        ": some-value\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    message = str(excinfo.value)
+    assert message == "workflow top-level keys must be strings"
+    assert decoded not in message
+    assert encoded not in message
+
+
+def test_validate_workflow_rejects_explicit_bool_tag_on_key():
+    text = (
+        "name: CI\n"
+        "!!bool on:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_valid_on_alongside_explicit_bool_tag_on():
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "!!bool on:\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_valid_on_alongside_bareword_true():
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "true:\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_mixed_type_extra_keys():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "  123: {}\n"
+    )
+    with pytest.raises(cip.PolicyError, match="event name strings"):
+        cip.validate_workflow(_workflow_text(on_block))
 
 
 def test_all_discovered_tests_are_accounted_for():
@@ -248,22 +859,435 @@ def test_all_discovered_tests_are_accounted_for():
     assert discovered
     assert included
     argv = cip.pytest_argv(gate["included"])
-    assert argv[:4] == [cip.sys.executable, "-m", "pytest", "-q"]
-    assert argv[4:] == list(gate["included"])
+    assert argv[:5] == [cip.sys.executable, "-m", "pytest", "--durations=25", "-q"]
+    assert argv[5:] == list(gate["included"])
+    # Duration reporting is bounded diagnostics, not filtering or a new test step.
+    assert argv.count("--durations=25") == 1
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """PR544 reached 98% when its old 25-minute job ceiling cancelled the gate."""
+    """Keep a finite, adequate 60-minute shard window with fail-closed fan-in."""
     import yaml
 
-    workflow = yaml.safe_load(
-        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == 40
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=cip._WorkflowYAMLLoader,
+    )
+    jobs = workflow["jobs"]
+    shards = jobs["pytest_shards"]
+    gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert job.get("continue-on-error", False) is False
-    gate_steps = [step for step in job["steps"]
-                  if step.get("name") == "Run repository test gate"]
+    assert shards["permissions"] == {"contents": "read", "actions": "read"}
+    assert shards["timeout-minutes"] == 60
+    assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
+    assert gate["timeout-minutes"] == 8
+    assert shards["strategy"]["fail-fast"] is False
+    assert shards["strategy"]["max-parallel"] == 6
+    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
+    assert shards.get("continue-on-error", False) is False
+    assert gate.get("continue-on-error", False) is False
+
+    shard_steps = shards["steps"]
+    test_steps = [
+        step for step in shard_steps
+        if step.get("name") == "Run repository test shard"
+    ]
+    assert len(test_steps) == 1
+    assert test_steps[0]["run"] == (
+        "python -m scripts.ci_parallel_shard --jobs 6 --index "
+        "${{ matrix.index }}"
+    )
+    assert all(step.get("continue-on-error", False) is False for step in shard_steps)
+    for name in (
+        "Verify Paper direct pinned MCP SDK",
+        "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+        "Compile source",
+        "Validate shell scripts",
+    ):
+        steps = [step for step in shard_steps if step.get("name") == name]
+        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
+
+
+def test_hosted_gate_stays_a_single_required_check_job():
+    """A fail-closed fan-in produces the sole stable required context test."""
+    import yaml
+
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=cip._WorkflowYAMLLoader,
+    )
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pytest_shards", "test"]
+    job = workflow["jobs"]["test"]
+    assert "strategy" not in job
+    assert job["name"] == "test"
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["if"] == "${{ always() }}"
+    assert job["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    gate_steps = [
+        step for step in job["steps"]
+        if step.get("name") == "Run repository test gate"
+    ]
     assert len(gate_steps) == 1
-    assert gate_steps[0]["run"] == "python scripts/ci_pytest.py"
+    gate = gate_steps[0]
+    assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
+    assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
+    assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
+    assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
+    assert "exit 1" in gate["run"]
+    assert "python scripts/ci_pytest.py --plan-only --jobs 6" in gate["run"]
     assert all(step.get("continue-on-error", False) is False for step in job["steps"])
+
+
+# --- `--jobs` sharding: placement only, never a coverage reduction -----------
+#
+# The gate may split its resolved module set across concurrent pytest
+# processes to cut wall-clock. The safety property under test is that the
+# split can never quietly shrink what runs: every shard plan must be a
+# total, disjoint cover of exactly the set the discovery/exclusion policy
+# already produced, and any shard failing must fail the gate.
+
+
+@pytest.mark.parametrize("jobs", [2, 3, 4, 5, 8])
+def test_shard_plan_is_a_total_disjoint_cover(jobs):
+    included = tuple(f"tests/test_m{index:03d}.py" for index in range(37))
+    shards = cip.partition_modules(included, jobs=jobs)
+    assert len(shards) == jobs
+    flattened = [path for shard in shards for path in shard]
+    assert sorted(flattened) == sorted(included)
+    assert len(flattened) == len(set(flattened))
+
+
+def test_real_shard_plan_stays_reasonably_balanced():
+    # Hash assignment trades exact evenness for stability, so pin the real
+    # repository's actual spread rather than an idealised one.
+    gate = cip.resolve_gate(_ROOT)
+    sizes = [len(shard) for shard in cip.partition_modules(gate["included"], jobs=4)]
+    assert min(sizes) >= 0.75 * (len(gate["included"]) / 4)
+    assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
+
+
+def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None:
+    """Preserve every hash except the measured protected and runner pins."""
+    import hashlib
+
+    gate = cip.resolve_gate(_ROOT)
+    included = gate["included"]
+    pins = {
+        # Hosted shard 0 exceeded its observed stable duration; these four
+        # pinned moves compensate one another and retain complete coverage.
+        "tests/test_capacity_host_artifacts.py": 1,
+        "tests/test_native_fabric_quota_continuity.py": 0,
+        "tests/test_trend_persistence_walkforward.py": 0,
+        "tests/test_deploy_provenance.py": 0,
+        "tests/test_executive_runtime_bounded_acquisition.py": 1,
+        "tests/test_mastermind_window_reader_static_fences.py": 1,
+        "tests/test_market_view.py": 1,
+        "tests/test_product_acceptance_original_selector.py": 1,
+        "tests/test_executive_os_phase1fc.py": 2,
+    }
+    assert set(pins).issubset(included)
+    shards = cip.partition_modules(included, jobs=3)
+    cip.verify_partition(included, shards)
+    observed = {
+        path: index
+        for index, shard in enumerate(shards)
+        for path in shard
+    }
+    assert len(observed) == len(included)
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        hashed = int.from_bytes(digest[:8], "big") % 3
+        if path in pins:
+            assert hashed != pins[path]  # Every pin intentionally moves its module.
+            assert observed[path] == pins[path]
+        else:
+            assert observed[path] == hashed
+
+    augmented = tuple(sorted((*included, "tests/test_future_added_module.py")))
+    after = cip.partition_modules(augmented, jobs=3)
+    placement_after = {
+        path: index for index, shard in enumerate(after) for path in shard
+    }
+    assert all(placement_after[path] == observed[path] for path in included)
+
+
+def test_measured_three_job_pins_do_not_affect_other_job_counts() -> None:
+    import hashlib
+
+    gate = cip.resolve_gate(_ROOT)
+    included = gate["included"]
+    for jobs in (2, 4, 5, 8):
+        shards = cip.partition_modules(included, jobs=jobs)
+        cip.verify_partition(included, shards)
+        for index, shard in enumerate(shards):
+            for path in shard:
+                digest = hashlib.sha256(path.encode("utf-8")).digest()
+                assert int.from_bytes(digest[:8], "big") % jobs == index
+
+
+def test_shard_plan_is_deterministic_across_processes():
+    """sha256, never the salted builtin `hash()`.
+
+    A per-process salt would shard the same checkout differently on every run,
+    so a shard-specific failure could not be reproduced. Pin an exact expected
+    assignment: this fails if the hash function or its input ever changes.
+    """
+    included = tuple(f"tests/test_m{index:03d}.py" for index in range(20))
+    first = cip.partition_modules(included, jobs=4)
+    assert first == cip.partition_modules(included, jobs=4)
+
+    import hashlib
+
+    expected: list[list[str]] = [[] for _ in range(4)]
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        expected[int.from_bytes(digest[:8], "big") % 4].append(path)
+    assert first == tuple(tuple(bucket) for bucket in expected)
+
+
+def test_adding_a_module_does_not_move_the_others():
+    """The stability property that motivated hashing over round-robin.
+
+    Sharding changes which modules share a pytest process, so a reshuffle can
+    surface a latent cross-module ordering dependency. Round-robin moved every
+    module after an insertion; hashing moves only the inserted one, keeping
+    that blast radius on the PR that actually caused it.
+    """
+    before = tuple(f"tests/test_m{index:03d}.py" for index in range(40))
+    after = tuple(sorted(before + ("tests/test_aaa_brand_new.py",)))
+    placement_before = {
+        path: index
+        for index, shard in enumerate(cip.partition_modules(before, jobs=4))
+        for path in shard
+    }
+    placement_after = {
+        path: index
+        for index, shard in enumerate(cip.partition_modules(after, jobs=4))
+        for path in shard
+    }
+    moved = [p for p in before if placement_before[p] != placement_after[p]]
+    assert moved == []
+
+
+def test_single_job_shard_plan_is_the_whole_included_set():
+    included = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    assert cip.partition_modules(included, jobs=1) == (included,)
+
+
+@pytest.mark.parametrize("jobs", [0, -1, -9])
+def test_non_positive_job_count_is_rejected(jobs):
+    with pytest.raises(cip.PolicyError, match="at least 1"):
+        cip.partition_modules(("tests/test_a.py",), jobs=jobs)
+
+
+def test_job_count_above_module_count_is_rejected():
+    with pytest.raises(cip.PolicyError, match="cannot exceed"):
+        cip.partition_modules(("tests/test_a.py", "tests/test_b.py"), jobs=3)
+
+
+def test_dropped_module_in_a_shard_plan_is_rejected():
+    included = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    with pytest.raises(cip.PolicyError, match="resolved"):
+        cip.verify_partition(included, (("tests/test_a.py",), ("tests/test_b.py",)))
+
+
+def test_duplicated_module_hiding_a_dropped_one_is_rejected():
+    # Same total count as `included`, so a length-only check would pass.
+    included = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    with pytest.raises(cip.PolicyError, match="exact cover"):
+        cip.verify_partition(
+            included, (("tests/test_a.py", "tests/test_a.py"), ("tests/test_b.py",))
+        )
+
+
+def test_substituted_module_in_a_shard_plan_is_rejected():
+    included = ("tests/test_a.py", "tests/test_b.py")
+    with pytest.raises(cip.PolicyError, match="exact cover"):
+        cip.verify_partition(included, (("tests/test_a.py",), ("tests/test_zz.py",)))
+
+
+def test_empty_shard_is_rejected():
+    included = ("tests/test_a.py", "tests/test_b.py")
+    with pytest.raises(cip.PolicyError, match="empty shard"):
+        cip.verify_partition(included, (("tests/test_a.py", "tests/test_b.py"), ()))
+
+
+def test_plan_line_reports_shard_sizes_and_default_omits_them():
+    plan = {"discovered": 9, "excluded": 0, "running": 9}
+    assert cip.format_plan(plan) == "discovered=9 excluded=0 running=9"
+    shards = cip.partition_modules(
+        tuple(f"tests/test_m{index}.py" for index in range(9)), jobs=3
+    )
+    rendered = cip.format_plan(plan, shards=shards)
+    assert "jobs=3" in rendered
+    # Sizes are whatever the hash produced; what the plan line must prove is
+    # that the printed per-shard counts still add up to `running`.
+    sizes = rendered.split("shard_modules=")[1].split()[0]
+    assert len(sizes.split(",")) == 3
+    assert sum(int(size) for size in sizes.split(",")) == plan["running"]
+
+
+def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
+    included = tuple(f"tests/test_m{index}.py" for index in range(10))
+    shards = cip.partition_modules(included, jobs=3)
+    seen: list[str] = []
+
+    def fake_popen(argv, **kwargs):
+        seen.extend(argv[argv.index("-q") + 1 :])
+        return _Completed(0, "")
+
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
+    assert cip.run_shards(shards, root=tmp_path) == 0
+    assert sorted(seen) == sorted(included)
+
+
+class _Completed:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        import io
+
+        self.stdout = io.StringIO(stdout)
+
+    def wait(self):
+        return self.returncode
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stdout.close()
+
+
+def test_one_failing_shard_fails_the_whole_gate(tmp_path, monkeypatch):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+
+    def fake_popen(argv, **kwargs):
+        failing = "tests/test_b.py" in argv
+        return _Completed(1 if failing else 0, "boom" if failing else "ok")
+
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
+    assert cip.run_shards(shards, root=tmp_path) != 0
+
+
+def test_every_shard_runs_even_after_an_earlier_one_fails(tmp_path, monkeypatch):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+    ran: list[str] = []
+
+    def fake_popen(argv, **kwargs):
+        module = argv[-1]
+        ran.append(module)
+        return _Completed(1 if module == "tests/test_a.py" else 0, "")
+
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
+    cip.run_shards(shards, root=tmp_path)
+    assert sorted(ran) == ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
+
+
+def test_shard_output_is_reported_under_an_attributable_banner(tmp_path, monkeypatch, capsys):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",))
+
+    def fake_popen(argv, **kwargs):
+        return _Completed(0, f"result for {argv[-1]}")
+
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
+    cip.run_shards(shards, root=tmp_path)
+    out = capsys.readouterr().out
+    assert "shard 1/2" in out and "shard 2/2" in out
+    assert out.count("elapsed_s=") == 2
+    assert "result for tests/test_a.py" in out
+    assert "result for tests/test_b.py" in out
+
+
+def test_real_repository_shard_plan_covers_the_real_gate():
+    gate = cip.resolve_gate(_ROOT)
+    shards = cip.partition_modules(gate["included"], jobs=4)
+    flattened = [path for shard in shards for path in shard]
+    assert sorted(flattened) == sorted(gate["included"])
+    assert len(flattened) == len(set(flattened))
+
+
+def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
+    tmp_path, monkeypatch
+):
+    # Shard 0 fails slowly with 3; shard 2 fails quickly with 4. The reported
+    # code must be shard 0's, so reruns of the same failure report the same
+    # code regardless of scheduling.
+    import time
+
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+
+    def fake_popen(argv, **kwargs):
+        module = argv[-1]
+        if module == "tests/test_a.py":
+            time.sleep(0.15)
+            return _Completed(3, "slow failure")
+        if module == "tests/test_c.py":
+            return _Completed(4, "fast failure")
+        return _Completed(0, "")
+
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
+    assert cip.run_shards(shards, root=tmp_path) == 3
+
+
+
+# The preflight is a fast witness of incumbent strict gates, not an alternate
+# discovery/exclusion/fan-in owner. A release PR with an illegal EVAL R0
+# surface or changed role source without an updated immutable fixture should
+# fail near checkout instead of consuming all six expensive full shards.
+_FAST_RELEASE_NODES = (
+    "tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface",
+    "tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched",
+    "tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure",
+)
+
+
+def _assert_fast_release_preflight(workflow: dict) -> None:
+    jobs = workflow["jobs"]
+    shard_job = jobs["pytest_shards"]
+    steps = shard_job["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.count("Fast source-bound release preflight") == 1
+    step = steps[names.index("Fast source-bound release preflight")]
+    assert "if" not in step  # all shards and all event types
+    assert "continue-on-error" not in step
+    command = step["run"]
+    assert command.startswith("python -m pytest -q --tb=short ")
+    for node in _FAST_RELEASE_NODES:
+        assert command.count(node) == 1
+    assert names.index("Install project") < names.index("Fast source-bound release preflight")
+    assert names.index("Fast source-bound release preflight") < names.index("Run repository test shard")
+    assert names.index("Fast source-bound release preflight") < names.index(
+        "H1 required real Linux no-ACL positive journey"
+    )
+    assert shard_job["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
+    assert shard_job["strategy"]["fail-fast"] is False
+    assert "test" in jobs  # existing protected fan-in remains the source of truth
+
+
+def test_source_bound_fast_preflight_runs_for_all_full_shards():
+    source = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow = cip.yaml.load(source, Loader=cip._WorkflowYAMLLoader)
+    _assert_fast_release_preflight(workflow)
+
+
+@pytest.mark.parametrize("corruption", ["missing", "conditional", "waived", "drop-r0", "drop-role", "late"])
+def test_source_bound_fast_preflight_regression_rejects_coverage_or_order_loss(corruption):
+    source = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow = cip.yaml.load(source, Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    step = next(s for s in steps if s.get("name") == "Fast source-bound release preflight")
+    if corruption == "missing":
+        steps.remove(step)
+    elif corruption == "conditional":
+        step["if"] = "matrix.index == 0"
+    elif corruption == "waived":
+        step["continue-on-error"] = True
+    elif corruption == "drop-r0":
+        step["run"] = step["run"].replace(_FAST_RELEASE_NODES[0], "")
+    elif corruption == "drop-role":
+        step["run"] = step["run"].replace(_FAST_RELEASE_NODES[2], "")
+    else:
+        steps.remove(step)
+        steps.append(step)
+    with pytest.raises(AssertionError):
+        _assert_fast_release_preflight(workflow)

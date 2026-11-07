@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime
 
 import pytest
 
@@ -65,7 +66,11 @@ def test_schema_pins_and_action_surface_are_closed():
     assert wsp.PROBE_SCHEMA == "mastermind.web_sol_surface_probe.v1"
     assert wsp.ACTION_SCHEMA == "mastermind.web_sol_surface_action.v1"
     assert wsp.RECEIPT_SCHEMA == "mastermind.web_sol_surface_receipt.v1"
-    assert {item.value for item in wsp.SurfaceAction} == {"INSPECT", "FOREGROUND"}
+    assert {item.value for item in wsp.SurfaceAction} == {
+        "INSPECT",
+        "FOREGROUND",
+        "TYPED_REENTRY",
+    }
 
 
 def test_valid_request_round_trips_as_detached_normalized_copy():
@@ -85,6 +90,67 @@ def test_valid_receipt_round_trips_as_deep_detached_copy():
     assert normalized["observation"] is not receipt["observation"]
     normalized["observation"]["target_present"] = False
     assert receipt["observation"]["target_present"] is True
+
+
+def test_typed_reentry_request_has_a_closed_digest_only_payload():
+    request = valid_request(
+        action="TYPED_REENTRY",
+        operation_id="e" * 64,
+        result_digest="c" * 64,
+        obligation_digest="d" * 64,
+    )
+    assert wsp.validate_request(request) == request
+
+    request.pop("operation_id")
+    with pytest.raises(wsp.WebSolProtocolError, match="operation_id"):
+        wsp.validate_request(request)
+
+
+def test_typed_reentry_payload_schema_is_closed_and_digested():
+    request = valid_request(
+        action="TYPED_REENTRY",
+        operation_id="e" * 64,
+        result_digest="c" * 64,
+        obligation_digest="d" * 64,
+    )
+    for field in ("operation_id", "result_digest", "obligation_digest"):
+        rejected = {**request, field: "not-hex"}
+        with pytest.raises(wsp.WebSolProtocolError, match=field):
+            wsp.validate_request(rejected)
+    with pytest.raises(wsp.WebSolProtocolError, match="unknown keys: extra"):
+        wsp.validate_request({**request, "extra": "forbidden"})
+
+
+def test_typed_reentry_receipt_schema_is_closed_and_status_bound():
+    request = valid_request(
+        action="TYPED_REENTRY",
+        operation_id="e" * 64,
+        result_digest="c" * 64,
+        obligation_digest="d" * 64,
+    )
+    receipt = valid_receipt(action="TYPED_REENTRY", status="CONSUMED")
+    receipt.update(
+        {
+            "operation_id": request["operation_id"],
+            "result_digest": request["result_digest"],
+            "obligation_digest": request["obligation_digest"],
+        }
+    )
+    assert wsp.validate_receipt(receipt) == receipt
+    with pytest.raises(wsp.WebSolProtocolError, match="unknown keys: extra"):
+        wsp.validate_receipt({**receipt, "extra": "forbidden"})
+
+
+def test_typed_reentry_window_refuses_expired_requests():
+    request = valid_request(
+        action="TYPED_REENTRY",
+        operation_id="e" * 64,
+        result_digest="c" * 64,
+        obligation_digest="d" * 64,
+    )
+    now = datetime.fromisoformat(request["expires_at"].replace("Z", "+00:00"))
+    with pytest.raises(wsp.WebSolProtocolError, match="expired"):
+        wsp.validate_action_window(request, now=now)
 
 
 @pytest.mark.parametrize(

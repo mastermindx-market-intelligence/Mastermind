@@ -1,0 +1,41 @@
+# SOURCE-ONLY TEMPLATE. Admin install/authorization is a separate gate.
+# This is a single non-credentialed data-plane proxy for two dedicated role
+# 127/8 loopback listeners, not a Hermes bot or model-serving process.
+[Unit]
+Description=Mastermind Hermes role-isolated vendor CONNECT proxy
+# Stop an incompatible stock proxy before starting this fixed-vendor proxy.
+# Root operator admission and persistent masking are specified in README.md.
+After=network-online.target squid.service
+Conflicts=squid.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxy
+Group=proxy
+# Fixed root-owned one-shot prerequisite; refusal (78) skips this startup.
+# The + applies only here. Squid retains the restrictions below.
+ExecCondition=+/usr/bin/python3 -I -S /usr/local/libexec/mastermind-hermes-loopback.py ensure
+ExecStartPre=/usr/sbin/squid -k parse -f /etc/squid/hermes-byok.conf
+ExecStart=/usr/sbin/squid -N -f /etc/squid/hermes-byok.conf
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=hermes-egress
+LogsDirectory=hermes-egress
+StateDirectory=hermes-egress
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

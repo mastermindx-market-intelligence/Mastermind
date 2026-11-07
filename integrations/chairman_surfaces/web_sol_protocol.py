@@ -35,12 +35,17 @@ class WebSolProtocolError(ValueError):
 class SurfaceAction(str, Enum):
     INSPECT = "INSPECT"
     FOREGROUND = "FOREGROUND"
+    TYPED_REENTRY = "TYPED_REENTRY"
 
 
 class ReceiptStatus(str, Enum):
     INSPECTED = "INSPECTED"
     FOREGROUNDED_VERIFIED = "FOREGROUNDED_VERIFIED"
     FOREGROUND_EFFECT_UNKNOWN = "FOREGROUND_EFFECT_UNKNOWN"
+    CONSUMED = "CONSUMED"
+    NOT_CONSUMED = "NOT_CONSUMED"
+    CONVERSATION_CLOSED = "CONVERSATION_CLOSED"
+    TYPED_REENTRY_BLOCKED = "TYPED_REENTRY_BLOCKED"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
     TARGET_CHANGED = "TARGET_CHANGED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -66,6 +71,12 @@ _REQUEST_KEYS = frozenset(
         "nonce",
     }
 )
+_TYPED_REENTRY_PAYLOAD_KEYS = frozenset({
+    "operation_id",
+    "result_digest",
+    "obligation_digest",
+})
+_TYPED_REENTRY_KEYS = _REQUEST_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
 _RECEIPT_KEYS = frozenset(
     {
         "schema",
@@ -80,6 +91,7 @@ _RECEIPT_KEYS = frozenset(
         "observation",
     }
 )
+_TYPED_REENTRY_RECEIPT_KEYS = _RECEIPT_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
 _PROBE_KEYS = frozenset(
     {
         "schema",
@@ -398,7 +410,7 @@ def _require_action(value: Any, path: str) -> SurfaceAction:
     try:
         return SurfaceAction(value)
     except (ValueError, TypeError) as exc:
-        raise _error(path, "must be INSPECT or FOREGROUND") from exc
+        raise _error(path, "must be INSPECT, FOREGROUND, or TYPED_REENTRY") from exc
 
 
 def _validate_identity_fields(
@@ -419,6 +431,11 @@ def _validate_identity_fields(
             raise _error("$.expires_at", "must be later than issued_at")
         if (expires - issued).total_seconds() > MAX_ACTION_TTL_SECONDS:
             raise _error("$.expires_at", "request ttl exceeds the protocol ceiling")
+    if action is SurfaceAction.TYPED_REENTRY:
+        for field in ("operation_id", "result_digest", "obligation_digest"):
+            if field not in value:
+                raise _error(f"$.{field}", "required for TYPED_REENTRY")
+            _require_hex64(value[field], f"$.{field}")
     return action
 
 
@@ -483,7 +500,14 @@ def validate_request(value: dict[str, Any]) -> dict[str, Any]:
     """Validate structure only and return a detached normalized copy."""
 
     _walk_forbidden(value)
-    request = _require_exact_keys(value, _REQUEST_KEYS, "$")
+    action = value.get("action") if isinstance(value, dict) else None
+    request = _require_exact_keys(
+        value,
+        _TYPED_REENTRY_KEYS
+        if action == SurfaceAction.TYPED_REENTRY.value
+        else _REQUEST_KEYS,
+        "$",
+    )
     _require_schema(request["schema"], ACTION_SCHEMA, "$.schema")
     _validate_identity_fields(request, include_time=True)
     return copy.deepcopy(request)
@@ -590,6 +614,74 @@ def _validate_receipt_semantics(
         )
         return
 
+    if status is ReceiptStatus.CONSUMED:
+        _require_probe_truth(
+            action is SurfaceAction.TYPED_REENTRY,
+            "$.status",
+            "CONSUMED requires TYPED_REENTRY action",
+        )
+        _require_probe_truth(
+            probe["target_present"] and probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "CONSUMED requires the exact target to be present and loaded",
+        )
+        _require_probe_truth(
+            probe["composer_available"] is True,
+            "$.observation.composer_available",
+            "must be true for CONSUMED",
+        )
+        _require_probe_truth(
+            probe["generation_state"] == "idle",
+            "$.observation.generation_state",
+            "must be idle for CONSUMED",
+        )
+        _require_probe_truth(
+            probe["auth_required"] is not True,
+            "$.observation.auth_required",
+            "must not be true for CONSUMED",
+        )
+        _require_probe_truth(
+            probe["provider_error_present"] is not True,
+            "$.observation.provider_error_present",
+            "must not be true for CONSUMED",
+        )
+        return
+
+    if status is ReceiptStatus.NOT_CONSUMED:
+        _require_probe_truth(
+            action is SurfaceAction.TYPED_REENTRY,
+            "$.status",
+            "NOT_CONSUMED requires TYPED_REENTRY action",
+        )
+        _require_probe_truth(
+            probe["composer_available"] is not True
+            or probe["generation_state"] != "idle",
+            "$.observation",
+            "requires composer or generation state to be unavailable",
+        )
+        return
+
+    if status is ReceiptStatus.CONVERSATION_CLOSED:
+        _require_probe_truth(
+            action is SurfaceAction.TYPED_REENTRY,
+            "$.status",
+            "CONVERSATION_CLOSED requires TYPED_REENTRY action",
+        )
+        _require_probe_truth(
+            not probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "must be false for CONVERSATION_CLOSED",
+        )
+        return
+
+    if status is ReceiptStatus.TYPED_REENTRY_BLOCKED:
+        _require_probe_truth(
+            action is SurfaceAction.TYPED_REENTRY,
+            "$.status",
+            "TYPED_REENTRY_BLOCKED requires TYPED_REENTRY action",
+        )
+        return
+
     if status is ReceiptStatus.TARGET_NOT_FOUND:
         _require_probe_truth(
             not probe["target_present"],
@@ -626,7 +718,14 @@ def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
     """Validate one bounded S0/S1 receipt and return a deep detached copy."""
 
     _walk_forbidden(value)
-    receipt = _require_exact_keys(value, _RECEIPT_KEYS, "$")
+    action = value.get("action") if isinstance(value, dict) else None
+    receipt = _require_exact_keys(
+        value,
+        _TYPED_REENTRY_RECEIPT_KEYS
+        if action == SurfaceAction.TYPED_REENTRY.value
+        else _RECEIPT_KEYS,
+        "$",
+    )
     _require_schema(receipt["schema"], RECEIPT_SCHEMA, "$.schema")
     action = _validate_identity_fields(receipt, include_time=False)
     _parse_zulu(receipt["observed_at"], "$.observed_at")

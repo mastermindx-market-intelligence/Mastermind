@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mastermind Design System"
+  short_description: "Apply the existing design system without visual-rule drift"

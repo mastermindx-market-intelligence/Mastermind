@@ -1,0 +1,19 @@
+{
+  "name": "mastermind-cortex",
+  "version": "0.1.0",
+  "description": "Read-only specialist orientation for tracing claims to current canonical owners, preserving unknowns and conflicts, and identifying one justified first read.",
+  "author": {
+    "name": "Mastermind-X"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mastermind Cortex",
+    "shortDescription": "Read-only canonical-source orientation",
+    "longDescription": "Trace orientation claims to current canonical owners, preserve conflicts and genuine unknowns, and identify one deterministic first read without creating lifecycle, permission, retry, or source-selection authority.",
+    "developerName": "Mastermind-X",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ]
+  }
+}

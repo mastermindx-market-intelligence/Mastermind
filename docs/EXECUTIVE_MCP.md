@@ -158,6 +158,55 @@ bounded returns `output_too_large` rather than something misleading. Errors and
 | `validation` | no | `{pytest_targets?, compileall_paths?, git_diff_check?}` |
 | `attempt_limit` | no | 1–3, default 2 |
 
+### Large worker handoffs stay out of the CEO-intent payload
+
+`submit_ceo_intent` is the compact semantic/authority envelope, not a transport for a
+second agent prompt. The 4,000-character `objective` ceiling remains unchanged. For
+strict-v2 Executive work, the existing trusted dialogue-source owner supplies the
+immutable `commission_ref` separately from caller input:
+
+```text
+repository + exact 40-hex commit + repository-relative path + content SHA-256
+```
+
+That reference is canonical context/provenance, **not authority**. The effective Job
+grant, allowed paths, validation and provider/lifecycle controls remain authoritative.
+Before either the sealed worker or read-only Operator planner consumes the commission,
+the supervisor requires the persisted repository identity to equal the canonical Mastermind
+repository **exactly** and binds byte resolution to the durable Job-assigned Git root.
+Mutable local remote labels are not repository authority and are not consulted. Local Git
+inspection is network-inert: all Git protocols are denied, replacement objects and lazy promisor
+fetching are disabled, global/system configuration is disabled, and interactive prompting is
+disabled. The resolver distinguishes three states. If the exact commit and fixed path/tree prove
+an exact blob whose bytes are already local, the blob is read by its verified object ID. If an
+available exact commit proves the fixed path semantically absent, verification refuses with no
+network fallback. If the exact immutable object graph or referenced blob bytes are merely
+unavailable locally, one bounded fallback may read only
+`https://raw.githubusercontent.com/mastermindx-market-intelligence/Mastermind/<40-hex>/<fixed-path>`.
+That request is credential-free, proxy-free, redirect-free, one-attempt/no-retry, and revalidates
+the final HTTPS destination; it never acquires a mutable branch/ref and never mutates the local
+Git object store.
+
+Local and fallback bytes are bounded to 512 KiB before acceptance, then checked for exact
+persisted SHA-256, strict UTF-8 and NUL exclusion before any provider construction/start or
+resumed model turn. Sealed
+workers receive an owner-only `0400` immutable run-input artifact even when the enclosing
+run-input directory uses the already-existing shared worker group for schema traversal.
+The supervisor also injects those already-verified bytes through the existing sealed-worker
+prompt mechanism, so provider visibility does not require widening file readability or
+grant/write/test/provider authority. The Operator planner receives the same verified bytes
+through its existing internal provider prompt because that lane has no separate local
+run-input file argument. Same-Attempt Operator recovery re-verifies before any new/resumed
+model turn. Cancellation/containment of an already-live Operator remains available even if
+a later commission verification fails; containment never authorizes another model turn.
+
+This keeps the Web CEO call small and typed while preserving a complete worker brief.
+Do not add `handoff_ref`, raw prompt text, Drive URLs, or another caller-authored context
+field to this public schema merely to move large instructions; that would duplicate the
+existing `commission_ref` owner and blur context with execution authority. External
+documents may be evidence referenced by the commission, but they do not become a second
+commission/lifecycle plane.
+
 ### Structurally absent from every input schema
 
 `actor`, `requested_authorities`, `validation_commands`, `mastermind_sha`,
@@ -372,6 +421,106 @@ file placed under a production tree is refused as well.
   mechanism (**Secure MCP Tunnel**). **Do not expose the gateway to the public
   Internet as a workaround**, and do not add TCP/HTTP to
   `ExecutiveControlService`.
+- **Amendment (Chairman decision, incident #1656, 2026-10-21).** The Chairman
+  decided to publish an authenticated public MCP entrypoint on
+  `https://mcp.mastermind-x.com/mcp`, superseding the blanket prohibition above for
+  that one endpoint. It is not a workaround for the tunnel: the owner-rendered
+  Caddy block (`ops/executive_os/os_public_edge.caddy.template`) exposes exactly
+  GET `/.well-known/oauth-protected-resource/mcp` and POST `/mcp`, the gateway
+  remains the only authenticator (Caddy performs none), Caddy caps request bodies
+  at 64000 bytes (below the gateway's own 65536-byte ceiling), and every other
+  path on the host still aborts. `ExecutiveControlService` still gains no
+  TCP/HTTP.
+  **Installing the Caddy routes is not neutral.** Without the gateway key below
+  the gateway's token verifier accepts a token minted for any configured resource
+  (the OS audience and every tunnel audience) at `/mcp`, and the primary
+  challenge/metadata still name a tunnel URL. So the moment the routes are live,
+  an Internet client holding a token for any of those audiences could reach
+  `/mcp`, and a compliant client could not discover this host. The gateway
+  therefore carries an opt-in **sealed installed-config key,
+  `public_mcp_resource`**, and the routes must not be installed until the
+  installed gateway runs with it.
+  - **Value and profile.** The only accepted value is exactly
+    `https://mcp.mastermind-x.com/mcp`, and only on the plain `web_ceo_v3`
+    profile; it is refused together with `coo` or `principal_ruling_target`,
+    with any other profile, or when the value duplicates a primary or additional
+    (OS/tunnel) resource. `gateway_refresh_preflight` runs the same validation, so
+    a bad value is refused before any service-control effect.
+  - **What it does.** `/mcp` accepts that single audience only: the primary
+    connector, the OS Executive and every tunnel audience are refused there with
+    a 401 whose challenge carries
+    `resource_metadata="https://mcp.mastermind-x.com/.well-known/oauth-protected-resource/mcp"`
+    and names no other resource, and
+    `GET /.well-known/oauth-protected-resource/mcp` returns metadata for
+    `https://mcp.mastermind-x.com/mcp` alone. The public policy is derived from the
+    primary pair, differs from it only by resource and metadata URL, and reuses its
+    policy ids and audit sinks (no new audit directory). The reconcile route is not
+    mounted in this mode.
+  - **Confinement.** The OS Executive transport authenticates with its own
+    exact-resource pair, so a public-audience token is refused on
+    `/os/executive/*` (the OS resource may not be set to the public resource). The
+    Workspace and content apps are built with fixed-resource policies of their own,
+    and the OS static app serves anonymous public assets and accepts no bearer at
+    all; none of them receives the public Executive pair. Only the
+    `web_ceo_v3` builder opts in; every other builder, including the COO
+    compositions, refuses a configured public policy.
+  - **Exclusive per process.** Public mode replaces the multi-audience `/mcp`
+    behaviour for that gateway process; it is not additive. Keeping the OpenAI
+    tunnel entrypoint reachable at the same time needs a second gateway instance
+    with its own sealed config. With the key absent nothing changes.
+  - **Still outside the source.** (c) a distinct, separately registered Auth0 API
+    audience for `https://mcp.mastermind-x.com/mcp` (a human step in the tenant),
+    and the sealed M2 installed-config change that adds the key, are prerequisites
+    for the VPS apply. Neither is performed by a source change.
+  - **Owned component update (`plan-mcp-component` / `apply-mcp-component` /
+    `reconcile-mcp-component`).** Changing the sealed gateway config and plist
+    (a new release sha, optionally `--set-public-mcp-resource`) is performed by
+    `ops/executive_os/mcp_component_update.py`, dispatched only by the
+    `service-control.sh` of the TARGET release under root. It replaces the
+    historical 2026-09-27 `mcp-component-*` receipts, whose code was not in the
+    repository. `plan` is read-only and prints a digest; `apply` requires that
+    digest (`--plan-sha256`) and refuses on any drift. Each effect (stage, stop,
+    replace, start) is persisted as a transaction marker before it is dispatched,
+    stop and start are never replayed, and recovery is observation-driven through
+    `reconcile`. A launchd `disabled` override on the gateway label is honored
+    as an operator kill switch only where it can be told apart from the tool's
+    own `disable`: `apply` refuses (`GATEWAY_DISABLED`) and a gateway disabled
+    between staging and the stop discards the staged images with no effect. After
+    the tool's own stop the flag is its own, so an operator `disable` made before
+    the `start` (or before the compensating `enable` completes) is undone by the
+    `start`/`enable` the tool already owes. Once the compensating `enable` has
+    completed and is recorded, the tool never enables again: a label found
+    disabled then is EFFECT_UNKNOWN `GATEWAY_DISABLED_AFTER_RECOVERY` and needs
+    the operator to `enable` it (and `bootstrap` it if it was also booted out),
+    then `reconcile`; the tool cannot close a transaction while leaving the label
+    disabled. A candidate is verified only when the readback
+    join, the loopback probes **and** a launchd process-identity proof pass, and
+    the proof brackets the probes: the running gateway must have the after-image
+    argv, program, working directory and service user and keep one stable pid
+    for three consecutive polls before the probes; after the probes the same pid
+    must be observed running with that identity on every poll of a hold window
+    that outlasts launchd's 10 s `ThrottleInterval`, the probes are repeated, and
+    a final observation must match again. A new release that dies, is respawned
+    or changes identity within that window, and a before-image process, are
+    EFFECT_UNKNOWN `PROCESS_IDENTITY_NOT_PROVEN:<reasons>`, never a COMPLETE
+    receipt. The proof does **not** tie the listener pid to the port (a foreign
+    process holding the port while the new release stays alive but unbound is not
+    detected) and does not cover a failure later than the hold window. There is
+    **no automatic rollback after replacement**: a
+    failed candidate is restored by a human-approved copy of the preserved
+    before-images (`mcp-update-<plan12>.config.before` and `.plist.before` in
+    `installation-receipts/`) followed by `launchctl enable` and `bootstrap`;
+    the tool has no restore verb. A recorded start dispatch that leaves the
+    label absent is reported as EFFECT_UNKNOWN `START_NOT_PROVEN` and needs the
+    same human `launchctl enable` + `bootstrap`; it is never retried. An
+    ineffective stop (the old gateway is still serving) is closed as
+    `ABORTED_UNCHANGED` after one compensating `enable` and prior-release probes;
+    the preserved and staged images are removed and `reconcile` can re-enter that
+    cleanup if the root process dies part-way. Receipt names carry the
+    transaction start stamp, so re-applying the same plan after an abort writes
+    a distinct receipt. The tool exists only inside releases built after it
+    merges, and running it against the installed gateway is a separate
+    Chairman-approved effect.
 - EXEC-MCP-A does not modify `allowed_peer_uids` or the production
   service-principal topology. A dedicated least-privilege principal for the
   tunnel-facing process is a **separate reviewed architecture decision** for the
@@ -564,3 +713,21 @@ python3 scripts/executive_mcp.py --profile e1-read --mode readonly --describe \
 These commands document a reviewed source composition only. They do **not**
 authorize an installation, listener launch, tunnel, custom-app connection,
 runtime access, production readiness claim, or production deployment.
+
+### Existing Operator submit fence
+
+The production submit fence is **not** `ServerMode.PRODUCTION`.
+`ServerMode` remains limited to `READONLY` and `FIXTURE`.
+The fence gates the existing `submit-ceo-intent` command.
+It applies when the service is bound to the installed Operator socket.
+That installed socket is the production control socket.
+The gate requires the distinct host-owned `ceo_submit_armed` receipt.
+This receipt is separate from MCP mode and from the other service arming bits.
+The fence does not create a production write mode.
+No command-line flag or MCP mode creates a production write mode.
+The existing submit sink and Job creation path remain unchanged.
+The fence only refuses before that sink is entered when the receipt is absent.
+Fixture and temporary service sockets retain their existing behavior.
+Arming is a Chairman act.
+Arming remains blocked on the installed-host ceremony.
+This documentation does not authorize that ceremony or any deployment.

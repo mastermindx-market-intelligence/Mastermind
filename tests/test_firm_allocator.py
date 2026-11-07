@@ -495,6 +495,7 @@ def test_shadow_guarantee_grep(tmp_path):
     ALLOWED_RELATIVE = {
         "app/web.py",
         "tests/test_firm_allocator.py",
+        "tests/test_benchmark_window_consumers.py",  # A12: calls _latest_benchmark (read-only test)
         "portfolio/firm_allocator.py",  # the module itself
     }
     allowed_abs = {repo_root / rel for rel in ALLOWED_RELATIVE}

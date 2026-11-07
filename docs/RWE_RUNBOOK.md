@@ -44,6 +44,38 @@ Program reference: `research/REPRODUCIBLE_WORKER_ENVIRONMENTS_MASTERPLAN_V1.md`
   e.g. `tests/test_executive_service.py` -- never touch `engine`/`lib` and
   are a valid equivalence check on their own).
 
+## One-command disposable worker path
+
+For a worker or attended operator that needs one deterministic test invocation but should not
+manage a venv lifecycle itself, use `run`:
+
+```
+python scripts/rwe_env.py run \
+  --subset tests/test_executive_service.py \
+  --receipt-out /existing/artifact/dir/rwe-receipt.json
+```
+
+`run` composes the existing `realize` and `gate` operations in a fresh temporary environment,
+exports the final secret-free `mastermind.worker_environment/v1` receipt, and removes the
+temporary environment before returning. The gate's real non-zero exit code is preserved even if
+receipt publication later fails. A completed gate retains `proof.gate` and adds
+`proof.run.status=gate_completed`. A lawful gate refusal that occurs before pytest starts does **not**
+fabricate `proof.gate`; it exports `proof.run.status=gate_refused_before_execution` with the refusal
+exit code. If the gate raises before it can persist a trustworthy terminal, the exported receipt says
+`proof.run.status=gate_outcome_unavailable` and exits 2.
+
+The receipt target must be new. Existing parent symlinks such as macOS `/tmp` are canonicalized once,
+then parent device/inode identity is rechecked at publication. Receipt bytes are fsynced to a private
+same-directory inode and atomically hard-linked into the final leaf, so a racing owner is never
+overwritten and an interrupted write cannot leave a partial final JSON file that blocks a later run.
+A realization refusal produces no receipt.
+
+Use `--python` or `--lock` only under the same rules as `realize`. Omit `--subset` only when the
+full-gate vendored input described above is already materialized. This convenience path does not
+cache environments, install a host service, select a worker/provider, change CI authority, or make
+the shadow RWE lane required. It exists so a worker can consume the accepted environment without
+spending reasoning time on venv construction and cleanup.
+
 ## Realize a fresh environment
 
 ```
@@ -74,6 +106,27 @@ your platform's default location differs (e.g. a different Homebrew prefix).
 ```
 python scripts/rwe_env.py gate --env /path/to/venv
 ```
+
+The shadow workflow runs the canonical six-shard plan on six independent
+runners. One `prepare-lock` job supplies the same Linux lock bytes to
+every runner; each realizes its own environment, then runs
+`gate --env /tmp/rwe-env --shard-index N` for its index from 0 through 5.
+Each shard has a 45-minute job limit, and the final `shadow-gate` job
+requires both lock preparation and the complete shard matrix to succeed.
+A failed, cancelled, or missing shard cannot qualify the full gate.
+
+Each runner installs Node 22.14.0 and the package-lock-bound npm
+dependencies before realizing the Python environment and running its
+shard. Python hash-lock checks, native nested test deadlines, and the
+canonical discovery/exclusion rules remain in force.
+
+A shard receipt records only `proof.shard`, including its index, six-way
+plan, selected module count, included-module digest, command, exit code
+and elapsed time. It never becomes `proof.gate`; full coverage is proved
+by the workflow's complete matrix and fail-closed fan-in. The ordinary
+`gate --env /path/to/venv` command above still invokes the full discovery
+gate and records `proof.gate`.
+
 
 Refuses first (before anything else, including any subprocess call) if the
 environment's interpreter is no longer CPython 3.12, or if a prior receipt

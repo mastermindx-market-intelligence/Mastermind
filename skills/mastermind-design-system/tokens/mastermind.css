@@ -1,0 +1,42 @@
+/*
+ * Mastermind portable Claude reference projection.
+ * DO NOT replace production templates/theme.css with this file.
+ * Production source law remains authoritative; this file makes the observed system legible to Claude.
+ */
+:root,
+html[data-theme="dark"] {
+  --bg:#0f1115; --panel:#181b21; --panel2:#1e222a; --text:#d7dce3; --muted:#8b93a1; --line:#3a4150;
+  --up:#45b873; --down:#e06464; --warn:#e0a030; --act:#e05555; --ok:#3da564; --info:#5b9bf0; --link:#7aa7e0; --orange:#e08b45;
+  --prov:#62a0e8; --prov-ink:#62a0e8;
+  --mx-tier-accent:#7c5cff; --mx-tier-fill:#6340d8; --ink-tier:#9b86ff;
+  --ser-1:#5b9bf0; --ser-2:#d4a017; --ser-3:#0ea5e9; --ser-4:#e08b45;
+  --ink-up:var(--up); --ink-down:var(--down); --ink-warn:var(--warn); --ink-link:var(--link);
+  --card-shadow:0 1px 0 rgba(255,255,255,.02);
+  --popover-shadow:0 6px 18px rgba(0,0,0,.5);
+}
+
+html[data-theme="light"] {
+  --bg:#f7f8fa; --panel:#ffffff; --panel2:#eef1f6; --text:#1c2430; --muted:#5d6b7e;
+  /* Production theme.css computes its light line token; this literal is the Paper projection, not an overwrite instruction. */
+  --line:#c9ccd1;
+  --up:#1f9a55; --down:#cf4040; --warn:#b9791a; --act:#c43d3d; --ok:#2f8a52; --info:#285fff; --link:#285fff; --orange:#c4781f;
+  --prov:#2f6fd0; --prov-ink:#2c62b3;
+  --mx-tier-accent:#7c5cff; --mx-tier-fill:#6340d8; --ink-tier:#5b3fc4;
+  --ser-1:#2f63c4; --ser-2:#8f6a04; --ser-3:#0284c7; --ser-4:#b06a25;
+  --ink-up:#1e6d47; --ink-down:#b23c3d; --ink-warn:#7d5922; --ink-link:#2758e6;
+  --card-shadow:0 1px 3px rgba(20,30,50,.07);
+  --popover-shadow:0 4px 10px rgba(20,30,50,.06), 0 12px 28px rgba(20,30,50,.14);
+}
+
+/* Asia market-direction convention: health/severity does not flip. */
+html[data-lang="zh"] { --up:#e06464; --down:#45b873; --ink-up:#e06464; --ink-down:#45b873; }
+html[data-theme="light"][data-lang="zh"] { --up:#cf4040; --down:#1f9a55; --ink-up:#b23c3d; --ink-down:#1e6d47; }
+
+:root {
+  --font-ui:-apple-system,BlinkMacSystemFont,Inter,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,"Cascadia Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --fs-micro:10px; --fs-label:11px; --fs-sm:12.5px; --fs-body:14px; --fs-h3:14px; --fs-md:15px; --fs-h2:17px; --fs-num-lg:22px; --fs-h1:28px; --fs-num-xl:38px; --fs-display:46px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-7:32px; --sp-8:44px;
+  --r-ctl:8px; --r-btn:10px; --r-card:12px; --r-panel:14px; --r-pill:999px;
+  --t-fast:.16s; --t-med:.2s; --t-slow:.55s; --ease-std:ease; --ease-lift:cubic-bezier(.2,.7,.3,1);
+}

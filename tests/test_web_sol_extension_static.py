@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -165,8 +166,8 @@ def test_background_uses_generated_exact_native_host_and_no_generic_action_vocab
     assert 'NATIVE_HOST = "com.mastermind.web_sol_surface"' not in source
     assert 'connectNative("com.mastermind.web_sol_surface")' not in source
     for forbidden in (
+        r"\bTYPE\b",
         "CLICK",
-        "TYPE",
         "SEND",
         "NAVIGATE",
         "RELOAD",
@@ -175,4 +176,4 @@ def test_background_uses_generated_exact_native_host_and_no_generic_action_vocab
         "RETRY",
         "FAILOVER",
     ):
-        assert forbidden not in source
+        assert re.search(forbidden, source) is None
