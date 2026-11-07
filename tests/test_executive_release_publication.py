@@ -166,7 +166,9 @@ def harness(tmp_path):
            "REPO_ROOT": str(ROOT), "SYSTEM_ROOT": str(system), "SOURCE_REPO": str(source),
            "EXPECTED_SHA": sha, "TREE_SHA": tree, "RELEASE_ROOT": str(canonical),
            "SCRIPT_DIR": str(ROOT / "ops/executive_os"), "STAGE_RELEASE_ONLY": "0",
-           "OS_WEB_ASSETS": ""}  # Backend-only installer default; optional path has its own harness.
+           "OS_WEB_ASSETS": "", "HERMES_ATTENDED_SOURCE": "",
+           "HERMES_ATTENDED_CONFIGURATION": "", "HERMES_ATTENDED_CONFIGURATION_SHA256": ""}
+    # Backend-only installer defaults; optional artifacts have their own harness.
     # The installer's cleanup only removes its still-owned staging pathname.
     cleanup = """trap 'if [ -n "$STAGING" ] && [ -d "$STAGING" ]; then /bin/rm -rf -- "$STAGING"; fi' EXIT\n"""
     # Only root/native admission is substituted; archive, sealing, publication,
