@@ -1088,7 +1088,7 @@ def test_a_responses_provider_error_frame_is_never_a_completion():
 
 
 def test_plan_policy_is_bound_to_generation_and_sent_by_owner():
-    from ops.native_fabric.experiential_proxy.plan_policy import plan_policy_digest
+    from control_plane.experiential_plan_policy import plan_policy_digest
     gateway = MockGateway().start()
     try:
         mode = "free_only"

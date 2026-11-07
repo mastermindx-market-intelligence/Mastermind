@@ -131,6 +131,26 @@ if str(_HERE) not in sys.path:
 
 import experiential_pin as pin  # noqa: E402  (same-directory sibling law)
 
+# Direct source CLI and flat native releases use the same policy source.
+from pathlib import Path as _PolicyPath
+import sys as _policy_sys
+_policy_source_root = _PolicyPath(__file__).resolve().parents[3]
+if (_policy_source_root / "control_plane" / "experiential_plan_policy.py").is_file():
+    _policy_sys.path.insert(0, str(_policy_source_root))
+
+try:
+    from control_plane.experiential_plan_policy import (
+        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        plan_policy_digest, route_policy_generation, select_plan_model,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name not in {"control_plane", "control_plane.experiential_plan_policy"}:
+        raise
+    from experiential_plan_policy import (
+        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        plan_policy_digest, route_policy_generation, select_plan_model,
+    )
+
 #: Exact pool/slug are THE PIN'S law, re-exported read-only.  The transport
 #: never carries a second copy of the slug and never substitutes a model.
 POOL = pin.POOL
@@ -199,7 +219,7 @@ PROVIDER_REQUEST_ID_MALFORMED = "PROVIDER_REQUEST_ID_MALFORMED"
 MAX_INLINE_COST_USD = 100.0
 
 _RUN_ID_RE = pin.RUN_ID_RE
-_PACKET_ROOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./:-]{0,255}$")
+_PACKET_ROOT_RE = re.compile(r"^/?[A-Za-z0-9][A-Za-z0-9_./:-]{0,1023}$")
 _PROXY_TOKEN_RE = re.compile(r"^[\x21-\x7e]{24,256}$")
 _ROUTE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -272,6 +292,7 @@ class GatewayRoute:
     route_generation: str
     scheme: str = "http"
     base_path: str = GATEWAY_BASE_PATH
+    plan_policy: str = "legacy"
 
 
 @dataclass(frozen=True)
@@ -321,11 +342,13 @@ class InferenceOutcome:
     cost_settled: bool = False
     cost_detail: str = "not_observed"
     max_output_tokens: int = MAX_OUTPUT_TOKENS
+    plan_lane: Optional[str] = None
 
     def summary(self) -> Dict[str, Any]:
         """Metadata-only view (no completion text, no credentials)."""
         return {
             "source": self.source,
+            "plan_lane": self.plan_lane,
             "run_id": self.run_id,
             "packet_root": self.packet_root,
             "pool": self.pool,
@@ -450,7 +473,7 @@ def _validate_prompt(prompt: Any, system: Any, limits: TransportLimits) -> str:
     return prompt
 
 
-def _build_request_frame(prompt: str, system: Any, max_tokens: int) -> bytes:
+def _build_request_frame(prompt: str, system: Any, max_tokens: int, model: str = MODEL) -> bytes:
     """The exact admitted request frame.  The model is the pin's law; the
     frame is non-streaming by law; ``max_tokens`` is the validated
     tighten-only worst-case output bound; no other caller-supplied field can
@@ -464,7 +487,7 @@ def _build_request_frame(prompt: str, system: Any, max_tokens: int) -> bytes:
     # dispatches. Pin one attempt and forbid internal provider-rung fallback.
     # These are documented Experiential gateway controls, not provider fields.
     frame = {
-        "model": MODEL,
+        "model": model,
         "messages": messages,
         "stream": False,
         # Fixed conservative worst-case output bound.  A request that fails
@@ -534,7 +557,7 @@ def _classify_http_error(status: int, content_type: str,
     return refusal
 
 
-def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str], Any]:
+def _parse_completion(raw: bytes, content_type: str, expected_model: str = MODEL) -> Tuple[str, Optional[str], Any]:
     """The exact JSON response law: 200 + JSON + non-empty choices + content.
 
     The echoed ``model`` must match the pinned request slug BYTE-FOR-BYTE —
@@ -557,10 +580,13 @@ def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str]
         raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED", "frame is not an object")
     model_echo = frame.get("model")
     if model_echo is not None:
-        if not isinstance(model_echo, str) or model_echo != MODEL:
+        allowed_echoes = {expected_model}
+        if expected_model in PLAN_CHAT_MODELS and expected_model.endswith(":free"):
+            allowed_echoes.add(expected_model[:-5])
+        if not isinstance(model_echo, str) or model_echo not in allowed_echoes:
             raise ExperientialTransportRefused(
                 "GATEWAY_RESPONSE_MODEL_MISMATCH",
-                f"expected pinned model {MODEL!r}")
+                f"expected pinned model {expected_model!r}")
     choices = frame.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED", "no choices")
@@ -689,6 +715,20 @@ def _observe_cost(usage: Any) -> Tuple[str, Optional[float], bool, str]:
             "inline_observation_not_settled")
 
 
+def require_plan_route_qualified(route: GatewayRoute, model: str) -> None:
+    """A plan route is host-enrolled and bound to the enforced gateway policy.
+
+    Legacy qualification constants retain their original meaning. A new plan
+    must use a distinct scoped account, fresh metadata and a policy-bound route.
+    """
+    _validate_route(route)
+    if model not in PLAN_CHAT_MODELS or route.plan_policy not in {"free_only", "free_and_uncensored"}:
+        raise ExperientialTransportRefused("PLAN_GATEWAY_POLICY_REQUIRED")
+    base = f"{route.scheme}://{route.host}:{route.port}{route.base_path}"
+    if route.route_generation != route_policy_generation(base, GATEWAY_CHAT_PATH, route.plan_policy):
+        raise ExperientialTransportRefused("PLAN_GATEWAY_GENERATION_MISMATCH")
+
+
 def require_route_qualified() -> None:
     """The transport-owned attestation gate.  Reads the module constant."""
     if ROUTE_QUALIFIED is not True:
@@ -791,11 +831,16 @@ def run_opt_in_inference(
         account=account, quota_readback=quota_readback)
 
     # Transport-owned attestation + structure, after the admission law.
-    require_route_qualified()
-    _validate_route(route)
+    if admitted["model"] in PLAN_CHAT_MODELS:
+        require_plan_route_qualified(route, admitted["model"])
+        if route.plan_policy != admitted["plan_policy"]:
+            raise ExperientialTransportRefused("PLAN_GATEWAY_POLICY_MISMATCH")
+    else:
+        require_route_qualified()
+        _validate_route(route)
     _validate_prompt(prompt, system, bounded)
     output_cap = _validate_output_tokens(max_output_tokens)
-    body = _build_request_frame(prompt, system, output_cap)
+    body = _build_request_frame(prompt, system, output_cap, admitted["model"])
 
     headers = {
         "Authorization": f"Bearer {route.proxy_token}",
@@ -806,6 +851,8 @@ def run_opt_in_inference(
         # Content-Length is deliberately NOT set here: urllib computes it, and
         # a duplicate Content-Length is refused by the attempt boundary law.
     }
+    if admitted["model"] in PLAN_CHAT_MODELS:
+        headers["X-Fabric-Plan-Policy"] = admitted["policy_digest"]
     request = urllib.request.Request(_gateway_url(route), data=body,
                                      headers=headers, method="POST")
     opener = _build_opener()
@@ -865,7 +912,7 @@ def run_opt_in_inference(
         raise ExperientialTransportRefused(
             "GATEWAY_RESPONSE_TOO_LARGE",
             f"exceeds {MAX_RESPONSE_BYTES} bytes")
-    content, model_echo, usage = _parse_completion(raw, content_type)
+    content, model_echo, usage = _parse_completion(raw, content_type, admitted["model"])
     # Fail-closed BYOK law first, then the typed (never invented) cost
     # observation.  Neither dials anything: settlement belongs to the
     # existing billing owner via the provider request id / usage export.
@@ -893,6 +940,7 @@ def run_opt_in_inference(
         cost_settled=cost_settled,
         cost_detail=cost_detail,
         max_output_tokens=output_cap,
+        plan_lane=admitted.get("plan_lane"),
     )
 
 

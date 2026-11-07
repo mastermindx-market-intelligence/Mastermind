@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from ops.native_fabric.experiential_proxy.gateway import Settings, create_app
-from ops.native_fabric.experiential_proxy.plan_policy import (
+from control_plane.experiential_plan_policy import (
     FREE_CHAT_MODELS, FREE_NATIVE_MODELS, PAID_UNCENSORED_MODELS, plan_policy_digest,
 )
 
@@ -185,3 +185,15 @@ def test_sdk_helper_pins_policy_and_disables_retries(monkeypatch):
         assert client.default_headers["Idempotency-Key"] == "one-logical-fixture"
     finally:
         client.close()
+
+
+def test_nested_gateway_controls_cannot_enable_provider_retry_or_fallback():
+    import json
+    from control_plane.experiential_plan_policy import validate_plan_request, PlanRequestRefused
+    from ops.native_fabric.experiential53.experiential_transport import _build_request_frame
+    bad = {"model": "deepseek-v4.1-flash-uncensored", "gateway": {
+        "routing": {"allow_fallbacks": True}, "retry": {"max_total_attempts": 8}}}
+    with pytest.raises(PlanRequestRefused, match="ROUTING_OVERRIDE"):
+        validate_plan_request("free_and_uncensored", "chat/completions", json.dumps(bad).encode())
+    good = _build_request_frame("bounded proof", None, 8, "deepseek-v4.1-flash-uncensored")
+    assert validate_plan_request("free_and_uncensored", "chat/completions", good) == "paid_uncensored"

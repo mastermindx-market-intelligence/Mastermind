@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import httpx
 
-from .plan_policy import PLAN_MODES, PlanRequestRefused, plan_policy_digest, validate_plan_request
+from control_plane.experiential_plan_policy import PLAN_MODES, PlanRequestRefused, plan_policy_digest, validate_plan_request
 
 UPSTREAM = "https://api.experientiallabs.ai/v1"
 ALLOWED = {
@@ -404,7 +404,11 @@ def create_app(
         scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not hmac.compare_digest(candidate, cfg.proxy_token):
             return JSONResponse({"error": {"message": "unauthorized", "type": "authentication_error"}}, status_code=401)
-        return JSONResponse(await request.app.state.admissions.snapshot())
+        snapshot = await request.app.state.admissions.snapshot()
+        snapshot.update(plan_policy=cfg.plan_policy,
+                        plan_policy_digest=plan_policy_digest(cfg.plan_policy),
+                        account_metadata_enabled=cfg.enable_account_metadata)
+        return JSONResponse(snapshot)
 
     @app.api_route("/v1/{endpoint:path}", methods=["POST", "GET"])
     async def proxy(endpoint: str, request: Request) -> Response:

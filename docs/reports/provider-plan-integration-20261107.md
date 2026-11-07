@@ -1,133 +1,113 @@
 # Provider plan integration — November 7, 2026
 
 Operation: `provider-plans-byteplus-experiential-20261107-c2`.
-Protected source pin: `779fc3be9d07c366bf5b47c650b64e59fc6f3903`.
+Protected law pin: `779fc3be9d07c366bf5b47c650b64e59fc6f3903`.
 Parent: [Capacity Fabric #983](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983).
-Source plan: [Experiential gateway, P5](../plans/EXPERIENTIAL_FABRIC_GATEWAY.md).
-This report distinguishes source qualification, account observations and live execution.
+Source: [PR #2220](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2220).
+Implementation: [provider plan composition](../../ops/native_fabric/provider_plans/README.md).
 
-## Implemented and qualified source
+## Current checkpoint
 
-- The existing gateway enforces opt-in `free_only` and
-  `free_and_uncensored` modes before any RPM/slot reservation or upstream send.
-- All seven requested free models have exact model/protocol mappings. Chat and
-  Responses keep five chat models; Jev uses System One; GPT-6 Luna Decisions uses
-  Decisions. All free model IDs retain `:free`; no paid spill or automatic retry.
-- Paid mode permits exactly DeepSeek V4.1 Flash Uncensored and GLM 5.3 Flash
-  Uncensored. The declared new-selection preference is DeepSeek first. The
-  gateway does not select models or override the incumbent router.
-- The Attempt-owned consumer binds the plan policy digest into its route
-  generation and sends it to the existing gateway. Drift/missing policy fails
-  before admission. Legacy routes preserve their prior identity.
-- Paired null key limits now remain null; malformed/partial nulls still fail.
-  This fixes the actual supplied key's valid metadata without minting capacity.
-- BytePlus's existing readback projection now supports an opaque owner-issued
-  subscription reference and a bounded freshness evaluation. Any one of the
-  three windows can report exhaustion. Expired-reset or stale/future observations
-  remain unknown. Rounded percentages never become request counts/concurrency.
-- Additional API keys share a subscription's scope. Additional subscriptions
-  need distinct enrolled identities and actual concurrency proof.
+The source now connects both plans to the incumbent native request, physical
+host lease, provider Broker, credential owners, process receipts, quota observer
+and ledger. Source qualification is complete enough for protected CI and release
+review. Native selection and real provider inference are still pending at this
+checkpoint. No merged-source or completed live-acceptance claim is made here.
 
-Focused local qualification on the registered M2 worktree:
-**289 passed, zero skipped** in 34.13 seconds after installing the declared
-OpenAI SDK dependency into an isolated temporary virtual environment. The earlier
-system-Python run was 281 passed / 7 skipped; the SDK run resolved those skips
-and includes the added policy-header client test. Command:
+Credentials have been enrolled in private, owner-only files on the designated
+host. They are absent from source, packets and this report. The existing
+Experiential gateway has been started as a bounded candidate service on loopback
+for authenticated metadata qualification; production native routing remains
+unselected pending protected source delivery.
 
-```sh
-python3 -m pytest --noconftest -o addopts='' -q --tb=short \
-  tests/test_experiential_plan_policy.py \
-  tests/test_experiential_account_metadata_proxy.py \
-  tests/test_experiential_systemone_gateway.py \
-  tests/test_experiential_proxy.py \
-  tests/test_experiential_harness_endpoint.py \
-  tests/test_subscription_catalog_byteplus_readback.py \
-  tests/test_subscription_harness_bindings.py
-```
+## Implemented behavior
 
-Tests use local/mock upstreams and fixture credentials. They do not prove a
-provider inference, native lease, installed generation or production acceptance.
-SDK-dependent cases completed in the isolated SDK-enabled run.
+- ModelArk uses supported Claude Code against the personal coding-plan endpoint.
+  Exact models: `deepseek-v4.1-flash` and `glm-5.3-flash`.
+- Each subscription has one quota scope for its five-hour, weekly and monthly
+  windows. An extra key does not create quota. Distinct subscriptions can be
+  enrolled separately. Initial operator concurrency is one.
+- UNKNOWN management telemetry remains UNKNOWN. Bounded coding-tool execution
+  uses the provider's hard plan enforcement. Any known exhausted window holds
+  the account. No guessed public request count, reset or PAYG fallback is used.
+- Experiential free requests retain exact `:free` wire IDs. Its base catalog
+  slugs authorize those documented qualifiers; they are not required to appear
+  as separate catalog rows. A canonical base echo may identify the served model,
+  without stripping the outgoing qualifier.
+- All seven screenshot free-model protocols are mapped. Five are native chat
+  workers; Jev uses System One and GPT-6 Luna Decisions uses Decisions.
+- Paid selection permits only DeepSeek V4.1 Flash Uncensored and GLM 5.3 Flash
+  Uncensored, with DeepSeek first for a fresh selection. No after-send fallback.
+- Gateway policy is checked before RPM/admission; unsafe nested fallback/retry
+  controls are rejected. Workers carry the deployed policy digest.
+- Native execution validates the real Broker account/model/root and reserves the
+  existing one-shot run artifact. Restart/replay is refused before another send.
+- Physical admission uses the existing shared M2 lane markers. The two new pools
+  do not bypass its physical ceiling, load gate, disk gate or cleanup holds.
+- The new source profile preserves all 107 selected native files and adds nine
+  source-owned dependencies. It patches seven exact native preimages and does
+  not touch the active #2175 writer's checkout.
+
+## Verification
+
+A focused source run passed **438 tests** covering the new native lease/send
+binding, actual bridge-to-local-HTTP transport, plan policy, existing gateway,
+account metadata, supported harness profiles, quota readbacks and legacy routes.
+This includes proving that a second process cannot send an already reserved run
+and that a different leased account is refused before HTTP.
+
+The actual packaged Macro/Fabric composition passed **15 tests and 8 subtests**
+after the gateway's production-archive dependency was moved into
+`control_plane/experiential_plan_policy.py`. Its pinned gateway blob is
+`50295bb81abaaf6949f8b61be2f6aef8a60b1b76`.
+
+Offline composition reproduced the complete 116-file proposed native closure
+from the exact selected generation. Compilation and shell syntax checks passed.
+These are source/packaging proofs, not real inference receipts.
 
 ## Actual account observations
 
-Only read-only requests were made to the documented Experiential origin. The
-supplied credential authenticated for `/api/whoami`, `/api/v1/key`,
-`/api/v1/credits` and `/v1/models` (HTTP 200).
+Authenticated metadata reads through the installed candidate gateway succeeded
+for status, identity, credits and model catalog. The organization SHA256 is
+`6d136977b6476bf16b6538e1c31ead74b6b0773c477cdda07aa35aca3a0e3aad`.
+The later observed wallet difference was **$32.813517129**. No inference was
+performed by this operation before that observation; other account activity
+can change this value.
 
-- Credential is an **inference key**, `is_provisioning=false`.
-- Key's daily USD restriction: `limit=null`, `limit_remaining=null`.
-- Credits API's **USD** totals: 46.0 credited, 8.768133843 used,
-  **37.231866157 USD** wallet difference. Pending reservations were not measured.
-- This is not proof of the claimed $200/month subscription allowance or the
-  current remaining 7,000 daily free credits. Those are Chairman-declared plan
-  expectations pending account-level readback.
-- Authenticated catalog included all seven requested base slugs and both paid
-  Uncensored slugs. Public model detail confirms GPT-6 Luna Decisions is
-  `POST /v1/decisions`, not chat/streaming.
-- Daily usage read initially returned 422 naming missing `org_id`. One request
-  corrected that schema using the same authenticated organization; it returned
-  400. No daily balance was inferred. This is a request error, not an auth-denial
-  claim; no unchanged request loop was performed.
-- The connected-browser bootstrap timed out. No dashboard session or budget
-  control was observed.
+The 7,000 free credits/day and $200/month are Chairman-declared plan entitlements,
+not observed remaining balances. Provider prepaid/free-allowance enforcement and
+the exact-model policy are the correct funding owners. The earlier suggestion
+that a provisioning key or new monthly budget ledger was needed was incorrect.
 
-Credentials were handled only in short-lived process stdin/memory for these
-reads. No key was committed, placed in a worker packet, installed in a live
-service, or disclosed in this report. No billable/provider inference was sent.
+BytePlus Ark CLI 1.0.48 is available in an isolated diagnostic installation.
+Its control-plane authentication reports no SSO session. That limits management
+quota visibility; it is not an inference-key rejection. Current official
+documentation supports coding-tool subagents and the Hermes coding agent. The
+earlier blanket claim that this plan forbids all unattended coding agents was
+incorrect. The supported individual coding-tool boundary remains enforced.
 
-## Preserved owners and remaining live gates
+## Delivery and remaining acceptance
 
-1. **Incumbent native composition:** PR #2175 and its original Studio/native
-   release effects remain with the active writer. This change does not edit its
-   lease broker, launcher, publication, rollout or current-generation files.
-2. **Experiential installation:** no loopback gateway was listening on M2 port
-   8311; installed native registry contained no enrolled Experiential/BytePlus
-   pool. Installation must use the existing gateway and Attempt consumer, then
-   the existing broker/ledger. No parallel queue or quota database was added.
-3. **Paid budget:** before enabling paid mode, the existing account/budget owner
-   must verify the monthly boundary. The supplied inference key cannot administer
-   it. Use an authorized account-dashboard session or the provider's provisioning
-   control; never relabel wallet money as a monthly allowance.
-4. **Old holds:** Account A's HTTP403 hold, Account B's original $1/day restriction,
-   `experiential53` manual route and qualification constants remain unchanged.
-   New enrollment must establish actual account identity without bypassing those
-   holds or treating another key as another organization.
-5. **BytePlus:** the $50 personal plan is supported-tool, individual/attended
-   scope. Its existing models already include `deepseek-v4.1-flash` and
-   `glm-5.3-flash`. Current account-bound quota data, credential-owner enrollment,
-   supported harness canary and accepted release are not yet proven. No
-   commercial PAYG endpoint substitution or autonomous grant occurred.
-6. **Real-path acceptance:** still requires one actually admitted Fabric
-   Attempt through the installed gateway/supported harness, canonical quota
-   observations, and consumed result. Source tests are not that receipt.
+Protected branch-protection REST read returned a permission denial and was not
+retried. That does not deny a separate normal protected PR/merge-queue request.
+Release must consume actual PR-head checks, native queue/merge receipts and
+`origin/master` source. No self-approval, direct self-merge or rule bypass is
+authorized or used.
 
-The bounded paid Fabric implementation request
-`provider-plan-gateway-policy-20261107-c2` returned
-`REQUEST_REFUSED_BEFORE_LAUNCH`, `EXECUTION_NOT_ELIGIBLE`; controller 80807 exited
-75. No worker start/result was proven and no retry was issued. Principal
-source work continued in the existing registered workspace.
+Next: complete exact-head CI/source delivery, enroll the accounts and narrow host
+engine permissions through their existing owners, select the qualified native
+generation by CAS, run public bounded requests through actual Fabric leases,
+then record consumed outputs and terminal quota receipts in this report.
 
-## Primary provider references
+## Primary references
 
-- [Experiential errors and free-only contract](https://platform.experientiallabs.ai/docs/errors)
-- [Account API and key permissions](https://platform.experientiallabs.ai/docs/account-api)
-- [Cost API: wallet units](https://platform.experientiallabs.ai/docs/cost-api)
-- [Billing and budget controls](https://platform.experientiallabs.ai/docs/billing)
-- [Authenticated model discovery](https://platform.experientiallabs.ai/docs/models)
-- [GPT-6 Luna Decisions public model detail](https://api.experientiallabs.ai/api/models/gpt-6-luna-decisions)
-- [BytePlus Singapore plan documentation](https://console.byteplus.com/ark/region%3Aap-southeast-1/docs/coding-plan-personal-plan-overview)
+- [Experiential free-only errors/limits](https://platform.experientiallabs.ai/docs/errors)
+- [Canonical slugs and free qualifiers](https://platform.experientiallabs.ai/docs/coding-agents)
+- [Account API](https://platform.experientiallabs.ai/docs/account-api)
+- [Model catalog](https://platform.experientiallabs.ai/docs/models)
+- [BytePlus personal coding-plan quickstart](https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-get-started?redirect=1)
+- [BytePlus Hermes integration](https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-ai-hermes-agent)
 - [BytePlus plan FAQ](https://docs.byteplus.com/en/docs/ModelArk/coding-plan-personal-faq)
 
-BytePlus's public FAQ and regional overview disagree on advertised request
-estimates; neither number set is used to initialize live capacity.
-
-
-## Release capability observation
-
-Reading the protected branch rules through the connected GitHub integration
-returned HTTP 403, `Resource not accessible by integration`. That denied action
-was not retried through another tool/account. The source PR can be published,
-but native merge-queue enrollment remains held until the actual enforced rules
-can be verified through an authorized control. No review approval, queue entry,
-merge or deployment is claimed by this report.
+Public BytePlus request estimates conflict across documents. Neither set is used
+as current available capacity.

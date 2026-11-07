@@ -5,7 +5,7 @@ Does not select a Fabric pool, model, account, worker or execution root.
 import os
 from openai import OpenAI
 
-from ops.native_fabric.experiential_proxy.plan_policy import plan_policy_digest
+from control_plane.experiential_plan_policy import plan_policy_digest
 
 
 def new_client(*, request_id: str | None = None) -> OpenAI:

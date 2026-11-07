@@ -65,7 +65,7 @@ from control_plane.attempt_inference_endpoint import (
 )
 from control_plane.opencode_go_pooled_transport import ProviderRequest, _freeze_request
 
-from ops.native_fabric.experiential_proxy.plan_policy import plan_policy_digest
+from control_plane.experiential_plan_policy import plan_policy_digest, route_policy_generation
 
 MAX_STREAM_BYTES = 64 * 1024 * 1024
 MAX_ERROR_BYTES = 256 * 1024
@@ -204,16 +204,10 @@ def gateway_route_generation(base_url: str, path: str, plan_policy: str = "legac
     to dial, so a route that drifted after attestation is refused instead of
     being forwarded under the approved identity.
     """
-    normalized = str(base_url).rstrip("/")
     try:
-        policy_digest = plan_policy_digest(plan_policy)
+        return route_policy_generation(base_url, path, plan_policy)
     except ValueError as exc:
         raise ExperientialHarnessContractError("invalid gateway plan policy") from exc
-    # Preserve already-issued legacy generation identities.
-    target = f"{normalized}\n{path}"
-    if plan_policy != "legacy":
-        target += "\n" + policy_digest
-    return hashlib.sha256(target.encode("utf-8")).hexdigest()
 
 
 def _normalize_base_url(base_url: str) -> str:
