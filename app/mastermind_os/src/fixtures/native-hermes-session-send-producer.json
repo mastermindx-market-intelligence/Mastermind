@@ -1,0 +1,158 @@
+{
+  "schema": "mastermind.native_session_send_source_fixture.v1",
+  "now_ms": 1800000000000,
+  "selection": {
+    "work_ref": "WS:NATIVE-SECRETARY",
+    "root_job_id": "JOB-042",
+    "target_kind": "hermes_secretary"
+  },
+  "arguments": {
+    "target_ref": "hermes_secretary:960e94a07fbb767e801bb9a4f1ef26f4fa4abbab1974a36298850b5db55abb99",
+    "operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+    "instruction": "Read the original Secretary result.\n  保留原文  \n",
+    "stop_condition": "Return one original finding.\n"
+  },
+  "context": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "context",
+    "ok": true,
+    "effect": "NONE",
+    "operation_key": null,
+    "data": {
+      "schema": "mastermind.os.executive.session_context.v1",
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300,
+      "selection": {
+        "work_ref": "WS:NATIVE-SECRETARY",
+        "root_job_id": "JOB-042",
+        "target_kind": "hermes_secretary"
+      },
+      "selection_state": "RESOLVED",
+      "target": {
+        "addressable": true,
+        "continuation_operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+        "generation": "960e94a07fbb767e801bb9a4",
+        "kind": "hermes_secretary",
+        "root_job_id": "JOB-042",
+        "target_ref": "hermes_secretary:960e94a07fbb767e801bb9a4f1ef26f4fa4abbab1974a36298850b5db55abb99",
+        "work_ref": "WS:NATIVE-SECRETARY"
+      },
+      "capabilities": {
+        "send": true,
+        "reply_read": true,
+        "stop": false
+      }
+    },
+    "error": null
+  },
+  "read_context": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "context",
+    "ok": true,
+    "effect": "NONE",
+    "operation_key": null,
+    "data": {
+      "schema": "mastermind.os.executive.session_context.v1",
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300,
+      "selection": {
+        "work_ref": "WS:NATIVE-SECRETARY",
+        "root_job_id": "JOB-042",
+        "target_kind": "hermes_secretary"
+      },
+      "selection_state": "RESOLVED",
+      "target": {
+        "addressable": true,
+        "continuation_operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+        "generation": "960e94a07fbb767e801bb9a4",
+        "kind": "hermes_secretary",
+        "root_job_id": "JOB-042",
+        "target_ref": "hermes_secretary:960e94a07fbb767e801bb9a4f1ef26f4fa4abbab1974a36298850b5db55abb99",
+        "work_ref": "WS:NATIVE-SECRETARY"
+      },
+      "capabilities": {
+        "send": false,
+        "reply_read": true,
+        "stop": false
+      }
+    },
+    "error": null
+  },
+  "sent": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "send",
+    "ok": true,
+    "effect": "CONTINUATION_COMMITTED",
+    "operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+    "data": {
+      "admission": {
+        "admission_id": "native-hermes-fixture-1",
+        "authority_epoch": 3,
+        "execution_generation": null,
+        "outcome": null,
+        "sequence": 1,
+        "status": "queued"
+      },
+      "answer": null,
+      "commit_started": true,
+      "native_input_sha256": "310396749aa00ad5300fbb29c010dc68fc28c6269f1f70995ecd9b004896a73f",
+      "native_status": "ADMITTED",
+      "operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+      "parent_consumed": false,
+      "read_ref": "session-reply-70da700b60e22a1a997ba3166b3026134b1d8d6ec2176722fe420d2fac9c6dd4",
+      "request_ref": "session-bridge-continue:70da700b60e22a1a997ba3166b3026134b1d8d6ec2176722fe420d2fac9c6dd4",
+      "request_revision": "d76fc07c1bc76250e4349dce58eb2a3145671d9140c7a8dee75e280f2310d18d",
+      "schema": "mastermind.session_bridge.hermes_secretary_result.v1",
+      "successful": null,
+      "target_ref": "hermes_secretary:960e94a07fbb767e801bb9a4f1ef26f4fa4abbab1974a36298850b5db55abb99"
+    },
+    "error": null
+  },
+  "reply": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "reply",
+    "ok": true,
+    "effect": "CONTINUATION_COMMITTED",
+    "operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+    "data": {
+      "admission": {
+        "admission_id": "native-hermes-fixture-1",
+        "authority_epoch": 3,
+        "execution_generation": 2,
+        "outcome": "completed",
+        "sequence": 1,
+        "status": "terminal"
+      },
+      "answer": "Original qualified Secretary reply. 日本語 ✓",
+      "commit_started": true,
+      "native_input_sha256": "310396749aa00ad5300fbb29c010dc68fc28c6269f1f70995ecd9b004896a73f",
+      "native_status": "OBSERVED",
+      "operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+      "parent_consumed": false,
+      "read_ref": "session-reply-70da700b60e22a1a997ba3166b3026134b1d8d6ec2176722fe420d2fac9c6dd4",
+      "request_ref": "session-bridge-continue:70da700b60e22a1a997ba3166b3026134b1d8d6ec2176722fe420d2fac9c6dd4",
+      "request_revision": "d76fc07c1bc76250e4349dce58eb2a3145671d9140c7a8dee75e280f2310d18d",
+      "schema": "mastermind.session_bridge.hermes_secretary_result.v1",
+      "successful": true,
+      "target_ref": "hermes_secretary:960e94a07fbb767e801bb9a4f1ef26f4fa4abbab1974a36298850b5db55abb99"
+    },
+    "error": null
+  },
+  "unknown": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "send",
+    "ok": false,
+    "effect": "UNKNOWN",
+    "operation_key": "session-continue-e5385d6f05dcd3aebd39c2aef2cf21cb147f8840e68cad75d24801594703f915",
+    "data": null,
+    "error": {
+      "code": "effect_unknown",
+      "message": "operation outcome is unknown; reconcile the original operation"
+    }
+  },
+  "premises": [
+    "actual pure Hermes target/request/public-result derivation over inert material",
+    "actual RS256 verifier/authenticator and fixed OsSessionTransportApp",
+    "inert InstalledSessionBridgeClient peer; no live Runtime, provider or installed authority"
+  ]
+}

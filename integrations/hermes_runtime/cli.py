@@ -66,6 +66,10 @@ def main(argv: list[str] | None = None, *,
     enroll_p.add_argument("--profile", type=Path, required=True)
     enroll_p.add_argument("--hermes-bin", type=Path, required=True)
 
+    meta_enroll_p = sub.add_parser("enroll-meta-session", help="Enroll the frozen native Meta-CEO session in its installed role")
+    meta_enroll_p.add_argument("--profile", type=Path, required=True)
+    meta_enroll_p.add_argument("--hermes-bin", type=Path, required=True)
+
     text_p = sub.add_parser("text-turn", help="Host-invoked one text turn inside the installed role unit; stdin only")
     text_p.add_argument("--profile", type=Path, required=True)
     text_p.add_argument("--hermes-bin", type=Path, required=True)
@@ -114,6 +118,8 @@ def main(argv: list[str] | None = None, *,
             return _canary(args.profile, args.hermes_bin)
         elif args.command == "enroll-secretary-session":
             return _enroll_secretary_session(args.profile, args.hermes_bin, native_launch=native_launch)
+        elif args.command == "enroll-meta-session":
+            return _enroll_meta_session(args.profile, args.hermes_bin, native_launch=native_launch)
         elif args.command == "text-turn":
             return _text_turn(args.profile, args.hermes_bin)
         else:
@@ -238,8 +244,21 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
 
 
 def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_launch=None) -> int:
+    return _enroll_native_session(profile_path, hermes_bin, expected_role="mmsecretary",
+                                 native_launch=native_launch)
+
+
+def _enroll_meta_session(profile_path: Path, hermes_bin: Path, *, native_launch=None) -> int:
+    return _enroll_native_session(profile_path, hermes_bin, expected_role="mmmeta",
+                                 native_launch=native_launch)
+
+
+def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_role: str,
+                           native_launch=None) -> int:
     """One held-release, in-cgroup enrollment of the frozen native original."""
     import asyncio
+    from .constants import conversation_contract
+    conversation_contract(expected_role)
     from .constants import PINNED_UPSTREAM_SHA
     from .native_session_control import (
         NativeSecretaryClient, enrollment_result, validate_enrollment_capability,
@@ -258,18 +277,20 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
     if native_launch is None:
         raise RuntimeRefusal("NATIVE_ENROLLMENT_HELD_LAUNCH_REQUIRED")
     profile = load_profile(profile_path)
-    if (profile.role != "mmsecretary" or profile.gateway_backend != "native-session-authority"
+    if (profile.role != expected_role or profile.gateway_backend != "native-session-authority"
             or profile.sha != PINNED_UPSTREAM_SHA
             or profile_path != profile.state_dir / "current/profile.yaml"
             or not profile_path.is_absolute()
-            or native_launch.recipe.get("schema") != "mastermind.hermes_native_gateway_installation/v2"):
+            or native_launch.recipe.get("schema") not in (
+                "mastermind.hermes_native_gateway_installation/v2",
+                "mastermind.hermes_native_gateway_installation/v3")):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_INSTALLATION_REQUIRED")
-    capability = validate_enrollment_capability(native_launch.recipe.get("session_enrollment"))
+    capability = validate_enrollment_capability(native_launch.recipe.get("session_enrollment"), role=expected_role)
     request_id = capability["request_id"]
     implementation_sha = native_launch.owner.root.name
     # Validate identities before native imports; the release entry owns their
     # exact dependency roots, interpreter and source descriptors.
-    enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+    enrollment_result(implementation_sha, request_id, "UNAVAILABLE", role=expected_role)
     saved_profile = dump_profile(profile)
 
     def qualify_profile():
@@ -281,7 +302,7 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
         enforce_role_tcp_ports(current)
-        expected_disabled_mcp(current)
+        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"))
 
     qualify_profile()
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)
@@ -290,7 +311,7 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
     from hermes_cli.gateway_runtime import _endpoint
 
     def result(status):
-        return enrollment_result(implementation_sha, request_id, status)
+        return enrollment_result(implementation_sha, request_id, status, role=expected_role)
 
     async def execute():
         modifying = False
@@ -301,10 +322,10 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
                     if (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True) != home:
                         raise RuntimeRefusal("NATIVE_ENROLLMENT_PROFILE_HOME_CHANGED")
                     boot = _boot_id()
-                    rows = await asyncio.wait_for(_query_fixed_pid1(role="mmsecretary"), timeout=3)
-                    if len(rows) != 1 or rows[0]["role"] != "mmsecretary":
+                    rows = await asyncio.wait_for(_query_fixed_pid1(role=expected_role), timeout=3)
+                    if len(rows) != 1 or rows[0]["role"] != expected_role:
                         raise RuntimeRefusal("NATIVE_ENROLLMENT_SUPERVISOR_UNQUALIFIED")
-                    facts = held.role_facts("mmsecretary", rows[0]["unit_properties"], boot)
+                    facts = held.role_facts(expected_role, rows[0]["unit_properties"], boot)
                     payload = await asyncio.to_thread(query_identify, home, timeout=2)
                     if (type(payload) is not dict or type(payload.get("pid")) is not int
                             or payload["pid"] <= 0 or payload.get("hermes_home") != str(home)):
@@ -339,7 +360,7 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
                     }
 
                 before = await owner()
-                client = NativeSecretaryClient(home, expected_pid=before["child"]["pid"])
+                client = NativeSecretaryClient(home, expected_pid=before["child"]["pid"], role=expected_role)
                 observed = await asyncio.to_thread(client.inspect_enrollment, implementation_sha, request_id)
                 # This also serves as the fresh, immediately pre-create fence.
                 if await owner() != before:
@@ -351,7 +372,7 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
                         return result("EFFECT_UNKNOWN")
                 observed = validate_enrollment_result(
                     observed, implementation_sha=implementation_sha, request_id=request_id,
-                    profile_id=str(home), principal_id=f"uid:{native_launch.row['uid']}")
+                    profile_id=str(home), principal_id=f"uid:{native_launch.row['uid']}", role=expected_role)
                 if observed["status"] == "ENROLLED" and any(
                         observed["target"][key] != before["endpoint"][key]
                         for key in ("profile_id", "instance_id", "authority_epoch")):

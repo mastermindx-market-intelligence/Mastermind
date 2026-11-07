@@ -32,10 +32,10 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
-        # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "de7f3502204c76403b8f5e94fe640f8b883c21a143db30717e127e2a2765cf38",
-        "ast_sha256": "bfeed80a98cf1e20152070659d1397600a2597921c38b938799ce2e095a879eb",
+        # Selected-child App-peer admission changes the enclosing ingress AST.
+        # The original Fabric reply operands and Company listener remain unchanged.
+        "source_sha256": "ea7aee823d3b38eb5c8b102d713678cc35a818213bb6777560cdce09a7976720",
+        "ast_sha256": "d6dc49f5ec033025ac0fbf1903374049a4ec7c5cde5daa504c3f0473e5507164",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
