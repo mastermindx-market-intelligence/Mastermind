@@ -2281,13 +2281,14 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
 
 
 def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None) -> Any:
-    """One static COO implementation, reached through a qualified host builder."""
+    """One COO implementation with two fixed, principal-selected catalogues."""
     from control_plane.coo_principal_request import principal_request_ref, principal_intent_id
     from control_plane import ceo_intent
     from integrations.executive_mcp.coo import (
         COO_MCP_PATH, COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS,
-        validate_coo_tool_arguments,
+        COO_CONTEXT_TOOL_SPECS, validate_coo_tool_arguments, validate_coo_context_tool_arguments,
     )
+    from common import coo_agentos_context_contract as context_wire
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
 
     core = create_coo_app(settings, audit_sink=audit_sink)
@@ -2311,13 +2312,29 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
 
     server = Server(COO_SERVER_NAME, version=COO_SERVER_VERSION)
     schemes = oauth_security_schemes(settings.policy.required_scopes)
-    tools = tuple(mcp_types.Tool(name=spec.name, description=spec.description,
-        inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations),
-        securitySchemes=schemes, _meta={"securitySchemes": schemes}) for spec in COO_TOOL_SPECS)
+    def descriptors(specs):
+        return tuple(mcp_types.Tool(name=spec.name, description=spec.description,
+            inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations),
+            securitySchemes=schemes, _meta={"securitySchemes": schemes}) for spec in specs)
+    tools = {context_wire.LEGACY_CATALOGUE: descriptors(COO_TOOL_SPECS),
+             context_wire.CATALOGUE: descriptors(COO_CONTEXT_TOOL_SPECS)}
 
     @server.list_tools()
     async def list_tools():
-        return list(tools)
+        if settings.catalogue_provider is None:
+            return list(tools[context_wire.LEGACY_CATALOGUE])
+        core.require_context_current()
+        request = server.request_context.request
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            raise ValueError("unambiguous current authorization required")
+        authenticated = await core._auth(request)
+        if isinstance(authenticated, JSONResponse):
+            raise ValueError("COO catalogue unavailable")
+        catalogue = await core.catalogue(*authenticated)
+        if not await core._same_auth(request, authenticated):
+            raise ValueError("COO catalogue unavailable")
+        core.require_context_current()
+        return list(tools[catalogue])
 
     def error(name, code="backend_unavailable"):
         value = _e1_error(settings.executive, name, code, "COO response is unavailable")
@@ -2341,7 +2358,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
             raise ValueError("unambiguous current authorization required")
         try:
-            validated = validate_coo_tool_arguments(name, arguments)
+            validated = (validate_coo_context_tool_arguments(name, arguments) if name == context_wire.TOOL
+                         else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return result(error(name, exc.code))
         is_submit = name == "submit_principal_intent"
@@ -2428,10 +2446,18 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                         payload = failed()
             elif not preflight and (response.status_code != 200 or not _is_e1_envelope(payload, name, COO_SERVER_VERSION)):
                 payload = failed()
+            elif not preflight and name == context_wire.TOOL:
+                data = payload["data"]
+                context_wire.validate_result(data, expected_context=data["principal_context"],
+                    capability_profile_digest=data["capability_profile_digest"])
+                if data["principal_context"]["work_ref"] != validated["work_ref"]:
+                    raise ValueError("COO context workstream differs")
         except Exception:
             payload = selected_child_failed() if is_selected_child else failed()
         reply = result(payload, challenge)
-        if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+        reply_ceiling = (MAX_RESPONSE_BYTES - 4096 if name == context_wire.TOOL
+                         else MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096)
+        if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > reply_ceiling:
             reply = result(selected_child_failed() if is_selected_child
                            else (failed() if has_receipt else error(name, "output_too_large")))
         return reply
