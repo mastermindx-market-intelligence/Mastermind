@@ -966,3 +966,7 @@ REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-jo
     'sites': (),
     'utf8_sites': ((61, 13, 16, 'int', '501'),),
 }
+REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
+    "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
+    "sites": ((252, 46, 49, "int", "512"),),
+}
