@@ -1,6 +1,7 @@
 //! The native client owns OAuth transactions and bearer tokens. The webview
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
+pub mod hermes_native;
 pub mod control_room_read;
 mod draft_continuity;
 mod transport_diagnostics;
@@ -290,6 +291,19 @@ impl Inner {
         let url = self.transaction(Resource::Acquisition)?;
         Ok(format!("{url}&prompt=login"))
     }
+    fn expire_transaction(&mut self, generation: u64, expires: Instant, now: Instant) -> bool {
+        // A completed or replaced transaction's timer must not announce a new
+        // auth boundary. Only the exact original pending deadline can expire.
+        if self.generation != generation
+            || !self.pending.as_ref().is_some_and(|pending|
+                pending.generation == generation && pending.expires == expires && expires <= now)
+        {
+            return false;
+        }
+        let Some(pending) = self.pending.take() else { return false; };
+        self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+        true
+    }
     fn consume(&mut self, callback: &str) -> Result<(Pending, String, String)> {
         // Malformed or unrelated callbacks cannot cancel another transaction.
         let (state, code, error) = parse_callback(callback)?;
@@ -470,7 +484,7 @@ fn emit(app: &AppHandle) {
     }
 }
 fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()> {
-    {
+    let expires = {
         let state = app.state::<NativeAuth>();
         let mut inner = state.lock()?;
         // Serialize browser handoff with logout and replacement transactions.
@@ -484,24 +498,15 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
             emit(app);
             return Err("AUTH_BROWSER_UNAVAILABLE".into());
         }
-    }
+        inner.pending.as_ref().ok_or("AUTHENTICATION_CHANGED")?.expires
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(TRANSACTION_TTL).await;
         let state = app.state::<NativeAuth>();
-        if let Ok(mut inner) = state.lock() {
-            if inner.generation == generation
-                && inner
-                    .pending
-                    .as_ref()
-                    .is_some_and(|p| p.expires <= Instant::now())
-            {
-                if let Some(pending) = inner.pending.take() {
-                    inner.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
-                }
-            }
-        }
-        emit(&app);
+        let expired = state.lock().map(|mut inner|
+            inner.expire_transaction(generation, expires, Instant::now())).unwrap_or(false);
+        if expired { emit(&app); }
     });
     Ok(())
 }
@@ -3055,7 +3060,9 @@ mod tests {
         }
     }
     fn inner() -> Inner {
-        Inner::new(Some("public-client"))
+        // This fixture covers the base two-resource flow independently of the
+        // compiled optional Executive profile; enabled flows have explicit fixtures.
+        Inner::with_executive_resource(Some("public-client"), None)
     }
     fn callback_url(state: &str) -> String {
         format!("{CALLBACK}?state={state}&code=test-code")
@@ -3101,6 +3108,98 @@ mod tests {
         assert_eq!(i.token(Resource::Content).unwrap().value, "content");
         assert_eq!(i.status().status, "signed_in");
     }
+    #[test]
+    fn completed_transaction_timers_do_not_announce_an_auth_change() {
+        let mut i = Inner::with_executive_resource(Some("public-client"),
+            Some("https://mcp.mastermind-x.com/os/executive"));
+        i.transaction(Resource::Acquisition).unwrap();
+        let mut deadlines = Vec::new();
+        for resource in [Resource::Acquisition, Resource::Content, Resource::Executive] {
+            let pending = i.pending.as_ref().unwrap();
+            deadlines.push((pending.generation, pending.expires));
+            let state = pending.state.clone();
+            let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
+            assert_eq!(pending.resource, resource);
+            i.finish_exchange(pending.generation, resource, Ok(token("grant")));
+        }
+        let generation = i.generation;
+        let executive_generation = i.executive_generation;
+        for (timer_generation, expires) in deadlines {
+            assert!(!i.expire_transaction(timer_generation, expires, expires));
+        }
+        assert_eq!(i.status().status, "signed_in");
+        assert!(i.token(Resource::Acquisition).is_some());
+        assert!(i.token(Resource::Content).is_some());
+        assert!(i.token(Resource::Executive).is_some());
+        assert_eq!(i.generation, generation);
+        assert_eq!(i.executive_generation, executive_generation);
+        assert!(i.pending.is_none());
+        assert!(i.reason.is_none());
+    }
+
+    #[test]
+    fn consumed_callback_timer_does_not_interrupt_exchange() {
+        let mut i = inner();
+        i.transaction(Resource::Acquisition).unwrap();
+        let state = i.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
+        assert!(!i.expire_transaction(pending.generation, pending.expires, pending.expires));
+        assert!(i.exchanging);
+        assert!(i.reason.is_none());
+        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_some());
+        assert!(i.status().acquisition);
+    }
+
+    #[test]
+    fn stale_transaction_timer_preserves_replacement_and_logout_generation() {
+        let mut i = inner();
+        i.transaction(Resource::Acquisition).unwrap();
+        let generation = i.generation;
+        let old_deadline = i.pending.as_ref().unwrap().expires;
+        i.transaction(Resource::Content).unwrap();
+        let replacement_deadline = old_deadline + Duration::from_secs(1);
+        i.pending.as_mut().unwrap().expires = replacement_deadline;
+        let replacement_state = i.pending.as_ref().unwrap().state.clone();
+        assert!(!i.expire_transaction(generation, old_deadline, replacement_deadline));
+        assert!(!i.expire_transaction(generation, replacement_deadline, old_deadline));
+        assert_eq!(i.pending.as_ref().unwrap().state, replacement_state);
+        assert_eq!(i.pending.as_ref().unwrap().resource, Resource::Content);
+        i.invalidate();
+        i.transaction(Resource::Acquisition).unwrap();
+        let current_deadline = i.pending.as_ref().unwrap().expires;
+        let current_state = i.pending.as_ref().unwrap().state.clone();
+        assert!(!i.expire_transaction(generation, current_deadline, current_deadline));
+        assert_eq!(i.pending.as_ref().unwrap().state, current_state);
+        assert!(i.reason.is_none());
+    }
+
+    #[test]
+    fn current_transaction_expires_once_with_resource_failure_isolation() {
+        for resource in [Resource::Acquisition, Resource::Content, Resource::Executive] {
+            let mut i = Inner::with_executive_resource(Some("public-client"),
+                Some("https://mcp.mastermind-x.com/os/executive"));
+            i.acquisition = Some(token("acquisition"));
+            i.content = Some(token("content"));
+            i.transaction(resource).unwrap();
+            let expires = i.pending.as_ref().unwrap().expires;
+            let generation = i.generation;
+            assert!(i.expire_transaction(generation, expires, expires));
+            assert!(!i.expire_transaction(generation, expires, expires));
+            assert!(i.pending.is_none());
+            assert!(!i.exchanging);
+            assert!(i.status().acquisition);
+            assert!(i.status().content);
+            if resource == Resource::Executive {
+                assert_eq!(i.status().status, "signed_in");
+                assert!(i.reason.is_none());
+                assert!(i.executive.is_none());
+            } else {
+                assert_eq!(i.reason, Some("AUTH_TRANSACTION_EXPIRED"));
+                assert_eq!(i.status().status, "error");
+            }
+        }
+    }
+
     #[test]
     fn late_token_exchange_cannot_restore_signed_out_session() {
         let mut i = inner();

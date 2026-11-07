@@ -734,7 +734,10 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
+# 2026-11-07 attended source check: native Hermes composition and exact pending
+# auth-timer expiry move these unchanged three operands. Preserve whole-file and
+# exact-token qualification; this supplies no runtime or formal release approval.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}

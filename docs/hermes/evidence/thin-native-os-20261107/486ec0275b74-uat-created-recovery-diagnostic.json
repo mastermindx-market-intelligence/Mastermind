@@ -1,0 +1,26 @@
+{
+  "source": "486ec0275b74d8c508ca96dbe40173054b246978",
+  "bridgeSha256": "d08c48057348c1edc63cd2a4458d7a957e86b911e023fa938f7ed4f3182c20c3",
+  "request": {
+    "operation": "recover_create",
+    "requestId": "9fbc8f4abb944ab1a170b4990e59f729"
+  },
+  "elapsedSeconds": 3.385,
+  "exitCode": 0,
+  "result": {
+    "schema": "mastermind.hermes_native_view.v1",
+    "state": "EFFECT_UNKNOWN",
+    "capabilities": [
+      "native_chat",
+      "native_history",
+      "admission_recovery"
+    ],
+    "delegation": "NOT_ENABLED",
+    "retryAllowed": false,
+    "operation": "recover",
+    "code": "NATIVE_OUTCOME_UNKNOWN",
+    "requestId": "9fbc8f4abb944ab1a170b4990e59f729"
+  },
+  "createCalls": 0,
+  "sendCalls": 0
+}

@@ -1,0 +1,33 @@
+{
+  "schema": "mastermind.hermes_thin_os.source_composition.v1",
+  "observed_at": "2026-11-07T08:57:47.499761+00:00",
+  "operation": "hermes-thin-os-integration-20261106-c1-01",
+  "candidate_head": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "protected_base": "547a880894b0f3d28a6d5118ee2534287b3fc1c0",
+  "governing_pin": "615146aac6a1b0c0933bc9b815517a2fd285ed4a",
+  "governing_delta": false,
+  "tested_merge_tree": "1972f1192d64680d8456b21937a934ed7a9e875a",
+  "resolved_path": "tests/integration/test_fabric_translation_composition.py",
+  "resolved_blob": "b3e00e1c3d507dc276f0f24d40e0665448f1e18a",
+  "resolution": "Retain protected historical preimage pin consumed by application_http_sources; remove unrelated current-realm pin. All other assertions and pins retained.",
+  "app_tree": "e3bd08a36c4ea2363a12b061bf47f70639dd3dbe",
+  "app_source_unchanged": true,
+  "macro_fixture_commit": "f0375acf4ba076718e7cb420ed28ab61fb0a4f26",
+  "validation": [
+    {
+      "path": "/tmp/hermes-thin-master547-paired-20261107-c1.log",
+      "sha256": "26428958c88e41570275b9dca9a3303e562696c7ee4964b552b1d689a367428a",
+      "passed": 23,
+      "exit": 0
+    },
+    {
+      "path": "/tmp/hermes-thin-master547-realm-complete-root-20261107-c1.log",
+      "sha256": "99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87",
+      "passed": 2,
+      "exit": 0
+    }
+  ],
+  "initial_fixture_limit": "The paired-CI archive omits ops.fabric_launch needed to collect native-startup cases. Those two cases passed in the complete existing workspace at the same prepared merge tree. No source repair or dependency installation was needed.",
+  "native_or_backend_execution": false,
+  "merge_queue_requested": false
+}

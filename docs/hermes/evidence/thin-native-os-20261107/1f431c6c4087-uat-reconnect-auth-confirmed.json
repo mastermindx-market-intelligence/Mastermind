@@ -1,0 +1,11 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "observation": {
+    "at": "2026-11-07T09:09:17.763Z",
+    "pid": 75264,
+    "windows": 1,
+    "signedIn": "Signed in"
+  },
+  "reconnectSignInPressAt": "2026-11-07T09:05:04.553Z",
+  "credentialCeremonyActor": "not_attributed"
+}

@@ -1,6 +1,7 @@
 import { parseProjectSourceWriteTarget, projectSourceWriteKeyMatches } from "./project-source-write-target";
 import { parseInstructionAdmissionTarget } from "./instruction-admission-target";
 import type { OperationPointer } from "./operation-controller";
+import { readNativePending } from "../hermes-native/pending-pointer";
 import { parseDirectConsumeTarget } from "../direct-native-result";
 import { canonicalJson, sha256Hex } from "./operation-key";
 import {parseFreshConversationTarget} from './fresh-conversation-target';
@@ -67,6 +68,11 @@ type ClosedRecord = {
 } | {
   /** Project execution keeps only the original opaque operation lookup. */
   readonly v: 12; readonly operationKey: string; readonly kind: "launch"; readonly targetKey: string;
+} | {
+  /** Same local native request only; no prompt, ticket or execution state. */
+  readonly v: 13; readonly operationKey: string; readonly kind: "conversation_create"; readonly targetKey: string;
+} | {
+  readonly v: 14; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -138,6 +144,8 @@ const KIND_RECORDS = {
  * versa; the prefix grammars are disjoint from every legacy key grammar.
  */
 const KIND_VARIANTS = {
+  conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false }],
+  conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false }],
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
   launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
     { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
@@ -187,6 +195,9 @@ function planningTargetMatches(targetKey: unknown): boolean {
 function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>, scope: string): boolean {
   if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
       || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
+  if (spec.v === 13 || spec.v === 14) {
+    return readNativePending(raw as unknown as OperationPointer) !== null;
+  }
   if (spec.v === 5) {
     if (typeof raw.targetKey !== "string") return false;
     const target = parseProjectSourceWriteTarget(raw.targetKey);
