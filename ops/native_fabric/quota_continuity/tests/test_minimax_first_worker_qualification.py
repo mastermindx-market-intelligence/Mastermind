@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 _host = ModuleType("host_pick")
 _host.load_registry = lambda: {}
 _host.evaluate_hosts = lambda *_a, **_k: []
+_host.refresh_stale = lambda _hosts: True
 _host.HOSTS_STATE_DIR = "fixture-states"
 _pick = ModuleType("pick")
 _pick.format_pick = lambda *_a, **_k: "NONE reason=fixture"

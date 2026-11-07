@@ -32,6 +32,7 @@ ADAPTER = ROOT / "candidate/fabric_task.py"
 _host = ModuleType("host_pick")
 _host.load_registry = lambda: {}
 _host.evaluate_hosts = lambda *_a, **_k: []
+_host.refresh_stale = lambda _hosts: True
 _host.HOSTS_STATE_DIR = "fixture-states"
 _pick = ModuleType("pick")
 _pick.format_pick = lambda *_a, **_k: "NONE reason=fixture"
@@ -99,6 +100,74 @@ class Ubuntu4GlmCentralQualification(unittest.TestCase):
         self.assertEqual(view["m1"]["qualification_only_modes"], ["grok", "minimax"])
         self.assertEqual(self.registry, original)
         self.assertEqual(picker.call_args.kwargs["pool"], "glm")
+
+    def test_stale_host_refreshes_one_original_telemetry_probe(self):
+        initial = [{"host": "ubuntu4", "eligible": False,
+                    "gates": [{"gate": "fresh", "result": "FAIL"},
+                              {"gate": "thermal", "result": "FAIL"},
+                              {"gate": "pressure", "result": "FAIL"}]}]
+        current = [{"host": "ubuntu4", "eligible": True,
+                    "gates": [{"gate": "fresh", "result": "PASS"},
+                              {"gate": "thermal", "result": "PASS"},
+                              {"gate": "pressure", "result": "PASS"}]}]
+        with (
+            patch.object(qualification.host_pick, "evaluate_hosts",
+                         side_effect=[initial, current]) as evaluate,
+            patch.object(qualification.host_pick, "refresh_stale",
+                         create=True, return_value=True) as refresh,
+            patch.object(qualification.pick, "format_pick",
+                         return_value="POOL=glm KEY=- MODEL=fixture") as picker,
+        ):
+            result = qualification.qualification_route(
+                "ubuntu4", pool="glm", task_class="mechanical",
+                complexity="C0_MECHANICAL", reason="read only",
+                root="original-root", parent="original-parent", registry=self.registry)
+        self.assertIn("HOST=ubuntu4 MODE=glm-codex", result)
+        refresh.assert_called_once_with(["ubuntu4"])
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertEqual([call.kwargs["max_age"] for call in evaluate.call_args_list], [30, 30])
+        picker.assert_called_once()
+
+    def test_reprobe_does_not_waive_a_real_thermal_failure(self):
+        initial = [{"host": "ubuntu4", "eligible": False,
+                    "gates": [{"gate": "fresh", "result": "FAIL"}]}]
+        hot = [{"host": "ubuntu4", "eligible": False,
+                "gates": [{"gate": "fresh", "result": "PASS"},
+                          {"gate": "thermal", "result": "FAIL"}]}]
+        with (
+            patch.object(qualification.host_pick, "evaluate_hosts",
+                         side_effect=[initial, hot]) as evaluate,
+            patch.object(qualification.host_pick, "refresh_stale",
+                         create=True, return_value=True) as refresh,
+            patch.object(qualification.pick, "format_pick") as picker,
+        ):
+            with self.assertRaisesRegex(ValueError, "QUALIFICATION_PREREQUISITE_REFUSED:thermal"):
+                qualification.qualification_route(
+                    "ubuntu4", pool="glm", task_class="mechanical",
+                    complexity="C0_MECHANICAL", reason="read only",
+                    root="original-root", parent="original-parent", registry=self.registry)
+        refresh.assert_called_once_with(["ubuntu4"])
+        self.assertEqual(evaluate.call_count, 2)
+        picker.assert_not_called()
+
+    def test_failed_telemetry_probe_refuses_before_provider_selection(self):
+        initial = [{"host": "ubuntu4", "eligible": False,
+                    "gates": [{"gate": "fresh", "result": "FAIL"}]}]
+        with (
+            patch.object(qualification.host_pick, "evaluate_hosts",
+                         return_value=initial) as evaluate,
+            patch.object(qualification.host_pick, "refresh_stale",
+                         create=True, return_value=False) as refresh,
+            patch.object(qualification.pick, "format_pick") as picker,
+        ):
+            with self.assertRaisesRegex(ValueError, "QUALIFICATION_TELEMETRY_REFRESH_FAILED"):
+                qualification.qualification_route(
+                    "ubuntu4", pool="glm", task_class="mechanical",
+                    complexity="C0_MECHANICAL", reason="read only",
+                    root="original-root", parent="original-parent", registry=self.registry)
+        refresh.assert_called_once_with(["ubuntu4"])
+        evaluate.assert_called_once()
+        picker.assert_not_called()
 
     def test_glm_route_still_requires_the_canonical_glm_pick_pool(self):
         with self.assertRaisesRegex(ValueError, "QUALIFICATION_PROVIDER_REFUSED"):

@@ -13,7 +13,7 @@
   "ext/fabric_client_projection.py": "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6",
   "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
   "ext/fabric_cpu_scope.py": "15891591aba64e7d5658b7c92fd5ff90a89f6c57df952f8e5673c2a638fc0c63",
-  "ext/fabric_host_qualification.py": "0af361be09af90278ecb9010d66d60ba62b94e1ea7b240cace9a9ca0fd3cb861",
+  "ext/fabric_host_qualification.py": "ae443c6dc465733cde78cc823e523b2f00203e1f4bc5dbe166b59a4999aad8ab",
   "ext/fabric_operator_client.py": "fcb79e9dc4b873832e18e1fde16f0ba900374a08d62d0fc8b9b624a40ec1cd17",
   "ext/fabric_operator_contract.py": "e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e",
   "ext/fabric_operator_diagnostics.py": "c0a5219a29d49f616df19fdb1e1686c78926179911d0e9c923d6c2bcae518641",

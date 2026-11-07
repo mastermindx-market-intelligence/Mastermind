@@ -34,9 +34,21 @@ def qualification_route(host, *, task_class, complexity, reason, subject_pool=No
     # host gate, canonical provider selection and actual LaneLease still applies.
     view = deepcopy(registry)
     view[host]["qualification_only_modes"] = [x for x in held if x != mode]
-    rows = host_pick.evaluate_hosts(view, state_dir or host_pick.HOSTS_STATE_DIR,
-        mode, max_age=30, excluded=set(view)-{host}, now=now)
-    row = next((r for r in rows if r["host"] == host), None)
+    def observe_host():
+        rows = host_pick.evaluate_hosts(view, state_dir or host_pick.HOSTS_STATE_DIR,
+            mode, max_age=30, excluded=set(view)-{host}, now=now)
+        return next((r for r in rows if r["host"] == host), None)
+
+    row = observe_host()
+    if (row is not None and not row["eligible"]
+            and any(g.get("gate") == "fresh" and g.get("result") == "FAIL"
+                    for g in row.get("gates", []))):
+        # The original collector runs every 60 seconds while qualification
+        # needs a <=30-second observation. Use its existing bounded one-host
+        # probe once; never weaken thermals, pressure, leases or provider gates.
+        if not host_pick.refresh_stale([host]):
+            raise ValueError("QUALIFICATION_TELEMETRY_REFRESH_FAILED")
+        row = observe_host()
     if not row or not row["eligible"]:
         fails = [] if not row else [g["gate"] for g in row["gates"] if g["result"] != "PASS"]
         raise ValueError("QUALIFICATION_PREREQUISITE_REFUSED:" + ",".join(fails))
