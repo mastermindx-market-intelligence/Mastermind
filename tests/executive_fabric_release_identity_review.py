@@ -826,3 +826,14 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
            (183, 19, 22, 'int', '460'),
            (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
            (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+
+
+# The unchanged optional observation owner limits a regular binding file to
+# 512 KiB. This sole multiplication operand is bytes, not a UID/GID, peer,
+# socket, principal or port. Exact whole-source and token coordinates only;
+# any changed path, operand, custody logic or other byte restores D8 scrutiny.
+# This test evidence grants no profile access, installation or runtime authority.
+REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
+    "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
+    "sites": ((252, 46, 49, "int", "512"),),
+}

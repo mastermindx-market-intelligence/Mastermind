@@ -124,8 +124,29 @@ def _json(obj) -> dict:
     return _ok(json.dumps(fallback, default=str, ensure_ascii=False))
 
 
-def _read_first_nonempty_mapping_checked(paths):
-    """Read usable mappings without treating unavailable artifacts as absent."""
+def _mapping_field_checked(mapping, key):
+    """Return one optional mapping field plus whether its persisted shape was invalid."""
+    if mapping is None:
+        return {}, False
+    value = mapping.get(key)
+    if value is None:
+        return {}, False
+    if not isinstance(value, dict):
+        return {}, True
+    return value, False
+
+def _single_name_ticker(args):
+    """Keep ticker lookups in one filename component without changing symbol normalization."""
+    value = args.get("ticker")
+    if not isinstance(value, str) or not value or any(char in value for char in ("/", "\\", "\x00")):
+        return None
+    return value.upper()
+
+def _read_first_nonempty_mapping_checked(paths, *, allow_empty=False):
+    """Read usable mappings without treating unavailable artifacts as absent.
+
+    Empty mappings remain failed evidence unless the caller explicitly allows them.
+    """
     had_failure = False
     for path in paths:
         try:
@@ -153,7 +174,7 @@ def _read_first_nonempty_mapping_checked(paths):
         except Exception:  # noqa: BLE001 - caller projects a closed source status
             had_failure = True
             continue
-        if not isinstance(value, dict) or not value:
+        if not isinstance(value, dict) or (not value and not allow_empty):
             had_failure = True
             continue
         return value, had_failure
@@ -174,6 +195,65 @@ def _read_json(p: Path):
 _FRESHNESS_BASIS = "vendored_macro_file"
 _FRESHNESS_KEYS = ("freshness", "alt_freshness")
 
+
+def _ticker_record_checked(mapping, ticker):
+    """Return one ticker record plus whether the mapping shape was invalid."""
+    if mapping is None:
+        return None, False
+    tickers = mapping.get("tickers")
+    if tickers is None:
+        return None, False
+    if not isinstance(tickers, dict):
+        return None, True
+    if ticker not in tickers:
+        return None, False
+    record = tickers[ticker]
+    if not isinstance(record, dict):
+        return None, True
+    return record, False
+
+def _list_field_checked(mapping, key):
+    """Return one optional list field plus whether its persisted shape was invalid."""
+    if mapping is None:
+        return [], False
+    value = mapping.get(key)
+    if value is None:
+        return [], False
+    if not isinstance(value, list):
+        return [], True
+    return value, False
+
+def _read_ticker_feed_checked(ticker, relative_paths):
+    """Select a usable feed and its actual path without hiding earlier read failures."""
+    had_failure = False
+    empty = None
+    for rel in relative_paths:
+        mapping, read_failed = _read_first_nonempty_mapping_checked(
+            (_V / rel,), allow_empty=True,
+        )
+        had_failure = had_failure or read_failed
+        if mapping is None:
+            continue
+        if not mapping:
+            if empty is None:
+                empty = (mapping, rel)
+            continue
+        record, shape_failed = _ticker_record_checked(mapping, ticker)
+        had_failure = had_failure or shape_failed
+        if shape_failed:
+            continue
+        return mapping, record, had_failure, rel
+    if empty is not None:
+        mapping, rel = empty
+        return mapping, None, had_failure, rel
+    return None, None, had_failure, None
+
+
+def _feed_ticker_checked(value):
+    """Return one nonblank feed identifier without changing its normalization."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.upper()
 
 def _first_vendored(*rels: str):
     """(rel, payload) of the first vendored file with a non-empty payload — the same precedence
@@ -238,9 +318,34 @@ def _stock_price(t: str):
 # ---------------- READ tools ----------------
 @tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
 async def get_regime(args):
-    d = _read_json(_V / "data" / "regime" / "latest.json") or {}
     keys = ["date", "quad", "quad_name", "growth_score", "inflation_score", "liquidity_overlay", "cycle_tag"]
-    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (d.get("sector_rs") or [])[:6]}
+    d, core_failed = _read_first_nonempty_mapping_checked((
+        _V / "data" / "regime" / "latest.json",
+    ))
+    if d is None:
+        out = {k: None for k in keys} | {
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable" if core_failed else "absent",
+            "error": "regime_core_unavailable" if core_failed else "regime_core_absent",
+        }
+        if core_failed:
+            out["failed_sources"] = ["regime"]
+        return _json(out)
+
+    sector_rs = d.get("sector_rs")
+    if sector_rs is not None and not isinstance(sector_rs, list):
+        return _json({
+            **{k: None for k in keys},
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable",
+            "error": "regime_core_unavailable",
+            "failed_sources": ["regime"],
+        })
+
+    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (sector_rs or [])[:6]}
+    failed_sources = []
     # E1.1 — append the market_view brief + label_vs_planes line (ADDITIVE; absent view → keys absent).
     # This replaces the ad-hoc 7-key slice so the autonomous Brain reads the same perception layer as
     # the judgment seats — the incident's root cause was the Brain seeing ONLY the label.
@@ -248,35 +353,52 @@ async def get_regime(args):
         from brain.pm_conviction import _read_market_view, _market_view_enrichment
         mv = _read_market_view()
         enrichment = _market_view_enrichment(mv)
+        if enrichment is not None and not isinstance(enrichment, dict):
+            raise TypeError("market-view enrichment is not a mapping")
         if enrichment:
-            compact_mv = dict(enrichment)
-            compact_mv["plane_summaries"] = [
-                {
+            planes = enrichment.get("plane_summaries")
+            if planes is None:
+                planes = []
+            if not isinstance(planes, list):
+                raise TypeError("market-view planes are not a list")
+            compact_planes = []
+            for row in planes:
+                if not isinstance(row, dict):
+                    raise TypeError("market-view plane is not a mapping")
+                freshness, freshness_failed = _mapping_field_checked(row, "freshness")
+                if freshness_failed:
+                    raise TypeError("market-view plane freshness is not a mapping")
+                compact_planes.append({
                     "name": row.get("name"),
                     "direction": row.get("direction"),
                     "status": row.get("status"),
-                    "asof": (row.get("freshness") or {}).get("asof"),
-                    "stale": (row.get("freshness") or {}).get("stale"),
-                    "age_sessions": (row.get("freshness") or {}).get("age_sessions"),
-                }
-                for row in (enrichment.get("plane_summaries") or [])
-            ]
+                    "asof": freshness.get("asof"),
+                    "stale": freshness.get("stale"),
+                    "age_sessions": freshness.get("age_sessions"),
+                })
+            compact_mv = dict(enrichment)
+            compact_mv["plane_summaries"] = compact_planes
+            json.dumps(compact_mv, default=str, ensure_ascii=False)
             out["market_view"] = compact_mv
-    except Exception:  # noqa: BLE001 — additive; never break the tool
-        pass
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("market_view")
     try:
         from brain import decision_context as _dc
 
         dc = _dc.prompt_summary(
             expected_publication=(out.get("market_view") or {}).get("publication")
         )
+        if dc is not None and not isinstance(dc, dict):
+            raise TypeError("decision context is not a mapping")
         if dc:
-            liquidity = dc.get("liquidity") or {}
-            quality = liquidity.get("quality") or {}
-            driver = dc.get("market_driver") or {}
+            liquidity, liquidity_failed = _mapping_field_checked(dc, "liquidity")
+            quality, quality_failed = _mapping_field_checked(liquidity, "quality")
+            driver, driver_failed = _mapping_field_checked(dc, "market_driver")
+            if liquidity_failed or quality_failed or driver_failed:
+                raise TypeError("decision context contains an invalid mapping field")
             # Keep this tool's JSON safely below its transport cap. Rich fresh-lobe context remains
             # available to the strategist/PM; get_regime carries the precise regime core.
-            out["decision_context"] = {
+            compact_dc = {
                 "schema_version": dc.get("schema_version"),
                 "market_asof": dc.get("market_asof"),
                 "hard_label": dc.get("hard_label"),
@@ -303,8 +425,14 @@ async def get_regime(args):
                 "publication": dc.get("publication"),
                 "serving_freshness": dc.get("serving_freshness"),
             }
-    except Exception:  # noqa: BLE001
-        pass
+            json.dumps(compact_dc, default=str, ensure_ascii=False)
+            out["decision_context"] = compact_dc
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("decision_context")
+    if failed_sources:
+        out["read_status"] = "partial"
+        out["failed_sources"] = failed_sources
+        out["note"] = "Regime core is available; named context sources did not complete."
     return _json(out)
 
 
@@ -424,20 +552,70 @@ async def get_standouts(args):
 
 @tool("get_portfolio", "The bot's current paper book + track record.", {})
 async def get_portfolio(args):
-    # This is the private Portfolio Advisor's own-book reader.  ``flagship`` remains the
+    # This is the private Portfolio Advisor's own-book reader. ``flagship`` remains the
     # storage compatibility default, but it is archived and must never silently supply the
     # active US advisor context.
-    from portfolio import registry
+    portfolio_id = None
+    try:
+        from portfolio import registry
 
-    portfolio_id = registry.DASHBOARD_DEFAULT_ID
-    meta = registry.get(portfolio_id)
-    latest = _read_json(registry.data_dir(portfolio_id) / "latest.json")
+        portfolio_id = registry.DASHBOARD_DEFAULT_ID
+        book_path = registry.data_dir(portfolio_id) / "latest.json"
+    except Exception:  # noqa: BLE001
+        return _json({
+            "portfolio_id": portfolio_id,
+            "read_status": "unavailable",
+            "error": "portfolio_registry_unavailable",
+            "failed_sources": ["portfolio_registry"],
+        })
+
+    latest, book_failed = _read_first_nonempty_mapping_checked((book_path,), allow_empty=True)
+    if latest is None:
+        if book_failed:
+            return _json({
+                "portfolio_id": portfolio_id,
+                "read_status": "unavailable",
+                "error": "portfolio_book_unavailable",
+                "failed_sources": ["portfolio_book"],
+            })
+        return _json({"status": "no book yet", "portfolio_id": portfolio_id})
     if not latest:
         return _json({"status": "no book yet", "portfolio_id": portfolio_id})
+
+    try:
+        meta = registry.get(portfolio_id)
+        if not isinstance(meta, dict):
+            raise TypeError("portfolio registry metadata is not a mapping")
+    except Exception:  # noqa: BLE001
+        return _json({
+            **latest,
+            "portfolio_id": portfolio_id,
+            "active": None,
+            "lifecycle": None,
+            "read_status": "partial",
+            "failed_sources": ["portfolio_registry"],
+            "note": "Book state is available; portfolio registry metadata did not complete.",
+        })
+
+    try:
+        active = registry.is_active(portfolio_id)
+        if not isinstance(active, bool):
+            raise TypeError("portfolio active status is not a boolean")
+    except Exception:  # noqa: BLE001
+        return _json({
+            **latest,
+            "portfolio_id": portfolio_id,
+            "active": None,
+            "lifecycle": meta.get("status", "active"),
+            "read_status": "partial",
+            "failed_sources": ["portfolio_registry"],
+            "note": "Book state is available; portfolio active-status read did not complete.",
+        })
+
     return _json({
         **latest,
         "portfolio_id": portfolio_id,
-        "active": registry.is_active(portfolio_id),
+        "active": active,
         "lifecycle": meta.get("status", "active"),
     })
 
@@ -506,24 +684,109 @@ async def get_divergences(args):
 @tool("get_altdata", "Alternative-data flow + Trump-family/administration linkage for a NAME — cross-signal convergence across congress/insider/government-contract/lobbying/Trump-trade channels, plus whether the name sits in the latent-stake entity graph (e.g. American Bitcoin -> Hut 8, branded crypto but the value accrues to an AI-power-infra parent). A QUALITATIVE research signal: politically-linked smart-money flow. Public-record + CONTEXT-ONLY (never a scored axis) — informs narrative/conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_altdata(args):
-    t = (args.get("ticker") or "").upper()
-    bt = (_read_json(_V / "site" / "altdata" / "by_ticker.json")
-          or _read_json(_V / "data" / "altdata" / "by_ticker.json") or {})
-    rec = (bt.get("tickers") or {}).get(t)
-    latent = _read_json(_V / "site" / "altdata" / "latent.json") or {}
-    graph = None
-    for w in (latent.get("watch") or []):
-        if (w.get("ticker") or "").upper() == t:
-            graph = {"in_graph": True, "themes": [th.get("en") for th in (w.get("themes") or [])],
-                     "trump_people": w.get("trump_people"), "top_holder": (w.get("top_holder") or {}).get("owner"),
-                     "alt_corroborated": w.get("alt_corroborated"), "note": w.get("note")}
+    t = None
+    try:
+        t = _feed_ticker_checked(args.get("ticker"))
+        if t is None:
+            raise ValueError("alt-data ticker is unavailable")
+        flow_store, rec, flow_failed, _flow_rel = _read_ticker_feed_checked(t, (
+            "site/altdata/by_ticker.json", "data/altdata/by_ticker.json",
+        ))
+        flow_available = flow_store is not None
+
+        latent, graph_read_failed = _read_first_nonempty_mapping_checked(
+            (_V / "site" / "altdata" / "latent.json",), allow_empty=True,
+        )
+        watch, watch_shape_failed = _list_field_checked(latent, "watch")
+        mismatches, mismatch_shape_failed = _list_field_checked(latent, "mismatches")
+        graph_failed = graph_read_failed or watch_shape_failed or mismatch_shape_failed
+        graph_available = latent is not None and not (watch_shape_failed or mismatch_shape_failed)
+
+        graph = None
+        for row in watch:
+            row_ticker = _feed_ticker_checked(row.get("ticker")) if isinstance(row, dict) else None
+            if row_ticker is None:
+                graph_failed = True
+                continue
+            if row_ticker != t:
+                continue
+            themes = row.get("themes")
+            if themes is None:
+                themes = []
+            if not isinstance(themes, list):
+                graph_failed = True
+                themes = []
+            elif any(not isinstance(theme, dict) for theme in themes):
+                graph_failed = True
+                themes = [theme for theme in themes if isinstance(theme, dict)]
+            top_holder = row.get("top_holder")
+            if top_holder is None:
+                top_holder = {}
+            if not isinstance(top_holder, dict):
+                graph_failed = True
+                top_holder = {}
+            graph = {
+                "in_graph": True,
+                "themes": [theme.get("en") for theme in themes],
+                "trump_people": row.get("trump_people"),
+                "top_holder": top_holder.get("owner"),
+                "alt_corroborated": row.get("alt_corroborated"),
+                "note": row.get("note"),
+            }
             break
-    mismatch = next((m for m in (latent.get("mismatches") or [])
-                     if t in {(m.get("repointed_ticker") or "").upper(), (m.get("entity_ticker") or "").upper()}), None)
-    if rec is None and graph is None and mismatch is None:
-        return _ok(f"no alt-data signal for {t} — not flagged by any political/insider/contract channel.")
-    return _json({"ticker": t, "flow": rec, "latent_graph": graph, "label_mismatch": mismatch,
-                  "note": "Public-record alt-data (congress/insider/govt-contract/SEC EDGAR — macro engine Signal Intelligence Desk). Context-only — informs narrative, never sizes alone."})
+
+        mismatch = None
+        for row in mismatches:
+            if not isinstance(row, dict):
+                graph_failed = True
+                continue
+            tickers = set()
+            for key in ("repointed_ticker", "entity_ticker"):
+                value = row.get(key)
+                if value is None or value == "":
+                    continue
+                row_ticker = _feed_ticker_checked(value)
+                if row_ticker is None:
+                    graph_failed = True
+                else:
+                    tickers.add(row_ticker)
+            if not tickers:
+                graph_failed = True
+            if t in tickers:
+                mismatch = row
+                break
+
+        failed_sources = []
+        if flow_failed:
+            failed_sources.append("altdata_flow")
+        if graph_failed:
+            failed_sources.append("altdata_graph")
+        payload = {
+            "ticker": t,
+            "flow": rec,
+            "latent_graph": graph,
+            "label_mismatch": mismatch,
+            "note": "Public-record alt-data (congress/insider/govt-contract/SEC EDGAR — macro engine Signal Intelligence Desk). Context-only — informs narrative, never sizes alone.",
+        }
+        if failed_sources:
+            payload["read_status"] = (
+                "unavailable"
+                if flow_failed and graph_failed and not flow_available and not graph_available
+                else "partial"
+            )
+            payload["failed_sources"] = failed_sources
+            if payload["read_status"] == "unavailable":
+                payload["error"] = "ticker_altdata_unavailable"
+            return _json(payload)
+        if rec is None and graph is None and mismatch is None:
+            return _ok(f"no alt-data signal for {t} — not flagged by any political/insider/contract channel.")
+        return _json(payload)
+    except Exception:  # noqa: BLE001 - malformed input or projection remains unavailable
+        return _json({
+            "ticker": t, "flow": None, "latent_graph": None, "label_mismatch": None,
+            "read_status": "unavailable", "error": "ticker_altdata_unavailable",
+            "failed_sources": ["altdata_flow", "altdata_graph"],
+        })
 
 
 @tool("get_news",
@@ -533,14 +796,39 @@ async def get_altdata(args):
       "about this name. CONTEXT-ONLY (never a scored axis) — informs narrative/conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_news(args):
-    t = (args.get("ticker") or "").upper()
-    rel, bt = _first_vendored("site/news/by_ticker.json", "data/news/by_ticker.json")
-    rec = (bt.get("tickers") or {}).get(t)
-    if rec is None:
-        return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
-    return _json({"ticker": t, "news": rec,
-                  "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone.",
-                  "freshness": _freshness(bt, rel), "evidence_grade": "vendored_snapshot"})
+    t = None
+    try:
+        t = _feed_ticker_checked(args.get("ticker"))
+        if t is None:
+            raise ValueError("news ticker is unavailable")
+        store, rec, failed, rel = _read_ticker_feed_checked(t, (
+            "site/news/by_ticker.json", "data/news/by_ticker.json",
+        ))
+        labels = {"freshness": _freshness(store, rel), "evidence_grade": "vendored_snapshot"}
+        if failed:
+            payload = {
+                "ticker": t,
+                "news": rec,
+                "read_status": "partial" if store is not None else "unavailable",
+                "failed_sources": ["news"],
+                "note": "News evidence did not fully load; missing fields are unknown, not negative evidence. Context-only; never sizes alone.",
+                **labels,
+            }
+            if payload["read_status"] == "unavailable":
+                payload["error"] = "ticker_news_unavailable"
+            return _json(payload)
+        if rec is None:
+            return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
+        return _json({
+            "ticker": t, "news": rec,
+            "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone.",
+            **labels,
+        })
+    except Exception:  # noqa: BLE001 - no input/read/projection failure escapes the tool
+        return _json({
+            "ticker": t, "news": None, "read_status": "unavailable",
+            "error": "ticker_news_unavailable", "failed_sources": ["news"],
+        })
 
 
 @tool("get_intelligence",
@@ -552,33 +840,94 @@ async def get_news(args):
       "QUIET tape; crowded/late = flow into a LOUD tape). CONTEXT-ONLY — informs conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_intelligence(args):
-    t = (args.get("ticker") or "").upper()
-    urel, uni = _first_vendored("site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json")
-    rec = (uni.get("tickers") or {}).get(t)
-    if rec is not None:
-        labels = {"freshness": _freshness(uni, urel), "evidence_grade": "vendored_snapshot"}
-    else:
-        # the unified bundle isn't published yet — compose from the standalone feeds
-        nrel = "site/news/by_ticker.json"
-        ndoc = _read_json(_V / nrel) or {}
-        news = (ndoc.get("tickers") or {}).get(t)
+    t = None
+    try:
+        t = _feed_ticker_checked(args.get("ticker"))
+        if t is None:
+            raise ValueError("intelligence ticker is unavailable")
+        unified_store, rec, unified_failed, urel = _read_ticker_feed_checked(t, (
+            "site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json",
+        ))
+        unified_available = unified_store is not None
+        if rec is not None:
+            payload = {
+                "ticker": t, **rec,
+                "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
+                "freshness": _freshness(unified_store, urel), "evidence_grade": "vendored_snapshot",
+            }
+            if unified_failed:
+                payload["read_status"] = "partial"
+                payload["failed_sources"] = ["unified_intelligence"]
+            return _json(payload)
+
+        news_store, news, news_failed, nrel = _read_ticker_feed_checked(t, (
+            "site/news/by_ticker.json", "data/news/by_ticker.json",
+        ))
+        news_available = news_store is not None
         arel = "site/altdata/mastermind.json"
-        adoc = _read_json(_V / arel) or {}
-        mm = adoc.get("signals") or []
-        alt = next((s for s in mm if (s.get("ticker") or "").upper() == t), None)
+        alt_store, alt_read_failed = _read_first_nonempty_mapping_checked(
+            (_V / arel,), allow_empty=True,
+        )
+        signals, signals_shape_failed = _list_field_checked(alt_store, "signals")
+        alt_failed = alt_read_failed or signals_shape_failed
+        alt_available = alt_store is not None and not signals_shape_failed
+        alt = None
+        for row in signals:
+            row_ticker = _feed_ticker_checked(row.get("ticker")) if isinstance(row, dict) else None
+            if row_ticker is None:
+                alt_failed = True
+                continue
+            if row_ticker == t:
+                alt = row
+                break
+
+        failed_sources = []
+        if unified_failed:
+            failed_sources.append("unified_intelligence")
+        if news_failed:
+            failed_sources.append("news")
+        if alt_failed:
+            failed_sources.append("altdata")
+        labels = {
+            "missing_reason": (
+                "unified_intelligence_incomplete" if unified_failed
+                else "ticker_absent_in_vendored_file" if unified_available
+                else "unified_artifact_absent"
+            ),
+            "fallback": "standalone_news_and_altdata_feeds",
+            "evidence_grade": "legacy_fallback",
+            "freshness": _freshness(news_store, nrel),
+        }
+        if alt is not None:
+            labels["alt_freshness"] = _freshness(alt_store, arel)
+        composed = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
+        if failed_sources:
+            payload = {
+                **composed, **labels,
+                "read_status": (
+                    "unavailable"
+                    if unified_failed and news_failed and alt_failed
+                    and not unified_available and not news_available and not alt_available
+                    else "partial"
+                ),
+                "failed_sources": failed_sources,
+                "note": "Intelligence evidence did not fully load; missing fields are unknown, not negative evidence. Context-only; never sizes alone.",
+            }
+            if payload["read_status"] == "unavailable":
+                payload["error"] = "ticker_intelligence_unavailable"
+            return _json(payload)
         if news is None and alt is None:
             return _ok(f"no news or alt-data intelligence for {t}.")
-        rec = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
-        labels = {"missing_reason": "ticker_absent_in_vendored_file",
-                  "fallback": "standalone_news_and_altdata_feeds",
-                  "evidence_grade": "legacy_fallback",
-                  "freshness": _freshness(ndoc, nrel if ndoc else None)}
-        if alt is not None:
-            labels["alt_freshness"] = _freshness(adoc, arel)
-    return _json({"ticker": t, **rec,
-                  "note": "News flow (what the tape says) + alt-data signal (what smart money does), side "
-                          "by side. Context-only — the divergence between them is the read; never sizes alone.",
-                  **labels})
+        return _json({
+            **composed, **labels,
+            "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
+        })
+    except Exception:  # noqa: BLE001 - keep setup and final transport inside the boundary
+        return _json({
+            "ticker": t, "news": None, "alt": None,
+            "read_status": "unavailable", "error": "ticker_intelligence_unavailable",
+            "failed_sources": ["unified_intelligence", "news", "altdata"],
+        })
 
 
 @tool("get_quote",
@@ -621,20 +970,65 @@ async def get_quote(args):
       "never a position size.",
       {"type": "object", "properties": {"top": {"type": "integer"}}})
 async def get_daily_briefing(args):
-    top = int(args.get("top") or 20)
-    b = (_read_json(_V / "site" / "intelligence" / "briefing.json")
-         or _read_json(_V / "data" / "intelligence" / "briefing.json"))
-    if b:
-        return _json({"as_of": b.get("as_of"), "macro_context": b.get("macro_context"),
-                      "n_actionable": b.get("n_actionable"), "n_divergences": b.get("n_divergences"),
-                      "priority_queue": (b.get("priority_queue") or [])[:top],
-                      "divergences": b.get("divergences"), "how_to_use": b.get("how_to_use")})
-    # not published yet — compose a live briefing from the per-engine intake funnel
-    from brain import intake
-    q = intake.build(limit=top)
-    return _json({"as_of": q.get("as_of"), "macro_context": q.get("macro_context"),
-                  "priority_queue": q.get("candidates"),
-                  "note": "Composed live from the dashboard signal engines (briefing.json not built yet)."})
+    failed_sources = ["briefing"]
+    try:
+        top = int(args.get("top") or 20)
+        briefing, briefing_failed = _read_first_nonempty_mapping_checked((
+            _V / "site" / "intelligence" / "briefing.json",
+            _V / "data" / "intelligence" / "briefing.json",
+        ))
+        if briefing is not None:
+            queue_raw = briefing.get("priority_queue")
+            divergences_raw = briefing.get("divergences")
+            queue_failed = not isinstance(queue_raw, list)
+            divergences_failed = divergences_raw is not None and not isinstance(divergences_raw, list)
+            source_failed = briefing_failed or queue_failed or divergences_failed
+            payload = {
+                "as_of": briefing.get("as_of"),
+                "macro_context": briefing.get("macro_context"),
+                "n_actionable": briefing.get("n_actionable"),
+                "n_divergences": briefing.get("n_divergences"),
+                "priority_queue": None if queue_failed else queue_raw[:top],
+                "divergences": None if divergences_failed else divergences_raw,
+                "how_to_use": briefing.get("how_to_use"),
+            }
+            if source_failed:
+                payload["read_status"] = "partial"
+                payload["failed_sources"] = ["briefing"]
+                payload["note"] = "Published briefing evidence is incomplete; missing fields are unknown."
+            return _json(payload)
+
+        # Missing publication permits a live briefing; a failed artifact remains visible.
+        failed_sources = (["briefing"] if briefing_failed else []) + ["intake"]
+        from brain import intake
+
+        live = intake.build(limit=top)
+        if not isinstance(live, dict):
+            raise TypeError("intake briefing is not a mapping")
+        candidates = live.get("candidates")
+        if not isinstance(candidates, list):
+            raise TypeError("intake candidates are not a list")
+        payload = {
+            "as_of": live.get("as_of"),
+            "macro_context": live.get("macro_context"),
+            "priority_queue": candidates,
+            "note": "Composed live from the dashboard signal engines (briefing.json not built yet).",
+        }
+        if "note" in live:
+            payload["intake_note"] = live["note"]
+        if briefing_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["briefing"]
+        return _json(payload)
+    except Exception:  # noqa: BLE001 - setup, composition and serialization share one boundary
+        return _json({
+            "as_of": None,
+            "macro_context": None,
+            "priority_queue": None,
+            "read_status": "unavailable",
+            "error": "daily_briefing_unavailable",
+            "failed_sources": failed_sources,
+        })
 
 
 @tool("get_intel_hub",
@@ -649,29 +1043,97 @@ async def get_daily_briefing(args):
       "sector heat. The richest single pull; context-only, never sizes.",
       {"type": "object", "properties": {"ticker": {"type": "string"}, "top": {"type": "integer"}}})
 async def get_intel_hub(args):
-    h = (_read_json(_V / "site" / "intel_hub" / "hub.json")
-         or _read_json(_V / "data" / "intel_hub" / "hub.json"))
-    if not h:
-        return _ok("intel hub not built yet (site/intel_hub/hub.json absent — ships in the daily build).")
-    t = (args.get("ticker") or "").upper()
-    if t:
-        d = next((x for x in (h.get("command") or []) if (x.get("ticker") or "").upper() == t), None)
-        if not d:
-            return _ok(f"{t} not in the intel-hub command (no cross-desk signal today).")
-        return _json({"ticker": t, **d, "macro_context": h.get("macro_context"),
-                      "note": "Full 5-desk dossier. The flags name the setup; track the falsifier."})
-    top = int(args.get("top") or 15)
+    try:
+        ticker = args.get("ticker")
+        if ticker is None:
+            ticker = ""
+        if not isinstance(ticker, str) or (ticker and not ticker.strip()):
+            raise TypeError("intel-hub ticker is not a usable string")
+        t = ticker.upper()
+        hub, hub_failed = _read_first_nonempty_mapping_checked((
+            _V / "site" / "intel_hub" / "hub.json",
+            _V / "data" / "intel_hub" / "hub.json",
+        ))
+        if hub is None:
+            if hub_failed:
+                raise ValueError("intel-hub artifact is unavailable")
+            return _ok("intel hub not built yet (site/intel_hub/hub.json absent — ships in the daily build).")
 
-    def _slim(d):
-        return {k: d.get(k) for k in ("ticker", "name", "composite_conviction", "lean", "n_confirm",
-                "n_dissent", "flags", "read", "peers", "sectors", "falsifier") if k in d}
-    return _json({"as_of": h.get("as_of"), "macro_context": h.get("macro_context"),
-                  "desks": h.get("desks"), "counts": h.get("counts"),
-                  "n_actionable": h.get("n_actionable"),
-                  "command": [_slim(d) for d in (h.get("command") or [])[:top]],
-                  "divergence_alerts": h.get("divergence_alerts"),
-                  "sector_heat": (h.get("sector_heat") or [])[:8],
-                  "how_to_use": h.get("how_to_use")})
+        command_raw = hub.get("command")
+        sector_raw = hub.get("sector_heat")
+        command_field_failed = not isinstance(command_raw, list)
+        sector_field_failed = sector_raw is not None and not isinstance(sector_raw, list)
+        command_rows = []
+        row_failed = False
+        for row in [] if command_field_failed else command_raw:
+            row_ticker = row.get("ticker") if isinstance(row, dict) else None
+            if not isinstance(row_ticker, str) or not row_ticker.strip():
+                row_failed = True
+                continue
+            command_rows.append(row)
+        sector_rows = [] if sector_field_failed else list(sector_raw or [])
+        sector_row_failed = any(not isinstance(row, dict) for row in sector_rows)
+        sector_rows = [row for row in sector_rows if isinstance(row, dict)]
+        evidence_failed = hub_failed or command_field_failed or sector_field_failed or row_failed or sector_row_failed
+
+        if t:
+            dossier = next(
+                (row for row in command_rows if row["ticker"].upper() == t),
+                None,
+            )
+            if dossier is None and evidence_failed:
+                return _json({
+                    "ticker": t,
+                    "dossier": None,
+                    "macro_context": hub.get("macro_context"),
+                    "read_status": "partial",
+                    "failed_sources": ["intel_hub"],
+                    "note": "Intel-hub evidence is incomplete; ticker absence cannot be confirmed.",
+                })
+            if dossier is None:
+                return _ok(f"{t} not in the intel-hub command (no cross-desk signal today).")
+            payload = {
+                "ticker": t,
+                **dossier,
+                "macro_context": hub.get("macro_context"),
+                "note": "Full 5-desk dossier. The flags name the setup; track the falsifier.",
+            }
+            if evidence_failed:
+                payload["read_status"] = "partial"
+                payload["failed_sources"] = ["intel_hub"]
+            return _json(payload)
+
+        top = int(args.get("top") or 15)
+
+        def _slim(row):
+            return {key: row.get(key) for key in (
+                "ticker", "name", "composite_conviction", "lean", "n_confirm",
+                "n_dissent", "flags", "read", "peers", "sectors", "falsifier",
+            ) if key in row}
+
+        payload = {
+            "as_of": hub.get("as_of"),
+            "macro_context": hub.get("macro_context"),
+            "desks": hub.get("desks"),
+            "counts": hub.get("counts"),
+            "n_actionable": hub.get("n_actionable"),
+            "command": None if command_field_failed else [_slim(row) for row in command_rows[:top]],
+            "divergence_alerts": hub.get("divergence_alerts"),
+            "sector_heat": None if sector_field_failed else sector_rows[:8],
+            "how_to_use": hub.get("how_to_use"),
+        }
+        if evidence_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["intel_hub"]
+            payload["note"] = "Intel-hub evidence is incomplete; missing rows/fields are unknown."
+        return _json(payload)
+    except Exception:  # noqa: BLE001 - malformed inputs and unavailable evidence stay closed
+        return _json({
+            "read_status": "unavailable",
+            "error": "intel_hub_unavailable",
+            "failed_sources": ["intel_hub"],
+            "command": None,
+        })
 
 
 @tool("get_intake_candidates",
@@ -754,24 +1216,58 @@ async def get_ticker_package(args):
       "Piotroski/accounting verdict, and the composite conviction score/band/size with its cautions.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_fundamentals(args):
-    t = (args.get("ticker") or "").upper()
-    d = _read_json(_V / "site" / "stockdata" / f"{t}.json")
-    if not d:
+    t = _single_name_ticker(args)
+    if t is None:
+        return _json({
+            "ticker": None,
+            "read_status": "unavailable",
+            "error": "ticker_fundamentals_unavailable",
+            "failed_sources": ["fundamentals"],
+        })
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "stockdata" / f"{t}.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "ticker": t,
+                "read_status": "unavailable",
+                "error": "ticker_fundamentals_unavailable",
+                "failed_sources": ["fundamentals"],
+            })
         return _ok(f"no stock file for {t} (covered: S&P 1500 + crypto; ships in the Pages artifact).")
-    return _json({
-        "ticker": t, "name": d.get("name"), "sector": d.get("sector"), "asof": d.get("asof"),
-        "valuation": _pick(d.get("valuation"), ["trailing_pe", "forward_pe", "forward_tier", "price_to_book",
-                           "price_to_sales", "earnings_yield", "shareholder_yield", "value_z"]),
-        "financials": _pick(d.get("financials"), ["gross_margin", "net_margin", "fcf_margin", "rev_growth",
-                            "ni_growth", "roe", "roa", "debt_to_assets", "accruals"]),
-        "earnings": _pick(d.get("earnings"), ["next_date", "eps_forecast", "sue_z", "summary"]),
-        "analyst": _pick(d.get("analyst"), ["rating", "target", "forward_pe", "div_yield"]),
-        "accounting_quality": _pick(d.get("accounting_quality"), ["verdict", "headline", "piotroski", "n_caution"]),
-        "factors": _pick(d.get("factors"), ["composite", "fundamental_score"]),
-        "tech": _pick(d.get("tech"), ["price", "pct_vs_50dma", "pct_vs_200dma", "rsi14", "off_52w_high_pct"]),
-        "conviction": _pick(d.get("conviction"), ["score", "band", "verdict", "size", "risk",
-                            "cycle_blocked", "cautions"]),
-    })
+
+    specs = {
+        "valuation": ["trailing_pe", "forward_pe", "forward_tier", "price_to_book",
+                      "price_to_sales", "earnings_yield", "shareholder_yield", "value_z"],
+        "financials": ["gross_margin", "net_margin", "fcf_margin", "rev_growth",
+                       "ni_growth", "roe", "roa", "debt_to_assets", "accruals"],
+        "earnings": ["next_date", "eps_forecast", "sue_z", "summary"],
+        "analyst": ["rating", "target", "forward_pe", "div_yield"],
+        "accounting_quality": ["verdict", "headline", "piotroski", "n_caution"],
+        "factors": ["composite", "fundamental_score"],
+        "tech": ["price", "pct_vs_50dma", "pct_vs_200dma", "rsi14", "off_52w_high_pct"],
+        "conviction": ["score", "band", "verdict", "size", "risk", "cycle_blocked", "cautions"],
+    }
+    projected = {}
+    section_failed = False
+    for key, fields in specs.items():
+        section, failed = _mapping_field_checked(data, key)
+        section_failed = section_failed or failed
+        projected[key] = None if failed else _pick(section, fields)
+
+    payload = {
+        "ticker": t,
+        "name": data.get("name"),
+        "sector": data.get("sector"),
+        "asof": data.get("asof"),
+        **projected,
+    }
+    if section_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["fundamentals"]
+        payload["note"] = "Fundamental evidence is incomplete; malformed sections are unknown."
+    return _json(payload)
 
 
 @tool("get_options",
@@ -781,19 +1277,50 @@ async def get_fundamentals(args):
       "timing + risk bands, not stock selection.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_options(args):
-    t = (args.get("ticker") or "").upper()
-    d = _read_json(_V / "site" / "gex" / f"{t}.json")
-    if not d:
+    t = _single_name_ticker(args)
+    if t is None:
+        return _json({
+            "ticker": None,
+            "read_status": "unavailable",
+            "error": "ticker_options_unavailable",
+            "failed_sources": ["options"],
+        })
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "gex" / f"{t}.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "ticker": t,
+                "read_status": "unavailable",
+                "error": "ticker_options_unavailable",
+                "failed_sources": ["options"],
+            })
         return _ok(f"no options/GEX file for {t} (only the ~liquid options universe is covered).")
-    return _json({
-        "ticker": t, "asof": (d.get("meta") or {}).get("asof"),
-        "summary": _pick(d.get("summary"), ["spot", "regime", "tier", "net_gex_bn", "gamma_flip",
-                         "dist_to_flip_pct", "magnet_up", "magnet_down", "iv30", "put_call_oi_ratio",
-                         "max_pain", "call_wall", "put_wall"]),
-        "expected_move": _pick(d.get("expected_move"), ["daily_pct", "weekly_pct", "front"]),
-        "vol_hole": _pick(d.get("vol_hole"), ["state", "bias", "upper", "lower", "to_upper_pct",
-                          "to_lower_pct", "compression"]),
-    })
+
+    meta, meta_failed = _mapping_field_checked(data, "meta")
+    summary, summary_failed = _mapping_field_checked(data, "summary")
+    expected_move, move_failed = _mapping_field_checked(data, "expected_move")
+    vol_hole, vol_failed = _mapping_field_checked(data, "vol_hole")
+    section_failed = meta_failed or summary_failed or move_failed or vol_failed
+    payload = {
+        "ticker": t,
+        "asof": None if meta_failed else meta.get("asof"),
+        "summary": None if summary_failed else _pick(summary, [
+            "spot", "regime", "tier", "net_gex_bn", "gamma_flip", "dist_to_flip_pct",
+            "magnet_up", "magnet_down", "iv30", "put_call_oi_ratio", "max_pain",
+            "call_wall", "put_wall",
+        ]),
+        "expected_move": None if move_failed else _pick(expected_move, ["daily_pct", "weekly_pct", "front"]),
+        "vol_hole": None if vol_failed else _pick(vol_hole, [
+            "state", "bias", "upper", "lower", "to_upper_pct", "to_lower_pct", "compression",
+        ]),
+    }
+    if section_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["options"]
+        payload["note"] = "Options evidence is incomplete; malformed sections are unknown."
+    return _json(payload)
 
 
 @tool("get_anticipation",
@@ -803,14 +1330,30 @@ async def get_options(args):
       "guards/caveats. Context for a timing lean; honest about trust.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_anticipation(args):
-    t = (args.get("ticker") or "").upper()
-    d = _read_json(_V / "site" / "anticipationdata" / f"{t}.json")
-    if not d:
+    t = _single_name_ticker(args)
+    if t is None:
+        return _json({
+            "ticker": None,
+            "read_status": "unavailable",
+            "error": "ticker_anticipation_unavailable",
+            "failed_sources": ["anticipation"],
+        })
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "anticipationdata" / f"{t}.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "ticker": t,
+                "read_status": "unavailable",
+                "error": "ticker_anticipation_unavailable",
+                "failed_sources": ["anticipation"],
+            })
         return _ok(f"no anticipation file for {t} (only the curated forward-signal watchlist is covered).")
     return _json({
-        "ticker": t, "name": d.get("name"), "group": d.get("group"), "as_of": d.get("as_of"),
-        **_pick(d, ["anticipation_index", "index_band", "confluence_value", "n_go_legs",
-                    "direction_trust", "trust", "vol_cone_ann", "horizons", "drivers", "guards", "caveats"]),
+        "ticker": t, "name": data.get("name"), "group": data.get("group"), "as_of": data.get("as_of"),
+        **_pick(data, ["anticipation_index", "index_band", "confluence_value", "n_go_legs",
+                      "direction_trust", "trust", "vol_cone_ann", "horizons", "drivers", "guards", "caveats"]),
     })
 
 
