@@ -1720,3 +1720,76 @@ Macro compiler #10831 and canonical handoff #10836 remain on their original head
 The original Ubuntu1/root C26 journal-read PermissionError is unretried. Restore that original authorized administrative connection, then reconcile its retained original operation; do not use C3 or another identity/carrier as a runtime substitute. The original M2 operation `meta-ceo-byok-followon-parent-20261106-c35-01`, its effect fence and return path remain retained. Paid Fabric refusals and the two local control-socket denials remain unretried. Parent performs source labor; native agents provide principal judgment only.
 
 Remaining acceptance is unchanged: actual serving v4/context readback; enrolled roles and grants; a genuine correction-to-fresh-context journey; durable cross-session memory/compaction/forgetting; complete native EVAL and candidate delivery; held-out improvement and rollback; actual entitled vault/browser/computer tasks; child START plus parent consumption; recovery/revocation/endurance and the original fleet campaign. None is established by these source or CI receipts.
+
+
+## 41. Original native EVAL inputs implemented; truthful failure accounting is the next source dependency — 2026-11-07
+
+**Mission remains incomplete (MORE_WORK_EXISTS).** Source/fixture milestones below do not establish installed fleet acceptance, a complete native EVAL producer, held-out improvement or Outcome Learning adoption. The original Chairman instruction remains to take leadership through complete implementation; this milestone is a save-and-continue boundary.
+
+### Current protected law and original release effects
+
+Protected source advanced from `7ccb72a1f751f8012190a7deda90ea7ec1db1ecb` to `66780ab7e3e9fdbfd40713bb5791fb1888529f7c`. The compare identified five accepted commits, including changed BOOTSTRAP_KERNEL and assigned-principal instructions. INDEX and those changed owners were read at 66780; unchanged applicable companions retain their previously verified content. The long-horizon/direct principal recovery rules preserve actual denials, original effects and source gates.
+
+- **Transport #2228**, head `72e683c038b1195d6305ee37aefae365fc7a9b6e`: current-head main CI `42386315324`, required test job `128456285623`, all six shards, runtime/harness Python 3.12/3.13 and CodeQL passed. The original release request is now in the protected merge queue, position 1, AWAITING_CHECKS at readback. No actual merge was observed; no duplicate request was issued.
+- **Discovery #2217**, current head `5bba402b3de999cbcb48d8d36728c40749946637`, tree `348a744118b572bc5689e9224356214701b675fb`, parent `20dbb2c0552315b63bc2d135bb4bfcebca761a60`: the complete original feature and prior four-file repair remain. Parent CI shards 1–4 passed; shard 0 found the disabled-profile aggregate policy digest, and shard 5 found exact source/token/dependency fixture drift. The PR was put back in Draft before repair. Five test/qualification files now retain exact TS 512 length-bound sites, the original isolated child allowlist, the moved CCR positions, the original principal/grant/config identities and the actual TypeScript correction dependency in the lost-reply Launch fixture. No production permissions or scanner exceptions changed.
+- Discovery's first focused repair run retained 249 passing cases and exposed two remaining setup/pin failures. Exact Git-blob bytes and lockfile-matched existing Node dependencies resolved them; four targeted recovery/child cases passed, XML SHA256 `6094903a1ca53249ec64645402836dd22a6270c32aa45ae7e82fb1859169feb1`. The original lost-reply journey reopens one accepted Job without a second submit. Original 251-case receipt SHA256 `2e75d32c177f58163a818bbc53313350c0e866ec933323f6295966f323da52c1` retains the two historical failures honestly.
+- The discovery candidate passed whitespace and the incumbent production D8 collector over 80 source files, with no source/evidence findings. The collector's existing test-fixture exclusion was used; applying its low-level scanner indiscriminately to its own token-coordinate tables had produced metadata-only findings and was not claimed as a production check.
+- Canonical GraphQL readback confirmed discovery head 5bba, Ready, and both old auto-merge and queue absent after Draft conversion. One new exact-head request was then issued through the same original release carrier. Readback: autoMergeRequest enabled at **2026-11-07T16:49:24Z**, queue null, OPEN. Current-head runtime and Workspace OAuth passed; CI `42393077181`, harness `42393077173` and OS `42393077217` were still running. Do not duplicate the request.
+- Macro #10831/#10836 remain on their original merge-on-green owners and previous heads. No native auto-merge, controller replacement or caller replay was performed.
+
+### New canonical source: HERMES-LRN-EVAL-INPUT-01
+
+**Draft PR #2234**: https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234
+
+Head `7e2739fd124b3d94c788e8af5dee90cceded633f`; tree `690fa15ad5e29c60290d8672b2b65dc7a4f67cef`. Parents are discovery 5bba and transport 72e. Branch `sol/hermes-native-eval-inputs-20261107-c3`. The component owns 34 files; prerequisites remain with their original PRs. No release request has been made for #2234.
+
+The optional mmmeta/Z.ai selection resolves an existing immutable scenario/configuration/experiment in ArtifactStore and binds candidate instruction files, explicit context, source visibility, arm/pair/replicate, seed and manual effort to one original native admission. PUBLIC_SAFE/DURABLE_SANITIZED and warm-session semantics are mandatory; a freshness-requiring scenario is refused rather than rewritten. The private nominal selection is detached, actor/owner-bound and inserted before the native fingerprint. The public payload allowlist remains unchanged.
+
+Uniqueness is enforced inside the original admission transaction, independently of an optional caller callback. Exact original replay returns its original receipt; any previously recorded run request refuses a new admission, including reuse across principals/sessions or a recreated textual carrier. The original maintenance owner keeps the sanitized input admission/identity tombstone past the retry horizon while expiring model output normally. No reservation table, alternative queue or retry engine is introduced. The guarantee depends on intact original profile storage and the selected maintenance source.
+
+Candidate instructions/context are applied before the incumbent agent cache signature. The real native provider resolver and callback wire both receive the manual effort/seed, including zero. Pinned Hermes's actual custom-provider/requested-provider identities are preserved. Checks run at prompt delivery, after request hooks and at the original nonstream dispatch boundary after middleware. Conflicting final extra_body fields, changed transport installation, stale native generation, changed Agent OS attachment/snapshot and a competing adaptive-effort plugin refuse the selected trial.
+
+Input evidence shares the original result, scope locks, sealing and 16 KiB metadata budget. Historical readback joins the original marker/admission/producer instance and sibling request event identities/digests. Malformed EVAL evidence suppresses that projection without destroying the native answer. Complete evaluation, provider delivery and independently verified model identity remain false.
+
+The selected release includes the existing Agent Evaluation and OMH helper import closure. A sparse validation checkout initially omitted tracked prerequisites; materializing the exact existing tracked files fixed that environment issue. No duplicate EVAL implementation or dependency ownership was created.
+
+### Exact donor qualification and component proof
+
+Pinned donor remains NousResearch/hermes-agent `1c0cd667746d3395fe9e1b6c74f8f85952486f18`. Cumulative patch SHA256 is now **`750385de0d48588641c6301587627d53a5f124153414f1529d0e80ce5bbdeb59`**. This supersedes the intermediate 5b365a3c derivation only for the new, unpublished EVAL kind. The private parameter uses the existing mmx namespace; the reserved OS-account prefix was removed from that parameter without adding a scanner exemption. Original marker schemas and public payload semantics are unchanged.
+
+Authority postimage: 87,326 bytes, Git blob `7a0241bd920adb2bc75b5adb1d3eede7fac8bccc`, SHA256 `7779fd227b5e3105ded5a3407434c7a8c77e1d998cdf087e1e8a492d0cd9ae99`. The other ten postimages are unchanged by the final rename, including all nine prior Workspace OAuth/privacy postimages and the retirement change. Retirement remains SHA256 `7c0b12ab4502411592bc19454a89a8d03730a8a764122fe4266f1d5e706cafe7`.
+
+C3 final candidate: **330 recorded tests/subtests passed, zero failures/errors/skips**, including the 61 native input cases, exact release identity records and Meta proxy tests. Process 20930 exited 0; XML SHA256 `49d57e62e77dac15c78169ede81a8e0b42da898a4838f9b038861e9c69887b60`. Actual OpenAI 2.54.0 / HTTPX 0.28.1 use MockTransport; no provider/account request was made.
+
+Actual pristine-donor eleven-file qualification passes; receipt SHA256 `e54c03965523278163792632790e20fe136e45df26062f21f7a62bf96b1c6b09`. Donor unmodified, no driver started, not installed/runtime-ready. The complete composed production D8 source scan covers 124 files with no source/evidence findings. Source whitespace passes; the unified-diff file preserves required blank context markers and separately passes actual git apply --whitespace=error-all qualification.
+
+The broader pre-rename C3 regression is **not all green**: JUnit records 655 cases, seven failures and one skip (SHA256 `0f2d665c4d7187c648ec75c444236f4ad92317f94bc80ca323a5168994968999`). Failures are Linux /proc, role loopback-alias and system-path assumptions on macOS; the skip requires the actual fixed Linux CPython recipe. These do not count as installed/Linux proof. Hosted Linux CI remains required. The two previously denied local socket cases were excluded and unretried.
+
+### Complete the Meta source route through the existing owner
+
+The input-selected mmmeta journey needs Z.ai plus Executive/Agent OS and Office OAuth. Its former proxy declaration only permitted api.z.ai, so configuration could not support that whole journey.
+
+The same existing Squid source now adds **meta_office** and **meta_issuer** ACLs for exactly `mcp.mastermind-x.com:443` and `dev-eo0jf8us5mup7wd5.us.auth0.com:443`. Each uses hostname-only dstdomain -n and the Meta socket. Separate model vendors, both original listeners, all Secretary rules, private/address-literal denies, CONNECT/443, deny ordering and final deny remain. Fourteen source policy cases and their mutation subtests pass; the existing egress workflow owns actual Squid parsing. No live proxy was installed/reloaded. Actual role-cgroup allow/deny, proxy process/config, TLS and issuer acceptance remain owed.
+
+### Next connected implementation: truthful native EVAL publication
+
+HERMES-LRN-EVAL-01 is still incomplete. Current Run v1 requires non-null observed model/process/session/sandbox/network/workspace/environment/context facts even for FAILED/TIMED_OUT/CANCELLED. Inventing these from configured intent is forbidden; omitting failed attempts would bias the evaluation population.
+
+The next source slice belongs to the existing EVAL contracts/finalizer/store: add an explicit v2 draft/run shape with a closed set of nullable observed fields, exact typed unavailability reasons and explicit collection coverage. Strict v1 meanings remain unchanged. Missing mandatory observations/coverage must force technical invalidity even if an experiment permits degradation. Keep original completion distinct from observation availability; preserve unknown effect/leakage/cleanup precedence. The same ArtifactStore run identity/path/population must retain incomplete failed attempts; no failure ledger or second store.
+
+An original-result publisher must be a separate finite operation on the existing private Control carrier, leaving read_original read-only. It accepts the original admission identity/binding, not a caller-supplied draft or artifact root; joins the original marker/result/observation siblings; uses the existing finalizer and create-only ArtifactStore; and reconciles the same immutable run on replay. It must never invoke submit or repeat inference. Preserve the original store selection and first publication metadata; do not substitute today's release, fabricate expired output, backdate validation or generate fresh timestamps that create replay conflicts.
+
+Next authentic observation work remains on the actual owners:
+- Capture the startup cgroup, credential metadata and successful Landlock attachment observations where their checks execute. Cgroup membership is not BPF proof; Landlock covers TCP ports, not files/IPs/domains/UDP/Unix. Do not reattach Landlock per warm admission or promote fixture raw cgroup text into live proof.
+- Join actual process/source/profile/config custody and a closed non-secret environment projection. Do not hash credentials or the whole environment; do not treat a state-directory stat as a workspace-content fingerprint.
+- Bind observed provider-reported labels to the response actually consumed; this is not model-weight attestation. Missing/error/ambiguous responses remain unavailable.
+- Preserve actual Agent OS prefetch source references as well as explicit candidate/context input. A scenario allowlist is not an observed-source inventory.
+- Capture validated selected-child and Workspace effect receipts before tool-result encoding, joined to the original execution ordinal. Returned/acknowledged callbacks, completed children and PR publication are not whole-trial effect/cleanup proof.
+- Existing transport origin hashes use a different representation from EVAL destination digests; never relabel one as the other.
+- Use the incumbent isolation-probe/proxy owner for effective policy evidence. Frozen comparison environment digests must not incorporate per-run timestamps/PIDs or silently change with each candidate instruction bundle.
+
+### Held effects and complete mission acceptance
+
+Original Ubuntu1/root C26 journal-read PermissionError remains unretried. The assigned session owns recovery of the **original authorized administrative connection and retained operation**; C3 source validation is not a runtime substitute. Preserve original M2 operation `meta-ceo-byok-followon-parent-20261106-c35-01`, workspace/effect custody, paid Fabric refusals, denied local socket cases and Outcome Learning #398/#409 holds. Native children supplied principal judgment only; parent performed source work.
+
+Still required: serving v4/context readback; correct role/resource grants; correction-to-fresh-context; durable cross-session memory/compaction/forgetting; complete original native EVAL publication and Harness2 consumption; held-out improvement with rollback; entitled vault/browser/computer workflows; actual child START and parent consumption; restart/revocation/endurance and the original fleet acceptance campaign. Source merging, CI, metadata retention and a disabled candidate profile do not satisfy these journeys.
