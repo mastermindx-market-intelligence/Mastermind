@@ -469,3 +469,5 @@ or a request to reopen closed credentials. Original09b holds, prior Paper/Chrome
 refusals and native writer effects remain on their original carriers. No new
 provider turn, worker admission, install, restart, deployment or merge occurred.
 The native read-only judgment assignment is ACCEPTED / STOP; no watcher was created.
+
+Hosted CI follow-up: PR fast checks on `18167126468567ddbfc31caa807d606aedf92e5b` identified a single new blank line at EOF in the evidence log (run 42347539779, job 128328496014). Repaired the log on the same original carrier and checked the complete PR change range, which includes the new evidence files. Production source, tests and mount patch bytes are unchanged; their behavioral qualification remains applicable.

@@ -14,4 +14,3 @@ build exit=0 process_seconds=1.93
 (!) Some chunks are larger than 500 kB after minification. Consider:
 [INEFFECTIVE_DYNAMIC_IMPORT] src/conversations/SourceMarkdown.tsx is dynamically imported by src/conversations/ObservedResponseMarkdown.tsx, src/conversations/ResultSourceReader.tsx, src/knowledge/KnowledgeSources.tsx, src/knowledge/library/KnowledgeLibrary.tsx but also statically imported by src/conversations/ProjectConversationHistory.tsx, src/conversations/ProjectConversations.tsx, src/discovery/SavedConversationReader.tsx, dynamic import will not move module into another chunk.
 ✓ built in 485ms
-

@@ -669,5 +669,13 @@
     "disposition": "ACCEPTED / STOP",
     "formal_github_approval": false,
     "watcher": "NOT_APPLICABLE"
+  },
+  "hosted_ci_repair": {
+    "initial_head": "18167126468567ddbfc31caa807d606aedf92e5b",
+    "run_id": 42347539779,
+    "job_id": 128328496014,
+    "result": "PR fast checks failed on one extra blank line at EOF in s6-checks.log",
+    "repair": "Removed trailing empty log line on the same branch; production code, tests and mount bytes unchanged",
+    "qualification_limit": "The earlier local diff check excluded then-untracked files; complete PR-range whitespace check is used for the repair"
   }
 }
