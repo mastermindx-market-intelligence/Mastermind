@@ -6,6 +6,24 @@ on:
       - 'tests/test_hermes_primary_application_enrollment.py'
       - 'tests/test_hermes_primary_retained_enrollment.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_native_install.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py'
+      - 'ops/native_fabric/quota_continuity/rollout/build_review_stage.py'
+      - 'ops/native_fabric/quota_continuity/rollout/provider_application/**'
+      - 'ops/native_fabric/provider_plans/profile.json'
+      - 'ops/native_fabric/provider_plans/compose.py'
+      - 'ops/native_fabric/provider_plans/patches/**'
+      - 'tests/fixtures/provider-plan-auto-predecessor.json'
+      - 'tests/test_provider_plan_auto_routing.py'
+      - 'tests/test_provider_plan_local_return.py'
+      - 'ops/native_fabric/quota_continuity/candidate/byteplus_coding_plan.py'
+      - 'ops/native_fabric/quota_continuity/candidate/native_plan_worker.py'
+      - 'control_plane/codex_provider_realm.py'
+      - 'control_plane/experiential_plan_policy.py'
+      - 'control_plane/fs_security.py'
+      - 'ops/native_fabric/experiential_native_bridge/experiential_bridge.py'
+      - 'ops/native_fabric/experiential53/experiential_host_context.py'
+      - 'ops/native_fabric/experiential53/experiential_pin.py'
+      - 'ops/native_fabric/experiential53/experiential_transport.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_native_stage.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py'
@@ -43,6 +61,7 @@ jobs:
             tests/test_hermes_primary_application_enrollment.py \
             tests/test_hermes_primary_retained_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
             ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
@@ -52,10 +71,18 @@ jobs:
             ops/native_fabric/quota_continuity/tests/test_go_service_workload_composition.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py \
             ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py
-          python - "$native_rollout_test_root/proof.xml" <<'PY'
+          python ops/native_fabric/quota_continuity/rollout/build_review_stage.py \
+            --output "$native_rollout_test_root/provider-application" \
+            --include-provider-plan-application --include-go-application
+          MMX_PROVIDER_AUTO_TEST_STAGE="$native_rollout_test_root/provider-application/native-code-stage" \
+            python -B -m pytest -q -o addopts= --noconftest \
+            --junitxml="$native_rollout_test_root/provider-auto-proof.xml" \
+            tests/test_provider_plan_auto_routing.py \
+            tests/test_provider_plan_local_return.py
+          python - "$native_rollout_test_root/proof.xml" "$native_rollout_test_root/provider-auto-proof.xml" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
-          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          suites = [suite for path in sys.argv[1:] for suite in ET.parse(path).getroot().iter("testsuite")]
           totals = {key: sum(int(s.get(key, "0")) for s in suites)
                     for key in ("tests", "failures", "errors", "skipped")}
           assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals

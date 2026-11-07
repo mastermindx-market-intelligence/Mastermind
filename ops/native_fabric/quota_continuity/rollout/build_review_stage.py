@@ -10,6 +10,8 @@ import hashlib
 import json
 import io
 import zipfile
+import subprocess
+import tempfile
 from pathlib import Path
 
 BASE_FILES = frozenset("""
@@ -299,6 +301,159 @@ def before_host_pull_integrity(manifest):
     return previous
 
 
+# An explicit forward composition of the selected provider plan and the exact
+# current APPLICATION107 source. The historical provider composer stays frozen.
+PROVIDER_APPLICATION_RECORD_SHA256 = "04d6983e43eaaadeccaf847662a5b9b80b30af88e0e2c0a865f455522031e7f4"
+PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
+    "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
+    "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",
+    "experiential_transport.py", "fs_security.py", "native_plan_worker.py"))
+PROVIDER_ROUTING_DIGESTS = {
+    "ext/pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+    "ext/remote_sub.sh": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+    "ext/slot.py": "32809dd831e20711d30e07b956aa843de85edde5dc3965c002e522b4824d6ea7",
+    "ext/sub.sh": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",
+}
+
+
+def _manifest_digest(manifest):
+    return sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode())
+
+
+def _provider_source(path, expected):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("provider APPLICATION source must be a regular file")
+    raw = path.read_bytes()
+    if sha(raw) != expected:
+        raise ValueError("provider APPLICATION source commitment differs")
+    return raw
+
+
+def provider_application_record(root=None):
+    root = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    raw = _provider_source(root / "rollout/provider_application/composition.json",
+                           PROVIDER_APPLICATION_RECORD_SHA256)
+    record = json.loads(raw)
+    profile = json.loads(_provider_source(root / record["provider_profile_source"],
+                                         record["provider_profile_sha256"]))
+    if (record["schema"] != "native-provider-application-composition.v1"
+            or set(record["additions"]) != PROVIDER_APPLICATION_MEMBERS
+            or _manifest_digest(profile["files"]) != record["provider_manifest_sha256"]
+            or any(profile["files"].get(key) != digest
+                   for key, digest in PROVIDER_ROUTING_DIGESTS.items())):
+        raise ValueError("provider APPLICATION source cohort differs")
+    return record, profile["files"]
+
+
+def _has_provider_members(manifest):
+    return bool(PROVIDER_APPLICATION_MEMBERS & set(manifest)) or any(
+        manifest.get(key) == digest for key, digest in PROVIDER_ROUTING_DIGESTS.items())
+
+
+def before_provider_application(manifest):
+    """Invert only the complete116 source; never mutate the actual manifest."""
+    if type(manifest) is not dict:
+        raise ValueError("provider APPLICATION manifest differs")
+    if not _has_provider_members(manifest):
+        return manifest
+    record, _ = provider_application_record()
+    if len(manifest) != 116 or _manifest_digest(manifest) != record["manifest_sha256"]:
+        raise ValueError("provider APPLICATION source cohort differs")
+    previous = dict(manifest)
+    for key in record["additions"]:
+        del previous[key]
+    for key, row in record["replacements"].items():
+        previous[key] = row["preimage_sha256"]
+    if len(previous) != 107 or _manifest_digest(previous) != record["application_manifest_sha256"]:
+        raise ValueError("provider APPLICATION parent closure differs")
+    return previous
+
+
+def _application_base(manifest):
+    return {key: value for key, value in manifest.items()
+            if key not in {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+            | HTTP_GENERATION_MEMBERS}
+
+
+def go_staged_dependency_hashes(manifest, candidate_hashes):
+    """Keep original candidate provenance while binding actual combined bytes."""
+    result = dict(candidate_hashes)
+    base = _application_base(manifest)
+    if _has_provider_members(base):
+        before_provider_application(base)
+        record, _ = provider_application_record()
+        broker = record["replacements"]["ext/lease_broker.py"]
+        if candidate_hashes.get("lease_broker.py") != broker["preimage_sha256"]:
+            raise ValueError("provider APPLICATION broker preimage differs")
+        result["lease_broker.py"] = broker["sha256"]
+    return result
+
+
+def validate_go_source_transition(before, after):
+    """Check the frozen verified pair; CURRENT/CAS remains with the installer."""
+    if not (_has_provider_members(before) or _has_provider_members(after)):
+        return
+    record, provider = provider_application_record()
+    go_members = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+    http_members = HTTP_GENERATION_MEMBERS & set(after)
+    base = _application_base(after)
+    if (before != provider or not go_members <= set(after)
+            or http_members and http_members != HTTP_GENERATION_MEMBERS
+            or len(base) != 116 or _manifest_digest(base) != record["manifest_sha256"]):
+        raise ValueError("provider APPLICATION source transition differs")
+    before_provider_application(base)
+
+
+def compose_provider_application_stage(root, output, manifest, files):
+    """Build reviewed source in isolation; never publish or select a release."""
+    root, output = Path(root), Path(output)
+    record, _ = provider_application_record(root)
+    if len(manifest) != 107 or _manifest_digest(manifest) != record["application_manifest_sha256"]:
+        raise ValueError("provider APPLICATION requires the exact107 source")
+    stage = output / "native-code-stage"
+    for key, expected in manifest.items():
+        _provider_source(stage / key, expected)
+    updates = {}
+    # Apply only reviewed patch bytes to copied preimages outside any Git index.
+    with tempfile.TemporaryDirectory(prefix="native-provider-application-") as temporary:
+        scratch = Path(temporary)
+        for key, row in record["replacements"].items():
+            original = _provider_source(stage / key, row["preimage_sha256"])
+            target = scratch / key
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(original)
+            patch = _provider_source(root / row["source"], row["patch_sha256"])
+            subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                            "apply", "--whitespace=nowarn", "-"], input=patch, cwd=scratch,
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            raw = _provider_source(target, row["sha256"])
+            if len(raw) != row["bytes"]:
+                raise ValueError("provider APPLICATION postimage size differs")
+            updates[key] = raw
+        for key, row in record["additions"].items():
+            if key in manifest or (stage / key).exists() or (stage / key).is_symlink():
+                raise ValueError("provider APPLICATION addition already exists")
+            raw = _provider_source(root / row["source"], row["sha256"])
+            if len(raw) != row["bytes"]:
+                raise ValueError("provider APPLICATION addition size differs")
+            updates[key] = raw
+    composed = dict(manifest, **{key: sha(raw) for key, raw in updates.items()})
+    before_provider_application(composed)
+    for key, raw in updates.items():
+        (stage / key).write_bytes(raw)
+        if key in record["replacements"]:
+            row = record["replacements"][key]
+            files[key] = dict(files[key], source=row["source"], source_kind="verified_patch",
+                composition_preimage_source=files[key]["source"],
+                composition_preimage_sha256=row["preimage_sha256"], patch_sha256=row["patch_sha256"],
+                sha256=sha(raw), bytes=len(raw))
+        else:
+            row = record["additions"][key]
+            files[key] = dict(row, installed_preimage_sha256=None)
+    manifest.update(composed)
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
 
@@ -324,7 +479,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     be relabeled with either forward collector.
     """
     actual_manifest = manifest
-    manifest = normalize_application_carrier_base_manifest(before_host_pull_integrity(manifest))
+    manifest = normalize_application_carrier_base_manifest(
+        before_host_pull_integrity(before_provider_application(manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -520,12 +676,13 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
         dependencies[name] = {"sha256": sha(data), "bytes": len(data), "source": "candidate/" + name}
     staged_dependencies = None
     if staged_manifest is not None:
-        staged_dependencies = {}
+        staged_dependencies = go_staged_dependency_hashes(staged_manifest,
+            {name: row["sha256"] for name, row in dependencies.items()})
         for name, dependency in dependencies.items():
             relative = "ext/" + name
             staged = output / "native-code-stage" / relative
             expected = staged_manifest.get(relative)
-            if (not isinstance(expected, str) or expected != dependency["sha256"]
+            if (not isinstance(expected, str) or expected != staged_dependencies[name]
                     or staged.is_symlink() or not staged.is_file()
                     or sha(staged.read_bytes()) != expected):
                 raise ValueError("external Go dependency differs from captured native stage")
@@ -555,9 +712,10 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
 def compose_go_stage(root, output, manifest, files, component):
     """Join only the captured external B handler and the fixed native entry."""
     root, output = Path(root), Path(output)
-    validate_go_base_manifest(manifest,
+    staged_dependencies = go_staged_dependency_hashes(manifest,
         {name: row["sha256"] for name, row in component["dependencies"].items()})
-    expected = {"ext/" + name: row["sha256"] for name, row in component["dependencies"].items()}
+    validate_go_base_manifest(manifest, staged_dependencies)
+    expected = {"ext/" + name: digest for name, digest in staged_dependencies.items()}
     if (component.get("schema") != "native-external-go-component.v1"
             or component.get("component") != "go_application_handler"
             or component.get("destination_relative_to_stable_ext") != "go_shim/go_shim.py"
@@ -790,6 +948,8 @@ def main():
                         help='include the fixed Go entry/handler source pair; does not enroll or start services')
     parser.add_argument('--include-application-http', action='store_true',
                         help='seal fixed HTTP transport metadata; requires Go ingress and grants no application permission')
+    parser.add_argument('--include-provider-plan-application', action='store_true',
+                        help='preserve the exact selected provider plan in the reviewed APPLICATION source')
     args = parser.parse_args()
     if args.include_application_http and not args.include_go_application:
         parser.error('--include-application-http requires --include-go-application')
@@ -885,10 +1045,14 @@ def main():
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
     normalize_application_carrier_base_manifest(before_host_pull_integrity(manifest))
+    if args.include_provider_plan_application:
+        compose_provider_application_stage(root, output, manifest, files)
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)
     extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
+    if args.include_provider_plan_application:
+        extra |= {Path(name).name for name in PROVIDER_APPLICATION_MEMBERS}
     if args.include_application_http:
         compose_application_http_stage(root, output, manifest, files)
         extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}
