@@ -484,6 +484,10 @@ jobs:
             -p test_fabric_portfolio_composition.py -v
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_regional_portfolio_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_cross_pool_auto.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_cross_pool_auto.py -v
           python -m pip install --disable-pip-version-check playwright==1.62.0
           python -m playwright install --with-deps chromium
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
