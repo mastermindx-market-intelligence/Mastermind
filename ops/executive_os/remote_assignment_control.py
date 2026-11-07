@@ -85,10 +85,56 @@ class AssignmentControlBinding:
         return observed
 
 
+def _fabric_assignment_codec(binding, request, broker_call):
+    """Closed value codec only; gateway mTLS/config/Unix peer owns authentication."""
+    import json
+    from control_plane.executive_fabric_bridge_broker import _binding, _digest, BridgeProtocolError
+    from control_plane.worker_execution_contract import WorkerProcessRef
+    payload = json.loads(canonical(request["broker_request"]))
+    fields = {"binding", "physical_binding_sha256", "run_id", "worker_id", "process_ref"}
+    if type(payload) is not dict or set(payload) != fields:
+        raise RemoteAssignmentError("Fabric assignment fields differ")
+    try:
+        original = _binding(payload["binding"])
+        _digest(payload["physical_binding_sha256"])
+    except BridgeProtocolError as exc:
+        raise RemoteAssignmentError("Fabric assignment binding is invalid") from exc
+    ref = payload["process_ref"]
+    if (original["attempt_id"] != request["attempt_id"]
+            or original["job_id"] != request["job_id"]
+            or payload["run_id"] != request["attempt_id"]
+            or payload["worker_id"] != request["worker_id"]
+            or payload["worker_id"] != binding.worker_id
+            or type(ref) is not dict
+            or set(ref) != {field.name for field in dataclasses.fields(WorkerProcessRef)}
+            or ref["run_id"] != request["attempt_id"]
+            or ref["effective_uid"] != binding.worker_uid
+            or ref["effective_gid"] != binding.worker_gid):
+        raise RemoteAssignmentError("Fabric assignment differs from original envelope/principal")
+    common = {"adapter_id": "attended-fabric", "binding": original,
+              "physical_binding_sha256": payload["physical_binding_sha256"]}
+    async def exchange(operation, phase_payload):
+        if operation not in {"assignment-seal-prepare", "assignment-seal-commit"}:
+            raise RemoteAssignmentError("Fabric assignment phase is invalid")
+        result = await broker_call(operation, {**payload, **phase_payload})
+        extra = {"snapshot", "snapshot_sha256"} if operation.endswith("prepare") else {"observation"}
+        if (type(result) is not dict or set(result) != set(common) | extra
+                or any(result[key] != value for key, value in common.items())):
+            raise RemoteAssignmentError("Fabric assignment return binding differs")
+        if operation.endswith("prepare"):
+            if (type(result["snapshot"]) is not dict
+                    or result["snapshot"].get("effective_grant_digest") != original["effective_grant_digest"]):
+                raise RemoteAssignmentError("Fabric assignment grant differs")
+            return {key: result[key] for key in extra}
+        return result["observation"]
+    return payload, common, exchange
+
+
 async def seal_original_assignment(
     binding: AssignmentControlBinding,
     request: Mapping[str, Any],
     broker_call: Callable[[str, Mapping[str, Any]], Awaitable[dict[str, Any]]],
+    *, fabric_target: bool = False,
 ) -> dict[str, Any]:
     """Seal only the bound original broker assignment; never finalize admission.
 
@@ -97,7 +143,14 @@ async def seal_original_assignment(
     determine both roots. Any interrupted/partial effect stays on that Attempt;
     this operation is modifying and is never automatically retried.
     """
-    payload = request["broker_request"]
+    if type(fabric_target) is not bool:
+        raise RemoteAssignmentError("assignment codec mode is invalid")
+    fabric_common = None
+    if fabric_target:
+        full_payload, fabric_common, broker_call = _fabric_assignment_codec(binding, request, broker_call)
+        payload = {key: full_payload[key] for key in ("run_id", "process_ref")}
+    else:
+        payload = request["broker_request"]
     if (type(payload) is not dict or set(payload) != {"run_id", "process_ref"}
             or type(payload["process_ref"]) is not dict
             or payload["run_id"] != request["attempt_id"]
@@ -153,4 +206,6 @@ async def seal_original_assignment(
                 label: {"open": "EACCES", "traverse": "EACCES", "list": "EACCES"}
                 for label in paths}):
         raise RemoteAssignmentError("original worker denial observation differs")
+    if fabric_common is not None:
+        return {**fabric_common, "observation": observation}
     return observation

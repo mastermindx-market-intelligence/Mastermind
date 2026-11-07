@@ -1,16 +1,24 @@
 """App selected-session HTTP transport for the installed v3 OS composition.
 
-This module owns exactly three fixed authenticated HTTPS POST routes around
+This module owns five fixed authenticated HTTPS POST routes around
 the actual :class:`InstalledSessionBridgeClient`.  It registers no routes and
 constructs no Runtime, socket listener, provider or credential; it remains
 disconnected until the integrator supplies the protected composition and the
 host qualifies it.  It never decodes JWTs, stores credentials, injects a
 principal into ASGI state, or takes a caller-selected private route.
 
-* ``/os/executive/session/context`` resolves one canonical fabric target for
-  an exact work/root selection through ``bridge.targets`` only.
+* ``/os/executive/session/context`` resolves one canonical target for an exact
+  work/root selection through ``bridge.targets`` only.  The closed selection
+  may carry an explicit ``target_kind``; its omission keeps the incumbent
+  fabric_attempt behaviour and its echo.
+* ``/os/executive/session/history-context`` binds the verified original READ
+  principal and expiry to one project without target enumeration or a root.
 * ``/os/executive/session/send`` commits one continuation with precisely the
-  four validated existing arguments, passed once to ``bridge.send``.
+  four validated existing arguments, passed once to ``bridge.send``.  A
+  ``hermes_secretary`` or ``hermes_meta`` target answers with the closed native public result
+  this transport validates against the producer's own validator.
+* ``/os/executive/session/references`` discovers bounded original-request
+  references through the same read-only bridge; never commits or acknowledges.
 * ``/os/executive/session/reply`` recovers the committed native reply by the
   exact original operation key through ``bridge.reply_read`` only.  It never
   reads targets, never sends, and never marks ``parent_consumed``.
@@ -53,6 +61,10 @@ from typing import Any
 
 from starlette.responses import Response
 
+from control_plane.native_continuation import (
+    HERMES_KINDS, HERMES_RESULT_SCHEMAS, hermes_family_for_target,
+)
+
 from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     VerifiedPrincipal,
@@ -76,19 +88,23 @@ from integrations.mastermind_executive_app.os_transport import (
 )
 from integrations.session_bridge.installed import InstalledSessionBridgeClient
 from integrations.session_bridge.schemas import (
+    BridgeError as _BridgeError,
     validate_tool_arguments as _validate_bridge_arguments,
 )
 
 #: Fixed route -> closed operation name.  Nothing here is request-selectable.
 _OPERATIONS: dict[str, str] = {
     "/os/executive/session/context": "context",
+    "/os/executive/session/history-context": "history_context",
     "/os/executive/session/send": "send",
     "/os/executive/session/reply": "reply",
+    "/os/executive/session/references": "references",
 }
 
 _RESULT_SCHEMA = "mastermind.os.executive.session_result.v1"
 _CONTEXT_SCHEMA = "mastermind.os.executive.session_context.v1"
 _NATIVE_REPLY_SCHEMA = "mastermind.native_reply_read.v1"
+_REFERENCE_SCHEMA = "mastermind.session_reply_references.v1"
 
 #: The existing exact read policy and the existing exact read+intent.submit
 #: policy.  Both must concern the same configured resource/issuer/subjects.
@@ -101,6 +117,9 @@ _SUBMIT_POLICY_SCOPES = frozenset((
 _WORK_REF_RE = re.compile(r"^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ROOT_JOB_RE = re.compile(r"^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$")
 _FABRIC_REF_RE = re.compile(r"^fabric_attempt:[0-9a-f]{64}$")
+_HERMES_REF_RE = re.compile(r"^(?:hermes_secretary|hermes_meta):[0-9a-f]{64}$")
+#: The closed canonical target-kind union; an absent kind keeps Fabric.
+_TARGET_KINDS = ("fabric_attempt", *HERMES_KINDS)
 _CONTINUE_KEY_RE = re.compile(r"^session-continue-[0-9a-f]{64}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _GENERATION_RE = re.compile(r"^[0-9a-f]{24}$")
@@ -156,6 +175,53 @@ def _continue_message_key(operation_key: str) -> str:
     return "asd-dot-continue-" + digest[:40]
 
 
+def _target_kind(target_ref: Any) -> str | None:
+    """The closed canonical kind of one target ref, or None when unsupported.
+
+    The prefix is the only kind carrier; there is no caller-selected kind
+    string outside :data:`_TARGET_KINDS`.
+    """
+
+    if not isinstance(target_ref, str):
+        return None
+    if _FABRIC_REF_RE.fullmatch(target_ref) is not None:
+        return "fabric_attempt"
+    if _HERMES_REF_RE.fullmatch(target_ref) is not None:
+        return hermes_family_for_target(target_ref).kind
+    return None
+
+
+def _hermes_operation_key(target_ref: str) -> str:
+    """The closed native continuation key of one exact Hermes target.
+
+    This reproduces the producer's own key derivation so a projected row can
+    be joined to its target.  It never mints a target, a session or an
+    operation; it only refuses a row whose key does not belong to it.
+    """
+
+    material = json.dumps(
+        {"schema": hermes_family_for_target(target_ref).operation_schema, "target_ref": target_ref},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")
+    return "session-continue-" + hashlib.sha256(material).hexdigest()
+
+
+def _original_request_digest(operation_key: str) -> str:
+    """Exact canonical Runtime request digest, used only as a READ verifier.
+
+    This does not mint identifiers or authorize an operation. Public original
+    references must remain tied to the stored immutable request key.
+    """
+    if type(operation_key) is not str or _CONTINUE_KEY_RE.fullmatch(operation_key) is None:
+        raise ValueError("invalid original operation key")
+    material = json.dumps(
+        {"schema": "mastermind.session_bridge.continue_request.v1",
+         "operation_key": operation_key},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")
+    return hashlib.sha256(material).hexdigest()
+
+
 def _native_reply_message_key(operation_key: str) -> str:
     """Owner native-reply key formula, used solely to validate recovery."""
 
@@ -194,8 +260,8 @@ def _json_response(payload: dict[str, Any], status: int, *, operation: str) -> R
         # A malformed or oversize release is UNKNOWN once an effect may have
         # happened; context never has an effect and reports the projection
         # unusable instead.
-        if operation == "context":
-            return _failure_response("context", "session_unavailable", effect="NONE")
+        if operation in ("context", "references"):
+            return _failure_response(operation, "session_unavailable", effect="NONE")
         return _failure_response(
             operation, "effect_unknown", effect="UNKNOWN",
             operation_key=payload.get("operation_key"),
@@ -231,7 +297,13 @@ def _failure_response(
 
 
 def _validated_targets(rows: Any) -> list[dict[str, Any]]:
-    """Validate every projected row; any defect fails the projection closed."""
+    """Validate every projected row; any defect fails the projection closed.
+
+    The closed kind union is Fabric and the two explicit native families.  The row
+    kind, the target prefix, the target generation and the projected
+    continuation key must all agree with one another before the row can be
+    joined to a selection.
+    """
 
     if not isinstance(rows, (list, tuple)) or len(rows) > _MAX_TARGETS:
         raise _ProjectionRefusal("target projection is unusable")
@@ -244,21 +316,23 @@ def _validated_targets(rows: Any) -> list[dict[str, Any]]:
         target_ref = row["target_ref"]
         generation = row["generation"]
         continuation_key = row["continuation_operation_key"]
+        kind = _target_kind(target_ref)
         if (
-            not isinstance(target_ref, str)
-            or _FABRIC_REF_RE.fullmatch(target_ref) is None
+            kind is None
             or not isinstance(generation, str)
             or _GENERATION_RE.fullmatch(generation) is None
-            or generation != target_ref.removeprefix("fabric_attempt:")[:24]
+            or generation != target_ref.removeprefix(f"{kind}:")[:24]
             or not isinstance(continuation_key, str)
             or _CONTINUE_KEY_RE.fullmatch(continuation_key) is None
             or row["addressable"] is not True
-            or row["kind"] != "fabric_attempt"
+            or row["kind"] != kind
             or not isinstance(row["work_ref"], str)
             or _WORK_REF_RE.fullmatch(row["work_ref"]) is None
             or not isinstance(row["root_job_id"], str)
             or _ROOT_JOB_RE.fullmatch(row["root_job_id"]) is None
         ):
+            raise _ProjectionRefusal("canonical target row is malformed")
+        if kind in HERMES_KINDS and continuation_key != _hermes_operation_key(target_ref):
             raise _ProjectionRefusal("canonical target row is malformed")
         if target_ref in seen_refs or continuation_key in seen_keys:
             raise _ProjectionRefusal("duplicate canonical target")
@@ -378,8 +452,31 @@ def _validated_native_reply(operation_key: str, native: Any) -> dict[str, Any]:
     return data
 
 
+def _validated_native_public_result(
+    value: Any, *, operation_key: str
+) -> dict[str, Any]:
+    """Validate one closed native public result against the producer's rules.
+
+    The producer owns the native semantics; this transport never duplicates
+    them.  It binds the validated result to the exact requested original
+    operation key and refuses every foreign, malformed or oversize frame.
+    """
+
+    from integrations.session_bridge.hermes_native import validate_public_result
+
+    try:
+        data = validate_public_result(value)
+    except _BridgeError:
+        raise _ForeignReceipt("native result exceeds the installed budget") from None
+    except Exception:
+        raise _ForeignReceipt("native result is malformed") from None
+    if data["operation_key"] != operation_key:
+        raise _ForeignReceipt("native result is foreign to the original operation")
+    return data
+
+
 class OsSessionTransportApp:
-    """Three fixed selected-session routes around the installed bridge client.
+    """Fixed selected-session/history routes around the installed bridge client.
 
     No inner app is wrapped: unrecognized scopes, methods, paths, schemes and
     query strings fail closed here, and the private bridge call is reached
@@ -525,8 +622,8 @@ class OsSessionTransportApp:
             return await self._dispatch(operation, scope, body, principal, chain)
         except Exception:
             # No phase may be inferred from an unexpected internal failure.
-            if operation == "context":
-                return _failure_response("context", "session_unavailable", effect="NONE")
+            if operation in ("context", "history_context", "references"):
+                return _failure_response(operation, "session_unavailable", effect="NONE")
             return _failure_response(
                 operation,
                 "effect_unknown",
@@ -628,9 +725,42 @@ class OsSessionTransportApp:
     ) -> Response:
         if operation == "context":
             return await self._context(scope, body, principal, chain)
+        if operation == "history_context":
+            return await self._history_context(scope, body, principal, chain)
         if operation == "send":
             return await self._send(scope, body, principal, chain)
+        if operation == "references":
+            return await self._references(scope, body, principal, chain)
         return await self._reply(scope, body, principal, chain)
+
+    async def _history_context(
+        self, scope: Mapping[str, Any], body: dict[str, Any],
+        principal: VerifiedPrincipal, chain: tuple[tuple[Any, Any], ...],
+    ) -> Response:
+        """Project-scoped original-history READ; never enumerates live targets.
+
+        This context binds the already verified READ principal and its expiry.
+        References and bodies still pass their existing original-principal
+        bridge checks; this response grants no session or mutation authority.
+        """
+        selection = body.get("selection") if type(body) is dict and set(body) == {"selection"} else None
+        if (type(selection) is not dict or set(selection) != {"work_ref"}
+                or type(selection["work_ref"]) is not str
+                or _WORK_REF_RE.fullmatch(selection["work_ref"]) is None):
+            return _failure_response("history_context", "invalid_input", effect="NONE")
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("history_context", "authentication_required", effect="NONE")
+        data = {
+            "schema": "mastermind.os.executive.project_history_context.v1",
+            "principal_scope": principal_scope(principal),
+            "verified_expiry": principal.expires_at,
+            "selection": {"work_ref": selection["work_ref"]},
+            "capabilities": {"references_read": True, "reply_read": True},
+        }
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("history_context", "authentication_required", effect="NONE")
+        return _json_response(_result("history_context", ok=True, effect="NONE", data=data),
+                              HTTPStatus.OK, operation="history_context")
 
     async def _context(
         self,
@@ -646,16 +776,23 @@ class OsSessionTransportApp:
         )
         if (
             not isinstance(selection, Mapping)
-            or frozenset(selection) != frozenset(("work_ref", "root_job_id"))
+            or frozenset(selection) not in (
+                frozenset(("work_ref", "root_job_id")),
+                frozenset(("work_ref", "root_job_id", "target_kind")),
+            )
         ):
             return _failure_response("context", "invalid_input", effect="NONE")
         work_ref = selection["work_ref"]
         root_job_id = selection["root_job_id"]
+        explicit_kind = "target_kind" in selection
+        target_kind = selection["target_kind"] if explicit_kind else "fabric_attempt"
         if (
             not isinstance(work_ref, str)
             or _WORK_REF_RE.fullmatch(work_ref) is None
             or not isinstance(root_job_id, str)
             or _ROOT_JOB_RE.fullmatch(root_job_id) is None
+            or not isinstance(target_kind, str)
+            or target_kind not in _TARGET_KINDS
         ):
             return _failure_response("context", "invalid_input", effect="NONE")
         if not await self._same_principal(scope, principal, chain):
@@ -663,7 +800,9 @@ class OsSessionTransportApp:
                 "context", "authentication_required", effect="NONE"
             )
         try:
-            rows = await self._bridge.targets(principal, kind="fabric_attempt")
+            # Exactly one target read for the one requested kind. There is no
+            # cross-kind fallback: an absent Secretary target stays absent.
+            rows = await self._bridge.targets(principal, kind=target_kind)
         except Exception:
             return _failure_response("context", "session_unavailable", effect="NONE")
         try:
@@ -673,7 +812,9 @@ class OsSessionTransportApp:
         matches = [
             row
             for row in targets
-            if row["work_ref"] == work_ref and row["root_job_id"] == root_job_id
+            if row["work_ref"] == work_ref
+            and row["root_job_id"] == root_job_id
+            and row["kind"] == target_kind
         ]
         if not matches:
             state, target = "UNAVAILABLE", None
@@ -685,11 +826,14 @@ class OsSessionTransportApp:
             return _failure_response(
                 "context", "authentication_required", effect="NONE"
             )
+        echoed: dict[str, Any] = {"work_ref": work_ref, "root_job_id": root_job_id}
+        if explicit_kind:
+            echoed["target_kind"] = target_kind
         data = {
             "schema": _CONTEXT_SCHEMA,
             "principal_scope": principal_scope(principal),
             "verified_expiry": principal.expires_at,
-            "selection": {"work_ref": work_ref, "root_job_id": root_job_id},
+            "selection": echoed,
             "selection_state": state,
             "target": target,
             "capabilities": {
@@ -731,8 +875,9 @@ class OsSessionTransportApp:
                 operation_key=self._retained_key("send", body),
             )
         operation_key = validated["operation_key"]
+        target_kind = _target_kind(validated["target_ref"])
         if (
-            _FABRIC_REF_RE.fullmatch(validated["target_ref"]) is None
+            target_kind is None
             or _CONTINUE_KEY_RE.fullmatch(operation_key) is None
         ):
             return _failure_response(
@@ -755,6 +900,8 @@ class OsSessionTransportApp:
             return _failure_response(
                 "send", "effect_unknown", effect="UNKNOWN", operation_key=operation_key
             )
+        if target_kind in HERMES_KINDS:
+            return self._native_send_response(operation_key, validated["target_ref"], receipt)
         try:
             data = _validated_send_receipt(validated, receipt)
         except _ForeignReceipt:
@@ -772,6 +919,115 @@ class OsSessionTransportApp:
             HTTPStatus.OK,
             operation="send",
         )
+
+    @staticmethod
+    def _native_send_response(
+        operation_key: str, target_ref: str, receipt: Any
+    ) -> Response:
+        """Closed effect mapping for one validated native public result.
+
+        A recorded but uncommitted request is ``NONE`` evidence of a request,
+        never a pre-send refusal of this invocation.  A committed request with
+        a qualified admission proves that admission only.  Every other
+        committed outcome stays UNKNOWN with its validated phase. Malformed,
+        foreign or oversized frames withhold data.
+        """
+
+        try:
+            data = _validated_native_public_result(receipt, operation_key=operation_key)
+            if data["target_ref"] != target_ref:
+                raise _ForeignReceipt("native result is foreign to the selected target")
+        except _ForeignReceipt:
+            return _failure_response(
+                "send", "effect_unknown", effect="UNKNOWN", operation_key=operation_key
+            )
+        if data["commit_started"] is False:
+            return _json_response(
+                _result(
+                    "send", ok=True, effect="NONE",
+                    operation_key=operation_key, data=data,
+                ),
+                HTTPStatus.OK,
+                operation="send",
+            )
+        if data["native_status"] in ("ADMITTED", "OBSERVED"):
+            return _json_response(
+                _result(
+                    "send", ok=True, effect="CONTINUATION_COMMITTED",
+                    operation_key=operation_key, data=data,
+                ),
+                HTTPStatus.OK,
+                operation="send",
+            )
+        return _json_response(
+            _result("send", ok=True, effect="UNKNOWN", operation_key=operation_key, data=data),
+            HTTPStatus.OK, operation="send",
+        )
+
+    async def _references(
+        self, scope: Mapping[str, Any], body: dict[str, Any],
+        principal: VerifiedPrincipal, chain: tuple[tuple[Any, Any], ...],
+    ) -> Response:
+        """READ-only original reference lookup; never consults the active slot."""
+        from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+        arguments = body.get("arguments") if isinstance(body, dict) and set(body) == {"arguments"} else None
+        try:
+            validated = NativeReplyReferencesTool.validate("session_reply_references", arguments)
+            if (_WORK_REF_RE.fullmatch(validated["work_ref"]) is None
+                    or ("root_job_id" in validated
+                        and _ROOT_JOB_RE.fullmatch(validated["root_job_id"]) is None)):
+                raise ValueError("invalid OS selection")
+        except Exception:
+            return _failure_response("references", "invalid_input", effect="NONE")
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("references", "authentication_required", effect="NONE")
+        try:
+            data = await self._bridge.reply_references(principal, validated)
+            if (type(data) is not dict
+                    or set(data) != {"schema", "status", "references", "next_cursor", "high_water"}
+                    or data["schema"] != _REFERENCE_SCHEMA
+                    or data["status"] not in ("PARTIAL", "COMPLETE")
+                    or type(data["references"]) is not list
+                    or len(data["references"]) > validated.get("page_size", 16)
+                    or type(data["high_water"]) is not int
+                    or data["high_water"] < 0
+                    or (data["status"] == "PARTIAL") != (data["next_cursor"] is not None)
+                    or (data["next_cursor"] is not None and (
+                        type(data["next_cursor"]) is not str
+                        or len(data["next_cursor"]) > 2048
+                        or re.fullmatch(r"[A-Za-z0-9_=-]+", data["next_cursor"]) is None))):
+                raise ValueError("invalid reference response")
+            for row in data["references"]:
+                expected = {"read_ref", "operation_key", "request_ref",
+                            "request_event_id", "request_revision", "requested_at",
+                            "work_ref", "root_job_id", "target_ref", "reference_only"}
+                if (type(row) is not dict or set(row) != expected
+                        or row["reference_only"] is not True
+                        or row["work_ref"] != validated["work_ref"]
+                        or ("root_job_id" in validated
+                            and row["root_job_id"] != validated["root_job_id"])
+                        or type(row["request_event_id"]) is not int
+                        or not 1 <= row["request_event_id"] <= data["high_water"]
+                        or any(type(row[key]) is not str or not row[key]
+                               or len(row[key]) > 256
+                               for key in expected - {"reference_only", "request_event_id"})
+                        or _CONTINUE_KEY_RE.fullmatch(row["operation_key"]) is None
+                        or row["read_ref"] != ("session-reply-" +
+                            _original_request_digest(row["operation_key"]))
+                        or row["request_ref"] != ("session-bridge-continue:" +
+                            _original_request_digest(row["operation_key"]))
+                        or _SHA256_RE.fullmatch(row["request_revision"]) is None
+                        or _WORK_REF_RE.fullmatch(row["work_ref"]) is None
+                        or _ROOT_JOB_RE.fullmatch(row["root_job_id"]) is None
+                        or _target_kind(row["target_ref"]) is None):
+                    raise ValueError("foreign reference")
+        except Exception:
+            return _failure_response("references", "session_unavailable", effect="NONE")
+        if not await self._same_principal(scope, principal, chain):
+            return _failure_response("references", "authentication_required", effect="NONE")
+        return _json_response(
+            _result("references", ok=True, effect="NONE", data=data),
+            HTTPStatus.OK, operation="references")
 
     async def _reply(
         self,
@@ -826,6 +1082,8 @@ class OsSessionTransportApp:
                 operation_key=operation_key,
             )
         try:
+            if isinstance(native, Mapping) and native.get("schema") in HERMES_RESULT_SCHEMAS:
+                return self._native_reply_response(operation_key, native)
             data = _validated_native_reply(operation_key, native)
         except _ForeignReceipt:
             return _failure_response(
@@ -841,6 +1099,38 @@ class OsSessionTransportApp:
                 effect="CONTINUATION_COMMITTED",
                 operation_key=operation_key,
                 data=data,
+            ),
+            HTTPStatus.OK,
+            operation="reply",
+        )
+
+    @staticmethod
+    def _native_reply_response(operation_key: str, native: Any) -> Response:
+        """Recover the closed native public result of one original operation.
+
+        This is a READ of the exact original operation key.  It never sends,
+        never looks up a target and never marks parent consumption.  The
+        recovered phase is evidence only: an uncommitted request proves no
+        native effect, an admitted request proves that admission only, and
+        every other committed phase stays unresolved on the original pointer.
+        """
+
+        try:
+            data = _validated_native_public_result(native, operation_key=operation_key)
+        except _ForeignReceipt:
+            return _failure_response(
+                "reply", "effect_unknown", effect="UNKNOWN", operation_key=operation_key
+            )
+        if data["commit_started"] is False:
+            effect = "NONE"
+        elif data["native_status"] in ("ADMITTED", "OBSERVED"):
+            effect = "CONTINUATION_COMMITTED"
+        else:
+            effect = "UNKNOWN"
+        return _json_response(
+            _result(
+                "reply", ok=True, effect=effect,
+                operation_key=operation_key, data=data,
             ),
             HTTPStatus.OK,
             operation="reply",

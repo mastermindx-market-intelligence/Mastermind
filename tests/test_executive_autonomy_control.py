@@ -107,6 +107,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "workspace_binding_class": "company-workspace-admin-attested",
         "credential_expires_at": "2026-08-25T12:00:00Z",
         "native_return": False,
+        "foreground_only": False,
     }
 
     disarm = parser.parse_args(["disarm", "--expected-sha", SHA])
@@ -131,7 +132,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_sha": SHA,
     }
 
-    # The command set is EXACTLY the closed twelve: no generic recovery/debug verb
+    # The command set is closed: no generic recovery/debug verb
     # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
@@ -152,13 +153,105 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "dialogue-canary-reconcile",
         "a2-disable-prepare",
         "a2-disable-prepare-reconcile",
+        "a2-restore-controller-socket",
+        "a2-restore-controller-socket-reconcile",
+        "a2-restored-readside-preflight",
+        "finite-control-stage",
+        "finite-control-stage-reconcile",
+        "finite-control-retire",
+        "finite-control-retire-reconcile",
+        "paid-control-stage",
+        "paid-control-stage-reconcile",
+        "publish-os-gateway",
+        "reconcile-os-gateway",
+        "plan-control-component",
+        "apply-control-component",
+        "reconcile-control-component",
     }
+    # The OS gateway publication domain: the two closed verbs carry only the
+    # bounded digests and the original transaction id, and never accept a
+    # foreign flag, a duplicated value or the other verb's flags.
+    publish_argv = [
+        "publish-os-gateway",
+        "--expected-sha", SHA,
+        "--expected-bundle-digest", "a" * 64,
+        "--expected-mcp-config-sha256", "b" * 64,
+        "--expected-mcp-plist-sha256", "c" * 64,
+        "--expected-grant-absent",
+    ]
+    assert vars(parser.parse_args(publish_argv)) == {
+        "command": "publish-os-gateway",
+        "expected_sha": SHA,
+        "expected_bundle_digest": "a" * 64,
+        "expected_mcp_config_sha256": "b" * 64,
+        "expected_mcp_plist_sha256": "c" * 64,
+        "expected_grant_sha256": None,
+        "expected_grant_absent": True,
+        "expected_predecessor_receipt_sha256": None,
+    }
+    digest_publish = list(publish_argv)
+    digest_publish[-1:] = ["--expected-grant-sha256", "d" * 64]
+    assert parser.parse_args(digest_publish).expected_grant_sha256 == "d" * 64
+    reconcile_argv = [
+        "reconcile-os-gateway",
+        "--expected-sha", SHA,
+        "--expected-bundle-digest", "a" * 64,
+        "--transaction-id", "autonomy-" + "0" * 12,
+    ]
+    assert vars(parser.parse_args(reconcile_argv)) == {
+        "command": "reconcile-os-gateway",
+        "expected_sha": SHA,
+        "expected_bundle_digest": "a" * 64,
+        "transaction_id": "autonomy-" + "0" * 12,
+    }
+    for bad in (
+        # A missing required publish digest.
+        [w for w in publish_argv if w != "--expected-mcp-plist-sha256" and w != "c" * 64],
+        # The other verb's flag.
+        publish_argv + ["--transaction-id", "autonomy-" + "0" * 12],
+        # Foreign or duplicated values.
+        publish_argv + ["--foreign", "/tmp/x"],
+        ["reconcile-os-gateway", "--expected-sha", SHA, "--expected-sha", SHA,
+         "--expected-bundle-digest", "a" * 64, "--transaction-id", "autonomy-" + "0" * 12],
+        # Malformed digests and transaction ids.
+        [w if w != "a" * 64 else "A" * 64 for w in publish_argv],
+        ["reconcile-os-gateway", "--expected-sha", SHA, "--expected-bundle-digest",
+         "a" * 64, "--transaction-id", "autonomy-xyz"],
+        # Reconcile never carries publish flags.
+        reconcile_argv + ["--expected-grant-absent"],
+    ):
+        with pytest.raises(SystemExit):
+            parser.parse_args(bad)
+    # The exactly-one grant expectation is a closed service-control argv-walk
+    # law, already asserted end to end in the affected owner suite; the parser
+    # itself keeps both bounded spellings optional and exclusive of nothing.
+    for command in ("paid-control-stage","paid-control-stage-reconcile"):
+        argv=[command,"--expected-sha",SHA,"--expected-definition-sha256","d"*64]
+        if command=="paid-control-stage":argv += ["--expected-control-sha256","c"*64]
+        assert parser.parse_args(argv).expected_definition_sha256=="d"*64
+        for extra in (["--service-label","foreign"],["--expected-definition-sha256","e"*64]):
+            with pytest.raises(SystemExit):parser.parse_args(argv+extra)
     for command in ("a2-disable-prepare", "a2-disable-prepare-reconcile"):
         assert vars(parser.parse_args([command, "--expected-sha", SHA])) == {
             "command": command, "expected_sha": SHA,
         }
         with pytest.raises(SystemExit):
             parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
+
+    for command in ("finite-control-stage", "finite-control-stage-reconcile",
+                    "finite-control-retire", "finite-control-retire-reconcile"):
+        argv = [command, "--expected-sha", SHA]
+        expected = {"command": command, "expected_sha": SHA}
+        if command in {"finite-control-stage", "finite-control-retire"}:
+            with pytest.raises(SystemExit):
+                parser.parse_args(argv)
+            argv += ["--expected-control-sha256", "a" * 64]
+            expected["expected_control_sha256"] = "a" * 64
+        assert vars(parser.parse_args(argv)) == expected
+        for extra in (["--service-label", "foreign"], ["--expected-sha", SHA],
+                      ["--command-path", "/tmp/foreign"]):
+            with pytest.raises(SystemExit):
+                parser.parse_args(argv + extra)
 
     # A CEO verb carries no COO authority flag: the arm admission surface of the
     # legacy verb must not be reachable from the CEO domain.
@@ -1207,7 +1300,9 @@ def test_transaction_order_and_static_safety_fences_are_structural():
     # verified against the exact held inode.
     assert "os.mkdir(AUTONOMY_TRANSACTION" not in production
     create = production.split("def _create_marker", 1)[1].split("\n    def ", 1)[0]
-    assert "os.mkdir(generation, 0o700)" in create
+    # The generation is created only through the module's ONE directory
+    # creation site; the canonical audit leaf shares that same site.
+    assert "_create_directory(generation, 0o700)" in create
     assert "os.rename(generation, AUTONOMY_TRANSACTION)" in create
     assert "_seal_generation(" in create
     assert "_publication_mutex()" in create
@@ -4210,6 +4305,9 @@ def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
         st_ino=73,
     )
     ledger = []
+    # Do not patch process-global os.fstat/open/close: pytest and Path use them.
+    # The production module resolves its own os binding, so isolate its test seam.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
     monkeypatch.setattr(
         host, "_transaction_present", lambda: ledger.append("marker") or True
@@ -4309,6 +4407,8 @@ def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
     for host in (first, second):
         monkeypatch.setattr(host, "_config_root_safe", lambda: None)
         monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    # os.fstat is used by pytest internals; patch only this owner's module binding.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
     monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
     monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
@@ -4434,9 +4534,18 @@ def test_ceo_submit_process_recovery_refuses_legacy_marker_without_launchd_preim
 
 def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
     source = Path(control.__file__).read_text(encoding="utf-8")
-    production = source.split("class ProductionCeoSubmitHost", 1)[1]
+    # The CEO-submit control boundary proper ends where the separate OS
+    # gateway publication domain begins.  That domain must name the fixed
+    # service-control entry exactly once, by law: its sealed module origin
+    # joins the installed controller that exec'd it, and never executes it.
+    production = (
+        source.split("class ProductionCeoSubmitHost", 1)[1]
+        .split("class ProductionGatewayPublicationHost", 1)[0]
+    )
     assert "service-control.sh" not in production
     assert production.count("service-control.sh") == 0
+    gateway_source = source.split("class ProductionGatewayPublicationHost", 1)[1]
+    assert gateway_source.count("service-control.sh") == 1
 
     for name in ("def _reconcile_control_boundary", "def reconcile_control_service"):
         body = production.split(name, 1)[1].split("\n    def ", 1)[0]
@@ -7619,6 +7728,7 @@ def _marker_workspace(workdir: Path) -> Path:
 def _marker_adapter_bindings():
     """The three hermetic adapters, declared once for every harness process."""
 
+    from ops.executive_os import control_observation
     real_fstat = os.fstat
     real_lstat = Path.lstat
 
@@ -7656,6 +7766,9 @@ def _marker_adapter_bindings():
         (control.os, "fchown", privileged_root_chown),
         (control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)),
         (control, "_has_acl", lambda _path: False),
+        # This journal harness does not install a release or its publisher.
+        # The actual publisher/owner composition has separate affected tests.
+        (control_observation, "publish_for_transaction", lambda *args: None),
     ]
 
 
@@ -8940,9 +9053,14 @@ def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkey
     root=tmp_path/"control/acceptance"/SHA
     root.mkdir(parents=True)
     root.chmod(0o700)
+    # POSIX directories can inherit the parent's group rather than the
+    # process's primary group (for example /private/tmp on macOS). Bind the
+    # fixture account to the actual fixture directory; production still checks
+    # the exact configured owner/group and mode without an exemption.
+    fixture_identity=root.lstat()
     monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
-    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=os.getuid()))
-    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=fixture_identity.st_uid))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=fixture_identity.st_gid))
     monkeypatch.setattr(control,"_has_acl",lambda path:False)
     raw=b"existing full acceptance receipt"
     monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))

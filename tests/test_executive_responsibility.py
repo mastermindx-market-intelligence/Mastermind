@@ -127,8 +127,14 @@ def test_runtime_rejects_bad_role_before_job_insert(tmp_path,fault):
         assert conn.execute('select count(*) from jobs').fetchone()[0]==0
 
 
+class _InertDataBoundary:
+    """Test-only inert DATA boundary: no provider start, no transport, never paid."""
+
+    adapter_id = "fixture"
+
+
 def test_startup_prompt_retains_intent_without_new_authority(tmp_path):
-    from types import SimpleNamespace
+    from types import MethodType, SimpleNamespace
     from control_plane.executive_runtime import Runtime
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.model_router import ModelRouter, WorkRequest
@@ -136,7 +142,12 @@ def test_startup_prompt_retains_intent_without_new_authority(tmp_path):
     runtime=Runtime.at(tmp_path)
     decision=ModelRouter.load().route(WorkRequest('implementation',responsibility_intent=intent()))
     job=runtime.jobs.create_job('role test',constraints=decision.job_constraints())
-    host=SimpleNamespace(runtime=runtime,_commission_prompt_suffix=lambda *a:'')
+    host=SimpleNamespace(runtime=runtime,adapter=_InertDataBoundary(),
+                         _commission_prompt_suffix=lambda *a:'')
+    host._product_acceptance_review_suffix = MethodType(
+        ExecutiveSupervisor._product_acceptance_review_suffix, host)
+    host._reviewed_role_prompt_suffix = MethodType(
+        ExecutiveSupervisor._reviewed_role_prompt_suffix, host)
     attempt=SimpleNamespace(attempt_id='test-attempt',worker_id='test-worker',quota_class='default')
     prompt=ExecutiveSupervisor._prompt(host,job,attempt)
     packet=json.loads(prompt[prompt.index('{'):])

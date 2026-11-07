@@ -109,10 +109,11 @@ describe("Work read recovery in the actual App", () => {
       state = { status: "signed_out", reason: null, acquisition: false, content: false }; notify(state);
     });
     expect(signal.aborted).toBe(true);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh Work" }).disabled).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh Work" })).toBeNull();
     await act(async () => retry.resolve(structuredClone(workAvailable)));
     expect(screen.queryByText("JOB-2")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Refresh Work" }));
+    expect(screen.queryByRole("button", { name: "Refresh Work" })).toBeNull();
     expect(readWork).toHaveBeenCalledTimes(2);
   });
 
@@ -135,11 +136,14 @@ describe("Work read recovery in the actual App", () => {
     const user = userEvent.setup(); render(<App />);
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(await screen.findByRole("button", { name: "Open project Alpha program" }));
-    await screen.findByRole("heading", { name: "Mission" });
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await screen.findByRole("heading", { name: "Alpha program", level: 1 });
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Keep this direction");
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(screen.getByRole("button", { name: "Open project Alpha program" }));
+    await user.click(screen.getByRole("button", { name: "Project details" }));
+    await user.click(screen.getByRole("button", { name: "Work controls" }));
+    await user.click(screen.getByText("More work details", { selector: "summary" }));
     await user.click(screen.getByRole("tab", { name: "Work" }));
     await screen.findByText("SOURCE_UNAVAILABLE");
     const locationBefore = location.href;
@@ -153,7 +157,7 @@ describe("Work read recovery in the actual App", () => {
     expect(readMission).toHaveBeenCalledTimes(missionCalls);
     expect(readProgramsObservation).toHaveBeenCalledTimes(programCalls);
     expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("Keep this direction");
   });
 

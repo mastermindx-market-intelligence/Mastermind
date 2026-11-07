@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationWindow } from "./ConversationWindow";
+import { canNavigateForAutomaticSignIn } from "../auth-navigation-guard";
 import { emptyDrafts, readDraft, writeDraft } from "./drafts";
 import { decodeMissionv3 } from "../mission";
 import { decodeWindow } from "../workspace-contract";
@@ -38,6 +39,34 @@ function Harness({ projection }: { projection: OfficeProjection }) {
 }
 
 describe("Atelier observed conversation window", () => {
+  it("keeps an already-written note copyable but read-only when Content is withheld", async () => {
+    const original = (await input()).projection;
+    const noContent = structuredClone(original);
+    noContent.conversation.source.state = "WITHHELD";
+    noContent.conversation.value = null;
+    const note = "Private conversation note must remain copyable.";
+    const view = render(<ConversationWindow projection={noContent} draft={note}
+      notesPresentation="collapsed" retainUnsentOnExpiry onDraftChange={vi.fn()} />);
+    const field = screen.getByRole("textbox", { name: "Unsent notes" }) as HTMLTextAreaElement;
+    expect(field.value).toBe(note);
+    expect(field.readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    view.rerender(<ConversationWindow projection={noContent} draft=""
+      notesPresentation="collapsed" retainUnsentOnExpiry onDraftChange={vi.fn()} />);
+    expect(screen.queryByRole("textbox", { name: "Unsent notes" })).toBeNull();
+  });
+  it("holds unattended redirects while conversation notes are unsent", async () => {
+    const view = render(<Harness projection={(await input()).projection} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Unsent draft" }),
+      { target: { value: "Do not lose these notes." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByRole("textbox", { name: "Unsent draft" }),
+      { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   it.each([false, true])("attaches result evidence only to the observed Job/Attempt, exact=%s", async exact => {
     const { reads, context } = await input();
     const result = decodeResultEnvelope(structuredClone(resultFixture), {
@@ -78,7 +107,7 @@ describe("Atelier observed conversation window", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review evidence" }));
     expect(!!screen.queryByText("Only the exact returned result.")).toBe(exact);
     expect(!!screen.queryByText("private:other-result")).toBe(exact);
-    if (!exact) expect(screen.getByText("Result source · UNASSOCIATED for this window. Review and acceptance remain separate.")).toBeTruthy();
+    if (!exact) expect(screen.getByText("Result source · UNASSOCIATED for this window")).toBeTruthy();
   });
   it("renders the decoded owner window without inventing a session or transcript", async () => {
     const { projection } = await input();
@@ -111,7 +140,7 @@ describe("Atelier observed conversation window", () => {
     expect(screen.getByText(state)).toBeTruthy();
     const text = reads.conversation!.value!.view.items.find(item => item.text)!.text!;
     if (state !== "STALE") expect(screen.queryByText(text)).toBeNull();
-    if (state === "STALE") expect(screen.getByText("Retained window; current conversation state is not established.")).toBeTruthy();
+    if (state === "STALE") expect(screen.getByText("Showing an earlier view. Newer replies may be missing.")).toBeTruthy();
     if (state === "WITHHELD") { expect(document.body.textContent).not.toContain("private:"); expect(screen.queryByRole("textbox")).toBeNull(); }
   });
   it.each(["auth", "target", "revision", "session", "binding"])("withdraws inspected content synchronously at a %s boundary", async boundary => {
@@ -132,7 +161,7 @@ describe("Atelier observed conversation window", () => {
   it("keeps unknown effect and independent receipts visible without a resend control", async () => {
     const { reads, context } = await input(); reads.mission!.value!.transport.dispatch_state = "EFFECT_UNKNOWN";
     render(<Harness projection={projectOffice(reads, context)} />);
-    expect(screen.getByRole("alert").textContent).toContain("original operation");
+    expect(screen.getByRole("alert").textContent).toContain("Don’t send it again");
     expect(screen.getByRole("region", { name: "Independent receipts" }).textContent).toContain("acceptanceNOT_PROJECTED");
     expect(screen.queryByRole("button", { name: /retry|resend|failover|stop/i })).toBeNull();
   });

@@ -204,3 +204,52 @@ def test_real_runtime_rejects_fabric_identity_or_evidence_mutation(tmp_path, mut
     with runtime.store.read() as con:
         with pytest.raises(StateConflict, match="Fabric terminal evidence failed original-owner validation"):
             _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
+
+
+def _without_empty_validation_cleanup(runtime, terminal):
+    evidence = terminal["result_evidence"]
+    assert evidence["validation_receipts"]["commands"] == []
+    assert evidence["launch_identity"]["request"]["validation_commands"] == []
+    evidence["validation_receipts"].pop("fabric_cleanup")
+    evidence["validation_receipts_digest"] = digest(evidence["validation_receipts"])
+    terminal["validation_receipt_digest"] = evidence["validation_receipts_digest"]
+    _save_fixture_terminal(runtime, terminal)
+
+
+def _save_fixture_terminal(runtime, terminal):
+    terminal["terminal_evidence_digest"] = digest({
+        k: v for k, v in terminal.items() if k != "terminal_evidence_digest"})
+    with runtime.store.transaction() as con:
+        con.execute("UPDATE jobs SET result_json=? WHERE job_id=?", (
+            json.dumps(terminal, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+            terminal["result_evidence"]["validation_receipts"]["job_id"]))
+
+
+def test_real_runtime_empty_validation_does_not_require_nonexistent_process_evidence(tmp_path):
+    runtime, row, terminal = fabric_fixture(tmp_path)
+    _without_empty_validation_cleanup(runtime, terminal)
+    with runtime.store.read() as con:
+        assert _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)
+
+
+@pytest.mark.parametrize("mutation", ["commands", "launch_commands", "collection_cleanup"])
+def test_empty_validation_exception_cannot_hide_other_missing_evidence(tmp_path, mutation):
+    runtime, row, terminal = fabric_fixture(tmp_path)
+    _without_empty_validation_cleanup(runtime, terminal)
+    evidence = terminal["result_evidence"]
+    if mutation == "commands":
+        evidence["validation_receipts"]["commands"] = [{"argv": ["/usr/bin/true"]}]
+        evidence["validation_receipts_digest"] = digest(evidence["validation_receipts"])
+        terminal["validation_receipt_digest"] = evidence["validation_receipts_digest"]
+    elif mutation == "launch_commands":
+        evidence["launch_identity"]["request"]["validation_commands"] = [["/usr/bin/true"]]
+        metadata = json.loads(row["launch_metadata_json"])
+        metadata[REMOTE_LAUNCH_IDENTITY_KEY]["sha256"] = digest(evidence["launch_identity"])
+        row["launch_metadata_json"] = json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    else:
+        evidence["collection_receipt"].pop("fabric_cleanup")
+        evidence["collection_receipt_digest"] = digest(evidence["collection_receipt"])
+    _save_fixture_terminal(runtime, terminal)
+    with runtime.store.read() as con:
+        with pytest.raises(StateConflict):
+            _sealed_worker_result_payload(con, row, expected_role="plan", terminal_payload=terminal)

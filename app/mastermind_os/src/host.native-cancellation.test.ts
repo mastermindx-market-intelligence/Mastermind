@@ -24,6 +24,10 @@ type Read = (client: RawClient, signal: AbortSignal) => Promise<unknown>;
 const reads: [string, Read][] = [
   ["read_programs", (c, signal) => c.readPrograms({ signal })],
   ["read_work", (c, signal) => c.readWork({ signal })],
+  ["read_fabric_catalog", (c, signal) => c.readAttendedFabricCatalog!({ signal })],
+  ["read_fabric_status", (c, signal) => c.readAttendedFabric!({
+    rootId: "JOB-1", runId: "ATT-11111111111111111111111111111111", signal,
+  })],
   [
     "read_mission",
     (c, signal) =>
@@ -64,6 +68,25 @@ async function setup(transport: (command: string) => Promise<unknown>) {
 }
 
 describe("native read cancellation settlement", () => {
+  it("sends only the exact paid-run selector to the fixed native status command", async () => {
+    const { client, invoke } = await setup(async () => ({}));
+    await client.readAttendedFabric!({ rootId: "JOB-1",
+      runId: "ATT-11111111111111111111111111111111", signal: new AbortController().signal });
+    expect(invoke).toHaveBeenLastCalledWith("read_fabric_status", { selection: {
+      root_id: "JOB-1", run_id: "ATT-11111111111111111111111111111111",
+    } });
+    await client.readAttendedFabricCatalog!({ signal: new AbortController().signal });
+    expect(invoke).toHaveBeenLastCalledWith("read_fabric_catalog", undefined);
+  });
+
+  it("rejects an invalid Fabric selector before a native command", async () => {
+    const { client, invoke } = await setup(async () => ({}));
+    invoke.mockClear();
+    await expect(client.readAttendedFabric!({ rootId: "../foreign", runId: "ATT-1",
+      signal: new AbortController().signal })).rejects.toThrow("FABRIC_SELECTION_INVALID");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it.each(reads)(
     "settles %s immediately even if the native read never returns",
     async (command, read) => {

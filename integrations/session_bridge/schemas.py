@@ -12,7 +12,7 @@ SERVER_NAME = "mastermind-session-bridge"
 SERVER_VERSION = "0.2.0"
 RESULT_SCHEMA = "mastermind.session_bridge_result.v1"
 
-TARGET_KINDS = ("fabric_attempt", "codex", "claude")
+TARGET_KINDS = ("fabric_attempt", "codex", "claude", "hermes_secretary", "hermes_meta")
 MAX_INSTRUCTION_CHARS = 700
 MAX_STOP_CONDITION_CHARS = 700
 MAX_OPERATION_KEY_CHARS = 96
@@ -118,6 +118,27 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
         return normalized
 
     raise BridgeError("not_found", "unknown tool")
+
+
+def validate_installed_summon_arguments(arguments: Any) -> dict[str, Any]:
+    """Private App research extension; the public MCP summon stays frozen.
+
+    The already authenticated App carries its requested catalogue alias. Only
+    canonical ingress can resolve/freeze it; this syntax grants no provider,
+    account, placement or execution authority.
+    """
+    if not isinstance(arguments, Mapping) or "frontier_model_alias" not in arguments:
+        return validate_tool_arguments("session_summon", arguments)
+    if arguments.get("execution_profile") != "research_only":
+        raise BridgeError("invalid_input", "App frontier summon requires research_only")
+    from integrations.executive_mcp import schemas as executive
+    try:
+        normalized = executive.validate_app_submit_arguments(arguments)
+    except executive.GatewayError as exc:
+        raise BridgeError(exc.code, exc.message) from None
+    if "workstream" not in normalized:
+        raise BridgeError("invalid_input", "strict Executive admission requires workstream")
+    return normalized
 
 
 def summon_input_schema() -> dict[str, Any]:

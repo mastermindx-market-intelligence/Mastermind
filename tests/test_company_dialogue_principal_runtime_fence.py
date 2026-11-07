@@ -388,6 +388,56 @@ def test_reconcile_carrier_failure_preserves_effect_unknown(tmp_path):
     assert result.state is PrincipalCommitObservationState.EFFECT_UNKNOWN
 
 
+def test_committed_read_exposes_exact_ruling_body_without_a_second_commit(tmp_path):
+    runtime, root, child, attempt = runtime_child(tmp_path)
+    bound = binding(root, child, attempt)
+    raw = principal_message(bound)
+    raw.pop("fingerprint")
+    raw.update(message_type="RULING", body={
+        "authority_class": "WITHIN_COMMISSION", "selected_option": "opt-accept",
+        "decision": "Accept this exact scoped revision.",
+        "rationale": "The bound proof contract was satisfied.", "canonical_ref": None,
+    })
+    message = build_message_v2(raw)
+    service = ReadService([message])
+    subject = owner(runtime, Resolver(bound), service)
+    subject.before_commit(intent(bound, message))
+    before = runtime.events.list_events(aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE, aggregate_id=MESSAGE_KEY)
+    read = run(subject.read_committed_message(MESSAGE_KEY))
+    assert read.observation.state is PrincipalCommitObservationState.APPLIED
+    assert read.message == message
+    assert read.message["body"]["selected_option"] == "opt-accept"
+    read.message["body"]["decision"] = "Mutated local output"
+    assert run(subject.read_committed_message(MESSAGE_KEY)).message == message
+    assert runtime.events.list_events(aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE, aggregate_id=MESSAGE_KEY) == before
+    assert all(call["operation"] == "read_thread" for call in service.calls)
+
+
+@pytest.mark.parametrize("carrier_case", ["missing", "duplicate", "conflict", "unavailable"])
+def test_unqualified_committed_read_never_exposes_a_ruling(carrier_case, tmp_path):
+    runtime, root, child, attempt = runtime_child(tmp_path)
+    bound = binding(root, child, attempt)
+    message = principal_message(bound)
+    changed = principal_message(bound, instruction="A different instruction.")
+    messages = {"missing": [], "duplicate": [message, message], "conflict": [changed], "unavailable": []}[carrier_case]
+    subject = owner(runtime, Resolver(bound), ReadService(messages, error=carrier_case == "unavailable"))
+    subject.before_commit(intent(bound, message))
+    read = run(subject.read_committed_message(MESSAGE_KEY))
+    assert read.message is None
+    expected = PrincipalCommitObservationState.CONFLICT if carrier_case in {"duplicate", "conflict"} else PrincipalCommitObservationState.EFFECT_UNKNOWN
+    assert read.observation.state is expected
+
+
+def test_unissued_committed_read_does_not_touch_the_carrier(tmp_path):
+    runtime, root, child, attempt = runtime_child(tmp_path)
+    service = ReadService()
+    subject = owner(runtime, Resolver(binding(root, child, attempt)), service)
+    read = run(subject.read_committed_message(MESSAGE_KEY))
+    assert read.observation.state is PrincipalCommitObservationState.NOT_APPLIED
+    assert read.message is None
+    assert service.calls == []
+
+
 def test_runtime_fence_owner_adds_no_table_listener_or_retry_plane() -> None:
     path = (
         ROOT

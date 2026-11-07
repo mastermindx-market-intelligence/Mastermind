@@ -20,11 +20,12 @@ from types import MappingProxyType
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
 from control_plane.remote_worker_transport import BrokerTransportBinding
 
-FABRIC_OPERATIONS = frozenset({'start', 'status', 'collect', 'cancel', 'validate',
+FABRIC_OPERATIONS = frozenset({'start', 'status', 'collect', 'cancel', 'validate', 'attended-secret-canary',
                               'assignment-seal', 'assignment-seal-finalize'})
 _FIELDS = frozenset({'host_ref', 'worker_id', 'physical_binding_sha256',
     'endpoint_host', 'endpoint_port', 'ca_path', 'client_cert_path', 'client_key_path',
     'expected_server_fingerprint', 'timeout_seconds'})
+_TRANSPORT_FIELDS = _FIELDS - {'host_ref', 'worker_id', 'physical_binding_sha256'}
 _BINDING_FIELDS = frozenset({'root_id', 'job_id', 'attempt_id',
                             'effective_grant_digest', 'commission_sha256'})
 
@@ -59,7 +60,14 @@ class FabricRemoteTransport:
         if (type(raw) is not dict or set(raw) != _FIELDS
                 or raw['host_ref'] != physical.host_ref
                 or raw['worker_id'] != physical.worker_id
-                or raw['physical_binding_sha256'] != physical.digest
+                or raw['physical_binding_sha256'] != physical.digest):
+            _refuse()
+        return cls.from_host_document({key: raw[key] for key in _TRANSPORT_FIELDS})
+
+    @classmethod
+    def from_host_document(cls, raw):
+        """Qualify TLS transport without manufacturing an execution identity."""
+        if (type(raw) is not dict or set(raw) != _TRANSPORT_FIELDS
                 or type(raw['endpoint_host']) is not str
                 or any(type(raw[name]) is not str for name in
                        ('ca_path', 'client_cert_path', 'client_key_path'))):
@@ -132,10 +140,11 @@ class PinnedFabricRemoteClient:
                                        bound_payload_identity=self._client.bound_payload_identity):
             _refuse()
 
-    async def request(self, operation, payload, *, timeout_seconds=None):
+    async def request(self, operation, payload, *, timeout_seconds=None, foreground_start_receipt=None):
         self._require(operation, payload)
         try:
-            result = await self._client.request(operation, payload, timeout_seconds=timeout_seconds)
+            options = {} if foreground_start_receipt is None else dict(foreground_start_receipt=foreground_start_receipt)
+            result = await self._client.request(operation, payload, timeout_seconds=timeout_seconds, **options)
         except asyncio.CancelledError as exc:
             # The inner await may already have written the original command.
             # Without its classified no-effect response, cancellation cannot

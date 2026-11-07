@@ -209,7 +209,7 @@ local Unix client. Neither route falls back to the other on failure.
 
 The gateway must explicitly select `broker_target: attended-fabric`, the actual
 `expected_broker_peer_uid`, and its fixed protected Fabric socket. It preserves
-the exact seven Fabric operations and forwards assignment sealing to the
+the closed Fabric operations and forwards assignment sealing to the
 original Fabric owner instead of the Worker Broker's separate seal handler.
 Its startup metadata check is not a Backend-readiness check: Fabric has no
 global `status {}` operation, and startup must not invent an Attempt to probe.
@@ -236,3 +236,93 @@ The remote client preserves the optional exactly-once Runtime generation binding
 A synchronous call inside a running loop reports the existing no-effect transport
 error. A cancelled modifying transport await retains `EFFECT_UNKNOWN`, because
 cancellation does not establish whether the original command was already sent.
+
+## Original owner lifetime split
+
+The original lane runner now exposes begin, finish and exact-handle cancellation
+mechanics while its one generator retains Popen, bounded collectors, stdin,
+cleanup and terminal receipt. The original main-thread controller can keep one
+shielded asynchronous finisher after a START handler returns. Cancelling a
+waiting RPC does not transfer settlement; cancellation before the finisher first
+executes aborts the same yielded stack. A second begin refuses before Popen,
+and an unknown spawn, missing receipt or unproven cleanup retains exclusion.
+Legacy synchronous callers retain their existing reconciliation behavior.
+
+The private executor seam retains the original lease object and applies the
+existing cleanup hold after terminal settlement. It does not release that
+lease or prove assignment revocation. The eventual concrete Backend must keep
+the original lease and admission exclusion through Control seal, worker denial
+and durable Supervisor ACK. The resource handle is not full START: independently
+pinned post-exec image, live original generation, all existing admission and
+isolation evidence, retained collection and native parent acceptance remain
+required. No CLI/RPC, installed service or production profile is activated.
+
+
+### Original-owner executed-image observation (source only)
+
+The original runner can now inspect only its retained live Popen PID, using a
+pinned Linux process directory and a bounded executable-image hash. Boot, exact
+start ticks, process group/session and real/effective UID/GID must match the
+original handle. A changed, dead or foreign process refuses; the original owner
+retains collection and settlement. No argv pathname or controller PID stands in
+for the executed image. File ownership remains distinct from process credentials.
+
+The paid image patch was consumed by the exact original Codex parent and accepted
+once after two independently identified defects reproduced and were repaired.
+80 image/identity cases and32 affected original-owner cases pass. These are
+source and inert/local-child proofs, not Linux production admission. The physical
+owner still needs an independently qualified executable/interpreter chain, realm,
+attendance, isolation, assignment and complete retained launch attestation before
+exposing START. No service, provider credential, profile or installed lane changes.
+
+
+## Fixed original Backend and terminal consumer join (uninstalled)
+
+Draft #1391 now composes the original live owner into the existing authenticated
+bridge. It retains authority-before-reservation, one original lease/handle and
+finisher, canonical result projection, independent immutable cleanup readback,
+configured Control assignment sealing and durable-ACK-before-physical-release.
+The finite caller refuses nonempty validation commands before effects. Supervisor
+and Runtime accept the truthful empty command receipt while preserving the
+original grant/request join, collection cleanup and assignment revocation.
+
+This is source composition, not production enrollment. Actual supported Linux
+issuer/realm/profile/binary/assignment and shutdown inputs are still required by
+the existing fixed factory; its unconfigured invocation remains refused. Ordinary
+attended shell Fabric and the already-accepted active Stop return remain usable
+independently. No new dispatcher, queue, lifecycle, fake WorkerRef or root is added.
+
+
+## Per-Attempt finite canary composition (uninstalled)
+
+The existing broker now offers `attended-secret-canary` as an observational
+operation bound to the original governed LaunchSpec, Attempt and physical route.
+Control calls it under its live claim before START. The source pins the original
+Control config file SHA, complete startup attestation and normalized loaded
+configuration, then checks the lease, foreground claim, route and definition
+again after the response. A changed startup definition cannot be adopted by an
+already constructed service.
+
+The only current producer preset is `darwin-same-host/v1` for the finite MiniMax
+Claude-compatible binding. The fixed factory uses the existing Control environment
+probe and V2 open-only canary helper. The enrolled realm retains ownership and
+inode checks through those probes; credential bytes are not read by the canary.
+Linux remains refused because a Mac Control PID cannot identify an Ubuntu process.
+Cancellation of a socket waiter keeps the original probe busy until its thread
+actually finishes. The operation reserves no worker or provider lane.
+
+Supervisor preserves the final V2 receipt in the START request, Runtime launch
+pin, launch attestation and WorkerRecoveryBinding. The commissioned integration
+test uses real SQLite grants and recovery metadata with explicitly inert profile,
+provenance and RPC issuers. The separate producer composition uses fixture realm
+and environment issuers with real harmless filesystem denial checks. These are
+source proofs, not host enrollment or provider execution. The 240 affected checks
+pass; a real loaded-Path serialization failure was reproduced and repaired using
+the existing normalized-definition projection.
+
+`fabric_attended_probe` references one protected worker definition. A typed source
+is passed into the existing in-process service composition; the standalone service
+still does not select Fabric execution or enable `fabric_bridge_armed`. An existing
+installation owner must supply and qualify the actual worker definition, realm,
+binary, same-host environment owner and selected finite profile before any live
+Attempt. No new lifecycle or credential enrollment is created by this change.

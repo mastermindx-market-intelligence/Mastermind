@@ -150,4 +150,62 @@ def test_default_cli_still_applies_existing_reconciliation(tmp_path, monkeypatch
     result = json.loads(capsys.readouterr().out)
     assert result['requested'] == [o.obligation_id for o in snapshot.observed]
     assert 'mode' not in result
+    assert 'capacity_observation' not in result
     assert len(runtime.events.list_events()) == len(before)+1
+
+
+def test_cli_consumes_real_owner_intervals_without_authoritative_writes(tmp_path, monkeypatch, capsys):
+    from tests.test_capacity_campaign_observation import owner_stream, snapshot
+    runtime, _, _ = owner_stream(tmp_path, retry=True)
+    monkeypatch.setattr(cli, 'collect_source_snapshot', lambda *a, **kw: snapshot())
+    keeper = sqlite3.connect(runtime.store.path, isolation_level=None)
+    try:
+        before = image(tmp_path)
+        events_before = tuple(keeper.execute('SELECT * FROM events ORDER BY event_id'))
+        assert cli.main(['--root', str(tmp_path), '--observe-only', '--json']) == 0
+        result = json.loads(capsys.readouterr().out)
+        observation = result['capacity_observation']
+        assert observation['point_status'] == 'OBSERVED'
+        assert observation['interval_summaries']['request_to_ack_ms']['p95'] == 5000
+        assert observation['acknowledgement_counts']['reasoning_session'] == 1
+        assert observation['campaign_qualified'] is False
+        assert observation['unavailable_metrics']['original_parent_disposition_consumption']['value'] is None
+        assert result['writes_applied'] is False
+        unchanged_authoritative(tmp_path, before)
+        assert tuple(keeper.execute('SELECT * FROM events ORDER BY event_id')) == events_before
+    finally:
+        keeper.close()
+
+
+def test_cli_retains_unfinished_intervals_under_degraded_coverage(tmp_path, monkeypatch, capsys):
+    from tests.test_capacity_campaign_observation import owner_stream, snapshot
+    _, obligation, _ = owner_stream(tmp_path, pending=True)
+    monkeypatch.setattr(cli, 'collect_source_snapshot',
+                        lambda *a, **kw: snapshot((obligation,), degraded=True))
+    assert cli.main(['--root', str(tmp_path), '--observe-only', '--json']) == 2
+    observation = json.loads(capsys.readouterr().out)['capacity_observation']
+    assert observation['point_status'] == 'PARTIAL'
+    summary = observation['interval_summaries']['request_to_ack_ms']
+    assert summary['population'] == 1 and summary['unfinished'] == 1
+    assert summary['completed'] == 0 and summary['p95'] is None
+
+
+@pytest.mark.parametrize('failure,exit_code', [('clock', 2), ('wire', 3)])
+def test_cli_measurement_failure_preserves_partial_diagnostics_and_exit_code(
+    tmp_path, monkeypatch, capsys, failure, exit_code,
+):
+    from dataclasses import replace
+    from tests.test_capacity_campaign_observation import owner_stream, snapshot
+    _, _, ledger = owner_stream(tmp_path)
+    item = ledger.events[2]
+    damaged = (replace(item, event=replace(item.event, created_at=None)) if failure == 'clock'
+               else replace(item, record=replace(item.record, binding_generation=2)))
+    ledger = replace(ledger, events=ledger.events[:2] + (damaged,) + ledger.events[3:])
+    monkeypatch.setattr(cli, 'collect_source_snapshot', lambda *a, **kw: snapshot())
+    monkeypatch.setattr(cli, 'collect_ledger_snapshot', lambda *a, **kw: ledger)
+    before = image(tmp_path)
+    assert cli.main(['--root', str(tmp_path), '--observe-only', '--json']) == exit_code
+    result = json.loads(capsys.readouterr().out)
+    summary = result['capacity_observation']['interval_summaries']['request_to_ack_ms']
+    assert summary['completed'] == 0 and summary['unavailable'] == 1 and summary['p95'] is None
+    unchanged_authoritative(tmp_path, before)

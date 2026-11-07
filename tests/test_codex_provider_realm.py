@@ -76,7 +76,9 @@ def test_subscription_realm_registry_reviews_minimax_and_quarantines_opencode_go
     assert set(REVIEWED_CODEX_PROVIDER_REALMS) == {
         "minimax-token-plan", "alibaba-token-plan-sg",
     }
-    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {"opencode-go"}
+    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {
+        "opencode-go", "byteplus-modelark-commercial",
+    }
     assert MINIMAX_TOKEN_PLAN.base_url == "https://api.minimax.io/v1"
     assert MINIMAX_TOKEN_PLAN.env_key == "MINIMAX_TOKEN_PLAN_KEY"
     assert MINIMAX_TOKEN_PLAN.wire_api == "responses"

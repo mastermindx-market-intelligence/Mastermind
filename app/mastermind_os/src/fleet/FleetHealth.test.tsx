@@ -85,3 +85,12 @@ describe("Fleet hardware screen", () => {
     expect(path.getAttribute("d")?.includes("L")).toBe(false);
   });
 });
+
+it("does not claim a retained observation when the initial read fails", async () => {
+  const FleetHealth = component();
+  render(<FleetHealth read={async () => { throw Error("private transport detail"); }} />);
+  await screen.findByText("Refresh failed · no observation available");
+  expect(screen.queryByText(/showing last observation/i)).toBeNull();
+  expect(screen.queryByRole("button", {name: /inspect Ubuntu 2/i})).toBeNull();
+  expect(screen.queryByText(/private transport detail/i)).toBeNull();
+});

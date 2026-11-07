@@ -125,7 +125,7 @@ export function FleetHealth({read, generation = 0}: {read?: FleetRead; generatio
     </header>
     <div className="fleet-toolbar">
       <div className="fleet-windows" role="group" aria-label="History window">{WINDOWS.map(value => <button type="button" key={value} aria-pressed={window === value} onClick={() => setWindow(value)}>{value}</button>)}</div>
-      <span className="fleet-muted" role="status">{!read ? "Source not connected" : failed ? "Refresh failed · showing last observation" : pending ? "Reading the existing observer…" : data ? `Source observed ${time(data.generated_at)}` : "No observation received"}</span>
+      <span className="fleet-muted" role="status">{!read ? "Source not connected" : failed ? data ? "Refresh failed · showing last observation" : "Refresh failed · no observation available" : pending ? "Reading the existing observer…" : data ? `Source observed ${time(data.generated_at)}` : "No observation received"}</span>
     </div>
     {!read && <div className="fleet-empty"><h3>Connect the existing Fleet source.</h3><p>The trusted workspace service has not supplied a Fleet reader. No computers, agent counts or sensor values are invented.</p></div>}
     {data?.availability === "UNAVAILABLE" && <div className="fleet-empty"><h3>Fleet source unavailable</h3><p>The existing observer is not readable through this workspace connection. This is not an empty or healthy fleet.</p></div>}

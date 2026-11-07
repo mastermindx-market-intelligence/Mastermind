@@ -48,3 +48,11 @@ PR #1363 separately owns held Ubuntu 0/3 collector activation; original transpor
 3. Advance existing Mac sensor and 30-day retention qualifications through their actual incumbent owners; then join canonical agent/run identities without inventing a new agent lifecycle store. Finish only when the Chairman can use the live app and observed fields are grounded on real hosts.
 
 **State at this checkpoint:** `BUILT_NOT_PROVEN` for the end-to-end product source, `PARTIAL` real host telemetry coverage, `NOT_PROVEN` for installed public app and full-machine historical/agent-census coverage. Source tests and local live-source composition cannot be promoted to production completion.
+
+## 2026-11-07 S5 continuation on the original carrier
+
+The assigned S5 session composed the original branch with protected master `5f8c13da926011fb5fdc8cea21287b532ac968db`, preserving current Resources/Capacity and authenticated route owners. The held reader function remains byte-identical; no cross-UID binding or collector activation was attempted.
+
+[Source qualification and exact observed capability coverage](../evidence/2026-11-07-s5-fleet/README.md) records the annotated Capacity parser repair, candidate-only standard Linux MemTotal adapter, original preimages, truthful initial read failure, focused test receipts and compiled synthetic browser proof. Same-user reads and source tests do not establish installed-service operation. Applied cleanup/restarts: none; attributable reclaimed bytes: 0.
+
+Original storage #1632/#1877/#1900, recovery #1887, Ubuntu #2007/#2008 and accepted #2156 retain their separate custody, exclusions and release/host gates. This continuation does not claim S5 product acceptance.

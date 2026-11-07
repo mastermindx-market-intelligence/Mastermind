@@ -90,6 +90,46 @@ def test_broker_log_reader_bounds_window_and_filenames(wd, one):
     assert wd.recent_broker_faults((one,), now=later) == ([], [])
 
 
+
+@pytest.mark.parametrize("copies,expected_degraded", [(1, False), (2, True), (4, True)])
+def test_repeated_broker_response_ended_is_visible_without_restart(
+    wd, one, copies, expected_degraded
+):
+    """One transient reconnect is not a declared outage; repeats are visible."""
+    logs_dir = one.root / "_diag"
+    logs_dir.mkdir()
+    lines = [
+        f"[2026-10-14 01:0{i}:00Z ERR  BrokerServer] "
+        "System.Net.Http.HttpIOException: The response ended prematurely. "
+        "(ResponseEnded)\n"
+        for i in range(copies)
+    ]
+    (logs_dir / "Runner_20261014-010000-utc.log").write_text(
+        "".join(lines), encoding="utf8"
+    )
+    now = datetime(2026, 10, 14, 1, 10, tzinfo=timezone.utc)
+    faults, unreadable = wd.recent_broker_faults((one,), now=now)
+    assert not unreadable
+    assert bool(faults) is expected_degraded
+    if expected_degraded:
+        assert faults == [
+            f"{one.name}:poll_timeouts=0,self_shutdowns=0,broker_response_ended={copies}"
+        ]
+    seen = []
+    with patch.object(wd, "github_snapshot", return_value={
+        one.name: {"status": "online", "busy": True}
+    }), patch.object(wd, "local_state", return_value=(
+        {one.name: True}, {one.name: True}
+    )), patch.object(wd, "recent_broker_faults", return_value=(
+        faults, unreadable
+    )), patch.object(wd, "kickstart", side_effect=AssertionError(
+        "broker diagnostics must never authorize restart"
+    )), patch.object(wd, "log", side_effect=seen.append):
+        assert wd.run_watchdog("irrelevant", (one,), confirm_seconds=0,
+                               verify_seconds=0, dry_run=False) == 0
+    assert any(line.startswith("DEGRADED recent broker") for line in seen) is expected_degraded
+    assert not (expected_degraded and any(line.startswith("HEALTHY") for line in seen))
+
 def test_unreadable_broker_log_is_indeterminate(wd, tmp_path):
     spec = wd.RunnerSpec("missing", "unused", tmp_path / "absent")
     assert wd.recent_broker_faults((spec,)) == ([], ["missing"])
