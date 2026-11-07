@@ -2095,7 +2095,12 @@ def api_etf_outcomes() -> JSONResponse:
         from portfolio import etf_outcomes
         return JSONResponse(etf_outcomes.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {"status": "building"}, "error": str(exc)})
+        _log.warning("ETF outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "etf_outcomes_unavailable",
+        })
 
 
 @router.get("/api/overnight-tape")
@@ -2792,26 +2797,41 @@ def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
 def api_outcomes() -> JSONResponse:
     """Realized thesis outcomes — triple-barrier + rel-return vs SPY (the learning signal that
     feeds the Brier track record). `labels` per thesis, `summary` stats, and the graded
-    `track_record`. Best-effort: returns empty-but-valid on any failure."""
+    `track_record`. Failed reads are unavailable; calibration-only failure preserves
+    the other evidence with an explicit partial status."""
     try:
         import bot  # noqa: F401 — bootstraps vendor/macro for the price accessor
         from datetime import date as _date
         from brain import calibration, outcomes, scorer
         asof = _date.today()
         realized = outcomes.realized_returns(asof)
+        calibration_failed = False
         try:
             cal = calibration.load() or calibration.compute(asof)
-        except Exception:  # noqa: BLE001
-            cal = {}
-        return JSONResponse({
+        except Exception as exc:  # noqa: BLE001 — preserve the healthy outcome evidence
+            _log.warning("outcomes calibration read failed: %s", type(exc).__name__)
+            cal = None
+            calibration_failed = True
+        payload = {
             "labels": outcomes.all_labels(asof),
             "summary": outcomes.summary(asof),
             "track_record": scorer.track_record(asof, realized=realized),
             "calibration": cal,
-        })
+        }
+        if calibration_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["calibration"]
+        return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"labels": [], "summary": {}, "track_record": {},
-                             "calibration": {}, "error": str(exc)})
+        _log.warning("outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "outcomes_unavailable",
+            "labels": None,
+            "summary": None,
+            "track_record": None,
+            "calibration": None,
+        })
 
 
 @router.get("/api/shadow_books")
@@ -2898,7 +2918,13 @@ def api_shadow_bandit() -> JSONResponse:
         from portfolio import bandit
         return JSONResponse(bandit.rank_shadow_books())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "arms": [], "error": str(exc)})
+        _log.warning("shadow bandit read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "arms": None,
+            "error": "shadow_bandit_unavailable",
+        })
 
 
 @router.get("/api/student")
@@ -2952,7 +2978,12 @@ def api_interim_marks() -> JSONResponse:
         from brain import interim_marks
         return JSONResponse(interim_marks.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {}, "error": str(exc)})
+        _log.warning("interim marks read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "interim_marks_unavailable",
+        })
 
 
 @router.get("/api/engine_backtest")
