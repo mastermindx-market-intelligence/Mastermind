@@ -1621,3 +1621,28 @@ A fresh canonical GitHub read, against protected Mastermind master **4fb0d3825b5
 The Macro aggregate displayed a failed **ci-authority/codex/merge-queue-pilot** context. One bounded diagnostic read the actual original check128418474005: its own signed summary states base_ref=main, context_active=false and context_reason=inactive_base_context. The corresponding active **ci-authority/main** check128418476150 is SUCCESS and allowed=true. This is an inactive alternate-base context, not evidence of a new source failure or permission denial. It was not rerun, masked, deleted or overridden. The existing controller must still evaluate the binding main-branch contexts, natural full CI, freshness and holds before any ordinary Macro release admission.
 
 No source publication or deployment is represented as installed teammate acceptance. All recorded C26/local-Control/Fabric boundaries remain unchanged. Recovery should consume original release effects, then resume live work only after observed restoration of the original Ubuntu1/root connection and reconciliation of the original operation.
+
+
+## 38. Learning producer source continuation — 2026-11-07
+
+**MISSION_COMPLETE: false. Mission: MORE_WORK_EXISTS. Runtime lane: EXACT_HUMAN_GATE.** Principal scope review identified the original production EVAL producer/Harness2Port connection as unfinished source work. The complete learning pipeline must not be described as built merely because native memory, correction and tool observation are source-qualified.
+
+Active source leaf **HERMES-LRN-TRANSPORT-01**, operation **hermes-native-transport-observation-20261107-c3**, continues original learning roadmap P5 against qualified observation source7df8f907711a8ad4a8ac4ba927d8525f80b99b50. Existing release requests/carriers retain their identities. New source work uses the isolated local mirror hermes-native-transport-observation; it does not amend the armed #2204 head or use C3 for denied runtime work.
+
+### 38.1 Qualified design and completion boundary
+
+The next connected increment extends the existing request observer and original retained admission result with source-qualified lower transport observations. It must observe actual selected HTTPX send attempts below SDK retries/redirects, distinguish header return from consumed response bodies, retain actual explicit wire seed/effort/model fields without defaulting missing values, and keep middleware-synthesized or unsupported paths visibly incomplete. Original callback/session/generation and private read_original joins remain controlling.
+
+Reuse the existing _NativeGatewayLaunch.observe_child(pid) for actual executable/UID/GID/boot/birth identity, and measure time at the original execution wrapper. Do not add a process controller, observer store, provider client, retry, EVAL validity system, memory owner or queue. Raw headers, credentials, prompts, errors and response bodies must not enter the metadata projection.
+
+This leaf is complete only when the original native source bodies, actual selected HTTPX/SDK library behavior, strict historical/current readback, source drift and late/uncertain execution boundaries are qualified and source published on one ordinary carrier. It is not a complete EVAL producer or live provider/account proof.
+
+The eventual complete producer must still obtain authentic effective instruction/context/source inventory, installed sandbox/network/environment/workspace identity, effects and cleanup. EVAL requires a real model label, integer seed, supported effort, timing and those fingerprints; an INVALID label does not make placeholders truthful. Existing validity subset checks cannot detect a missing observer. A draft needs an explicit completeness gate, then the existing finalizer, create-only ArtifactStore and graph verification. Existing admitted Harness2Port must return retained Trial receipts. Outcome Learning398 and PR409 remain held; memory comparison stays separate from Harness2's skill-only factor lock.
+
+### 38.2 Current bounded source evidence
+
+Pinned Hermes1c0cd667746d3395fe9e1b6c74f8f85952486f18 supplies perform_api_call's execution-middleware boundary and chat_completion_helpers._dispatch_nonstreaming_api_request with request-local client/abort ownership. _NonStreamRequest copies ContextVars into its original worker; canceled workers can outlive the original caller. SDK create/helper entry is not one physical provider attempt.
+
+HTTPX0.28.1 source commit26d48e0634e6ee9cdc0533996db289ce4b430177 supplies Client._send_single_request below redirect iteration; the complete _client.py blob is2249231f8c3b912c731ff160344d3672e2f11738 and installed local source SHA256c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d. Qualified transport entry/return is still not independent model-weight or complete network-policy attestation.
+
+The source workspace copy reported one existing broken vendor/macro symlink (target macro_src); all other copy operations completed. The exact original symlink was recreated only at the new absent destination. No existing source workspace, upstream checkout, runtime or original release carrier was rewritten.
