@@ -141,3 +141,81 @@ async def test_pinned_client_preserves_the_durable_guard_and_native_result(tmp_p
     request = {"operation": "submit", "fixture": "sealed"}
     assert await client.request_secretary(request, before_write=lambda *args: called.append(args)) == expected
     assert called == [("submit", request)]
+
+def dual_document(tmp_path):
+    data = document(tmp_path)
+    meta = copy.deepcopy(data["hermes_secretary_conversation"])
+    meta.update(schema=composition.HERMES_META_HOST_SCHEMA, root_id="meta-root",
+                root_job_id="JOB-002", work_ref="WS:META", session_id="meta-session",
+                profile_id="meta-profile")
+    data.update(schema_version=composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                hermes_meta_conversation=meta)
+    return data
+
+
+def test_v5_keeps_two_distinct_selections_on_one_qualified_host(tmp_path, root_stats):
+    source = source_for(tmp_path, dual_document(tmp_path))
+    secretary, meta = source.hermes_secretary_selection(), source.hermes_meta_selection()
+    assert type(secretary) is composition.HermesSecretaryHostBinding
+    assert type(meta) is composition.HermesMetaHostBinding
+    assert secretary.transport == meta.transport
+    assert secretary.session_id != meta.session_id
+    assert source.has_execution_bindings is False
+    client = source.hermes_meta_client(root_id=meta.root_id, session_id=meta.session_id)
+    assert client._client._conversation_role == "mmmeta"
+    with pytest.raises(composition.FabricCompositionError):
+        source.hermes_meta_client(root_id=secretary.root_id, session_id=secretary.session_id)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", composition.HERMES_SECRETARY_HOST_SCHEMA),
+    ("host_ref", "host-" + "f" * 64),
+    ("expected_host_binding_sha256", "e" * 64),
+    ("expected_implementation_sha", "e" * 40),
+    ("session_id", ""), ("root_job_id", "not-a-job"),
+])
+def test_v5_refuses_foreign_family_or_source(tmp_path, root_stats, field, value):
+    data = dual_document(tmp_path)
+    data["hermes_meta_conversation"][field] = value
+    with pytest.raises(composition.FabricCompositionError):
+        source_for(tmp_path, data)
+
+
+def test_v4_never_acquires_meta_from_a_secretary_selection(tmp_path, root_stats):
+    source = source_for(tmp_path, document(tmp_path))
+    assert source.hermes_meta_selection() is None
+    assert source.hermes_meta_client(root_id="transport-root", session_id="native-session") is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("change_at", ["before", "callback", "after"])
+async def test_meta_pinned_client_retains_exact_effect_boundary(tmp_path, root_stats, monkeypatch, change_at):
+    source = source_for(tmp_path, dual_document(tmp_path))
+    selected = source.hermes_meta_selection()
+    events = []
+    def change():
+        source.path.write_bytes(source.path.read_bytes() + b" ")
+    class Fake:
+        async def request_meta(self, request, *, before_write=None):
+            events.append("transport")
+            try:
+                before_write("submit", copy.deepcopy(request))
+            except Exception:
+                raise TransportError("before_write_refused", TransportEffect.NO_EFFECT) from None
+            events.append("write")
+            if change_at == "after":
+                change()
+            return {"schema": "mastermind.hermes_meta_native_control/v1", "status": "ADMITTED"}
+    monkeypatch.setattr(RemoteWorkerBrokerClient, "for_meta_conversation", lambda *a, **k: Fake())
+    client = source.hermes_meta_client(root_id=selected.root_id, session_id=selected.session_id)
+    if change_at == "before":
+        change()
+    def commit(*_):
+        events.append("commit")
+        if change_at == "callback":
+            change()
+    with pytest.raises(TransportError) as caught:
+        await client.request_meta({"operation": "submit"}, before_write=commit)
+    assert caught.value.classification is (TransportEffect.EFFECT_UNKNOWN if change_at == "after"
+                                           else TransportEffect.NO_EFFECT)
+    assert ("write" in events) is (change_at == "after")

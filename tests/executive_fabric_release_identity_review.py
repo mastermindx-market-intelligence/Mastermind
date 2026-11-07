@@ -7,6 +7,12 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
+    # Exact reviewed preview source/site only; any byte drift re-exposes it.
+    'ops/fleet_storage_cleanup/linux_cache_preview.py': {
+        'sha256': '1fc025101f08a052223a79f494fa28c489f48a85590bc9b37e8ef1af0ea3796d',
+        'sites': ((204, 43, 46, 'int', '512'),),
+    },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
@@ -554,7 +560,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'd9fa633a41d69028568bf5bd15184406e2a37412a767190be995b568ff86db1f', 'sites': ((349, 24, 27, 'int', '501'), (6961, 35, 37, 'int', '80'), (6962, 50, 55, 'int', '0o755'), (7825, 41, 46, 'int', '0o644'), (8593, 64, 69, 'int', '0o644'), (9995, 41, 46, 'int', '0o644'))}
+# Integrated protected finite-retirement source is inspected with the same
+# exact studio UID, group and root-file permission AST token contexts; the
+# full postimage and all six source sites must remain an exact match.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '64af8405aa7981c9868e14ffe7f1912d2c326bb37c976ec223e14c42ec49b61b',
+ 'sites': ((349, 24, 27, 'int', '501'),
+           (6961, 35, 37, 'int', '80'),
+           (6962, 50, 55, 'int', '0o755'),
+           (7825, 41, 46, 'int', '0o644'),
+           (8593, 64, 69, 'int', '0o644'),
+           (10005, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -660,9 +675,9 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-# BYOK/Instructions composition preserves the complete permission handler AST;
-# only its enclosing source and four HTTP denial token positions change.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'cd40a7b7f89dfc562ac39715e08c27cbb03566c69b9e8a558b0723d8e00d55ee', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+# Selected-child capture changes the enclosing source only; the permission
+# handler AST and all four HTTP denial token positions remain unchanged.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '7646f71ea0099bb68ecc022270843d837f7d11dcc2a7d0521073e7168da508ce', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -708,10 +723,10 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
 # C1 composed-source audit retains the original Programs observation context.
 # Only full-source binding and absolute positions move; no release grant.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'a5ecd756029ca43fef46134fc0a5cf214b638cca9f5985d994ad764e6f29b1ce', 'sites': ((3546, 68, 71, 'int', '503'), (3551, 69, 72, 'int', '503'), (3555, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'e7b3111d83dda7b2e118b1754dffad69fb0990c6b82dbc83fe37ca5a1f124002', 'sites': ((3546, 68, 71, 'int', '503'), (3551, 69, 72, 'int', '503'), (3555, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
 
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
@@ -721,24 +736,25 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 # C21 attended-parent source review combines native composition with the
 # accepted archive closure and inert gateway replacement. ensure_directories
 # retains its exact AST and whole permission token at the accepted moved site.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '58bfdd19e0a03838f2fd9ead533de5de9b0bd9cecd1687f68756fafc53995601', 'sites': ((675, 71, 76, 'int', '0o750'),)}
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9b6349152277e6e5823169c4e3819388434a87102f468f608dbb6ea6f1',
+                                                              'sites': ((677, 71, 76, 'int', '0o750'),)}
 
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "f3f84a63b1b966a4d2ece6c3669959e377b2dc929ba9dd2e6fbc6c997f743fbf",
+    "sha256": "bc444a613891eb84a484f12a253b371d91dadfabeda71bfe9ef0959d2bf8a0ed",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
 # Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
 # NUMBER token is the left operand of MAX_SECRETARY_RESPONSE_BYTES = 512 * 1024.
 REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
-    "sha256": "b977481fddffb008064a2760699af3564c1748abea74a381860d5da5ee667280",
+    "sha256": "c0d8d30ec2789d56c609c5f245b530c5765a2bb774f647cb7bd8cc2a86b05c31",
     "sites": ((34, 31, 34, "int", "512"),),
 }
 
-# C22 native-control source pin reconciled at its unchanged published postimage;
-# MAX_WIRE_BYTES retains the single exact multiplication operand above.
+# C46 native-control composition changes the enclosing source. The byte-ceiling
+# declaration, both consumers and the single reviewed operand remain exact.
 
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.

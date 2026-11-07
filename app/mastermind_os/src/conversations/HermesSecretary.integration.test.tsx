@@ -29,6 +29,7 @@ import {
   type SessionSendArguments,
 } from "../orchestration/executive-session-command-port";
 import { sessionNativePhase } from "../orchestration/ui/SelectedSessionContinuation";
+import metaFixture from "../fixtures/native-hermes-meta-session-send-producer.json";
 
 // ── Frozen fixture vocabulary ─────────────────────────────────────────────────
 
@@ -723,5 +724,105 @@ describe("rendered original answer custody", () => {
         .resolves.toBe(false);
     }
     expect(hook.result.current.visible(owner)?.pointer).toEqual(pointer);
+  });
+});
+
+describe("Meta shares the native owner with exact family joins", () => {
+  const selection: ExecutiveSessionSelection = {
+    workRef: metaFixture.selection.work_ref,
+    rootJobId: metaFixture.selection.root_job_id,
+    targetKind: "hermes_meta",
+  };
+  const pointer: OperationPointer = {
+    kind: "message", operationKey: metaFixture.arguments.operation_key,
+    targetKey: metaFixture.arguments.target_ref,
+  };
+  function meta() {
+    const f = fixture();
+    f.setContext(metaFixture.context);
+    f.setSend(metaFixture.sent);
+    f.setReply(metaFixture.reply);
+    return f;
+  }
+
+  it("decodes the real Meta producer and preserves its exact selection and original references", async () => {
+    expect(sessionSelectionWire(selection)).toEqual(metaFixture.selection);
+    expect(decodeSessionContext(metaFixture.context, selection)?.target?.kind).toBe("hermes_meta");
+    expect(decodeSessionContext(metaFixture.context, {...selection, targetKind: "hermes_secretary"})).toBeNull();
+    const result = await decodeHermesPublicResult(metaFixture.reply.data);
+    expect(result).toEqual(metaFixture.reply.data);
+    expect(sessionNativePhase(result)).toBe("REPLY_AVAILABLE");
+    const f = meta(), handle = mount(f, {selection: () => selection});
+    await handle.ready;
+    const read = await handle.binding.port.readQualifiedAnswer(pointer, new AbortController().signal);
+    expect(read.answer).toEqual({
+      kind: "hermes_meta", text: metaFixture.reply.data.answer, successful: true,
+      readRef: metaFixture.reply.data.read_ref, parentConsumed: false, nextStep: null,
+    });
+    expect(f.replyArgs).toEqual([{operation_key: pointer.operationKey}]);
+    expect(f.calls.send).toBe(0);
+  });
+
+  it("refuses cross-family schemas, targets and operation domains", async () => {
+    for (const patch of [
+      {schema: "mastermind.session_bridge.hermes_secretary_result.v1"},
+      {target_ref: HERMES_REF}, {operation_key: HERMES_OPKEY},
+      {schema: []}, {schema: "mastermind.session_bridge.hermes_meta_result.v2"},
+    ]) {
+      expect(await decodeHermesPublicResult({...metaFixture.reply.data, ...patch})).toBeNull();
+    }
+    expect(await decodeHermesPublicResult({
+      ...nativeResult(), schema: "mastermind.session_bridge.hermes_meta_result.v1",
+    })).toBeNull();
+  });
+
+  it("will not promote a valid other-family result returned for the original Meta operation", async () => {
+    const f = meta();
+    const foreign = nativeResult({
+      native_status: "OBSERVED", admission: admission({status: "terminal"}),
+      answer: "Valid Secretary answer.", successful: true,
+    });
+    expect(await decodeHermesPublicResult(foreign)).not.toBeNull();
+    f.setReply(envelope("reply", {effect: "CONTINUATION_COMMITTED",
+      operation_key: pointer.operationKey, data: foreign}));
+    const handle = mount(f, {selection: () => selection});
+    await handle.ready;
+    const read = await handle.binding.port.readQualifiedAnswer(pointer, new AbortController().signal);
+    expect(read.receipt.disposition).toBe("unknown");
+    expect(read.answer).toBeNull();
+    expect(f.calls.send).toBe(0);
+  });
+
+  it("captures the Meta family and admission before asynchronous validation", async () => {
+    const raw = structuredClone(metaFixture.reply.data);
+    const pending = decodeHermesPublicResult(raw);
+    raw.schema = "mastermind.session_bridge.hermes_secretary_result.v1";
+    raw.admission.status = "queued";
+    const result = await pending;
+    expect(result?.schema).toBe("mastermind.session_bridge.hermes_meta_result.v1");
+    expect(result?.admission?.status).toBe("terminal");
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result?.admission)).toBe(true);
+  });
+
+  it("does not accept equal Meta text when its success outcome or family differs", async () => {
+    const hook = renderHook(useQualifiedOriginalAnswer);
+    disposables.push(hook.unmount);
+    const owner = {binding: {}, principalScope: SCOPE, generation: HERMES_GEN,
+      selectionSeq: 1, authRevision: 1};
+    const answer = {kind: "hermes_meta" as const, text: metaFixture.reply.data.answer,
+      successful: true, readRef: metaFixture.reply.data.read_ref,
+      parentConsumed: false as const, nextStep: null};
+    act(() => hook.result.current.setCurrent({...owner, active: true}));
+    let pending!: Promise<boolean>;
+    act(() => {pending = hook.result.current.stage(owner, pointer, answer);});
+    const rendered = hook.result.current.visible(owner)!;
+    act(() => hook.result.current.acknowledgeRender(rendered));
+    await expect(pending).resolves.toBe(true);
+    await expect(hook.result.current.stage(owner, pointer, {...answer})).resolves.toBe(true);
+    await expect(hook.result.current.stage(owner, pointer, {...answer, successful: false})).resolves.toBe(false);
+    await expect(hook.result.current.stage(owner, pointer,
+      {...answer, kind: "hermes_secretary"})).resolves.toBe(false);
+    expect(hook.result.current.visible(owner)?.answer).toEqual(answer);
   });
 });

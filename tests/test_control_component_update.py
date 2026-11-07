@@ -3554,3 +3554,100 @@ def test_the_selection_is_part_of_the_same_pending_source_upgrade(
     assert caught.value.code == "release_not_retargeted"
     assert host.commands == []
     assert host.binding_publications == []
+
+def _prior_role_conversations(tmp_path, dual):
+    from control_plane import executive_fabric_composition as composition
+    member = _hermes_read_member(tmp_path)
+    secretary = dict(member, schema=composition.HERMES_SECRETARY_HOST_SCHEMA,
+        root_id="secretary-root", root_job_id="JOB-001", work_ref="WS:SECRETARY",
+        session_id="secretary-session", profile_id="secretary-profile", principal_id="principal-1")
+    meta = dict(secretary, schema=composition.HERMES_META_HOST_SCHEMA, root_id="meta-root",
+        root_job_id="JOB-002", work_ref="WS:META", session_id="meta-session", profile_id="meta-profile")
+    raw = ccu.compose_binding_candidate(input_document=member, prior_bindings=[],
+        prior_remote_transports=[], prior_secretary_conversation=secretary,
+        prior_meta_conversation=meta if dual else None)
+    # The paired-selection operation requires changed selector coordinates.
+    # Preserve the full prior semantics with its original compact serialization;
+    # the new immutable artifact is rendered by the incumbent pretty composer.
+    raw = json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")).encode()
+    path = tmp_path / "prior-role-conversations.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return str(path), hashlib.sha256(raw).hexdigest(), json.loads(raw)
+
+
+@pytest.mark.parametrize("dual", [False, True])
+def test_control_update_preserves_complete_role_conversations(host, publisher, tmp_path, root_owned_files, dual):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    composed = _composed(host)
+    assert composed == prior
+    assert len(host.binding_publications) == 1
+    assert hashlib.sha256(Path(prior_path).read_bytes()).hexdigest() == prior_digest
+
+
+@pytest.mark.parametrize("dual", [False, True])
+@pytest.mark.parametrize("field,value", [
+    ("host_ref", "host-" + "f" * 64),
+    ("expected_host_binding_sha256", "f" * 64),
+    ("expected_implementation_sha", "f" * 40),
+])
+def test_control_update_refuses_conversation_source_retarget_before_effect(
+        host, tmp_path, root_owned_files, dual, field, value):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+    _select_binding(host, prior_path, prior_digest)
+    changed = dict(prior["hermes_role_metadata_read"], **{field: value})
+    path, digest = _hermes_input(tmp_path, changed)
+    before = dict(host.files.data)
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert caught.value.code == "control_component_hermes_read_binding_conflict"
+    assert host.files.data == before and host.binding_publications == [] and host.commands == []
+
+@pytest.mark.parametrize("dual", [False, True])
+def test_role_conversation_recovery_keeps_original_bytes_without_republication(
+        host, publisher, tmp_path, root_owned_files, dual):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
+    planned = _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    # The plan's digest/destination and the qualified consumer bytes must agree.
+    observed = host.observe_control_component_update(
+        target_sha=TARGET_SHA, hermes_read=(path, digest))
+    assert observed["candidate"].selection.candidate_sha256 == observed["binding"]["candidate_sha256"]
+    assert observed["candidate"].selection.destination == observed["binding"]["destination"]
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    original = host._component_binding_candidate_bytes
+    assert hashlib.sha256(original).hexdigest() == planned["selection"]["candidate_sha256"]
+    publications = list(host.binding_publications)
+    host.closed = False
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host._component_binding_candidate_bytes == original
+    assert host.binding_publications == publications
+    assert json.loads(original) == prior
+
+
+def test_recovery_keeps_sealed_legacy_v3_policy_for_prior_secretary(
+        host, publisher, tmp_path, root_owned_files, monkeypatch):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, False)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
+    compose = ccu.compose_binding_candidate
+    def legacy(**kwargs):
+        kwargs.pop("prior_secretary_conversation", None)
+        kwargs.pop("prior_meta_conversation", None)
+        return compose(**kwargs)
+    # Create an inert historical transaction through the same fake host.
+    with monkeypatch.context() as patch:
+        patch.setattr(ccu, "compose_binding_candidate", legacy)
+        _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    original = host._component_binding_candidate_bytes
+    assert json.loads(original)["schema_version"] == BINDING_V3
+    assert "hermes_secretary_conversation" not in json.loads(original)
+    publications = list(host.binding_publications)
+    host.closed = False
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host._component_binding_candidate_bytes == original
+    assert host.binding_publications == publications

@@ -1,4 +1,6 @@
 import asyncio
+import copy
+import hashlib
 import json
 import os
 
@@ -176,6 +178,16 @@ def test_v3_is_additive_and_prior_snapshot_hashes_remain_frozen():
     assert (
         v3.web_ceo_v3_schema_snapshot_sha256()
         == v3.WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256
+    )
+    # The current profile adds only the Meta target to its frozen predecessor.
+    # Qualify the whole inherited snapshot, not merely the new digest literal.
+    prior = copy.deepcopy(v3.web_ceo_v3_schema_snapshot())
+    target = next(tool for tool in prior["tools"] if tool["name"] == "session_targets")
+    kinds = target["input_schema"]["properties"]["kind"]["enum"]
+    assert kinds[-1] == "hermes_meta" and kinds.count("hermes_meta") == 1
+    kinds.remove("hermes_meta")
+    assert hashlib.sha256(legacy.canonical_json(prior)).hexdigest() == (
+        "5c157d1de43d6efef99f6ba9e27e851f0243bbb18d38c23551b94a5c2a4ba2c0"
     )
     from integrations.executive_mcp import web_ceo_sessions as sessions
 

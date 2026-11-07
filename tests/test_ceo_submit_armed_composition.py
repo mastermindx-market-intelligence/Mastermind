@@ -1585,8 +1585,8 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Exact source review of the canonical installed wrapper. Keep a pinned
     # full-source digest; never derive it during this test. The pinned digest
-    # covers this base's composed phase1c (C18 Secretary source/injection over
-    # protected 32a354c3), and the installed entry AST remains exactly the
+    # covers the composed C18 Secretary and frozen selected-child target
+    # injection. The installed entry AST remains exactly the
     # independently reviewed 060525... anchor checked below. This does not
     # exempt other run calls or imports, even inside the same function. This
     # static literal freezes the combined candidate, not independent review or
@@ -1599,7 +1599,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '99b67ad9bd8984fd179c213dff7d310ecefdd43b0675ebcf70344973edbc86cd'):
+            'c2a07369ad481d54b494f766043386f1809fb6f075d4cac53792c792158ac25a'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

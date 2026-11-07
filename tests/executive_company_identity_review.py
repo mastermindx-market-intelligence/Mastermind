@@ -32,12 +32,10 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
-        # The original CCR branch and listener remain structurally unchanged.
-        # C1 combines accepted model READ with protected selected-child dispatch.
-        # Ingress/listener ASTs and original HTTP/mode operands remain exact.
-        "source_sha256": "d018a46a28cee713a032b1090495c4e7fed003fc33925492c14be00f6b98e8cd",
-        "ast_sha256": "170f64c7d11e88cb87736aa688b9e0a376ddd0e44ca6e739ff3beb4aff30f709",
+        # Model READ and selected-child admission coexist in the joined ingress.
+        # The original Fabric reply operands and Company listener remain unchanged.
+        "source_sha256": "3e52425c2bc8ff14e988a7579f28a54ea6b258f994feed9de37e6e8f0a34f0cc",
+        "ast_sha256": "973e0e4440b041bc384a56c5024bb6f3a443981f6b9c7d6af8ff0241497aaa93",
         "sites": (
             (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
