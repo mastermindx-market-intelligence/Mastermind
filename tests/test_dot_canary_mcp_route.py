@@ -234,3 +234,28 @@ def test_foreign_principal_cannot_use_another_account_canary_policy():
 def test_bad_constructor_cannot_make_spoof_owner():
     with pytest.raises(TypeError):
         WebReplyEventRpc(FakeReplyOwner(), clock=lambda: NOW, canary_owner=object())
+
+
+def test_subscription_cannot_outlive_original_account_token_even_with_long_ttl():
+    class LongGrant(FakeCanaryOwner):
+        async def subscribe(self, who, request):
+            result = await super().subscribe(who, request)
+            return dataclasses.replace(result, expires_at=NOW + 7200)
+    params = {**subscribe_params(), "ttlMs": 24 * 60 * 60 * 1000}
+    canary = LongGrant()
+    result = invoke("events/subscribe", params, canary=canary)
+    assert result["error"]["code"] == -32010
+    assert any(x[0] == "subscribe" for x in canary.calls)
+    assert SECRET not in json.dumps(result)
+
+
+def test_policy_change_after_owner_effect_cannot_be_reported_as_success():
+    class RevokedDuringSubscription(FakeCanaryOwner):
+        async def subscribe(self, who, request):
+            result = await super().subscribe(who, request)
+            self.enrolled = dataclasses.replace(self.enrolled, current=False)
+            return result
+    canary = RevokedDuringSubscription()
+    result = invoke("events/subscribe", subscribe_params(), canary=canary)
+    assert result["error"]["code"] == -32010
+    assert SECRET not in json.dumps(result)
