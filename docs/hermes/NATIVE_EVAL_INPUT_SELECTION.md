@@ -614,3 +614,45 @@ These receipts qualify the stated source and fixture boundaries. The original
 carrier's active context/source-observation continuation remains separate.
 Protected prerequisite integration, installed provenance, one-account admission,
 valid held-out learning trials, promotion and measured availability remain owed.
+
+
+## Current primary, context and Trial composition — 2026-11-07
+
+Qualified executable source `d590410a6fd751b0bf1b21421b51b742b79ec29c`
+joins the current primary/provider/H2 source and original installer fixtures
+through `52cb239df9c058031875ecc52393d7978f50d2a3`, original context/Run-v3
+source2341, and the completed original Trial/provider-observation successor
+`c19488c14aa1279946e108b2e85b4b8fafba1b49`. The six earlier
+APPLICATION/EVAL/TCP corrections remain, along with the current native package
+and Macro source projection. This contribution remains directed at Draft#2234.
+
+The existing context fixture had paired its independently selected CPython3.12
+child with the outer CPython3.14 dependency site. The real isolated compiler
+refused that mixed runtime. The fixture now obtains its dependency site,
+LibYAML availability and reported versions from the same selected interpreter.
+The production import guard, compiler, source capture and test assertions are
+unchanged. All56 previously affected native setup cases and the actual context
+capture passed after that correction; the prior failed receipts remain recorded.
+
+Three separate groups passed on the committed combined source, with no
+failures, errors or skips:
+
+| Proof | Cases |
+|---|---:|
+| Native operator, original publication/Trial reader and transport observation |188|
+| Exact source/identity, finite EVAL scope, D7 and actual-head D8 |291|
+| Actual isolated archive entry modes, including eval-trial and the existing Harness2 consumer |6|
+
+The archive group used CPython3.12.13; the other groups used CPython3.14.7.
+The earlier context/Run-v3 contract and fixture-repair receipts retain their
+original source attribution and are not added to these counts. The
+[source qualification report](../../review_evidence/hermes_eval/current-primary-context-trial-composition-20261107.json)
+records exact inputs, preserved artifacts, test selectors, log/JUnit digests,
+the failed baseline and its successful correction.
+
+The private Trial reader consumes an already published original run and its
+retained output only after the incumbent VALID and NO_EFFECT checks. Current
+native producer evidence remains invalid where required observations are
+incomplete. Runtime-provider selection witnesses do not establish remote
+provider delivery or model identity. Source qualification grants no installed
+role, APPLICATION admission, learning promotion or measured availability.

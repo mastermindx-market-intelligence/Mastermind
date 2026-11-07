@@ -1,0 +1,293 @@
+{
+  "acceptance": {
+    "application_admission": false,
+    "current_native_valid_learning_trial": false,
+    "installed_acceptance": false,
+    "learning_promotion": false,
+    "measured_availability_slo": false,
+    "provider_delivery": false,
+    "remote_model_identity": false,
+    "source_composition_qualified": true
+  },
+  "changes": [
+    "Preserve both authenticated Workspace discovery and model-configuration reads.",
+    "Retain the six prior APPLICATION/EVAL/TCP runtime corrections with the current primary native package and source projection.",
+    "Use the selected context child interpreter for dependency-site and version facts in the existing fixture.",
+    "Consume the original installer fixture repair with the composed D7 source binding.",
+    "Join the authenticated retained-run Trial reader and transport-v2 runtime-provider producer/publisher as one completed source unit."
+  ],
+  "destination": "original Draft PR2234 contribution; no EVAL release request",
+  "earlier_composition_and_fixture_evidence": {
+    "behavior_baseline": {
+      "counts": {
+        "errors": 56,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 312
+      },
+      "exit": 1,
+      "head": "ac3b12cf1960ca93d6dbd653d17b71f292c72a72",
+      "junit_sha256": "b699b49baae5f497ad2095885accc7955c73f8c9dc73a7487f4784f24412280f",
+      "log_sha256": "4c4b0842191fac8a3bc35d12539e56b5d545bee1c828a9df07603bc3891e133f",
+      "paths": [
+        "integrations/hermes_runtime/tests/test_native_eval_operator.py",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py",
+        "integrations/hermes_runtime/tests/test_operator_native_enrollment.py",
+        "integrations/hermes_runtime/tests/test_native_eval_inputs.py",
+        "tests/test_hermes_primary_application_host.py",
+        "tests/test_hermes_native_gateway_sources.py",
+        "tests/test_hermes_isolated_entry.py"
+      ],
+      "proof_interpreter": "CPython3.14.7",
+      "testcase_nodes": 312,
+      "tree": "0c13768521cacfe88e497d2df9f6f439b6dc608b"
+    },
+    "cause": "The fixture selected the configured CPython3.12 child but supplied the outer CPython3.14 dependency site. The real child exited1; its required YAML/LibYAML import provenance stayed strict.",
+    "context_contract_baseline": {
+      "counts": {
+        "errors": 0,
+        "failures": 1,
+        "skipped": 0,
+        "tests": 217
+      },
+      "exit": 1,
+      "head": "ac3b12cf1960ca93d6dbd653d17b71f292c72a72",
+      "junit_sha256": "5920a5d3dedeb35ce6137745f383b6c741cb28647077e1b622927b773f417a6b",
+      "log_sha256": "062c81d16ac4f6e7d38aa64d646a795ed7bfddb18fe21ae16d61224728a163f9",
+      "paths": [
+        "tests/test_agentos_context_record_sources.py",
+        "tests/test_agent_eval_run_v2.py",
+        "tests/test_agent_eval_contracts.py",
+        "tests/test_agent_eval_harness2_recursion.py"
+      ],
+      "proof_interpreter": "CPython3.14.7",
+      "testcase_nodes": 217
+    },
+    "focused_repair": {
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 14
+      },
+      "exit": 0,
+      "junit_sha256": "e25735bce57bd2efae87c99fb03f189c5ccf6302744fc4bab9b20e986f30ddff",
+      "log_sha256": "fe9dca0451129aaabdd76ea13e310b61a52091a146a1f9fe5b72b851eb33547f",
+      "paths": [
+        "tests/test_agentos_context_record_sources.py::test_actual_capture_binds_record_bytes_to_data_not_code",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_actual_sdk_and_pinned_worker_observations_feed_conservative_native_receipt",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused"
+      ],
+      "proof_interpreter": "CPython3.14.7",
+      "testcase_nodes": 14
+    },
+    "interpretation": "The baseline behavior run had256 passes and56 shared setup errors; all56 later passed. The context baseline had216 passes and one shared-fixture failure; that original capture later passed. The final current-source groups above also qualify the changed publisher and operator. Cohorts overlap and are not summed.",
+    "rechecks": [
+      {
+        "counts": {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 30
+        },
+        "exit": 0,
+        "head": "51639024b8352f504ce5cc1eef14497dd7c21309",
+        "junit_sha256": "ba4b10ee1eeb4feb27b99f382e05f702ff7726bf9ad7cd3999516dce60439e77",
+        "log_sha256": "a2a3c4b68aa70416fb312e4aaae8e14c352c367fc692b27c4622eb9644d825cf",
+        "paths": [
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_actual_sdk_and_pinned_worker_observations_feed_conservative_native_receipt",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_evidence[unused_assembly]",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_evidence[wire_content]",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_evidence[missing_eval]",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_future_wall_clock_does_not_invent_time_or_block_honest_invalid_receipt",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_original_native_lifecycle_applies_candidate_seed_zero_and_manual_effort[facts\\n ]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[effort]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[stream]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[extra_model]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[attachment]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_marked_admission_never_falls_back_to_ordinary_execution[no-scope]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_marked_admission_never_falls_back_to_ordinary_execution[retained-run]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[replaced]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[snapshot-copy]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[input]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[instructions]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[extra-system]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[new-builder-failed]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_actual_record_capture_overflow_refuses_before_request_assembly",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_observation_budget_loss_does_not_invent_sources_or_an_execution_failure",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[delivery-sequence]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[retry]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[inventory-data]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[anchor]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_v1_observation_stays_exact_and_source_unobserved",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_execution_middleware_drift_refuses_before_original_client[seed]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_execution_middleware_drift_refuses_before_original_client[generation]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_execution_middleware_drift_refuses_before_original_client[extra_input]",
+          "tests/test_agentos_context_record_sources.py::test_actual_capture_binds_record_bytes_to_data_not_code",
+          "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults"
+        ],
+        "proof_interpreter": "CPython3.14.7",
+        "testcase_nodes": 30,
+        "tree": "12e6b5f16b164aa0000a7d84a3933d0b7d1acc80"
+      },
+      {
+        "counts": {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 28
+        },
+        "exit": 0,
+        "head": "51639024b8352f504ce5cc1eef14497dd7c21309",
+        "junit_sha256": "d77d6c42129d61434e6ee5c3fd3cc05ec21113418de03450aa35f9e965fa21a4",
+        "log_sha256": "a4ba55c7ec7daeede2ecfea3dda9a793665ee142066911215af4f033a9e8412a",
+        "paths": [
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_acquired_inventory_without_assembly_is_not_a_run_source",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_evidence[retry_counter]",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_evidence[wire_fields]",
+          "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_evidence[duplicate_event]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_original_native_lifecycle_applies_candidate_seed_zero_and_manual_effort[]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[seed]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[candidate]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[extra_seed]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_post_prompt_drift_refuses_required_execution_outside_observer_catch[generation]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_marked_admission_never_falls_back_to_ordinary_execution[no-owner]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_marked_admission_never_falls_back_to_ordinary_execution[unknown-version]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[removed]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[historical-copy]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[expired]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[system]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[extra-input]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_source_delivery_requires_original_current_user_and_snapshot[extra-instructions]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_legitimate_message_metadata_changes_preserve_anchor_and_separate_digests",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_old_current_receipt_cannot_invent_new_source_delivery",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_unscoped_late_prefetch_cannot_erase_current_admission_anchor",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[delivery-digest]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[request-duplicate]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[inventory-use]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_historical_source_join_cannot_substitute_original_evidence[unknown-field]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_evaluation_records_share_original_budget_and_seal",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_execution_middleware_drift_refuses_before_original_client[extra_body]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_execution_middleware_drift_refuses_before_original_client[memory]",
+          "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_actual_sdk_serialization_and_original_worker_receive_trial_inputs"
+        ],
+        "proof_interpreter": "CPython3.14.7",
+        "testcase_nodes": 28,
+        "tree": "12e6b5f16b164aa0000a7d84a3933d0b7d1acc80"
+      }
+    ],
+    "repair": "Derive YAML/LibYAML dependency site and actual versions from that same already-selected interpreter; no production loader or assertion changes."
+  },
+  "executed_on_qualified_source": [
+    {
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 188
+      },
+      "exit": 0,
+      "head": "d590410a6fd751b0bf1b21421b51b742b79ec29c",
+      "junit_sha256": "30de80a86b7a02b1eaab35a9005481736e55bb0bf533cba350ebaf5f07c089f2",
+      "log_sha256": "38ccef58aa87dcd5f2296783327683f11e8d89d9de0c19a53e8101f64f374e74",
+      "paths": [
+        "integrations/hermes_runtime/tests/test_native_eval_operator.py",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py",
+        "integrations/hermes_runtime/tests/test_native_transport_observation.py"
+      ],
+      "proof_interpreter": "CPython3.14.7",
+      "testcase_nodes": 188,
+      "tree": "6c0d180b6695fc7fb95e7548cee015d0fafa6d3f"
+    },
+    {
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 291
+      },
+      "exit": 0,
+      "head": "d590410a6fd751b0bf1b21421b51b742b79ec29c",
+      "junit_sha256": "c483a1d20c3f718d4bb846141b1652e1635535059b90308351a8d2bf1e1ef50d",
+      "log_sha256": "9a6e56de58c8abd9fa7076c16ed58e12c1f08e38671f3b1ad4c951439a7d1cbd",
+      "paths": [
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_workspace_fabric_review_pins.py",
+        "tests/test_agent_eval_inertness.py::test_native_eval_owned_delta_reaches_real_fences_with_shared_connections",
+        "tests/test_agent_eval_inertness.py::test_shared_native_changes_do_not_claim_eval_program_ownership",
+        "tests/test_agent_eval_inertness.py::test_native_eval_delta_cannot_admit_nearby_or_forbidden_foreign_paths",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+        "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults"
+      ],
+      "proof_interpreter": "CPython3.14.7",
+      "testcase_nodes": 291,
+      "tree": "6c0d180b6695fc7fb95e7548cee015d0fafa6d3f"
+    },
+    {
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 6
+      },
+      "exit": 0,
+      "head": "d590410a6fd751b0bf1b21421b51b742b79ec29c",
+      "junit_sha256": "4a240e7708177669a607e29ceff63007f6cad200595d32a6974d2a841e93252e",
+      "log_sha256": "700bc0322b00f8e8db3ce495047983b54ab27ab59ed1fedac05f3aeba47dae24",
+      "paths": [
+        "tests/test_hermes_isolated_entry.py::test_actual_archive_runs_closed_hermes_modes_with_held_yaml"
+      ],
+      "proof_interpreter": "CPython3.12.13",
+      "testcase_nodes": 6
+    }
+  ],
+  "finite_identity_review": {
+    "company_listener_ast_sha256": "01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236",
+    "composed_ingress_ast_sha256": "7d8a2a072164cde3275f7e18f97eb6b96a0d2cdfe31242093daf07b858d036e3",
+    "composed_ingress_source_sha256": "0c62c1f8cf397f27ae22dcfc2aa6eec92753e63978f50991e882f764a8874ed6",
+    "d7_source_sha256": "a422011c13b7ee3646aab825a0147e8f224048c9654aa7e924ca189ee3f894ba",
+    "d7_wrapper_ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+    "fabric_response_subtree_ast_sha256": "70820944367157cfa6d655c36fcf89c7e63242aca01b761f9176d75397418962",
+    "new_literal_exemptions": false,
+    "reviewed_python_owners_and_rust_diagnostic_fixture_unchanged": true,
+    "same_literal_budget": 6
+  },
+  "inputs": {
+    "current_context_source": "2341b535cb889b91cb77a4fe2496cf81a630c3fa",
+    "original_installer_fixture_repair": "52cb239df9c058031875ecc52393d7978f50d2a3",
+    "original_trial_and_provider_observation": "c19488c14aa1279946e108b2e85b4b8fafba1b49",
+    "prior_application_eval_composition": "b13eed4c0a67c4c8e72ac870d1e19eddb2e0b764",
+    "qualified_primary_source": "d0c543124b47372becd8ee632a1c29b32ffc3ef0",
+    "selected_child_fixture_repair": "51639024b8352f504ce5cc1eef14497dd7c21309"
+  },
+  "invariants": {
+    "historical_transport_v1_and_run_v2_retained": true,
+    "invalid_or_effectful_run_can_become_eligible_trial": false,
+    "native_session_control_listener_suite_executed": false,
+    "original_store_admission_and_retired_identity_preserved": true,
+    "source_selector_evidence_claims_remote_provider_identity": false,
+    "trial_read_submits_or_publishes": false,
+    "unsupported_primary_plus_eval_selection_remains_refused": true
+  },
+  "next_boundary": "Original carrier intake and protected prerequisite delivery; installed provenance, one eligible consumer/account path, complete held-out observations and promotion remain separate.",
+  "qualified_source": {
+    "commit": "d590410a6fd751b0bf1b21421b51b742b79ec29c",
+    "parents": [
+      "00e19e99110c94e7a765b50521ea2f1c7b5fffc5",
+      "c19488c14aa1279946e108b2e85b4b8fafba1b49"
+    ],
+    "tree": "6c0d180b6695fc7fb95e7548cee015d0fafa6d3f"
+  },
+  "schema": "mastermind.hermes_eval.integration_source_qualification/v1",
+  "unchanged_primary_artifacts": {
+    "integrations/hermes_application_fabric/attended-runtime-files.json": "708e2dee42e673aefa833aaac723452acf4cd6b1f081ec19a2fb8ea6c0f5545e",
+    "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.json": "b3601ed493a6ffa9eaabd8e58e451768a69d1544df337ca646e0ca452ac89f7e",
+    "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.patch": "631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541",
+    "integrations/hermes_application_fabric/macro-source.json": "dfd647529cd1e78478fade0a6f37d0542937fe6f57fd84157479a205d2b4da3a",
+    "integrations/studio_direct_mcp/fabric-backend.mjs": "887a42fd53cc4d510c1ac9dd0a1db8d52937c342da83a5b98eac07f6ebf47075"
+  }
+}
