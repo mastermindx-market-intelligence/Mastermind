@@ -2270,3 +2270,17 @@ describe("fixed project execution two-resource requests", () => {
     expect(e.fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
   });
 });
+
+// New read reuses the independent Executive READ owner, never Workspace/SEND.
+describe("authored company priorities fixed read",()=>{
+ it("uses the fixed empty JSON route with READ-only Executive scope",async()=>{
+  const resource="https://executive.example.invalid/mcp",e=setup({executiveResource:resource});
+  e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,scope:new URL(e.popup.location).searchParams.get("audience")===resource?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
+  await e.login();e.fetcher.mockReset();e.fetcher.mockResolvedValueOnce(response({schema:"inert-wire-only"}));
+  await e.client.executive!.companyPriorities!(new AbortController().signal);
+  expect(e.fetcher).toHaveBeenCalledExactlyOnceWith(ORIGIN+"/os/executive/company-priorities",expect.objectContaining({method:"POST",body:"{}",credentials:"omit",redirect:"error",cache:"no-store",headers:{Accept:"application/json","Content-Type":"application/json",Authorization:"Bearer private-token"}}));
+ });
+ it("discards the delayed READ after the current Executive grant ends",async()=>{
+  const e=setup({executiveResource:"https://executive.example.invalid/mcp"});await e.login();e.fetcher.mockReset();const held=deferred<Response>();e.fetcher.mockReturnValueOnce(held.promise);const read=e.client.executive!.companyPriorities!(new AbortController().signal);const refused=expect(read).rejects.toThrow();await e.client.signOut();held.resolve(response({must_not_escape:true}));await refused;
+ });
+});

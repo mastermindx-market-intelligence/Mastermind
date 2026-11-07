@@ -185,7 +185,7 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
     provider delivery, historical process attestation or model identity.
     """
     from .native_request_observation import (
-        SCHEMA as observation_schema, LEGACY_SCHEMA, STAGE, CONTENT_FIELDS,
+        SCHEMA as observation_schema, PREVIOUS_SCHEMA, LEGACY_SCHEMA, STAGE, CONTENT_FIELDS,
         TOOLS_STAGE, TOOL_COVERAGE, TOOL_IDENTIFIERS, TOOL_ERRORS, CANONICALIZATION,
         MAX_CONTENT_BYTES, MAX_EVENTS, MAX_TOOL_EVENTS, MAX_METADATA_BYTES,
     )
@@ -244,11 +244,15 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
 
     fields = ("schema", "stage", "scope", "observations", "errors", "overflow", "coverage",
               "provider_dispatch_proven", "model_identity_verified")
-    v2 = type(value) is dict and literal(value.get("schema"), observation_schema)
+    v3 = type(value) is dict and literal(value.get("schema"), observation_schema)
+    v2 = v3 or type(value) is dict and literal(value.get("schema"), PREVIOUS_SCHEMA)
     if v2:
         fields += ("tools_stage", "tool_coverage", "executions", "commits", "tool_overflow", "metadata_overflow")
+    if v3:
+        fields += ("transport",)
     shape(value, fields)
-    if (not literal(value["schema"], observation_schema if v2 else LEGACY_SCHEMA) or not literal(value["stage"], STAGE)
+    selected_schema = observation_schema if v3 else PREVIOUS_SCHEMA if v2 else LEGACY_SCHEMA
+    if (not literal(value["schema"], selected_schema) or not literal(value["stage"], STAGE)
             or value["provider_dispatch_proven"] is not False or value["model_identity_verified"] is not False
             or type(value["overflow"]) is not bool):
         refuse()
@@ -313,13 +317,19 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
             or not literal(value["coverage"], "assembly_hooks_only" if events else "no_assembly_observation")
             or not v2 and value["overflow"] and len(events) != MAX_EVENTS):
         refuse()
-    projected = {"schema": observation_schema if v2 else LEGACY_SCHEMA, "stage": STAGE, "scope": scope,
+    projected = {"schema": selected_schema, "stage": STAGE, "scope": scope,
         "observations": events, "errors": list(errors), "overflow": value["overflow"],
         "coverage": value["coverage"], "provider_dispatch_proven": False, "model_identity_verified": False}
+    transport = None
+    if v3:
+        from .native_transport_observation import validate_document
+        transport = validate_document(value["transport"])
+        projected["transport"] = transport
     if v2:
         if (not literal(value["tools_stage"], TOOLS_STAGE) or not literal(value["tool_coverage"], TOOL_COVERAGE)
                 or type(value["tool_overflow"]) is not bool or type(value["metadata_overflow"]) is not bool
-                or value["metadata_overflow"] and not (value["overflow"] or value["tool_overflow"])
+                or value["metadata_overflow"] and not (value["overflow"] or value["tool_overflow"]
+                    or transport is not None and transport["overflow"])
                 or value["overflow"] and not value["metadata_overflow"] and len(events) != MAX_EVENTS):
             refuse()
 

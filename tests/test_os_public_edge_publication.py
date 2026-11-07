@@ -23,7 +23,8 @@ from ops.executive_os import release_manifest as seals
 from ops.executive_os.os_public_edge import (HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES,
     GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES,
     COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES,
-    PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES, asset_routes, render)
+    PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_COMPANY_PRIORITIES_POST_ROUTES, asset_routes, render)
 
 
 def git(repo, *args):
@@ -321,16 +322,19 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
     )
     assert PRE_DIRECT_NATIVE_POST_ROUTES == historical
     assert DIRECT_NATIVE_POST_ROUTES == native
-    assert POST_ROUTES == historical + native
+    company = ("/os/executive/company-priorities",)
+    assert PRE_COMPANY_PRIORITIES_POST_ROUTES == historical + native
+    current_posts = historical + native + company
+    assert POST_ROUTES == current_posts
     branches = lambda config: config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
     before = copy.deepcopy(relay.current)
     original = branches(before)
     assert original[1]["match"][0]["path"] == list(historical)
     rendered = render(entry.build_os_asset_manifest(i["new_bundle"]), i["relay_port"])
     post_matcher = rendered.split("    @post {", 1)[1].split("    handle @post {", 1)[0]
-    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(historical + native)
+    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(current_posts)
     assert "method POST" in post_matcher
-    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native)
+    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native + company)
 
     for phase, expected_state in (("prepare", "PREPARED"), ("finalize", "FINAL")):
         if phase == "finalize":
@@ -339,7 +343,7 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
             relay.selected = "new"  # The explicit test-host switch, never the publisher.
         assert publish(staged, phase)["state"] == expected_state
         current = branches(relay.current)
-        assert current[1]["match"][0] == {"method": ["POST"], "path": list(historical + native)}
+        assert current[1]["match"][0] == {"method": ["POST"], "path": list(current_posts)}
         # Body bounds, proxy/header identity and terminal refusal remain exact.
         assert current[1]["handle"] == original[1]["handle"]
         assert current[1]["handle"][0] == {"handler": "request_body", "max_size": 64000}
@@ -355,7 +359,7 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
             return [branch for branch in current[:-1]
                     if any(method in match["method"] and path in match["path"]
                            for match in branch["match"])]
-        for path in native:
+        for path in native + company:
             assert matching("POST", path) == [current[1]]
             for method in ("GET", "PUT", "DELETE", "OPTIONS"):
                 assert matching(method, path) == []

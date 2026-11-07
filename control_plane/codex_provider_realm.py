@@ -22,7 +22,13 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+try:
+    from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+except ModuleNotFoundError as exc:
+    if exc.name not in {"control_plane", "control_plane.fs_security"}:
+        raise
+    # The native generation seals these same owner bytes as flat modules.
+    from fs_security import FilesystemSecurityError, has_macos_acl
 
 
 _REALM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")

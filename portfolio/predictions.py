@@ -168,11 +168,38 @@ def _label(panel: dict, spy, ticker: str, entry_iso: str, horizon: int, asof_iso
 # ─────────────────────────────────────────────────────────────────────────────
 # isolated prediction ledger
 # ─────────────────────────────────────────────────────────────────────────────
-def _load_ledger() -> list:
+def _load_ledger(*, strict: bool = False) -> list:
+    """Read the owned ledger, exposing unavailable evidence when explicitly requested."""
+    if not strict:
+        try:
+            return [json.loads(l) for l in _LEDGER.read_text().splitlines() if l.strip()]
+        except Exception:  # noqa: BLE001
+            return []
     try:
-        return [json.loads(l) for l in _LEDGER.read_text().splitlines() if l.strip()]
-    except Exception:  # noqa: BLE001
-        return []
+        payload = _LEDGER.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        try:
+            _LEDGER.lstat()
+        except FileNotFoundError:
+            for parent in _LEDGER.parents:
+                try:
+                    parent.lstat()
+                except FileNotFoundError:
+                    continue
+                if not parent.is_dir():
+                    raise OSError("prediction ledger ancestor is unavailable")
+                return []
+            raise
+        raise
+    rows = []
+    for line in payload.splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError("prediction ledger row is malformed")
+        rows.append(row)
+    return rows
 
 
 def _save_ledger(rows: list) -> None:
