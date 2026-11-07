@@ -102,19 +102,24 @@ sweep:
   edit that re-adds apply capability fails closed instead of shipping. A
   refused invocation is recorded as a degraded pass (`stale_packs_rc` 78) and
   never loses the receipt.
-- The **recurring telemetry is retained**: the pass still runs on every
-  scheduled sweep and still reports its discovery receipt. No duplicate reaper
-  and no second scheduler are introduced.
+- The **recurring sweep telemetry is retained**: the sweep still runs on every
+  scheduled sweep, and its own free-space sample, external-volume snapshots
+  and sweep-log row are unaffected. What this source no longer does is ask
+  the installed helper for a discovery receipt at all: the helper is not
+  source-enrolled here, so the coordinator holds the pass BEFORE any helper
+  subprocess instead of running installed source it cannot bind. No duplicate
+  reaper and no second scheduler are introduced.
 - The receipt names the hold explicitly — `stale_packs_hold:
   HELD_UNQUALIFIED_STALE_PACK_HELPER` and `stale_packs_effect_state:
   NOT_APPLIED` — and `finish()` records `stale_packs.held_unqualified_helper`
   in `incomplete_substeps`, so the sweep is **degraded, never green**, while
   the hold is in force. There is no bypass: no flag, environment variable or
   receipt path re-arms the apply mode.
-- All other helper flow, receipt and last-exit contracts are unchanged. The
-  helper's own exit code is still reported verbatim in `stale_packs_rc`; a
-  discovery receipt reports `applied=false` and therefore can never satisfy the
-  applied-receipt contract of the existing inventory check.
+- All other helper flow, receipt and last-exit contracts are unchanged. A
+  receipt retained by an earlier dispatch reports `applied=false` with exact
+  integer zero counters, which is a zero-effect **producer claim**; it is a
+  complete inventory only when its discovery census is complete and
+  error-free, and it is never proof that the installed helper is enrolled.
 
 This is source-only. It does not install, arm, schedule or authorize anything,
 does not prove an installed preimage, and does not qualify the helper for
@@ -152,3 +157,156 @@ helper, obtain independent review and protected integrated CI, and
 prove one natural existing-service execution/JSONL result. Hermetic
 coordinator regression: `python3 -m unittest discover -s tests -p
 test_fleet_storage_volume_monitor.py`.
+
+## S5 source-only: pre-dispatch holds, delegation hold, and truthful effect evidence
+
+Source-only candidate on top of the B11/B12 holds. It installs nothing, arms
+nothing, and grants no apply capability. The strict argv allowlist, the
+zero-effect inventory predicate, the grant gate, the kernel flock, the #1951
+generated-cache hold, the fleet sparse/repack/archive holds and the
+external-volume telemetry are unchanged.
+
+### The stale-pack pass holds BEFORE any helper subprocess
+
+The installed `stale_pack_reaper.py` is not source-enrolled in protected
+Mastermind, so this coordinator cannot bind the installed source or its
+preimage. A request-side guard does not bind the source that answers the
+request. The pass therefore refuses **before any child is started**: it builds
+and validates the never-apply argv (purely — building an argv starts no
+child), records the existing `HELD_UNQUALIFIED_STALE_PACK_HELPER` hold with
+`stale_packs_rc` 78, `stale_packs_effect_state=NOT_APPLIED` and
+`stale_packs_verified_reclaimed_bytes=0`, and dispatches nothing.
+
+- There is **no runtime bypass**: no flag, environment variable or receipt
+  path re-arms the helper.
+- The no-dispatch is scoped to **this invocation**. It reconciles nothing of,
+  and claims nothing about, any prior unknown effect.
+- The sweep's **independent** telemetry is unaffected: the free-space sample,
+  the external-volume snapshots and the recurring sweep-log row still happen
+  on every sweep. What does not survive is the helper's own discovery receipt,
+  because this source no longer asks for it.
+- The argv builder and the zero-effect inventory predicate are kept as **pure**
+  functions: they are what the pure retained-receipt classifier reads when it
+  judges one receipt retained by an earlier dispatch.
+
+### The denied-grant loopback delegation is held before any forced child
+
+When the grant context is denied or unverified, the incumbent design's last
+resort is to re-enter the same sweep over ssh to `127.0.0.1`, where a
+Remote-Login session holds the grants. That delegation is now **held before
+any ssh or forced-child invocation**.
+
+The forced `authorized_keys` command starts the **host's installed sweeper**.
+The parent nonce and the kernel flock bind the *request* and the exclusion of
+a concurrent sweeper; they do **not** bind the installed source or preimage
+the child would run. The same gap that keeps the unenrolled stale-pack helper
+undispatched applies here for the same reason.
+
+The transport, auth and lock code in `via_loopback()` is preserved unchanged;
+only the admission of the delegation is held. The helper-exclusion lock is not
+relinquished either, because there is no child to hand it to. The receipt
+names `loopback_hold=HELD_UNBOUND_LOOPBACK_CHILD_SOURCE`,
+`loopback_effect_state=NOT_APPLIED` and `loopback_rc=78`, and `finish()`
+records `loopback.held_unqualified_child_source` in `incomplete_substeps`.
+There is **no qualification flag**: restoring the delegation requires the
+original owner to bind the installed child source/preimage, which is not a
+source-level decision.
+
+### Retained receipts are classified truthfully
+
+A retained receipt is a **producer claim**: what an unqualified helper says
+about itself. It is never proof that the installed helper is enrolled,
+source-identified or safe to run apply-capable.
+
+One retained receipt is classified by a **pure** classifier: it reads that
+single captured text and the exit code retained with it, and it writes
+nothing. The **existing** append-only `sweep-log.jsonl` remains the owner of
+history — this source adds no history reader, no journal, no history
+authority and no controller, and it reconciles nothing. An unknown row stays
+unknown; no missing history is claimed to be cleared.
+
+The classification is strict, because what a receipt retains is a **captured
+excerpt** — the last stdout line, truncated at the capture limit — and not the
+helper's full original stdout:
+
+| retained evidence | verdict |
+| --- | --- |
+| `applied` is exactly `false`, `removed` and `freed_bytes` are exact int `0`, **and** the discovery census is complete and error-free | `NOT_APPLIED` — a zero-effect **producer claim** that also claims a complete inventory |
+| `applied` is exactly `false`, `removed` and `freed_bytes` are exact int `0`, but the discovery census is missing, incomplete or errored | `NOT_APPLIED` — a zero-effect **producer claim**; the inventory claim stays **incomplete** |
+| `applied: true`, a positive counter, or a value that cannot be read as "no effect" | `EFFECT_UNKNOWN` — the raw text is retained verbatim |
+| an **omitted** effect field | `EFFECT_UNKNOWN` — an omitted field is missing evidence, not evidence of no effect |
+| text that does not parse (malformed, truncated, capture loss) | `EFFECT_UNKNOWN` — a parsing failure can never prove `NOT_APPLIED` |
+| a nonzero rc (timeout, interrupted pass) | `EFFECT_UNKNOWN` |
+| a **missing or null rc**, or an rc that is not exactly the int `0` (bool, float, string) | `EFFECT_UNKNOWN` — only an exact int rc of `0` can carry a completed producer claim at all |
+
+The verified reclaimed-byte count is always `0`: nothing an unenrolled helper
+reports can be verified as reclaimed by this coordinator.
+
+The **unknown classification is monotonic within one observation**: once a
+receipt has been classified `EFFECT_UNKNOWN`, a later zero or blank value for
+the same key does not downgrade it. The coordinator's own pre-dispatch refusal
+is left alone — a known non-dispatch is not an unknown effect — but it is
+recognised by the **structured hold metadata** the current stale-pack pass
+emits together with the incumbent refusal rc `78`, **not** by the refusal text
+alone. The exact refusal text with any other rc, or without that structured
+hold metadata, is not a proven coordinator refusal and stays
+`EFFECT_UNKNOWN`.
+
+No runtime helper is retried automatically, because runtime dispatch is
+unconditionally held.
+
+### Seven pre-effect holds
+
+`hold_unqualified_apply` keeps a **closed** tuple of unqualified apply call
+sites, and each of the seven remaining apply invocations is replaced by that
+existing pre-effect hold (`rc` 78, `NOT_APPLIED`, `PRE_EFFECT_HOLD: ...`):
+
+| pass | helper | applicability |
+| --- | --- | --- |
+| `hung` | `hung_process_reaper.py` | every run, recorded **before** the grant gate |
+| `temp_gc` | `temp_worktree_gc.py` | every granted run |
+| `temp_gc_generic` | `temp_worktree_gc.py` | every granted run |
+| `reap` | `reap_incomplete_temp_worktrees.py` | every granted run |
+| `sparse` | `sparse_idle_worktrees.py` | only when the sparse census is eligible |
+| `scratch_reap` | `scratch_reap.py` | every granted run |
+| `chain_archive` | `chain_snapshot_archive.py` | only when the chain snapshot dir is eligible |
+
+A hold is a statement about **enrollment**, not a claim of a proven internal
+defect in the held helper. What is missing at this coordinator boundary is the
+qualification itself: exact installed/source identity; operation-specific
+complete discovery; the original owner/device/inode with the current lease
+and the active worktree; the reserve; and interruption reconciliation — plus
+PID/start identity, ownership and carrier protection for the process reaper.
+One census of one helper does not qualify another, and a flag never fakes
+qualification. The original `generated_cache`, `fleet_sparse`, `repack` and
+archive holds are unchanged.
+
+Consequences that are part of the contract:
+
+- The held helpers never appear in the coordinator's child-process argv, so
+  nothing apply-capable is spawned on any applicable path. The stale-pack
+  helper is held the same way, so **no child at all** is spawned for it.
+- The `--receipts` directory is prepared **only for a consumer that will
+  actually launch**. Every consumer of the temp-GC/reap and sparse receipt
+  directories is held, so the removable-volume mkdir/write probe never runs
+  for a helper that will never run.
+- A hold is an abstention, not a successful assessment: the chain-archive
+  success stamp is **not** advanced, so the condition is re-evaluated on the
+  next sweep.
+- A hold degrades the receipt by itself (`<pass>.held_unqualified_helper`), so
+  a success-shaped receipt or a zero exit code injected later cannot rearm a
+  pass that never launched.
+- The incumbent applicability conditions are unchanged: on a calm host with
+  headroom the sparse census and the repack are still deferred, and those two
+  passes are neither launched nor held there.
+
+### A corrected comment about live transfers
+
+The stale-pack pass comment previously claimed that the helper "refuses any
+file a process still holds open, so a live transfer is never interrupted".
+That claim was false: `stat` + `lsof` is a **path** check, not an
+owner/inode binding, so a writer that replaces the pathname in between can
+still be hit. The comment now says so, and points at the hold.
+
+Hermetic regression (no live sweep, no helper, no host, no native file):
+`python3 -m unittest discover -s tests -p test_fleet_storage_volume_monitor.py`.
