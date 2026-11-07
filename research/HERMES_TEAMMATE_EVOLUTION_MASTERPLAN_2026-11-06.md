@@ -1147,3 +1147,44 @@ Agent OS remains the sole durable continuity owner: v2 disables Hermes's indepen
 2. Prepare the exact installed v2 publication and genuine receiving-owner enrollment through incumbent installation/auth owners. Actual activation waits for the original C26 authorized connection to be restored and its retained effect reconciled.
 3. Complete the remaining existing-owner account/item/origin browser-fill integration, genuine request/dispatch and held-out EVAL evidence, and original recovery/endurance/fleet journeys. Source completion does not close these product outcomes.
 4. Keep the researched source and already accepted PRs DO_NOT_REDO. Original Fabric refusals/failures are unretried; native agents supplied principal judgment only. Outcome Learning #398 remains held; C69/C70 remain accepted. No Slack message, credential collection, account grant, service start or durable background worker is claimed.
+
+## 28. Original transport queue withdrawal, current CI repair, and native-source reconciliation — 2026-11-07
+
+This supersedes the active frontier in section 27; its dated source evidence remains valid. **MISSION_COMPLETE=false; BUILT_NOT_PROVEN.** No fleet service, account grant, vault access, new background runner, or installed native memory acceptance is claimed.
+
+### Original authenticated transport: PR 2188
+
+The original d5cebb3f81114c018912f805890d7b77015ea7c6 candidate passed ordinary CI 42343112652. Its single original protected-queue entry `MQE_lQDOTotz3c8AAAABNdpVVc4ABAiKzgPMmAQ` reached AWAITING_CHECKS against protected 5f8c13da926011fb5fdc8cea21287b532ac968db, with integrated candidate cca3f612398e954b6f1321018ca84b6ea026965b. No merge is claimed.
+
+While the queue was pending, another candidate exposed an inherited historical-source fixture mismatch. The canonical builder already selected the retained source preimage after PR 1824; one integration test still selected the live module. The exact reviewed preimage hash is unchanged. A repair was prepared and checked before changing the queue effect.
+
+- Explicit dequeue mutation at original Studio process 68132 succeeded; process 68499 read back the same d5 head with both autoMergeRequest and mergeQueueEntry absent, and no merge commit. Only then was the original branch made Draft and updated.
+- Current auth head: **851f250dd8ec7489b74a603d52733f8c4828f2b2**, tree **e2988a4915f7c9e78762780f3394b58620549cf5**, parents d5 and protected 5f8. All 19 transport postimages remain byte-identical to d5; current protected source is preserved.
+- The one fixture change moves the expected exact blob eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37 from the live realm lookup to `source/codex_provider_realm.py.preimage`. New test blob b3e00e1c3d507dc276f0f24d40e0665448f1e18a. No projection/compiler input pins, behavior assertions or runtime code were weakened.
+- Actual projection suite: **39 passed and 5 subtests passed**. The fixture's original hash-check loop accepts the retained historical file, rejects its absence, and rejects substitution of the current live module. Focused context suite on complete protected-source composition: **77 passed, 2 deselected**. The excluded local socket actions remain unretried.
+- Original application carrier PR 2175 was read back OPEN/Draft with autoMergeRequest and queue entry absent; it was not modified, duplicated or abandoned.
+- Latest auth readback: OPEN/Draft at 851f250, MERGEABLE, no queue entry or auto-merge request. Ordinary CI **42348279388** is in progress. No new release request has been made.
+
+### Native memory: PR 2195
+
+The initial 29c4376 source exposed two ordinary dedicated-CI fixture/dependency problems, both repaired on its original branch. The Linux Hermes suites now install the existing reviewed Executive MCP dependency inputs plus pinned pytest, with the path trigger enrolled. This is Linux source qualification, not the separate macOS production hash-lock attestation.
+
+- Repair cd21b70fe6e6ccfab622dd50b7d4c3a338f0fe3a passed Hermes harness **42346131000** and Hermes runtime **42346131021** on their Python matrices. General CI then exposed the inherited preimage fixture mismatch above.
+- Fixture repair head **73fd5443f06e382260600caf09521730f7711e01** also passed Hermes harness **42347849593** and Hermes runtime **42347849531**. General CI **42347849599** was in progress at this read.
+- Protected source subsequently advanced through PRs 805, 2179 and 2196 to **58ac65ae47824750cae32c5ab85b58b6f38e6d5e** (tree a16956491bf262160905835b1c3e15d99bca0928). No source-law file changed relative to the compatible e37dc82 pin. The current model-router test supersedes the narrow alias-presence fixture repair and adds stronger presence/eligibility/non-admission coverage.
+- The resulting genuine shared-test conflict was resolved by adopting that entire protected test blob **af180a1b66febba5531ad89a21a65cdcada8c953** unchanged. **6 tests and 5 subtests passed**. All other 54 native/auth/CI-repair postimages remain unchanged.
+- Latest native candidate: **e7bd8ae23f2744f0f5294f063dc6f07351e34cb4**, tree **2628cd0be6d14d906eb3937fcab321b1bf595b86**, parents 73fd544 and protected 58ac65. Normal CI must qualify this exact candidate. PR remains Draft and unarmed until the original auth dependency and its own required gates are reconciled.
+
+### Continuity and connected vault frontier
+
+Macro continuity PR **10823**, head **1dab525093d73f415dd9a5db0ed9cf6c0ff2a68e**, retains the dated section-27 state and all unrelated Control Room obligations. Required CI and fences passed. Protected Macro controller source 67a5ddb98aca0f4e7784372e5b69f592e78050ad explicitly treats the inactive merge-queue-pilot check as nonbinding on main. The incumbent `merge-on-green` label was added once. Latest readback: OPEN, same head, label present, no merge commit or native auto-merge request. Do not edit or arm a second carrier while that original effect is pending.
+
+A source branch **sol/hermes-workbench-vault-fill-20261107-c3** was created at protected 5f8 for the remaining connected account/item/origin browser fill. It has no feature commit or PR yet. The local validation mirror contains exact protected files and is not a host publication workspace. Existing owners are WorkbenchActionRuntime, BrowserActionPort/ResourcePort, original ActionArtifactStore and relay, and worker_browser_b1 runtime installation attestation. The selected backend mechanism is the existing Hermes Fernet vault format; the actual pinned Playwright MCP engine will own the browser. Architecture preparation does not claim an implementation, credential, browser launch, grant or account enrollment.
+
+### Constraints and next material actions
+
+1. Consume the original auth CI; qualify and use one exact-head protected-queue request when eligible. Consume native e7bd8ae CI and release only after its original dependency is reconciled. No stale-head release, duplicate transport, direct self-merge or self-approval.
+2. Complete the connected existing-owner credential-fill source slice with an actual permission producer, private receiving process/backend, source custody and meaningful integration evidence. Do not stop at a catalogue, grant-only facade or mocked callback.
+3. Extend the incumbent native observation and EVAL/refinement path with actual tool-schema/invocation evidence; do not create another memory, lifecycle, authorization, retry, queue or learning control plane.
+4. The original C26 Ubuntu1/root permission denial and local AF_UNIX denial remain unretried. Restore the original authorized connection for installed activation and reconcile its retained effect. Ordinary automatically discovered CI is not an alternate manual replay of the denied action.
+5. PRs 398/409 remain held; C69/C70 and accepted source slices remain DO_NOT_REDO. Original paid Fabric refusals/failures were not replayed. Native children supply principal judgment only. No Slack/email message was sent.
