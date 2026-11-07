@@ -57,7 +57,7 @@ def _vendor_module(name: str, root: Path):
 def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                     host: str, port: int, implementation_sha: str | None = None,
                     session_enrollment: dict | None = None,
-                    consumer_transition=None) -> None:
+                    consumer_transition=None, request_observation=None) -> None:
     _selection(role, host, port)
     if getattr(module, "_mmx_role_api_bound", False):
         raise RuntimeRefusal("NATIVE_API_ALREADY_BOUND")
@@ -81,6 +81,8 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                    "session_enrollment": session_enrollment}
         if consumer_transition is not None:
             options["consumer_transition"] = consumer_transition
+        if request_observation is not None:
+            request_observation.bind_authority(runner)
         install_private_control(runner, role_home, role, **options)
         return await original(runner, host=host, port=port)
 
@@ -475,12 +477,15 @@ def run(launch, argv: list[str]) -> int:
         # against.
         from .native_session_control import install_runtime_owner
         install_runtime_owner(launch.owner.root.name)
+        from .native_request_observation import install_request_observation
+        request_observation = install_request_observation(launch, vendor, role_home, role)
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,
                         implementation_sha=launch.owner.root.name,
                         session_enrollment=launch.recipe.get("session_enrollment"),
-                        consumer_transition=consumer_transition)
+                        consumer_transition=consumer_transition,
+                        request_observation=request_observation)
     launch.check()
     result = native_main.main()
     return result if type(result) is int else 0
