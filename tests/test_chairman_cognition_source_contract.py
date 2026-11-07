@@ -305,7 +305,7 @@ def test_program_has_real_vertical_and_completion_not_docs():
 
 def test_strategic_state_records_current_autonomy_parent_without_erasing_cognition():
     state = yaml.safe_load(_text(_STATE))
-    assert str(state["meta"]["as_of"]) == "2026-09-26"
+    assert str(state["meta"]["as_of"]) == "2026-11-06"
     objectives = {item["id"]: item for item in state["p0"]}
     objective = objectives["AUTONOMY_FORCE_MULTIPLIER"]
     assert objective["department"] == "executive"

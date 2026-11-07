@@ -411,3 +411,101 @@ def test_executive_contract_declares_the_source_of_truth_order():
         "config/authority_map.yml",
     ):
         assert layer in text, f"AGENTS.md source-of-truth order must cite {layer}"
+
+
+def _strategy_weight_map(doc, mapping_name):
+    if mapping_name == "resource_policy":
+        return doc["resource_policy"]
+    return doc["core_product_value_model"]["dimensions"]
+
+
+@pytest.mark.parametrize("mapping_name", ["resource_policy", "value_dimensions"])
+@pytest.mark.parametrize("weight", [
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="positive-infinity"),
+    pytest.param(float("-inf"), id="negative-infinity"),
+    pytest.param(10 ** 400, id="float-conversion-overflow"),
+])
+def test_weight_maps_reject_non_finite_values(tmp_path, mapping_name, weight):
+    def mutate(doc):
+        weights = _strategy_weight_map(doc, mapping_name)
+        weights[next(iter(weights))] = weight
+
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="must be finite"):
+        load_strategic_state(path)
+
+
+@pytest.mark.parametrize("mapping_name", ["resource_policy", "value_dimensions"])
+@pytest.mark.parametrize("weight", [
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="positive-infinity"),
+    pytest.param(float("-inf"), id="negative-infinity"),
+])
+def test_invalid_weight_maps_do_not_reach_ceo_orientation(
+    tmp_path, monkeypatch, mapping_name, weight,
+):
+    from control_plane.ceo_boot_packet import load_strategic_summary
+
+    def mutate(doc):
+        weights = _strategy_weight_map(doc, mapping_name)
+        weights[next(iter(weights))] = weight
+
+    path = _mutated(tmp_path, mutate)
+    monkeypatch.setattr(ss, "_STATE_FILE", path)
+    summary, error = load_strategic_summary()
+    assert summary is None
+    assert error is not None and "must be finite" in error
+
+
+@pytest.mark.parametrize("mapping_name", ["resource_policy", "value_dimensions"])
+@pytest.mark.parametrize("weight,message", [
+    pytest.param(True, "must be a number", id="boolean"),
+    pytest.param("0.25", "must be a number", id="numeric-string"),
+    pytest.param(None, "must be a number", id="null"),
+    pytest.param(-0.1, "must not be negative", id="negative"),
+])
+def test_weight_maps_preserve_type_and_sign_validation(
+    tmp_path, mapping_name, weight, message,
+):
+    def mutate(doc):
+        weights = _strategy_weight_map(doc, mapping_name)
+        weights[next(iter(weights))] = weight
+
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match=message):
+        load_strategic_state(path)
+
+
+@pytest.mark.parametrize("mapping_name", ["resource_policy", "value_dimensions"])
+def test_weight_maps_accept_integer_zeros_and_one(tmp_path, mapping_name):
+    def mutate(doc):
+        weights = _strategy_weight_map(doc, mapping_name)
+        weights.update({key: 0 for key in weights})
+        weights[next(iter(weights))] = 1
+
+    state = load_strategic_state(_mutated(tmp_path, mutate))
+    assert sum(_strategy_weight_map(state, mapping_name).values()) == 1
+    assert state["meta"]["authority"] == "advisory_and_orientation_only"
+
+
+@pytest.mark.parametrize("mapping_name", ["resource_policy", "value_dimensions"])
+@pytest.mark.parametrize("total,accepted", [
+    pytest.param(0.995, True, id="within-lower-tolerance"),
+    pytest.param(1.005, True, id="within-upper-tolerance"),
+    pytest.param(0.98, False, id="outside-lower-tolerance"),
+    pytest.param(1.02, False, id="outside-upper-tolerance"),
+])
+def test_weight_maps_preserve_sum_tolerance(tmp_path, mapping_name, total, accepted):
+    def mutate(doc):
+        weights = _strategy_weight_map(doc, mapping_name)
+        weights.update({key: 0 for key in weights})
+        weights[next(iter(weights))] = total
+
+    path = _mutated(tmp_path, mutate)
+    if accepted:
+        state = load_strategic_state(path)
+        assert sum(_strategy_weight_map(state, mapping_name).values()) == total
+    else:
+        with pytest.raises(StrategicStateError, match="sum"):
+            load_strategic_state(path)

@@ -1,5 +1,6 @@
 import {
   decodeOwnerObservation,
+  decodeProgramsEnvelope,
   isOwnerObservationReference,
   type OwnerObservation,
 } from "./workspace-contract";
@@ -287,6 +288,8 @@ export interface ProgramCard {
   title: string | null;
   state: string | null;
   nextAction: string | null;
+  /** Presentation-only withholding; never carries rejected source text. */
+  nextActionWithheld: boolean;
   rootJobId: string | null;
   rootState: "RESOLVED" | "CONFLICT" | "UNKNOWN";
   rootCandidates: string[];
@@ -814,6 +817,15 @@ export function decodeMission(
       })
     : null;
   if (v2 && !observation) return null;
+  if (observation?.schema === "mastermind.workspace_source_observation.v2") {
+    const basis = observation.project_data;
+    if (!obj(basis) || !obj(basis.data_observation) || typeof s.control_room_generated_at !== "string"
+      || typeof basis.data_observation.canonical_observed_at_ms !== "number"
+      || !Number.isSafeInteger(basis.data_observation.canonical_observed_at_ms)
+      || !Number.isFinite(Date.parse(s.control_room_generated_at))
+      || Math.abs(Date.parse(s.control_room_generated_at) - basis.data_observation.canonical_observed_at_ms) >= 1000)
+      return null;
+  }
   const r = value.read_state;
   if (
     !obj(r) ||
@@ -1428,6 +1440,10 @@ const CCR = [
   "placement_selection",
   "autonomy",
 ];
+// Canonical CCR observation metadata; deliberately not projected into
+// catalogue rows, permission, launch, create or send capability. Retain the
+// exact legacy shape as well as this one explicitly known additive shape.
+const CCR_WITH_RUNTIME_OBSERVATION = [...CCR, "runtime_capability_status"];
 const WORK = [
   "work_ref",
   "agent_os",
@@ -1493,6 +1509,26 @@ export function programsFromControlRoom(value: unknown): {
   state: "AVAILABLE" | "UNAVAILABLE";
   reason: string;
 } {
+  if (obj(value) && value.schema === "mastermind.programs_source_composition.v1") {
+    try {
+      if (!exact(value, ["schema", "control_room", "source_observation", "canonical_projects", "coverage"]))
+        throw new Error("PROGRAM_DATA_INVALID");
+      const composed = decodeProgramsEnvelope({ ...value, schema: "mastermind.workspace_programs.v2",
+        availability: "AVAILABLE", reason_codes: [] }) as { control_room: unknown; canonical_projects: Array<{work_ref:string;control_room:unknown}>; coverage:{state:string} };
+      const base = programsFromControlRoom(composed.control_room);
+      if (base.state !== "AVAILABLE") return base;
+      const programs = [...base.programs];
+      for (const project of composed.canonical_projects) {
+        const selected = programsFromControlRoom(project.control_room);
+        if (selected.state !== "AVAILABLE" || selected.programs.length !== 1 || selected.programs[0].workRef !== project.work_ref)
+          throw new Error("PROGRAM_DATA_INVALID");
+        programs.push(selected.programs[0]);
+      }
+      return { programs, state: "AVAILABLE", reason: composed.coverage.state === "PARTIAL" ? "PARTIAL_PROJECT_COVERAGE" : "QUALIFIED_PROJECT_SOURCES" };
+    } catch {
+      return { programs: [], state: "UNAVAILABLE", reason: "PROJECT_DATA_INVALID" };
+    }
+  }
   if (value === null || value === undefined)
     return {
       programs: [],
@@ -1501,7 +1537,7 @@ export function programsFromControlRoom(value: unknown): {
     };
   if (
     !obj(value) ||
-    !exact(value, CCR) ||
+    !(exact(value, CCR) || exact(value, CCR_WITH_RUNTIME_OBSERVATION)) ||
     value.schema !== "mastermind.chairman_control_room.v1" ||
     !time(value.generated_at) ||
     !Array.isArray(value.work) ||
@@ -1577,19 +1613,24 @@ export function programsFromControlRoom(value: unknown): {
         !ntext(a.title, 256) ||
         !ntext(a.state, 64) ||
         !ntext(a.status, 64) ||
-        !ntext(a.next_action))
+        !(a.next_action === null || typeof a.next_action === "string"))
     )
       return {
         programs: [],
         state: "UNAVAILABLE",
         reason: "AGENT_OS_ORIENTATION_INVALID",
       };
-    const matches = rows.filter((x) => x.responsibility_ref === card.work_ref),
+    // Authored next actions are optional display prose, not root identity.
+    // Preserve the shared text/privacy guard and withhold the whole field;
+    // truncation could retain private content or hide an unsafe suffix.
+    const nextActionWithheld = a !== null && a.next_action !== null && !text(a.next_action),
+      matches = rows.filter((x) => x.responsibility_ref === card.work_ref),
       base = {
         workRef: card.work_ref,
         title: (a?.title as string | null) ?? null,
         state: (a?.state ?? a?.status ?? null) as string | null,
-        nextAction: (a?.next_action as string | null) ?? null,
+        nextAction: nextActionWithheld ? null : (a?.next_action as string | null) ?? null,
+        nextActionWithheld,
       };
     if (matches.length !== 1) {
       out.push({
@@ -1965,4 +2006,77 @@ export function decodeMissionv3(
   )
     return null;
   return value as unknown as Missionv3Document;
+}
+
+export interface ProductAcceptanceView {
+  schema: "mastermind.product_acceptance_view.v1";
+  selection: { work_ref: string; root_job_id: string; request_message_key: string };
+  state: "ACCEPTED" | "UNAVAILABLE";
+  reason_codes: string[];
+  receipt: {
+    state: "PRODUCT_ACCEPTED";
+    subject_job_id: string;
+    subject_result_envelope_digest: string;
+    ruling_message_key: string;
+    qualified_ruling_digest: string;
+    parent_job_id: string;
+    parent_attempt_id: string;
+    parent_result_envelope_digest: string;
+    source_continuity: {
+      issued_basis_digest: string; current_basis_digest: string;
+      declaration_digest: string; disposition: string;
+    };
+  } | null;
+}
+export interface Missionv4Document {
+  schema: "mastermind.mission_workspace.v4";
+  mission: Missionv3Document;
+  product_acceptance: ProductAcceptanceView;
+}
+
+/** A separate selected read; no v1-v3 parser gains acceptance authority. */
+export function decodeMissionv4(value: unknown, sel: MissionSelection,
+  requestMessageKey: string): Missionv4Document | null {
+  if (!normalizeWorkspaceSelection(sel) || !/^asd-mcp-[0-9a-f]{32}$/.test(requestMessageKey)
+    || !obj(value) || !exact(value, ["schema", "mission", "product_acceptance"])
+    || value.schema !== "mastermind.mission_workspace.v4") return null;
+  const mission = decodeMissionv3(value.mission, sel);
+  const view = value.product_acceptance;
+  if (!mission || !obj(view) || !exact(view, ["schema", "selection", "state", "reason_codes", "receipt"])
+    || view.schema !== "mastermind.product_acceptance_view.v1" || !obj(view.selection)
+    || !exact(view.selection, ["work_ref", "root_job_id", "request_message_key"])
+    || view.selection.work_ref !== sel.workRef || view.selection.root_job_id !== sel.rootJobId
+    || view.selection.request_message_key !== requestMessageKey || !Array.isArray(view.reason_codes)) return null;
+  const reasons = ["ACCEPTANCE_NOT_COMPOSED", "ACCEPTANCE_UNAVAILABLE", "SELECTION_MISMATCH",
+    "PARENT_RETURN_UNVERIFIED", "PARENT_CONSUMPTION_UNPROVEN", "SOURCE_UNAVAILABLE",
+    "SOURCE_CHANGED", "RUNTIME_CHANGED"];
+  if (view.state === "UNAVAILABLE") {
+    if (view.receipt !== null || view.reason_codes.length !== 1
+      || !reasons.includes(view.reason_codes[0])) return null;
+  } else if (view.state === "ACCEPTED") {
+    const receipt = view.receipt;
+    const hash = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+    if (mission.read_state.state !== "CURRENT" || mission.result_refs.availability !== "AVAILABLE"
+      || view.reason_codes.length !== 0 || !obj(receipt)
+      || !exact(receipt, ["state", "subject_job_id", "subject_result_envelope_digest", "ruling_message_key",
+        "qualified_ruling_digest", "parent_job_id", "parent_attempt_id", "parent_result_envelope_digest", "source_continuity"])
+      || receipt.state !== "PRODUCT_ACCEPTED" || receipt.parent_job_id !== sel.rootJobId
+      || !workspaceJob(receipt.subject_job_id) || typeof receipt.parent_attempt_id !== "string"
+      || !/^ATT-[0-9a-f]{32}$/.test(receipt.parent_attempt_id)
+      || !hash(receipt.subject_result_envelope_digest) || !hash(receipt.qualified_ruling_digest)
+      || !hash(receipt.parent_result_envelope_digest) || typeof receipt.ruling_message_key !== "string"
+      || !/^asd-principal-[0-9a-f]{32}$/.test(receipt.ruling_message_key)) return null;
+    const source = receipt.source_continuity;
+    if (!obj(source) || !exact(source, ["issued_basis_digest", "current_basis_digest", "declaration_digest", "disposition"])
+      || !hash(source.issued_basis_digest) || !hash(source.current_basis_digest) || !hash(source.declaration_digest)
+      || typeof source.disposition !== "string"
+      || !["UNCHANGED_SOURCE", "SOURCE_OBSERVATION_CHANGED_DECLARATION_UNCHANGED"].includes(source.disposition)
+      || (source.disposition === "UNCHANGED_SOURCE") !== (source.issued_basis_digest === source.current_basis_digest)) return null;
+    const parent = mission.result_refs.refs.filter(r => r.job_id === sel.rootJobId);
+    const subject = mission.result_refs.refs.filter(r => r.job_id === receipt.subject_job_id);
+    if (parent.length !== 1 || subject.length !== 1 || parent[0].attempt_id !== receipt.parent_attempt_id
+      || parent[0].result_envelope_digest !== receipt.parent_result_envelope_digest
+      || subject[0].result_envelope_digest !== receipt.subject_result_envelope_digest) return null;
+  } else return null;
+  return value as unknown as Missionv4Document;
 }

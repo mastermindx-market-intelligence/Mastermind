@@ -834,3 +834,28 @@ def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monke
     assert result["degraded"] == [
         "installed boot helper unavailable: grounding_mismatch"
     ]
+
+
+def test_rendered_ceo_boot_packet_names_executable_successor_not_ghost_owner():
+    # Text only: no new Job, status field, queue or assignment authority.
+    minimal = {
+        "schema": SCHEMA,
+        "generated_at": "2026-11-02T00:00:00Z",
+        "mastermind": {"sha": "a" * 40, "branch": "master"},
+        "macro": {"sha": None, "root": None},
+        "strategic_state": None,
+        "brief": None,
+        "handoffs": [],
+        "degraded": [],
+        "next_recommended_act": "Reconcile the current source-linked workstream",
+    }
+    rendered = render_packet(minimal)
+    flat = " ".join(rendered.split())
+    assert "LEADERSHIP / RECOVERY (source law controls)" in rendered
+    assert "current assigned session owns the next authorized recovery step" in flat
+    assert "archived chats and prior PR authors are not live owners" in flat
+    assert "EFFECT_UNKNOWN on the original carrier" in flat
+    assert "Independent non-author review and protected release remain required" in flat
+    assert rendered == render_packet(minimal)
+    assert max(map(len, rendered.splitlines())) <= 80
+    assert set(minimal) == _PACKET_KEYS

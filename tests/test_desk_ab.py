@@ -213,7 +213,10 @@ def test_run_isolates_to_sandbox_and_builds_all_books(sandbox, monkeypatch):
     row = {"asof": "2026-06-21", "holdings": [{"ticker": "AME", "weight": 0.5}]}
     (sandbox / "decisions.jsonl").write_text(json.dumps(row) + "\n")
     inputs = [_rec("AME", price=100.0), _rec("ANET", price=50.0), _rec("SMH", price=660.0)]
-    res = desk_ab.run("2026-06-21", inputs=inputs)
+    # A03: a historical asof never borrows the undated current-price accessor, so the build-day
+    # prices travel as the dated seed (the same shared fetch the daily flow passes in).
+    res = desk_ab.run("2026-06-21", prices={"AME": 100.0, "ANET": 50.0, "SMH": 660.0, "SPY": 400.0},
+                      inputs=inputs)
     ids = {b["id"] for b in res["leaderboard"]}
     assert ids == {p["id"] for p in desk_ab.POLICIES}
     # no_etf must have dropped SMH; prod keeps it
@@ -282,10 +285,11 @@ def test_carried_day_empty_inputs_holds_not_liquidates(sandbox, monkeypatch):
         p = sandbox / "desk_ab" / "books" / "prod" / "account.json"
         return json.loads(p.read_text())["positions"] if p.exists() else {}
 
-    desk_ab.run("2026-06-22", prices={"SPY": 400.0}, inputs=[_rec("AME", price=100.0)])
+    # A03: historical asof -> prices travel as the dated seed, not the undated accessor.
+    desk_ab.run("2026-06-22", prices={"AME": 100.0, "SPY": 400.0}, inputs=[_rec("AME", price=100.0)])
     assert (_prod_pos().get("AME") or {}).get("shares", 0) > 0
     # CARRIED day — no inputs → HOLD AME (not liquidate), still mark forward
-    res = desk_ab.run("2026-06-23", prices={"SPY": 400.0}, inputs=[])
+    res = desk_ab.run("2026-06-23", prices={"AME": 100.0, "SPY": 400.0}, inputs=[])
     assert (_prod_pos().get("AME") or {}).get("shares", 0) > 0, \
         "carried day liquidated the desk book (the empty-inputs trap)"
     assert res["books"]["prod"]["holdings"] == ["AME"]

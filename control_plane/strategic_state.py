@@ -31,6 +31,7 @@ Usage
 """
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -159,9 +160,15 @@ def _validate_resource_policy(doc: dict, where: Path) -> None:
         # bool is an int subclass — reject it explicitly rather than scoring True as 1.
         if isinstance(weight, bool) or not isinstance(weight, (int, float)):
             _fail(where, f"resource_policy[{bucket!r}] must be a number, got {weight!r}")
+        try:
+            value = float(weight)
+        except OverflowError:
+            _fail(where, f"resource_policy[{bucket!r}] must be finite")
+        if not math.isfinite(value):
+            _fail(where, f"resource_policy[{bucket!r}] must be finite")
         if weight < 0:
             _fail(where, f"resource_policy[{bucket!r}] must not be negative, got {weight!r}")
-        total += float(weight)
+        total += value
 
     if abs(total - 1.0) > RESOURCE_SUM_TOLERANCE:
         _fail(where, f"resource_policy weights must sum to ~1.0 "
@@ -191,7 +198,12 @@ def _validate_core_product_value_model(doc: dict, where: Path) -> None:
             _fail(where, "core_product_value_model dimension names must be non-empty strings")
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             _fail(where, f"core_product_value_model.dimensions[{name!r}] must be a number")
-        value = float(raw)
+        try:
+            value = float(raw)
+        except OverflowError:
+            _fail(where, f"core_product_value_model.dimensions[{name!r}] must be finite")
+        if not math.isfinite(value):
+            _fail(where, f"core_product_value_model.dimensions[{name!r}] must be finite")
         if value < 0:
             _fail(where, f"core_product_value_model.dimensions[{name!r}] must not be negative")
         total += value

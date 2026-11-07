@@ -31,7 +31,7 @@ meta:
   title: Mastermind-X company strategic state
   canonical_home: mastermind
   authority: advisory_and_orientation_only
-  as_of: 2026-09-26
+  as_of: 2026-11-06
   charter: research/MASTERMIND_CHARTER_V2.md
   contract: AGENTS.md
   origin: research/EXECUTIVE_OS_PHASE0_CENSUS.md
@@ -117,7 +117,7 @@ p0:
   - id: US_PROPHET_ENTRY_TIMING
     department: prophet
     objective: >
-      Retired as a company P0 on 2026-09-26 and subsumed by
+      Retired as a company P0 on 2026-11-06 and subsumed by
       CORE_INTELLIGENCE_PRODUCTIZATION. Historical objective: reduce structural
       late-entry behavior in US Prophet without unacceptable false-positive cost.
     status: retired
@@ -125,7 +125,7 @@ p0:
   - id: PRODUCT_TRUST_COHERENCE
     department: product
     objective: >
-      Retired as a company P0 on 2026-09-26 and subsumed by
+      Retired as a company P0 on 2026-11-06 and subsumed by
       PREMIUM_PRODUCT_EXPERIENCE. Historical objective: remove unfinished-product
       signals, inconsistent UX/CSS, dead surfaces, and confusing structure.
     status: retired
@@ -133,7 +133,7 @@ p0:
   - id: MONETIZATION_AND_ONBOARDING
     department: product
     objective: >
-      Retired as a company P0 on 2026-09-26 and subsumed by
+      Retired as a company P0 on 2026-11-06 and subsumed by
       DISTRIBUTION_AND_REVENUE. Historical objective: complete signup, trial, billing,
       entitlement, paywall, activation, analytics, and lifecycle paths for revenue.
     status: retired
@@ -141,7 +141,7 @@ p0:
   - id: ZERO_TO_ONE_ACQUISITION
     department: marketing
     objective: >
-      Retired as a company P0 on 2026-09-26 and subsumed by
+      Retired as a company P0 on 2026-11-06 and subsumed by
       DISTRIBUTION_AND_REVENUE. Historical objective: prove the first repeatable path
       from zero traffic to qualified prospects and paying users.
     status: retired
@@ -149,7 +149,7 @@ p0:
   - id: EXECUTIVE_OS
     department: executive
     objective: >
-      Retired as a company P0 on 2026-09-26 and subsumed by
+      Retired as a company P0 on 2026-11-06 and subsumed by
       AUTONOMY_FORCE_MULTIPLIER. Existing Executive OS remains the canonical lifecycle
       and admission owner; this retirement changes company-priority classification,
       not runtime authority or accepted implementation ownership.
@@ -158,7 +158,7 @@ p0:
   - id: CHAIRMAN_COGNITION_AUTONOMY
     department: executive
     objective: >
-      Retired as a company P0 on 2026-09-26 and subsumed by
+      Retired as a company P0 on 2026-11-06 and subsumed by
       AUTONOMY_FORCE_MULTIPLIER. The existing Meta-CEO Chairman Cognition capability
       and constitutional Chairman boundaries remain intact as subordinate autonomy
       capabilities rather than a separate company objective.
