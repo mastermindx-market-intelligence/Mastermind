@@ -55,6 +55,16 @@ G7B_MAC_ADDED_RE='^requirements/[A-Za-z0-9][A-Za-z0-9._-]*-macos-arm64-py312[.](
 # 0 non-comment lines = equal, any pin/extra/hash/option line = STOP. The #1714 trio path and D-G7B-2 are unchanged.
 G7B_GATE_LOCKS="requirements/gate-linux-x86_64-py312.lock
 requirements/gate-macos-arm64-py312.lock"
+# D-G7B-4 (rev 3.7): exactly this direct declaration, already pinned in BOTH
+# OLD gate locks. This is source admission only; T2 stays equal and fresh
+# same-venv compatibility is mandatory at s1, immediately before s3, and s4.
+G7B_JSONSCHEMA_DRIFT='+    "jsonschema>=4.26,<5",    # validates the existing bot tool roster for Fabric inference'
+G7B_JSONSCHEMA_OLD_ENTRIES=$'100644 blob 7f97e053ea7afd287ceec36d33a37faea85283eb\tpyproject.toml
+100644 blob d7a925849235a42f088ba359e0308847a9316fcd\trequirements/gate-linux-x86_64-py312.lock
+100644 blob 3db3c9bdee75dd0212f24a252a8d002cf6f73992\trequirements/gate-macos-arm64-py312.lock'
+G7B_JSONSCHEMA_NEW_ENTRIES=$'100644 blob 622259d33f04d40907075430c5228d6fbba2bae1\tpyproject.toml
+100644 blob 87471eec3fe0d41a1655411ec05be5e6519ab584\trequirements/gate-linux-x86_64-py312.lock
+100644 blob 53d9429e5f8bdf701f98d798b34fdf79afaf003c\trequirements/gate-macos-arm64-py312.lock'
 # G7a rev 3.6 (seat ruling D-G7A-1, 2026-11-06): #1422 (b796d4505) changed portfolio/forward_evaluation.py OLD->SHA in one hunk of
 # _current_exposure_metrics (build_snapshot path only), traced inert to every deploy probe and runbook mirror (evidence
 # runtime-rev36-build-20261106T0607Z/G7A_forward_evaluation_trace.md). Admitted ONLY as this exact mode+blob pair; any other blob or
@@ -63,6 +73,24 @@ G7A_FE_PATH=portfolio/forward_evaluation.py
 G7A_FE_OLD_ENTRY="100644 blob 46031e40a2510b49cd4d3dce23a5ed05cc759213"
 G7A_FE_NEW_ENTRY="100644 blob 13d15e91823d2b46b97dd4057c04d6c8628a29e0"
 G7A_PR1422=b796d450505f77a3c9a0716c2c825db9800c27a7
+# G7a rev 3.7 / D-G7A-2: one complete, source-adjudicated six-path manifest.
+# The three changed paths affect chat/research dispatch, failed daily-mark
+# publication and the existing D-G7A-1 hunk. Deploy probes/startup/schedules and
+# the three deploy scripts retain their admitted mechanics. This is not a path
+# waiver: any missing/foreign mode/blob on either side, or unreadable blob STOPs.
+G7A_BUNDLE_PATHS=$'app/main.py\napp/scheduler.py\nportfolio/forward_evaluation.py'
+G7A_BUNDLE_OLD_ENTRIES=$'100644 blob fdb22dc1a2650ff57d50a1c9c1cfebcf10521da4\tapp/main.py
+100644 blob ec2546731d69289b5af4837a6d1eefe59caf9b37\tapp/scheduler.py
+100644 blob 46031e40a2510b49cd4d3dce23a5ed05cc759213\tportfolio/forward_evaluation.py
+100755 blob f871e88815e70338a646008dbe77dfcc1727e978\tscripts/deploy_code_to_vps.sh
+100755 blob f40e7895e88b0cd755fb7ef9b41a4783a1df4ed9\tscripts/deploy_from_git.sh
+100755 blob a7a32713ef1477d1b84398ff24c6b9fda938831e\tscripts/refresh_datadog_release_tag.sh'
+G7A_BUNDLE_NEW_ENTRIES=$'100644 blob 6106ff3dd2d55ba4f9eebe0440388fe2e446931c\tapp/main.py
+100644 blob 50dca31c852e9abe332bd9e191ff900e6c1fcdb3\tapp/scheduler.py
+100644 blob 13d15e91823d2b46b97dd4057c04d6c8628a29e0\tportfolio/forward_evaluation.py
+100755 blob f871e88815e70338a646008dbe77dfcc1727e978\tscripts/deploy_code_to_vps.sh
+100755 blob f40e7895e88b0cd755fb7ef9b41a4783a1df4ed9\tscripts/deploy_from_git.sh
+100755 blob a7a32713ef1477d1b84398ff24c6b9fda938831e\tscripts/refresh_datadog_release_tag.sh'
 SHOW_PROPS="-p ActiveState -p SubState -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts -p FragmentPath -p DropInPaths -p NeedDaemonReload -p ControlGroup -p Result -p InvocationID"
 VPS=(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 "$HOST")
 
@@ -289,10 +317,24 @@ g7_pipe_ok() {  # g7_pipe_ok "${PIPESTATUS[@]}": rc 0 iff stage 1 (git) exited 0
   return 0
 }
 
-g7a_classify() {  # g7a_classify <wt> <old> <sha>: stdout G7A_MODE (none|D-G7A-1) rc 0; stderr reason rc 1. git reads only.
-  local wt=$1 old=$2 sha=$3 mech oe ne
+g7a_classify() {  # g7a_classify <wt> <old> <sha>: stdout G7A_MODE (none|D-G7A-1|D-G7A-2) rc 0; stderr reason rc 1. git reads only.
+  local wt=$1 old=$2 sha=$3 mech oe ne entries metadata file blob
   mech=$(git -C "$wt" diff --no-renames --name-only "$old" "$sha" -- "${MECH[@]}") || { echo "G7a: git diff failed - STOP, seat" >&2; return 1; }
   [ -n "$mech" ] || { echo none; return 0; }
+  if [ "$mech" = "$G7A_BUNDLE_PATHS" ]; then
+    oe=$(git -C "$wt" ls-tree --full-tree "$old" -- "${MECH[@]}") || { echo "G7a: bundle OLD tree read failed - STOP, seat" >&2; return 1; }
+    ne=$(git -C "$wt" ls-tree --full-tree "$sha" -- "${MECH[@]}") || { echo "G7a: bundle SHA tree read failed - STOP, seat" >&2; return 1; }
+    if [ "$oe" != "$G7A_BUNDLE_OLD_ENTRIES" ] || [ "$ne" != "$G7A_BUNDLE_NEW_ENTRIES" ]; then
+      echo "G7a: three changed paths are not the complete D-G7A-2 OLD/SHA mode+blob manifests - STOP, seat" >&2; return 1
+    fi
+    for entries in "$oe" "$ne"; do
+      while IFS=$'\t' read -r metadata file; do
+        blob=${metadata##* }
+        git -C "$wt" cat-file -e "$blob^{blob}" || { echo "G7a: D-G7A-2 blob unavailable ($file) - STOP, seat" >&2; return 1; }
+      done <<< "$entries"
+    done
+    echo D-G7A-2; return 0
+  fi
   [ "$mech" = "$G7A_FE_PATH" ] || { echo "G7a: deploy/runtime mechanics changed since OLD: $(echo $mech) - seat ruling (the runbook's mirrors would be stale)" >&2; return 1; }
   oe=$(git -C "$wt" ls-tree "$old" -- "$G7A_FE_PATH") || { echo "G7a: git ls-tree OLD failed - STOP, seat" >&2; return 1; }
   ne=$(git -C "$wt" ls-tree "$sha" -- "$G7A_FE_PATH") || { echo "G7a: git ls-tree SHA failed - STOP, seat" >&2; return 1; }
@@ -318,6 +360,18 @@ g7b_gate_locks_only() {  # g7b_gate_locks_only <sorted drift list>: rc 0 iff eve
   return 0
 }
 
+g7b_jsonschema_pair() {  # exact complete mode/blob pair; 0 exact, 1 different, 2 unreadable
+  local oe ne entries metadata file blob
+  oe=$(git -C "$1" ls-tree --full-tree "$2" -- pyproject.toml requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock) || return 2
+  ne=$(git -C "$1" ls-tree --full-tree "$3" -- pyproject.toml requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock) || return 2
+  [ "$oe" = "$G7B_JSONSCHEMA_OLD_ENTRIES" ] && [ "$ne" = "$G7B_JSONSCHEMA_NEW_ENTRIES" ] || return 1
+  for entries in "$oe" "$ne"; do
+    while IFS=$'\t' read -r metadata file; do
+      blob=${metadata##* }; git -C "$1" cat-file -e "$blob^{blob}" || return 2
+    done <<< "$entries"
+  done
+}
+
 g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_pending) rc 0; stderr reason rc 1. git reads only.
   local wt=$1 old=$2 sha=$3 dep mac
   dep=$(git -C "$wt" diff --no-renames --name-only "$old" "$sha" -- pyproject.toml requirements/ | sort) || { echo "G7b: git diff failed" >&2; return 1; }
@@ -339,7 +393,10 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
   sdk_bad=$(printf '%s\n' "$sdk" | grep '^+' | grep -vc 'claude-agent-sdk>=0\.2')          # a new floor must stay in the 0.2 series
   rest=$(printf '%s\n' "$plines" | grep -v 'claude-agent-sdk' | grep -v '^$')
   [ "$sdk_bad" = 0 ] || { echo "G7b: the claude-agent-sdk floor is not a >=0.2 floor: $(echo $sdk) - STOP, seat" >&2; return 1; }
-  if [ -n "$rest" ] && [ "$rest" != "$G7B_DEV_DRIFT" ]; then
+  if [ "$rest" = "$G7B_JSONSCHEMA_DRIFT" ]; then
+    [ "$dep" = "$SDK_TRIO" ] && [ -z "$sdk" ] && g7b_jsonschema_pair "$wt" "$old" "$sha" \
+      || { echo "G7b: jsonschema declaration is not the exact D-G7B-4 mode/blob pair - STOP, seat" >&2; return 1; }
+  elif [ -n "$rest" ] && [ "$rest" != "$G7B_DEV_DRIFT" ]; then
     echo "G7b: pyproject drift is not the claude-agent-sdk floor / the ruled dev bound (D-G7B-1): $(echo $rest) - STOP, seat" >&2; return 1
   fi
   if [ -n "$sdk" ]; then echo floor_pending; return 0; fi   # #1714 trio: rev-2 semantics, T2 runs in floor_pending mode
@@ -347,6 +404,105 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
     || { echo "G7b: gate-lock diff failed - STOP, seat" >&2; return 1; }   # rev 3.1: column-0 option lines (-r, --index-url, -e) count as body lines; only the ---/+++ headers are dropped. rev 3.4: the two gate locks only. rev 3.5 (r5o NIT): --text --no-textconv --no-ext-diff. rev 3.6 (r6 MINOR/NIT): pipeline status checked (grep -c exits 1 on a zero count, so not `|| return`); --no-renames
   [ "$lockbody" = 0 ] || { echo "G7b: $lockbody non-comment gate-lock line(s) changed without an SDK floor (pins/extras/hashes) - STOP, seat" >&2; return 1; }
   echo equal
+}
+
+# Re-derive the condition from the frozen source at each affected runtime step.
+# Missing/copied state must not turn the exact conditional case into legacy equal.
+g7b_runtime_mode() {
+  local rc=0
+  g7b_jsonschema_pair "$WT" "$OLD" "$SHA" || rc=$?
+  [ "$rc" != 2 ] || { echo "G7b: frozen source unreadable" >&2; return 1; }
+  if [ "$rc" = 0 ]; then
+    [ "${G7B_MODE:-}" = D-G7B-4 ] && [ "$T2_MODE" = equal ] \
+      || { echo "G7b: D-G7B-4 attempt state missing or inconsistent" >&2; return 1; }
+    echo D-G7B-4
+  else
+    [ "${G7B_MODE:-legacy}" = legacy ] || { echo "G7b: ruling does not match frozen source" >&2; return 1; }
+    echo legacy
+  fi
+}
+
+# Fixed library-only read. No application imports, network, package installation
+# or portfolio reads/writes. timeout(1) also bounds the remote process if SSH drops.
+T2_JSONSCHEMA_PROGRAM='
+import copy, importlib.metadata, json, re, subprocess, sys
+from jsonschema import Draft202012Validator, FormatChecker
+binding = json.loads(sys.argv[1])
+assert sys.executable == "/opt/mastermind/.venv/bin/python", "wrong interpreter"
+assert importlib.metadata.version("jsonschema") == "4.26.0", "wrong jsonschema version"
+unit = subprocess.check_output(["systemctl", "show", "mastermind.service", "-p", "ExecStart", "--value"], text=True, timeout=5)
+paths = re.findall(r"(?:^|[ ;{])path=([^ ;}]+)", unit)
+assert paths == ["/opt/mastermind/.venv/bin/uvicorn"], "wrong service interpreter"
+schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "additionalProperties": False,
+ "required": ["as_of", "decision_cutoff", "windows", "authority", "member"],
+ "properties": {"as_of": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+  "decision_cutoff": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+  "windows": {"type": "array", "items": {"enum": [5,20,63]}, "minItems": 3, "maxItems": 3, "uniqueItems": True},
+  "authority": {"type": "boolean", "const": False}, "member": {"$ref": "#/$defs/member"}},
+ "$defs": {"member": {"type": "object", "required": ["symbol", "value"], "additionalProperties": False,
+  "properties": {"symbol": {"type": "string", "pattern": "^[A-Z]{1,5}$"}, "value": {"type": ["number", "null"]}}}}}
+Draft202012Validator.check_schema(schema)
+validator = Draft202012Validator(schema, format_checker=FormatChecker())
+value = {"as_of": "2026-11-02", "decision_cutoff": None, "windows": [5,20,63], "authority": False, "member": {"symbol": "XLK", "value": None}}
+assert validator.is_valid(value), "valid value rejected"
+bad = []
+for key, replacement in [("as_of", "2026-02-30"), ("windows", [5,5,63]), ("windows", [5,20,99]), ("authority", True), ("member", {"symbol": "bad", "value": "wrong"})]:
+ item = copy.deepcopy(value); item[key] = replacement; bad.append(item)
+extra = copy.deepcopy(value); extra["unexpected"] = True; bad.append(extra)
+assert all(not validator.is_valid(item) for item in bad), "invalid value accepted"
+print(json.dumps({"binding": binding, "executable": sys.executable, "service_executable": paths[0], "version": "4.26.0", "valid": True, "invalid_rejected": len(bad)}, sort_keys=True))
+'
+
+t2_jsonschema_condition() {  # <pre|prelaunch|post> <fresh dists file> <proof file>
+  local mode; mode=$(g7b_runtime_mode) || return 1
+  [ "$mode" = D-G7B-4 ] || return 0
+  "$PY" -I -B - "$EV" "$SHA" "$1" "$2" "$3" "${BASH_SOURCE[0]}" "$T2_JSONSCHEMA_PROGRAM" "${VPS[@]}" <<'PY'
+import datetime, hashlib, json, pathlib, secrets, shlex, subprocess, sys
+attempt, target, phase, dists_path, proof_path, driver_path, program, *ssh = sys.argv[1:]
+def sha(data): return hashlib.sha256(data).hexdigest()
+def now(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
+try:
+    assert phase in ("pre", "prelaunch", "post"), "unknown phase"
+    dists = pathlib.Path(dists_path).read_bytes()
+    versions = [line for line in dists.decode("utf-8").splitlines() if line.startswith("jsonschema==")]
+    assert versions == ["jsonschema==4.26.0"], "fresh T2 distribution must identify exactly jsonschema==4.26.0"
+    identity = {"attempt": str(pathlib.Path(attempt).resolve()), "target": target,
+                "probe_sha256": sha(program.encode()), "driver_sha256": sha(pathlib.Path(driver_path).read_bytes())}
+    if phase != "pre":
+        baseline = json.loads((pathlib.Path(attempt)/"identity/pre/jsonschema.compatibility.json").read_text())
+        assert baseline.get("schema") == "pbr-w1-jsonschema-compatibility/v1" and baseline.get("ruling") == "D-G7B-4", "missing prior condition"
+        assert all(baseline.get(k) == v for k,v in identity.items()), "prior proof belongs to a different attempt, target or driver"
+        assert baseline.get("phase") == "pre" and baseline.get("distributions_sha256") == sha(dists), "pre/current distribution mismatch"
+        assert baseline.get("result", {}).get("valid") is True, "prior compatibility did not pass"
+    binding = {**identity, "phase": phase, "distributions_sha256": sha(dists), "nonce": secrets.token_hex(24)}
+    request = "timeout --signal=KILL 15s /opt/mastermind/.venv/bin/python -I -B - " + shlex.quote(json.dumps(binding, sort_keys=True))
+    started = now()
+    result = subprocess.run([*ssh[:-1], "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", ssh[-1], request],
+                            input=program.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40)
+    assert result.returncode == 0, "compatibility read failed rc=" + str(result.returncode)
+    assert 0 < len(result.stdout) <= 8192, "invalid compatibility output size"
+    observed = json.loads(result.stdout)
+    expected = {"binding": binding, "executable": "/opt/mastermind/.venv/bin/python",
+                "service_executable": "/opt/mastermind/.venv/bin/uvicorn", "version": "4.26.0", "valid": True, "invalid_rejected": 6}
+    assert json.dumps(observed, sort_keys=True) == json.dumps(expected, sort_keys=True), "malformed, stale or incompatible response"
+    receipt = {"schema": "pbr-w1-jsonschema-compatibility/v1", "ruling": "D-G7B-4", **binding,
+               "started_at": started, "completed_at": now(), "result": observed}
+    out = pathlib.Path(proof_path)
+    with out.open("w") as handle: handle.write(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+except Exception as exc:
+    print("D-G7B-4 runtime condition REFUSED: " + str(exc), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+t2_jsonschema_prelaunch() {
+  local mode; mode=$(g7b_runtime_mode) || stop "G7b runtime state"
+  [ "$mode" = D-G7B-4 ] || return 0
+  local I=$EV/identity/prelaunch
+  mkdir -p "$I" || stop "T2 prelaunch evidence"
+  dists_read "$I/dists.txt" || stop "T2 prelaunch dists read"
+  diff "$EV/identity/pre/dists.txt" "$I/dists.txt" > "$I/dists.diff" || stop "T2 prelaunch venv drift; no deploy, no pip"
+  t2_jsonschema_condition prelaunch "$I/dists.txt" "$I/jsonschema.compatibility.json" || stop "D-G7B-4 prelaunch compatibility; no deploy"
 }
 
 # ------------------------------------------------------------------ s0: bootstrap + G7 (Mac + git only)
@@ -409,11 +565,14 @@ EOF
   rm -f "$a/probe.txt"; rmdir "$a" "$b"
   # 0.5 G7 composition gates
   git -C "$wt" merge-base --is-ancestor "$OLD" "$sha" || stop "G7: OLD $OLD is not an ancestor of $sha"
-  local g7a; g7a=$(g7a_classify "$wt" "$OLD" "$sha" 2> "$EV/gates/G7a.reason") || stop "$(cat "$EV/gates/G7a.reason")"   # rev 3.6 / D-G7A-1
+  local g7a; g7a=$(g7a_classify "$wt" "$OLD" "$sha" 2> "$EV/gates/G7a.reason") || stop "$(cat "$EV/gates/G7a.reason")"   # rev 3.7 / exact D-G7A-1 or D-G7A-2
   rm -f "$EV/gates/G7a.reason"
   if [ "$g7a" = D-G7A-1 ]; then
     printf 'G7a (rev 3.6): %s changed OLD->SHA exactly as the D-G7A-1 pair (OLD %s -> SHA %s; #1422 %s, one hunk of _current_exposure_metrics on the build_snapshot path), traced inert to the deploy probes and the runbook G4/G6 mirrors (evidence runtime-rev36-build-20261106T0607Z/G7A_forward_evaluation_trace.md). Every other MECH path is unchanged OLD->SHA.\n' \
       "$G7A_FE_PATH" "$G7A_FE_OLD_ENTRY" "$G7A_FE_NEW_ENTRY" "${G7A_PR1422:0:9}" > "$EV/gates/G7a.RULING" || stop "G7a ruling record"
+  elif [ "$g7a" = D-G7A-2 ]; then
+    printf 'G7a (rev 3.7 / D-G7A-2): exact complete six-path bundle at frozen OLD=%s -> SHA=%s.\nChanged paths: app/main.py, app/scheduler.py, portfolio/forward_evaluation.py.\nOLD entries:\n%s\nSHA entries:\n%s\nThe three deployment scripts are unchanged. app/main.py changes chat/research dispatch; _runtime_health, _start_scheduler, health and ready retain their source. app/scheduler.py changes Self-Directed daily-mark failure handling: failed/unavailable marks suppress publication and retain FREEZE event handling; schedule registration/startup/cohort/deploy probes are unchanged. This is an intended later business-job behavior, not an inert release. The forward-evaluation hunk retains D-G7A-1. Source qualification: INSTALL_RUNBOOK.md D-G7A-2; original carrier Mastermind #1693. G7b, G8, Nov9 window, live-idle/WAL/outbox, overnight and marker/authority checks remain required.\n' \
+      "$OLD" "$sha" "$G7A_BUNDLE_OLD_ENTRIES" "$G7A_BUNDLE_NEW_ENTRIES" > "$EV/gates/G7a.RULING" || stop "G7a bundle ruling record"
   fi
   state G7A_MODE "$g7a"
   local t2; t2=$(g7b_classify "$wt" "$OLD" "$sha" 2> "$EV/gates/G7b.reason") || stop "$(cat "$EV/gates/G7b.reason")"
@@ -427,9 +586,15 @@ EOF
       >> "$EV/gates/G7b.RULING" || stop "G7b ruling record"
   fi
   state T2_MODE "$t2"
+  local g7b=legacy
+  if g7b_jsonschema_pair "$wt" "$OLD" "$sha"; then
+    g7b=D-G7B-4
+    printf 'D-G7B-4: exact pyproject/gate-lock mode+blob pair; only the direct jsonschema>=4.26,<5 declaration is added, both gate-lock bodies unchanged. T2_MODE=equal. RUNTIME CONDITION PENDING: fresh jsonschema==4.26.0 and same-service-interpreter Draft202012Validator/FormatChecker proof required at s1, immediately before s3, and s4. No package/venv change or SDK policy change.\n' >> "$EV/gates/G7b.RULING" || stop "G7b conditional ruling"
+  fi
+  state G7B_MODE "$g7b"
   git -C "$wt" diff --name-status "$OLD" "$sha" > "$EV/identity/old_to_sha.name-status.txt"
   pass G7
-  say "s0 PASS: SHA=$sha T2_MODE=$t2 G7A_MODE=$g7a WT=$wt"
+  say "s0 PASS: SHA=$sha T2_MODE=$t2 G7A_MODE=$g7a G7B_MODE=$g7b WT=$wt"
   echo "export PBR_EV=$EV"
 }
 
@@ -446,6 +611,7 @@ s1() {
   unit_hashes "$I/unit_sha256.txt" || stop "T3 unit hashes"
   dists_read "$I/dists.txt" || stop "T2 dists read"
   grep -E '^(claude-agent-sdk|anthropic)==' "$I/dists.txt" > "$I/dists_key.txt" || stop "T2: claude-agent-sdk/anthropic not in the venv"
+  t2_jsonschema_condition pre "$I/dists.txt" "$I/jsonschema.compatibility.json" || stop "D-G7B-4 pre-change compatibility"
   blob_manifest "$I/installed_manifest.jsonl" || stop "T1 manifest read"
   rb t1 --repo "$WT" --sha "$OLD" --manifest "$I/installed_manifest.jsonl" --out "$I" > "$I/t1_verdict.json" \
     || stop "T1(pre) vs OLD FAIL - the host is not OLD (identity/pre/identity_manifest.tsv); seat ruling"
@@ -506,7 +672,8 @@ s3() {
   [ ! -e "$EV/logs/deploy.started" ] || stop "a deploy was already started from this evidence dir - exactly once: use s3-result; NEVER re-run s3"
   env_guard
   [ -f "$EV/gates/PRE.PASS" ] && [ -f "$EV/gates/G7.PASS" ] || stop "s0/s1 have not passed"
-  gates_all
+  t2_jsonschema_prelaunch
+  gates_all   # live-idle/maintenance gates remain after the added library read
   local t0; t0=$(host_now) || stop "host clock read"
   [ "$t0" -lt "$W_LAST_START" ] || stop "G5 recheck: past 05:30Z"
   state DEPLOY_T0 "$t0"
@@ -548,14 +715,16 @@ s3_result() { STEP=s3-result; load; [ -f "$EV/logs/deploy.started" ] || stop "no
 s4() {
   STEP=s4; load
   [ -f "$EV/gates/DEPLOY.PASS" ] || stop "s3-result has not reported deploy OK"
-  local P=$EV/captures/post I=$EV/identity/post fail=0
+  local P=$EV/captures/post I=$EV/identity/post fail=0 t2_fail=0
   show_read "$P/systemctl_show.txt" || stop "systemctl show"
   blob_manifest "$I/installed_manifest.jsonl" || stop "T1 manifest read"
   rb t1 --repo "$WT" --sha "$SHA" --manifest "$I/installed_manifest.jsonl" --out "$I" > "$I/t1_verdict.json" || { say "T1 FAIL"; fail=1; }
   grep -q '"marker_claim_matches": true' "$I/t1_verdict.json" || { say "T1 marker does not claim $SHA"; fail=1; }
   dists_read "$I/dists.txt" || stop "T2 dists read"
   if diff "$EV/identity/pre/dists.txt" "$I/dists.txt" > "$I/dists.diff"; then say "T2 PASS (venv unchanged; mode $T2_MODE)"
-  else say "T2 FAIL: the venv changed during the deploy (the deploy never touches .venv)"; fail=2; fi
+  else say "T2 FAIL: the venv changed during the deploy (the deploy never touches .venv)"; t2_fail=1; fi
+  t2_jsonschema_condition post "$I/dists.txt" "$I/jsonschema.compatibility.json" \
+    || { say "T2 FAIL: D-G7B-4 post-install compatibility"; t2_fail=1; }
   unit_hashes "$I/unit_sha256.txt" || stop "T3 unit hashes"
   diff <(grep -v '/81-datadog-version.conf$' "$EV/identity/pre/unit_sha256.txt") \
        <(grep -v '/81-datadog-version.conf$' "$I/unit_sha256.txt") > "$I/unit.diff" || { say "T3 FAIL: unit/drop-ins changed"; fail=1; }
@@ -580,6 +749,7 @@ s4() {
   [ "$(head -n 1 "$EV/captures/pre/forward_marker.txt")" = "$(head -n 1 "$P/forward_marker.txt")" ] || { say "start.json identity changed"; fail=1; }
   "${VPS[@]}" "cd $DPATH && MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT=$LIVE python3 -B -m portfolio.forward_evaluation status" \
     > "$P/forward_status.json" 2> "$P/forward_status.stderr" || { say "forward_evaluation status rc != 0 after the deploy"; fail=1; }
+  [ "$t2_fail" = 0 ] || fail=2   # a later T1/T3/T4 failure must not erase the no-rollback T2 hold
   case $fail in
     0) state INSTALLED "$SHA"; pass PROOF; say "s4 PASS: installed = $SHA (T1 T2 T3 T4 /health app_started + snapshot + marker) - run s4a, then s5" ;;
     2) stop "T2 FAIL - STOP: venv changed outside the deploy; no rollback without the seat" ;;
@@ -1006,7 +1176,7 @@ rollback_c() {  # transactional re-deploy of OLD through deploy_code_to_vps.sh (
 }
 rollback_c_result() { STEP=R-c-result; load; classify rc "$OLD" "$EV/rollback/rc.deploy.log"; state ROLLED_BACK R-c; say "R-c OK - run proof-old"; }
 
-g7b_selftest() {  # helper import check + 24 G7b and 12 G7a synthetic repos + three reads of SEAT_WT (git only, no host contact); rc 0 = all PASS
+g7b_selftest() {  # helper import + 40 retained, 23 G7a and 23 G7b exact-pair cases; git only, no host contact
   STEP=g7b-selftest
   local root fail=0 n=0 r live
   root=$(mktemp -d) || stop "mktemp"
@@ -1035,7 +1205,7 @@ g7b_selftest() {  # helper import check + 24 G7b and 12 G7a synthetic repos + th
   _base() {  # _base <case>: commit the working change in $r as the new OLD (no classification)
     "${_g[@]}" -C "$r" add -A && "${_g[@]}" -C "$r" commit -qm base || stop "selftest base $1"
   }
-  _expect() {  # _expect <case> <repo> <old> <new> <want: equal|floor_pending|none|D-G7A-1|STOP|ANY> [classifier, default g7b_classify]
+  _expect() {  # _expect <case> <repo> <old> <new> <want: equal|floor_pending|none|D-G7A-1|D-G7A-2|STOP|ANY> [classifier, default g7b_classify]
     n=$((n + 1))
     local got rc; got=$("${6:-g7b_classify}" "$2" "$3" "$4" 2>/dev/null); rc=$?; [ "$rc" -eq 0 ] || got=STOP
     if [ "$got" = "$5" ] || { [ "$5" = ANY ] && [ "$got" != STOP ]; }; then say "g7b-selftest $1: PASS ($got)"
@@ -1055,6 +1225,32 @@ g7b_selftest() {  # helper import check + 24 G7b and 12 G7a synthetic repos + th
     cp "$fe_a" "$d/$G7A_FE_PATH" && echo main > "$d/app/main.py" && echo old > "$d/README.md" || return 1
     "${_g[@]}" -C "$d" add -A && "${_g[@]}" -C "$d" commit -qm old || return 1
     echo "$d"
+  }
+  _capture_bundle() {  # _capture_bundle <directory> <fixed manifest>; actual source blobs, fixture bytes only
+    local d=$1 entries=$2 metadata file blob file_mode
+    while IFS=$'\t' read -r metadata file; do
+      blob=${metadata##* }; file_mode=${metadata%% *}
+      mkdir -p "$d/$(dirname "$file")" || return 1
+      git -C "$SEAT_WT" cat-file blob "$blob" > "$d/$file" || return 1
+      case "$file_mode" in
+        100644) chmod 644 "$d/$file" || return 1 ;;
+        100755) chmod 755 "$d/$file" || return 1 ;;
+        *) return 1 ;;
+      esac
+    done <<< "$entries"
+  }
+  _mkb() {  # _mkb <name>: an inert repository containing the complete D-G7A-2 OLD manifest
+    local d=$root/$1
+    mkdir -p "$d" && cp -R "$root/bundle.old/." "$d/" && echo old > "$d/README.md" \
+      && "${_g[@]}" -C "$d" init -q && "${_g[@]}" -C "$d" config core.filemode true \
+      && "${_g[@]}" -C "$d" add -A && "${_g[@]}" -C "$d" commit -qm old || return 1
+    echo "$d"
+  }
+  _newb() {  # _newb <repo>: only the three changed paths; stable scripts remain observable invariants
+    local file
+    while IFS= read -r file; do
+      cp "$root/bundle.new/$file" "$1/$file" && chmod 644 "$1/$file" || return 1
+    done <<< "$G7A_BUNDLE_PATHS"
   }
   local cmt=$'    # pytest 9.2.0 reds five existing tests at teardown; hold below 9.2\n'
   n=$((n + 1)); if "$PY_WT" -E -s -B "$WT_TOOL" --help > /dev/null 2>&1; then say "g7b-selftest c0_wt_tool: PASS (helper imports under -E -s -B)"; else say "g7b-selftest c0_wt_tool: FAIL ($PY_WT -E -s -B $WT_TOOL --help)"; fail=1; fi
@@ -1149,13 +1345,96 @@ g7b_selftest() {  # helper import check + 24 G7b and 12 G7a synthetic repos + th
     _expect a12_bad_rev "$r" 0000000000000000000000000000000000000001 "$(git -C "$r" rev-parse HEAD)" STOP g7a_classify
   _expect "a13_live_pr1422(OLD..${G7A_PR1422:0:9})" "$SEAT_WT" "$OLD" "$G7A_PR1422" D-G7A-1 g7a_classify
   _expect "a14_live(OLD..origin/master@${live:0:8})" "$SEAT_WT" "$OLD" "$live" ANY g7a_classify
+  # rev 3.7 / D-G7A-2: retain a1-a14 and qualify the complete six-path manifests.
+  _capture_bundle "$root/bundle.old" "$G7A_BUNDLE_OLD_ENTRIES" \
+    && _capture_bundle "$root/bundle.new" "$G7A_BUNDLE_NEW_ENTRIES" || stop "selftest: D-G7A-2 source blobs unavailable"
+  r=$(_mkb b1_exact_bundle) || stop "mk"; _newb "$r" || stop "bundle"; _run b1_exact_bundle D-G7A-2 g7a_classify
+  r=$(_mkb b2_bundle_unrelated) || stop "mk"; _newb "$r" || stop "bundle"; echo new > "$r/README.md"
+    _run b2_bundle_unrelated D-G7A-2 g7a_classify
+  local file tag oid
+  while IFS= read -r file; do
+    tag=${file##*/}; tag=${tag//./_}
+    r=$(_mkb "b3_wrong_old_$tag") || stop "mk"; echo '# unqualified OLD' >> "$r/$file"; _base "b3_wrong_old_$tag"
+      _newb "$r" || stop "bundle"; _run "b3_wrong_old_$tag" STOP g7a_classify
+    r=$(_mkb "b4_wrong_target_$tag") || stop "mk"; _newb "$r" || stop "bundle"; echo '# unqualified SHA' >> "$r/$file"
+      _run "b4_wrong_target_$tag" STOP g7a_classify
+  done <<< "$G7A_BUNDLE_PATHS"
+  r=$(_mkb b5_old_mode) || stop "mk"; chmod 755 "$r/app/main.py"; _base b5_old_mode
+    _newb "$r" || stop "bundle"; _run b5_old_mode STOP g7a_classify
+  r=$(_mkb b6_target_mode) || stop "mk"; _newb "$r" || stop "bundle"; chmod 755 "$r/app/main.py"
+    _run b6_target_mode STOP g7a_classify
+  r=$(_mkb b7_added) || stop "mk"; rm "$r/app/main.py"; _base b7_added
+    _newb "$r" || stop "bundle"; _run b7_added STOP g7a_classify
+  r=$(_mkb b8_deleted) || stop "mk"; _newb "$r" || stop "bundle"; rm "$r/app/main.py"; _run b8_deleted STOP g7a_classify
+  r=$(_mkb b9_reverted) || stop "mk"; _newb "$r" || stop "bundle"; cp "$root/bundle.old/$G7A_FE_PATH" "$r/$G7A_FE_PATH"
+    _run b9_reverted STOP g7a_classify
+  r=$(_mkb b10_renamed) || stop "mk"; _newb "$r" || stop "bundle"; mv "$r/app/main.py" "$r/app/main-renamed.py"
+    _run b10_renamed STOP g7a_classify
+  r=$(_mkb b11_reverse) || stop "mk"; _newb "$r" || stop "bundle"; _base b11_reverse
+    cp -R "$root/bundle.old/." "$r/" || stop "bundle"; _run b11_reverse STOP g7a_classify
+  r=$(_mkb b12_extra_mechanics) || stop "mk"; _newb "$r" || stop "bundle"; echo '# extra' >> "$r/scripts/deploy_code_to_vps.sh"
+    _run b12_extra_mechanics STOP g7a_classify
+  r=$(_mkb b13_foreign_stable_script) || stop "mk"; echo '# foreign on both sides' >> "$r/scripts/deploy_code_to_vps.sh"; _base b13_foreign_stable_script
+    _newb "$r" || stop "bundle"; _run b13_foreign_stable_script STOP g7a_classify
+  r=$(_mkb b14_missing_stable_script) || stop "mk"; rm "$r/scripts/deploy_code_to_vps.sh"; _base b14_missing_stable_script
+    _newb "$r" || stop "bundle"; _run b14_missing_stable_script STOP g7a_classify
+  r=$(_mkb b15_bad_old_rev) || stop "mk"
+    _expect b15_bad_old_rev "$r" 0000000000000000000000000000000000000001 "$(git -C "$r" rev-parse HEAD)" STOP g7a_classify
+  r=$(_mkb b16_bad_target_rev) || stop "mk"
+    _expect b16_bad_target_rev "$r" "$(git -C "$r" rev-parse HEAD)" 0000000000000000000000000000000000000001 STOP g7a_classify
+  r=$(_mkb b17_old_blob_unavailable) || stop "mk"; _newb "$r" || stop "bundle"
+    "${_g[@]}" -C "$r" add -A && "${_g[@]}" -C "$r" commit -qm new || stop "selftest commit b17"
+    oid=$(git -C "$r" rev-parse HEAD~1:app/main.py) && [ -f "$r/.git/objects/${oid:0:2}/${oid:2}" ] \
+      && rm "$r/.git/objects/${oid:0:2}/${oid:2}" || stop "selftest unread b17"
+    _expect b17_old_blob_unavailable "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" STOP g7a_classify
+  r=$(_mkb b18_target_blob_unavailable) || stop "mk"; _newb "$r" || stop "bundle"; _unread "$r" app/main.py || stop "selftest unread b18"
+    _expect b18_target_blob_unavailable "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" STOP g7a_classify
+  r=$(_mkb b19_stable_blob_unavailable) || stop "mk"; _newb "$r" || stop "bundle"; _unread "$r" scripts/deploy_code_to_vps.sh || stop "selftest unread b19"
+    _expect b19_stable_blob_unavailable "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" STOP g7a_classify
   rm -rf "$root"
+  _capture_bundle "$root/deps.old" "$G7B_JSONSCHEMA_OLD_ENTRIES" \
+    && _capture_bundle "$root/deps.new" "$G7B_JSONSCHEMA_NEW_ENTRIES" || stop "selftest: D-G7B-4 source blobs unavailable"
+  _mkd() {
+    local d=$root/$1
+    mkdir -p "$d" && cp -R "$root/deps.old/." "$d/" && echo old > "$d/README.md" \
+      && "${_g[@]}" -C "$d" init -q && "${_g[@]}" -C "$d" config core.filemode true \
+      && "${_g[@]}" -C "$d" add -A && "${_g[@]}" -C "$d" commit -qm old || return 1
+    echo "$d"
+  }
+  _newd() { cp -R "$root/deps.new/." "$1/"; }
+  r=$(_mkd d1_exact) || stop "mk"; _newd "$r" || stop "deps"; _run d1_exact equal
+  r=$(_mkd d2_added_mac) || stop "mk"; _newd "$r" || stop "deps"; _mac "$r" extra; _run d2_added_mac equal
+  r=$(_mkd d3_unrelated) || stop "mk"; _newd "$r" || stop "deps"; echo new > "$r/README.md"; _run d3_unrelated equal
+  local dp di=0
+  while IFS= read -r dp; do
+    di=$((di + 1))
+    r=$(_mkd "d4_wrong_old_$di") || stop "mk"; echo '# different old source' >> "$r/$dp"; _base "d4_$di"; _newd "$r" || stop "deps"; _run "d4_wrong_old_$di" STOP
+    r=$(_mkd "d5_wrong_new_$di") || stop "mk"; _newd "$r" || stop "deps"; echo '# different new source' >> "$r/$dp"; _run "d5_wrong_new_$di" STOP
+  done <<< "$SDK_TRIO"
+  r=$(_mkd d6_old_mode) || stop "mk"; chmod 755 "$r/pyproject.toml"; _base d6; _newd "$r" || stop "deps"; chmod 644 "$r/pyproject.toml"; _run d6_old_mode STOP
+  r=$(_mkd d7_new_mode) || stop "mk"; _newd "$r" || stop "deps"; chmod 755 "$r/requirements/gate-linux-x86_64-py312.lock"; _run d7_new_mode STOP
+  r=$(_mkd d8_extra_file) || stop "mk"; _newd "$r" || stop "deps"; echo extra > "$r/requirements/extra-linux.txt"; _run d8_extra_file STOP
+  r=$(_mkd d9_extra_dependency) || stop "mk"; _newd "$r" || stop "deps"; echo 'unexpected-dependency = "1"' >> "$r/pyproject.toml"; _run d9_extra_dependency STOP
+  r=$(_mkd d10_sdk_combination) || stop "mk"; _newd "$r" || stop "deps"; echo 'claude-agent-sdk>=0.2.120' >> "$r/pyproject.toml"; _run d10_sdk_combination STOP
+  r=$(_mkd d11_lock_pin) || stop "mk"; _newd "$r" || stop "deps"; echo 'another==1.2.3' >> "$r/requirements/gate-linux-x86_64-py312.lock"; _run d11_lock_pin STOP
+  r=$(_mkd d12_lock_option) || stop "mk"; _newd "$r" || stop "deps"; echo '--index-url https://invalid.example' >> "$r/requirements/gate-macos-arm64-py312.lock"; _run d12_lock_option STOP
+  r=$(_mkd d13_deleted_pyproject) || stop "mk"; _newd "$r" || stop "deps"; rm "$r/pyproject.toml"; _run d13_deleted_pyproject STOP
+  r=$(_mkd d14_renamed_gate) || stop "mk"; _newd "$r" || stop "deps"; mv "$r/requirements/gate-linux-x86_64-py312.lock" "$r/requirements/renamed-macos-arm64-py312.lock"; _run d14_renamed_gate STOP
+  r=$(_mkd d15_reverse) || stop "mk"; _newd "$r" || stop "deps"; _base d15
+    _expect d15_reverse "$r" HEAD HEAD~1 STOP
+  _expect d16_bad_old "$r" missing-old HEAD STOP
+  _expect d17_bad_new "$r" HEAD~1 missing-target STOP
+  r=$(_mkd d18_old_unreadable) || stop "mk"; _newd "$r" || stop "deps"; _base d18
+    oid=$(git -C "$r" rev-parse HEAD~1:pyproject.toml) && rm "$r/.git/objects/${oid:0:2}/${oid:2}" || stop "unread d18"
+    _expect d18_old_unreadable "$r" HEAD~1 HEAD STOP
+  r=$(_mkd d19_new_unreadable) || stop "mk"; _newd "$r" || stop "deps"; _unread "$r" pyproject.toml || stop "unread d19"
+    _expect d19_new_unreadable "$r" HEAD~1 HEAD STOP
   [ "$fail" = 0 ] || stop "g7b-selftest FAILED"
-  [ "$n" = 40 ] || stop "g7b-selftest ran $n cases, expected 40"
+  [ "$n" = 86 ] || stop "g7b-selftest ran $n cases, expected 86"
   say "g7b-selftest PASS ($n cases)"
 }
 
-g7a_check() {  # rev 3.6: s0's G7a on SEAT_WT origin/master as of its last fetch (git only, no host contact); the precheck's mirror of s0 0.5
+g7a_check() {  # rev 3.7: s0's G7a on SEAT_WT origin/master as of its last fetch (git only, no host contact); the precheck's mirror of s0 0.5
   STEP=g7a-check
   local live g7a why
   live=$(git -C "$SEAT_WT" rev-parse --verify -q origin/master) || stop "SEAT_WT origin/master unreadable"

@@ -1,0 +1,95 @@
+{
+  "schema": "pbr-w1-source-rulings/v1",
+  "mission": "Mastermind #1693 covering release; Persistent Sector Leadership #1202 consumer",
+  "original_branch": "claude/ssd-pbr-runtime-85f3de87bc7b8894",
+  "parent": "a2297d08e4f96d69fd7df1b02ad44bc51fa88678",
+  "qualified_target": "f32ad4eb198c9562be74f5bc051a8afbd3a049c6",
+  "installed_old": "ff16c192cc7b932e59c28c4fe30aeaf27bcb7595",
+  "driver_preimage_sha256": "d75178c08f7de1f943d17668e7e7f481a5ad416a7424cc96191d56c3de3658d5",
+  "runbook_preimage_sha256": "d945e6deecb5800fbfb436ffce4b5721c7f76cfd6aec67cc729409eeafe0e52d",
+  "source_sha256": {
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/install_w1.sh": "a796af3f194a5673716613511dde2f74404b8cd89fe37021380112138955abfb",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/INSTALL_RUNBOOK.md": "f60d98aec6238ef9f2122c6dd265b37b73fbc15508c57b30d9cfeed881b5312b",
+    "research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook/test_install_w1_jsonschema.py": "5f1b637da97e11c9b50caac473580f02bdea26d40ff62b690c5674d9ecd7a57d"
+  },
+  "rulings": {
+    "D-G7A-2": "Exact complete six-path OLD/target mode and blob manifests, unchanged deploy scripts; no path waiver.",
+    "D-G7B-4": "Exact complete pyproject/gate-lock pair, only jsonschema direct declaration already locked at OLD. T2 equal; distinct mode with fresh same-service-interpreter conditions before/after deployment. No pip, SDK or venv mutation."
+  },
+  "qualification": {
+    "syntax_rc": 0,
+    "source_selftest": {
+      "cases": 86,
+      "rc": 0,
+      "seconds": 23.783,
+      "log_sha256": "e44b282a6213a13c37610c3a41d215c93ab9baea363ba0b6fdd8d6f1530c24b0",
+      "driver_sha256": "a8ef7048dd85db3038d3ae6c2c9d86c342be8d2a42869e0f021d961a6fda0c03",
+      "scope_note": "Both classifiers, all86sourcefixtures and positive actual-target check unchanged after qualification; subsequent driver change only makes the bounded runtime response comparison JSON-type-exact, with two new wrong-type cases."
+    },
+    "actual_target_g7a": {
+      "rc": 0,
+      "mode": "D-G7A-2",
+      "log_sha256": "b9aa2a328c3d6850926a1c23562d3df0471fb4064b1a2fe5cd48a8e5ebef2cd9"
+    },
+    "runtime_condition_offline": {
+      "rc": 0,
+      "seconds": 6.649,
+      "driver_sha256": "a796af3f194a5673716613511dde2f74404b8cd89fe37021380112138955abfb",
+      "test_sha256": "5f1b637da97e11c9b50caac473580f02bdea26d40ff62b690c5674d9ecd7a57d",
+      "log_sha256": "1e9913f746d1d87397a855b5e2a90e69b38541fc0add288621f8602f15659f83",
+      "tail": [
+        "----------------------------------------------------------------------",
+        "Ran 12 tests in 6.572s",
+        "",
+        "OK"
+      ]
+    },
+    "initial_g7a_only": {
+      "rc": 1,
+      "pass_cases": 62,
+      "fail_cases": 1,
+      "cause": "Unchanged live G7b composition gate refused new jsonschema declaration; retained, not relabeled as pass.",
+      "log_sha256": "83bf437146973a91b0053642281e6df65a9ec6a54e95ca080e89d72bb2e1b47f"
+    },
+    "initial_runtime_fixture": {
+      "tests": 12,
+      "failures": 6,
+      "cause": "Prototype required an optional date-time checker outside the current exact-window contract. Replaced with actual dossier as_of date and impossible-calendar-date discriminator; no dependency installed, no validator weakened."
+    },
+    "runtime_condition_offline_before_type_check": {
+      "rc": 0,
+      "seconds": 6.244,
+      "driver_sha256": "a8ef7048dd85db3038d3ae6c2c9d86c342be8d2a42869e0f021d961a6fda0c03",
+      "test_sha256": "ce6ce02697dceb89504a33f3950c4dd787b00ee0ee11d5538760c7e4cdf2cd18",
+      "log_sha256": "31c77e6ee8872d9e184bb3977b21bf469ef1652c22f8634ef1c1ce466302b51a",
+      "tail": [
+        "----------------------------------------------------------------------",
+        "Ran 12 tests in 6.171s",
+        "",
+        "OK"
+      ]
+    }
+  },
+  "historical_service_evidence": {
+    "directory": "/Volumes/Mastermind/evidence/pbr/install-20261102T0338Z_19cb00cf",
+    "dists_bytes": 1390,
+    "dists_sha256": "d9350e8738ee374d4393d968b7f2cf98f1b8687abbc6f5919c5e6164d9d2bcab",
+    "jsonschema_version": "4.26.0",
+    "meaning": "Historical metadata only, not current import or runtime proof; installed rpds-py differs from locks."
+  },
+  "self_review": "SELF_REVIEWED with read-only C3 judgment; not a GitHub APPROVED review",
+  "effects": {
+    "ssh_or_vps_query": false,
+    "source_workspace_edited": false,
+    "runtime_pin_changed": false,
+    "wake_changed": false,
+    "deployment_started": false
+  },
+  "retained_evidence": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/w1-source-rulings/rev37-qualified-candidate",
+  "remaining": [
+    "Original-owner source pin/wake reconciliation",
+    "November 9 window and original live gates",
+    "Fresh T2 compatibility at s1/prelaunch/s4",
+    "Exact covering release identity and natural consumer proof"
+  ]
+}

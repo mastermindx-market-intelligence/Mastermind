@@ -6,6 +6,7 @@ PBR #1693, RUNTIME lane. **Commands only.** RUNTIME executed nothing on the host
 |---|---|
 | Approval | Seat ruling 2026-10-22: Option A, conditional; needrestart exclusion approved as a release-row item; the SDK pin is NOT in this window. **Rev 3 (2026-11-02, seat takeover of the RUNTIME lane):** the 2026-10-23 window was lost (the seat session died at the Fable usage limit 18:02Z 10-22 before its 03:25Z wake; no s0 ran; nothing was installed: `.deployed_git_sha` = OLD on 11-02 01:19Z). Re-run Mon 2026-11-02 with `PBR_DAY=2026-11-02` on s0 (same timeline, same gates, same hold); G7b widened by seat ruling D-G7B-1 and a git-only `g7b-selftest` step added; the s0 worktree-helper call drops `-I` (Python 3.14 isolated mode implies `-P`, which hides the helper's sibling `pool_storage` module, so rev 2 failed at s0 step 0.1 on the seat Mac); nothing else changed. **Rev 3.1 (2026-11-02, after independent review r1 = PASS_WITH_MINORS, no MAJOR):** the pyproject/lock line filters now count column-0 option lines (`-r`, `--index-url`, `-e`) as body lines and drop only the `---`/`+++` diff headers; the s0 helper call runs under `-E -s -B` (env and user-site isolation kept, the script directory still visible); `PBR_DAY=YYYY-MM-DD` is required (the stale 2026-10-23 default is gone); the selftest gains c9 (SDK floor outside the 0.2 series → STOP) and c10 (column-0 lock option line → STOP) and removes its temp dir on any stop. **Rev 3.2 (2026-11-02 03:50Z, after s1 ABORTed at `run_events read` on the live file's 10 pre-existing unparsed rows):** `events_tail` gains the D-EVT-1 pre-filter (G1 row, §7 note 10); nothing else changed. **Rev 3.3 (2026-11-02, after independent review r3 of rev 3.2 = PASS_WITH_MINORS, no MAJOR):** pre-filter hardening only — non-UTF-8 bytes pass through the pre-filter unchanged and such a row counts as unparsed (r3 MINOR-2: strict decoding would have crashed the step on a corrupt row that D-EVT-1 means to tolerate); the trusted `"ts"` prefix must carry the host's `+00:00` suffix (r3 NIT); and whenever the pre-filter reports `dropped_before_threshold > 0` the seat records the `DROPPED` head bytes from `logs/unparsed_rows.log` in the ledger after s1 and after s2 (r3 MINOR-1: a drop is tamper-evident, never silent). Nothing else changed. **Rev 3.4 (2026-11-03, seat ruling D-G7B-2):** the 2026-11-03 window was skipped at the 03:00Z precheck — `g7b-selftest` c8_live STOPped because #1362 (`0b3708856943ba9479c4ad968399d85c5bfc65a9`) added `requirements/executive-control-aead-macos-arm64-py312.{in,lock}` to master, a file pair outside the trio; no step ran and nothing touched the host. G7b now admits a requirements file *added* since OLD (absent at OLD; renames are split into delete + add) named `<stem>-macos-arm64-py312.{in,lock}` directly under `requirements/` and not named `gate-*`: the Linux deploy never pip-installs (T2 must show an unchanged venv) and `scripts/deploy_code_to_vps.sh` rsyncs with `--exclude='*.lock'`, so such a file cannot change the VPS runtime. s0 lists the admitted paths in `gates/G7b.RULING`. The non-comment lock-line count now reads only the two gate locks. The selftest gains c11–c19 (20 cases). Re-run Wed 2026-11-04 with `PBR_DAY=2026-11-04`. Nothing else changed. **Rev 3.5 (2026-11-05, seat ruling D-G7B-3, after independent review r5o of rev 3.4 = PASS_WITH_MINORS, no MAJOR):** the 2026-11-04 window was missed (the host slept through the session wakes) and the 2026-11-05 window was skipped at the 04:09Z precheck — `g7b-selftest` c8_live STOPped because #1909 (`7d6acb68`) regenerated both gate locks with header-comment-only changes while `pyproject.toml` stayed unchanged since OLD, a drift set outside the trio; no step ran and nothing touched the host. G7b now sends a drift that is a non-empty subset of the two gate locks (pyproject unchanged) to the existing non-comment lock-line check alone: 0 lines → `T2_MODE=equal`, any pin/extra/hash/option line → STOP. Folded r5o findings: the D-G7B-2 `comm` step must exit 0 and drop exactly as many lines as it admitted, else STOP (MINOR 1); the G7b row's rename wording is corrected (MINOR 2); the `gate-*` exclusion is case-insensitive; the `-U0` diffs run `--text --no-textconv --no-ext-diff`; and the s0 RULING text notes that an admitted `.in` is rsynced but never consumed (only `*.lock` is rsync-excluded). The selftest gains c20–c22 (23 cases). Re-run Fri 2026-11-06 with `PBR_DAY=2026-11-06`. Nothing else changed. **Rev 3.6 (2026-11-06, seat ruling D-G7A-1, after independent review r6 of rev 3.5 = PASS_WITH_MINORS, no MAJOR):** the 2026-11-06 window ABORTed at s0 G7a (03:38:37Z; no host step ran and nothing touched the host): #1422 (`b796d4505`) changed `portfolio/forward_evaluation.py` between OLD and SHA (blob `46031e40` → `13d15e91`, one hunk in `_current_exposure_metrics` on the `build_snapshot` path), which is a MECH path. The seat traced the hunk and found it inert: no deploy probe in `scripts/deploy_code_to_vps.sh` (status, init, finalize) reaches it, nor do this runbook's G4/G6 mirrors; `statuses` always carries `latest` (evidence `runtime-rev36-build-20261106T0607Z/G7A_forward_evaluation_trace.md`). G7a now admits exactly that mode+blob pair at OLD/SHA (`G7A_MODE=D-G7A-1`, recorded in `gates/G7a.RULING`). Any other blob or mode for that file, a change to any other MECH path, or a failed git read still STOPs. Folded r6 findings: the pyproject and gate-lock diff pipelines now check `PIPESTATUS`, so a git failure STOPs instead of reading as an empty diff (MINOR); the gate-lock diff runs with `--no-renames` (NIT); the s0 step-6 wording now says no non-comment lock line changed (NIT). A git-only `g7a-check` step joins the precheck. The selftest gains c23–c25 and a1–a14 (40 cases). Re-run Mon 2026-11-09 with `PBR_DAY=2026-11-09`. Nothing else changed. |
 | Executor | The seat. The deploy key is Mac-held. |
+| Source amendment | **Rev 3.7 (2026-11-07, D-G7A-2 and conditional D-G7B-4):** the assigned integration session adds one exact six-path OLD/SHA manifest for the three adjudicated mechanics changes. The old `none` and D-G7A-1 cases remain. The exact already-locked jsonschema declaration gains fresh same-interpreter conditions at s1/prelaunch/s4; T2 stays equal with no package installation. This is source qualification; it does not release the November 9 window, G7b/G8, live-idle/WAL/outbox, overnight, marker or authority gates. See the fixed manifest and qualification below. |
 | Inputs | `INSTALL_PROOF_PLAN.md` §1 (T1–T4), §2, §4, §5 and §7. |
 | Driver | `runbook/install_w1.sh`. One subcommand per step. State lives in `$PBR_EV/state.env`, so every step runs from a fresh, stateless shell. |
 
@@ -21,6 +22,105 @@ PBR #1693, RUNTIME lane. **Commands only.** RUNTIME executed nothing on the host
 | Merge-queue hold | **No merge to `master` from 03:30Z until s3 has launched (to be safe, until 05:40Z).** Master is shared with non-PBR work (fabric and Executive OS merged at ~13:00Z on 10-22). If master moves after s0, G8 fails at s2/s3, and the wrapper would refuse anyway (rc 2). Recovery before 05:20Z: a new `s0` (new evidence dir), `s1`, then `s2`. |
 | Never | Touch `/opt/mastermind-live-data`; rsync/scp toward the VPS outside the repo's deploy script; re-run s3; deploy a third SHA; copy `.env`/keys; run the SDK pin. |
 
+### D-G7A-2: exact six-path source ruling (rev 3.7)
+
+This additional case admits exactly the following OLD/target modes and blobs,
+with **only** the first three paths changed. Every entry on both sides must be
+present and its blob readable. It preserves the old `none` and sole D-G7A-1
+cases; it does not allow arbitrary combinations or caller-selected hashes.
+
+| Path | Mode on both sides | OLD blob | Target blob |
+|---|---|---|---|
+| `app/main.py` | `100644` | `fdb22dc1a2650ff57d50a1c9c1cfebcf10521da4` | `6106ff3dd2d55ba4f9eebe0440388fe2e446931c` |
+| `app/scheduler.py` | `100644` | `ec2546731d69289b5af4837a6d1eefe59caf9b37` | `50dca31c852e9abe332bd9e191ff900e6c1fcdb3` |
+| `portfolio/forward_evaluation.py` | `100644` | `46031e40a2510b49cd4d3dce23a5ed05cc759213` | `13d15e91823d2b46b97dd4057c04d6c8628a29e0` |
+| `scripts/deploy_code_to_vps.sh` | `100755` | `f871e88815e70338a646008dbe77dfcc1727e978` | `f871e88815e70338a646008dbe77dfcc1727e978` |
+| `scripts/deploy_from_git.sh` | `100755` | `f40e7895e88b0cd755fb7ef9b41a4783a1df4ed9` | `f40e7895e88b0cd755fb7ef9b41a4783a1df4ed9` |
+| `scripts/refresh_datadog_release_tag.sh` | `100755` | `a7a32713ef1477d1b84398ff24c6b9fda938831e` | `a7a32713ef1477d1b84398ff24c6b9fda938831e` |
+
+At protected source `320611cbd7eca66af86a09d0c6f7622f229bdf73`, these are
+the exact manifests against installed OLD
+`ff16c192cc7b932e59c28c4fe30aeaf27bcb7595`. This is a qualification target,
+not the future deployment SHA: November 9 s0 must freeze and re-evaluate its
+actual target, and G8 must still prove it remains current.
+
+`app/main.py` changes `/chat` and `/research` dispatch/recovery behavior.
+`_runtime_health`, `_start_scheduler`, `health` and `ready` retain their source;
+the W1 probes do not invoke the changed handlers. `app/scheduler.py` changes
+Self-Directed daily-mark failure handling: a failed or unavailable mark skips
+publication and retains the existing FREEZE event path, with cleanup in the
+existing `finally` block. Schedule registration, startup, cohort and deployment
+probes are unchanged. This later business-job behavior is intentional; the
+release as a whole is not inert. The forward-evaluation hunk keeps the existing
+D-G7A-1 rationale.
+
+s0 writes the actual OLD and SHA, all six mode/blob pairs, changed and unchanged
+paths, the bounded impact rationale and retained gates to `gates/G7a.RULING`.
+The positive `g7a-check` uses the same classifier. G7b, G8, the November 9
+window, live-idle/WAL/outbox checks, overnight duties, active forward marker and
+authority bytes remain required. A source PASS does not update `PIN.accepted`,
+rebind a wake or authorize s3. Runtime dependency drift remains G7b's separate
+decision, including the newly declared `jsonschema>=4.26,<5` at this source.
+
+### D-G7B-4: exact already-locked declaration; runtime condition pending (rev 3.7)
+
+The fixed declaration added by #2060 (`32a354c3dd77751e206a80b2abc4e497efdbe5e6`)
+is `jsonschema>=4.26,<5`, including its exact inline comment. Both OLD gate
+locks already pin `jsonschema==4.26.0`. The complete mode/blob pairs below are
+required; all six blobs must be readable, the remaining dependency path set
+must be exactly the trio after D-G7B-2 additions, no SDK-floor change may
+accompany it, and the existing fail-closed non-comment lock comparison must
+still pass. This does not admit other declarations, lock regenerations or a
+caller-selected package/version.
+
+| Path | Mode on both sides | OLD blob | Target blob |
+|---|---|---|---|
+| `pyproject.toml` | `100644` | `7f97e053ea7afd287ceec36d33a37faea85283eb` | `622259d33f04d40907075430c5228d6fbba2bae1` |
+| `requirements/gate-linux-x86_64-py312.lock` | `100644` | `d7a925849235a42f088ba359e0308847a9316fcd` | `87471eec3fe0d41a1655411ec05be5e6519ab584` |
+| `requirements/gate-macos-arm64-py312.lock` | `100644` | `3db3c9bdee75dd0212f24a252a8d002cf6f73992` | `53d9429e5f8bdf701f98d798b34fdf79afaf003c` |
+
+s0 records `T2_MODE=equal`, distinct `G7B_MODE=D-G7B-4` and **RUNTIME CONDITION
+PENDING** in the existing attempt. The previous G7b cases remain `G7B_MODE=legacy`.
+The condition is re-derived from frozen OLD/SHA at each affected runtime step;
+missing or mismatched attempt state cannot downgrade it to ordinary equality.
+
+The original ledger-linked November 2 capture
+`install-20261102T0338Z_19cb00cf/identity/pre/dists.txt` (1,390 bytes,
+SHA256 `d9350e8738ee374d4393d968b7f2cf98f1b8687abbc6f5919c5e6164d9d2bcab`)
+records `jsonschema==4.26.0` under the pinned `remote_dists.py` and service
+venv. This proves historical metadata only. It does not prove current presence,
+imports or equality to the locks; its `rpds-py` version differs from the locks.
+The release preserves the actual installed venv, without pip or an SDK change.
+
+At s1, the existing fresh T2 distribution list must contain exactly one
+`jsonschema==4.26.0` entry. A fixed library-only fragment uses
+`/opt/mastermind/.venv/bin/python -I -B`, verifies that interpreter and the
+service's actual ExecStart path, imports `Draft202012Validator`/`FormatChecker`,
+constructs a Draft 2020-12 schema and exercises valid/invalid values for the
+Sector consumer's structural checks and `as_of` date format. The existing
+nullable decision cutoff is null. The exact-session consumer uses its stdlib
+clock/date checks without a FormatChecker; an optional RFC3339 date-time
+checker is not a new installation requirement. This fragment never imports the
+application or reads/writes portfolio state and makes no provider call.
+
+Before s3, it freshly reads distributions again, requires complete equality to
+s1, validates the prior proof's attempt/target/source bindings and repeats the
+compatibility probe with a new nonce. **The existing `gates_all` runs after
+this added work**, followed by the final host-clock/window check; only then
+may `DEPLOY_T0` and `deploy.started` be written. The remote fragment has a
+15-second timeout and local transport a 40-second timeout. Each response must
+match the current nonce, attempt, phase, target, driver/program/distribution
+hashes, interpreter identity and exact result shape; a stale-only or copied
+response cannot satisfy the condition.
+
+s4 repeats compatibility alongside full pre/post distribution equality. A T2
+failure retains the existing no-rollback-without-seat disposition even when
+another post-install proof also fails. Proofs stay in the original attempt's
+`identity/{pre,prelaunch,post}/jsonschema.compatibility.json`; no new owner,
+scheduler, retry or installation path is created. The November 9 window, G7a,
+G8, live-idle/WAL/outbox, overnight and marker/authority gates remain unchanged.
+Actual post-install Sector consumption is still separate acceptance evidence.
+
 ## 1. Bootstrap, pins and conventions
 
 ### Pins
@@ -29,7 +129,7 @@ These are sha256 values. s0 re-verifies the three helpers; a mismatch aborts.
 
 | File | sha256 |
 |---|---|
-| `runbook/install_w1.sh` | `d75178c08f7de1f943d17668e7e7f481a5ad416a7424cc96191d56c3de3658d5` |
+| `runbook/install_w1.sh` | `a796af3f194a5673716613511dde2f74404b8cd89fe37021380112138955abfb` |
 | `runbook/pbr_rb.py` | `536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac` |
 | `runbook/remote_blob_manifest.py` | `49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf` |
 | `runbook/remote_dists.py` | `b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0` |
@@ -44,7 +144,7 @@ RB=research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook
 B=$(mktemp -d)
 git -C "$SEAT_WT" fetch -q origin claude/ssd-pbr-runtime-85f3de87bc7b8894
 git -C "$SEAT_WT" show "FETCH_HEAD:$RB/install_w1.sh" > "$B/install_w1.sh"
-echo "d75178c08f7de1f943d17668e7e7f481a5ad416a7424cc96191d56c3de3658d5  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
+echo "a796af3f194a5673716613511dde2f74404b8cd89fe37021380112138955abfb  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
 env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> PBR_DAY=2026-11-09 /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 # s0's last line prints:  export PBR_EV=/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>
 ```
@@ -122,15 +222,15 @@ env -u PBR_EV OPERATOR_SESSION_ID=<id> PBR_DAY=2026-11-09 /opt/homebrew/bin/bash
 5. Records tool versions and runs a local-only rsync flag probe.
 6. Runs the composition gates:
    - **G7**: OLD is an ancestor of SHA.
-   - **G7a**: the mechanics diff is empty (`G7A_MODE=none`), or (rev 3.6, D-G7A-1) it is exactly `portfolio/forward_evaluation.py` with the pinned OLD/SHA mode+blob pair (`G7A_MODE=D-G7A-1`, `gates/G7a.RULING`). The precheck runs `g7a-check` first. It is git only and reads SEAT_WT `origin/master`, and it must print `g7a-check PASS`.
-   - **G7b**: dependency drift is empty, exactly the #1714 trio with only the `claude-agent-sdk>=0.2` floor changed, or (rev 3, D-G7B-1) the trio with only the dev pytest bound and comment-only gate locks; (rev 3.4, D-G7B-2) any of these plus added macOS-arm64 platform files; (rev 3.5, D-G7B-3) with pyproject unchanged, one or both gate locks changed with no non-comment lock line changed (comment-only or metadata-only). This sets `T2_MODE`. Run `g7b-selftest` (40 cases: the helper import check, 24 G7b and 12 G7a synthetic git repos and three live reads of SEAT_WT; no host contact) before s0; it must print `g7b-selftest PASS`.
+   - **G7a**: the mechanics diff is empty (`G7A_MODE=none`), the existing sole D-G7A-1 forward-evaluation pair, or the complete D-G7A-2 manifest below (`G7A_MODE=D-G7A-2`). The latter requires exactly three changed paths, both full six-path mode/blob manifests and readable referenced blobs. s0 records actual frozen OLD/SHA, all six pairs and the bounded impact rationale in `gates/G7a.RULING`. The precheck runs the same classifier through `g7a-check`; it is Git-only, reads SEAT_WT `origin/master`, and must print `g7a-check PASS`.
+   - **G7b**: dependency drift is empty, exactly the #1714 trio with only the `claude-agent-sdk>=0.2` floor changed, or (rev 3, D-G7B-1) the trio with only the dev pytest bound and comment-only gate locks; (rev 3.4, D-G7B-2) any of these plus added macOS-arm64 platform files; (rev 3.5, D-G7B-3) with pyproject unchanged, one or both gate locks changed with no non-comment lock line changed (comment-only or metadata-only). This sets `T2_MODE`. The exact D-G7B-4 pair additionally requires the conditional T2 checks above. Run `g7b-selftest` (86 cases: 40 retained, 23 D-G7A-2 and 23 D-G7B-4 discriminators; no host contact) before s0; it must print `g7b-selftest PASS`.
 7. Writes `identity/old_to_sha.name-status.txt`.
 
 **PASS output**
 
 ```
 GATE G7 PASS
-s0 PASS: SHA=<40 hex> T2_MODE=equal|floor_pending G7A_MODE=none|D-G7A-1 WT=<path>
+s0 PASS: SHA=<40 hex> T2_MODE=equal|floor_pending G7A_MODE=none|D-G7A-1|D-G7A-2 G7B_MODE=legacy|D-G7B-4 WT=<path>
 export PBR_EV=<path>
 ```
 
@@ -143,8 +243,8 @@ Check that SHA equals the master the seat expects at the hold. Check that `$PBR_
 | Environment override, missing session id, weekend day | Fix and re-run s0. |
 | Worktree creation failed, or HEAD != remote master (master moved during s0) | Remove the new worktree and re-run s0. |
 | Helper pin mismatch | STOP, ask RUNTIME. |
-| G7a non-empty, other than the exact D-G7A-1 `forward_evaluation.py` pair (any other MECH path, or any other blob or mode for that file), or a G7a git read failure | Seat ruling. The runbook's mirrors of the deploy mechanics would be stale. |
-| G7b drift beyond the trio (other than D-G7B-2 added macOS-arm64 platform files) and beyond the D-G7B-3 gate-lock subset, a non-comment gate-lock change without the SDK floor, a D-G7B-2 `comm` failure or count mismatch, a pyproject line other than the SDK floor / the ruled dev bound, or (rev 3.6, r6 MINOR) a failed pyproject or gate-lock diff | STOP, seat. |
+| G7a non-empty outside the exact D-G7A-1 pair or complete D-G7A-2 manifest; any foreign/missing mode/blob, additional mechanics path or Git/object read failure | STOP for a source ruling. The runbook's mechanics mirrors are not admitted. |
+| G7b drift beyond the trio (other than D-G7B-2 added macOS-arm64 platform files) and beyond the D-G7B-3 gate-lock subset, a non-comment gate-lock change without the SDK floor, a D-G7B-2 `comm` failure or count mismatch, a pyproject line other than the SDK floor / the ruled dev bound / the complete exact D-G7B-4 pair, or (rev 3.6, r6 MINOR) a failed pyproject or gate-lock diff | STOP, seat. |
 
 ### s1: pre-change capture (read-only)
 
@@ -159,7 +259,7 @@ PBR_EV=… /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.s
 | `systemctl show mastermind.service` (12 props) | `captures/pre/systemctl_show.txt` |
 | The ExecStart path, and the EnvironmentFiles **names only** | |
 | T3: sha256 of the unit fragment + drop-ins | `identity/pre/unit_sha256.txt` |
-| T2: venv dist list | `identity/pre/dists.txt`; must contain `claude-agent-sdk==` and `anthropic==` |
+| T2: venv dist list | `identity/pre/dists.txt`; must contain `claude-agent-sdk==` and `anthropic==`. D-G7B-4 additionally requires `jsonschema==4.26.0` and fresh `identity/pre/jsonschema.compatibility.json`. |
 | T1: blob manifest of `/opt/mastermind`, compared with `git ls-tree OLD` | `rb t1 … --sha OLD` must PASS with `marker_claim_matches: true` |
 | T1 against SHA, as a prediction | `identity/pre_vs_sha/` (expected FAIL: differing+missing are the paths the deploy will write) |
 | Book state: sha256/stat of account, fills, decisions, pending_target and paper_transaction for autonomous/china/hk, plus receipt counts | `captures/pre/book_state.txt` |
@@ -260,7 +360,7 @@ PBR_EV=… /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.s
 | Check | PASS condition |
 |---|---|
 | **T1** | The blob manifest equals `git ls-tree SHA`, and `.deployed_git_sha` claims SHA (`identity/post/t1_verdict.json`). |
-| **T2** | `identity/pre/dists.txt` == `identity/post/dists.txt`. The deploy never touches `.venv`. |
+| **T2** | `identity/pre/dists.txt` == `identity/post/dists.txt`. The deploy never touches `.venv`. D-G7B-4 also requires fresh same-interpreter post-install compatibility; any T2 failure keeps the no-rollback hold. |
 | **T3** | Unit and drop-in hashes are unchanged, except `81-datadog-version.conf`. That file must hash to `[Service]\nEnvironment=DD_VERSION=<SHA>\n` (when `80-datadog.conf` exists). `NeedDaemonReload=no`. |
 | **T4** | The loaded process started at or after `DEPLOY_T0`, from the T1-proven tree (`rb t4`). |
 | /health | Reports SHA. |
@@ -465,7 +565,7 @@ It is launched detached and logs to `rollback/rc.deploy.log`. It is classified l
 ## 5. Evidence layout (`$PBR_EV` = `/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>/`)
 
 ```
-state.env                    CAPTURE_ID SHA WT DAY T2_MODE DEPLOY_T0 DEPLOY_RC SNAP INSTALLED ROLLED_BACK
+state.env                    CAPTURE_ID SHA WT DAY T2_MODE G7A_MODE G7B_MODE DEPLOY_T0 DEPLOY_RC SNAP INSTALLED ROLLED_BACK
 tools/                       install_w1.sh + the 3 pinned helpers
 logs/                        runbook.log stops.log pins.txt tools.txt rsync_flag_check.txt
                              deploy.log deploy.stdout deploy.rc deploy.pid deploy.started close_verdict.json
@@ -526,7 +626,10 @@ manifest.json                sha256 of every file (s6)
 - needrestart verify: a fake conf gives rc 3 before, rc 0 after, rc 4 on a parse error. The regex matches `mastermind(.service)`, not `mastermind-restart.service`.
 - `pbr_rb` gates/app-started/t1/t4/health/cycle/close against dated fixtures.
 - G1/G2E waiver paths.
-- `g7b-selftest`: c0 worktree helper imports under `-E -s -B`; c1 unrelated → equal; c2 SDK floor → floor_pending; c3 dev bound + header-only locks → equal; c4 dev bound + lock pin → STOP; c5 other dependency → STOP; c6 extra requirements file → STOP; c7 SDK + dev → floor_pending; c9 SDK floor 0.3 → STOP; c10 column-0 `--index-url` lock line → STOP; (rev 3.4) c11 added macOS-arm64 `.in`/`.lock` pair → equal; c12 dev bound + header-only gate locks + added macOS pair (the 2026-11-03 master shape) → equal; c13 SDK floor + added macOS pair → floor_pending; c14 added `-linux-x86_64-py312.lock` → STOP; c15 added `gate-extra-macos-arm64-py312.lock` → STOP; c16 pre-existing macOS lock modified → STOP; c17 pre-existing macOS `.in` deleted → STOP; c18 `extra.txt` renamed onto a macOS lock name → STOP; c19 macOS lock in a subdirectory → STOP; (rev 3.5) c20 both gate locks header-only, pyproject unchanged (the 2026-11-05 #1909 shape) → equal; c21 one gate lock header-only → equal; c22 gate-lock pin change, pyproject unchanged → STOP; (rev 3.6, r6 MINOR/NIT) c23 gate-lock blob unreadable at SHA → STOP; c24 pyproject blob unreadable at SHA → STOP; c25 one gate lock moved onto the other gate-lock name (delete + add) → STOP; c8 live OLD→origin/master → not STOP; (rev 3.6, D-G7A-1, the G7a classifier) a1 unrelated change → none; a2 the exact `forward_evaluation.py` pair → D-G7A-1; a3 the pair plus an unrelated change → D-G7A-1; a4 another new blob → STOP; a5 another old blob → STOP; a6 the pair plus `app/main.py` → STOP; a7 `app/main.py` alone → STOP; a8 file deleted → STOP; a9 file added → STOP; a10 the pair with mode 100755 → STOP; a11 the pair reversed → STOP; a12 a bad OLD revision (git failure) → STOP; a13 live OLD→#1422 `b796d4505` → D-G7A-1; a14 live OLD→origin/master → not STOP. The step also checks that exactly 40 cases ran. Rev 3.6 mutation check: 10 one-edit mutants of the new guards each fail on their predicted cases. One equivalent mutant survives: dropping the ls-tree rc guards changes nothing, because an empty entry still STOPs (evidence `runtime-rev36-build-20261106T0607Z/mutation-table.md`).
+- `g7b-selftest`: c0 worktree helper imports under `-E -s -B`; c1 unrelated → equal; c2 SDK floor → floor_pending; c3 dev bound + header-only locks → equal; c4 dev bound + lock pin → STOP; c5 other dependency → STOP; c6 extra requirements file → STOP; c7 SDK + dev → floor_pending; c9 SDK floor 0.3 → STOP; c10 column-0 `--index-url` lock line → STOP; (rev 3.4) c11 added macOS-arm64 `.in`/`.lock` pair → equal; c12 dev bound + header-only gate locks + added macOS pair (the 2026-11-03 master shape) → equal; c13 SDK floor + added macOS pair → floor_pending; c14 added `-linux-x86_64-py312.lock` → STOP; c15 added `gate-extra-macos-arm64-py312.lock` → STOP; c16 pre-existing macOS lock modified → STOP; c17 pre-existing macOS `.in` deleted → STOP; c18 `extra.txt` renamed onto a macOS lock name → STOP; c19 macOS lock in a subdirectory → STOP; (rev 3.5) c20 both gate locks header-only, pyproject unchanged (the 2026-11-05 #1909 shape) → equal; c21 one gate lock header-only → equal; c22 gate-lock pin change, pyproject unchanged → STOP; (rev 3.6, r6 MINOR/NIT) c23 gate-lock blob unreadable at SHA → STOP; c24 pyproject blob unreadable at SHA → STOP; c25 one gate lock moved onto the other gate-lock name (delete + add) → STOP; c8 live OLD→origin/master → not STOP; (rev 3.6, D-G7A-1, the G7a classifier) a1 unrelated change → none; a2 the exact `forward_evaluation.py` pair → D-G7A-1; a3 the pair plus an unrelated change → D-G7A-1; a4 another new blob → STOP; a5 another old blob → STOP; a6 the pair plus `app/main.py` → STOP; a7 `app/main.py` alone → STOP; a8 file deleted → STOP; a9 file added → STOP; a10 the pair with mode 100755 → STOP; a11 the pair reversed → STOP; a12 a bad OLD revision (git failure) → STOP; a13 live OLD→#1422 `b796d4505` → D-G7A-1; a14 live OLD→origin/master → not STOP. Rev 3.6 checked exactly 40 cases; rev 3.7 retains them and requires exactly 86 after 23 G7a and 23 G7b additional cases. Rev 3.6 mutation check: 10 one-edit mutants of the new guards each fail on their predicted cases. One equivalent mutant survives: dropping the ls-tree rc guards changes nothing, because an empty entry still STOPs (evidence `runtime-rev36-build-20261106T0607Z/mutation-table.md`).
+- **Rev 3.7 D-G7A-2 cases:** exact bundle and unrelated changes pass; each of the three changed paths with a wrong OLD or target blob refuses; wrong OLD/target mode, add, delete, individual revert, rename and reverse bundle refuse; extra mechanics, a foreign stable script on both sides and a stable script absent on both sides refuse; bad OLD/target revisions and unavailable OLD/target/stable blobs refuse. Existing a1–a14 remain unchanged. `a14_live` accepts ANY non-STOP outcome and does not replace a positive exact-target `g7a-check`. The full selftest remains a live composition gate: an unrelated G7b refusal is retained, not changed into a fixture PASS.
+- **Rev 3.7 D-G7B-4 cases:** exact trio, added admitted macOS files and unrelated files pass; each wrong OLD/target source, modes, extra requirement/dependency/SDK drift, lock pin/option, delete/rename/reverse, bad revisions and unreadable source blobs refuse. The live composition case is unchanged.
+- **Rev 3.7 conditional runtime suite:** `runbook/test_install_w1_jsonschema.py` uses a local fake SSH executable and the real installed validator, with no host contact. It covers valid pre/prelaunch/post proofs; missing/wrong/duplicate metadata; import/API/date-format/interpreter/service failures; malformed/oversized/stale response; missing/copied/mismatched baseline/state; prelaunch distribution drift; repeated current compatibility before launch; unchanged final live-gate/clock ordering; lost window; and exactly-once launch. Previous qualification results below describe their original revisions, not new live execution.
 - `g7a-check` (rev 3.6): runs s0's G7a classifier on SEAT_WT `origin/master` (git only). On 2026-11-06 06:25Z it printed `g7a-check PASS (origin/master@c09866e6: G7A_MODE=D-G7A-1)`.
 - G3 against a fake host with systemd-255-shaped stubs (`systemctl show` prints a date whatever the flags; `busctl` prints `t <µs>`), 9/9 cases plus 4 assertions:
   - the observed 14:21Z value (06:33:10Z) → PASS; the redrawn 14:24Z value (06:53:33Z) → PASS; exactly 05:55:00Z → PASS;
