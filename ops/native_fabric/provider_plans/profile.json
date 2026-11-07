@@ -252,13 +252,13 @@
       "patch_sha256": "58be497624ade12e46fed03385a9bf5b339bf7130ee72a80e1be8b7a65836daa"
     },
     "ext/remote_sub.sh": {
-      "after": "596e7e56ba6d9b1508b2e37083f07fb2ae2e6d13976eac822584b3260bb91858",
+      "after": "1b181b47e0d149c7a2b01218e3d49e85dfb461f005f527af9b3cd4dedc32fb0c",
       "before": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
       "patch": "patches/remote_sub.sh.patch",
       "patch_sha256": "a48d3fd2d2359760eb65caeaaa0dc1671a16c7bd33c9d34590ebab050e34a720"
     },
     "ext/slot.py": {
-      "after": "da030aef94a836b5ce8f17ced6552907d7821552a00fdafe76f63cafcfb543c5",
+      "after": "65e388b09099071c05afec9d198f01abd704c489e4b6264805aa3d5c3be5f95b",
       "before": "85c8c2140d314241d8d8e324cf07428672f842ecacfc126570c25400affe406f",
       "patch": "patches/slot.py.patch",
       "patch_sha256": "a49ae4840820dababa5a1dd44f735e1b03568086d791db995084d01c71002454"

@@ -33,7 +33,10 @@ def compose(base, output):
     for relative, expected in profile["base_files"].items():
         if digest(base / relative) != expected:
             raise ValueError("native preimage mismatch: " + relative)
-    for row in profile["patches"].values():
+    for name, row in profile["patches"].items():
+        if (row["before"] != profile["base_files"].get(name)
+                or row["after"] != profile["files"].get(name)):
+            raise ValueError("patch metadata differs from verified file closure")
         if digest(HERE / row["patch"]) != row["patch_sha256"]:
             raise ValueError("source patch changed")
     for relative, source in profile["source_map"].items():
