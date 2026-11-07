@@ -68,6 +68,14 @@ class CompanyConsultationPeerResolver:
     expected_actor_ref: Mapping[str, Any] | None = None
     expected_binding: Mapping[str, Any] | None = None
 
+    def visible_peers(self, *, program_ref: str) -> tuple[ConsultationPeer, ...]:
+        """Use the same identity checks for discovery and direct resolution."""
+        return tuple(
+            self.resolve(peer.peer_ref, program_ref=program_ref)
+            for peer in self.peers
+            if peer.program_ref == program_ref
+        )
+
     def resolve(self, alias: str, *, program_ref: str) -> ConsultationPeer:
         alias = alias.strip().lower()
         matches = [
