@@ -1,3 +1,15 @@
+# Latest frontier: historical release fixtures repaired
+
+Mission remains **MORE_WORK_EXISTS**. Native enrollment/installed configuration source is complete through published Ready #2225 parent `60894ba27aebc645e36b4c34478d599af07457c4`; this successor changes only the two newly failing historical test fixtures and evidence.
+
+- Macro contribution is now published `2a29073d1418577f36b2164be665504d20eee8cd`, retaining both priorfff and original339 as actual parents. All original-carrier paths outside the existing Hermes contribution remain exact;198 composed consumer/identity cases passed. Original #10740 return: https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6711944596 . Prior native/archive qualification keeps its exactfff attribution.
+- Original51b shadow job128492240807 failed seven historical fixture cases. Root opened the actual log and reproduced all seven on60894. The current manifest59728 is now kept separate from its exact host predecessorbcfb8c; existing host→publisher→sparse inverses retain the collector-successor lineage and every historical Grok/Qwen pin.
+- Repaired execution: all13 affected/current/historical negative controls passed. The broader68-case run had67 passes and one selected-publisher fixture refusal, independently reproduced using the unchanged parent source. That limitation is explicit; no production guard was relaxed. Receipt: `historical-shadow-fixture-repair-20261107.json`.
+- No candidate/rollout, current generation, grant, provider, process, live Hermes source or protected branch changed. The temporary baseline probe was removed after exact-byte verification. Native startup binding is currently owned by original root/J under #983 comments6711742216/6711756875; do not duplicate its reserved output. Active #2232 retains the sequence37-preserving APPLICATION/C4 cohort and the combined provider/latency input.
+- Next: commit and publish this bounded fixture correction, run its actual committed D8 gate, return the exact successor through #2175, and consume genuine required-CI/release-owner returns. Final source absorption, preserving release/C3, original J collection, current scoped enrollment and real primary→tool→continuation plus worker-result acceptance remain owed.
+
+## Previous completed native source frontier
+
 # Latest frontier: passive native enrollment integrated
 
 Mission remains **MORE_WORK_EXISTS**. The current source closes the configuration-reader and multi-home dependency joins; protected delivery and live acceptance remain owed.
