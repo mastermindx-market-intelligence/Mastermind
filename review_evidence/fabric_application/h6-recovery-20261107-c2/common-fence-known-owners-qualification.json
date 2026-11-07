@@ -199,7 +199,7 @@
   "gates": [
     "full authenticated successor cohort enrollment after existing source owner emission",
     "all other configuration/credential/account writers and legacy transition closure",
-    "APPLICATION owner/issuer for remote support remains absent",
+    "remote APPLICATION support application_native_owner.py remains absent; native v9/v10 issuer is already implemented",
     "billable dispatch meter and actual account envelope remain unqualified",
     "source normalization through active preserving116 cohort, required CI, protected release and real consumer acceptance"
   ],

@@ -1,0 +1,22 @@
+{
+  "versions": {
+    "numpy": "2.5.2",
+    "pandas": "3.0.5"
+  },
+  "rc": 0,
+  "seconds": 7.483,
+  "log_sha256": "4d2b355801f0a7362fe1d751f1ca4f03747cd2fd5d9c27b4460c908114b89fb4",
+  "reason": "Existing repository conftest imports exact installed numpy and pandas through canon fixture",
+  "installed": [
+    "iniconfig==2.3.1",
+    "numpy==2.5.2",
+    "packaging==26.3",
+    "pandas==3.0.5",
+    "pluggy==1.7.0",
+    "Pygments==2.21.0",
+    "pytest==9.1.1",
+    "python-dateutil==4.0.0",
+    "PyYAML==6.0.3",
+    "tzdata==2026.6"
+  ]
+}

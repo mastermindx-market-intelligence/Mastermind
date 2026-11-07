@@ -1,0 +1,27 @@
+{
+  "root": "/private/tmp/h6-hosted680-source-qualified-proof-3m7mdp42",
+  "argv": [
+    "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+    "tests/test_native_pool_policy_publication.py",
+    "--basetemp",
+    "/private/tmp/h6-hosted680-source-qualified-proof-3m7mdp42/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-hosted680-source-qualified-proof-3m7mdp42/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 4,
+  "seconds": 0.179,
+  "testcases": 0,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [],
+  "files": {
+    "result.log": "b4083335b60775513d7d62a4c0383ba8e2accacabf2470fa2283941b55df91c4"
+  }
+}

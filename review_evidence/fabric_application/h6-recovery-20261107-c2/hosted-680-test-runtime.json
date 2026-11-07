@@ -1,0 +1,26 @@
+{
+  "root": "/private/tmp/h6-ci-qualification-runtime-ib96be_v",
+  "base_python": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "python": "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+  "requested_versions": {
+    "pytest": "9.1.1",
+    "PyYAML": "6.0.3"
+  },
+  "rc": 0,
+  "seconds": 7.029,
+  "install_log_sha256": "b4e0b5bff831644f80552ecd7545e65402492506e6a415071ff017f8957630ee",
+  "scope": "Disposable test interpreter only; no native PM, production environment, source or guard change",
+  "installed": [
+    "iniconfig==2.3.1",
+    "packaging==26.3",
+    "pluggy==1.7.0",
+    "Pygments==2.21.0",
+    "pytest==9.1.1",
+    "PyYAML==6.0.3"
+  ],
+  "isolated_import": {
+    "yaml": "6.0.3",
+    "pytest": "9.1.1",
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]"
+  }
+}

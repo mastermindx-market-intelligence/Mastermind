@@ -1,0 +1,22 @@
+...................................................F...............      [100%]
+=================================== FAILURES ===================================
+_____ test_operator_uses_real_selected_publisher_and_observes_same_target ______
+
+installation = namespace(directory=PosixPath('/private/tmp/h6-hosted680-source-repair-proof-t6pqmvsg/fixtures/test_operator_uses_real...":100,"remaining_pct":35}}}},"routing":{"execute_order":["glm","grok"],"grok_expiring_priority":{"enabled":false}}}\n')
+
+    def test_operator_uses_real_selected_publisher_and_observes_same_target(installation):
+        value = installation
+        _store, selected = selected_generation(value)
+        result = operator.publish_or_observe(stable_ext=value.ext, expected_generation=selected,
+            previous=digest(value.before), candidate=digest(value.after),
+            candidate_path=value.candidate, rollback_source=value.rollback)
+>       assert result["state"] == "POLICY_PUBLISHED", result
+E       AssertionError: {'schema': 'mastermind.native_policy_publication.v1', 'state': 'REFUSED', 'code': 'POLICY_PUBLICATION_PREFLIGHT_REFUSED', 'writes_applied': False, ...}
+E       assert 'REFUSED' == 'POLICY_PUBLISHED'
+E         
+E         - POLICY_PUBLISHED
+E         + REFUSED
+
+tests/test_native_pool_policy_publication.py:320: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_native_pool_policy_publication.py::test_operator_uses_real_selected_publisher_and_observes_same_target

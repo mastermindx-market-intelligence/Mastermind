@@ -256,3 +256,33 @@ completed current composition906bb682 on its existing followthrough branch
 (comment6711837521). Hermes2225 is Ready at60894ba (comment6711828478).
 These source developments preserve active H6 and#2232/#2234 custody; do not
 duplicate their mutations or treat source delivery as runtime acceptance.
+
+## Current source-test repair qualified
+
+The complete two changed test modules now pass67 cases,0 failures/errors/skips
+in13.719s. hosted-680-test-repair.json preserves both earlier outcomes:66/67
+with a local no-user-site YAML dependency refusal in the unchanged publisher
+test, and a temporary-environment conftest setup failure with0 cases executed.
+The final disposable environment uses the same installed pytest/YAML/numpy/
+pandas versions. No publisher check, production dependency environment, builder,
+native manifest/inventory or source was changed.
+
+The repair pins actual current59728d, verifies the exact three-member host-pull
+inverse to historicalbcfb8c, preserves APPLICATION/sparse parent pins, and starts
+older-layer negative controls from a valid normalized input before corruption.
+Current and historical unknown publishers retain their precise distinct refusals.
+
+Raw copied D8 tracebacks were removed from current evidence because they echoed
+protected template code as new source. Their original bytes remain in e4cdecef
+and their digests/outcomes are retained. The guard and reviewed registry are
+unchanged. New evidence delta passed the actual scanner preflight; the next
+actual committed-head D8 guard remains the publication gate.
+
+Hosted680 now has all jobs completed: shards1-5 success, shard0 and aggregate
+failure. The repaired private HTTP group remains164/164. After exact commit,
+D8 and push readback, an eligible single successor CI run is the next gate.
+
+See common-fence-remaining-owner-frontier.md for the exact remaining writer,
+selector, loaded-consumer and physical-allowance evidence. Native v9/v10 issuer
+implementation is present; remote APPLICATION support closure is a distinct
+missing input. No blanket human gate is invented. MISSION_COMPLETE=false.

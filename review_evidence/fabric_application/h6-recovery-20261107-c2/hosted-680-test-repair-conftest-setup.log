@@ -1,0 +1,9 @@
+ImportError while loading conftest '/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/tests/conftest.py'.
+tests/conftest.py:73: in <module>
+    _ensure_engine_canon()
+tests/conftest.py:70: in _ensure_engine_canon
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/fixtures/engine_stub/canon.py:18: in <module>
+    import numpy as np
+E   ModuleNotFoundError: No module named 'numpy'

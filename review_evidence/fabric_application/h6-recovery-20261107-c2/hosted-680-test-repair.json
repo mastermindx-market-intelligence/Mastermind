@@ -1,0 +1,80 @@
+{
+  "schema": "mastermind.h6.hosted680_source_test_repair.v1",
+  "base": "e4cdecef700cc4ea41759ab93d00e9b1630ea368",
+  "failing_ci_head": "680dc0ca78b9b3fcd081d3750304d1c47e5b5b9f",
+  "failing_run": 42402147021,
+  "failing_job": 128492040680,
+  "scope": "Only two source-closure test modules; no production builder/manifest/inventory/source change",
+  "known_equal_donors": [
+    "680dc0ca78b9b3fcd081d3750304d1c47e5b5b9f",
+    "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+    "f782ac0be36d652d27c8df1937e1c1a170df9755",
+    "e3ff065ccec6be40037e5e86cce7a73113ece594",
+    "906bb682d3bb061a8db347a871977f2dcfb47a9a"
+  ],
+  "ordering_precedent": "Completed ce625/51b tests/test_h1_native100_packaging.py repair; not a donor of these two changed files",
+  "manifest_relation": [
+    "actual current107=59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+    "existing host-pull inverse changes exactly3 members, same set; prior107=bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "existing APPLICATION and sparse historical inverses/pins retained"
+  ],
+  "changes": {
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": {
+      "pre_git_blob": "cd821db44409ca2bfd0288d06090db8109d6e9a2",
+      "pre_sha256": "b135fc30d0f9ddf3af0af04939dc8a0eaf0d42310f6b3673207ea47749d45508",
+      "post_sha256": "45988dc8bed4a678cf7844f9e284a844bcccbba199ff0907fb1ae21a9722a278"
+    },
+    "tests/test_native_pool_policy_publication.py": {
+      "pre_git_blob": "425c588fcde730cfd297c397a81ca39f35dacdec",
+      "pre_sha256": "2a02533db7334179c578c10d582426f67527066d351fd99e4955486586a3457c",
+      "post_sha256": "82f26bcb35925698a7232b31b9626fa59b4198384efe6531b14096008394b46d"
+    }
+  },
+  "receipts": [
+    {
+      "stem": "hosted-680-test-repair-ambient",
+      "rc": 1,
+      "seconds": 4.799,
+      "testcases": 67,
+      "failures": 1,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "67accda8ba51e8b1436e7b73235c2651a938822b1dd21af11b8e3f6ace7f2357",
+        "result.xml": "4adfbde53600b3e8fec795fd07aca84ef6d70d0bb10d2069124ddce1307f0ad4"
+      }
+    },
+    {
+      "stem": "hosted-680-test-repair-conftest-setup",
+      "rc": 4,
+      "seconds": 0.179,
+      "testcases": 0,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "b4083335b60775513d7d62a4c0383ba8e2accacabf2470fa2283941b55df91c4"
+      }
+    },
+    {
+      "stem": "hosted-680-test-repair-ready",
+      "rc": 0,
+      "seconds": 13.719,
+      "testcases": 67,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "e8ca89320215100aa98af0253237bf6f46c62048fbacd0ca2bf547d0f2ee2c58",
+        "result.xml": "8706e4083307b256b4abbc2f1083342116b539c8fc1ce915dea67ca5348bcad7"
+      }
+    }
+  ],
+  "final_qualification": "Both complete changed modules:67 passed,0 failures/errors/skips, same Python3.14.7 in temporary dependency environment",
+  "runtime_findings": [
+    "Ambient parent loaded YAML from user site; publisher intentionally removes user site, producing preflight refusal without writes in an unchanged test",
+    "Initial temporary environment lacked existing conftest numpy/pandas;0 test cases executed",
+    "Same installed pytest9.1.1/PyYAML6.0.3/numpy2.5.2/pandas3.0.5 supplied in disposable environment; no production or native PM repair"
+  ],
+  "production_tree_unchanged": true
+}

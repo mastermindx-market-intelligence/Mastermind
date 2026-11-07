@@ -430,9 +430,14 @@ def _publisher_source_manifest():
 def test_publisher_successor_preserves_actual_manifest_and_prior_go_validator():
     builder, manifest = _publisher_source_manifest()
     before = copy.deepcopy(manifest)
-    previous = builder.before_application_pool_composition(manifest)
-    assert previous is not manifest and manifest == before
-    assert {name for name in manifest if manifest[name] != previous[name]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
+    before_host_pull = builder.before_host_pull_integrity(manifest)
+    assert before_host_pull is not manifest and manifest == before
+    assert set(before_host_pull) == set(manifest)
+    assert {name for name in manifest if manifest[name] != before_host_pull[name]} == set(builder.HOST_PULL_INTEGRITY_DIGESTS)
+    assert digest((json.dumps(before_host_pull, sort_keys=True, indent=2) + "\n").encode()) == "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+    previous = builder.before_application_pool_composition(before_host_pull)
+    assert previous is not before_host_pull and manifest == before
+    assert {name for name in before_host_pull if before_host_pull[name] != previous[name]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
     assert digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
     before_sparse = builder.before_sparse_commit_preflight(previous)
     assert digest((json.dumps(before_sparse, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
@@ -446,6 +451,8 @@ def test_publisher_successor_preserves_actual_manifest_and_prior_go_validator():
 @pytest.mark.parametrize("mutation", ["other_member", "missing_member", "renamed_member", "added_member"])
 def test_publisher_forward_transform_refuses_partial_or_mixed_closures(mutation):
     builder, manifest = _publisher_source_manifest()
+    # Start from the valid historical input before corrupting its older layer.
+    manifest = builder.before_host_pull_integrity(manifest)
     if mutation == "other_member":
         manifest["ext/pick.py"] = "f" * 64
     elif mutation == "missing_member":
@@ -458,11 +465,16 @@ def test_publisher_forward_transform_refuses_partial_or_mixed_closures(mutation)
         builder.before_application_pool_composition(manifest)
 
 
-def test_unknown_publisher_never_receives_forward_compatibility():
+@pytest.mark.parametrize("historical", [False, True])
+def test_unknown_publisher_never_receives_forward_compatibility(historical):
     builder, manifest = _publisher_source_manifest()
+    if historical:
+        manifest = builder.before_host_pull_integrity(manifest)
     manifest["ext/support_bundle.py"] = "f" * 64
     dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     with pytest.raises(ValueError, match="application pool composition cohort"):
         builder.before_application_pool_composition(manifest)
-    with pytest.raises(ValueError, match="native scoped-model parent closure"):
+    refusal = ("native scoped-model parent closure differs" if historical else
+               "native host-pull integrity parent closure differs")
+    with pytest.raises(ValueError, match="^" + refusal + "$"):
         builder.validate_go_base_manifest(manifest, dependencies)

@@ -1,0 +1,15 @@
+{
+  "reason": "Raw failure traceback duplicated protected template code into new evidence. Retain the bounded outcome and original log/XML digests instead of another executable-looking copy; source identity guard unchanged.",
+  "original_traceback_commit": "e4cdecef700cc4ea41759ab93d00e9b1630ea368",
+  "later_guard": {
+    "head": "e4cdecef700cc4ea41759ab93d00e9b1630ea368",
+    "rc": 1,
+    "cases": 1,
+    "failures": 1,
+    "files": {
+      "result.log": "69944cfe6a9d4ac80baa1fd7780e8d335089f61c98b49fd2435bc044cdbb68a4",
+      "result.xml": "50aa19dbfe44632517c886062494eae452a4b114f29639e46bdc569c932109e3"
+    }
+  },
+  "production_or_guard_changed": false
+}
