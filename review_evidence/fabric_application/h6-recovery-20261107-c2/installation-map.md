@@ -262,3 +262,32 @@ enrollment, Macro dependency/weight/support/AUTO, worker AUTO/catalog/PyYAML and
 H5 physical consumer lanes are not replaced by this completed-source join.
 No current one-account APPLICATION envelope has been returned. Original J,
 Go401 fences and H4 scoped-serving-child/reload custody remain with their owners.
+
+
+## H1 source-support qualification and current-carrier boundary
+
+Composed Hermes887f in f71a354219298ac0e15460a4c4bbac3b377caf3f. The unchanged
+qualifier passed383 owner cases and21 native conversation cases on that exact
+clean adapter/native-owner pair, Macroa577 plus the exact four-file proposal, and
+Hermes1c0. Source flags were not overridden. The committed-blob exporter verified
+2538 files and the exact resulting2539-file proposal; no live provider SDK or
+external connection was attempted. See h1-source-support-composition.json.
+
+Current Macro10740 has independently adopted the proposal's exact source through
+a43 at12efe; do not replay the historical proposal onto it. Its separate attended
+AUTO relation remains under the active owner and is not implicitly qualified by
+these five-descriptor cases.
+
+Original Mastermind2175 now publishes v10 at72ffa. Its native entry digest
+ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055
+differs from this contribution's qualified H2 loader. Preserve both behavioral
+deltas through the actual next source join; never copy the older H2 hash over
+v10. The existing active root is composing later protected host-trio source.
+The533-case native receipts and six manifests above retain their actual source
+scope; they are not v10/host-trio composition or installed-current proof.
+
+Original J has terminal success on its execution owner according to the three
+source-linked983 returns6709365383/6709540563/6709649691. Its original controller
+collection remains unreconciled, the destination absent, and acceptance/settlement
+NOT_RECORDED. The active root is pursuing the existing original collection
+contract. No replacement collection, acceptance or dispatch was attempted here.

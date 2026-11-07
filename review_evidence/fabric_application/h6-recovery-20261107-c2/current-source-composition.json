@@ -25,6 +25,7 @@
     "observed": "terminal result consumed",
     "repair_qualification": "ci-repair-qualification.json"
   },
+  "compatible_law_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
   "current_final_join": {
     "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
     "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
@@ -43,13 +44,22 @@
     "worker_2225_incorporated": true
   },
   "current_original_carriers": {
-    "Macro10740": "cc45757612addfdc496acbb3c233376ad4c28c78",
-    "Mastermind2175": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "Macro10740": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+    "Mastermind2175": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
     "contribution_adoption": "NOT_OBSERVED",
-    "protected_Macro": "b94d5c0fce15e69479c33ea233a5ae5ab3da82a1",
-    "protected_Mastermind": "320611cbd7eca66af86a09d0c6f7622f229bdf73"
+    "protected_Macro": "a83cfac0845baf5687d0864d56765973f69fe98d",
+    "protected_Mastermind": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c"
   },
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
+  "h1_source_support": {
+    "composed_head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+    "native_conversation_cases": 21,
+    "owner_cases": 383,
+    "provider_calls": false,
+    "qualification": "h1-source-support-composition.json",
+    "source": "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc",
+    "source_flag_overrides": false
+  },
   "h2_runtime_sources_changed": false,
   "h3_outer_invalidation": {
     "cases_passed": 4,
@@ -92,6 +102,23 @@
   "mission_complete": false,
   "native_loader_repair": "native-loader-qualification.json",
   "original_carrier_at_join": "da2db3909544137ca8b0602304a9b574b18f5277",
+  "original_j": {
+    "execution_receipt_sha256": "7d8061569b6465c32301ec72098b67be8f5615a841866b5afe7943411c889af7",
+    "lease_settlement": "NOT_RECORDED",
+    "original_collection": "CONTROLLER_UNKNOWN_DESTINATION_ABSENT",
+    "original_execution": "TERMINAL_SUCCESS_REPORTED_AND_REVERIFIED_BY_ORIGINAL_HOST_READERS",
+    "output_sha256": "0fe4c6ecbf185b58b4b8c061fd131a2ab15e04a37a6b6fc86bbe93a3a35d84cb",
+    "recollected": false,
+    "redispatched": false,
+    "root_acceptance": "NOT_RECORDED",
+    "source_comments": [
+      6709365383,
+      6709540563,
+      6709649691,
+      6709989395
+    ],
+    "source_issue": 983
+  },
   "original_root": "fabric-application-integration-20261104-sol",
   "primary_core_preimage_qualification": "primary-core-preimages.json",
   "provider_calls": false,

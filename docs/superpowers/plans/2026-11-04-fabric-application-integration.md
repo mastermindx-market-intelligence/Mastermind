@@ -327,3 +327,35 @@ H6 patch's different lock order is not imported. Current H2 native source and
 all selectable manifests are unchanged. The Phase B qualified account/service
 envelope remains the next product-critical lane; H3 activation is not added as
 a blanket prerequisite.
+
+
+### H6 committed owner source-support qualification — 2026-11-07
+
+Composed completed Hermes887f as a true merge atf71a354. On that exact clean
+source, the original qualifier passed383 owner cases plus21 native conversation
+cases with real APPLICATION handler/Broker and disposable provider fixture,
+without overriding source-support flags. The three committed-blob boundary cases
+also passed. Missing immutable Macro blobs were acquired through authenticated
+GitHub reads, independently object-verified, and written only to the disposable
+fixture. The original source checkouts and live Hermes environment were untouched.
+
+The retained evidence identity guard exposed immutable output tokens. Exact full
+file/token records preserve the historical logs and negative-test account names
+without changing the guard. The initial535-case and committed547-case iterations
+each retained one failing overall composition guard; final committed verification
+follows the last single receipt-token correction. All failed receipts remain
+explicit in h1-source-support-composition.json.
+
+Refreshed compatible law at protected66780ab: same INDEX/active/reliability/review/
+delivery/continuity laws, with current bootstrap/account instruction changes read.
+Current original2175 publishes72ffa v10 and Macro10740 publishes12efe support.
+Do not reapply the historical Macro proposal or replace v10's native-entry pin
+with the older H2 pin. Preserve the active protected-base/v10/host-trio source
+join, workerAUTO and H5 physical-consumer writers.
+
+Original J's three source-linked host returns prove terminalrc0 and retained
+output; original collection/controller reconciliation, acceptance and settlement
+remain distinct unresolved work. No new collection or dispatch was attempted.
+Exact-head CI, protected release, authentic account/service/enrollment and
+original product/worker/OS acceptance remain open. PLAN_NOT_ORG_LINKED and
+MISSION_COMPLETE=false remain explicit.
