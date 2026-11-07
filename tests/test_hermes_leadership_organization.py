@@ -17,6 +17,7 @@ from integrations.hermes_leadership.native import native_handler
 from integrations.secretary_team_access.mission import summarize_mission
 from tests.test_hermes_leadership import access_for, reader_for
 from tests.test_secretary_team_mission import mission_body, _selection, _STAMP_EPOCH
+from tests.test_workspace_result_service import result_owner
 
 
 def summary_for(mission_body):
