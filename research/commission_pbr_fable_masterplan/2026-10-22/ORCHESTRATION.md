@@ -29,7 +29,7 @@ Columns: `when (UTC)` · `unit` (orchestrator or lane id) · `host/model` · `cl
 ### Pre-mortem (wave 1)
 1. Two owners edit `paper_account.py` → ECON is the sole writer; RESEARCH/RUNTIME request contracts in their ledger.
 2. A lane reads the Mac copy of `data/` instead of the VPS → every econ lane receives a captured read-only snapshot with sha256s from ECON's seat pull.
-3. Lanes mint on ubuntu2/3 and hit `active_lane_limit_reached` → preferred hosts assigned per owner; refusal consumes the run-id → bump `-rN`.
+3. Lanes hit `active_lane_limit_reached` → retain the original run-id and receipt, classify the refusal and reconcile its effects. A new `-rN` suffix or host is not retry authority. Capacity recovery requires materially changed eligibility and the current authorized owner's procedure; an explicit safety/permission denial or recorded no-retry verdict ends the action, and uncertain original execution cannot be renamed or replayed.
 4. A reviewer never returns → every build lane has a reserved review lane and a bounded wait; silence is absence of evidence.
 5. A worker "fixes" by resetting a book or inventing a balancing fill → forbidden in every packet; seat greps diffs for `reset`, `seed`, balancing writes before any merge.
 6. deploy_lag.json is trusted as installed identity → forbidden; blob comparison only.

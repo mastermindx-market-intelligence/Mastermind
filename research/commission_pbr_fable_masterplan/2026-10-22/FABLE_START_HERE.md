@@ -11,6 +11,8 @@ sha256 `4c7a0d449f02de080e4d8d310af5db09515af86683ac6a3bca1298f2e034d970`, 804 l
 230e9a301 (the audit pin c9cbee556 is its ancestor; the two later commits touch no audited path).
 **Packets, owners, status:** `WORK_PACKAGES.md`. **Ledger:** `ORCHESTRATION.md`. **Lane packets/returns:** `lanes/`.
 
+> **Historical commissioning context.** The pins, capacity, seats, launch examples and status below describe commissioning or the explicitly dated ledger entry. New execution is governed by current protected procedure and the original operation's reconciled effect record. Historical admission or a new run-id suffix supplies no current permission; RUNNING requires actual start evidence.
+
 ## 1. Frontier facts verified at commissioning (07:15–07:30Z, read-only)
 
 > **Correction 2026-10-22 07:35Z (seat-verified, read-only ssh).** The VPS live data root on the host namespace is `/opt/mastermind-live-data`, not `/opt/mastermind/data`. `mastermind.service` carries `BindPaths=/opt/mastermind-live-data:/opt/mastermind/data`, so only the service's private mount namespace sees live data at `/opt/mastermind/data`; a plain `ssh … ls /opt/mastermind/data` shows a stale July copy. All three books live at `/opt/mastermind-live-data/portfolios/<id>/` (autonomous `account.json` mtime 06:23Z today; `portfolio/` is an Aug-10 legacy dir). Code identity: `/opt/mastermind/.deployed_git_sha` = ff16c192… written 2026-10-21 15:32:17Z by `scripts/deploy_code_to_vps.sh` (rsync of a git archive; prior snapshot under `.deploy_prev/`). Blob comparison remains the identity proof. Reported by pbr-runtime; verified by the seat.
@@ -60,7 +62,7 @@ mb 1 active (cap 2) 119G · m1 0 active 164G (window Mon–Fri 02–11Z). ssh al
 2. Export before launch: `POOL_ORCHESTRATOR_ID=pbr-<domain>-ed665c78 POOL_TASK_CLASS=<class> POOL_TASK_COMPLEXITY=<C0|C1|C2|C3> REMOTE_SUB_MAX_SECS=<secs≤7200>`;
    glm-5.3 on a leaf class additionally needs `POOL_ESCALATION_REASON="<honest sentence ≥12 chars naming the failed flash run>"`.
 3. Launch detached with stdin closed: `pool remote <host> <mode> <packet.md> /home/<user>/lanes/wt/<lane> <model> --run-id <lane-id> --out <local.out> < /dev/null &`.
-   Read `ECONOMIC_POLICY`, `LEASE_OK`, `POLL` in the launcher log before calling it RUNNING. A refused launch keeps its run-id → relaunch as `<lane-id>-r2`.
+   Read `ECONOMIC_POLICY`, `LEASE_OK`, `POLL` in the launcher log before calling it RUNNING. After a refusal, preserve the original run-id and receipt, classify the cause and reconcile the original effects. An explicit safety/permission denial or recorded no-retry verdict ends that action; uncertain execution cannot be renamed or replayed. Capacity recovery requires materially changed eligibility and the current authorized owner's procedure, never merely a new `-rN` suffix or a change of host, account or provider.
    A remote admission refusal surfaces 2–3 min later as `DONE rc=75 … remote_admission_refused`.
 4. `--out` captures ONLY the worker's final assistant message → every packet ends with "emit the full RETURN block as your last message".
 5. Collect: `ssh <h> 'git -C ~/lanes/wt/<lane> diff'` → apply in the orchestrator's own SSD worktree → run the named tests → commit → push → PR. Clean the lane tree the same hour.
