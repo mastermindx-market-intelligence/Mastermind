@@ -8,6 +8,10 @@ This is a typed interface for the **existing** attended M2 Fabric adapter, not a
 
 The backend exposes eight tools: `fabric_capabilities`, `fabric_request`, `fabric_status`, `fabric_wait`, `fabric_result`, `fabric_result_page`, `fabric_accept`, and `fabric_controller_output`. The outer gateway may expose its existing liveness and retained-output paging tools. The Fabric-only installer profile explicitly disables Git, Paper, repository workspaces and commission publication. It does not modify another account's installed service, access settings or sandbox.
 
+## ChatGPT web session watcher
+
+`task_class: chatgpt_session_watch` is a first-class worker kind, `chatgpt_web_session_watcher`. The facade spawns `ops/native_fabric/chatgpt_session_watcher/cli.py` on the machine that owns the browser windows (m2studio). It does not place that class on a remote Linux lane. The reasoning pool is `minimax` and the model is `MiniMax-M2.7`. The first deployment mode is observe: browser clicks and sends stay off unless the host process has `MMX_WATCHER_ALLOW_LIVE=1`. `fabric_accept` refuses this kind. Enabling steps are in `ops/native_fabric/chatgpt_session_watcher/DEPLOY.md`.
+
 The existing Studio private service and tunnel supervisors retain lifecycle ownership. Desktop Commander retains adapter process handles; the Fabric retains run state and results. The facade's bounded, in-memory attempted-call and controller-handle indexes only prevent frontend replay and arbitrary PID access within their generation. They are not a second durable operation ledger, queue, watcher or retry mechanism. No provider credentials are read or passed by the facade.
 
 ## Trust and input boundary

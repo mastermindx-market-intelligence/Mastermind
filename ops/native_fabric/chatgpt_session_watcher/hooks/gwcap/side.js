@@ -1,0 +1,1 @@
+(function(){return [...document.querySelectorAll('nav a[href*="/c/"]')].map(a=>(a.getAttribute('aria-label')||a.innerText.trim())+' @'+a.getAttribute('href').split('/c/')[1]).filter(s=>/flovia|mcp|connector|install/i.test(s)).join('\n')||'NONE in sidebar ('+document.querySelectorAll('nav a[href*="/c/"]').length+' links)'})()

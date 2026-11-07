@@ -1,0 +1,14 @@
+{
+  "schema": "mastermind.fabric_worker_kind.v1",
+  "kind": "chatgpt_web_session_watcher",
+  "task_class": "chatgpt_session_watch",
+  "pool": "minimax",
+  "model": "MiniMax-M2.7",
+  "model_aliases": ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "auto"],
+  "host": "m2studio",
+  "readiness": "http://127.0.0.1:45119/readyz",
+  "default_mode": "observe",
+  "live_requires_env": "MMX_WATCHER_ALLOW_LIVE=1",
+  "owner_script": "fabric_task.py",
+  "spawn": "ops/native_fabric/chatgpt_session_watcher/cli.py spawn"
+}

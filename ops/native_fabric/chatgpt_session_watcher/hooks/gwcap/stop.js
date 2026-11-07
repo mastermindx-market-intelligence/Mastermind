@@ -1,0 +1,1 @@
+(function(){var b=[...document.querySelectorAll('button')].find(x=>x.offsetParent&&/stop/i.test(x.getAttribute('aria-label')||''));if(!b)return 'NOSTOP';b.click();return 'stopped '+b.getAttribute('aria-label');})()
