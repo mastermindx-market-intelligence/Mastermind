@@ -24,6 +24,7 @@ export interface NativeView {
   schema: "mastermind.hermes_native_view.v1"; state: NativeState; authGeneration: number;
   capabilities: string[]; delegation: "NOT_ENABLED"; retryAllowed: false;
   operation?: NativeOperation["operation"]; code?: string;
+  requestId?: string; requestSessionId?: string;
   runtime?: { protocol: 1; instanceId: string; authorityEpoch: number; version: string | null; sourceRevision: string | null; localScope?: string };
   /** Produced by the native port from the existing durable pointer store. */
   pendingOperation?: NativePendingOperation | null;
@@ -76,7 +77,7 @@ function session(value: unknown): NativeSession {
 }
 
 export function parseNativeView(value: unknown): NativeView {
-  const v = record(value, ["schema", "state", "authGeneration", "capabilities", "delegation", "retryAllowed", "operation", "code", "runtime", "session", "sessions", "receipt"],
+  const v = record(value, ["schema", "state", "authGeneration", "capabilities", "delegation", "retryAllowed", "operation", "requestId", "requestSessionId", "code", "runtime", "session", "sessions", "receipt"],
     ["schema", "state", "authGeneration", "capabilities", "delegation", "retryAllowed"]);
   if (v.schema !== "mastermind.hermes_native_view.v1" || !states.has(text(v.state, 24)) || v.delegation !== "NOT_ENABLED" || v.retryAllowed !== false) return invalid();
   const caps = rows(v.capabilities, 8).map(value => text(value, 64));
@@ -87,6 +88,12 @@ export function parseNativeView(value: unknown): NativeView {
     if (!operations.has(text(v.operation, 20))) return invalid();
     result.operation = v.operation as NativeOperation["operation"];
   }
+  if (v.requestId !== undefined) {
+    const requestId = text(v.requestId, 32);
+    if (/^[a-f0-9]{32}$/.exec(requestId)?.[0] !== requestId) return invalid();
+    result.requestId = requestId;
+  }
+  if (v.requestSessionId !== undefined) result.requestSessionId = id(v.requestSessionId);
   if (v.code !== undefined) {
     const code = text(v.code, 100); if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(code)) return invalid(); result.code = code;
   }

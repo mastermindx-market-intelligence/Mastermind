@@ -13,21 +13,31 @@ const send = { operation: "send" as const, sessionId: original.sessionId, reques
 function session() { return { id: original.sessionId, storedId: original.sessionId, title: "Original",
   requestedModel: "configured", canSend: true, toolAccess: "NONE", running: false, executionGeneration: 1,
   messageCount: 0, messages: [], historyTruncated: false, pending: [], promptsPending: false }; }
-function view(extra: Record<string, unknown> = {}) { return {
+function view(extra: Record<string, unknown> = {}) {
+  const operation = extra.operation ?? "status";
+  const binding = operation === "send" || operation === "recover"
+    ? { requestId: original.requestId, requestSessionId: original.sessionId } : {};
+  return {
   schema: "mastermind.hermes_native_view.v1", state: "READY", operation: "status", authGeneration: 7,
   capabilities: ["native_chat", "native_history", "admission_recovery"],
   delegation: "NOT_ENABLED", retryAllowed: false,
   runtime: { protocol: 1, instanceId: "native", authorityEpoch: 1, version: "0.23.0",
-    sourceRevision: "b".repeat(40), localScope: scope }, ...extra }; }
+    sourceRevision: "b".repeat(40), localScope: scope }, ...binding, ...extra }; }
 function receipt(status = "terminal", extra: Record<string, unknown> = {}) {
   return view({ state: "ADMITTED", operation: "recover", session: session(), receipt: {
     id: "original-admission", sessionId: original.sessionId, status, sequence: 1,
     outcome: status === "terminal" ? "completed" : null, executionGeneration: 1, ...extra } });
 }
 type Wire = { operation: string; sessionId?: string; requestId?: string; text?: string };
+function noSend(request: Wire, code: string, extra: Record<string, unknown> = {}) {
+  return { schema: "mastermind.hermes_native_no_send.v1", operation: request.operation,
+    requestId: request.requestId, expectedAuthGeneration: 7, code,
+    ...(request.operation === "send" ? { sessionId: request.sessionId } : {}), ...extra };
+}
 function harness(factory = new IDBFactory(),
     handle: (request: Wire, args: Record<string, unknown>) => Promise<unknown> = async request =>
-      view({ operation: request.operation.startsWith("recover_") ? "recover" : request.operation }),
+      view({ operation: request.operation.startsWith("recover_") ? "recover" : request.operation,
+        requestId: request.requestId, requestSessionId: request.requestId ? request.sessionId : undefined }),
     storeOverride?: DurablePendingPointerStore) {
   const store = storeOverride ?? createIndexedDbPendingPointerStore(factory);
   const invoke = vi.fn(async (_command: string, args: Record<string, unknown>) => handle(args.request as Wire, args));
@@ -129,7 +139,7 @@ describe("native Hermes durable original-request recovery", () => {
   it("reserves atomically across two independently mounted ports", async () => {
     const factory = new IDBFactory();
     const owner = vi.fn(async (request: Wire) => request.operation === "send"
-      ? view({ state: "EFFECT_UNKNOWN", operation: "send" }) : view());
+      ? view({ state: "EFFECT_UNKNOWN", operation: "send", requestId: request.requestId }) : view());
     const a = harness(factory, owner), b = harness(factory, owner);
     await Promise.all([a.port.request({ operation: "status" }), b.port.request({ operation: "status" })]);
     const results = await Promise.all([a.port.request(send), b.port.request({ ...send, requestId: "b".repeat(32) })]);
@@ -157,6 +167,8 @@ describe("native Hermes durable original-request recovery", () => {
     for (const answer of [receipt("terminal", { sessionId: "another-session" }),
       receipt("terminal", { sequence: 0 }), view({ state: "ADMITTED" }),
       { ...receipt(), operation: "send" }, { ...receipt(), operation: undefined },
+      { ...receipt(), requestId: "b".repeat(32) }, { ...receipt(), requestId: undefined },
+      { ...receipt(), requestSessionId: "other" },
       { ...receipt(), session: { ...session(), id: "other", storedId: "other" } }]) {
       const h = harness();
       await h.store.reserve(scope, nativePendingPointer(original));
@@ -186,7 +198,7 @@ describe("native Hermes durable original-request recovery", () => {
     for (const code of ["NATIVE_BUSY", "NATIVE_CLIENT_NOT_STARTED", "REQUEST_INVALID"]) {
       const h = harness();
       await h.port.request({ operation: "status" });
-      h.invoke.mockRejectedValueOnce(new Error(code));
+      h.invoke.mockRejectedValueOnce(noSend(send, code));
       await expect(h.port.request(send)).rejects.toThrow(code);
       expect(await h.store.read(scope)).toBeNull();
     }
@@ -204,7 +216,7 @@ describe("native Hermes durable original-request recovery", () => {
     expect(await rawRecord(factory)).toEqual({ v: 13,
       ...nativePendingPointer({ kind: "create", requestId: "d".repeat(32) }) });
     const reopened = harness(factory, async request => request.operation === "recover_create"
-      ? view({ state: "OPENED", operation: "recover", session: session() }) : view());
+      ? view({ state: "OPENED", operation: "recover", requestId: "d".repeat(32), requestSessionId: undefined, session: session() }) : view());
     await reopened.port.request({ operation: "status" });
     expect((await reopened.port.request({ operation: "recover" })).pendingOperation).toBeNull();
     expect(reopened.invoke.mock.calls[1]?.[1].request).toEqual({ operation: "recover_create", requestId: "d".repeat(32) });
@@ -232,14 +244,15 @@ describe("native Hermes durable original-request recovery", () => {
     for (const request of [send, { operation: "create" as const, role: "secretary" as const, requestId: "d".repeat(32) }]) {
       const h = harness();
       await h.port.request({ operation: "status" });
-      h.invoke.mockRejectedValueOnce(new Error("NATIVE_AUTH_NOT_DISPATCHED"));
+      h.invoke.mockRejectedValueOnce(noSend(request, "NATIVE_AUTH_NOT_DISPATCHED"));
       await expect(h.port.request(request)).rejects.toThrow("NATIVE_AUTH_NOT_DISPATCHED");
       expect(await h.store.read(scope)).toBeNull();
       await expect(h.port.request(request)).rejects.toThrow("NATIVE_RECOVERY_UNAVAILABLE");
       expect(h.invoke).toHaveBeenCalledTimes(2);
       h.invoke.mockResolvedValueOnce(view({ authGeneration: 8 }));
       expect((await h.port.request({ operation: "status" })).pendingOperation).toBeNull();
-      h.invoke.mockResolvedValueOnce(view({ operation: request.operation, state: "NOT_SENT", authGeneration: 8 }));
+      h.invoke.mockResolvedValueOnce(view({ operation: request.operation, state: "NOT_SENT", authGeneration: 8,
+        requestId: request.requestId, requestSessionId: "sessionId" in request ? request.sessionId : undefined }));
       expect((await h.port.request(request)).pendingOperation).toBeNull();
       expect(h.invoke).toHaveBeenCalledTimes(4);
     }
@@ -256,6 +269,47 @@ describe("native Hermes durable original-request recovery", () => {
         expect(await h.store.read(scope)).toEqual(nativePendingPointer({ kind: "create", requestId: create.requestId }));
       }
     }
+  });
+
+  it("keeps generic or crossed no-send errors held across reopening", async () => {
+    const valid = noSend(send, "NATIVE_AUTH_NOT_DISPATCHED");
+    for (const error of [new Error("NATIVE_AUTH_NOT_DISPATCHED"), new Error("NATIVE_BUSY"),
+      { ...valid, requestId: "b".repeat(32) }, { ...valid, operation: "create" },
+      { ...valid, sessionId: "other" }, { ...valid, expectedAuthGeneration: 8 },
+      { ...valid, requestId: undefined }, { ...valid, private: "extra" }]) {
+      const h = harness(); await h.port.request({ operation: "status" });
+      h.invoke.mockRejectedValueOnce(error);
+      await expect(h.port.request(send)).rejects.toBeDefined();
+      const reopened = harness(h.factory);
+      expect((await reopened.port.request({ operation: "status" })).pendingOperation).toEqual(original);
+      expect(await h.store.read(scope)).toEqual(nativePendingPointer(original));
+    }
+  });
+
+  it("does not clear a direct refusal or terminal receipt for another original request", async () => {
+    for (const answer of [view({ operation: "send", state: "NOT_SENT", requestId: "b".repeat(32) }),
+      view({ operation: "send", state: "REFUSED", requestId: undefined }),
+      { ...receipt(), operation: "send", requestId: "b".repeat(32) }]) {
+      const h = harness(); await h.port.request({ operation: "status" });
+      h.invoke.mockResolvedValueOnce(answer);
+      await expect(h.port.request(send)).rejects.toThrow("NATIVE_RESPONSE_INVALID");
+      expect(await h.store.read(scope)).toEqual(nativePendingPointer(original));
+    }
+  });
+
+  it("freezes the original arguments before awaiting durable reservation", async () => {
+    const factory = new IDBFactory(), base = createIndexedDbPendingPointerStore(factory);
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const h = harness(factory, async request => request.operation === "send"
+      ? view({ operation: "send", state: "NOT_SENT" }) : view(), {
+      ...base, reserve: async (key, pointer) => { await waiting; return base.reserve(key, pointer); },
+    });
+    await h.port.request({ operation: "status" });
+    const input = { ...send }; const result = h.port.request(input);
+    input.requestId = "b".repeat(32); input.text = "changed after click";
+    release(); await result;
+    expect(h.invoke.mock.calls.at(-1)?.[1].request).toEqual(send);
   });
 
   it("cannot qualify an attachment from a crossed status response", async () => {

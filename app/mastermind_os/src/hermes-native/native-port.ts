@@ -8,6 +8,21 @@ type NativeInvoke = (command: string, args: Record<string, unknown>) => Promise<
 const preDispatch = new Set(["REQUEST_INVALID", "NATIVE_BUSY", "NATIVE_INSTALL_UNAVAILABLE",
   "NATIVE_PLATFORM_UNAVAILABLE", "NATIVE_CLIENT_NOT_STARTED", "NATIVE_AUTH_NOT_DISPATCHED"]);
 
+type Invocation = { operation: string; requestId?: string; sessionId?: string };
+function noSendCode(error: unknown, request: Invocation, generation: number): string | null {
+  if (!error || typeof error !== "object" || Array.isArray(error)) return null;
+  const value = error as Record<string, unknown>;
+  const keys = ["schema", "operation", "requestId", "expectedAuthGeneration", "code",
+    ...(request.operation === "send" ? ["sessionId"] : [])];
+  if (!["create", "send"].includes(request.operation) || Object.keys(value).length !== keys.length ||
+      keys.some(key => !Object.prototype.hasOwnProperty.call(value, key)) || value.schema !== "mastermind.hermes_native_no_send.v1" ||
+      value.operation !== request.operation || value.requestId !== request.requestId ||
+      value.expectedAuthGeneration !== generation ||
+      request.operation === "send" && value.sessionId !== request.sessionId ||
+      typeof value.code !== "string" || /^[A-Z][A-Z0-9_]{0,99}$/.exec(value.code)?.[0] !== value.code) return null;
+  return value.code;
+}
+
 /** One foreground adapter over the EXISTING durable pointer owner. Reserve before
  * invoking; only original owner evidence can settle. No payload is persisted and
  * reopening never submits. The native host separately fences auth before spawn.
@@ -36,13 +51,15 @@ export function createNativeHermesPort(input: {
   };
   return {
     available: input.available,
-    async request(request: NativeOperation): Promise<NativeView> {
+    async request(inputRequest: NativeOperation): Promise<NativeView> {
+      const request = { ...inputRequest };
       if (!input.available()) throw new Error("NATIVE_PLATFORM_UNAVAILABLE");
       if (inFlight) throw new Error("NATIVE_BUSY");
       inFlight = true;
       let reserved: OperationPointer | null = null;
       let scope: string | null = null;
       let dispatched = false;
+      let invocation: { request: Invocation; generation: number } | null = null;
       try {
         if (request.operation === "status") {
           const result = parseNativeView(await input.invoke("hermes_native", { request }));
@@ -89,6 +106,7 @@ export function createNativeHermesPort(input: {
             ? { operation: "recover_send", sessionId: original.sessionId, requestId: original.requestId }
             : { operation: "recover_create", requestId: original.requestId }
           : request;
+        invocation = { request: wire, generation: context.generation };
         dispatched = true;
         const result = parseNativeView(await input.invoke("hermes_native",
           { request: wire, expectedAuthGeneration: context.generation }));
@@ -101,7 +119,10 @@ export function createNativeHermesPort(input: {
           throw new Error("NATIVE_IDENTITY_CHANGED");
         }
         // Settlement must describe this invocation, including the public recovery operation.
-        if (result.operation !== request.operation) throw new Error("NATIVE_RESPONSE_INVALID");
+        if (result.operation !== request.operation || result.requestId !== invocation.request.requestId ||
+            result.requestSessionId !== (invocation.request.requestId ? invocation.request.sessionId : undefined)) {
+          throw new Error("NATIVE_RESPONSE_INVALID");
+        }
         checkTarget(result, wire as { sessionId?: string; admissionId?: string });
         const isRecovery = request.operation === "recover";
         const settled = mutating && ["REFUSED", "NOT_SENT"].includes(result.state) ||
@@ -118,12 +139,24 @@ export function createNativeHermesPort(input: {
       } catch (error) {
         const code = typeof error === "string" ? error : error instanceof Error ? error.message : "";
         if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_AUTH_NOT_DISPATCHED" || code === "NATIVE_IDENTITY_CHANGED") current = null;
-        // Only a typed before-spawn refusal may clear this call's reservation.
-        // An unclassified auth change can happen AFTER IO and must retain the original.
-        if (reserved && scope && (!dispatched || preDispatch.has(code))) {
-          await input.store.clearIfEqual(scope, reserved);
+        const proof = invocation ? noSendCode(error, invocation.request, invocation.generation) : null;
+        if (reserved && scope && (!dispatched || proof !== null)) {
+          let cleared = false;
+          try { cleared = await input.store.clearIfEqual(scope, reserved); }
+          catch { throw new Error("NATIVE_RECOVERY_UNAVAILABLE"); }
+          if (!cleared) throw new Error("NATIVE_RECOVERY_UNAVAILABLE");
+          if (proof !== null) {
+            if (proof === "NATIVE_AUTH_NOT_DISPATCHED") current = null;
+            // These UI codes mean before-dispatch only AFTER the exact proof cleared.
+            throw new Error(preDispatch.has(proof) ? proof : "NATIVE_CLIENT_NOT_STARTED");
+          }
         }
         if (code.startsWith("PENDING_POINTER_")) throw new Error("NATIVE_RECOVERY_UNAVAILABLE");
+        // A generic IPC string has no request-bound no-send proof. In particular,
+        // never let its spelling make the UI offer another mutation after IO.
+        if (dispatched && preDispatch.has(code)) {
+          throw new Error(code === "NATIVE_AUTH_NOT_DISPATCHED" ? "AUTHENTICATION_CHANGED" : "NATIVE_CLIENT_UNAVAILABLE");
+        }
         throw error;
       } finally { inFlight = false; }
     },

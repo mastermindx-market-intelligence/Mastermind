@@ -147,7 +147,7 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(result["retryAllowed"])
 
     def test_received_owner_refusal_is_not_unknown_or_failover(self):
-        runtime = FakeRuntime(error=self.b.OwnerRefusal("permission_denied"))
+        runtime = FakeRuntime(error=self.b.OwnerRefusal("permission_denied", code=4001))
         req = {"operation": "create", "role": "meta-ceo", "requestId": "c" * 32}
         result = asyncio.run(self.b.execute_request(req, runtime))
         self.assertEqual(result["state"], "REFUSED")
@@ -190,6 +190,68 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(runtime.identifies, 0)
 
 
+class OriginalSettlementTests(unittest.TestCase):
+    def setUp(self):
+        self.b = load()
+        self.send = {"operation": "send", "sessionId": "session-1", "requestId": "a" * 32, "text": "original"}
+        self.create = {"operation": "create", "role": "secretary", "requestId": "b" * 32}
+
+    def test_direct_success_qualifies_original_native_identity_before_settlement(self):
+        for request, lookup in [(self.create, ("recover_create", {"request_id": "b" * 32})),
+                                (self.send, ("recover_send", {"session_id": "session-1", "request_id": "a" * 32}))]:
+            runtime = FakeRuntime()
+            result = asyncio.run(self.b.execute_request(request, runtime))
+            self.assertEqual(result["state"], "OPENED" if request["operation"] == "create" else "ADMITTED")
+            self.assertEqual(result["requestId"], request["requestId"])
+            self.assertEqual(result.get("requestSessionId"), request.get("sessionId"))
+            self.assertEqual(runtime.lookups, [lookup])
+            self.assertEqual(sum(method in {"prompt.submit", "session.create"} for method, _ in runtime.calls), 1)
+
+    def test_crossed_create_or_direct_send_result_remains_unknown(self):
+        for request in [self.create, self.send]:
+            runtime = FakeRuntime(); original_rpc = runtime.rpc
+            async def crossed(method, **params):
+                value = await original_rpc(method, **params)
+                if method == "session.create":
+                    value["session_id"] = value["stored_session_id"] = "different-create"
+                if method == "prompt.submit":
+                    value["admission_id"] = "different-admission"
+                return value
+            runtime.rpc = crossed
+            result = asyncio.run(self.b.execute_request(request, runtime))
+            self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+            self.assertEqual(result["requestId"], request["requestId"])
+            self.assertNotIn("session", result); self.assertNotIn("receipt", result)
+
+    def test_storage_internal_and_unknown_owner_errors_after_submit_never_claim_no_effect(self):
+        for reason, code in [("storage_unavailable", 5001), ("request_failed", None),
+                             ("permission_denied", 5001), ("admission_conflict", 4001),
+                             ("future_reason", 4001), ("storage_unavailable", 4001)]:
+            runtime = FakeRuntime(error=self.b.OwnerRefusal(reason, code=code))
+            result = asyncio.run(self.b.execute_request(self.send, runtime))
+            self.assertEqual(result["state"], "EFFECT_UNKNOWN", (reason, code))
+            self.assertEqual(result["requestId"], self.send["requestId"])
+            self.assertEqual([method for method, _ in runtime.calls], ["session.resume", "prompt.submit"])
+            self.assertFalse(result["retryAllowed"])
+
+    def test_lookup_failure_after_submit_holds_but_changed_source_blocks_before_send(self):
+        runtime = FakeRuntime()
+        def missing(operation, params):
+            raise self.b.BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED")
+        runtime.resolve_original = missing
+        result = asyncio.run(self.b.execute_request(self.send, runtime))
+        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+        self.assertEqual([method for method, _ in runtime.calls], ["session.resume", "prompt.submit"])
+        runtime = FakeRuntime()
+        def changed():
+            raise self.b.BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
+        runtime.require_recovery_source = changed
+        result = asyncio.run(self.b.execute_request(self.send, runtime))
+        self.assertEqual(result["state"], "REFUSED")
+        self.assertEqual(result["requestId"], self.send["requestId"])
+        self.assertEqual(runtime.calls, [])
+
+
 class PreDispatchFailureTests(unittest.TestCase):
     def setUp(self):
         self.b = load()
@@ -221,6 +283,8 @@ class PreDispatchFailureTests(unittest.TestCase):
                     result = asyncio.run(self.b.execute_request(request, runtime))
                     self.assertEqual(result["state"], "NOT_SENT")
                     self.assertEqual(result["operation"], operation)
+                    self.assertEqual(result["requestId"], request["requestId"])
+                    self.assertEqual(result.get("requestSessionId"), request.get("sessionId"))
                     self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})] if stage == "history" else [])
                     self.assertFalse(result["retryAllowed"])
                     self.assertNotIn("private", str(result))
@@ -243,6 +307,8 @@ class PreDispatchFailureTests(unittest.TestCase):
             recovering = request["operation"].startswith("recover_")
             self.assertEqual(result["state"], "EFFECT_UNKNOWN" if recovering else "NOT_SENT")
             self.assertEqual(result["operation"], "recover" if recovering else request["operation"])
+            self.assertEqual(result["requestId"], request["requestId"])
+            self.assertEqual(result.get("requestSessionId"), request.get("sessionId"))
             self.assertFalse(result["retryAllowed"])
             self.assertNotIn("private", str(result))
             execute.assert_not_called()
@@ -255,6 +321,14 @@ class FakeRuntime:
         self.error = error
         self.calls = []
         self.identifies = 0
+        self.lookups = []
+
+    def require_recovery_source(self):
+        pass
+
+    def resolve_original(self, operation, params):
+        self.lookups.append((operation, params))
+        return {"session_id": "session-1", "admission_id": "original-admission"}
 
     async def identify(self):
         self.identifies += 1
@@ -268,6 +342,9 @@ class FakeRuntime:
         self.calls.append((method, params))
         if self.error and method != "session.resume":
             raise self.error
+        if method == "prompt.submit":
+            return {"admission_id": "original-admission", "ref": {"session_id": "session-1"},
+                    "status": "terminal", "sequence": 1, "outcome": "completed", "execution_generation": 1}
         return snapshot()
 
 

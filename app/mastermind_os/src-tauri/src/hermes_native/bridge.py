@@ -34,7 +34,17 @@ class BridgeRefusal(ValueError):
 
 
 class OwnerRefusal(ValueError):
-    pass
+    def __init__(self, reason, *, code=None):
+        super().__init__(reason)
+        self.code = code
+
+    def proves_rejection(self):
+        # Qualified native dispatcher/authority refusals before a modifying
+        # handler can commit. Storage/internal/unknown and admission-conflict
+        # errors are NOT absence evidence, even when the owner sent an error.
+        return ((self.code == 4001 and str(self) in {
+            "invalid_params", "permission_denied", "profile_mismatch", "runtime_draining"})
+            or self.code == -32601 and str(self) == "unknown_method")
 
 
 class NotSent(ValueError):
@@ -233,6 +243,20 @@ def envelope(state, **values):
             "delegation": "NOT_ENABLED", "retryAllowed": False, **values}
 
 
+def bound_envelope(request, state, **values):
+    # Correlate the public reply to this validated invocation. Successful native
+    # identities are separately checked against the existing upstream owner.
+    if type(request) is dict and request.get("operation") in {"create", "send", "recover_create", "recover_send"}:
+        request_id = request.get("requestId")
+        if type(request_id) is str and REQUEST_ID.fullmatch(request_id):
+            values["requestId"] = request_id
+        if request.get("operation") in {"send", "recover_send"}:
+            session_id = request.get("sessionId")
+            if type(session_id) is str and IDENTIFIER.fullmatch(session_id):
+                values["requestSessionId"] = session_id
+    return envelope(state, **values)
+
+
 async def execute_request(request, runtime):
     mutation_sent = False
     operation = "unknown"
@@ -241,7 +265,15 @@ async def execute_request(request, runtime):
         endpoint, public = qualify_identity(await runtime.identify(), runtime.home)
         readonly_capacity = bool(getattr(runtime, "readonly_capacity_qualified", lambda: False)())
         if operation == "status":
-            return envelope("READY", operation=operation, runtime=public)
+            return bound_envelope(request, "READY", operation=operation, runtime=public)
+        original_create = None
+        if operation in {"create", "send"}:
+            # A new mutation must have a qualified original-request recovery path.
+            # Source changes fail before modifying RPC; ordinary reads still work.
+            await asyncio.to_thread(runtime.require_recovery_source)
+            if operation == "create":
+                original_create = await asyncio.to_thread(runtime.resolve_original,
+                    "recover_create", {"request_id": request["requestId"]})
         async with runtime.connect(endpoint) as client:
             if operation in {"recover_create", "recover_send"}:
                 # Existing owner lookup only. Absence, pruning and read failure
@@ -250,14 +282,14 @@ async def execute_request(request, runtime):
                 if operation == "recover_create":
                     original = await client.rpc("session.resume", session_id=target["session_id"])
                     observed = project_result("read", original, target["session_id"], readonly_capacity=readonly_capacity)
-                    return envelope("OPENED", operation="recover", runtime=public, **observed)
+                    return bound_envelope(request, "OPENED", operation="recover", runtime=public, **observed)
                 # The canonical outcome is independent of transcript readability.
                 # The UI performs an ordinary history read after this receipt.
                 result = await client.rpc("prompt.receipt", session_id=target["session_id"], admission_id=target["admission_id"])
                 projected = project_result("receipt", result, target["session_id"], readonly_capacity=readonly_capacity)
                 if projected["receipt"]["id"] != target["admission_id"]:
                     raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
-                return envelope("ADMITTED", operation="recover", runtime=public, **projected)
+                return bound_envelope(request, "ADMITTED", operation="recover", runtime=public, **projected)
             if operation == "send":
                 original = await client.rpc("session.resume", session_id=params["session_id"])
                 observed = project_result("read", original, params["session_id"], readonly_capacity=readonly_capacity)
@@ -265,29 +297,37 @@ async def execute_request(request, runtime):
                     raise BridgeRefusal("NATIVE_SESSION_POLICY_UNQUALIFIED")
             mutation_sent = operation in {"create", "send"}
             result = await client.rpc(METHODS[operation], **params)
-            projected = project_result(operation, result, params.get("session_id"), readonly_capacity=readonly_capacity)
+            expected_session = original_create["session_id"] if original_create else params.get("session_id")
+            projected = project_result(operation, result, expected_session, readonly_capacity=readonly_capacity)
+            if operation == "send":
+                original_send = await asyncio.to_thread(runtime.resolve_original, "recover_send",
+                    {"session_id": params["session_id"], "request_id": request["requestId"]})
+                if projected["receipt"]["id"] != original_send["admission_id"]:
+                    raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
             if operation == "receipt" and projected["receipt"]["id"] != params["admission_id"]:
                 raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
             state = {"create": "OPENED", "send": "ADMITTED"}.get(operation, "READY")
-            return envelope(state, operation=operation, runtime=public, **projected)
+            return bound_envelope(request, state, operation=operation, runtime=public, **projected)
     except OwnerRefusal as exc:
         if operation.startswith("recover_"):
-            return envelope("EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
+            return bound_envelope(request, "EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
+        if mutation_sent and not exc.proves_rejection():
+            return bound_envelope(request, "EFFECT_UNKNOWN", operation=operation, code="NATIVE_OUTCOME_UNKNOWN")
         reason = str(exc)
         code = reason if re.fullmatch(r"[a-z_]{1,80}", reason) else "NATIVE_REFUSED"
-        return envelope("REFUSED", operation=operation, code=code)
+        return bound_envelope(request, "REFUSED", operation=operation, code=code)
     except NotSent:
         if operation.startswith("recover_"):
-            return envelope("EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
-        return envelope("NOT_SENT", operation=operation, code="NATIVE_NOT_SENT")
+            return bound_envelope(request, "EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
+        return bound_envelope(request, "NOT_SENT", operation=operation, code="NATIVE_NOT_SENT")
     except BridgeRefusal as exc:
         recovering = operation.startswith("recover_")
-        return envelope("EFFECT_UNKNOWN" if mutation_sent or recovering else "REFUSED",
+        return bound_envelope(request, "EFFECT_UNKNOWN" if mutation_sent or recovering else "REFUSED",
                         operation="recover" if recovering else operation, code=str(exc))
     except Exception:
         recovering = operation.startswith("recover_")
         not_sent = operation in {"create", "send"} and not mutation_sent
-        return envelope("EFFECT_UNKNOWN" if mutation_sent or recovering else "NOT_SENT" if not_sent else "UNAVAILABLE",
+        return bound_envelope(request, "EFFECT_UNKNOWN" if mutation_sent or recovering else "NOT_SENT" if not_sent else "UNAVAILABLE",
                         operation="recover" if recovering else operation,
                         code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent or recovering else "NATIVE_NOT_SENT" if not_sent else "NATIVE_UNAVAILABLE")
 
@@ -418,7 +458,7 @@ class NativeRuntime:
                     try:
                         return await client.rpc(method, _timeout=8, **params)
                     except GatewayRPCError as exc:
-                        raise OwnerRefusal(str(exc)) from None
+                        raise OwnerRefusal(str(exc), code=exc.code) from None
                     except GatewayClientError as exc:
                         if str(exc) == NOT_SENT:
                             raise NotSent() from None
@@ -459,13 +499,13 @@ def main():
         mutating = operation in {"create", "send"}
         recovering = operation.startswith("recover_")
         not_sent = mutating and not execution_started
-        result = envelope("NOT_SENT" if not_sent else "EFFECT_UNKNOWN" if mutating or recovering else "UNAVAILABLE",
+        result = bound_envelope(request, "NOT_SENT" if not_sent else "EFFECT_UNKNOWN" if mutating or recovering else "UNAVAILABLE",
                           operation="recover" if recovering else operation,
                           code="NATIVE_NOT_SENT" if not_sent else "NATIVE_CLIENT_UNAVAILABLE")
     encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(encoded) > 1024 * 1024:
         mutating = type(request) is dict and request.get("operation") in {"create", "send"}
-        encoded = json.dumps(envelope("EFFECT_UNKNOWN" if mutating or operation.startswith("recover_") else "UNAVAILABLE",
+        encoded = json.dumps(bound_envelope(request, "EFFECT_UNKNOWN" if mutating or operation.startswith("recover_") else "UNAVAILABLE",
                                       operation="recover" if operation.startswith("recover_") else operation,
                                       code="NATIVE_RESPONSE_TOO_LARGE")).encode()
     sys.stdout.buffer.write(encoded + b"\n")

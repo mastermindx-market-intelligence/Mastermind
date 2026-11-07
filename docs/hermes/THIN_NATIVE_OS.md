@@ -215,10 +215,72 @@ Actual repair checks:
 The inspected running installed app exposes real native accessibility controls and
 reports signed-in state, but still identifies the older fca92d5a source below.
 This establishes the available UI path, not acceptance of this repaired candidate.
-Its existing public native-client build input was located in that installed
-binary; the successor will reuse that identity rather than create a registration.
+Its existing public native-client input was subsequently verified from the original
+installation's retained build profile, rather than relying on binary extraction.
+The successor preserves that identity and the existing public input derivations.
 No native create/send, synthetic pending record, active service restart or release
 replacement occurred during these repairs.
+
+## Original-request settlement follow-through
+
+The initial concurrent failure-boundary checkpoint is published at
+`2c0386936a49ab214802aee093b714626642acf6`. The continuing source session took the
+remaining bounded repair from its clean local/remote head, preserving the concurrent
+native packaging lane. [Source custody and counterexamples](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2180#issuecomment-6702850319).
+
+- Before-dispatch host failures now return a closed original-invocation proof with
+  operation, request ID, send session and expected auth generation. A typed internal
+  before/after-dispatch distinction prevents later IO failures acquiring that proof.
+  Generic IPC strings cannot clear a durable reservation after invocation.
+- Authentication-race promotion validates the complete nonprivate NOT_SENT envelope.
+  Missing fields, crossed request/session IDs, unexpected receipt/runtime/private
+  fields and malformed capabilities remain held. Compare-clear must succeed.
+- Replies carry request ID and original send session, and the port validates them
+  before settlement. It captures request primitives before awaiting storage.
+- Successful create is checked against the upstream deterministic original identity.
+  Successful direct send is checked against the incumbent read-only ledger's exact
+  principal/session/request admission. A response echo alone is not the proof.
+- The native dispatcher can return storage_unavailable after its admission commit:
+  tracked_write invokes publication after write(), and dispatch catches sqlite errors
+  across both. Storage/internal/unknown errors after modifying RPC now retain
+  EFFECT_UNKNOWN. Only the narrow qualified explicit rejection set can clear.
+- New mutations require the already-qualified recovery helper source before dispatch.
+  A compatible upgrade can still serve ordinary reads; unqualified recovery semantics
+  cannot silently strand new sends. A post-submit lookup failure retains the original.
+
+Actual follow-through qualification (overlapping suites are not summed):
+
+| Check | Result | Retained receipt |
+|---|---|---|
+| Native UI/port/contract plus existing pointer/controller suites | 215 passed | `/tmp/hermes-thin-original-binding-web-20261107-c2.log` |
+| Python bridge, crossed success and post-admission failure cases | 31 passed | `/tmp/hermes-thin-original-binding-python-20261107-c1.log` |
+| Native host/auth/request and complete no-send proof | 9 passed | `/tmp/hermes-thin-original-binding-native-20261107-c1.log` |
+| TypeScript | Passed | `/tmp/hermes-thin-original-binding-typecheck-20261107-c1.log` |
+
+The first composed UI run exposed a raw-host fixture missing the new correlation
+fields (214 passed, one failed). The fixture now supplies those fields while retaining
+the original unmount/reopen/no-replay assertions; the final 215-test run passed.
+
+A real read-only recovery through the modified bridge returned the original canary
+admission terminal/completed, sequence6, execution generation1, with the exact original
+request/session binding. Receipt `/tmp/hermes-thin-original-binding-recovery-20261107-c1.json`,
+SHA256 `cae3efac1bf3e43618728ac04713b06a256051dddb0078c12fc903a84b6d8c03`;
+bridge SHA256 `c1d5135deea2f6f7e81166533f85a616d09f7c32898af83e75c374fa6da80534`.
+The original canary file's SHA256 remained unchanged before and after. No create,
+send, synthetic pending record, service restart or upstream upgrade occurred.
+This is native original-request recovery proof, not signed-in packaged-app acceptance.
+
+The original installed public profile was hash-verified at
+`/Volumes/Mastermind 2/agent-workspaces/web/mmos-project-team-launch-20261105-sol-002/app/mastermind_os/src-tauri/target/mmos-project-teams-fca92d5a-20261106-sol-002/PUBLIC_BUILD_INPUTS.json`,
+SHA256 `ddfeea5e9ef02c1780f97e54b987e58ea9e2e6aa9471c960e90f241e4946926d`.
+Preserve its native-client identity, absent/disabled refresh setting, Executive
+resource, launch catalogue and Terminal public-input derivation. Canonical
+[original installation provenance](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1621#issuecomment-6670337891)
+was read alongside its exact APP_UPDATE_RETURN record, SHA256
+`5466cbbc5abfa43d654aae033b531c82960fb97a751df537cdb331d5349e7953`.
+The continuing session's Browser initialization lacks its originating browser context;
+no alternate browser-control route is permitted by that failure. Existing pending
+sign-in must be reconciled before another sign-in or candidate replacement.
 
 ## Remaining acceptance and protected release
 

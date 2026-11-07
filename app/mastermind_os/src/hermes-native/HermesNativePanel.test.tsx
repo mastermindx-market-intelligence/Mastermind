@@ -117,10 +117,11 @@ describe("thin native Hermes Office", () => {
     let loseReply: ((reason: Error) => void) | undefined;
     const invoke = vi.fn(async (_command: string, args: Record<string, unknown>) => {
       const request = args.request as { operation: string; requestId?: string; sessionId?: string };
-      if (request.operation === "create") return view({ state: "OPENED", operation: "create", session: nativeSession() });
+      if (request.operation === "create") return view({ state: "OPENED", operation: "create", requestId: request.requestId, session: nativeSession() });
       if (request.operation === "send") return await new Promise((_resolve, reject) => { loseReply = reject; });
       if (request.operation === "read") return view({ operation: "read", session: nativeSession() });
       if (request.operation === "recover_send") return view({ state: "ADMITTED", operation: "recover",
+        requestId: request.requestId, requestSessionId: request.sessionId,
         receipt: { id: "original-admission", sessionId: "session-one", status: "terminal", sequence: 1,
           outcome: "completed", executionGeneration: 1 } });
       return view({ operation: "status" });
