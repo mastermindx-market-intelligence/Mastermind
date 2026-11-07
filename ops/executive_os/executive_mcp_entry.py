@@ -43,12 +43,14 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
     if raw.get('reply_events_armed',False) and raw.get('executive_mcp_profile') != 'web_ceo_v3':
         raise ValueError('reply events require explicit Web-CEO v3 receiver')
+    from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
+    validate_dot_canary_settings(raw)
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
