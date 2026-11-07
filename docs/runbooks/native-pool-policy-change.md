@@ -42,3 +42,55 @@ The original #2060/#10740 application-selection/enrollment migration and #2109 O
 Actual operator invocation read the existing public routing source selected from the incumbent installed pool launcher's kit. It returned ten configured IDs (`bailian`, `claude`, `claude-native`, `codex-native`, `cursor`, `glm`, `go`, `grok`, `minimax`, `ocfree`), source SHA256 `db4e4b1768809bd991003ef045568b480cdb42ea0715a6b73ea5353930bf90d8` and incumbent critical SHA256 `7433fc62d515d8872c68d4e1fb7a6fcbac0c07187cbaf1b6497df5dd0b7fca36`. A same-source preview returned `UNCHANGED`, no changed pools and no requirements. These are dated source observations, not permanent current revisions or live capacity proof.
 
 Both new Python files passed AST parsing. Regression cases are authored for current/candidate drift, native critical/noncritical semantics, source formatting, pool/model changes, invalid graphs, credential material, symlinks and actual CLI composition. No discretionary test suite was executed under the Chairman's existing instruction. Hosted CI results must be read for the exact published head before claiming those cases passed. No account configuration, secret resolver, provider call, lease mutation, service installation or production deployment was performed by this slice.
+
+## Author a model or pool change without editing the live file
+
+The existing operator also supports `stage` and `verify-candidate`. They create or read back **one private candidate artifact**, not installed configuration. The authored policy is canonical JSON, which is valid YAML; existing comments/formatting are not retained. Untouched decoded policy values are preserved.
+
+Use a closed JSON edit document. For example, to change an existing role to another model already declared in that pool's `model_capabilities`:
+
+```json
+{
+  "schema": "mastermind.native_pool_policy_edits.v1",
+  "model_assignments": {
+    "glm": {"executor": "glm-5.3"}
+  }
+}
+```
+
+`model_assignments` retains every other role, capability, quota, policy and account-related reference. It refuses unknown pools, missing model maps, unknown roles or models not already declared in the pool's capability map. A declared capability is not proof of a paid entitlement or live suitability.
+
+For intentional complete pool definitions, use `pool_upserts` (map from pool ID to the **complete** proposed pool row). For removal, use `pool_removals` (unique existing pool IDs). `routing`, when present, is the complete replacement routing object. No defaults, automatic enable flags, new credentials or added capacity are invented. An upsert is not a partial merge; preserve required fields deliberately. A model assignment cannot target the same pool as an upsert or removal. New/changed model definitions still require the original native owner's full qualification before admission.
+
+Create the output directory yourself with private permissions, separate from the live policy directory, and choose an unused final name:
+
+```sh
+mkdir -m 700 /absolute/private/pool-candidates
+python3 -B -m ops.native_fabric.quota_continuity.policy_change stage \
+  --policy /absolute/path/to/public/pools.yaml \
+  --edits /absolute/private/edits.json \
+  --expected-source-sha256 <inspect-source-sha256> \
+  --output /absolute/private/pool-candidates/candidate.json
+```
+
+The command validates the complete edit and native preview, rechecks the exact source and edit files, fsyncs a private scratch inode, and publishes the final name atomically with no replacement. It refuses pre-existing files, directories and symlinks, public/shared output directories, symlink parent paths, and output in the live source directory. No-op requests are refused rather than producing new artifacts. It neither unlinks nor replaces an existing destination, including one created concurrently.
+
+Successful output is `state=STAGED`, `candidate_written=true`, the exact candidate/source digests and the original change preview. `live_policy_changed=false`, `activation_authorized=false` and `original_operations_rebound=false` remain explicit. This is an executable candidate-authoring path, not a policy activation receipt.
+
+### Lost response or interrupted candidate publication
+
+An error after attempting the final no-replace publication returns exit code 3 with `state=EFFECT_UNKNOWN` and the original candidate digest. The original target is retained. Never restage to another path to evade uncertainty. Read that exact target:
+
+```sh
+python3 -B -m ops.native_fabric.quota_continuity.policy_change verify-candidate \
+  --candidate /absolute/private/pool-candidates/candidate.json \
+  --expected-candidate-sha256 <original-candidate-digest>
+```
+
+This reports only `ARTIFACT_PRESENT_VERIFIED`: the exact candidate is available. It does not reconstruct the original invocation's success or authorize replay, activation, key changes or original-operation transfer. The existing native publisher must independently recheck its current source, grants, admission/drain state and generation before consuming the candidate.
+
+### Authoring evidence
+
+The staged operator was exercised against the incumbent public ten-pool source at revision `db4e4b1768809bd991003ef045568b480cdb42ea0715a6b73ea5353930bf90d8`. A deliberately unactivated GLM executor change to its already-declared `glm-5.3` produced candidate `e1c0e3b2f00d315568e8fc7e6a9a39e145e8b35124af8d2952cd8d635e81d468`. CLI stage and readback returned exit0, with critical-policy/requalification/drain requirements preserved and the original live file byte-identical afterward. This was source-backed private candidate authoring, not a provider call, native generation install, account activation or model-choice recommendation.
+
+The source regression cases cover closed edit semantics, model-map ownership, untouched values, no-op and stale revisions, credential rejection, private destinations, no-overwrite races, input drift, lost final-publication acknowledgment and actual subprocess CLI composition. They are authored for required hosted CI; no discretionary local suite was run.
