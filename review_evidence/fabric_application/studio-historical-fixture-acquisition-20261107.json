@@ -1,0 +1,38 @@
+{
+  "schema": "mastermind.studio_historical_fixture_acquisition.v1",
+  "source_parent": "7118a1374bac0c70a695989bfccc1a84d54026b3",
+  "reason": "Exact7118 diagnostic passed the original migration case but broad discovery failed43 setups because depth-one checkout lacked a pinned historical Git object.",
+  "original_run": 42383449818,
+  "original_job": 128435743267,
+  "patch": {
+    "head": "7118a1374bac0c70a695989bfccc1a84d54026b3",
+    "path": ".github/workflows/hermes-application-inference.yml",
+    "pre_blob": "7e7622ab19acff326a77fc7c886989d49612dcdb",
+    "post_blob": "c94550cfdc62febafcc757ba46a46f1d3b0fb776",
+    "post_sha256": "785ff4aab6fa3f3dd8c17970e7a1c5c22b341fe7627ba3069e13d07bda6048ac",
+    "fixture_oid": "f87ac012339e82fe46bce5ddc70d1d04183d1b6e",
+    "fixture_sha256": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "fixture_bytes": 101068,
+    "decision": "Acquire and verify the immutable historical Git object in the checkout common object store before offline discovery. No test or production source change."
+  },
+  "focused_test": {
+    "named": 49,
+    "tests": 65,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "log_sha256": "b4d22879c9d63b1c2e89d7688bc15b73cf5942647c320f113931757cc9a8e768",
+    "xml_sha256": "6f0d0f2e356bda7fd973bec5e16d0b184a1c964f51eb81f3e6e9e55b2a6b2a4f"
+  },
+  "actual_acquisition_proof": {
+    "host": "M2",
+    "path": "/tmp/mmx-fleet-fixture-acquisition-20261107-root-v1-5731yemo/proof.json",
+    "github_api_acquired": true,
+    "length_sha256_git_oid_verified": true,
+    "absent_in_fresh_bare_before": true,
+    "exact_object_readback_after": true,
+    "real_checkout_unchanged": true
+  },
+  "preserved": "All fixture constants, production source, HEAD/index/worktree inputs and original delivery assertions. Only CI input acquisition plus this report changes.",
+  "hosted_acceptance": "Pending on resulting exact head"
+}

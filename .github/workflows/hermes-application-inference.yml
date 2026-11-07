@@ -250,16 +250,10 @@ jobs:
           python -m pip install --disable-pip-version-check 'uv==0.13.5'
           uv sync --project .ci-hermes-native --locked --no-default-groups --python 3.14
           uv pip install --python .ci-hermes-native/.venv/bin/python 'jsonschema==4.26.0' 'PyYAML==6.0.3' 'pytest==9.2.0'
-      - name: Verify actual native tool history, owner limits and unknown effects
-        env:
-          HERMES_HOME: ${{ runner.temp }}/hermes-original-owner-fixture
-          PYTHONPATH: .ci-hermes-native
-          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+      - name: Verify committed source fixture boundaries
         run: >-
           .ci-hermes-native/.venv/bin/python -B
-          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
-          --adapter-root . --macro-root .ci-hermes-application-owner
-          --native-owner-root . --hermes-root .ci-hermes-native
+          integrations/hermes_application_fabric/qualification/test_source_materialization.py
       - name: Qualify the exact source-support proposal without overriding support flags
         env:
           HERMES_HOME: ${{ runner.temp }}/hermes-source-support-native-fixture
@@ -271,6 +265,16 @@ jobs:
           --adapter-root . --macro-root .ci-hermes-application-owner
           --native-owner-root . --hermes-root .ci-hermes-native
           --source-support-proposal
+      - name: Verify actual native tool history, owner limits and unknown effects
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-original-owner-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
   original-tunnel-owner:
     name: Hermes aliases through original tunnel custody
     runs-on: ubuntu-latest

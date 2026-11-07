@@ -9,10 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import stat
 import subprocess
-import tarfile
 import xml.etree.ElementTree as ET
 
 
@@ -38,13 +38,70 @@ def sha256(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def git(root, *arguments):
+def git(root, *arguments, input_data=None):
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1",
                GIT_NO_LAZY_FETCH="1", GIT_TERMINAL_PROMPT="0")
-    return subprocess.run(["git", "-c", "gc.auto=0", "-C", str(root), *arguments],
-        env=env, stdin=subprocess.DEVNULL, capture_output=True,
-        timeout=60, check=True).stdout
+    stream = {"stdin": subprocess.DEVNULL} if input_data is None else {"input": input_data}
+    try:
+        return subprocess.run(["git", "-c", "gc.auto=0", "-C", str(root), *arguments],
+            env=env, capture_output=True, timeout=60, check=True, **stream).stdout
+    except subprocess.CalledProcessError as error:
+        diagnostic = error.stderr.decode("utf-8", errors="replace")
+        diagnostic = re.sub(r"(?:https?|ssh)://[^\s]+", "[remote]", diagnostic)
+        diagnostic = re.sub(r"(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]+", "[credential]", diagnostic)
+        diagnostic = " ".join(diagnostic.split())[:1000]
+        raise RuntimeError("Source fixture git " + arguments[0] + " failed ("
+                           + str(error.returncode) + "): " + diagnostic) from None
+
+
+def export_committed(original, destination, commit, selected):
+    """Export only locally present, regular committed blobs; never fetch or copy HEAD's worktree."""
+    records = git(original, "ls-tree", "-r", "-z", "--full-tree", commit, "--", *selected)
+    entries, seen = [], set()
+    for record in records.split(b"\0"):
+        if not record:
+            continue
+        header, raw_path = record.split(b"\t", 1)
+        mode, kind, oid = header.decode("ascii").split()
+        name = raw_path.decode("utf-8")
+        relative = PurePosixPath(name)
+        if (mode not in {"100644", "100755"} or kind != "blob"
+                or re.fullmatch(r"[0-9a-f]{40}", oid) is None
+                or relative.is_absolute() or ".." in relative.parts
+                or name in seen or str(relative) != name
+                or not any(name == path or name.startswith(path + "/") for path in selected)):
+            raise RuntimeError("Source fixture has an unsafe committed member")
+        seen.add(name)
+        entries.append((name, mode, oid))
+    if not entries or any(not any(name == path or name.startswith(path + "/")
+            for name in seen) for path in selected):
+        raise RuntimeError("Source fixture lacks a selected committed path")
+    object_ids = sorted({oid for _, _, oid in entries})
+    checks = git(original, "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+                 input_data=("\n".join(object_ids) + "\n").encode("ascii")).decode("ascii").splitlines()
+    sizes = {}
+    if len(checks) != len(object_ids):
+        raise RuntimeError("Source fixture object inventory is incomplete")
+    for oid, line in zip(object_ids, checks):
+        fields = line.split()
+        if len(fields) != 3 or fields[:2] != [oid, "blob"] or not fields[2].isdigit():
+            raise RuntimeError("Source fixture committed blob is not locally available: " + oid)
+        sizes[oid] = int(fields[2])
+    for name, mode, oid in entries:
+        raw = git(original, "cat-file", "blob", oid)
+        actual = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw,
+                              usedforsecurity=False).hexdigest()
+        if len(raw) != sizes[oid] or actual != oid:
+            raise RuntimeError("Source fixture committed blob differs: " + name)
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("xb") as output:
+            output.write(raw)
+        target.chmod(int(mode[-3:], 8))
+    return {"method": "verified_local_committed_blobs", "files": len(entries),
+            "unique_blobs": len(object_ids), "bytes": sum(sizes[oid] for _, _, oid in entries),
+            "lazy_fetch_permitted": False, "worktree_content_used": False}
 
 
 def inventory(root):
@@ -83,15 +140,9 @@ def prepare(original, adapter, destination):
         raise RuntimeError("Original Macro source is not the proposal parent")
     git(original, "diff", "--exit-code", "HEAD", "--")
     destination.mkdir()
-    archive = destination.parent / "macro-source-support.tar"
-    if archive.exists():
-        raise RuntimeError("Proposal archive already exists")
-    archived_tests = [path for path in TESTS if path not in CHANGED or contract["preimages"][path] is not None]
-    git(original, "archive", "--format=tar", "--output=" + str(archive),
-        OWNER_COMMIT, "engine", "lib", "config", "tests/__init__.py", *archived_tests)
-    with tarfile.open(archive) as source:
-        source.extractall(destination, filter="data")
-    archive.unlink()
+    selected_tests = [path for path in TESTS if path not in CHANGED or contract["preimages"][path] is not None]
+    materialization = export_committed(original, destination, OWNER_COMMIT,
+        ("engine", "lib", "config", "tests/__init__.py", *selected_tests))
     before = inventory(destination)
     for path, expected in contract["preimages"].items():
         if before.get(path) != expected:
@@ -114,6 +165,7 @@ def prepare(original, adapter, destination):
     return {"original_owner_commit": OWNER_COMMIT,
         "contract_sha256": sha256(raw_contract), "patch_sha256": contract["patch_sha256"],
         "postimages": contract["postimages"], "fixture_files": len(after),
+        "source_materialization": materialization,
         "original_source_unchanged": True, "runtime_enrollment": False}
 
 

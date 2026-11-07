@@ -36,11 +36,22 @@ original Macro factory/workload declarations and a disposable attended grant.
 The successor adds the same three cases for meta fixed/AUTO/exact, yielding21
 cases in each of two explicitly distinct contexts: original a577 with fixture
 source-flag overrides, and the exact proposed source support without those
-overrides. These21-case executions are pending until their own hosted receipts
-exist. Neither context qualifies a real account, installs a service or
+overrides. The original-a577 context passed all21 cases on composed d7/173b224,
+in job128439397143. Its proposal preparation then failed at Git archive before
+patch application; that underlying cause remains unproved because stderr was
+not surfaced. The successor exports verified local committed blobs instead,
+with three passing Git boundary tests and the same pre/postimage checks.
+Hosted proposal383+21 proof remains pending. Neither context qualifies a real
+account, installs a service or
 authenticates a live attended host. The separate patched-gateway suite covers
 native route/admission projection. The shared paired gate still consumes its
 original CI-owned pin.
+
+The repaired Studio diagnostic passed all848 discovery cases on d7/173b224,
+plus the baseline and observed isolated target. That actual receipt supports
+retaining the proven immutable-anchor/full-history input during composition
+with the original552 continuation's independently supplied fixture acquisition.
+Only one acquisition path is used; no original assertion or guard is changed.
 
 | Input | Exact identity / owner |
 | --- | --- |

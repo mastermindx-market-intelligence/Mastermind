@@ -61,8 +61,8 @@ disposable qualification fixtures, with no installed changes or provider calls.
 The existing `qualify_application_owner.py` also covers21 native cases:
 Secretary and meta-CEO fixed/AUTO/exact, plus attended fixed; each exercises a
 native tool conversation, step-limit refusal and uncertain-followup retention.
-With `--source-support-proposal`, `owner_source_support.py` archives the exact
-original Macro checkout into a new temporary directory, verifies/applies only
+With `--source-support-proposal`, `owner_source_support.py` exports the exact
+selected committed Macro blobs into a new temporary directory, verifies/applies only
 the four declared files, runs the383 original-owner cases and then executes
 the native cases. The positive proposal path does not override the source
 support flags. Only the disposable endpoint/model and runtime qualification
@@ -70,6 +70,18 @@ inputs are synthetic. The unmodified-owner path is reported separately.
 
 Hosted proposal/native results remain pending until their exact run receipts
 exist. The older12-case c164 native proof is not relabelled as this21-case proof.
+
+The original-a577 context passed all21 cases on composed d7/173b224 in hosted
+job128439397143. Its subsequent proposal preparation failed at `git archive`
+with exit128 before applying the patch; captured stderr was not surfaced, so
+the underlying archive cause is unproved. Preparation now reads only selected
+committed tree/blob objects, verifies their IDs, sizes and regular-file modes,
+and refuses missing local blobs without lazy fetch or working-tree substitution.
+Three actual local-Git boundary cases pass, covering committed bytes/modes,
+link refusal and missing-object refusal with the object still absent afterward.
+The exact source/patch contract, original-clean-source readbacks and complete
+four-file postimage delta remain mandatory. Hosted proposal383+21 proof remains
+pending its own successful receipt.
 
 ## Owner consumption
 
