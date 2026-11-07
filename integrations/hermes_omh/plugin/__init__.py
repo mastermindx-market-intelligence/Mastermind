@@ -1,6 +1,6 @@
 """Hermes-native read-only bridge to an exact installed Mastermind CLI release.
 
-No provider keys, runtime grants, dispatcher, retries or memory provider. The
+No provider keys, runtime grants, worker dispatcher, retries or memory provider. The
 native registry/lease owns registration; the descriptor is operator installation
 metadata, never authentication or a model-supplied command/configuration.
 """
@@ -19,6 +19,15 @@ TOOL_NAME='mmx_omh'
 TOOLSET='mmx_omh'
 RUNTIME_SCHEMA='mastermind.hermes_omh.local_runtime/v1'
 MAX_BYTES=131072
+CAPACITY_SERVER='mastermind-fabric-capacity'
+CAPACITY_TOOL='fabric_route_preview'
+# Wire-schema values from the existing read-only Capacity bridge, not routing
+# policy. The caller states task requirements; OMH categories are not complexity.
+TASK_CLASSES=frozenset(('execute','fix_build','mechanical','review','census','audit',
+    'verify','build','high_level','architecture','integration','domain_orchestration','orchestration'))
+COMPLEXITIES=frozenset(('C0_MECHANICAL','C1_ROUTINE_BOUNDED','C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT'))
+PREVIEW_FIELDS=frozenset(('pool','model','mode','host','state','reason','reserved',
+                         'selection_rechecked_at_request','proof'))
 SOURCE_FILES=frozenset({
     'integrations/__init__.py','integrations/hermes_omh/__init__.py',
     'integrations/hermes_omh/__main__.py','integrations/hermes_omh/adapter.py',
@@ -32,19 +41,69 @@ SOURCE_FILES=frozenset({
 _BOOT='import runpy,sys; root,home=sys.argv[1:]; sys.path.insert(0,root); sys.argv=["mmx_omh","--omh-home",home]; runpy.run_module("integrations.hermes_omh.bridge_cli",run_name="__main__")'
 TOOL_SCHEMA={
     'name':TOOL_NAME,
-    'description':'Mastermind read-only OMH bridge. Prepare a canonical graph proposal or obtain existing OMH skill/model/effort recommendations. Never admits, starts, retries or accepts work. Use the existing authorized Executive/Fabric tools for execution; candidates do not prove capacity or entitlement.',
+    'description':'Mastermind read-only OMH bridge. Prepare a graph, obtain OMH advice, or preview the canonical Fabric route for explicit task_class and complexity. OMH candidates never override Fabric models or pools. Never admits, starts, retries or accepts work. Use the existing authorized Executive/Fabric tools for execution.',
     'parameters':{
         'type':'object','additionalProperties':False,'required':['action'],
-        'properties':{'action':{'type':'string','enum':['status','plan','recommend']},
+        'properties':{'action':{'type':'string','enum':['status','plan','recommend','route']},
                       'proposal':{'type':'object','description':'Same closed nodes/policies/root_job_id/plan_attempt_id proposal as the Mastermind OMH CLI; identity strings are not authority.'},
                       'message':{'type':'string','maxLength':4000},
-                      'category':{'type':'string','maxLength':128}},
+                      'category':{'type':'string','maxLength':128},
+                      'task_class':{'type':'string','enum':sorted(TASK_CLASSES)},
+                      'complexity':{'type':'string','enum':sorted(COMPLEXITIES)}},
     },
 }
 
 
 class NativeBridgeError(RuntimeError):
     pass
+
+
+class CapacityPreviewError(NativeBridgeError):
+    def __init__(self, reason, owner_reason=None):
+        self.reason=reason
+        self.owner_reason=owner_reason
+        super().__init__(reason)
+
+
+def _owner_reason(value):
+    return value if type(value) is str and re.fullmatch('[A-Z][A-Z0-9_]{1,63}',value) else None
+
+
+def _capacity_preview(ctx, requirements):
+    """One existing native MCP call, with its existing trust and profile gates."""
+    try:
+        envelope=ctx.call_mcp(CAPACITY_SERVER,CAPACITY_TOOL,dict(requirements),timeout=20)
+    except PermissionError:
+        raise CapacityPreviewError('NATIVE_CAPACITY_NOT_AUTHORIZED') from None
+    except Exception:
+        raise CapacityPreviewError('NATIVE_CAPACITY_UNAVAILABLE') from None
+    try:
+        _bound(envelope)
+        if type(envelope) is not dict:raise ValueError('envelope')
+        if envelope.get('ok') is False:
+            raise CapacityPreviewError('NATIVE_CAPACITY_REFUSED',_owner_reason(envelope.get('error')))
+        if envelope.get('ok') is not True or envelope.get('truncated',False) is not False:
+            raise ValueError('envelope')
+        result=envelope.get('result')
+        if type(result) is str:result=json.loads(result,object_pairs_hook=_pairs)
+        _bound(result)
+        if type(result) is not dict or not set(result)<=PREVIEW_FIELDS:raise ValueError('shape')
+        if result.get('state')=='NO_ELIGIBLE_ROUTE':
+            raise CapacityPreviewError('NATIVE_CAPACITY_NO_ELIGIBLE_ROUTE',_owner_reason(result.get('reason')))
+        if (result.get('state')!='PREVIEW_ONLY' or result.get('reserved') is not False
+                or result.get('selection_rechecked_at_request') is not True
+                or result.get('proof')!='PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH'):
+            raise ValueError('proof')
+        for key in ('pool','model'):
+            value=result.get(key)
+            if type(value) is not str or re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}',value) is None:
+                raise ValueError('route')
+        for key in ('mode','host','reason'):
+            if key in result and (type(result[key]) is not str or len(result[key])>512):
+                raise ValueError('metadata')
+        return result
+    except (ValueError,TypeError,RecursionError,UnicodeError):
+        raise CapacityPreviewError('NATIVE_CAPACITY_OUTPUT_INVALID') from None
 
 
 @dataclass(frozen=True)
@@ -135,16 +194,23 @@ def verify_sources(binding):
     except (OSError,NativeBridgeError):return False
 
 
-def _refusal(reason):
-    return json.dumps(dict(state='REFUSED',reason=reason,admitted=False,dispatched=False),sort_keys=True)
+def _refusal(reason, capacity_reason=None):
+    result=dict(state='REFUSED',reason=reason,admitted=False,dispatched=False)
+    if capacity_reason is not None:result['capacity_reason']=capacity_reason
+    return json.dumps(result,sort_keys=True)
 
 
 def _valid_request(arguments):
     _bound(arguments)
     if type(arguments) is not dict:raise ValueError('request')
     action=arguments.get('action')
-    expected={'status':{'action'},'plan':{'action','proposal'},'recommend':{'action','message','category'}}
+    expected={'status':{'action'},'plan':{'action','proposal'},'recommend':{'action','message','category'},
+              'route':{'action','message','category','task_class','complexity'}}
     if type(action) is not str or action not in expected or set(arguments)!=expected[action]:raise ValueError('action')
+    if action=='route':
+        if (type(arguments['task_class']) is not str or arguments['task_class'] not in TASK_CLASSES
+                or type(arguments['complexity']) is not str or arguments['complexity'] not in COMPLEXITIES):
+            raise ValueError('requirements')
     raw=json.dumps(arguments,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode('utf-8')
     if len(raw)>MAX_BYTES:raise ValueError('bound')
     return raw
@@ -160,18 +226,22 @@ def register(ctx):
         raise NativeBridgeError('NATIVE_PROFILE_MISMATCH')
 
     def handler(arguments,*,session_id=None,task_id=None):
-        try:raw=_valid_request(arguments)
+        try:
+            raw=_valid_request(arguments)
+            if arguments['action']=='route':
+                raw=_valid_request(dict(action='recommend',message=arguments['message'],category=arguments['category']))
         except (ValueError,TypeError,RecursionError,UnicodeEncodeError):return _refusal('NATIVE_REQUEST_INVALID')
         if type(session_id) is not str or not 1<=len(session_id)<=256:return _refusal('NATIVE_SESSION_UNBOUND')
-        from hermes_constants import get_hermes_home
-        if Path(get_hermes_home()).resolve()!=Path(binding.profile_home).resolve():return _refusal('NATIVE_PROFILE_MISMATCH')
+        import hermes_constants
+        if Path(hermes_constants.get_hermes_home()).resolve()!=Path(binding.profile_home).resolve():return _refusal('NATIVE_PROFILE_MISMATCH')
         try:entry=registry.snapshot_registration(TOOL_NAME,scope=scope)
         except Exception:return _refusal('NATIVE_REGISTRATION_UNAVAILABLE')
         if entry is None or entry.handler is not handler:return _refusal('NATIVE_REGISTRATION_STALE')
         if not verify_sources(binding):return _refusal('NATIVE_SOURCE_CHANGED')
         try:
             # Deterministic local CLI only. No shell, provider credential, PATH
-            # discovery, arbitrary script, remote call or automatic retry.
+            # discovery, arbitrary script or automatic retry. The route action
+            # subsequently uses only the existing native read-only MCP client.
             result=subprocess.run(
                 [binding.python_executable,'-I','-B','-c',_BOOT,binding.source_root,binding.omh_home],
                 input=raw,capture_output=True,timeout=20,cwd=binding.source_root,
@@ -184,7 +254,7 @@ def register(ctx):
         try:current=registry.snapshot_registration(TOOL_NAME,scope=scope)
         except Exception:return _refusal('NATIVE_REGISTRATION_UNAVAILABLE')
         if current is None or current.handler is not handler:return _refusal('NATIVE_REGISTRATION_STALE')
-        if Path(get_hermes_home()).resolve()!=Path(binding.profile_home).resolve():return _refusal('NATIVE_PROFILE_MISMATCH')
+        if Path(hermes_constants.get_hermes_home()).resolve()!=Path(binding.profile_home).resolve():return _refusal('NATIVE_PROFILE_MISMATCH')
         if result.stderr or len(result.stdout)>MAX_BYTES+1:return _refusal('NATIVE_LOCAL_OUTPUT_INVALID')
         try:
             out=json.loads(result.stdout,object_pairs_hook=_pairs);_bound(out)
@@ -194,11 +264,30 @@ def register(ctx):
                 if type(out['reason']) is str and re.fullmatch('[A-Z][A-Z_]{1,63}',out['reason']):
                     return _refusal(out['reason'])
                 raise ValueError('reason')
-            states={'status':'LOCAL_BRIDGE_READY','plan':'PREPARED_NOT_ADMITTED','recommend':'RECOMMENDED_NOT_ADMITTED'}
+            states={'status':'LOCAL_BRIDGE_READY','plan':'PREPARED_NOT_ADMITTED','recommend':'RECOMMENDED_NOT_ADMITTED',
+                    'route':'RECOMMENDED_NOT_ADMITTED'}
             if (result.returncode!=0 or out.get('state')!=states[arguments['action']]
                     or out.get('admitted') is not False or out.get('dispatched') is not False):raise ValueError('state')
             if not verify_sources(binding):return _refusal('NATIVE_SOURCE_CHANGED')
             out['bridge_release_commit']=binding.release_commit
+            if arguments['action']=='status':
+                out['actions']=['plan','recommend','route','status']
+            if arguments['action']=='route':
+                requirements={key:arguments[key] for key in ('task_class','complexity')}
+                try:preview=_capacity_preview(ctx,requirements)
+                except CapacityPreviewError as exc:return _refusal(exc.reason,exc.owner_reason)
+                # The external native call is a second currentness boundary.
+                try:current=registry.snapshot_registration(TOOL_NAME,scope=scope)
+                except Exception:return _refusal('NATIVE_REGISTRATION_UNAVAILABLE')
+                if current is None or current.handler is not handler:return _refusal('NATIVE_REGISTRATION_STALE')
+                if Path(hermes_constants.get_hermes_home()).resolve()!=Path(binding.profile_home).resolve():return _refusal('NATIVE_PROFILE_MISMATCH')
+                if not verify_sources(binding):return _refusal('NATIVE_SOURCE_CHANGED')
+                out=dict(schema='mastermind.hermes_omh.route_preview/v1',
+                         state='ROUTE_PREVIEW_NOT_ADMITTED',admitted=False,dispatched=False,
+                         selected_model=None,availability='NOT_RESERVED',
+                         routing_requirements=requirements,recommendation=out,capacity_preview=preview,
+                         execution_owner='Mastermind Executive and Capacity/Fabric',
+                         bridge_release_commit=binding.release_commit)
             return json.dumps(out,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False)
         except (ValueError,TypeError,RecursionError,UnicodeError):return _refusal('NATIVE_LOCAL_OUTPUT_INVALID')
 
@@ -210,11 +299,15 @@ def register(ctx):
         current=commands.get('mmx-omh')
         if type(current) is not dict or current.get('handler') is not command_handler:
             return _refusal('NATIVE_COMMAND_STALE')
-        if type(raw_args) is not str or len(raw_args)>4200:
+        if type(raw_args) is not str or len(raw_args)>4400:
             return _refusal('NATIVE_REQUEST_INVALID')
         text=raw_args.strip()
         if text in ('','status'):
             request={'action':'status'}
+        elif text.split(None,1)[0]=='route':
+            parts=text.split(None,4)
+            if len(parts)!=5:return _refusal('NATIVE_REQUEST_INVALID')
+            request=dict(action='route',task_class=parts[1],complexity=parts[2],category=parts[3],message=parts[4])
         else:
             parts=text.split(None,1)
             if len(parts)!=2:return _refusal('NATIVE_REQUEST_INVALID')
@@ -244,8 +337,8 @@ def register(ctx):
             raise NativeBridgeError('NATIVE_TOOL_READBACK_FAILED') from None
         try:
             command_handle=ctx.register_command('mmx-omh',command_handler,
-                description='Read-only Mastermind OMH status or model/effort/skill advice; never executes work.',
-                args_hint='status | <category> <task>',argument_mode='text')
+                description='Read-only OMH advice and canonical Fabric route preview; never executes work.',
+                args_hint='status | <category> <task> | route <task_class> <complexity> <category> <task>',argument_mode='text')
         except Exception:
             raise NativeBridgeError('NATIVE_REGISTRATION_EFFECT_UNKNOWN') from None
         try:
