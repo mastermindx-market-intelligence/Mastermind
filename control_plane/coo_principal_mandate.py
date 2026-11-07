@@ -29,6 +29,7 @@ _SCOPE_RE = re.compile(r"^[a-z][a-z0-9._:-]{2,95}$")
 PRINCIPAL_ACTIONS = (
     "bounded_intent",
     "governed_orchestration",
+    "read_adopted_agentos_context",
 )
 DEFAULT_PRINCIPAL_ACTIONS = ("bounded_intent",)
 
