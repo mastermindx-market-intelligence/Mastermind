@@ -1541,3 +1541,50 @@ def test_record_run_gate_outcome_mismatch_fails_closed():
         "exit": 0,
         "gate_proof_recorded": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# Shadow prerequisites and ordinary CLI scope survive the six-shard placement.
+# ---------------------------------------------------------------------------
+
+
+def test_shadow_gate_cli_default_preserves_full_gate_scope():
+    parser = rwe.build_parser()
+    ordinary = parser.parse_args(["gate", "--env", "/tmp/venv"])
+    assert ordinary.subset is None
+    assert ordinary.shard_index is None
+    assert ordinary.func is rwe.cmd_gate
+    shard = parser.parse_args([
+        "gate", "--env", "/tmp/venv", "--shard-index", "5",
+    ])
+    assert shard.subset is None
+    assert shard.shard_index == 5
+    assert shard.func is rwe.cmd_gate
+
+
+def test_shadow_workflow_installs_node_prerequisites_before_shard_gate():
+    import yaml
+
+    path = _ROOT / ".github" / "workflows" / "rwe-shadow.yml"
+    data = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    job = data["jobs"]["shadow-shards"]
+    steps = job["steps"]
+    node = [step for step in steps if step.get("uses") == "actions/setup-node@v4"]
+    assert len(node) == 1
+    assert node[0]["with"] == {
+        "node-version": "22.14.0",
+        "cache": "npm",
+        "cache-dependency-path": "app/mastermind_os/package-lock.json",
+    }
+    deps = [step for step in steps if step.get("name") == "Install Node dependencies"]
+    assert len(deps) == 1
+    assert deps[0]["run"] == "npm ci --prefix app/mastermind_os"
+    realize = [step for step in steps if step.get("name") == "Realize hash-locked environment"]
+    assert len(realize) == 1
+    gate = [step for step in steps if step.get("name") ==
+            "Run canonical test shard inside the realized environment"]
+    assert len(gate) == 1
+    assert steps.index(node[0]) < steps.index(deps[0]) < steps.index(realize[0]) < steps.index(gate[0])
+    assert "continue-on-error" not in job
+    for step in (node[0], deps[0], realize[0], gate[0]):
+        assert "continue-on-error" not in step
