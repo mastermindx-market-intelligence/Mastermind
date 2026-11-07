@@ -37,6 +37,8 @@ MASTERMIND_REVISION_SOURCE_REF = "GITHUB:Mastermind:protected-master"
 AGENT_OS_REVISION_SOURCE_REF = "AGENT_OS:canonical-revision"
 STRATEGIC_SOURCE_REF = "STRATEGIC_STATE:config/strategic_state.yml"
 AGENT_OS_SOURCE_REF = "AGENT_OS:ceo_brief"
+COMPILED_CONTEXT_SOURCE_REF = "AGENT_OS:compiled_project_context"
+_MAX_COMPILED_CONTEXT_BYTES = 524288
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -97,8 +99,15 @@ class ChairmanCognitionSourceError(ValueError):
     """The bundle cannot be composed without inventing company truth."""
 
 
-def compose_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
-    """Compose and validate one closed Chairman-cognition input document."""
+def compose_input(bundle: Mapping[str, Any], *, compiled_context: Any = None,
+                  compiled_context_attestation: Any = None) -> dict[str, Any]:
+    """Compose one input, optionally binding an already-acquired Agent OS context.
+
+    The native optional argument is a dedicated source path, not an expansion of
+    caller-authored additional_source_receipts or the closed JSON bundle grammar.
+    This function remains pure; installed assembly owns acquisition/revalidation.
+    The delegation envelope and proposed options are never rewritten here.
+    """
     doc = _closed_mapping(
         bundle,
         required={
@@ -151,6 +160,13 @@ def compose_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
         agentos_receipt,
         *additions,
     ]
+    if compiled_context is None and compiled_context_attestation is not None:
+        raise ChairmanCognitionSourceError("compiled observation requires its payload")
+    if compiled_context is not None:
+        receipts.append(_compiled_project_receipt(
+            compiled_context, agentos_revision=agentos_revision,
+            attestation=compiled_context_attestation, as_of=as_of, options=doc["options"],
+        ))
     refs = [item["source_ref"] for item in receipts]
     if len(refs) != len(set(refs)):
         raise ChairmanCognitionSourceError("duplicate source_ref across composed sources")
@@ -199,6 +215,78 @@ def evaluate_bundle(bundle: Mapping[str, Any]) -> dict[str, Any]:
         canonical_json_bytes(result)
     ).hexdigest()
     return result
+
+
+
+def _compiled_project_receipt(
+    observation: Any, *, agentos_revision: Mapping[str, Any],
+    attestation: Any, as_of: str, options: Any,
+) -> dict[str, Any]:
+    """Bind project-scoped compiler output without equating unrelated digest domains.
+
+    CURRENT means the acquired source snapshot agrees; it does not mean the
+    context has no omissions, the model read it, or an action is permitted.
+    Compiler degradation remains in the original context consumed by the host.
+    Data/hashes are evidence, not authentication of the installed source owner.
+    """
+    if not isinstance(observation, Mapping):
+        raise ChairmanCognitionSourceError("compiled context requires acquired source data")
+    context = dict(observation)
+    required = {"schema", "source_records_digest", "target", "generated_at", "repo_sha",
+                "token_budget", "token_estimate", "sections", "excluded",
+                "omitted_due_to_budget", "degraded", "no_answer_reason"}
+    if (not required <= set(context)
+            or type(context.get("source_records_digest")) is not str
+            or _SHA256_RE.fullmatch(context["source_records_digest"]) is None
+            or any(type(context.get(key)) is not list for key in
+                   ("sections", "excluded", "omitted_due_to_budget", "degraded"))
+            or type(context.get("token_budget")) is not int or context["token_budget"] <= 0
+            or type(context.get("token_estimate")) is not int or context["token_estimate"] < 0
+            or (context["no_answer_reason"] is not None and type(context["no_answer_reason"]) is not str)):
+        raise ChairmanCognitionSourceError("compiled context is missing its bounded source accounting")
+    attested = _closed_mapping(attestation,
+        required={"schema", "project_ref", "repository_revision", "compiler_sha256",
+                  "source_records_digest", "payload_digest", "observed_at"},
+        where="compiled context observation")
+    target = context.get("target")
+    generated = _valid_utc_text(context.get("generated_at"))
+    observed = _valid_utc_text(as_of)
+    acquired_at = _valid_utc_text(attested["observed_at"])
+    if (context.get("schema") != "context_bundle.v1"
+            or not isinstance(target, Mapping)
+            or type(target.get("workstream")) is not str
+            or re.fullmatch(r"WS:[A-Za-z0-9][A-Za-z0-9._-]{1,63}", target["workstream"]) is None
+            or target.get("resolution") != "explicit"
+            or agentos_revision["state"] != "CURRENT"
+            or context.get("repo_sha") != agentos_revision["revision"]
+            or attested["schema"] != "mastermind.compiled_project_context_observation.v1"
+            or attested["project_ref"] != target.get("workstream")
+            or attested["repository_revision"] != agentos_revision["revision"]
+            or attested["source_records_digest"] != context["source_records_digest"]
+            or type(attested["compiler_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", attested["compiler_sha256"]) is None
+            or generated is None or observed is None or acquired_at is None
+            or datetime.fromisoformat(acquired_at.replace("Z", "+00:00")) != datetime.fromisoformat(generated.replace("Z", "+00:00"))
+            or datetime.fromisoformat(generated.replace("Z", "+00:00")) > datetime.fromisoformat(observed.replace("Z", "+00:00"))):
+        raise ChairmanCognitionSourceError("compiled context does not match the canonical Agent OS observation")
+    for option in options if isinstance(options, list) else []:
+        if (isinstance(option, Mapping) and COMPILED_CONTEXT_SOURCE_REF in option.get("source_refs", [])
+                and option.get("scope_refs") != [target["workstream"]]):
+            raise ChairmanCognitionSourceError("compiled context cannot bind a different project option")
+    try:
+        encoded = canonical_json_bytes(context)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ChairmanCognitionSourceError("compiled context is not canonical source data") from exc
+    if attested["payload_digest"] != "sha256:" + hashlib.sha256(encoded).hexdigest():
+        raise ChairmanCognitionSourceError("compiled payload differs from its source observation")
+    if len(encoded) > _MAX_COMPILED_CONTEXT_BYTES:
+        raise ChairmanCognitionSourceError("compiled context exceeds source binding bound")
+    return {
+        "source_ref": COMPILED_CONTEXT_SOURCE_REF, "owner": "AGENT_OS",
+        "revision": "sha256:" + hashlib.sha256(encoded).hexdigest(),
+        "state": "CURRENT", "load_bearing": True,
+        "observed_at": context["generated_at"],
+    }
 
 
 def _boot_packet(value: Any) -> Mapping[str, Any]:
