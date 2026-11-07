@@ -1,0 +1,88 @@
+"""Chris-Dot event over the REAL existing Executive App-peer and Runtime store.
+
+Fake Slack/HTTPS and synthetic neutral principal; not an OpenAI account canary.
+"""
+import asyncio
+import dataclasses
+import json
+
+from integrations.slack_agent_dialogue.dot_canary_event import TrustedCanaryPolicy
+from integrations.session_bridge.dot_canary_mcp_route import (
+    CANARY_SCOPE, CanarySubscribeRequest, CanaryUnsubscribeRequest,
+)
+from integrations.session_bridge.runtime_reply_subscriptions import ExecutiveReplyCipher
+from integrations.session_bridge.web_reply_subscription_owner import owner_key
+from integrations.session_bridge.installed_reply_events import RuntimeReplyEventHost
+from tests.test_session_bridge_reply_event_host_integration import (
+    event_case, short_socket_root, with_peer, URL, SECRET,
+)
+
+
+def admit(s):
+    source=s.host
+    who=dataclasses.replace(s.principal,scopes=tuple((*s.principal.scopes,CANARY_SCOPE)))
+    policy=TrustedCanaryPolicy(
+        workspace_id="T0BRD2AQXQV",channel_id="C0BSBM78V1N",
+        relay_bot_user_id="U0BT71H4FQE",owner_slack_user_id="U0BRET6191C",
+        principal_digest=owner_key(who),
+        not_before_ts=f"{s.auth.now[0]-60}.000001",current=True,
+    )
+    s.host=RuntimeReplyEventHost(
+        s.owner,ExecutiveReplyCipher("fixture-key",b"k"*32),
+        s.auth.policies,clock=lambda:s.auth.now[0],enabled=True,
+        resolver=source.challenge.resolver,connector=source.challenge.connector,
+        canary_policy_provider=lambda principal:policy,
+    )
+    return who,policy
+
+
+def test_exact_existing_peer_challenge_persists_chris_subscription(event_case,tmp_path,short_socket_root):
+    s=event_case
+    who,policy=admit(s)
+    async def act(client,service):
+        observed=await client._call("canary_policy",who,{})
+        assert observed==dataclasses.asdict(policy)
+        subscribed=await client._call("canary_subscribe",who,dataclasses.asdict(
+            CanarySubscribeRequest("C0BSBM78V1N",URL,SECRET,240000)))
+        return subscribed
+    receipt=asyncio.run(with_peer(s,tmp_path,short_socket_root,act))
+    assert receipt["persisted"] is True and receipt["callback_verified"] is True
+    assert receipt["owner_access_current"] is True
+    assert len(s.http)==1 and s.http[0][0]["type"]=="verification"
+    stored=s.host.canary_owner.store
+    record=asyncio.run(stored.read(receipt["subscription_id"]))
+    assert record.channel_id=="C0BSBM78V1N"
+    view=stored.delivery_view(record.subscription_id,
+        expected_version=asyncio.run(stored.snapshot(record.subscription_id)).version,
+        owner_key=owner_key(who))
+    assert view.signing_secrets==(SECRET,)
+    assert SECRET not in json.dumps([e.to_dict() for e in s.f.runtime.store.list_events()])
+    assert URL not in json.dumps([e.to_dict() for e in s.f.runtime.store.list_events()])
+
+
+def test_original_default_off_host_does_not_grant_canary(event_case,tmp_path,short_socket_root):
+    s=event_case
+    who=dataclasses.replace(s.principal,scopes=tuple((*s.principal.scopes,CANARY_SCOPE)))
+    async def act(client,service):
+        return await client._call("canary_policy",who,{})
+    try:
+        asyncio.run(with_peer(s,tmp_path,short_socket_root,act))
+    except Exception:
+        pass
+    else:
+        raise AssertionError("no canary enrollment may be inferred")
+    assert s.host.canary_owner is None
+
+
+def test_existing_peer_unsubscribe_revokes_current_chris_subscription(event_case,tmp_path,short_socket_root):
+    s=event_case
+    who,policy=admit(s)
+    async def act(client,service):
+        enrolled=await client._call("canary_subscribe",who,dataclasses.asdict(
+            CanarySubscribeRequest("C0BSBM78V1N",URL,SECRET,240000)))
+        stopped=await client._call("canary_unsubscribe",who,dataclasses.asdict(
+            CanaryUnsubscribeRequest("C0BSBM78V1N",URL)))
+        return enrolled,stopped
+    enrolled,stopped=asyncio.run(with_peer(s,tmp_path,short_socket_root,act))
+    assert stopped=={"stopped":True,"committed":True}
+    assert asyncio.run(s.host.canary_owner.store.read(enrolled["subscription_id"])) is None
