@@ -66,22 +66,32 @@ def available() -> bool:
     return _get_client() is not None
 
 
-def daily_closes(ticker: str, start: str, end: str, cache: bool = True) -> dict:
-    """Adjusted daily closes for [start, end] (ISO dates) as {YYYY-MM-DD: close}. Best-effort
+def _aggs_cache_dir():
+    """Aggregates disk-cache dir, resolved per call (so tests can redirect the root)."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "data" / "cache" / "aggs"
+
+
+def daily_closes(ticker: str, start: str, end: str, cache: bool = True,
+                 adjusted: bool = True) -> dict:
+    """Daily closes for [start, end] (ISO dates) as {YYYY-MM-DD: close}. Best-effort
     (returns {} on any failure). Non-positive closes (data errors / halted-trading artifacts) are
-    dropped so they can't fabricate a stop barrier or a -100% return. `cache=True` reads/writes a
-    disk cache under data/cache/aggs — ONLY safe for immutable, fully-elapsed windows; callers pass
-    cache=False for still-live windows so a partial snapshot is never frozen."""
+    dropped so they can't fabricate a stop barrier or a -100% return. `adjusted=True` (the
+    default) requests split/dividend-adjusted closes exactly as before; `adjusted=False` requests
+    RAW closes and uses a separate `..._raw.json` cache file so the two bases never share a cache
+    entry. `cache=True` reads/writes a disk cache under data/cache/aggs — ONLY safe for immutable,
+    fully-elapsed windows; callers pass cache=False for still-live windows so a partial snapshot
+    is never frozen."""
     import json
     import os
     from datetime import datetime, timezone
-    from pathlib import Path
 
     t = (ticker or "").upper().strip()
     if not t or not start or not end:
         return {}
-    cdir = Path(__file__).resolve().parent.parent / "data" / "cache" / "aggs"
-    cf = cdir / f"{t}_{start}_{end}.json"
+    cdir = _aggs_cache_dir()
+    cf = cdir / f"{t}_{start}_{end}{'' if adjusted else '_raw'}.json"
     if cache:
         try:
             if cf.exists():
@@ -94,7 +104,8 @@ def daily_closes(ticker: str, start: str, end: str, cache: bool = True) -> dict:
         key = (os.environ.get("POLYGON_API_KEY") or os.environ.get("MASSIVE_API_KEY") or "").strip()
         if key:
             url = f"https://api.polygon.io/v2/aggs/ticker/{t}/range/1/day/{start}/{end}"
-            r = requests.get(url, params={"adjusted": "true", "sort": "asc", "limit": 50000,
+            r = requests.get(url, params={"adjusted": "true" if adjusted else "false",
+                                          "sort": "asc", "limit": 50000,
                                           "apiKey": key}, timeout=12)
             if r.ok:
                 for row in (r.json() or {}).get("results") or []:
@@ -200,8 +211,145 @@ def search_tickers(query: str, limit: int = 12) -> list[dict]:
 
 _snapshot_cache: dict[str, tuple[float, Optional[dict]]] = {}
 
+# Observation records belong to the existing cache entry, not another price owner.
+# The snapshot dict remains shared exactly as before. Changed selected fields lose
+# their retrieval context; recording never repairs or admits a numerical value.
+_snapshot_observations: dict = {}
 
-def _snapshot(ticker: str) -> Optional[dict]:
+
+def _snapshot_clock():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
+def _snapshot_payload_fields(snap):
+    import math
+    import re
+    if type(snap) is not dict:
+        return None, None, None, None
+    day = snap.get("day")
+    day = day if type(day) is dict else None
+    value = day.get("o") if day is not None else None
+    if type(value) not in (int, float) or not math.isfinite(value):
+        value = None
+    symbol = snap.get("ticker")
+    if type(symbol) is not str or not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", symbol):
+        symbol = None
+    updated = snap.get("updated")
+    # Keep the provider integer exact through JSON/JavaScript. Its unit is not
+    # established here and it is never relabelled as the Open event or bar date.
+    updated = str(updated) if type(updated) is int and 0 <= updated < 2**64 else None
+    return day, value, symbol, updated
+
+
+def _remember_snapshot_observation(ticker, entry, started, returned):
+    day, value, symbol, updated = _snapshot_payload_fields(entry[1])
+    record = (entry, day, value, symbol, updated, started, returned)
+    try:
+        _snapshot_observations[ticker] = record
+    except Exception:
+        pass
+    return record
+
+
+def _emit_snapshot_observation(sink, entry, record, observed):
+    if sink is not None:
+        try:
+            sink.clear()
+            sink.update(entry=entry, record=record, observed=observed)
+        except Exception:
+            pass
+
+
+def _emit_open_observation(sink, ticker, snap, raw_open, price, captured):
+    """Project only the selected source fields and its captured retrieval clocks."""
+    if sink is None:
+        return
+    try:
+        import math
+        from datetime import datetime, timezone
+
+        def epoch(value):
+            if isinstance(value, datetime):
+                return value.timestamp() if value.tzinfo is not None else None
+            return value if type(value) in (int, float) and math.isfinite(value) else None
+
+        def timestamp(value):
+            value = epoch(value)
+            return datetime.fromtimestamp(value, timezone.utc).isoformat() if value is not None else None
+
+        selected = price if type(price) in (int, float) and math.isfinite(price) and price > 0 else None
+        result = {
+            "schema": "mastermind.polygon_snapshot_evidence.v1",
+            "ticker": (ticker or "").upper().strip(), "field": "day.o",
+            "price": selected, "currency": "USD", "status": "unavailable",
+            "reason": "snapshot_context_unavailable",
+            "payload_ticker": None, "payload_ticker_status": "unavailable",
+            "source_updated_raw": None, "source_updated_unit": "not_established",
+            "source_bar_label": None, "source_bar_label_kind": "not_provided",
+            "cache_anchor_at": None, "request_started_at": None,
+            "response_returned_at": None, "cache_age_observed_at": None,
+            "cache_age_seconds": None, "within_cache_ttl": None,
+            "cache_clock_basis": "lookup_before_request",
+            "market_observed_at": None, "execution_qualification": "not_checked",
+        }
+        entry = captured.get("entry") if type(captured) is dict else None
+        record = captured.get("record") if type(captured) is dict else None
+        bound = (
+            type(entry) is tuple and len(entry) == 2 and entry[1] is snap
+            and type(record) is tuple and len(record) == 7 and record[0] is entry
+        )
+        if selected is None:
+            result["reason"] = "no_selected_open"
+        elif type(raw_open) not in (int, float) or not math.isfinite(raw_open):
+            result["reason"] = "unsupported_selected_value"
+        elif bound:
+            day, value, symbol, updated = _snapshot_payload_fields(snap)
+            if (
+                day is not record[1] or type(raw_open) is not type(record[2])
+                or raw_open != record[2] or value != record[2]
+                or symbol != record[3] or updated != record[4]
+            ):
+                result["reason"] = "snapshot_fields_changed"
+            else:
+                anchor, started, returned, observed = (
+                    epoch(entry[0]), epoch(record[5]), epoch(record[6]),
+                    epoch(captured.get("observed")),
+                )
+                payload_status = "unavailable" if symbol is None else (
+                    "matched" if symbol == result["ticker"] else "mismatch"
+                )
+                result.update(
+                    status="available", reason=None, payload_ticker=symbol,
+                    payload_ticker_status=payload_status, source_updated_raw=updated,
+                    cache_anchor_at=timestamp(anchor), request_started_at=timestamp(started),
+                    response_returned_at=timestamp(returned), cache_age_observed_at=timestamp(observed),
+                )
+                known = [x for x in (anchor, started, returned, observed) if x is not None]
+                regressed = any(a > b for a, b in zip(known, known[1:]))
+                if regressed:
+                    result.update(status="partial", reason="local_clock_regressed")
+                else:
+                    if anchor is not None and observed is not None:
+                        age = observed - anchor
+                        result.update(cache_age_seconds=age, within_cache_ttl=age < _TTL)
+                    if any(x is None for x in (anchor, started, returned, observed)):
+                        result.update(status="partial", reason="retrieval_clock_unavailable")
+                if payload_status != "matched":
+                    result.update(status="partial", reason=(
+                        "payload_ticker_mismatch" if payload_status == "mismatch"
+                        else "payload_ticker_unavailable"
+                    ))
+                elif updated is None and result["status"] == "available":
+                    result.update(status="partial", reason="snapshot_updated_unavailable")
+        sink.clear()
+        sink.update(result)
+    except Exception:
+        pass
+
+
+
+def _snapshot(ticker: str, *, _evidence=None) -> Optional[dict]:
     """Raw Polygon snapshot `ticker` object for one symbol (cached `_TTL` s).
     None when unkeyed / offline / paywalled."""
     import os
@@ -211,30 +359,73 @@ def _snapshot(ticker: str) -> Optional[dict]:
     now = time.time()
     hit = _snapshot_cache.get(t)
     if hit and (now - hit[0]) < _TTL:
+        try:
+            record = _snapshot_observations.get(t)
+            _emit_snapshot_observation(_evidence, hit, record, now)
+        except Exception:
+            pass
         return hit[1]
     out = None
+    started = returned = None
     try:
         import requests
         key = (os.environ.get("POLYGON_API_KEY") or os.environ.get("MASSIVE_API_KEY") or "").strip()
         if key:
+            try:
+                started = _snapshot_clock()
+            except Exception:
+                pass
             r = requests.get(
                 f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{t}",
                 params={"apiKey": key}, timeout=6)
+            try:
+                returned = _snapshot_clock()
+            except Exception:
+                pass
             if r.ok:
                 out = (r.json() or {}).get("ticker") or None
     except Exception:  # noqa: BLE001
         out = None
-    _snapshot_cache[t] = (now, out)
+    entry = (now, out)
+    record = None
+    try:
+        # Capture the selected fields before exposing the shared mutable dict.
+        record = _remember_snapshot_observation(t, entry, started, returned)
+    except Exception:
+        pass
+    _snapshot_cache[t] = entry
+    try:
+        _emit_snapshot_observation(_evidence, entry, record, returned)
+    except Exception:
+        pass
     return out
 
 
-def day_open(ticker: str) -> Optional[float]:
-    """Today's regular-session OPEN price (`snapshot.day.o`) — used to fill orders queued
-    while the market was closed at the *open* of the session they release into. None pre-open
-    / unkeyed so callers fall back to last price."""
-    snap = _snapshot(ticker) or {}
+def day_open(ticker: str, *, _evidence=None) -> Optional[float]:
+    """Positive `snapshot.day.o` using the existing numerical admission contract.
+
+    The source field alone does not establish a bar date, opening event, matching
+    payload symbol or order eligibility. Optional observations do not change that
+    admission, the shared mutable snapshot, cache refresh or fallback behavior.
+    """
+    captured = {}
+    if _evidence is None:
+        snap = _snapshot(ticker) or {}
+    else:
+        try:
+            from portfolio.price_evidence import read_with_evidence
+        except Exception:
+            snap = _snapshot(ticker) or {}
+        else:
+            snap, captured = read_with_evidence(_snapshot, ticker)
+            snap = snap or {}
     o = (snap.get("day") or {}).get("o")
-    return float(o) if (o and float(o) > 0) else None
+    price = float(o) if (o and float(o) > 0) else None
+    try:
+        _emit_open_observation(_evidence, ticker, snap, o, price, captured)
+    except Exception:
+        pass
+    return price
 
 
 def snapshot_price(ticker: str) -> Optional[float]:

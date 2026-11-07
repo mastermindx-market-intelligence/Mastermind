@@ -1,0 +1,30 @@
+{
+  "schema": "mastermind.hermes_diagnostic_privacy_patch.v1",
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "qualified_source_commits": [
+    "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+  ],
+  "patch_sha256": "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce",
+  "license": "MIT",
+  "license_file": "UPSTREAM_LICENSE",
+  "installed": false,
+  "proof_scope": "Exact diagnostic-only vendor source derivation; no host, credential, model or installed qualification",
+  "files": {
+    "agent/agent_init.py": {
+      "before_bytes": 126617,
+      "before_git_blob": "1d2d7f302e41c0f83f32fe628a3d308f6fdc5bca",
+      "before_sha256": "040c74ad19dc27c7886bf32d2e60a251a44b5b0efc95425c461b2b3b322cbcc0",
+      "after_bytes": 126495,
+      "after_git_blob": "b62a9fe0cf03a003ea0882e3281f40053bbf3bf2",
+      "after_sha256": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08"
+    },
+    "agent/memory_caller_scope.py": {
+      "before_bytes": 7600,
+      "before_git_blob": "a05d2de55d3df2d8913a23f457779f49527d29d7",
+      "before_sha256": "98e96ae63394a0e80d3b0b235c59a520184d64b76006f73e8954f9a71e7a7d88",
+      "after_bytes": 7497,
+      "after_git_blob": "a48df847b4c59268613256e32252545c523ee62a",
+      "after_sha256": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6"
+    }
+  }
+}

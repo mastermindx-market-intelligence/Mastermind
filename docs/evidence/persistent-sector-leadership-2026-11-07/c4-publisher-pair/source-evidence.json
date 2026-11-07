@@ -1,0 +1,106 @@
+{
+  "schema": "mastermind.psl.c4_publisher_pair_source_evidence/v1",
+  "observed_at": "2026-11-07T08:09:29.446228+00:00",
+  "base": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "operation": "persistent-sector-leadership-publisher-20261107-c4",
+  "source_hashes": {
+    "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "18135274af8d24ff3d909c4044d64e464c1f65f653ad0e09a97259e65671b596",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment_test.py": "d707314053190bed2e2e449f00121d87f46e9908358c22546cac6e0858e7537a",
+    "integrations/studio_direct_mcp/private_service_status_successor.py": "06086c18caa67a17ed862df2b6e6547ff43ccb584e283e3d389d0eb5287974f9",
+    "integrations/studio_direct_mcp/private_service_status_successor_test.py": "128446430986309e1004e8c77d64a52967d5803ffbb2d893f7b01caec3344c6b",
+    "integrations/studio_direct_mcp/private_service_test.py": "e95183d0803cbe6d6cedbe5692fdbdbddc9f792960f3c722e112c746486c7033",
+    "integrations/studio_direct_mcp/workspace-access.mjs": "53e1f5c8863ab26c892baea5c4665ae7d4abff304d428d87b7e40e8ae10b6e53",
+    "integrations/studio_direct_mcp/workspace-access.test.mjs": "3e0bd3f131416d42cebd10cd463f55a48e90eb7881a313d1147d982e323cad64",
+    "integrations/studio_direct_mcp/fixtures/workspace-access.fleet-v10-merge.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5"
+  },
+  "adapter_worker": {
+    "run": "psl-publisher-adapter-20261107-c4",
+    "commit": "e5446e3a2d8a274d3a4d94bc63f2c100678e9075",
+    "tree": "d27f8ba4498d1441e14686dab59e57bba7deaee9",
+    "response_sha256": "345afde324b726db0d1714532ed0a975fa074a570d422b23d0a3d831d616f8f4"
+  },
+  "tests": [
+    {
+      "log": "pair-focused-tests.log",
+      "passed": 47,
+      "exit_code": 0,
+      "command": "unittest C4 successor/frozen contract/generic compatibility",
+      "sha256": "c927e71387f0932139ead076e7b709018547b5b76627fe7d9406c05be9bd6081"
+    },
+    {
+      "log": "pair-adapter-tests.log",
+      "passed": 67,
+      "exit_code": 0,
+      "command": "node --test workspace-access.test.mjs",
+      "sha256": "8be4981856f8e5699064a4ab9734c33c47f20ee9214e22fe014964f0934de93b"
+    },
+    {
+      "log": "pair-all-installer-tests.log",
+      "passed": 590,
+      "exit_code": 0,
+      "command": "python3 -B -m unittest discover -s integrations/studio_direct_mcp -p private_service*test.py",
+      "sha256": "999cec3ad90f98db5ab5a50b0644fb16c889efb1f50083e6cf695493f888308c"
+    },
+    {
+      "log": "pair-control-closure-tests.log",
+      "passed": 53,
+      "exit_code": 0,
+      "command": "python3 -B -m unittest discover -s integrations/studio_direct_mcp -p control_bundle*_test.py",
+      "sha256": "1912d4e23f1d24067ad7f45cc52e14286022d9c245b46495fe4b463f8d63e919"
+    },
+    {
+      "log": "pair-held-c2-composition.log",
+      "passed": 45,
+      "exit_code": 0,
+      "command": "C4 successor/frozen contract and actual held C2 personal publisher tests",
+      "sha256": "a6438618626dd8ecf28a245445831ba9b8c6666fffcc2ea2e0de81108f014a7a"
+    }
+  ],
+  "held_c2": {
+    "base": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+    "held_c2_head": "1adc54cbd6905fec837cb6c0fb456ec0ef0bcc76",
+    "held_files_preserved": {
+      "integrations/studio_direct_mcp/private_service.py": "b26720144e54b3754094d5e281d83129dc13c0e5b22c3aeabb39bb80a1b9d886",
+      "integrations/studio_direct_mcp/private_service_pin.py": "5104d8f86851f088b04c6ea88436c15eb9614232809d20a4dae9c801a9c8c7d5",
+      "integrations/studio_direct_mcp/private_service_pin_personal_publisher_test.py": "37cc99b1bd72bea78c3942f5579bef5f5a459984dc89227ae9c0a757d3b131f4",
+      "integrations/studio_direct_mcp/private_service_status_successor.py": "d3a917109881210ff263d007a6ec78d495b793980bd2ab17a38b544e85b7ff9b",
+      "integrations/studio_direct_mcp/private_service_test.py": "23a7532aecd25030a96252b638e14e2065e14146aed9cb9a88416fda03df336b"
+    },
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "private_service_status_successor_test.C4PublisherSuccessorTests",
+      "private_service_pin_enrollment_test.C4PublisherFrozenContractTests",
+      "private_service_pin_personal_publisher_test"
+    ],
+    "exit_code": 0,
+    "seconds": 30.146,
+    "log_sha256": "a6438618626dd8ecf28a245445831ba9b8c6666fffcc2ea2e0de81108f014a7a",
+    "production_or_carrier_write": false
+  },
+  "actual_git_binary": {
+    "path": "/usr/bin/git",
+    "version": "git version 2.50.1 (Apple Git-155)",
+    "isolated_pinned_url_projection": "PASS",
+    "configuration_changed": false
+  },
+  "old_gateway_compatibility": {
+    "gateway_sha256": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "version": "0.1.10",
+    "sealed_module_count": 12,
+    "exact_installed_module_preimages_verified": true,
+    "import_config_and_recovery_catalog_assertions": "PASS before the subsequent fixture error",
+    "whole_helper_exit_code": 1,
+    "whole_helper_error": "ENOENT /owned/bin/mmx-workspace: inert discovery stub was missing",
+    "publisher_invoked": false,
+    "log_sha256": "6b9fb0658b0b319c97d6bf9bd8c503274c3dd1cd27aeef5ff19c5fde150594d5",
+    "subsequent_fixture_correction_start": "tunnel connection failure/no PID; target remained unchanged; historical execution unproven; not replayed"
+  },
+  "control_bundle_members": 13,
+  "generic_owner_pins_changed": false,
+  "installed_changes": false,
+  "production_or_consumer_acceptance": false,
+  "parent_adapter_test_normalization": "Removed only extra blank lines at EOF after the67-test run; no executable test text changed."
+}

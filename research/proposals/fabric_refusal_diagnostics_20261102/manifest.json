@@ -1,0 +1,10 @@
+{
+  "format": "prospective-source-patch",
+  "base_commit": "6595f251b33643f355beab4c62d5aa9ca70a5640",
+  "target_path": "ops/native_fabric/quota_continuity/candidate/fabric_task.py",
+  "preimage_sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+  "postimage_sha256": "dc50cb91deb38d996290bf10bf95e125437ca4ddd7e951ab705cdb7f3b551723",
+  "patch_sha256": "c8dd93270ee64cdcf58b4a25690894b52f4101ad994fc6412ce335088ff7896a",
+  "scope": "Closed diagnostic code in the existing verified prelaunch-refusal receipt and status projection. No admission, route, retry, result acceptance or native installation effect.",
+  "active_candidate_unchanged": true
+}

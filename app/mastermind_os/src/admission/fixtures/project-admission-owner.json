@@ -1,0 +1,121 @@
+{
+  "qualification": "Hermetic actual Runtime/Workspace owner source fixture; synthetic membership only; no installed/live behavior claim.",
+  "open": {
+    "availability": "AVAILABLE",
+    "current_receipt": null,
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "pause_token": null,
+    "permissions": {
+      "pause": true,
+      "resume": true
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_admission_control.v1",
+    "selection": {
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:ONE"
+    },
+    "state": "NOT_SUSPENDED"
+  },
+  "paused": {
+    "availability": "AVAILABLE",
+    "current_receipt": {
+      "command_id": "mmos-project-pause-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "committed_at_ms": 1793783055416,
+      "event_id": 2,
+      "request_digest": "b3cdd4cb5261313c6ab5e42ef7fda0c5ac3ff44156257c382dddeb5961a7576c",
+      "schema": "mastermind.workstream_admission_suspension_receipt.v1",
+      "state": "PAUSED",
+      "work_ref": "WS:ONE"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "pause_token": {
+      "event_id": 2,
+      "receipt_digest": "172eb3584bd210b462b2ce3fadeb055e6188d86887e7987fc29cc1cf15534bff"
+    },
+    "permissions": {
+      "pause": true,
+      "resume": true
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_admission_control.v1",
+    "selection": {
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:ONE"
+    },
+    "state": "PAUSED"
+  },
+  "resumed": {
+    "availability": "AVAILABLE",
+    "current_receipt": {
+      "command_id": "mmos-project-resume-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "committed_at_ms": 1793783055496,
+      "event_id": 3,
+      "pause_event_id": 2,
+      "pause_receipt_digest": "172eb3584bd210b462b2ce3fadeb055e6188d86887e7987fc29cc1cf15534bff",
+      "request_digest": "7c0b2070e584962f10f19294e8b094086c324fc2764a4413700ea15e5cf54f59",
+      "schema": "mastermind.workstream_admission_resumption_receipt.v1",
+      "state": "RESUMED",
+      "work_ref": "WS:ONE"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "pause_token": null,
+    "permissions": {
+      "pause": true,
+      "resume": true
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_admission_control.v1",
+    "selection": {
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:ONE"
+    },
+    "state": "RESUMED"
+  },
+  "pause_result": {
+    "schema": "mastermind.workspace_project_admission_action_result.v1",
+    "selection": {
+      "work_ref": "WS:ONE",
+      "root_job_id": "JOB-001",
+      "command_id": "mmos-project-pause-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "disposition": "COMMITTED",
+    "receipt": {
+      "schema": "mastermind.workstream_admission_suspension_receipt.v1",
+      "work_ref": "WS:ONE",
+      "state": "PAUSED",
+      "event_id": 2,
+      "command_id": "mmos-project-pause-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "request_digest": "b3cdd4cb5261313c6ab5e42ef7fda0c5ac3ff44156257c382dddeb5961a7576c",
+      "committed_at_ms": 1793783055416
+    },
+    "reason_codes": []
+  },
+  "resume_result": {
+    "schema": "mastermind.workspace_project_resumption_action_result.v1",
+    "selection": {
+      "work_ref": "WS:ONE",
+      "root_job_id": "JOB-001",
+      "command_id": "mmos-project-resume-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "disposition": "COMMITTED",
+    "receipt": {
+      "schema": "mastermind.workstream_admission_resumption_receipt.v1",
+      "work_ref": "WS:ONE",
+      "state": "RESUMED",
+      "event_id": 3,
+      "command_id": "mmos-project-resume-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "request_digest": "7c0b2070e584962f10f19294e8b094086c324fc2764a4413700ea15e5cf54f59",
+      "committed_at_ms": 1793783055496,
+      "pause_event_id": 2,
+      "pause_receipt_digest": "172eb3584bd210b462b2ce3fadeb055e6188d86887e7987fc29cc1cf15534bff"
+    },
+    "reason_codes": []
+  }
+}

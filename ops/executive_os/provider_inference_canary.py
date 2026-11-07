@@ -5,7 +5,7 @@ as the dedicated worker principal against the pinned production binary and
 ``CODEX_HOME``. It never starts Executive services, never opens the control
 SQLite, and never writes into production workspaces or runs.
 
-Pinned Codex 0.147.0 exposes no login/exec workspace-selection flag. The
+Pinned Codex 0.159.2 exposes no login/exec workspace-selection flag. The
 config key ``forced_chatgpt_workspace_id`` exists but is not applied here:
 the intended workspace id is an operator binding, not a silent default.
 """
@@ -28,29 +28,51 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 _SCRIPT_DIRECTORY = Path(__file__).resolve().parent
-if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+_RELEASE_ROOT = _SCRIPT_DIRECTORY.parents[1]
+if __package__ in {None, ""}:
+    for candidate in (_SCRIPT_DIRECTORY, _RELEASE_ROOT):
+        if str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+
+from control_plane.codex_provider_realm import (
+    REVIEWED_CODEX_PROVIDER_REALMS,
+    ProviderRealmError,
+    provider_home_credential_loader,
+)
+from control_plane.subscription_harness_bindings import (
+    HarnessBindingError,
+    get_binding,
+)
+from control_plane.subscription_provider_profiles import (
+    ProviderProfileError,
+    get_profile,
+)
 
 try:
     from ops.executive_os.provider_worker_slots import (
         SlotCatalogError,
         all_slots,
         get_slot,
+        get_subscription_slot,
+        subscription_slots,
     )
 except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
     from provider_worker_slots import (  # type: ignore[no-redef]
         SlotCatalogError,
         all_slots,
         get_slot,
+        get_subscription_slot,
+        subscription_slots,
     )
 
 
-SCHEMA_VERSION = "mastermind.executive_provider_inference_canary/v1"
-PINNED_CODEX_VERSION = "0.147.0"
+SCHEMA_VERSION = "mastermind.executive_provider_inference_canary/v2"
+SUBSCRIPTION_SCHEMA_VERSION = "mastermind.executive_subscription_provider_inference_canary/v1"
+PINNED_CODEX_VERSION = "0.159.2"
 PINNED_CODEX_TEAM_ID = "2DC432GLL2"
-PINNED_CODEX_SHA256 = "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+PINNED_CODEX_SHA256 = "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 INSTALLED_CODEX_BINARY = (
-    "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0"
+    "/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"
 )
 WORKER_USER = "_mastermind_worker"
 WORKER_GROUP = "_mastermind_worker"
@@ -88,6 +110,19 @@ _DISABLED_FEATURES = (
     "image_generation",
     "memories",
     "multi_agent",
+    "auth_elicitation",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "daemon_auto_start",
+    "enable_mcp_apps",
+    "mcp_2026_07_28",
+    "multi_agent_v2",
+    "shell_snapshot",
+    "shell_snapshot_v2",
+    "skill_mcp_dependency_install",
+    "skill_search",
+    "tool_call_mcp_elicitation",
+    "workspace_dependencies",
     "remote_plugin",
 )
 INERT_SCHEMA: dict[str, Any] = {
@@ -100,6 +135,22 @@ INERT_PROMPT = (
     "This is an Executive OS provider-readiness canary. Do not use tools. "
     'Return only the JSON object {"ok": true}.'
 )
+PROVIDER_FAILURE_CLASSES = frozenset(
+    {
+        "provider_output_schema_unsupported",
+        "provider_rate_limited",
+        "provider_usage_limited",
+        "provider_credits_exhausted",
+        "provider_auth_failed",
+        "provider_entitlement_denied",
+        "provider_model_unavailable",
+        "provider_service_tier_unavailable",
+        "provider_request_invalid",
+        "provider_service_unavailable",
+        "provider_turn_failed",
+        "provider_stream_error",
+    }
+)
 EVENT_CLASSES = frozenset(
     {
         "turn_completed",
@@ -110,6 +161,60 @@ EVENT_CLASSES = frozenset(
         "result_invalid",
         "isolation_violation",
         "configuration_invalid",
+        *PROVIDER_FAILURE_CLASSES,
+    }
+)
+
+# A provider error may contain credentials, account identifiers, email
+# addresses, or other provider payload.  Receipts therefore retain only a
+# digest, a bounded count, and words selected from this closed diagnostic
+# vocabulary.  Raw provider text never crosses the canary boundary.
+PROVIDER_DIAGNOSTIC_TERMS = frozenset(
+    {
+        "account",
+        "auth",
+        "authorization",
+        "billing",
+        "busy",
+        "capacity",
+        "connection",
+        "conversation",
+        "credits",
+        "denied",
+        "disabled",
+        "error",
+        "expired",
+        "failed",
+        "failure",
+        "forbidden",
+        "internal",
+        "invalid",
+        "limit",
+        "model",
+        "network",
+        "output",
+        "overloaded",
+        "permission",
+        "plan",
+        "provider",
+        "quota",
+        "rate",
+        "request",
+        "schema",
+        "service",
+        "session",
+        "stream",
+        "supported",
+        "temporarily",
+        "tier",
+        "timeout",
+        "token",
+        "unauthorized",
+        "unavailable",
+        "unknown",
+        "unsupported",
+        "usage",
+        "workspace",
     }
 )
 
@@ -134,6 +239,7 @@ class PathOwnership:
 class ProviderCanaryConfig:
     canary_id: str
     worker_user: str
+    worker_group: str
     worker_uid: int
     worker_gid: int
     provider_home: Path
@@ -150,6 +256,11 @@ class ProviderCanaryConfig:
     control_root: Path
     operator_home: Path
     timeout_seconds: float = 180.0
+    subscription_slot_id: str | None = None
+    provider_alias: str | None = None
+    profile_id: str | None = None
+    harness_binding_id: str | None = None
+    provider_realm_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -200,6 +311,7 @@ def production_config(
     return ProviderCanaryConfig(
         canary_id=new_canary_id(),
         worker_user=slot.worker_user,
+        worker_group=slot.worker_group,
         worker_uid=slot.worker_uid,
         worker_gid=slot.worker_gid,
         provider_home=slot.provider_home,
@@ -216,6 +328,121 @@ def production_config(
         control_root=Path(CONTROL_ROOT),
         operator_home=operator_home,
     )
+
+
+def _subscription_components(slot_id: str) -> tuple[Any, Any, Any, Any]:
+    try:
+        slot = get_subscription_slot(slot_id)
+        binding = get_binding(slot.harness_binding_id)
+        profile = get_profile(slot.profile_id)
+    except (SlotCatalogError, HarnessBindingError, ProviderProfileError) as exc:
+        raise ProviderCanaryError("configuration_invalid") from exc
+    if (
+        binding.provider != slot.provider
+        or binding.profile_id != slot.profile_id
+        or binding.harness_id != "codex-cli"
+        or binding.adapter_id != "codex-cli"
+        or binding.protocol != "responses"
+        or binding.implementation_state != "BUILT_NOT_PROVEN"
+        or binding.autonomous_allowed is not False
+    ):
+        raise ProviderCanaryError("configuration_invalid")
+    usage = profile.usage_policy
+    if (
+        usage.get("supported_harness_required") is not True
+        or usage.get("interactive_only") is not True
+        or usage.get("unattended_background_allowed") is not False
+        or usage.get("production_backend_allowed") is not False
+    ):
+        raise ProviderCanaryError("configuration_invalid")
+    matches = tuple(
+        realm
+        for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+        if realm.provider_alias == binding.provider
+        and realm.base_url == binding.effective_base_url
+        and realm.wire_api == binding.protocol
+    )
+    if len(matches) != 1:
+        raise ProviderCanaryError("configuration_invalid")
+    return slot, binding, profile, matches[0]
+
+
+def subscription_production_config(
+    *,
+    probe_root: Path,
+    operator_home: Path,
+    slot_id: str,
+) -> ProviderCanaryConfig:
+    slot, binding, profile, realm = _subscription_components(slot_id)
+    try:
+        model = binding.model_for(profile)
+    except (HarnessBindingError, ProviderProfileError) as exc:
+        raise ProviderCanaryError("configuration_invalid") from exc
+    return ProviderCanaryConfig(
+        canary_id=new_canary_id(),
+        worker_user=slot.worker_user,
+        worker_group=slot.worker_group,
+        worker_uid=slot.worker_uid,
+        worker_gid=slot.worker_gid,
+        provider_home=slot.provider_home,
+        installed_codex_binary=Path(INSTALLED_CODEX_BINARY),
+        expected_codex_version=PINNED_CODEX_VERSION,
+        expected_codex_sha256=PINNED_CODEX_SHA256,
+        expected_codex_team=PINNED_CODEX_TEAM_ID,
+        model=model,
+        reasoning_effort="medium",
+        probe_root=probe_root,
+        executive_database=Path(EXECUTIVE_DATABASE),
+        production_workspaces=Path(PRODUCTION_WORKSPACES),
+        production_runs=Path(PRODUCTION_RUNS),
+        control_root=Path(CONTROL_ROOT),
+        operator_home=operator_home,
+        subscription_slot_id=slot.slot_id,
+        provider_alias=binding.provider,
+        profile_id=binding.profile_id,
+        harness_binding_id=binding.binding_id,
+        provider_realm_id=realm.realm_id,
+    )
+
+
+def _provider_realm(config: ProviderCanaryConfig) -> Any | None:
+    if config.provider_realm_id is None:
+        if any(
+            value is not None
+            for value in (
+                config.subscription_slot_id,
+                config.provider_alias,
+                config.profile_id,
+                config.harness_binding_id,
+            )
+        ):
+            raise ProviderCanaryError("configuration_invalid")
+        return None
+    if config.subscription_slot_id is None:
+        raise ProviderCanaryError("configuration_invalid")
+    slot, binding, profile, expected_realm = _subscription_components(
+        config.subscription_slot_id
+    )
+    try:
+        expected_model = binding.model_for(profile)
+    except (HarnessBindingError, ProviderProfileError) as exc:
+        raise ProviderCanaryError("configuration_invalid") from exc
+    if (
+        config.provider_realm_id != expected_realm.realm_id
+        or config.provider_alias != binding.provider
+        or config.profile_id != binding.profile_id
+        or config.harness_binding_id != binding.binding_id
+        or config.model != expected_model
+        or config.worker_user != slot.worker_user
+        or config.worker_group != slot.worker_group
+        or type(config.worker_uid) is not int
+        or type(config.worker_gid) is not int
+        or config.worker_uid != slot.worker_uid
+        or config.worker_gid != slot.worker_gid
+        or config.provider_home != slot.provider_home
+    ):
+        raise ProviderCanaryError("configuration_invalid")
+    return expected_realm
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -587,6 +814,10 @@ def build_exec_argv(
         "-c",
         f"permissions.{profile}.network.enabled=false",
     ]
+    realm = _provider_realm(config)
+    if realm is not None:
+        for override in realm.config_overrides():
+            argv.extend(["-c", override])
     for feature in _DISABLED_FEATURES:
         argv.extend(["--disable", feature])
     argv.append("-")
@@ -650,7 +881,11 @@ def assert_invocation_isolation(
         raise ProviderCanaryError("isolation_violation")
     if invocation.env.get("HOME") != str(invocation.home):
         raise ProviderCanaryError("isolation_violation")
-    for key in ("OPENAI_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"):
+    forbidden_env_keys = {"OPENAI_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"}
+    realm = _provider_realm(config)
+    if realm is not None:
+        forbidden_env_keys.add(realm.env_key)
+    for key in forbidden_env_keys:
         if key in invocation.env:
             raise ProviderCanaryError("isolation_violation")
     if "--with-api-key" in invocation.argv or "--with-access-token" in invocation.argv:
@@ -659,6 +894,166 @@ def assert_invocation_isolation(
         raise ProviderCanaryError("isolation_violation")
     if "forced_chatgpt_workspace_id" in remainder:
         raise ProviderCanaryError("isolation_violation")
+
+
+def _provider_failure_class(
+    *, events: Sequence[str], messages: Sequence[str]
+) -> str | None:
+    """Collapse provider failure text into one finite non-secret diagnostic class."""
+
+    text = " ".join(message[:2048] for message in messages[:4]).casefold()
+    unsupported = (
+        "unsupported",
+        "not supported",
+        "not available",
+        "unavailable",
+    )
+    if (
+        ("output schema" in text or "response format" in text or "structured output" in text)
+        and any(token in text for token in unsupported)
+    ):
+        return "provider_output_schema_unsupported"
+    if any(
+        token in text
+        for token in ("rate limit", "rate_limit", "too many requests", "http 429", "status 429")
+    ):
+        return "provider_rate_limited"
+    if any(
+        token in text
+        for token in ("usage limit", "usage_limit", "usage cap", "usage_cap")
+    ):
+        return "provider_usage_limited"
+    if any(
+        token in text
+        for token in (
+            "insufficient_quota",
+            "insufficient quota",
+            "insufficient credit",
+            "credits exhausted",
+            "no credits",
+        )
+    ):
+        return "provider_credits_exhausted"
+    if any(
+        token in text
+        for token in (
+            "unauthorized",
+            "authentication failed",
+            "authentication required",
+            "invalid token",
+            "login required",
+            "http 401",
+            "status 401",
+        )
+    ):
+        return "provider_auth_failed"
+    if any(
+        token in text
+        for token in (
+            "not eligible",
+            "not entitled",
+            "does not have access",
+            "access denied",
+            "feature is not enabled",
+            "usage_not_included",
+            "usage not included",
+            "plan does not support",
+        )
+    ):
+        return "provider_entitlement_denied"
+    if "model" in text and any(token in text for token in unsupported + ("not found",)):
+        return "provider_model_unavailable"
+    if (
+        "service tier" in text or "service_tier" in text
+    ) and any(token in text for token in unsupported + ("invalid",)):
+        return "provider_service_tier_unavailable"
+    if any(
+        token in text
+        for token in (
+            "invalid request",
+            "bad request",
+            "unsupported parameter",
+            "unknown parameter",
+            "invalid value",
+            "http 400",
+            "status 400",
+        )
+    ):
+        return "provider_request_invalid"
+    if any(
+        token in text
+        for token in (
+            "service unavailable",
+            "temporarily unavailable",
+            "internal server error",
+            "http 502",
+            "http 503",
+            "http 504",
+            "status 502",
+            "status 503",
+            "status 504",
+        )
+    ):
+        return "provider_service_unavailable"
+    if "turn.failed" in events:
+        return "provider_turn_failed"
+    if "error" in events:
+        return "provider_stream_error"
+    return None
+
+
+def _provider_error_message(payload: Mapping[str, Any]) -> str | None:
+    event_type = payload.get("type")
+    if event_type == "turn.failed":
+        error = payload.get("error")
+        if isinstance(error, Mapping) and isinstance(error.get("message"), str):
+            return str(error["message"])
+    if event_type == "error" and isinstance(payload.get("message"), str):
+        return str(payload["message"])
+    return None
+
+
+def _provider_diagnostic(messages: Sequence[str]) -> dict[str, Any]:
+    """Return a secret-free, finite diagnostic projection of provider text."""
+
+    bounded = tuple(message[:2048] for message in messages[:4])
+    if not bounded:
+        return {
+            "provider_error_message_count": 0,
+            "provider_error_message_sha256": None,
+            "provider_error_terms": [],
+        }
+    framed = b"".join(
+        len(message.encode("utf-8", errors="replace")).to_bytes(4, "big")
+        + message.encode("utf-8", errors="replace")
+        for message in bounded
+    )
+    words = {
+        word
+        for message in bounded
+        for word in re.findall(r"[a-z0-9_]+", message.casefold())
+        if word in PROVIDER_DIAGNOSTIC_TERMS
+    }
+    return {
+        "provider_error_message_count": len(bounded),
+        "provider_error_message_sha256": _sha256_bytes(framed),
+        "provider_error_terms": sorted(words),
+    }
+
+
+def _classification(
+    *,
+    passed: bool,
+    terminal_event_class: str,
+    result_valid: bool,
+    messages: Sequence[str] = (),
+) -> dict[str, Any]:
+    return {
+        "passed": passed,
+        "terminal_event_class": terminal_event_class,
+        "result_valid": result_valid,
+        **_provider_diagnostic(messages),
+    }
 
 
 def classify_provider_streams(
@@ -671,24 +1066,23 @@ def classify_provider_streams(
 ) -> dict[str, Any]:
     combined = stdout + b"\n" + stderr
     if timed_out:
-        return {
-            "passed": False,
-            "terminal_event_class": "timeout",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False, terminal_event_class="timeout", result_valid=False
+        )
     if stdout == b"" and stderr == LOCAL_FS_EACCES_STDERR:
-        return {
-            "passed": False,
-            "terminal_event_class": "isolation_violation",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class="isolation_violation",
+            result_valid=False,
+        )
     if _INVALID_WORKSPACE_MARKER.encode("ascii") in combined:
-        return {
-            "passed": False,
-            "terminal_event_class": "invalid_workspace_selected",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class="invalid_workspace_selected",
+            result_valid=False,
+        )
     events: list[str] = []
+    provider_messages: list[str] = []
     malformed = False
     for raw_line in stdout.splitlines():
         if not raw_line.strip():
@@ -702,6 +1096,9 @@ def classify_provider_streams(
             malformed = True
             continue
         events.append(str(payload["type"]))
+        message = _provider_error_message(payload)
+        if message is not None:
+            provider_messages.append(message)
     result_valid = False
     if result:
         try:
@@ -710,40 +1107,49 @@ def classify_provider_streams(
         except (UnicodeDecodeError, json.JSONDecodeError):
             malformed = True
     if malformed and "turn.completed" not in events:
-        return {
-            "passed": False,
-            "terminal_event_class": "malformed_provider_response",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class="malformed_provider_response",
+            result_valid=False,
+            messages=provider_messages,
+        )
+    provider_failure = _provider_failure_class(
+        events=events, messages=provider_messages
+    )
     if exit_code != 0:
-        return {
-            "passed": False,
-            "terminal_event_class": "process_failed",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class=provider_failure or "process_failed",
+            result_valid=False,
+            messages=provider_messages,
+        )
     if "turn.completed" not in events:
         if any(event in _JSONL_TERMINAL_EVENTS for event in events):
-            return {
-                "passed": False,
-                "terminal_event_class": "process_failed",
-                "result_valid": False,
-            }
-        return {
-            "passed": False,
-            "terminal_event_class": "malformed_provider_response",
-            "result_valid": False,
-        }
+            return _classification(
+                passed=False,
+                terminal_event_class=provider_failure or "process_failed",
+                result_valid=False,
+                messages=provider_messages,
+            )
+        return _classification(
+            passed=False,
+            terminal_event_class="malformed_provider_response",
+            result_valid=False,
+            messages=provider_messages,
+        )
     if not result_valid:
-        return {
-            "passed": False,
-            "terminal_event_class": "result_invalid",
-            "result_valid": False,
-        }
-    return {
-        "passed": True,
-        "terminal_event_class": "turn_completed",
-        "result_valid": True,
-    }
+        return _classification(
+            passed=False,
+            terminal_event_class="result_invalid",
+            result_valid=False,
+            messages=provider_messages,
+        )
+    return _classification(
+        passed=True,
+        terminal_event_class="turn_completed",
+        result_valid=True,
+        messages=provider_messages,
+    )
 
 
 def evaluate_provider_preflight(
@@ -796,6 +1202,13 @@ def _receipt(
         "result_valid": bool(classification["result_valid"]),
         "stdout_sha256": _sha256_bytes(stdout),
         "stderr_sha256": _sha256_bytes(stderr),
+        "provider_error_message_count": classification[
+            "provider_error_message_count"
+        ],
+        "provider_error_message_sha256": classification[
+            "provider_error_message_sha256"
+        ],
+        "provider_error_terms": classification["provider_error_terms"],
         "workspace_capability_outcome": workspace_capability,
         "workspace_selection_mechanism": "none",
         "forced_chatgpt_workspace_id_applied": False,
@@ -892,6 +1305,51 @@ def run_canary(
         _scrub_probe_secrets(invocation)
 
 
+def _subscription_receipt(
+    config: ProviderCanaryConfig, inner: Mapping[str, Any]
+) -> dict[str, Any]:
+    if (
+        config.subscription_slot_id is None
+        or config.provider_alias is None
+        or config.profile_id is None
+        or config.harness_binding_id is None
+        or config.provider_realm_id is None
+        or inner.get("schema_version") != SCHEMA_VERSION
+    ):
+        raise ProviderCanaryError("configuration_invalid")
+    return {
+        "schema_version": SUBSCRIPTION_SCHEMA_VERSION,
+        "slot_id": config.subscription_slot_id,
+        "provider": config.provider_alias,
+        "profile_id": config.profile_id,
+        "harness_binding_id": config.harness_binding_id,
+        "provider_realm_id": config.provider_realm_id,
+        "execution_mode": "interactive_canary",
+        "autonomous_allowed": False,
+        "passed": inner.get("passed") is True,
+        "refusal": inner.get("refusal"),
+        "inference_canary": dict(inner),
+    }
+
+
+def run_subscription_canary(
+    config: ProviderCanaryConfig,
+    *,
+    runner: CodexRunner,
+    binary_sha256: str,
+    observed_version: str,
+) -> dict[str, Any]:
+    if _provider_realm(config) is None:
+        raise ProviderCanaryError("configuration_invalid")
+    inner = run_canary(
+        config,
+        runner=runner,
+        binary_sha256=binary_sha256,
+        observed_version=observed_version,
+    )
+    return _subscription_receipt(config, inner)
+
+
 def subprocess_runner(invocation: CodexInvocation, *, timeout_seconds: float) -> CodexRunResult:
     try:
         completed = subprocess.run(
@@ -933,7 +1391,7 @@ def live_worker_runner(
         "-u",
         config.worker_user,
         "-g",
-        WORKER_GROUP,
+        f"#{config.worker_gid}",
         "/usr/bin/env",
         "-i",
         *env_args,
@@ -953,14 +1411,81 @@ def live_worker_runner(
     return subprocess_runner(inner, timeout_seconds=config.timeout_seconds)
 
 
+def _drop_worker_privileges(config: ProviderCanaryConfig) -> Callable[[], None]:
+    def drop() -> None:
+        os.setgroups([])
+        os.setgid(config.worker_gid)
+        os.setuid(config.worker_uid)
+
+    return drop
+
+
+def subscription_live_worker_runner(
+    config: ProviderCanaryConfig, invocation: CodexInvocation
+) -> CodexRunResult:
+    assign_probe_tree_to_worker(config, invocation)
+    assert_worker_probe_hierarchy(config, invocation)
+    realm = _provider_realm(config)
+    if realm is None:
+        raise ProviderCanaryError("configuration_invalid")
+    try:
+        loader = provider_home_credential_loader(
+            config.provider_home,
+            realm,
+            expected_uid=config.worker_uid,
+            expected_gid=config.worker_gid,
+        )
+        credential = loader()
+    except (OSError, ProviderRealmError):
+        raise ProviderCanaryError("provider_credential_unavailable") from None
+    process_env = dict(invocation.env)
+    process_env[realm.env_key] = credential
+    try:
+        completed = subprocess.run(
+            list(invocation.argv),
+            cwd=os.fspath(invocation.cwd),
+            env=process_env,
+            input=invocation.stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=config.timeout_seconds,
+            check=False,
+            preexec_fn=_drop_worker_privileges(config),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return CodexRunResult(
+            exit_code=124,
+            stdout=exc.stdout or b"",
+            stderr=exc.stderr or b"",
+            timed_out=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise ProviderCanaryError("process_failed") from None
+    finally:
+        process_env.pop(realm.env_key, None)
+        credential = ""
+    return CodexRunResult(
+        exit_code=int(completed.returncode),
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        timed_out=False,
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Executive Codex provider-inference canary"
     )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--slot-id",
         choices=[row.slot_id for row in all_slots()],
-        default="codex-01",
+        default=None,
+    )
+    group.add_argument(
+        "--subscription-slot-id",
+        choices=[row.slot_id for row in subscription_slots()],
+        default=None,
     )
     return parser
 
@@ -969,9 +1494,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     tokens = list(sys.argv[1:] if argv is None else argv)
     reject_live_path_options(tokens)
     args = _parser().parse_args(tokens)
+    is_subscription = args.subscription_slot_id is not None
     if sys.platform != "darwin" or os.geteuid() != 0:
         receipt = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": (
+                SUBSCRIPTION_SCHEMA_VERSION if is_subscription else SCHEMA_VERSION
+            ),
             "passed": False,
             "terminal_event_class": "configuration_invalid",
             "result_valid": False,
@@ -983,16 +1511,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     probe_root: Path | None = None
     try:
         try:
-            slot = get_slot(args.slot_id)
+            if is_subscription:
+                slot = get_subscription_slot(args.subscription_slot_id)
+            else:
+                slot = get_slot(args.slot_id or "codex-01")
         except SlotCatalogError as exc:
             raise ProviderCanaryError("configuration_invalid") from exc
         probe_root = create_live_probe_root(
             worker_uid=slot.worker_uid, worker_gid=slot.worker_gid
         )
-        config = production_config(
-            probe_root=probe_root,
-            operator_home=LIVE_OPERATOR_HOME,
-            slot_id=slot.slot_id,
+        config = (
+            subscription_production_config(
+                probe_root=probe_root,
+                operator_home=LIVE_OPERATOR_HOME,
+                slot_id=slot.slot_id,
+            )
+            if is_subscription
+            else production_config(
+                probe_root=probe_root,
+                operator_home=LIVE_OPERATOR_HOME,
+                slot_id=slot.slot_id,
+            )
         )
         binary = config.installed_codex_binary
         info = binary.lstat()
@@ -1039,13 +1578,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ProviderCanaryError("configuration_invalid")
 
         def runner(invocation: CodexInvocation) -> CodexRunResult:
-            return live_worker_runner(config, invocation)
+            return (
+                subscription_live_worker_runner(config, invocation)
+                if is_subscription
+                else live_worker_runner(config, invocation)
+            )
 
-        receipt = run_canary(
-            config,
-            runner=runner,
-            binary_sha256=binary_sha256,
-            observed_version=observed_version,
+        receipt = (
+            run_subscription_canary(
+                config,
+                runner=runner,
+                binary_sha256=binary_sha256,
+                observed_version=observed_version,
+            )
+            if is_subscription
+            else run_canary(
+                config,
+                runner=runner,
+                binary_sha256=binary_sha256,
+                observed_version=observed_version,
+            )
         )
         json.dump(receipt, sys.stdout, sort_keys=True, indent=2)
         sys.stdout.write("\n")
@@ -1059,9 +1611,12 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except ProviderCanaryError as exc:
+        subscription_mode = "--subscription-slot-id" in sys.argv[1:]
         json.dump(
             {
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": (
+                    SUBSCRIPTION_SCHEMA_VERSION if subscription_mode else SCHEMA_VERSION
+                ),
                 "passed": False,
                 "terminal_event_class": exc.code,
                 "result_valid": False,

@@ -1,0 +1,291 @@
+OBJECTIVE: PATCH_ONLY bounded source implementation for primary-only mixed Supervisor canary activation. Original root and parent 01a11e90-4b5d-7f53-b966-8aaaad38701f. This is a leaf with no delegation or host effect authority.
+SCOPE: use only embedded source below; do not inspect files, use tools, access network, run commands, or modify a checkout. Return a concise unified diff and discriminating test sketch, maximum 9000 characters. No claims of tests run.
+REQUIRED: MixedExecutionOwnerSupervisor must let the service activate the existing primary canary without copying it to Fabric owners. Add a narrow explicit activation API (or exact primary-only property forwarding). Existing service activate_canary validates and updates canary before reconciliation. Factory currently rejects any initial_canary when Fabric exists; accept it ONLY with exact typed physical/probe source AND nonempty validated attended placements, and leave Fabric owner's initial canary empty; per-Attempt probe remains mandatory. Preserve ordinary nonmixed path and canary validation, shared Runtime/instance, cleanup and cancellation. No generic __getattr__, no fake auth, no new lifecycle or enabling profiles. Existing dedicated-only canary without qualified attended composition must still refuse.
+ACCEPTANCE: source-local patch preserves all existing owner boundaries and demonstrates primary updated/Fabric empty; absent per-Attempt verdict cannot start Fabric. Return exact source hashes and rationale. Parent integrates/tests/reviews.
+
+FILE control_plane/mixed_worker_supervisor.py SHA256 ac9109f46cb25cbe5b248cebc1cc10832d3528b213cf598d0aabc748b5f9b8c7 LINES 1-118
+"""Select an existing execution owner after one canonical Runtime claim.
+
+This in-process composition has no queue, lease store, admission or host grant.
+The supplied Supervisors retain preparation, START, finishing and recovery.
+Physical Fabric binding, foreground lifetime and host qualification remain
+their existing owners' obligations; this module enables no execution profile.
+"""
+from __future__ import annotations
+
+import asyncio
+from types import MappingProxyType
+from typing import Mapping
+
+from control_plane.executive_runtime import AttemptLease, AttemptStatus, RuntimeProofError
+from control_plane.executive_supervisor import (
+    ActiveRun, ExecutiveSupervisor, ReconcileReceipt, ReconcileStatus,
+    SupervisorError, _ACTIVE_ATTEMPT_STATUSES, _require_exact_worker_target,
+)
+from control_plane.worker_adapter import _implementation_adapter_id
+
+
+async def _drain_original(task):
+    """Retain one already owned operation through caller cancellation."""
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    return task.result()
+
+
+class _ForegroundCustody:
+    """Observe the actual origin; request only its canonical Attempt's cancel."""
+    def __init__(self, runtime, operation, lease):
+        self.runtime, self.operation, self.lease = runtime, operation, lease
+        self.requested = False
+        self.error = None
+        self.monitor = asyncio.create_task(self._observe())
+
+    def request_cancel(self):
+        if self.requested:
+            return
+        self.requested = True
+        attempt = self.lease.attempt
+        try:
+            self.runtime.jobs.cancel_job(attempt.job_id,
+                expected_attempt_id=attempt.attempt_id,
+                expected_fence_generation=attempt.fence_generation)
+        except Exception as exc:
+            # No alternate signal/lease action. The original owner must still
+            # drain; its caller receives this unresolved cancellation after it.
+            self.error = self.error or exc
+
+    async def _observe(self):
+        try:
+            await self.operation.wait_closed()
+        except Exception as exc:
+            self.error = exc
+        self.request_cancel()
+
+    async def close(self):
+        # This cancels only a liveness observer, never the controller/collector.
+        self.monitor.cancel()
+        values = await _drain_original(asyncio.ensure_future(
+            asyncio.gather(self.monitor, return_exceptions=True)))
+        if values and isinstance(values[0], Exception):
+            self.error = self.error or values[0]
+
+    def require_settled(self):
+        if self.error is not None:
+            raise SupervisorError("original foreground cancellation remains unresolved") from self.error
+
+
+class MixedExecutionOwnerSupervisor:
+    def __init__(self, primary: ExecutiveSupervisor,
+                 owners: Mapping[str, ExecutiveSupervisor]):
+        if type(primary) is not ExecutiveSupervisor or not owners:
+            raise SupervisorError("mixed composition requires existing Supervisors")
+        if any(type(key) is not str or not key or type(owner) is not ExecutiveSupervisor
+               or owner.runtime is not primary.runtime
+               or owner.instance_id != primary.instance_id
+               for key, owner in owners.items()):
+            raise SupervisorError("mixed owners must share the exact Runtime and service instance")
+        if not any(owner is primary for owner in owners.values()):
+            raise SupervisorError("mixed composition must retain its original planner owner")
+        self.primary = primary
+        self.runtime = primary.runtime
+        self.instance_id = primary.instance_id
+        self.owners = MappingProxyType(dict(owners))
+        # Transient ActiveRun custody, not a second execution lifecycle. Durable
+        # restart authority remains the canonical Attempt/recovery binding.
+        self._active: dict[str, tuple[ExecutiveSupervisor, ActiveRun, _ForegroundCustody | None]] = {}
+        self._starting: set[str] = set()
+        self._unsettled: dict[str, tuple[ExecutiveSupervisor, ActiveRun]] = {}
+        self._pending_recovery: dict[str, tuple[ExecutiveSupervisor, ActiveRun]] = {}
+
+    def _select(self, attempt) -> ExecutiveSupervisor:
+        owner = self.owners.get(attempt.worker_id)
+        worker = self.runtime.workers.get_worker(attempt.worker_id)
+        quota = self.runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
+        job = self.runtime.jobs.get_job(attempt.job_id)
+        if (owner is None or worker is None or quota is None or job is None
+                or job.current_attempt_id != attempt.attempt_id
+                or quota.active_attempt_id != attempt.attempt_id
+                or attempt.execution_mode == "OPERATOR_HARNESS"):
+            raise SupervisorError("claimed Attempt has no exact execution owner")
+        if (worker.worker_type != _implementation_adapter_id(owner.adapter)
+                or quota.provider != worker.provider
+                or job.constraints.get("provider", worker.provider) != worker.provider):
+            raise SupervisorError("claimed Worker/provider differs from execution owner")
+        for key in ("execution_profile_id", "execution_profile_digest",
+                    "capability_policy_version", "capability_policy_digest"):
+            if job.constraints.get(key) != quota.metadata.get(key):
+                raise SupervisorError("claimed quota execution profile drifted")
+        return owner
+
+    def _foreground(self, job_id):
+        job = self.runtime.jobs.get_job(job_id)
+
+FILE scripts/executive_os_phase1c.py SHA256 07090756a77743367d67cc042c9c4251f4bedd1ee6e69d65b5d21ea2c9a4e7b3 LINES 1696-1757
+def _service_from_config(
+    raw: Mapping[str, Any],
+    *,
+    canary_loader: Callable[[], Mapping[str, Any]] | None = None,
+    autonomy_guard: Callable[[], None] | None = None,
+    ceo_submit_admission_guard: Callable[[], None] | None = None,
+    initial_canary: Mapping[str, Any] | None = None,
+    content_profile_loader: Callable[[], Any] | None = None,
+    workspace_acquisition_loader: Callable[[], Any] | None = None,
+    exact_target_source: _ExactWorkerTargetSource | None = None,
+    workspace_bindings_path: Path | None = None,
+    coo_source: Any | None = None,
+    claimed_operator_adapter_factory: Callable[..., Any] | None = None,
+    remote_operator_binding_source: Callable[..., Any] | None = None,
+    dialogue_canary_profile: Any | None = None,
+    native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
+    remote_worker_binding_source: Callable[..., Any] | None = None,
+    fabric_worker_binding_source: Any | None = None,
+    fabric_attended_probe_source: Any | None = None,
+    attended_work_placements: tuple = (),
+) -> ExecutiveControlService:
+    from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+    if dialogue_canary_profile is None:
+        dialogue_canary_profile = DialogueWakeCanaryProfile(None)
+    if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
+        raise ServiceError("dialogue canary profile requires trusted composition")
+    # This is trusted host composition, never a JSON/model-selected factory.
+    _validate_fabric_bridge_config(raw)
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member
+    if (type(attended_work_placements) is not tuple
+            or len(attended_work_placements) > 6
+            or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
+        raise ServiceError('attended placements require bounded typed host configuration')
+    if attended_work_placements and (fabric_worker_binding_source is None
+                                    or fabric_attended_probe_source is None):
+        raise ServiceError('attended placements require the binding and startup probe sources')
+    if fabric_attended_probe_source is not None:
+        from control_plane.fabric_attended_canary import AttendedControlProbeSource
+        if type(fabric_attended_probe_source) is not AttendedControlProbeSource:
+            raise ServiceError('attended probe requires the exact startup-bound source')
+        fabric_attended_probe_source.require_definition(raw)
+    if fabric_worker_binding_source is not None:
+        from control_plane.executive_fabric_composition import FabricBindingSource
+        if type(fabric_worker_binding_source) is not FabricBindingSource:
+            raise ServiceError("Fabric worker composition requires the exact root-installed binding source")
+        if remote_worker_binding_source is not None:
+            raise ServiceError("Fabric and remote worker binding sources conflict")
+        if initial_canary is not None:
+            raise FabricActivationRefused(
+                "A dedicated-worker canary does not qualify shared Fabric execution"
+            )
+        if any((binding.worker_uid, binding.worker_gid) !=
+               (raw.get("worker_uid"), raw.get("worker_gid"))
+               for binding in fabric_worker_binding_source.bindings):
+            raise ServiceError("Fabric bindings differ from the fixed Supervisor worker principal")
+        if any(binding.worker_id == str(raw.get("worker_id") or "codex-01")
+               for binding in fabric_worker_binding_source.bindings):
+            raise ServiceError("Fabric binding cannot replace the primary worker")
+    if attended_work_placements:
+        from control_plane.model_router import ModelRouter
+        router = ModelRouter.load()
+        for placement in attended_work_placements:
+
+FILE scripts/executive_os_phase1c.py SHA256 07090756a77743367d67cc042c9c4251f4bedd1ee6e69d65b5d21ea2c9a4e7b3 LINES 1883-1892
+    )
+    # A persisted receipt from another service instance is never startup
+    # authority. Every new PID starts quarantined and can activate only after a
+    # fresh same-PID worker probe followed by the private activation command.
+    canary: dict[str, Any] = dict(initial_canary or {})
+    initially_ready = initial_canary is not None
+
+    recovery_controller = {}
+
+    def recovery_controller_for(attempt):
+
+FILE scripts/executive_os_phase1c.py SHA256 07090756a77743367d67cc042c9c4251f4bedd1ee6e69d65b5d21ea2c9a4e7b3 LINES 1967-2017
+        primary = ExecutiveSupervisor(
+            runtime,
+            adapter,
+            runs_root=raw["worker_runs_root"],
+            isolation_roots=(
+                raw["proof_workspace_root"],
+                raw["worker_runs_root"],
+            ),
+            receipts_root=raw["receipts_root"],
+            worker_user=raw["worker_user"],
+            worker_uid=raw["worker_uid"],
+            worker_gid=raw["worker_gid"],
+            shared_run_gid=raw["shared_run_gid"],
+            secret_canary_verdict=canary,
+            require_complete_launch_attestation=initially_ready,
+            cleanup_policy=CleanupPolicy.DEDICATED_UID,
+            process_controller=process_controller,
+            exact_target_provider=(
+                (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
+                if exact_target_source is not None else None
+            ),
+            subscription_canary_claim_provider=claim_provider,
+            subscription_canary_binding_id=claim_binding_id,
+        )
+        if fabric_worker_binding_source is None:
+            return primary
+        from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+        fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source,
+            request_client_factory=fabric_worker_binding_source.client_for,
+            attended_probe_source=fabric_attended_probe_source)
+        fabric_owner = ExecutiveSupervisor(
+            runtime, fabric_adapter,
+            runs_root=raw["worker_runs_root"],
+            isolation_roots=(raw["proof_workspace_root"], raw["worker_runs_root"]),
+            receipts_root=raw["receipts_root"],
+            worker_user=raw["worker_user"], worker_uid=raw["worker_uid"],
+            worker_gid=raw["worker_gid"], shared_run_gid=raw["shared_run_gid"],
+            secret_canary_verdict=canary, require_complete_launch_attestation=True,
+            cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+            process_controller=fabric_adapter, instance_id=primary.instance_id,
+        )
+        mixed = MixedExecutionOwnerSupervisor(primary, {
+            config.worker_id: primary,
+            **{binding.worker_id: fabric_owner
+               for binding in fabric_worker_binding_source.bindings},
+        })
+        recovery_controller["owners"] = mixed.owners
+        return mixed
+
+    def operator_supervisor_factory(runtime, sealed_supervisor):
+
+FILE control_plane/executive_service.py SHA256 298d556a34c241ce8f614b99af6a993e833b0c492db1bd9c6cb71c13f5068adc LINES 2888-2923
+
+        if self._service_state != "AWAITING_CANARY":
+            raise ServiceError("Executive control service is not awaiting a canary")
+        from control_plane.codex_worker import validate_secret_canary_verdict
+
+        validated = validate_secret_canary_verdict(verdict, require_passed=True)
+        supervisor = self._require_supervisor()
+        if not hasattr(supervisor, "secret_canary_verdict") or not hasattr(
+            supervisor, "require_complete_launch_attestation"
+        ):
+            raise ServiceError("Executive supervisor cannot activate a complete canary")
+        if self.config.release_control_armed:
+            # Claim this activation before the first suspension. A sibling
+            # must not re-enter closure or overwrite a later quarantine.
+            self._service_state = "ACTIVATING_CANARY"
+        try:
+            supervisor.secret_canary_verdict = validated
+            supervisor.require_complete_launch_attestation = True
+            self._startup_reconciliation = await self._run_physical(
+                supervisor.reconcile_restart,
+                requeue_lost=False,
+            )
+            await self._schedule_recovered_runs()
+        except (Exception, asyncio.CancelledError):
+            if self.config.release_control_armed:
+                self._service_state = "QUARANTINED"
+            raise
+        if self._reconciliation_requires_quarantine(
+            self._startup_reconciliation
+        ):
+            self._service_state = "QUARANTINED"
+            raise StateConflict(
+                "Executive restart reconciliation was quarantined"
+            )
+        # Activation is the first moment this bootstrap-quarantined instance
+        # may resume durable terminal obligations.  Replay while admission is

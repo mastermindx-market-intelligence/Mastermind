@@ -1,0 +1,70 @@
+"""Six-seat alias qualification only; no credential loading or Capacity grant."""
+
+from datetime import datetime, timedelta, timezone
+import stat
+import sys
+from pathlib import Path
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from codex_pool_policy import CODEX_ACCOUNT_ALIASES, AccountObservation, select_account
+from codex_native_profile import inspect_profile, prepare_empty_profiles, UnsafeProfile
+
+NOW = datetime(2026, 10, 18, 7, 0, tzinfo=timezone.utc)
+
+
+def row(alias, *, ready=False, bound=False, remaining=100, cap=1, active=0, age=0):
+    return AccountObservation(
+        alias=alias, remaining_pct=remaining, observed_at=NOW-timedelta(minutes=age),
+        reset_at=NOW+timedelta(days=7), reset_credits=None,
+        active_leases=active, lease_cap=cap, auth_ready=ready,
+        binding_verified=bound,
+    )
+
+
+def test_six_explicit_aliases_not_any_other_account():
+    assert CODEX_ACCOUNT_ALIASES == frozenset({"C1", "C2", "C3", "C4", "B1", "B2"})
+
+
+def test_seat_home_preparation_creates_only_private_empty_directories(tmp_path):
+    root = tmp_path / "homes"
+    created = prepare_empty_profiles(root)
+    assert set(created) == set(CODEX_ACCOUNT_ALIASES)
+    assert set(p.name for p in root.iterdir()) == set(CODEX_ACCOUNT_ALIASES)
+    for child in root.iterdir():
+        assert stat.S_IMODE(child.stat().st_mode) == 0o700
+        assert list(child.iterdir()) == []
+        assert inspect_profile(root, child.name).state == "NOT_ENROLLED"
+
+
+@pytest.mark.parametrize("seat", ["B1", "B2"])
+def test_business_seat_without_qualified_binding_never_chosen(seat):
+    assert select_account([row(seat)], now=NOW) is None
+    assert select_account([row(seat, ready=True)], now=NOW) is None
+    assert select_account([row(seat, bound=True)], now=NOW) is None
+    assert select_account([row(seat, ready=True, bound=True, cap=0)], now=NOW) is None
+    assert select_account([row(seat, ready=True, bound=True, age=11)], now=NOW) is None
+    assert select_account([row(seat, ready=True, bound=True, active=1)], now=NOW) is None
+    assert select_account([row(seat, ready=True, bound=True, remaining=0)], now=NOW) is None
+
+
+def test_six_alias_advisory_accepts_only_explicit_fresh_qualified_input():
+    rows = [
+        row("C1", ready=True, bound=True, remaining=50),
+        row("B1", ready=True, bound=True, remaining=90),
+        row("B2", ready=True, bound=False, remaining=100),
+    ]
+    from dataclasses import replace
+    rows[1] = replace(
+        rows[1], account_id_sha256="a"*64, user_id_sha256="b"*64,
+        entitlement_class="business_premium_included",
+        qualified_models=frozenset({"gpt-6-astra", "gpt-6.1-sol"}),
+    )
+    decision = select_account(rows, now=NOW, requested_model="gpt-6-astra")
+    assert decision is not None and decision.alias == "B1"
+    assert not hasattr(decision, "reservation") and not hasattr(decision, "dispatch_ready")
+
+
+def test_unknown_business_alias_never_admitted():
+    with pytest.raises(ValueError, match="alias_unknown"):
+        select_account([row("B3", ready=True, bound=True)], now=NOW)

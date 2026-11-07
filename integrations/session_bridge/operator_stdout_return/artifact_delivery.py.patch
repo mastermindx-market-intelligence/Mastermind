@@ -1,0 +1,35 @@
+--- a/artifact_delivery.py
++++ b/artifact_delivery.py
+@@ -381 +381 @@
+-def retained_lease(lease_id, *, include_pool=False):
++def _retained_broker_row(query, parameters, *, here=None):
+@@ -384 +384 @@
+-    with DirectoryChain(HERE / "broker") as chain, LeaseSnapshotLock(chain):
++    with DirectoryChain((HERE if here is None else Path(here)) / "broker") as chain, LeaseSnapshotLock(chain):
+@@ -405,2 +405 @@
+-            columns = "id,orchestrator_id,host,account,model,state" + (",pool" if include_pool else "")
+-            row = db.execute("SELECT " + columns + " FROM leases WHERE id=?", (lease_id,)).fetchone()
++            row = db.execute(query, parameters).fetchone()
+@@ -412,0 +412,5 @@
++
++
++def retained_lease(lease_id, *, include_pool=False):
++    columns = "id,orchestrator_id,host,account,model,state" + (",pool" if include_pool else "")
++    return _retained_broker_row("SELECT " + columns + " FROM leases WHERE id=?", (lease_id,))
+@@ -760 +764,5 @@
+-    if type(request) is dict and request.get("schema") == "mastermind.original_delivery_read.v1":
++    if type(request) is dict and request.get("schema") == "mastermind.original_operator_stdout_read.v1":
++        import operator_stdout_delivery
++        code = operator_stdout_delivery.code_for_request(request)
++        response_limit = operator_stdout_delivery.MAX_RESPONSE
++    elif type(request) is dict and request.get("schema") == "mastermind.original_delivery_read.v1":
+@@ -946,0 +955,3 @@
++    for flag in ("delivery_verified", "worker_terminal_proof"):
++        if flag in receipt:
++            receipt[flag] = False
+@@ -1154 +1165,4 @@
+-            if args.run_id == "rf-static-checks-01a1333c-v1":
++            if args.run_id == "rf-codegen-contracts-impl-01a1333c-v1":
++                import operator_stdout_delivery
++                receipt = operator_stdout_delivery.collect(args.run_id, args.destination)
++            elif args.run_id == "rf-static-checks-01a1333c-v1":

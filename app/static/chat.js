@@ -32,6 +32,56 @@
   var CONV_KEY = "bc_conversation_id";
   var convId = null;
   try { convId = localStorage.getItem(CONV_KEY) || null; } catch (e) {}
+  var PENDING_PREFIX = "bc_pending_turn:";
+  var historyGeneration = 0;
+  var pendingTurn = null;
+  try { pendingTurn = convId ? JSON.parse(localStorage.getItem(PENDING_PREFIX + convId) || "null") : null; } catch (e) {}
+  if (pendingTurn && (pendingTurn.conversation_id !== convId || typeof pendingTurn.turn_id !== "string" || typeof pendingTurn.message !== "string")) pendingTurn = null;
+  function freshId() {
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+  function retainTurn(packet) {
+    localStorage.setItem(CONV_KEY, packet.conversation_id);
+    localStorage.setItem(PENDING_PREFIX + packet.conversation_id, JSON.stringify(packet));
+    pendingTurn = packet;
+  }
+  function recoverButton(col) {
+    if (!pendingTurn || (pendingTurn.backend !== "fabric" && pendingTurn.backend !== "unknown")) return;
+    var original = Object.freeze({message: pendingTurn.message, conversation_id: pendingTurn.conversation_id,
+      turn_id: pendingTurn.turn_id, backend: pendingTurn.backend});
+    var button = document.createElement("button"); button.className = "bc-q";
+    button.textContent = zh() ? "恢复同一请求" : "Recover this request";
+    button.onclick = function () {
+      if (!busy && pendingTurn && pendingTurn.turn_id === original.turn_id && pendingTurn.conversation_id === original.conversation_id)
+        send(original.message, original);
+    };
+    col.appendChild(button);
+  }
+  function unconfirmedRequests() {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (!key || key.indexOf(PENDING_PREFIX) !== 0) continue;
+        var saved = JSON.parse(localStorage.getItem(key) || "null");
+        if (!saved || saved.conversation_id === convId || typeof saved.message !== "string" ||
+            !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(saved.conversation_id) ||
+            !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(saved.turn_id)) continue;
+        (function (original) {
+          var button = document.createElement("button"); button.className = "bc-q";
+          button.textContent = (zh() ? "未确认请求：" : "Unconfirmed request: ") + original.message.slice(0,80);
+          button.onclick = function () {
+            if (busy) return;
+            try { retainTurn(original); } catch (e) { return; }
+            convId = original.conversation_id; sendBtn.disabled = true;
+            body.innerHTML = ""; rehydrate();
+          };
+          body.appendChild(button);
+        })(saved);
+      }
+    } catch (e) {} // Existing pending request remains in its original storage key.
+  }
 
   // --- friendly labels for the Brain's tool calls (chips) ---------------------
   var TOOL = {
@@ -327,12 +377,20 @@
   }
 
   // --- paper sheet ------------------------------------------------------------
+  // A read belongs to one explicit opening, even when the same paper is reopened.
+  var paperReadGeneration = 0;
+  function closePaper() {
+    paperReadGeneration++;
+    sheet.classList.remove("open");
+  }
   function openPaper(id) {
     if (!id) return;
+    var generation = ++paperReadGeneration;
     var t = sheet.querySelector(".sh-t"), sc = sheet.querySelector(".sh-scores"), bd = sheet.querySelector(".sh-body");
     t.textContent = "…"; sc.innerHTML = ""; bd.innerHTML = "<div style='color:var(--muted)'>" + (zh() ? "加载研究报告…" : "Loading the research paper…") + "</div>";
     sheet.classList.add("open");
     fetch("/chat/paper?id=" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (p) {
+      if (generation !== paperReadGeneration) return;
       if (!p || p.error) { bd.innerHTML = "<div style='color:var(--down,#e06d6d)'>" + (zh() ? "找不到该报告。" : "Paper not found.") + "</div>"; t.textContent = ""; return; }
       t.textContent = (p.ticker || "") + " — " + (zh() ? "研究报告" : "Research Report");
       var ok = !!p.confirmed;
@@ -348,9 +406,9 @@
       }
       html += fmt(p.report_md || p.summary || "");
       bd.innerHTML = html; bd.scrollTop = 0;
-    }).catch(function () { bd.innerHTML = "<div style='color:var(--down,#e06d6d)'>" + (zh() ? "加载失败。" : "Failed to load.") + "</div>"; });
+    }).catch(function () { if (generation !== paperReadGeneration) return; bd.innerHTML = "<div style='color:var(--down,#e06d6d)'>" + (zh() ? "加载失败。" : "Failed to load.") + "</div>"; });
   }
-  sheet.querySelector("#bc-sheet-x").onclick = function () { sheet.classList.remove("open"); };
+  sheet.querySelector("#bc-sheet-x").onclick = closePaper;
 
   // --- greeting + rehydrate ---------------------------------------------------
   function greet() {
@@ -359,7 +417,7 @@
     bubble(col, fmt(zh()
       ? "问我宏观状态、任意个股，或检视持仓。把一个想研究的标的发给我 — 我会先做初步筛查，通过后撰写完整研究报告，并排队一份交由确定性引擎审核的加仓提案。这里不会设定订单规模、不会成交，组合也不会改变。"
       : "Ask me about the macro setup, any name, or the book. Send a ticker to research — I'll run the preliminary gate, write a full paper if it clears, and queue an ADD proposal for deterministic review. No order is sized or filled here, and the book does not change."));
-    renderQuick(); scrollDown();
+    unconfirmedRequests(); renderQuick(); scrollDown();
   }
   function renderTurn(t) {
     if (t.role === "user") { bubble(addRow("user"), t.content, true); return; }
@@ -379,22 +437,63 @@
   }
   function rehydrate() {
     if (!convId) { greet(); return; }
+    var requestedConversation = convId, generation = ++historyGeneration;
     fetch("/chat/history?conversation_id=" + encodeURIComponent(convId))
       .then(function (r) { return r.json(); })
       .then(function (d) {
+        if (generation !== historyGeneration || convId !== requestedConversation || busy) return;
         var turns = (d && d.turns) || [];
-        if (!turns.length) { greet(); return; }
-        body.innerHTML = ""; turns.forEach(renderTurn); renderQuick(); scrollDown();
-      }).catch(function () { greet(); });
+        if (!turns.length) {
+          greet();
+          if (pendingTurn) {
+            var pendingEmpty = addRow("brain");
+            bubble(pendingEmpty, zh() ? "上次请求尚未确认完成。请求编号已保留。" : "The previous request has not been confirmed complete. Its original request ID has been retained.", true);
+            recoverButton(pendingEmpty); sendBtn.disabled = true;
+          }
+          return;
+        }
+        body.innerHTML = ""; turns.forEach(renderTurn); unconfirmedRequests(); renderQuick(); scrollDown();
+        if (pendingTurn) {
+          var pendingCol = addRow("brain");
+          bubble(pendingCol, zh() ? "上次请求尚未确认完成。恢复会使用同一请求编号。" : "The previous request has not been confirmed complete. Recovery keeps its original request ID.", true);
+          recoverButton(pendingCol); sendBtn.disabled = true;
+        }
+      }).catch(function () {
+        if (generation !== historyGeneration || convId !== requestedConversation || busy) return;
+        greet();
+        if (pendingTurn) {
+          var pendingFailedHistory = addRow("brain");
+          bubble(pendingFailedHistory, zh() ? "历史记录暂时不可用。上次请求编号仍保留。" : "History is unavailable. The previous request ID is still retained.", true);
+          recoverButton(pendingFailedHistory); sendBtn.disabled = true;
+        }
+      });
   }
 
   // --- streaming send ---------------------------------------------------------
-  function send(text) {
+  function send(text, recovery) {
     text = (text || input.value || "").trim();
-    if (!text || busy) return;
-    busy = true; sendBtn.disabled = true; input.value = ""; autoGrow(); quick.innerHTML = "";
+    if (!text || busy || (pendingTurn && !recovery)) return;
+    var packet;
+    try {
+      if (recovery) {
+        if (!pendingTurn || recovery.turn_id !== pendingTurn.turn_id || recovery.conversation_id !== pendingTurn.conversation_id ||
+            (recovery.backend !== "fabric" && recovery.backend !== "unknown")) return;
+        packet = Object.freeze({message: recovery.message, conversation_id: recovery.conversation_id, turn_id: recovery.turn_id, recover_only: true});
+      } else {
+        convId = convId || freshId();
+        packet = Object.freeze({message: text, conversation_id: convId, turn_id: freshId()});
+        retainTurn({message: packet.message, conversation_id: packet.conversation_id, turn_id: packet.turn_id, backend: "unknown"});
+      }
+    } catch (e) {
+      bubble(addRow("brain"), zh() ? "无法保存请求编号，尚未发送。" : "The request ID could not be saved. Nothing was sent.", true);
+      return;
+    }
+    var terminal = false;
+    historyGeneration++;
+    busy = true; sendBtn.disabled = true; panel.querySelector("#bc-new").disabled = true;
+    input.value = ""; autoGrow(); quick.innerHTML = "";
 
-    bubble(addRow("user"), text, true);
+    if (!recovery) bubble(addRow("user"), text, true);
     var col = addRow("brain");
     var typing = document.createElement("div"); typing.className = "bc-typing"; typing.innerHTML = "<i></i><i></i><i></i>";
     col.appendChild(typing); scrollDown();
@@ -412,8 +511,13 @@
     function settle() { if (lastChip) { lastChip.classList.remove("run"); lastChip.classList.add("done"); } }
 
     function onEvent(ev) {
+      if (terminal) return;
       if (ev.type === "start") {
-        if (ev.conversation_id) { convId = ev.conversation_id; try { localStorage.setItem(CONV_KEY, convId); } catch (e) {} }
+        if (ev.conversation_id !== packet.conversation_id || (ev.turn_id && ev.turn_id !== packet.turn_id)) throw new Error("Conversation identity mismatch");
+        if (pendingTurn && pendingTurn.turn_id === packet.turn_id) {
+          pendingTurn.backend = ev.backend || "unknown";
+          try { retainTurn(pendingTurn); } catch (e) {}
+        }
       } else if (ev.type === "text") {
         acc += ev.text; ensureBody().innerHTML = fmt(acc); scrollDown();
       } else if (ev.type === "tool") {
@@ -429,24 +533,36 @@
         if (typing.parentNode) typing.remove();
         col.appendChild(paperCard(ev)); scrollDown();
       } else if (ev.type === "done") {
+        terminal = true;
+        if (pendingTurn && pendingTurn.turn_id === packet.turn_id) {
+          try { localStorage.removeItem(PENDING_PREFIX + packet.conversation_id); } catch (e) {}
+          pendingTurn = null;
+        }
         settle();
         if (!acc && !col.querySelector(".bc-paper")) ensureBody().innerHTML = fmt(zh() ? "_(没有返回内容)_" : "_(no response)_");
         finish();
       } else if (ev.type === "error") {
-        settle();
-        ensureBody().innerHTML = "<span style='color:var(--down,#e06d6d)'>" + esc((zh() ? "出错了：" : "Error: ") + (ev.error || "unknown")) + "</span>";
+        terminal = true;
+        if (lastChip && lastChip.classList.contains("run")) {
+          lastChip.classList.remove("run"); lastChip.classList.add("unconfirmed");
+          lastChip.appendChild(document.createTextNode(zh() ? " · 结果未确认" : " · result unconfirmed"));
+        }
+        if (typing.parentNode) typing.remove();
+        var failure = bubble(col, "");
+        failure.innerHTML = "<span style='color:var(--down,#e06d6d)'>" + esc((zh() ? "出错了：" : "Error: ") + (ev.error || "unknown")) + "</span>";
+        recoverButton(col);
         finish();
       }
     }
     function finish() {
-      busy = false; sendBtn.disabled = false;
+      busy = false; sendBtn.disabled = !!pendingTurn; panel.querySelector("#bc-new").disabled = false;
       if (typing.parentNode) typing.remove();   // never leave the '...' spinner up (incl. content-free clean close)
       renderQuick();                             // restore the quick-reply chips cleared at send() (idempotent)
       scrollDown();
     }
 
     fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, conversation_id: convId }) })
+      body: JSON.stringify(packet) })
       .then(function (resp) {
         if (!resp.ok || !resp.body) throw new Error("HTTP " + resp.status);
         var reader = resp.body.getReader(), dec = new TextDecoder(), buf = "";
@@ -455,13 +571,16 @@
         // finish(). Without the return, the pump chain was orphaned and the widget wedged forever.
         return (function pump() {
           return reader.read().then(function (r) {
-            if (r.done) { if (busy) finish(); return; }
+            if (r.done) {
+              if (!terminal) throw new Error(zh() ? "连接结束，但请求尚未确认完成。请求编号已保留。" : "Connection ended before completion was confirmed. The original request ID has been retained.");
+              return;
+            }
             buf += dec.decode(r.value, { stream: true });
             var idx;
             while ((idx = buf.indexOf("\n\n")) >= 0) {
               var frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
               var line = frame.split("\n").find(function (l) { return l.indexOf("data:") === 0; });
-              if (line) { try { onEvent(JSON.parse(line.slice(5).trim())); } catch (e) {} }
+              if (line) onEvent(JSON.parse(line.slice(5).trim()));
             }
             return pump();
           });
@@ -480,12 +599,16 @@
     if (!body.children.length) rehydrate();
     setTimeout(function () { input.focus(); }, 120);
   }
-  function close() { document.body.classList.remove("bc-open"); sheet.classList.remove("open"); }
+  function close() { document.body.classList.remove("bc-open"); closePaper(); }
   launch.onclick = open;
   panel.querySelector("#bc-min").onclick = close;
   panel.querySelector("#bc-new").onclick = function () {
+    if (busy) return;
+    historyGeneration++;
+    // Keep an unsettled request under its original conversation key.
+    pendingTurn = null; sendBtn.disabled = false;
     convId = null; try { localStorage.removeItem(CONV_KEY); } catch (e) {}
-    sheet.classList.remove("open"); greet();
+    closePaper(); greet();
   };
   }   // end mount()
 

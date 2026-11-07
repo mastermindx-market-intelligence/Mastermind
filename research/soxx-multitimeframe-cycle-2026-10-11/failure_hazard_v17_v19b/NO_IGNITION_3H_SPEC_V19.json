@@ -1,0 +1,47 @@
+{
+  "schema": "soxx.no_ignition_exact_3h.frozen.v19",
+  "created": "2026-10-11",
+  "design_in_sample": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD"
+  ],
+  "new_test_cohort_semis": [
+    "NVDA",
+    "AVGO",
+    "MU",
+    "INTC",
+    "AMAT",
+    "LRCX",
+    "KLAC"
+  ],
+  "new_test_controls": [
+    "XLV",
+    "XLE"
+  ],
+  "registered_before_new_cohort_data_read": true,
+  "mission": "Pure causal failure-to-ignite test of a completed 3H MACD reversal on one index, several semis, and regime controls",
+  "frozen_signal": "First completed 3H MACD8/21/5 negative-but-rising histogram, StochRSI14 rising and K>=D after 2x80RMS downside extension and oversold <=20, next available observed 15m opening fill",
+  "base_exit": "1.5% entry-price emergency stop always active, 25% original position profit taken at +2% if touched, other shares timed-out at 52 observed regular-session hours, next-open fills, 5bp/side, stop-first",
+  "probe": "At precisely three observed RTH hours since entry, after the completed five-minute candle closes: if remaining position and close < original entry opening price, sell remaining at next recorded five-minute opening; evaluate once only. The hard emergency stop stays active and has precedence.",
+  "comparison": "Same-entry without 3h ignition rule, no change to stop, target, fee, source, higher timeframe signal, horizon, position unit",
+  "metrics": [
+    "opportunities resolved and skipped data",
+    "stop before 3h check",
+    "actual check opportunities",
+    "losing positions exited earlier",
+    "winning positions cut prematurely",
+    "mean net lift by trade and per original 3H event",
+    "worst-outcome change",
+    "cluster bootstrap by market week and asset equal weighting"
+  ],
+  "source_requirements": "Terminal existing public read-only intraday 15m and5m (30m optional completeness), ET display epochs restored to zoned ET; reject any study-year missing date/internal 5m bar, historical price adjustment/PIT unverified",
+  "new_data_access": "Only Terminal's existing public read endpoint; never directly contact paid vendor APIs or use credentials, no changes to Macro source writer",
+  "precommit_falsifier": "Even if this saves SOXX losers, do not promote unless new semis avoid meaningful prior-winner harm and cross-stock net lift is positive with uncertainty excluding zero. No threshold changes to 3h condition after viewing results.",
+  "test_coverage": "Eligibility at 3h can be absent because initial stop exits first. Partial profit sale does not exempt remainder from original stop or time horizon.",
+  "market_data_licenses": "Retain 5m/15m OHLCV privately; only code, hashes and derived research summaries to GitHub.",
+  "no_pit_proof": true,
+  "no_real_quotes": true,
+  "NOT_ACCEPTED_FOR_LIVE_TRADING": true
+}

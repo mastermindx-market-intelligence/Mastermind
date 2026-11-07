@@ -1,0 +1,281 @@
+/*
+ * ProjectWorkspace — bounded presentation composition.
+ * Prefix: mm-project-workspace. Every color, font, spacing and radius value
+ * comes from the app shell tokens; no palette or :root declarations here.
+ * The shell owns outer gutters and h1. The project header spans its content
+ * row; conversation, status and composer retain an 880px reading measure.
+ */
+
+.mm-project-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  width: 100%;
+  max-width: 1272px;
+  margin-inline: auto;
+  padding-block-start: var(--sp-4);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+.mm-project-workspace *,
+.mm-project-workspace *::before,
+.mm-project-workspace *::after {
+  box-sizing: border-box;
+}
+
+.mm-project-workspace__header {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: var(--sp-3) var(--sp-6);
+  min-width: 0;
+}
+
+.mm-project-workspace__title {
+  margin: 0;
+  font-family: var(--font-display);
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-workspace__goal-block {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.mm-project-workspace__section-title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mm-project-workspace__goal-text {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-workspace__muted {
+  color: var(--muted);
+}
+
+.mm-project-workspace__controls {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  justify-content: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.mm-project-workspace__control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-project-workspace__control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--sp-8);
+  min-width: var(--sp-8);
+  padding: 0 var(--sp-4);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+}
+
+.mm-project-workspace__control-button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.mm-project-workspace__control-button:disabled {
+  color: var(--faint);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.mm-project-workspace__control-button:focus-visible,
+.mm-project-workspace__disclosure:focus-visible,
+.mm-project-workspace__close:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.mm-project-workspace__control-why {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* Quiet 44px strip for the owner status panel and pause control. No
+   animation, pulsing or synthetic badge is added here. */
+.mm-project-workspace__status-strip {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--sp-8);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+}
+
+.mm-project-workspace__status-panel,
+.mm-project-workspace__pause-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* Conversation and composer stay unboxed: owner content renders directly,
+   never wrapped in another heavy card. */
+.mm-project-workspace__conversation,
+.mm-project-workspace__composer {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mm-project-workspace__disclosures {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mm-project-workspace__disclosure {
+  margin: 0;
+  padding: var(--sp-6);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+}
+
+.mm-project-workspace__disclosure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-block-end: var(--sp-3);
+}
+
+.mm-project-workspace__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--sp-8);
+  padding: 0 var(--sp-4);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+}
+
+.mm-project-workspace__close:hover {
+  border-color: var(--muted);
+}
+
+.mm-project-workspace__disclosure-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-workspace__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Light theme: white panel surface, hairline border, modest shadow, all
+   derived from existing tokens. */
+.shell[data-theme='light'] .mm-project-workspace__status-strip,
+.shell[data-theme='light'] .mm-project-workspace__disclosure {
+  background: var(--panel);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.mm-project-workspace[lang='zh-CN'] :is(h2,button,.mm-project-workspace__section-title) {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+@media (max-width: 640px) {
+  .mm-project-workspace__header { grid-template-columns: minmax(0,1fr); }
+  .mm-project-workspace__controls { grid-column: 1; grid-row: 3; justify-content: flex-start; }
+  .mm-project-workspace {
+    gap: var(--sp-5);
+    padding-block-start: var(--sp-3);
+  }
+
+  .mm-project-workspace__title {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .mm-project-workspace__status-strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mm-project-workspace__disclosure-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mm-project-workspace__disclosure-head > .mm-project-workspace__section-title {
+    min-width: 0;
+  }
+
+  .mm-project-workspace__close {
+    width: auto;
+    min-width: var(--sp-8);
+  }
+
+  .mm-project-workspace__disclosure {
+    padding: var(--sp-5);
+  }
+}
+
+.mm-project-workspace__launch { min-width: 0; }
+.mm-project-workspace__launch:empty { display: none; }

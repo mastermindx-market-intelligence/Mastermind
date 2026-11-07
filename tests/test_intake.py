@@ -42,6 +42,16 @@ def _patch(monkeypatch, files: dict):
     monkeypatch.setattr(intake, "_from_open_theses", lambda: {})
 
 
+def _eligible_altdata(signals: list[dict]) -> dict:
+    """Artifact fixture that explicitly grants the candidacy authority these tests need."""
+    return {
+        "brain_usable": True,
+        "is_context_only": False,
+        "article3": {"granted": True},
+        "signals": signals,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # 1. briefing priority_queue drives the ranking
 # --------------------------------------------------------------------------- #
@@ -79,13 +89,17 @@ def test_corroboration_lifts_multi_engine(monkeypatch):
         ], "divergences": []},
         "basketdata/radar_ticker.json": {"tickers": [
             {"ticker": "MULTI", "state": "POSITIVE_DIVERGENCE", "edge_score": 40}]},
-        "altdata/mastermind.json": {"signals": [
-            {"ticker": "MULTI", "signal_score": 70, "action": "WATCH", "channels": ["insider"]}]},
+        "altdata/mastermind.json": _eligible_altdata([
+            {"ticker": "MULTI", "signal_score": 70, "action": "WATCH", "channels": ["insider"]}]),
     })
     cands = {c["ticker"]: c for c in intake.build(limit=10)["candidates"]}
-    # MULTI is flagged by briefing + radar + altdata (3 engines) → corroboration bonus
-    assert cands["MULTI"]["n_sources"] >= 3
-    assert cands["MULTI"]["score"] > cands["SOLO"]["score"]
+    # The briefing is a derived summary, so only radar + altdata count as independent.
+    assert cands["MULTI"]["n_sources"] == 2
+    assert cands["MULTI"]["n_observed_sources"] == 3
+    # The derived briefing already sets research salience for both names; corroboration
+    # belongs on the separately governed candidacy axis, not stacked onto briefing priority.
+    assert cands["MULTI"]["score"] == cands["SOLO"]["score"] == 0.50
+    assert cands["MULTI"]["candidacy_score"] > cands["SOLO"]["candidacy_score"]
     assert set(cands["MULTI"]["sources"]) >= {"briefing", "radar", "altdata"}
 
 
@@ -112,7 +126,8 @@ def test_sources_without_briefing(monkeypatch):
     _patch(monkeypatch, {
         "factordata/us_standouts.json": {"buy": [{"ticker": "STD", "label": "BUY ZONE", "conviction": 0.7}]},
         "basketdata/radar_ticker.json": {"tickers": [{"ticker": "RAD", "state": "NEGATIVE_DIVERGENCE", "edge_score": 60}]},
-        "altdata/mastermind.json": {"signals": [{"ticker": "ALT", "signal_score": 90, "action": "BUY", "channels": ["congress"]}]},
+        "altdata/mastermind.json": _eligible_altdata([
+            {"ticker": "ALT", "signal_score": 90, "action": "BUY", "channels": ["congress"]}]),
         "news/by_ticker.json": {"tickers": {"NEW": {"n_recent": 8, "sentiment_lean": "pos"}}},
     })
     cands = {c["ticker"]: c for c in intake.build(limit=20)["candidates"]}
@@ -144,8 +159,8 @@ def test_tickers_min_score_and_limit(monkeypatch):
             {"ticker": "LO", "priority": 0.10, "lean": 0, "situation": "y"},
         ]},
     })
-    assert intake.tickers(limit=10, min_score=0.5) == ["HI"]
-    assert intake.tickers(limit=1) == ["HI"]            # limit truncates before filter
+    assert [c["ticker"] for c in intake.queue(limit=1)] == ["HI"]  # research salience
+    assert intake.tickers(limit=10, min_score=0.5) == []  # derived briefing has no candidacy authority
 
 
 # --------------------------------------------------------------------------- #
@@ -158,8 +173,10 @@ def test_salience_tiers(monkeypatch):
             "priority_queue": [
             {"ticker": "ACTNAME", "priority": 0.70, "lean": 1, "situation": "edge"},
             {"ticker": "WATCHME", "priority": 0.30, "lean": 0, "situation": "meh"}]},
-        "altdata/mastermind.json": {"signals": [
-            {"ticker": "ACTNAME", "signal_score": 80, "action": "BUY", "channels": ["insider"]}]},
+        "altdata/mastermind.json": _eligible_altdata([
+            {"ticker": "ACTNAME", "signal_score": 80, "action": "BUY", "channels": ["insider"]}]),
+        "basketdata/radar_ticker.json": {"tickers": [
+            {"ticker": "ACTNAME", "state": "POSITIVE_DIVERGENCE", "edge_score": 55}]},
     })
     tiers = intake.salience_tiers(limit=10)
     act = {c["ticker"] for c in tiers["act"]}

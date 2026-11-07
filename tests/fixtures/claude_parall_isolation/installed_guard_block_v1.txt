@@ -1,0 +1,30 @@
+    # A generic Claude Desktop launch uses the shared Anthropic application identity.
+    # On Parall multi-account Macs this can attach to or disrupt a numbered instance.
+    # Headless `claude` and explicit Parall wrapper paths are not desktop launches.
+    unmanaged_desktop = re.search(
+        r'''(?ix)(?:\bopen\s+(?:-[A-Za-z]+\s+)*-a\s+["']?Claude(?:\.app)?(?:["']|\s+(?![0-9])|$)'''
+        r'''|\bopen\s+(?:-[A-Za-z]+\s+)*["']?/Applications/Claude(?:\.app)?["']?(?:\s+(?![0-9])|$)'''
+        r'''|/Applications/Claude\ Official\.app'''
+        r'''|/Applications/Claude\ Runtimes/Claude\ (?:Default|[0-9]+)/Claude\.app/Contents/MacOS/Claude\b)''',
+        clean,
+    )
+    # Complete the known GUI-only routes while leaving ordinary Claude Code
+    # CLI invocation (including -p and --resume) unaffected.
+    unmanaged_desktop = unmanaged_desktop or any(
+        re.search(pattern, clean, re.I) for pattern in (
+            r'\bopen\s+(?:-[A-Za-z]+\s+)*-b\s+["\x27]?com\.anthropic\.claudefordesktop\b',
+            r'\bopen\s+(?:-[A-Za-z]+\s+)*["\x27]?claude://',
+            r'(?:^|[;&|\n(])\s*(?:[^\s;]+/)?claude\b[^\n;&|]*?\s--desktop(?:\s|$)',
+            r'\bopen\s+(?:-[A-Za-z]+\s+)*["\x27]?/Applications/Claude\s+(?:Official|Default)\.app\b',
+            r'\btell\s+application\s+["\x27]Claude(?:\.app)?["\x27]',
+        )
+    )
+    if unmanaged_desktop:
+        deny(
+            "Mastermind Claude Desktop isolation: generic or raw Claude app launch "
+            "is prohibited on this Parall multi-account host. Do not open the Free/default "
+            "Claude app for independent review. Use the already-admitted Subagent Fabric "
+            "for bounded reviews. For intentional GUI navigation, use an exact, already "
+            "provisioned Parall wrapper such as /Applications/Claude 6.app after "
+            "confirming the intended account; never invoke a raw Claude runtime."
+        )
