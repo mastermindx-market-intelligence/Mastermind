@@ -830,7 +830,7 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
 ] = {
-    "sha256": "8ff823832a3d429b619e596b9e031e300dd1689992ba72e5465e3f55088aa66b",
+    "sha256": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
     "sites": ((346, 37, 40, 'int', '409'),),
 }
 
