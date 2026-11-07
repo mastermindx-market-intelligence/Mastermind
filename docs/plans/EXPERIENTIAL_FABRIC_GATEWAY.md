@@ -159,3 +159,15 @@ An eligible Capacity/Subagent Fabric task can consume the actual subscribed plan
 DONE_WHEN is actual supported-plan execution and result consumption with truthful remaining quota, paid-model reservation and no secret leakage. A plan, source alias, gateway health response, test pass or successful merge alone is insufficient. If a real provider/permission/credential/native-release hold applies, preserve its exact identity and complete independent source work; do not remove guards to manufacture enrollment.
 
 Direct principal work is retained initially for PRINCIPAL_JUDGMENT and UNIQUE_APPROVED_ACCESS: reconcile personal-versus-commercial entitlement, old account holds, current supplied credentials, and active application/native writers. Bounded independent labor is eligible for the existing paid Fabric after that envelope is frozen; no new router, quota ledger, worker queue or credential cache is introduced.
+
+
+### P5 implementation checkpoint — November 7
+
+[P5 source and account evidence](../reports/provider-plan-integration-20261107.md)
+records the qualified gateway/Attempt policy and BytePlus projection changes.
+P5.T1 is recovered. P5.T2 has the executable gateway request guard, policy-bound
+Attempt route, correct null-cap metadata and account-scoped BytePlus observations;
+the native broker/ledger join and actual paid preference selection remain open.
+P5.T3 remains held on current provider-account controls and existing native
+enrollment/qualification. P5.T4 is not yet proven. The user journey remains open
+until an admitted real worker completes and its result is consumed.
