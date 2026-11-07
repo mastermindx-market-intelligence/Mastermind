@@ -142,3 +142,26 @@ The test verifies exact present-but-inert aliases, unchanged enabled/autonomous
 flags for every provider, and a separate legacy absent-catalog case. No production
 model/routing behavior, credential, admission or capacity policy changed.
 The complete affected `hermes_models` suite passed **23 tests** locally.
+
+
+## Original queue conflict reconciliation
+
+The original native queue entry was applied once, then reported UNMERGEABLE
+against its three-PR predecessor base `e41fa100251b692567751936bdc7243be8aa15db`.
+That base is a queue composition, **not a protected merge receipt**; protected
+master remained `5f8c13da926011fb5fdc8cea21287b532ac968db`.
+
+A real `git merge-tree` analysis isolated one content conflict:
+`integrations/hermes_models/tests/test_contract.py`. PR #2179's published
+head `9eec2b2c9f4a0c25ae6a2b127abcb401da9336ad` carries test blob
+`af180a1b66febba5531ad89a21a65cdcada8c953`, while our first dependency reuse
+carried the other existing Hermes variant. This carrier now consumes #2179's
+exact **already-published** test postimage so it can compose with that predecessor.
+Its 23-test package passes, including explicit absent/present/eligible fixture
+cases that still grant no authority.
+
+This does not publish or consume #2179's separate unpublished c744ef repair,
+change its realm pin, retry its refused publication, or alter its queue effect.
+The original #2196 branch, PR and operation remain the delivery carrier.
+The unchanged native routing implementation retains its earlier qualification;
+the new exact PR head still requires its own hosted checks and queue readback.
