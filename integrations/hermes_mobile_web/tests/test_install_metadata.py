@@ -6,7 +6,6 @@ No production home, credential, provider or gateway is used.
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 import shutil
 import struct
@@ -79,6 +78,7 @@ def test_static_router_uses_the_native_proxy_prefix_without_accepting_a_foreign_
         bad = client.get(PREFIX + "/metadata", headers={"X-Forwarded-Prefix": "/x?next=elsewhere"})
         assert bad.status_code == 400
         assert client.get(PREFIX + "/icon-1024.png").status_code == 404
+        assert client.post(PREFIX + "/metadata", json={"message": "must not send"}).status_code == 405
         manifest = client.get(PREFIX + "/manifest.webmanifest")
         assert manifest.headers["content-type"].startswith("application/manifest+json")
 
@@ -140,6 +140,8 @@ def test_metadata_adds_no_chat_mutation_or_arbitrary_file_route(native_client):
     client, server, _, _ = native_client
     client.headers[server._SESSION_HEADER_NAME] = server._SESSION_TOKEN
     assert client.get(PREFIX + "/metadata").status_code == 200
-    assert client.post(PREFIX + "/metadata", json={"message": "must not send"}).status_code == 405
+    # Hermes's namespace fallback intentionally makes an unsupported method 404;
+    # the direct static router above independently proves it has no POST handler.
+    assert client.post(PREFIX + "/metadata", json={"message": "must not send"}).status_code == 404
     assert client.get(PREFIX + "/secrets.txt").status_code == 404
     assert client.get(PREFIX + "/icon-0.png").status_code == 404
