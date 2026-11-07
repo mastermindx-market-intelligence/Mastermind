@@ -654,8 +654,8 @@ REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuat
 
 # Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
 # These are not OS identities; full-source drift exposes every token again.
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'f6401f32f9dbff8af0f5f235bd0d21bde03d060a0c9e8943ca16dd3c048e676b', 'sites': ((95, 97, 100, 'int', '512'),)}
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'f2a1bb24330f5afc85c585b4746acc81b218a9e7cc4e675e9ec856cb0955b281', 'sites': ((96, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': 'e5e379e7e4c985d36452fc82c8ad94ecaa7146ebf4aacc6ae0cd08aea504b336', 'sites': ((51, 64, 67, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
 

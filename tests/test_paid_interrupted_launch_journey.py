@@ -38,7 +38,8 @@ EXTRA_PINS={
  'mission.ts':'07e7ed5815788ee839aa2becdbd806443923f2249172de7997cae3770deb1c44',
  'workspace-contract.ts':'dece354a0c3744af41cf36e435cd8edee1f2247a0f7b07cef1974cc47d2990d5',
  'project-discovery.ts':'a4d539f729a9918585499c4c23fc169ed13439f102bf6554d5a2bcc284788742',
- 'knowledge/library/project-data-observation.ts':'f6401f32f9dbff8af0f5f235bd0d21bde03d060a0c9e8943ca16dd3c048e676b',
+ 'knowledge/library/project-data-observation.ts':'f2a1bb24330f5afc85c585b4746acc81b218a9e7cc4e675e9ec856cb0955b281',
+ 'knowledge/library/project-discovery-correction.ts':'6f02f16c2a5e3f07597e478cf5fd7ce62cb2289dbdbe25d750b67577191d79e0',
 }
 
 
@@ -58,7 +59,10 @@ for(const [name,file,replacements] of [
  ['project-discovery','project-discovery.ts',[
    ['./orchestration/operation-key','./operation-key.mjs'],
    ['./knowledge/library/project-data-observation','./project-data-observation.mjs']]],
- ['project-data-observation','knowledge/library/project-data-observation.ts',[]]]){
+ ['project-data-observation','knowledge/library/project-data-observation.ts',[
+   ['./project-discovery-correction','./project-discovery-correction.mjs']]],
+ ['project-discovery-correction','knowledge/library/project-discovery-correction.ts',[
+   ['../../orchestration/operation-key','./operation-key.mjs']]]]){
  let code=transformSource(file,fs.readFileSync(path.join(i.source,file),'utf8'));
  for(const [oldPath,newPath] of replacements){
   const quoted=[JSON.stringify(oldPath),"'"+oldPath+"'"].filter(value=>code.includes(value));
