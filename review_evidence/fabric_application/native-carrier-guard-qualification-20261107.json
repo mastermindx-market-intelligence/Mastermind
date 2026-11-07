@@ -1,0 +1,31 @@
+{
+  "effects": "source_only",
+  "head": "b4950c63cefbfb597cc1a3225d4cdef079f1a7d0",
+  "patch_sha256": "e5f984d772bbccaedbb2df39b0789a2da66b20d13adeb64a82b5402f8cb43640",
+  "posts": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": {
+      "git_blob": "ffa992ca025fea63262c78046c12b3594867331a",
+      "sha256": "7b2cb05a41af4d9a3aa7f67492dd9719af44dd82664b10a9609bbea2eb53668b"
+    },
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": {
+      "git_blob": "a49faad7934c39c3248f945c02669ee16a92b6cb",
+      "sha256": "c08568dca621dfaced83fc426b13e0766b9e0be0fae911ae5f8d65248c14c740"
+    }
+  },
+  "protected_source_composition": "pending_788cafa84feb8526cb8ad0c27cd460e793a0cdb6",
+  "qualification": {
+    "counts": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 174
+    },
+    "rc": 0,
+    "seconds": 3.545,
+    "sha256": "f80d9994ee9a886ec444dcc94cf9c23b88102e843d17b575f8c00549b8b3ea5a",
+    "tail": "........................................................................ [ 41%]\n........................................................................ [ 82%]\n..............................                                           [100%]\n"
+  },
+  "runtime_changed": false,
+  "schema": "mastermind.native_guard_return_composition.v1",
+  "source_return": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706688962"
+}
