@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import shutil
@@ -117,6 +118,9 @@ def install(
     release = state_dir / "releases" / release_id
     release.mkdir(mode=0o700)
     previous = os.readlink(state_dir / "current") if (state_dir / "current").is_symlink() else None
+    source_lifetime = ExitStack()
+    derivation = None
+    derivation_check = None
     try:
         if native is not None:
             vendor = Path(native["vendor_root"])
@@ -124,11 +128,14 @@ def install(
             git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
             git_env.update(native_git_environment(vendor))
             assert_checkout_sha(vendor, native_environment=git_env)
-            clean = subprocess.run(["git", "-C", str(vendor), "status", "--porcelain=v1",
-                                    "--untracked-files=all"], env=git_env, capture_output=True,
-                                   check=False, timeout=30)
-            if clean.returncode or clean.stdout:
-                raise RuntimeRefusal("NATIVE_VENDOR_CHECKOUT_DIRTY")
+            if "vendor_derivation" in native:
+                derivation, derivation_check = _qualify_native_derivation(native, profile, source_lifetime)
+            else:
+                clean = subprocess.run(["git", "-C", str(vendor), "status", "--porcelain=v1",
+                                        "--untracked-files=all"], env=git_env, capture_output=True,
+                                       check=False, timeout=30)
+                if clean.returncode or clean.stdout:
+                    raise RuntimeRefusal("NATIVE_VENDOR_CHECKOUT_DIRTY")
             os.symlink(vendor, release / "upstream")
             upstream_attested = True
         elif fetch:
@@ -139,7 +146,9 @@ def install(
             _copy_upstream(upstream_source, release / "upstream")
             upstream_attested = False
         _write_release(profile, release, bin_path, upstream_attested, hermes_config_renderer,
-                       native_installation=native)
+                       native_installation=native, native_derivation=derivation)
+        if derivation_check is not None:
+            derivation_check()
         _switch_current(state_dir, release_id)
         unit = _install_unit(profile, unit_dir, python_executable or sys.executable)
         _write_manifest(profile, unit_dir, unit)
@@ -150,6 +159,8 @@ def install(
         if previous is None and releases.is_dir() and not any(releases.iterdir()):
             shutil.rmtree(state_dir, ignore_errors=True)
         raise
+    finally:
+        source_lifetime.close()
     return {
         "schema": INSTALL_SCHEMA,
         "status": "INSTALLED",
@@ -161,6 +172,27 @@ def install(
         "upstream_attested": upstream_attested,
         "secrets_recorded": False,
     }
+
+
+def _qualify_native_derivation(native: dict, profile: RuntimeProfile, lifetime: ExitStack):
+    """The existing held release/inventory, not a generic dirty-checkout escape."""
+    from ops.executive_os.release_manifest import _HeldReleaseSources, _linux_source_acl
+    from ops.executive_os.native_gateway_sources import NativeSourceClosure, verify_vendor_derivation
+    owner = _HeldReleaseSources(repo_root())
+    lifetime.callback(owner.close)
+    installation = owner.hermes_runtime_input()
+    selected = [row for row in (installation or {}).get("roles", [])
+                if row["role"] == profile.role and row["state_dir"] == str(profile.state_dir)]
+    if len(selected) != 1 or selected[0].get("native_gateway") != native:
+        raise RuntimeRefusal("NATIVE_DERIVATION_RECIPE_MISMATCH")
+    closure = NativeSourceClosure(owner, native, _linux_source_acl)
+    lifetime.callback(closure.close)
+    receipt = verify_vendor_derivation(owner, native, _linux_source_acl)
+    def check():
+        closure.check()
+        owner.check()
+    check()
+    return receipt, check
 
 
 def rollback(state_dir: Path) -> dict:
@@ -176,6 +208,8 @@ def rollback(state_dir: Path) -> dict:
     previous = str(int(current) - 1)
     if not (state_dir / "releases" / previous).is_dir():
         raise RuntimeRefusal("ROLLBACK_UNAVAILABLE")
+    _qualify_native_rollback(state_dir / "releases" / current,
+                             state_dir / "releases" / previous)
     _switch_current(state_dir, previous)
     manifest_path = state_dir / "install-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -187,6 +221,20 @@ def rollback(state_dir: Path) -> dict:
         "release": previous,
         "secrets_recorded": False,
     }
+
+
+def _qualify_native_rollback(current: Path, previous: Path) -> None:
+    """A role symlink cannot restore a different held release/unit recipe."""
+    current_receipt = json.loads((current / "install-receipt.json").read_text(encoding="utf-8"))
+    previous_receipt = json.loads((previous / "install-receipt.json").read_text(encoding="utf-8"))
+    if "native_gateway" not in current_receipt and "native_gateway" not in previous_receipt:
+        return
+    fields = ("native_gateway", "native_vendor_derivation", "native_launcher_sha256",
+              "native_adapter_sha256", "profile_sha256")
+    if (any(current_receipt.get(key) != previous_receipt.get(key) for key in fields)
+            or (current / "bin/hermes").resolve(strict=True)
+               != (previous / "bin/hermes").resolve(strict=True)):
+        raise RuntimeRefusal("NATIVE_ROLLBACK_REQUIRES_MATCHING_RELEASE_RECIPE")
 
 
 def uninstall(*, state_dir: Path, systemd_user_dir: Path) -> dict:
@@ -274,6 +322,7 @@ def _write_release(
     upstream_attested: bool,
     hermes_config_renderer: Callable[[RuntimeProfile], str] | None = None,
     *, native_installation: dict | None = None,
+    native_derivation: dict | None = None,
 ) -> None:
     home = release / "hermes-home"
     role_dir = home / "profiles" / profile.role
@@ -318,10 +367,14 @@ def _write_release(
         "secrets_recorded": False,
     }
     if native_installation is not None:
+        if ("vendor_derivation" in native_installation) != (native_derivation is not None):
+            raise RuntimeRefusal("NATIVE_DERIVATION_PROOF_REQUIRED")
         receipt.update(native_gateway=native_installation,
                        native_launcher_sha256=hashlib_sha256(bin_path.read_bytes()),
                        native_adapter_sha256=hashlib_sha256(
                            (repo_root() / "integrations/hermes_runtime/native_gateway_entry.py").read_bytes()))
+        if native_derivation is not None:
+            receipt["native_vendor_derivation"] = native_derivation
         if plugin_digest is not None:
             # Source package equality only. The held release capability,
             # never role-home ownership, authenticates it before import.
