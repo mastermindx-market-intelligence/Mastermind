@@ -1,5 +1,6 @@
 """Fixed C3 selection and real installed helper closure in disposable owners."""
 import contextlib
+from functools import partial
 import hashlib
 import importlib.util
 import json
@@ -13,6 +14,7 @@ import tempfile
 import time
 from types import SimpleNamespace as S
 import unittest
+import venv
 from unittest import mock
 
 import control_bundle_closure_test as closure
@@ -669,6 +671,17 @@ class ComposedPreservingMigrationTests(unittest.TestCase):
             self.fixture.setUp()
         self.addCleanup(self.cleanup_fixture)
         self.fixture._install();self.home=self.fixture.home
+        # The sealed real helper requires a private regular interpreter. Hosted
+        # tool-cache permissions/hard links are environment properties, not the
+        # subject of this migration fixture. Build a disposable copy through
+        # stdlib venv; do not chmod the host interpreter or relax its guard.
+        runtime = self.home / "fixture-python"
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
+        interpreter = (runtime / "bin/python").resolve(strict=True)
+        interpreter.chmod(0o700)
+        self.assertEqual(interpreter.stat().st_nlink, 1)
+        self.assertNotEqual(interpreter, Path(sys.executable).resolve())
+        self.fixture._child = partial(self.fixture._child, interpreter=interpreter)
         self.marker=self.home/'fixture-remote-reads.jsonl'
         rollout=closure.HERE.parent.parent/'ops/native_fabric/quota_continuity/rollout'
         sys.path.insert(0,str(rollout));self.addCleanup(lambda:sys.path.remove(str(rollout)))
@@ -851,7 +864,28 @@ for (const method of ['spawn', 'spawnSync', 'execFile', 'execFileSync']) {
   };
 }
 syncBuiltinESMExports();
-import { readFileSync } from 'node:fs';
+import { readFileSync, lstatSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const positiveControl = await new Promise((resolve, reject) => {
+  const child = cp.spawn(process.execPath, ['-e', 'process.stdout.write("fixture-spawn-control")'],
+    { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+  child.once('error', reject);
+  child.once('close', resolve);
+});
+if (positiveControl !== 0 || helperDiagnostics.length !== 1 ||
+    helperDiagnostics[0].method !== 'spawn' ||
+    helperDiagnostics[0].stdout !== 'fixture-spawn-control') {
+  throw new Error('synthetic helper spawn diagnostic positive control failed');
+}
+function pinnedFileDiagnostic(filename, expected, executable) {
+  try {
+    const stat = lstatSync(filename);
+    return { filename, regular: stat.isFile(), symbolicLink: stat.isSymbolicLink(),
+      links: stat.nlink, mode: (stat.mode & 0o7777).toString(8), owner: stat.uid,
+      currentOwner: process.getuid(), executableRequired: executable,
+      digestMatches: createHash('sha256').update(readFileSync(filename)).digest('hex') === expected };
+  } catch (error) { return { filename, error: error.code ?? error.name }; }
+}
 const modulePath = process.argv[2];
 const descriptorPath = process.argv[3];
 const { createOriginalDelivery } = await import(modulePath);
@@ -867,7 +901,12 @@ const reconcile = text(await owner.call('fabric_original_collection_reconcile',
   { run_id: runId, predecessor_sha256: configuration.predecessor.receipt_sha256 }, principal));
 const parsed = JSON.parse(reconcile);
 if (parsed.state !== 'COMPLETE') {
-  process.stderr.write('MMX_SYNTHETIC_PREFLIGHT_DIAGNOSTICS ' + JSON.stringify(helperDiagnostics) + '\n');
+  process.stderr.write('MMX_SYNTHETIC_PREFLIGHT_DIAGNOSTICS ' + JSON.stringify({
+    calls: helperDiagnostics, files: [
+      pinnedFileDiagnostic(configuration.pythonPath, configuration.pythonSha256, true),
+      pinnedFileDiagnostic(configuration.controlPath, configuration.controlSha256, false),
+    ], node: process.version,
+  }) + '\n');
   throw new Error('composed reconciliation failed: ' + reconcile);
 }
 const resultText = text(await owner.call('fabric_original_collection_result',

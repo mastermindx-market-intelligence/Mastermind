@@ -133,3 +133,32 @@ The original accepted cohort return was collected without rerun and its existing
 Next in this same assignment: consume the documentation-only Hermes `c821b2df717022e3f3b6abcebeabeb2eadeb35a6` successor; compose exact H2 `69ead1bdc1b7f6e1b62ef186d955d07cbd718dce`, H3 `ef95049fa2e1f8c981497c8a21b643fcbe59f25b` and publisher `b5d7ece3acac6569d60b428e63af535e81ddd417` deltas; close native generation and installer/preimage/rollback evidence; diagnose the Linux preflight predicate. H2 percentage views remain insufficient for H3 integer-meter admission. Publish/claim atomicity and retained liabilities remain required source joins. Preserve no-overage, workload and physical-account qualification for the first legitimate primary/tool vertical.
 
 No runtime install/select, APPLICATION enrollment, provider call, protected merge, formal approval or live acceptance is claimed. MISSION_COMPLETE=false. Continue useful source work while the original custody and release lanes remain blocked.
+
+### H6 complete H2 artifact and fixture qualification
+
+Consumed the exact H2 69ead1bd source. Its 43 account, 16 reset-journey and 7 Grok
+component tests passed. Added one optional four-member successor to the existing
+native builder and one shared source resolver used by the existing installer.
+The complete 107/109/112 layouts were built and both APPLICATION variants passed
+the actual installer component validation. The historical default manifest and
+inventory remain byte-identical. The six-module native suite exited zero with
+292 testcase records and no failures/errors/skips (raw JUnit total counter301 is
+preserved separately); all sixteen reset journeys exercised actual emitted code.
+
+The original migration fixture and complete39-case original-delivery module pass
+on Linux. Its test-only interpreter now comes from a disposable stdlib venv copy,
+with a positive spawn diagnostic control and file metadata on refusal; production
+preflight remains unchanged. The combined M2 control/original-delivery suite passed
+74 cases. Hosted c821 CI42376517849 still records the original preflight failure;
+new exact-head hosted qualification is required before declaring it repaired.
+
+All16 H3 declared preimages match this source, and its exact patch reconstructed
+all3 declared outputs. H3 source composition, stale-envelope rejection, physical
+scope/quantity/enforcement joins and common publication fencing remain the next
+source slice. They are not enabled by the H2 artifact flag. The original Macro
+Metabolism contribution and authenticated product acceptance rows also remain.
+
+The reviewable component/preimage/rollback/enrollment sequence is in
+`review_evidence/fabric_application/h6-recovery-20261107-c2/installation-map.md`.
+Source custody and live effects retain the earlier holds. This milestone is a
+qualified source contribution; continue the next safe phase in this assignment.

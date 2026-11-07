@@ -1,0 +1,70 @@
+{
+  "observed_at": "2026-11-07T13:52:52.746225+00:00",
+  "results": [
+    {
+      "name": "incumbent",
+      "output": "/private/tmp/h6-h2-complete-stage-mo4dnxas/incumbent",
+      "flags": [],
+      "build": {
+        "native_files": 107,
+        "total_bytes": 3233076,
+        "manifest_sha256": "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459",
+        "source_inventory_sha256": "8ea3e85095428833c78ce08309ca1a2db748a92e69f3023f03679df54298bc5f"
+      },
+      "passed": true
+    },
+    {
+      "name": "h2-base",
+      "output": "/private/tmp/h6-h2-complete-stage-mo4dnxas/h2-base",
+      "flags": [
+        "--include-quota-reset-recovery"
+      ],
+      "build": {
+        "native_files": 107,
+        "total_bytes": 3280694,
+        "manifest_sha256": "d07566feab8355ecaa7f1a1e189a26de8c19242b0365c00121a76f88f773aa55",
+        "source_inventory_sha256": "d4d0a2001ad41a4f340799cabe41277578ef611d97e2a02405f5c0c86fa6e7e3"
+      },
+      "passed": true
+    },
+    {
+      "name": "h2-application",
+      "output": "/private/tmp/h6-h2-complete-stage-mo4dnxas/h2-application",
+      "flags": [
+        "--include-quota-reset-recovery",
+        "--include-go-application"
+      ],
+      "build": {
+        "native_files": 109,
+        "total_bytes": 3522906,
+        "manifest_sha256": "41b5fc84b09d6aa70c687f904d8cf4cb6472f31a7f59d61e1321c5d4b18627c6",
+        "source_inventory_sha256": "a05fed30fbb95a2b723b9eba61ac08ff89ec11a0933f4c11cd8f340feecdfb39"
+      },
+      "passed": true,
+      "installer_component": [
+        "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+        "41b5fc84b09d6aa70c687f904d8cf4cb6472f31a7f59d61e1321c5d4b18627c6"
+      ]
+    },
+    {
+      "name": "h2-http",
+      "output": "/private/tmp/h6-h2-complete-stage-mo4dnxas/h2-http",
+      "flags": [
+        "--include-quota-reset-recovery",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "build": {
+        "native_files": 112,
+        "total_bytes": 3606081,
+        "manifest_sha256": "b031deaa7a4c18769ffcee528291c8479bb5ef2ccf21ff260daad7c57566c0d7",
+        "source_inventory_sha256": "1ad8d04cd72eb7ba4abbd896f6b7d56eeb100fca8e1510612e71a5812fafa022"
+      },
+      "passed": true,
+      "installer_component": [
+        "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+        "b031deaa7a4c18769ffcee528291c8479bb5ef2ccf21ff260daad7c57566c0d7"
+      ]
+    }
+  ]
+}
