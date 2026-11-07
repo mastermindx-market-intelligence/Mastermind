@@ -740,7 +740,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "bc444a613891eb84a484f12a253b371d91dadfabeda71bfe9ef0959d2bf8a0ed",
+    "sha256": "71e8349094649945a018ce10f236e22e9e5a52eaba57258e3dd9b45eea20d20f",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
