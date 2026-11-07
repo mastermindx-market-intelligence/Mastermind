@@ -15,6 +15,7 @@ from typing import Awaitable, Callable
 from integrations.secretary_team_access.client import SecretaryAccessClient
 from integrations.secretary_team_access.mission import SUMMARY_SCHEMA
 from .charters import charter_for
+from .organization import organization_context
 from .budget import evaluate_adviser_budget, _result as budget_result
 
 SCHEMA = 'mastermind.hermes_leadership_brief.v1'
@@ -128,6 +129,7 @@ class LeadershipReader:
                     'result_boundary':'Result availability is not parent consumption or product acceptance.',
                     'effect_boundary':'Reconcile original effects through Executive before any continuation.',
                 })
+            value['organization'] = organization_context(self._key, summary)
             if self._key == 'grok_adviser':
                 budget = budget_result('meter_unbound')
                 if self._budget_reader is not None:
