@@ -308,3 +308,22 @@ H5 physical join, worker AUTO/catalog/PyYAML lane and original J reconciliation.
 No current qualified one-account APPLICATION envelope is present. Complete
 source/CI/install receipts and remaining acceptance return to2175 and983.
 The Agent OS plan-link gap remains explicit. MISSION_COMPLETE=false.
+
+
+### H6 narrow H3 outer-invalidation qualification — 2026-11-07
+
+Reused only the existing three rejection guards from Macro71cdb94 in the
+qualification-only joined H3 quota reader. Four cases passed on the original
+fixture and actual Broker/SQLite owner: pending refresh, refresh failure and
+terminal refusal now reject both a new claim and APPLICATION turn, retain the
+original lease unchanged and create no turn/request; the clean synthetic
+observation preserves prior behavior. The exact forward delta, pre/postimages,
+independent apply/reverse and no-live-effects proof are retained.
+
+This closes three baseline rejection defects only in the unselectable artifact.
+Changed outer binding, whole-operation consumption, common publication/claim
+serialization, real quantities and liability coverage remain open. The broader
+H6 patch's different lock order is not imported. Current H2 native source and
+all selectable manifests are unchanged. The Phase B qualified account/service
+envelope remains the next product-critical lane; H3 activation is not added as
+a blanket prerequisite.

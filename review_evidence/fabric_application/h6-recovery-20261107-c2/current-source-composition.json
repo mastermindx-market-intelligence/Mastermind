@@ -51,6 +51,17 @@
   },
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
   "h2_runtime_sources_changed": false,
+  "h3_outer_invalidation": {
+    "cases_passed": 4,
+    "guards": [
+      "refresh_pending",
+      "refresh_error",
+      "terminal_refusal"
+    ],
+    "qualification": "h3-outer-invalidation-qualification.json",
+    "selectable_source_changed": false,
+    "strict_scope_qualified": false
+  },
   "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed",
   "h3_patch_sha256": "5d3ad02f01e6c68184e66a7077ee67c14c7f8ff1213920a899d967d92b54fbf2",
   "h3_strict_scope_qualified": false,
