@@ -134,7 +134,7 @@ contract proves that omitted work is irrelevant.
 | Macro #10764 manifest-scoped freshness / #10745 replay environment | Existing source lanes with inherited-red/freshness dependencies | #10755 board-cap repair is already merged; preserve #10674 hold, then #10745, then existing-owner refresh of #10735 |
 | Macro #10656 authored/refresh admission and #10674 continuation | Existing control-plane work; #10674 original operation26751 uncertain | Preserve uncertain effect and live source; this plan does not replay or replace it |
 | Terminal #1320 native browser dedup / #1324 scoped QA | Merged | Preserve current integrated contracts |
-| Terminal #1297 trusted docs scope | Intake 6a7137dc; now integrated/published as 10230a0b on the same PR | Consume natural exact-head CI, then prove natural docs PR latency; release-rule read is currently denied |
+| Terminal #1297 trusted docs scope | Intake 6a7137dc; now integrated/published as 689757a5 on the same PR | Consume natural exact-head CI, then prove natural docs PR latency; release-rule read is currently denied |
 | Terminal #1306 optional isolated e2e lane | Open a709b18c3bd25e3aaa264fe3236dbda3155733c9 | Qualify trust/isolation and complete matrix before activation; no implicit host install |
 | Terminal #1223 weighted 7/5/5 + serial browser topology, trace and timing work | Draft e34862900a09bfbcf124397ffe0db02a4f509a49; unpublished candidate and uncertain create-commit | Reconcile original effect; preserve already-authored on-first-retry tracing, explicit zero-retry traces, per-attempt JSON timings and one-time Node unit discovery; do not reimplement or replay |
 
@@ -161,10 +161,12 @@ dependent shard cannot be treated as parallel.
 
 ### Amdahl and test granularity
 
-The historical 788.9-second capacity-artifact module establishes a 13m09s floor
-if it remains one unchanged unit under xdist loadfile. The [xdist distribution
+The historical 788.9-second capacity-artifact module imposed a 13m09s constraint
+while it remained one unchanged unit under xdist loadfile. The [xdist distribution
 contract](https://pytest-xdist.readthedocs.io/en/stable/distribution.html) keeps all
-tests in one file on one worker. Four workers per job cannot divide that module.
+tests in one file on one worker. The current execution slice has physically split
+that module into twelve coherent files while preserving all 466 cases. This removes
+that particular indivisible unit; it does not establish a five-minute full run.
 
 Macro's old 1630-second FIF unit divided perfectly into three remains approximately
 9m03s per sibling before setup. The observed 69-minute pack also shows that
@@ -183,7 +185,7 @@ through its current owner. Do not create another reservation service.
 
 ## Repository implementation design
 
-### Mastermind: finish xdist, then remove the remaining long units
+### Mastermind: remove repeated collection, long units and serial qualification
 
 Existing source owners are `scripts/ci_pr_scope.py`,
 `scripts/ci_parallel_shard.py`, `scripts/ci_pytest.py`,
@@ -191,28 +193,39 @@ Existing source owners are `scripts/ci_pr_scope.py`,
 and `.github/workflows/ci.yml`. Keep the required `test` aggregate and the
 accepted #2129 trusted merge-group scope.
 
-1. Integrate #2065 against the actual current source in its original workspace.
-   Preserve four workers, no worker restart, deterministic collection, expected
-   test completion and all closure/security repairs. Qualify the exact integrated
-   head; the earlier green head does not qualify a new merge.
-2. Profile `tests/test_capacity_host_artifacts.py` by setup/call/teardown and
-   subprocess/build work. Reuse immutable *fixture inputs* only where each test
-   still receives private mutable state. Never memoize an admission decision,
-   security assertion, ownership result or tamper outcome. If work is independent,
-   split coherent test families and prove collection conservation.
-3. Decompose shard 0's independent compatibility/custody preflights from its pytest
-   execution where their dependencies allow parallel execution. The existing
-   aggregate must require every resulting job. Account for shared build inputs
-   and service resources before allowing overlap; no success-on-skip shortcut.
-4. Recalibrate after fixture changes and after xdist. Duration weights measured
-   serially on one runner are not valid automatically for four concurrent workers.
-   Optimize the maximum job path, not equal numbers of files.
+1. Finish qualification in #2065's original source carrier. The nine independent
+   source qualifications now run beside the six pytest jobs. Capacity tests are
+   physically partitioned; the native custody pytest bundle uses four processes.
+   Preserve current source, security checks and explicit release holds. The latest
+   measured full run is red for a diagnosed test synchronization race, not accepted.
+2. Qualify **four independent prepartitioned pytest processes inside each existing
+   outer job**, using `ci_pytest.run_shards`. The current xdist workers each collect
+   the same outer shard before distributing its tests. Partition whole modules
+   before interpreter startup so each process collects its own subset. Keep six
+   outer jobs and four actual child interpreters: do not nest four xdist workers
+   inside each of four processes. Use an independently domain-separated inner
+   partition, exact cover checks, private child diagnostic directories and complete
+   terminal receipts. The detailed contract and failure cases are below.
+3. Treat source qualification as a separate measured critical path. The published
+   change removes it from pytest shard 0, but its own serial chain is still longer
+   than five minutes. After the collection experiment, qualify independent native
+   Actions qualification jobs only where their source/fixture inputs are separable.
+   Deliberately advance the aggregate and exact postmerge job-set contract together.
+4. Use the now-complete runtime timing inventory to select remaining expensive
+   modules and setup/import work. Split coherent affinity groups, shorten redundant
+   legitimate fixture work, or qualify faster capacity. A fixture-template cache
+   was measured and rejected: it produced no whole-module speedup. Do not resurrect
+   it, cache admission outcomes, or infer production Git-batching safety from it.
+5. Recalibrate after collection and granularity changes. Compare fixed-budget native
+   candidates before increasing the matrix. Include contention, queueing, cold
+   setup and first-attempt success. Only then choose a measured combination of work
+   reduction and additional qualified capacity that can satisfy the full target.
 
-The completed audit separates a fixture-only candidate from production Git batching.
-The next source slice caches initial test-repository construction only, gives each
-test a private full Git copy, and must qualify independently of #2065. Production
-batching remains deferred; the audit's 138 common failures do not establish full
-security parity. See the adjudication and exact implementation child below.
+The accepted architecture decision is a staged experiment, not a forecast that
+prepartitioning alone will reach five minutes. The prior native run reports
+10,383.657 seconds of test service. At 24 equivalent processes and unchanged
+service costs, perfect balancing alone still takes about 433 seconds before
+collection/setup. Both wasted work and the remaining compute budget must change.
 
 ### Macro: smaller semantic units and less unnecessary reproof
 
@@ -514,27 +527,37 @@ merge, runner activation or product acceptance is claimed.
 
 ## Current execution checkpoint — 2026-11-07 UTC
 
-### Published source and native evidence
+### Published source, proof and release state
 
-| Carrier | Exact current source | Observed outcome and remaining gate |
+| Carrier | Exact source or evidence | Observed outcome and remaining gate |
 | --- | --- | --- |
-| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | 91d1d8dd76f8a7d0d42cd2f479b4bb6832ebee96; tree 50db06f262c5e818a8348810766a09f40bcd253a; protected parent 5f8c13da926011fb5fdc8cea21287b532ac968db | Parallel qualification and strict ten-job proof reader published on the original branch. Required [run 42348719795](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42348719795) and shadow run 42348719763 require consumption. No latest-head green, queue or merge claim. |
-| [Terminal #1297](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1297) | 689757a5fecab76bac601efbef9178f8115ae01e | Full native [run 42344305342](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42344305342) **SUCCESS**, including every browser shard and required Terminal typecheck + tests. Started 05:49:00, completed 06:53:13 UTC: approximately 64m13s end to end. Release-rule verification remains blocked by the GitHub integration's explicit 403 on Terminal branch protection. |
-| [Macro #10825](https://github.com/mastermindx-market-intelligence/macro/pull/10825) | d49837ea333bfef114466139d410ee217ed1c999 | Authored pointer added to the existing W-ACCELERATION-20261104 record; Agent OS validation exited 0 and exact GitHub readback matched. Ready source PR, not a new workstream or runtime owner. |
-| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier | Earlier doc head 3db9d30 ran all six shards; five passed and shard 0 correctly refused the same protected-base realm pin mismatch. Source #2065 contains the qualified compatibility repair. The architecture still owes current required CI and normal release. |
+| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Current head **7a49a75341fbccf7cf3dc4898156718e21fcf38c**; capacity/qualification head `1b02680617008bd617a5d9be6da09a80b5a54cbf`; integrated native checkout `a91c52581a28434312013be584a03c767807df7d` | Original branch retained. Native [run 42353265679](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42353265679) completed **FAILURE** in about 25m30s: source qualification and five shards passed; shard 4 found the original-turn finalization race repaired in the newer source. Final-head [required CI 42355985590](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985590) and [shadow 42355985472](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985472) were observed pending. The 1b shadow was cancelled after superseding source. No queue or merge request issued. |
+| [Terminal #1297](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1297) | `689757a5fecab76bac601efbef9178f8115ae01e`; [run 42344305342](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42344305342) | **SUCCESS** across the full native matrix and required aggregate, approximately **64m13s**. This qualifies its scope composition, not fast CI. The integration's explicit 403 on branch-protection access blocks release-rule verification; no alternate carrier or queue request was used. |
+| [Macro #10825](https://github.com/mastermindx-market-intelligence/macro/pull/10825) | Continuity seed `d49837ea333bfef114466139d410ee217ed1c999`; existing `WS-CI-MERGE-CONTROL-PLANE` | Agent OS validation passed and exact source readback matched. `ci-gate`, all three packs and main authority succeeded; the distinct merge-queue-pilot authority context failed. Macro branch-protection verification also returned an explicit 403. No label, queue, approval or merge was requested. |
+| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier; previous checkpoint `e27af89163dbc1e255122b31501d733f167d5197` | Source-backed master plan, current evidence and staged execution contract. Its native required CI is red; job 128336049875 at the previous checkpoint confirms the same protected-base realm pin mismatch that #2065 repairs. Normal required checks and integration remain owed. |
 
-The protected procedure pin 615146aac6a1b0c0933bc9b815517a2fd285ed4a remains compatible:
-bounded comparison through 5f8c13 found no changes in AGENTS, sol_skills, session
-review, delivery workflow or active-execution law. No new review waiver is invented.
+The protected procedure pin `615146aac6a1b0c0933bc9b815517a2fd285ed4a` remains
+compatible through current protected master `5199647e89166d163392905574097b2cfa16ca5b`.
+The bounded comparison found no change in AGENTS, sol_skills, session review,
+delivery workflow or active-execution law, or the owned CI/capacity/gateway paths.
+The final protected ref was read again and still matched. No ancestry-only merge
+was performed merely to move the source revision.
 
-### Mastermind scheduling slice
+An explicit [Release HOLD on #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065#issuecomment-6704040875)
+requires the gateway successor failure to be diagnosed/repaired and fresh native
+proof. Its author was a read-only observer, not a replacement writer. The assigned
+session retains recovery ownership. Passing that shard in the later run is useful
+evidence, but does not by itself identify the earlier hidden exception or rescind
+the hold. Preserve the hold until legitimately resolved; do not invent an approval.
 
-The nine former matrix-zero qualification steps now run as one **Source qualification**
-job alongside pytest. Every moved step field, command, pinned source, environment
-binding and relative order is unchanged except removal of the matrix-zero predicate.
-The existing source/runtime bootstrap is copied intact. The six retained pytest
-jobs keep their canonical membership, four workers, loadfile placement and zero
-worker restart. Their retained step dictionaries are unchanged.
+### Source scheduling and exact qualification
+
+Nine formerly serial matrix-zero qualifications now run as a separate **Source
+qualification** job alongside six canonical pytest shards. Commands, source pins,
+environment bindings and order were preserved when moved. The later native-custody
+change adds four-process loadfile execution to its exact eleven pytest files.
+Its 375-case unittest prefix, trusted fixture parent, one-controller JUnit result,
+positive test count and zero-failure/error/skip assertion remain unchanged.
 
 ```mermaid
 flowchart TD
@@ -547,61 +570,148 @@ flowchart TD
     G --> M["Existing merge queue"]
 ```
 
-For full scope, both heavy results must be successful and fast checks skipped.
-For verified fast/smoke scope, focused checks must succeed and both heavy results
-must be skipped. Protected pushes and deliberate dispatches always require full
-qualification. Failed, missing, cancelled, unknown or unexpectedly skipped
-qualification remains red. The new job has source-read permission, a 30-minute cap,
-and depends only on the incumbent scope decision. Actions-read permission remains
-confined to pytest jobs; their existing 60-minute budget is unchanged.
+Full scope requires both heavy results successful and fast checks skipped.
+Fast/smoke requires successful focused checks and both heavy results skipped.
+Protected push and deliberate dispatch retain full qualification. Missing, failed,
+cancelled, unknown and unexpected skip states remain red. Source qualification
+has contents-read permission and a 30-minute cap; pytest retains its existing
+Actions-read permission and 60-minute cap.
 
-The incumbent reuse reader previously expected seven job records, while the
-trusted-scope workflow already emitted nine. It now requires the actual full
-ten-record shape, including successful source qualification and scope, the exactly
-skipped empty fast job, all six successful shards and the successful required gate.
-Same commit/clean checkout, native queue actor, exact workflow/attempt, freshness,
-unique job/step identities and authenticated API boundaries remain. Executed-job
-timestamps remain ordered; skipped-fast metadata is bounded to the run even when
-GitHub stamps its start after the skip decision. Missing proof still runs pytest.
-Current source qualifications remain mandatory even when pytest can be reused.
-Native merge-group/post-merge acceptance of this optimization is still owed.
+The postmerge reuse reader now verifies the actual **ten-job** full-run shape:
+six shards, source qualification, scope, required gate and the exactly skipped
+empty fast job. It retains exact source/clean checkout, native queue actor,
+workflow/attempt, freshness, unique job/step identity and authenticated API checks.
+Executed timestamps remain ordered; skipped-fast metadata is bounded to the run
+despite GitHub's unusual skipped-job timestamp order. Missing evidence executes
+pytest; source qualification remains mandatory even when pytest can be reused.
+Native merge-group and postmerge acceptance of this optimization are still owed.
 
-Qualification evidence:
+Focused graph/guard evidence: 736 tests passed, two old layout expectations were
+corrected and both passed against the same source. This is 738 qualified cases
+across the full run plus repair, not a single fabricated green invocation. Gate
+tests cover wrong dependency states on PR, merge group, push and dispatch;
+mutations reject omitted/conditional checks, serialized heavy dependencies,
+additional Actions permission and false-success suppression.
 
-- Complete-checkout guard run: 736 passed; two old workflow-layout expectations were
-  corrected and both passed against the same source. This is 738 qualified cases
-  across the full run and focused repair, not a fabricated single green invocation.
-- Real gate-shell tests reject each wrong dependency state across PR, merge group,
-  push and dispatch. New mutations reject serialized heavy dependencies, additional
-  Actions permission, omitted/conditional/false-success native checks and error
-  suppression. Canonical discovery, source selection, H1, cancellation and xdist
-  contracts are retained.
-- Earlier 433105 required run 42340989000 was green. Earlier a4aa976 shadow
-  run 42344275466 is fully green after the CLI metadata repair. Neither earlier
-  receipt qualifies 91d1d8d.
-- The CLI repair changes only eleven parametrized test IDs: the 131073-byte input
-  and assertions remain unchanged. All 99 tests passed locally; Linux E2BIG was
-  reproduced with the old inherited node ID and avoided with the short ID.
+Native source-qualification comparison:
 
-### Protected-base composition repair
+| Measurement | Prior 91d / run 42348719795 | Capacity/qualification 1b / run 42353265679 |
+| --- | ---: | ---: |
+| 375-case native unittest prefix | 14.022s | 14.725s |
+| Same eleven files / 277 native pytest cases | 451.33s, serial | **300.68s**, four-process loadfile |
+| Native application custody step | 466s | **316s** |
+| Whole source-qualification job | 817s | **684s** |
 
-Accepted protected #1824 changed the live provider realm to blob
-a51e2bce8d9bb312107f975d503abd6541bd5000. The translation fixture still required
-eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37. Actual integrated source 081a934b therefore
-correctly failed required run 42344275487; the architecture run 42343812671 refused
-the same mismatch. This was not a floating Macro dependency or a reason to remove
-the exact source assertion.
+Both sets of 277 cases had zero errors, failures and skips. These are two actual
+native observations, not a controlled cohort or a promised fourfold gain. The
+remaining qualification chain includes 151 seconds of private HTTP compatibility,
+48 seconds of closed transport and 45 seconds of Brain composition in the newer
+run, besides source setup. Splitting that chain is a separate qualified change.
 
-The new candidate integrates protected 5f8c13 and deliberately advances that one
-explicit live-realm pin. Frozen native A/B pins and hash checking remain fixed.
-From the exact candidate tree 50db06, the unchanged translation composition ran
-against paired Macro f0375acf4ba076718e7cb420ed28ab61fb0a4f26: **23 tests passed**.
-All 16 commercial-realm tests also passed, zero skips. Eight generic realm tests
-passed; the unchanged installed-Codex-binary test refused this Mac's different
-binary digest. No host binary, provider setting or assertion was changed.
+### Capacity module partition: published and natively consumed
 
-Impact planning must include explicit source-pin consumers as dependency edges;
-Python imports alone do not express these contracts.
+Original module blob `b3341d2768bbc21c229bd25d86261cb9d05c3231` contained 167 test
+functions and 466 parametrized cases. The candidate moves those functions into
+twelve direct children of `tests/`: artifacts, crash replay, failure evidence,
+precommit, publication, recovery, repository, retained views, rollback, source
+admission, transitions and transport. Shared helpers stay in the original module.
+
+All 167 function ASTs, decorators and parameter values are identical; all 39 helper
+definitions are unchanged. Named helper imports preserve the external native
+closure consumer. Tests using `__file__` retain the same directory depth; the
+canonical-temp test and the V2 test it calls stay together. Darwin custody fixtures
+are unchanged. There is no fixture cache or production capacity-code modification.
+
+The complete source checkout discovered 2,284 modules with zero exclusions and
+proved exact disjoint six-way membership. The later integrated checkout includes
+additional current-base modules; its native selected inventory is 2,289 modules,
+with 2,283 runtime summaries and six collection-gated modules. Source identity is
+recorded for each measurement rather than treating these corpora as identical.
+
+Paired partial Linux measurements preserve the exact 466-case inventory and outcomes:
+
+| Execution | Wall time | Outcome |
+| --- | ---: | --- |
+| Original module, serial | 163.326s | 416 pass / 14 fail / 36 skip |
+| Twelve modules, serial | 140.703s | Same outcome multiset |
+| Twelve modules, four-process loadfile | **54.000s** | Same outcome multiset |
+
+Failure IDs and messages match after normalizing only the exact source-root prefix.
+Missing historical source/workflow, nonstandard temporary ancestry and supplementary
+groups explain the partial snapshot refusals. These are local comparative results,
+not an all-green hosted qualification or a hosted speed forecast.
+
+Native run 42353265679 completed **all 466 capacity cases** across the twelve files.
+The longest new capacity module reported **219.600 seconds**; the previous native
+single-file unit reported **805.019 seconds**. The new family summed to 1,097.597
+reported seconds versus 805.019 previously, so no reduction in total hosted work is
+claimed. The split removes a large indivisible scheduling unit under variable load.
+All case-start/completion counts match. The entire run remains red for the separate
+follow-up-conversation race; this is evidence for this slice, not full acceptance.
+
+The focused complete-host policy/fanin/diagnostic/guard/closure run had 472 passes
+and 11 native-closure setup refusals caused by the Mac temporary ancestor's group.
+No custody assertion was relaxed. The unchanged native-closure consumer separately
+passed all 15 cases on Linux with a valid owned parent. These are distinct receipts.
+
+### Concrete failures repaired or retained
+
+**Original-turn finalization race.** Shard 4 of run 42353265679 failed strict event
+equality in `test_signed_consumed_parent_second_turn_original_read_and_no_replay`.
+The reply's completion future resolves at `RECORDED`; the [original dispatch](https://github.com/mastermindx-market-intelligence/Mastermind/blob/1b02680617008bd617a5d9be6da09a80b5a54cbf/control_plane/executive_service.py) then
+performs ordinary finalization. Its legitimate `OHF_EPOCH_ABANDONED` and
+`JOB_COMPLETED` events raced the test's snapshot. No new provider turn was observed.
+
+The [fixture repair](https://github.com/mastermindx-market-intelligence/Mastermind/blob/7a49a75341fbccf7cf3dc4898156718e21fcf38c/tests/test_fresh_conversation_turn.py) captures the original child dispatch task immediately after creation
+and awaits it before the duplicate-event snapshot. Exact event-list equality,
+same-result, original artifact export, one provider start, two turns and original
+job/attempt counts are retained. A new controlled case pauses the real finalizer,
+proves the duplicate is strictly read-only while finalization is pending, releases
+the barrier, calls the real finalizer and verifies settled original/turn results.
+Failure cleanup drains that original task before cancellation fallback.
+
+All **13 follow-up cases passed** with four-process loadfile. The final cleanup
+change additionally passed its focused case and a deliberate assertion-failure
+probe: the original task completed without cancellation or dispatch error, with
+exactly one abandonment and one completion event before teardown. The injected
+case correctly failed; it is a failure-path qualification, not a claimed green test.
+Production lifecycle and response behavior are unchanged.
+
+**Gateway successor publication.** Prior 91d required run failed
+`test_v2_receipt_can_be_next_exact_predecessor_without_rewriting_history`; its shadow
+run 42348719763 succeeded. The same gateway module and production owner were
+unchanged since the previous green candidate. The production wrapper correctly
+hides post-marker errors behind `TransactionEffectUnknown`, retaining context.
+
+The candidate adds bounded fixture-only diagnostics that rethrow the identical
+exception: at most eight cause/context nodes, known-source function/line frames,
+closed validated observation notes, cycle protection and a fixed fallback note.
+It does not expose arbitrary exception payloads or modify production refusal.
+Six focused diagnostic checks passed. All 24 existing gateway test function ASTs
+remain unchanged; their parametrized native module's 60 cases passed in run
+42353265679. An earlier Mac diagnostic passed the first two cases, including the
+previous failure, then was deliberately interrupted; it was not a full green suite.
+
+A narrow shared-repository-parent race during initial custody observation is a
+source-supported hypothesis, not the proven earlier cause. The reader's later
+prefix checks already tolerate ordinary child-entry changes. Do not weaken its
+production identity/ACL checks or declare the Release HOLD cleared from a rerun.
+Consume bounded context from any subsequent real failure and reproduce the actual
+mechanism before a fixture-isolation repair is accepted.
+
+**Explicit realm pin.** Accepted protected #1824 changed live realm blob
+`eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37` to
+`a51e2bce8d9bb312107f975d503abd6541bd5000`. The integration fixture's single live
+`REALM_PINS` entry was advanced deliberately; exact Git hash verification and
+historical A/B preimages remain fixed. Current Brain composition passed 23 tests
+against paired Macro `f0375acf4ba076718e7cb420ed28ab61fb0a4f26`; 16 commercial realm
+tests passed. A different installed Codex-binary digest remained a real local
+refusal; no host binary/configuration/assertion was altered. Native qualification
+now passes this composition. Impact planning must model explicit source-pin edges.
+
+The earlier CLI metadata repair changes only eleven parametrized IDs; the
+131,073-byte input and assertions are unchanged. All 99 tests passed locally;
+the old Linux E2BIG condition was reproduced and the shorter ID avoided it.
 
 ### Fixture experiment disposition
 
@@ -646,33 +756,100 @@ using C3 architecture judgment and direct-source self-checks
 (PRINCIPAL_JUDGMENT / CRITICAL_PATH_SHORTCUT / LOWER_TOTAL_OVERHEAD). No second
 worker, source carrier, runtime route or approval identity was introduced.
 
-### Remaining critical path and next actions
+### Full timing inventory and the next architecture constraint
 
-1. Consume #2065's new native runs, repair concrete failures, verify actual overlap
-   and then use the existing head-fenced release path under current rules. Do not
-   equate the new graph or focused tests with a five-minute outcome.
-2. Retained fixed diagnostics from successful canary 42340989000 identify
-   test_capacity_host_artifacts.py at **898.915 reported seconds for 466 cases** in
-   shard 2. Source is integrated checkout 8fbd91d937adc20cdbe2722b2a6a09dfada2c8d6.
-   Both inspected artifacts retain 512 progress records and explicitly truncate;
-   they are not a complete timing inventory. This long module still exceeds the
-   full-suite target under loadfile placement. Qualify smaller independent test
-   units through the existing discovery/coverage owner, or demonstrate safe work
-   reduction; do not create an exclusion list or extrapolate local microtimings.
-3. Terminal #1297 is native green. Its full run remains about 64 minutes; green is
-   not speed acceptance. Recover the existing #1223 source/effect before integrating
-   its weighted topology, Node-discovery correction and per-attempt timing report.
-   Global route warmup remains unjustified. Treat build/auth compatibility and
-   repeated capture cost as separate measured changes. No runner activation or
-   branch-rule fallback follows the 403.
-4. Preserve Macro's original #10674 uncertain effect and #10656 hold. #10755 is
-   already merged with DISPLAY_BOARD_CAP=640. Continue the incumbent #10674 →
-   #10745 → #10735 sequence only when its source/effect evidence permits. Keep
-   overlap among two/four-worker/FIF/capacity proposals under their existing owner.
-5. Continue the architecture and Agent OS source carriers through their normal
-   checks; add the next pointer-plus-delta handoff at an actual continuity boundary.
-   Do not create a parallel memory registry or fabricate a durable execution owner.
-6. Accept the program only from a representative natural cohort by risk class,
-   including cold/warm setup, queue delay, failures, flakes, fallback and cancellation.
-   The proposed five-minute p95, ordinary three-minute and docs 90-second targets
-   remain unproved. All original safety and product journeys remain in scope.
+Canonical-step logs from [run 42348719795](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42348719795)
+at integrated `d31e7ade3d01efab0bb8cc6c50c62c0d6c8a6823` establish:
+
+- **2,276 discovered modules, zero exclusions; 2,270 runtime timing summaries.**
+- Every reported module has equal started and completed case counts.
+- **10,383.656546 seconds** of setup/call/teardown service, excluding startup and collection.
+- Eight supplementary H1 summaries are excluded from canonical workload accounting.
+
+The six gaps are real tests behind module-level import gates: four
+`mastermind_window_reader` browser files gate Playwright (two also JWT),
+`test_acp_tool_observations.py` gates optional ACP, and `test_risk_prior.py` gates
+`brain.risk_prior`, absent at that source. Quiet logs do not identify each failed
+import. They have no runtime execution receipt; their import/capability-check cost
+is included in collection. Do not call all 2,276 modules executed or assign them
+zero collection cost.
+
+| Outer shard | Runtime modules | Reported service | Startup/collection to first case | First case to last module summary | Whole canonical test step |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0 | 402 | 1,393.230s | 196.331s | 438.029s | 638s |
+| 1 | 357 | 1,803.163s | 263.354s | 534.525s | 800s |
+| 2 | 349 | 1,858.675s | 250.181s | 805.743s | 1,059s |
+| 3 | 374 | 1,762.026s | 181.828s | 472.641s | 658s |
+| 4 | 379 | 1,658.507s | 258.462s | 441.831s | 704s |
+| 5 | 409 | 1,908.055s | 272.184s | 493.272s | 770s |
+
+The newer 1b native run still spent approximately **173–430 seconds before its
+first canonical case** depending on shard. Its longest test step was 1,244 seconds;
+`test_trend_persistence_walkforward.py` alone reported 553.047 seconds. Other source
+and runner load differ, so a capacity-module gain cannot be reported as an overall
+pack speedup. Filter logs at the exact canonical command boundary: H1 and the
+canonical step can share a rounded API timestamp and otherwise be double-counted.
+
+At unchanged observed service costs, 10,383.657 / 24 gives a conditional **432.65s**
+perfect-balance execution floor before collection/setup. This is a planning bound,
+not a hardware-independent law: reported elapsed service changes with contention.
+A provisional 300-second budget might allot 30s queue, 30s setup, 30s collection,
+200s selected execution and 10s aggregation. At that 200-second execution budget,
+the old service sum would require about 52 equivalent concurrent processes under
+ideal balancing, or roughly 54% less service work at 24. Neither is already
+qualified. The next experiment keeps capacity fixed so the collection effect can
+be measured before choosing the eventual work-reduction/capacity combination.
+
+### Next implementation: partition before collection, inside existing owners
+
+**Decision:** qualify independent prepartitioned pytest children before expanding
+the Actions matrix. Extend `ci_pytest.run_shards`, the existing guard and fixed
+diagnostics. Preserve six outer jobs, four actual child processes and the canonical
+root conftest/whole-module semantics. Keep native custody's separate eleven-file
+xdist lane unchanged during this experiment.
+
+1. **Independent inner placement.** Preserve outer membership. Derive inner buckets
+   from an explicit new hash domain or independent digest bits. Do not run the
+   same `hash % 4` over a subset selected by `hash % 6`: parity would populate only
+   two inner buckets. Prove deterministic complete disjoint cover at both levels,
+   no empty-selected false success, stable unrelated placement and known pin rules.
+2. **Private child outputs.** The current runner inherits one
+   `MMX_CI_FIXED_DIAGNOSTICS_DIR` and fixed JSON leaf. Give each child an owned
+   directory under the incumbent job root, preserving collision/foreign-file
+   refusal and bounded output. Retain explicit supplementary-H1 phase identity.
+   Reconcile all child evidence through the existing consumer, not a new registry.
+3. **Complete execution proof.** Exit code zero alone is insufficient. Require
+   collection/finish parity and a terminal receipt for each selected child. Detect
+   import-time exit zero, killed/lost child, partial collection, missing completion,
+   duplicate result, wrong source/child identity and controller interruption.
+   Wait/reap every child on failure; no silent retry or fallback to a second effect.
+4. **Fixture semantics.** Keep each whole module on one interpreter; preserve
+   module/class/session scopes at the existing process boundary. Check inherited
+   environment, cwd, import mode, subprocess resources, timeouts and cancellation.
+   Do not add nested workers or relax admission/security tests to obtain parity.
+5. **Same-budget native comparison.** Compare exact case/parameter/mark/skip
+   multisets and failure behavior, then setup, first-case latency, execution tail,
+   final required verdict and total compute on current integrated source. One
+   interpretable candidate, no simultaneous matrix or runner-class expansion.
+6. **Promotion/rollback.** Promote only with complete selected work and improved
+   end-to-end latency without flake/capacity regression. Restore the incumbent
+   xdist topology at the same owner if the qualification fails. This is source
+   rollback, not a retry/queue/authority service.
+
+### Remaining cross-repository execution order
+
+| Ready or held lane | Next concrete action | Completion proof / blocker |
+| --- | --- | --- |
+| Mastermind source qualification | Consume the new exact-head required/shadow runs; repair only concrete failures; diagnose the held gateway cause using retained evidence | Six shards, all source qualifications, strict aggregate and owed native integration proof; Release HOLD remains binding |
+| Mastermind collection | Implement the above four-child partition in existing owners, then native fixed-budget qualification | Exact case and terminal proof, failure injection, measured collection and final-gate reduction |
+| Mastermind remaining work | After collection, split independent qualification and remaining long modules; recalibrate current weights | Advance current aggregate/postmerge shape deliberately; no unmeasured matrix expansion |
+| Terminal scope | Preserve green #1297 and its full selector/fanin repair | Release-rule verification is blocked by explicit integration 403; no cross-carrier replay |
+| Terminal performance | Reconcile #1223's original uncertain create-commit; then consume its already-authored weighted topology, Node discovery and attempt timing; profile capture/runtime separately | Do not duplicate/rehome the unpublished candidate. No global warmup or production-build parity is yet proven |
+| Macro integration | Preserve **#10755 already merged (cap 640) + #10674 held → #10745 → #10735**; reconcile overlapping FIF/worker/compaction source under existing owners | Original #10674 operation26751 remains EFFECT_UNKNOWN; #10656 remains held and main admission OFF. Branch-rule verification 403 blocks this session's release path |
+| Source continuity | Update this architecture and #10825's existing workstream pointer at material milestones | Readback and Agent OS validation; actual handoff only at a genuine continuity boundary |
+| Program acceptance | Measure successive eligible natural cohorts per risk class and cold/warm mix | At least 30 initial observations/class, preserved failures/fallback/cancellation and original product journeys; all target p95 values remain unproved |
+
+The release holds and access denials block their specific lanes, not source analysis
+or authorized repairs elsewhere. No message, queued CI, successful job or source PR
+is described as a durable autonomous execution owner. No source merge, runner
+activation, five-minute acceptance or complete three-repository upgrade is claimed.
