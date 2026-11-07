@@ -258,8 +258,9 @@ class CrossPoolHTTPTests(CrossPoolHTTPFixture):
         self.assertEqual(self.auto_request()[0], 200)
         self.configure(["go", "codex-native"])
         status, body, _ = self.auto_request(step="step-2")
-        self.assertEqual(status, 503, body)
-        self.assertEqual(body["application"]["disposition"], "effect_unknown")
+        self.assertEqual(status, 409, body)
+        self.assertEqual(body["application"]["disposition"], "refused")
+        self.assertEqual(body["error"]["type"], "application_selection_changed")
         self.assertEqual(self.auto_request()[1]["application"]["disposition"], "terminal_receipt_only")
         self.assertEqual((len(self.posts), len(self.dispatches)), (1, 0))
         self.assertEqual(len(self.rows("leases")), 1)
@@ -402,7 +403,8 @@ class CrossPoolHTTPTests(CrossPoolHTTPFixture):
         with patch.object(self.gateway, "select_application", side_effect=choose_go), \
              patch.object(self.gateway, "begin_application", side_effect=racing_begin):
             status, body, _ = self.auto_request()
-        self.assertEqual((status, body["application"]["disposition"]), (503, "effect_unknown"))
+        self.assertEqual((status, body["application"]["disposition"]), (409, "refused"))
+        self.assertEqual(body["error"]["type"], "application_selection_changed")
         self.assertEqual((len(attempts), len(self.rows("leases")), len(self.posts), len(self.dispatches)),
                          (1, 1, 0, 0))
         with patch.object(self.gateway, "select_application", side_effect=AssertionError("repick")):
@@ -446,4 +448,117 @@ class CrossPoolHTTPTests(CrossPoolHTTPFixture):
         status, body, _ = self.auto_request(payload=dict(self.auto_payload, model="fixture-model"))
         self.assertEqual(status, 200, body)
         self.assertNotIn("application", body)
+        self.assertIsNone(self.rows("application_requests")[0]["routed_request_digest"])
+
+
+class ExactScopedHTTPTests(CrossPoolHTTPFixture):
+    def setUp(self):
+        super().setUp()
+        self.response = self.responses["bailian"]
+
+    def exact_payload(self, model="qwen3.8-flash", **changes):
+        return dict(self.auto_payload, model=model, **changes)
+
+    def exact_request(self, turn="exact", *, step="step-1", payload=None, scope_digest="current", **kwargs):
+        value = self.exact_payload() if payload is None else payload
+        expected = self.expected_scope_digest if scope_digest == "current" else scope_digest
+        headers = {} if expected is None else {"X-MM-Application-Route-Scope-Digest": expected}
+        return self.auto_request(turn, step=step, payload=value, scope_digest=None, headers=headers, **kwargs)
+
+    def test_exact_qwen_controls_reach_only_bailian_and_commit_unchanged_body(self):
+        payload = self.exact_payload(temperature=0, reasoning_effort="none")
+        payload["messages"][-1]["content"] = "Preserve this exact question. /no_think"
+        with patch.object(pick, "select_application", wraps=pick.select_application) as selector:
+            status, body, _ = self.exact_request(payload=payload)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(selector.call_count, 1)
+        route = body["application"]["routing"]
+        self.assertEqual((route["schema"], route["requested_model"], route["selected_model"], route["pool"]),
+            ("mastermind.fabric_application_route.v2", "qwen3.8-flash", "qwen3.8-flash", "bailian"))
+        self.assertEqual(route["request_digest"], digest(payload))
+        self.assertIsNone(route["routed_request_digest"])
+        row = self.rows("application_requests")[0]
+        self.assertEqual(row["request_digest"], digest(payload))
+        self.assertIsNone(row["routed_request_digest"])
+        self.assertEqual(json.loads(self.rows("application_turns")[0]["selection_json"])["schema"],
+            "mastermind.application_turn_selection.v3")
+        wire = json.loads(self.logical_posts[0].body)
+        self.assertEqual((wire["model"], wire["temperature"], wire["reasoning"], wire["stream"], wire["max_output_tokens"]),
+            ("qwen3.8-flash", 0, {"effort": "none"}, False, 128))
+        self.assertIn("/no_think", json.dumps(wire["input"]))
+        self.assertEqual(len(self.logical_posts), 1)
+        self.assertEqual(self.dispatches, [])
+
+    def test_nonmatching_compilers_are_not_called_and_native_pool_can_differ(self):
+        with patch.object(self.bailian_driver, "prepare_request", side_effect=AssertionError("wrong model compiled")):
+            status, body, _ = self.exact_request(payload=self.exact_payload("fixture-native"))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["application"]["routing"]["pool"], "codex-native")
+        self.assertEqual(len(self.dispatches), 1)
+        self.assertEqual(self.logical_posts, [])
+
+    def test_no_matching_model_and_partial_or_nonplaintext_controls_refuse_without_lease(self):
+        invalid = [
+            self.exact_payload("missing-model"),
+            self.exact_payload(temperature=0),
+            self.exact_payload(reasoning_effort="none"),
+            self.exact_payload(temperature=False, reasoning_effort="none"),
+            self.exact_payload(temperature=1, reasoning_effort="none"),
+            self.exact_payload(temperature=0, reasoning_effort="low"),
+            self.exact_payload(temperature=0, reasoning_effort="none", tools=[]),
+            self.exact_payload(temperature=0, reasoning_effort="none", messages=[{"role": "assistant", "content": "no"}]),
+        ]
+        for i, payload in enumerate(invalid):
+            with self.subTest(i=i):
+                self.assertGreaterEqual(self.exact_request(turn="bad-" + str(i), payload=payload)[0], 400)
+                self.assertEqual(self.rows("leases"), [])
+        self.assertEqual((self.logical_posts, self.dispatches), ([], []))
+
+    def test_frozen_scope_is_checked_before_replay_without_live_routes(self):
+        payload = self.exact_payload()
+        original_scope = self.expected_scope_digest
+        self.assertEqual(self.exact_request(payload=payload)[0], 200)
+        self.document["application_grants"] = []
+        self.save()
+        self.configure(None, purpose=False, bindings=False)
+        with patch.object(self.gateway, "select_application", side_effect=AssertionError("repick")), \
+             patch.object(self.gateway, "application_registered_routes", side_effect=AssertionError("current route")):
+            status, body, _ = self.exact_request(payload=payload, scope_digest=original_scope)
+            self.assertEqual((status, body["application"]["disposition"]), (409, "terminal_receipt_only"))
+            for altered in (None, "0" * 64):
+                status, body, _ = self.exact_request(payload=payload, scope_digest=altered)
+                self.assertEqual((status, body["application"]["disposition"]), (409, "refused"))
+                self.assertEqual(body["error"]["type"], "application_turn_scope_changed")
+        self.assertEqual((len(self.logical_posts), len(self.rows("leases"))), (1, 1))
+
+    def test_model_body_and_control_conflicts_never_resend(self):
+        payload = self.exact_payload(temperature=0, reasoning_effort="none")
+        self.assertEqual(self.exact_request(payload=payload)[0], 200)
+        for altered in (dict(payload, model="fixture-native"), dict(payload, max_tokens=127),
+                        dict(payload, temperature=1)):
+            self.assertGreaterEqual(self.exact_request(payload=altered)[0], 400)
+        self.assertEqual((len(self.logical_posts), len(self.dispatches)), (1, 0))
+
+    def test_served_model_mismatch_retains_actual_usage_and_exact_request(self):
+        self.responses["bailian"]["model"] = "qwen3.8-max"
+        status, body, _ = self.exact_request()
+        self.assertEqual(status, 502, body)
+        state = body["application"]
+        self.assertEqual((state["routing"]["requested_model"], state["routing"]["selected_model"], state["serving_model"]),
+                         ("qwen3.8-flash", "qwen3.8-flash", "qwen3.8-max"))
+        self.assertEqual(state["usage"], {"input_tokens": 11, "output_tokens": 7})
+        self.assertEqual(self.rows("application_requests")[0]["state"], "terminal")
+
+    def test_lost_prepare_ack_keeps_original_exact_pending_and_no_second_permit(self):
+        actual = self.gateway.prepare_application
+        def lose_ack(*args, **kwargs):
+            actual(*args, **kwargs)
+            raise RuntimeError("fixture lost original ACK")
+        with patch.object(self.gateway, "prepare_application", side_effect=lose_ack):
+            status, body, _ = self.exact_request(payload=self.exact_payload("fixture-native"))
+        self.assertEqual((status, body["application"]["disposition"]), (409, "pending"))
+        self.assertEqual(self.dispatches, [])
+        status, body, _ = self.exact_request(payload=self.exact_payload("fixture-native"))
+        self.assertEqual((status, body["application"]["disposition"]), (409, "pending"))
+        self.assertEqual((len(self.rows("application_requests")), len(self.rows("leases"))), (1, 1))
         self.assertIsNone(self.rows("application_requests")[0]["routed_request_digest"])

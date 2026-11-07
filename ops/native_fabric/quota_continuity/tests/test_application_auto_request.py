@@ -484,12 +484,13 @@ class AutoRequestCustodyTests(AutoFixture):
 
 class AutoSchemaCompatibilityTests(AutoFixture):
     def predecessor_schema(self):
-        # Remove precisely the additive AUTO objects. All incumbent native,
+        # Remove precisely the additive AUTO/exact objects. All incumbent native,
         # selection, HTTP and worker schema/trigger definitions stay untouched.
         with sqlite3.connect(self.directory / "leases.sqlite") as conn:
             names = [r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'application_auto_%'")]
-            self.assertEqual(len(names), 6)
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND "
+                "(name LIKE 'application_auto_%' OR name LIKE 'application_exact_%')")]
+            self.assertEqual(len(names), 12)
             for name in names:
                 conn.execute("DROP TRIGGER " + name)
             conn.execute("ALTER TABLE application_requests DROP COLUMN routed_request_digest")
@@ -522,6 +523,184 @@ class AutoSchemaCompatibilityTests(AutoFixture):
         columns = {r[1] for r in self.sql("PRAGMA table_info(application_requests)")}
         self.assertNotIn("routed_request_digest", columns)
         self.assertEqual(self.sql("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'application_auto_%'"), [])
+
+
+
+class ExactScopedFixture(AutoFixture):
+    def begin_exact(self, pool="go", *, turn="exact-turn", payload=None, pools=None):
+        payload = self.payload_for(pool) if payload is None else payload
+        scope = {"schema": "mastermind.application_route_scope.v1", "pools": sorted(pools or [pool])}
+        selected = self.gateway.select_application(
+            {"workload": "site_interactive", "turn_id": turn, "pool": "go", "model": payload["model"]},
+            principal_id="macro", host="vps", credential_ref="MACRO_APPLICATION_TOKEN",
+            purpose=self.purpose_for(pool), payload=payload, route_scope=scope,
+            transport_candidates=self.gateway.application_registered_routes())
+        target = selected["identity"]
+        recipe = None if target["pool"] == "go" else self.gateway.application_recipe(target["pool"], target["model"])[1]
+        binding = self.gateway.begin_application(
+            {"workload": "site_interactive", "turn_id": turn, "pool": target["pool"], "model": target["model"]},
+            principal_id="macro", host="vps", expected_credential_ref="MACRO_APPLICATION_TOKEN",
+            expected_recipe_digest=recipe, expected_selection=selected,
+            selection_purpose=self.purpose_for(pool), selection_payload=payload, selection_route_scope=scope)
+        return selected, binding
+
+
+class ExactScopedCustodyTests(ExactScopedFixture):
+    def test_every_registered_pool_keeps_concrete_original_and_null_routed_digest(self):
+        for pool, (model, _, _) in POOL_MODELS.items():
+            with self.subTest(pool=pool):
+                payload = self.payload_for(pool)
+                selected, binding = self.begin_exact(pool, turn="exact-" + pool)
+                self.assertEqual(selected["schema"], "mastermind.application_turn_selection.v3")
+                self.assertEqual(selected["identity"]["task"]["requested_model"], model)
+                prepared = self.prepare_auto(binding, payload=payload)
+                self.assertEqual(json.loads(prepared["payload_bytes"]), payload)
+                self.assertEqual(prepared["request_digest"], digest(payload))
+                self.assertIsNone(prepared.get("routed_request_digest"))
+                self.assertIsNone(self.rows("application_requests")[-1]["routed_request_digest"])
+                self.complete_auto(prepared)
+                self.assertEqual(self.broker.close_application_turn(
+                    principal_id="macro", turn_id=binding["turn_id"])["disposition"], "closed")
+
+    def test_one_picker_can_choose_exact_model_in_either_permitted_registered_pool(self):
+        shared = POOL_MODELS["codex-native"][0]
+        recipe = self.native_recipes["claude-native"]
+        recipe["model"] = shared
+        _, digest_value = lease_broker._application_native_recipe(
+            {key: value for key, value in recipe.items() if key != "__digest__"},
+            pool="claude-native", model=shared)
+        recipe["__digest__"] = digest_value
+        self.document["application_grants"] = [
+            grant for grant in self.document["application_grants"] if grant["pool"] != "claude-native"]
+        self.document["application_grants"].append(self.grant_for("claude-native", shared))
+        self.save()
+        self.rebuild_gateway()
+        payload = self.payload_for("codex-native")
+        with patch.object(pick, "select_application", wraps=pick.select_application) as selector:
+            selected, binding = self.begin_exact("codex-native", payload=payload,
+                pools=["codex-native", "claude-native"])
+        self.assertEqual(selector.call_count, 1)
+        self.assertEqual(set(selector.call_args.kwargs["catalogue"]["pools"]), {"codex-native", "claude-native"})
+        self.assertEqual(selector.call_args.kwargs["expected_identity"], {"model": shared})
+        self.assertEqual(binding["model"], shared)
+        self.assertNotEqual(binding["pool"], "go")
+        self.assertEqual(len(self.rows("leases")), 1)
+
+    def test_no_matching_model_or_grant_does_not_allocate_or_substitute(self):
+        for model in ("AUTO", "auto", "unknown-model", "Qwen3.8-flash"):
+            with self.subTest(model=model), self.assertRaises(ApplicationSelectionRefused):
+                self.begin_exact("bailian", payload=self.payload_for("bailian", model=model),
+                    pools=["go", "bailian", "codex-native"])
+        self.document["application_grants"] = []
+        self.save()
+        with self.assertRaises(ApplicationSelectionRefused):
+            self.begin_exact("bailian", pools=["go", "bailian"])
+        self.assertEqual(self.rows("leases"), [])
+
+    def test_closed_v3_cannot_be_null_mismatched_or_relabelled_v2(self):
+        selected, _ = self.begin_exact()
+        for requested in (None, "", False, "other-model"):
+            altered = copy.deepcopy(selected)
+            altered["identity"]["task"]["requested_model"] = requested
+            with self.subTest(requested=requested), self.assertRaises(lease_broker.ApplicationSelectionError):
+                lease_broker._application_record_scope(altered)
+        altered = dict(selected, schema="mastermind.application_turn_selection.v2")
+        with self.assertRaises(lease_broker.ApplicationSelectionError):
+            lease_broker._application_record_scope(altered)
+
+    def test_original_recovery_ignores_removed_routes_but_checks_exact_body_and_recipe(self):
+        payload = self.payload_for("bailian")
+        _, binding = self.begin_exact("bailian", payload=payload, pools=["go", "bailian"])
+        prepared = self.prepare_auto(binding, payload=payload)
+        self.complete_auto(prepared)
+        self.document["application_grants"] = []
+        self.save()
+        self.rebuild_gateway(application_http_recipes=(), application_http_accounts=())
+        original = self.recover_auto(payload=payload, turn=binding["turn_id"])
+        self.assertEqual(original["request"]["disposition"], "terminal")
+        for changed in (dict(payload, model=None), dict(payload, max_tokens=127)):
+            with self.subTest(changed=changed), self.assertRaises(LeaseGatewayError):
+                self.recover_auto(payload=changed, turn=binding["turn_id"])
+        with self.assertRaises(LeaseGatewayError):
+            self.recover_auto(payload=payload, turn=binding["turn_id"], expected_recipe_digest="a" * 64)
+        self.assertEqual(len(self.rows("application_requests")), 1)
+
+    def test_direct_token_cannot_skip_original_body_or_widen_frozen_needs(self):
+        _, binding = self.begin_exact()
+        payload = self.payload_for("go")
+        with self.assertRaises(lease_broker.ApplicationAdmissionError):
+            self.broker.prepare_application_request(principal_id="macro", turn_id="exact-turn",
+                request_id="missing-original", request_digest=digest(payload))
+        for changes in (
+            {"tools": [{"type": "function", "function": {"name": "read", "parameters": {"type": "object"}}}]},
+            {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "fixture"}}]}]},
+        ):
+            with self.assertRaises(LeaseGatewayError):
+                self.prepare_auto(binding, payload=dict(payload, **changes))
+        self.assertEqual(self.rows("application_requests"), [])
+        prepared = self.prepare_auto(binding, payload=payload)
+        self.complete_auto(prepared)
+        with self.assertRaises(LeaseGatewayError):
+            self.prepare_auto(binding, request_id="wide-step", payload=dict(payload, **changes))
+        self.assertEqual(len(self.rows("application_requests")), 1)
+
+    def test_sql_custody_guards_cover_null_digest_exact_go_and_terminal_rewrite(self):
+        _, binding = self.begin_exact()
+        prepared = self.prepare_auto(binding, payload=self.payload_for("go"))
+        before = self.rows("application_requests")
+        for statement in ("UPDATE application_requests SET request_digest='" + "e" * 64 + "'",
+                          "UPDATE application_requests SET principal_id='other'",
+                          "UPDATE application_requests SET logical_payload_digest='" + "f" * 64 + "'",
+                          "UPDATE application_requests SET routed_request_digest='" + "f" * 64 + "'",
+                          "DELETE FROM application_requests"):
+            self.sql(statement)
+            self.assertEqual(self.rows("application_requests"), before)
+        for table in ("application_requests", "application_turns", "leases"):
+            row = self.rows(table)[0]
+            columns = list(row)
+            statement = "INSERT OR REPLACE INTO " + table + " (" + ",".join(columns) + ") VALUES (" + ",".join("?" for _ in columns) + ")"
+            with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+                conn.execute("PRAGMA recursive_triggers=OFF")
+                with self.assertRaises(sqlite3.IntegrityError):
+                    conn.execute(statement, [row[key] for key in columns])
+        self.sql("UPDATE leases SET state='released'")
+        self.assertIn(self.rows("leases")[0]["state"], {"held", "rented"})
+        self.complete_auto(prepared)
+        terminal = self.rows("application_requests")
+        self.sql("UPDATE application_requests SET state='pending',terminal_receipt=NULL")
+        self.assertEqual(self.rows("application_requests"), terminal)
+        self.assertEqual(self.broker.close_application_turn(principal_id="macro", turn_id="exact-turn")["disposition"], "closed")
+
+    def test_old_closed_row_without_actual_release_is_unknown(self):
+        self.begin_exact()
+        self.sql("UPDATE application_turns SET state='closed'")
+        recovered = self.recover_auto(payload=self.payload_for("go"), turn="exact-turn")
+        self.assertEqual(recovered["turn"]["disposition"], "effect_unknown")
+        self.assertIn(self.rows("leases")[0]["state"], {"held", "rented"})
+
+    def test_zero_step_close_works_and_damaged_requested_model_cannot_release(self):
+        self.begin_exact(turn="empty")
+        self.assertEqual(self.broker.close_application_turn(principal_id="macro", turn_id="empty")["disposition"], "closed")
+        self.begin_exact()
+        turn = next(row for row in self.rows("application_turns") if row["turn_id"] == "exact-turn")
+        broken = json.loads(turn["selection_json"])
+        del broken["identity"]["task"]["requested_model"]
+        raw = lease_broker._application_json(broken)
+        self.sql("DROP TRIGGER application_selection_binding_v1")
+        self.sql("UPDATE application_turns SET selection_json=?,selection_digest=?,state='closed' WHERE turn_id='exact-turn'",
+            (raw, hashlib.sha256(raw.encode()).hexdigest()))
+        self.sql("UPDATE leases SET state='released' WHERE id=?", (turn["lease_id"],))
+        retained = next(row for row in self.rows("leases") if row["id"] == turn["lease_id"])
+        self.assertIn(retained["state"], {"held", "rented"})
+
+    def test_changed_guard_definition_refuses_initialization_without_rewriting_history(self):
+        self.begin_exact()
+        before = self.rows("application_turns")
+        self.sql("DROP TRIGGER application_exact_request_delete_v3")
+        self.sql("CREATE TRIGGER application_exact_request_delete_v3 BEFORE DELETE ON application_requests BEGIN SELECT RAISE(IGNORE); END")
+        with self.assertRaises(lease_broker.ApplicationAdmissionError):
+            self.new_broker()
+        self.assertEqual(self.rows("application_turns"), before)
 
 
 if __name__ == "__main__":
