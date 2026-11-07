@@ -1,0 +1,110 @@
+{
+  "errors": 0,
+  "failures": 0,
+  "files": {
+    "integrations/hermes_application_fabric/__init__.py": {
+      "bytes": 624,
+      "git_blob": "527bbd6d3a3688e7745fe627c8502338874d06b6",
+      "sha256": "413f68baad99aefb025c9a4b27d52862a2219c06866b5e8dc0047ed111624e61"
+    },
+    "integrations/hermes_application_fabric/client.py": {
+      "bytes": 18738,
+      "git_blob": "49edfc5417bc4c31542e5af2b0a54b0c076e0a22",
+      "sha256": "9b0fc0441e2ed5360253a2a320e1a8376fef9709c9f6a3caf7eb91912b6cf500"
+    },
+    "integrations/hermes_application_fabric/codec.py": {
+      "bytes": 12442,
+      "git_blob": "2990fd289abb56dfc301a7f8dadd5e605e09b081",
+      "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27"
+    },
+    "integrations/hermes_application_fabric/errors.py": {
+      "bytes": 496,
+      "git_blob": "f08ae8e8ce8546019237f47ec76df723466034e9",
+      "sha256": "c0290f842ea9a072688730131d1aa865b3fa4a1bbff00cd1823a32987a1ed1ba"
+    },
+    "integrations/hermes_application_fabric/qualification/native_acceptance.py": {
+      "bytes": 17708,
+      "git_blob": "cc679722028aa4927036f76ea6aab440bfc7c85b",
+      "sha256": "1e9922d3d3f596b4e09634883921252becf0a273ace09aed636e32733f79050f"
+    },
+    "integrations/hermes_application_fabric/structured.py": {
+      "bytes": 5587,
+      "git_blob": "674ec91eb5f26df069a1a5e4bf3ffef80af5b31b",
+      "sha256": "b6f69c02cfb6eeaccba563d28b46fc471a35686c2879d6ddad5f03f1acd089be"
+    },
+    "integrations/hermes_runtime/__init__.py": {
+      "bytes": 804,
+      "git_blob": "90b1f54916ff159b49abe2c1ad831d1f879bf8e9",
+      "sha256": "4eaf42b9ac33a9902013db49bbb6225496e41b2ab87e931958251f6d78aa6b48"
+    },
+    "integrations/hermes_runtime/constants.py": {
+      "bytes": 4436,
+      "git_blob": "2d56aae244934a7d891b90e1514c653447e81713",
+      "sha256": "82d889fe3f10433d52b3b87ca7fb052f5f7989cd5905f877c52a119175839666"
+    },
+    "integrations/hermes_runtime/contract.py": {
+      "bytes": 2153,
+      "git_blob": "2454d87fddfb440141de8cb81477c9c112a0e173",
+      "sha256": "6884524a9acbfdb7bd2f9b6b5054985b84b9e64e1d56fa22c578fb1e8c871635"
+    },
+    "integrations/hermes_runtime/egress.py": {
+      "bytes": 2554,
+      "git_blob": "50fad4dbdd28a6753ac4502672216923051f2345",
+      "sha256": "3d8c6b96c8e63b428d581541c436ae1b762d7012232623375f322226ef2c0ce8"
+    },
+    "integrations/hermes_runtime/errors.py": {
+      "bytes": 638,
+      "git_blob": "26a48e5a7fbdba0e8072ec2dd2c7209a4e693e16",
+      "sha256": "f3cd2e3e4c7ea4ada123a146e190946ef2c684ed3a8e3e2eb83a2275beaeb8aa"
+    },
+    "integrations/hermes_runtime/native_request_observation.py": {
+      "bytes": 26622,
+      "git_blob": "b826e2f2296d875b5d7cdf5431ed24eaa414c30b",
+      "sha256": "621845a89ed9fc21f9a93b2e32e4b2b5ef329d5247c52f5a7eae43ee53a37c05"
+    },
+    "integrations/hermes_runtime/native_session_control.py": {
+      "bytes": 71705,
+      "git_blob": "25c2154986a2268018c6ea63bee7ebd525a7f517",
+      "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735"
+    },
+    "integrations/hermes_runtime/native_transport_observation.py": {
+      "bytes": 42738,
+      "git_blob": "ee176abfa37b846476e3f7008af01b6c69ea07ae",
+      "sha256": "3bc37f03a3bffd145abb2487f1eee2173f1edbd41838cc75b5b67cf5812e6230"
+    },
+    "integrations/hermes_runtime/profile.py": {
+      "bytes": 17101,
+      "git_blob": "c93b53f5b797d5c3720f535b836900304e24b35e",
+      "sha256": "918077c3546cf9c45e91f1dd4876508d9860ed818f4ea43e91c6ffbf218e3401"
+    },
+    "integrations/hermes_runtime/registry.py": {
+      "bytes": 10607,
+      "git_blob": "2eb6d41cd6da054c51e19f9e6d911dc8d969da16",
+      "sha256": "48c716c9c682010fd3154ab100f9c5333e0680a1bf3ab78536df3fbe7971b891"
+    },
+    "integrations/hermes_runtime/secrets.py": {
+      "bytes": 8159,
+      "git_blob": "f5550fbe8805ac6e33142e96f528b77c316fbfd0",
+      "sha256": "5e0ebc568fc36b4389d8bc60e78b404583b8d0c564c7ded59f0119bec79b2d36"
+    },
+    "tests/test_hermes_primary_native_acceptance.py": {
+      "bytes": 23559,
+      "git_blob": "9d3b1e93b8a1626ca60f2b71fe942b87cdb6b65c",
+      "sha256": "5e7cc0ca4cd0f880f209928ee067d6b3a29dacc1a55876553c75bdb8ab2e8320"
+    }
+  },
+  "live_acceptance": false,
+  "log_sha256": "9aa1d0e7710fada9cb41405acb36d177a2edc113337eafe892bb2fe9047023c6",
+  "native_transport": "recording_double",
+  "network_attempts": 0,
+  "provider_dispatch_proven": false,
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "real_application_request_encoding": true,
+  "real_native_validators": true,
+  "schema": "mastermind.hermes_primary_native_acceptance_source_proof/v1",
+  "skips": 0,
+  "source_parent": "f378d36d052eff7b94612c5fd89e6817198897f0",
+  "tests": 29,
+  "uid": 501,
+  "qualification_date_utc": "2026-11-07"
+}

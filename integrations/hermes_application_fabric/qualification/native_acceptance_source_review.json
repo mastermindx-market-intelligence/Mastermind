@@ -1,0 +1,24 @@
+{
+  "all_other_registry_bytes_preserved": true,
+  "byte_drift_exposes_original_literal": true,
+  "changed_paths": 17,
+  "diff_postimage_mismatch_refused": true,
+  "full_committed_d8_gate": false,
+  "helper_git_blobs": {
+    "tests/executive_identity_review.py": "33e5a6c60b7a352a53b1f6a8ed425f174182b6cd",
+    "tests/executive_incident_identity_review.py": "eba94de862039868812239414d6861201647695b",
+    "tests/test_ceo_submit_armed_composition.py": "eddee669f9d504310819d16f2f6984226120675f",
+    "tests/test_hermes_workspace_oauth_identity_review.py": "b8d647383b496b345c53feb21ec3071c65af474e"
+  },
+  "injected_identity_visible": true,
+  "live_acceptance": false,
+  "new_reviewed_records": 1,
+  "new_reviewed_sites": 1,
+  "original_registry_git_blob": "54aa4c4db8faac6c3eb5138629c84e16df521e9d",
+  "phase": "qualified_exact_evidence_record",
+  "provider_request": false,
+  "registry_sha256": "fe9b9a6bfb8017ecd1dd625625272723c1bc86b51e6599439f26332ed3442da7",
+  "schema": "mastermind.hermes_primary_native_acceptance_bounded_source_review/v1",
+  "source_findings": [],
+  "unreviewed_path_refused": true
+}

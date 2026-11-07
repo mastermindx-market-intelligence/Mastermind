@@ -919,3 +919,8 @@ REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-file
     "sites": (),
     "utf8_sites": ((39, 18, 21, 'int', '501'), (52, 18, 21, 'int', '501'), (65, 18, 21, 'int', '501'), (78, 18, 21, 'int', '501'), (91, 18, 21, 'int', '501'), (104, 18, 21, 'int', '501'), (121, 18, 21, 'int', '501'), (134, 18, 21, 'int', '501'), (147, 18, 21, 'int', '501'), (160, 18, 21, 'int', '501'), (173, 18, 21, 'int', '501'), (186, 18, 21, 'int', '501'), (199, 18, 21, 'int', '501'), (212, 18, 21, 'int', '501'), (229, 18, 21, 'int', '501'), (242, 18, 21, 'int', '501'), (263, 18, 21, 'int', '501'), (276, 18, 21, 'int', '501'), (289, 18, 21, 'int', '501'), (302, 18, 21, 'int', '501'), (319, 18, 21, 'int', '501')),
 }
+
+
+# Isolated source-qualification process identity; no enrollment, grant,
+# account selection or runtime authority is conferred by this evidence.
+REVIEWED_FILES.update({'integrations/hermes_application_fabric/qualification/native_acceptance_source_proof.json': {'sha256': '761af79c686dd9f7a53c46ae4ab3819e4f1da0a4a060ab4b71472d2113ea5d36', 'sites': (), 'utf8_sites': ((108, 9, 12, 'int', '501'),)}})

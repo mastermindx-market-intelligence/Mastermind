@@ -1,7 +1,7 @@
 {
   "historical_contract_sha256": "7952878b5662a83687982ad4d86bed72c774fc3362115572a9ff42424c4e7d66",
   "operational_enrollment": false,
-  "owner_commit": "fff0025e10de394c6a297c7878518513f1dbe633",
+  "owner_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
   "postimages": {
     "engine/provider_production_modes.py": "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8",
     "tests/test_hermes_application_source_support.py": "6e4a9b8b477cc29512b1ed5bc02d2dbbab290a0313a2f432bac6568c240cbdf0",
