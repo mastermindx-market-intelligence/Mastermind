@@ -213,6 +213,11 @@ def build_config_document(
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
     if type(w3c_enabled) is not bool or type(dot_canary_enabled) is not bool:
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+    if w3c_enabled and dot_canary_enabled:
+        # The exact W3C review pin currently attests only the original
+        # W3C launch arguments. Refuse a combined mode until that separate
+        # signed permission contract is deliberately updated and accepted.
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
     document: dict[str, object] = {
         "schema": "mastermind.agent_relay_enrollment.v1",
         "release_sha": release_sha,
