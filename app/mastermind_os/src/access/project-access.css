@@ -1,0 +1,103 @@
+/* Detail-reader composition. Dark: quiet graphite elevation and even hairlines.
+   Light: white research material, firmer hairline and restrained shadow. */
+.project-access {
+  width: 100%;
+  max-width: 880px;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.project-access header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-6);
+}
+.project-access h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.project-access header p,
+.project-access__scope {
+  color: var(--muted);
+}
+.project-access button {
+  min-height: 44px;
+  max-width: 100%;
+  font: inherit;
+  white-space: normal;
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-btn);
+  background: var(--raised);
+  color: var(--text);
+  cursor: pointer;
+}
+.project-access button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.project-access button:focus-visible,
+.project-access summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.project-access__grants {
+  margin: var(--sp-6) 0;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.project-access__grants > div {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+}
+.project-access__grants > div + div {
+  border-top: 1px solid var(--border);
+}
+.project-access dd {
+  margin: 0;
+  min-width: 0;
+}
+.project-access__scope {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: 0.9em;
+}
+.project-access summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+.project-access__source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--sp-2) var(--sp-4);
+}
+.shell[data-theme="light"] .project-access__grants {
+  background: var(--panel);
+  box-shadow: 0 4px 16px
+    color-mix(in srgb, var(--mx-light-text) 8%, transparent);
+}
+.project-access:lang(zh-CN) {
+  letter-spacing: normal;
+  text-transform: none;
+}
+@media (max-width: 600px) {
+  .project-access header {
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+  .project-access__grants > div {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--sp-4) var(--sp-5);
+    gap: var(--sp-2);
+  }
+  .project-access__source {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

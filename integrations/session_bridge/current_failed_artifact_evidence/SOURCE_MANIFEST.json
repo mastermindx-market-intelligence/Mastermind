@@ -1,0 +1,66 @@
+{
+  "at": "2026-10-13T07:38:19.818494+00:00",
+  "preimages": {
+    "artifact_delivery.py": "2ec0bf05691c808af14e7e2bdb3abe4a1b4ef1a9fc1b9a6bbb3f97d9762c948c",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "fabric_task.py": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+    "remote_sub.sh": "cb7dd75a63f639a6087cb560615dcee36956a5a92a504bfe9619f79a98db3cae"
+  },
+  "installed": {
+    "current_failed_artifact_evidence.py": {
+      "sha256": "e97a7789469d6335c69f4c735ba67a94fa40c7d762905ef81593ceb6cefb7e33",
+      "bytes": 11196
+    },
+    "artifact_delivery.py": {
+      "sha256": "b776fbd04015d04c6e97516b5baec2e1a39462f266837b48d6eed6b02498a572",
+      "bytes": 67451
+    }
+  },
+  "review": {
+    "reviewer": "/root/operator_return_adjudication",
+    "verdict": "ACCEPTED_SCOPED_SOURCE",
+    "sole_finding": "original caller correlation before reservation",
+    "fixed": true,
+    "module_sha256": "e97a7789469d6335c69f4c735ba67a94fa40c7d762905ef81593ceb6cefb7e33",
+    "delivery_sha256": "b776fbd04015d04c6e97516b5baec2e1a39462f266837b48d6eed6b02498a572",
+    "tests": 28,
+    "test_xml_sha256": "12e3f7dfd9cad4195e8a39fb5a3bb8bf353c3aa88fe2fea1afc2b8a79443cea9",
+    "remote_read_admitted_only_to_original_parent": true
+  },
+  "adapter_and_hook_unchanged": true,
+  "remote_read_attempted": false,
+  "original_rc": 65,
+  "operation_accepted": false,
+  "classification": "INSTALLED_FINITE_CURRENT_OWNER_EVIDENCE_READER_NO_EXECUTION_ACCEPTANCE",
+  "source_files": {
+    "test_current_failed_artifact_evidence.py": {
+      "bytes": 10730,
+      "sha256": "3fb6a92a091da5e0bde0523604bf42873ee473994f33bf323da5034250322003"
+    },
+    "current_failed_artifact_evidence.py": {
+      "bytes": 11196,
+      "sha256": "e97a7789469d6335c69f4c735ba67a94fa40c7d762905ef81593ceb6cefb7e33"
+    },
+    "README.md": {
+      "bytes": 3412,
+      "sha256": "0d490e5cd50ab876ef3e1e82c42725dc1b6ae5d1c4746b8cdece9a7a16111505"
+    },
+    "artifact_delivery.py.patch": {
+      "bytes": 641,
+      "sha256": "9e26b706b6c1ba9ba2e09ae69660738832b516c045945bf117463d6eadc272ea"
+    }
+  },
+  "tests": {
+    "count": 28,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "xml": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-collector-20261013/rf-current-evidence/FINAL_TESTS.xml",
+    "sha256": "12e3f7dfd9cad4195e8a39fb5a3bb8bf353c3aa88fe2fea1afc2b8a79443cea9"
+  },
+  "installation_receipt_sha256": "200df1bfea621ef7ae6a689a09039a06590653f320f9f8e663f07dad2baa5340",
+  "local_original_qualification_sha256": "62b52256eed862eb411bd627bdc076b6b7c6e26b5edf087c3cad2c4419cf30a0",
+  "remote_retrieval": "COMPLETE_CURRENT_CONTENT_ONLY_ORIGINAL_RC65_UNACCEPTED",
+  "parent_delivery_proof_sha256": "16157e96c341f70a6ed80b3cf6bd14138fe9589fd3b0a9a441b6061e12e98b1f",
+  "original_source_review": "Assigning parent independent review active; not outcome acceptance"
+}

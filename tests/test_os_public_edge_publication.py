@@ -1,0 +1,903 @@
+"""Real qualification and real single-manifest consumer; no privileged effects.
+
+Only platform ownership/ACL checks and the npm build are replaced in temporary
+fixtures. Git source qualification, seal verification, bundle digest, byte/MIME
+contracts, phase journals and OsStaticApp are exercised as shipped. Publication
+uses an inert HTTP stand-in; neither root custody nor live deployment is claimed.
+"""
+import asyncio
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+
+import pytest
+
+from ops.executive_os import executive_mcp_entry as entry
+from ops.executive_os import os_public_edge_publication as m
+from ops.executive_os import os_release_assets as assets
+from ops.executive_os import release_manifest as seals
+from ops.executive_os.os_public_edge import (HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES,
+    GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES,
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES,
+    PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_COMPANY_PRIORITIES_POST_ROUTES, asset_routes, render)
+
+
+def git(repo, *args):
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+NOTICE_BYTES = {
+    "third-party/deepseek-client-dependency-NOTICES.txt": b"Dependency copyright notices\n",
+    "third-party/deepseek-harness-LICENSE.txt": b"Harness license and copyright\n",
+}
+
+
+def make_dist(app, tag, *, noir_notices=False):
+    dist = app / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text(f'<script src="/os/assets/index-{tag}.js"></script>'
+                                   f'<link href="/os/assets/index-{tag}.css">')
+    (dist / f"assets/index-{tag}.js").write_text(f'console.log("{tag}");')
+    (dist / f"assets/index-{tag}.css").write_text(f'body{{color:{tag}}}')
+    if noir_notices:
+        extra = {
+            f"assets/atelier-office-{tag}.jpg": b"office image",
+            f"assets/Manrope-Variable-{tag}.ttf": b"Manrope font",
+            f"assets/Inter-Variable-{tag}.woff2": b"Inter font",
+            "licenses/fonts/Inter-OFL.txt": b"Inter license",
+            "licenses/fonts/Manrope-OFL.txt": b"Manrope license",
+            "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
+            **NOTICE_BYTES,
+        }
+        for name, raw in extra.items():
+            path = dist / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+    return {"operator_uid": 501, "tools": {"/fixture/node": "a" * 64, "/fixture/npm": "b" * 64}}
+
+
+def _proxy(host):
+    # The handler `caddy adapt` emits for the rendered OS branches; the planner
+    # requires every branch proxy to equal it, so a bare upstream is refused.
+    return {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}],
+            "headers": {"request": {
+                "delete": ["Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                           "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"],
+                "set": {"Host": [host], "X-Forwarded-For": ["127.0.0.1"],
+                        "X-Forwarded-Proto": ["https"]}}}}
+
+
+ABORT_BRANCH = {"handle": [{"handler": "static_response", "abort": True}]}
+
+
+def os_branches(manifest):
+    """The complete rendered OS subroute: five proxy branches plus the abort."""
+    return [
+        {"match": [{"method": ["GET"], "path": sorted(set(GET_ROUTES) | set(asset_routes(manifest)))}],
+         "handle": [_proxy(HOST)]},
+        {"match": [{"method": ["POST"], "path": list(POST_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": 64000}, _proxy(HOST)]},
+        {"match": [{"method": ["POST"], "path": list(SOURCE_POST_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": 98304}, _proxy(HOST)]},
+        {"match": [{"method": ["GET"], "path": [MCP_METADATA_ROUTE]}],
+         "handle": [_proxy(HOST)]},
+        {"match": [{"method": ["POST"], "path": list(MCP_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": 64000}, _proxy("127.0.0.1")]},
+        dict(ABORT_BRANCH),
+    ]
+
+
+def fullconfig(manifest):
+    return {"admin": {"listen": "127.0.0.1:2019"}, "apps": {
+        "tls": {"automation": {"policies": [{"subjects": ["other.example.invalid"]}]}},
+        "http": {"servers": {"srv0": {"listen": [":443"], "routes": [{
+            "match": [{"host": [HOST]}], "terminal": True,
+            "handle": [{"handler": "subroute", "routes": os_branches(manifest)}]},
+            {"match": [{"host": ["other.example.invalid"]}],
+             "handle": [{"handler": "static_response", "body": "retained"}]}]}}}}}
+
+
+@pytest.fixture
+def inputs(tmp_path, monkeypatch, request):
+    monkeypatch.setattr(assets, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(assets, "_no_acl", lambda *a, **k: None)
+    monkeypatch.setattr(assets, "_require_root", lambda: None)
+    monkeypatch.setattr(seals, "_validate_owned_info", lambda *a, **k: None)
+    monkeypatch.setattr(seals, "_has_acl", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_root", lambda: None)
+    monkeypatch.setattr(m, "_owner", lambda s: m.require(s.st_uid == os.getuid()
+                                                       and not s.st_mode & 0o022, "unsafe fixture custody"))
+    repo = tmp_path / "source"
+    repo.mkdir()
+    for name in assets.INPUTS:
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((assets.ROOT / name).read_bytes())
+    git(repo, "init", "-q")
+    git(repo, "add", ".")
+    git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "source")
+    sha, tree = git(repo, "rev-parse", "HEAD"), git(repo, "rev-parse", "HEAD^{tree}")
+    git(repo, "update-ref", "refs/remotes/origin/master", sha)
+    settings = getattr(request, "param", (False, False))
+    old_notices, new_notices = settings[:2]
+    retired_edge_profile = settings[2] if len(settings) == 3 else None
+    monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(
+        app, "new", noir_notices=new_notices))
+    bundle = tmp_path / "bundle"
+    assets.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client",
+                   output=bundle, build_user="fixture", node=Path("/fixture/node"), npm_cli=Path("/fixture/npm"))
+    qualified = assets.qualify(bundle, expected_sha=sha, tree_sha=tree, source_repo=repo)
+    old = tmp_path / "old"
+    make_dist(old / "app/mastermind_os", "old", noir_notices=old_notices)
+    # Model the installed release root even under a restrictive host umask.
+    # Keep the real service-UID traversal check active.
+    old.chmod(0o755)
+    manifest = entry.build_os_asset_manifest(old)
+    (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(manifest))
+    seals.create(old, "a" * 40, "b" * 40)
+    live = tmp_path / "live.json"
+    config = fullconfig(manifest)
+    if retired_edge_profile is True:
+        # The retired production edge predates the Control Room routes, the
+        # dedicated source branch and the public MCP entrypoints: the complete
+        # legacy three-branch predecessor profile, not a partial list.
+        branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+        branches[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(manifest)))
+        branches[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+        del branches[2:5]
+    elif retired_edge_profile == "pre-native":
+        branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+        branches[1]["match"][0]["path"] = list(PRE_DIRECT_NATIVE_POST_ROUTES)
+        # Isolate the native POST upgrade from the already accepted COO upgrade.
+        branches[3]["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+        branches[4]["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
+    live.write_bytes(m.canonical(config))
+    return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
+                new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
+                new_digest=qualified.digest, live_config=live, relay_port=49152,
+                out=tmp_path / "stage")
+
+
+class InertRelay:
+    def __init__(self, inputs):
+        self.current = json.loads(inputs["live_config"].read_bytes())
+        self.apps = {"old": entry.load_os_app(inputs["old_root"]),
+                     "new": entry.load_os_app(inputs["new_bundle"])}
+        self.selected = "old"
+        self.etag = '"0"'
+        self.events = []
+        self.bad = None
+
+    def http(self, port, method, path, *, body=None, headers=None, maximum=m.MAX_BYTES):
+        if port == 2019:
+            self.events.append((method, "config"))
+            if method == "POST":
+                assert headers["If-Match"] == self.etag
+                assert headers["Content-Type"] == "application/json"
+                self.current = json.loads(body)
+                self.etag = '"next"'
+                if self.bad == "post-lost":
+                    raise OSError("reply lost after effect")
+                if self.bad == "readback":
+                    self.current["unexpected"] = True
+                return 200, {}, b""
+            return 200, {"etag": self.etag}, m.canonical(self.current)
+        self.events.append(("GET", self.selected, path))
+        messages = []
+        async def invoke():
+            async def receive():
+                return {"type": "http.request", "body": b"", "more_body": False}
+            async def send(message):
+                messages.append(message)
+            await self.apps[self.selected]({"type": "http", "method": "GET", "path": path,
+                "raw_path": path.encode(), "query_string": b"", "headers": []}, receive, send)
+        asyncio.run(invoke())
+        start = next(v for v in messages if v["type"] == "http.response.start")
+        content = b"".join(v.get("body", b"") for v in messages if v["type"] == "http.response.body")
+        response_headers = {k.decode(): v.decode() for k, v in start["headers"]}
+        if self.bad == "mime":
+            response_headers["content-type"] = "application/octet-stream"
+        elif self.bad == "short":
+            content = content[:-1]
+        elif self.bad == "extra":
+            content += b"x"
+        elif self.bad == "bytes":
+            content = b"x" * len(content)
+        return start["status"], response_headers, content
+
+
+@pytest.fixture
+def staged(inputs, monkeypatch):
+    result = m.stage_host(**inputs)
+    relay = InertRelay(inputs)
+    monkeypatch.setattr(m, "_http", relay.http)
+    monkeypatch.setattr(m, "_listener", lambda port, pid: m.require((port, pid) == (49152, 123), "listener differs"))
+    def validate(stage, phase, config):
+        assert json.loads(stage.read("prepare.json" if phase == "prepare" else "final.json")) == config
+        relay.events.append(("validate", phase))
+    monkeypatch.setattr(m, "_validate", validate)
+    return inputs, result, relay
+
+
+def publish(staged, phase="prepare", **changes):
+    i, r, _ = staged
+    return m.publish(**{**dict(stage_path=i["out"], stage_digest=r["stage_digest"],
+                              listener_pid=123, phase=phase), **changes})
+
+
+def ready(staged, **changes):
+    i, r, _ = staged
+    return m.verify_cutover(**{**dict(stage_path=i["out"], stage_digest=r["stage_digest"],
+                                     new_sha=i["new_sha"], new_digest=i["new_digest"]), **changes})
+
+
+@pytest.mark.parametrize("inputs", [(False, False, True)], indirect=True)
+def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(staged):
+    i, r, relay = staged
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert route[0]["match"][0]["path"] == sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(entry.build_os_asset_manifest(i["old_root"]))))
+    assert route[1]["match"][0]["path"] == list(LEGACY_POST_ROUTES)
+    assert route[1]["handle"][0]["max_size"] == 64000
+    assert len(route) == 3 and route[2] == ABORT_BRANCH
+    assert publish(staged)["state"] == "PREPARED"
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert set(GET_ROUTES) <= set(route[0]["match"][0]["path"])
+    assert route[1]["match"][0]["path"] == list(POST_ROUTES)
+    assert route[1]["handle"][0]["max_size"] == 64000
+    # The dedicated source-operation branch is inserted at its canonical
+    # position with its own 98304-byte cap and the public HOST proxy; the
+    # legacy POST branch keeps 64KB and the abort stays terminal.
+    assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
+    assert route[2]["handle"][0]["max_size"] == 98304
+    assert route[2]["handle"][1] == _proxy(HOST)
+    assert len(route) == 4 and route[3] == ABORT_BRANCH
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    assert route[1]["match"][0]["path"] == list(POST_ROUTES)
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert set(GET_ROUTES) <= set(route[0]["match"][0]["path"])
+    assert "/os/assets/index-old.js" not in route[0]["match"][0]["path"]
+    assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
+    assert route[2]["handle"][0]["max_size"] == 98304
+    assert len(route) == 4 and route[3] == ABORT_BRANCH
+
+
+@pytest.mark.parametrize("inputs", [(False, False, "pre-native")], indirect=True)
+def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
+    """Exercise rendered policy and both real publisher phases with inert HTTP."""
+    i, _, relay = staged
+    # These are the actual retained 39-path profile and the three POST paths
+    # dispatched by the native Executive transport, independent of the table.
+    historical = (
+        "/os/executive/context",
+        "/os/executive/submit",
+        "/os/executive/status",
+        "/os/executive/session/context",
+        "/os/executive/session/reply",
+        "/os/executive/session/references",
+        "/workspace/control-room/open",
+        "/workspace/control-room/bind",
+        "/workspace/control-room/unbind",
+        "/workspace/control-room/refresh-builds",
+        "/workspace/project-admission/pause",
+        "/workspace/project-admission/resume",
+        "/workspace/instruction-admission/pause",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
+        "/os/executive/session/history-context",
+        "/os/executive/session/conversations",
+        "/os/executive/session/conversation-read",
+        "/os/executive/session/fresh-conversations",
+        "/os/executive/session/fresh-conversation-read",
+        "/os/executive/conversation/preview",
+        "/os/executive/conversation/create",
+        "/os/executive/conversation/status",
+        "/os/executive/conversation/read",
+        "/os/executive/conversation/consume",
+        "/os/executive/conversation/turn",
+        "/os/executive/conversation/turn/status",
+        "/os/executive/conversation/turn/read",
+        "/os/executive/conversation/consume/status",
+        "/os/executive/conversation/turn/preview",
+        "/os/executive/session/send",
+        "/os/executive/project-execution/preview",
+        "/os/executive/project-execution/submit",
+        "/os/executive/project-execution/status",
+        "/os/executive/session/project-executions",
+        "/os/executive/session/project-execution-read",
+    )
+    native = (
+        "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+    )
+    assert PRE_DIRECT_NATIVE_POST_ROUTES == historical
+    assert DIRECT_NATIVE_POST_ROUTES == native
+    company = ("/os/executive/company-priorities",)
+    assert PRE_COMPANY_PRIORITIES_POST_ROUTES == historical + native
+    current_posts = historical + native + company
+    assert POST_ROUTES == current_posts
+    branches = lambda config: config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    before = copy.deepcopy(relay.current)
+    original = branches(before)
+    assert original[1]["match"][0]["path"] == list(historical)
+    rendered = render(entry.build_os_asset_manifest(i["new_bundle"]), i["relay_port"])
+    post_matcher = rendered.split("    @post {", 1)[1].split("    handle @post {", 1)[0]
+    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(current_posts)
+    assert "method POST" in post_matcher
+    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native + company)
+
+    for phase, expected_state in (("prepare", "PREPARED"), ("finalize", "FINAL")):
+        if phase == "finalize":
+            assert ready(staged)["state"] == "CUTOVER_READY"
+            assert relay.selected == "old"
+            relay.selected = "new"  # The explicit test-host switch, never the publisher.
+        assert publish(staged, phase)["state"] == expected_state
+        current = branches(relay.current)
+        assert current[1]["match"][0] == {"method": ["POST"], "path": list(current_posts)}
+        # Body bounds, proxy/header identity and terminal refusal remain exact.
+        assert current[1]["handle"] == original[1]["handle"]
+        assert current[1]["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert current[2:] == original[2:]
+        assert current[2]["handle"][0] == {"handler": "request_body", "max_size": 98304}
+        assert current[4]["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert current[-1] == {"handle": [{"handler": "static_response", "abort": True}]}
+        assert relay.current["apps"]["tls"] == before["apps"]["tls"]
+        assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][1:] == before["apps"]["http"]["servers"]["srv0"]["routes"][1:]
+        # Closed Caddy method/path matchers forward each actual native POST to
+        # the existing proxy. Other methods and paths reach only terminal abort.
+        def matching(method, path):
+            return [branch for branch in current[:-1]
+                    if any(method in match["method"] and path in match["path"]
+                           for match in branch["match"])]
+        for path in native + company:
+            assert matching("POST", path) == [current[1]]
+            for method in ("GET", "PUT", "DELETE", "OPTIONS"):
+                assert matching(method, path) == []
+        for path in ("/os/executive/direct-native/arbitrary", native[0] + "/",
+                     "/os/executive/direct-native/submit", "/os/executive/direct-native/*"):
+            assert matching("POST", path) == []
+        assert matching("POST", "/os/executive/session/send") == [current[1]]
+    assert relay.events.count(("POST", "config")) == 2
+    with pytest.raises(ValueError):
+        publish(staged, "finalize")
+
+
+def test_real_consumer_two_phase_order_and_single_selected_release(staged):
+    i, r, relay = staged
+    with pytest.raises(FileNotFoundError):
+        ready(staged)
+    before = copy.deepcopy(relay.current)
+    assert publish(staged)["state"] == "PREPARED"
+    post = relay.events.index(("POST", "config"))
+    assert any(v == ("GET", "old", "/os/auth/callback") for v in relay.events[:post])
+    assert not any(v[:2] == ("GET", "new") for v in relay.events)
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    # This is the test host's explicit switch, never a publisher callback.
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    assert relay.events.count(("POST", "config")) == 2
+    assert relay.current["apps"]["tls"] == before["apps"]["tls"]
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    assert "/os/assets/index-old.js" not in paths and "/os/assets/index-new.js" in paths
+    assert relay.http(49152, "GET", "/os/assets/index-old.js")[0] == 404
+    with pytest.raises(ValueError):
+        ready(staged)
+    with pytest.raises(ValueError):
+        publish(staged, "finalize")
+    with pytest.raises(ValueError):
+        publish(staged)
+
+
+@pytest.mark.parametrize("inputs,expected_counts", [
+    ((False, True), (4, 12)), ((True, False), (12, 4)), ((True, True), (12, 12)),
+], indirect=["inputs"])
+def test_eleven_asset_release_stage_load_and_cutover(staged, expected_counts):
+    i, r, relay = staged
+    with m.private(i["out"]) as stage:
+        descriptor, manifests, _, _, _ = m._load_stage(stage, r["stage_digest"])
+        for kind, count in zip(("old", "new"), expected_counts):
+            index = descriptor["indexes"][kind]
+            has_notices = count == 12
+            assert len(index) == count
+            assert (set(NOTICE_BYTES) <= set(index)) == has_notices
+            assert len(manifests[kind]["files"]) == len(index) - 1
+            if has_notices:
+                for name, raw in NOTICE_BYTES.items():
+                    assert stage.read(index[name]) == raw
+    assert publish(staged)["state"] == "PREPARED"
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    for name in NOTICE_BYTES:
+        assert ("/os/" + name in paths) == (name in descriptor["indexes"]["new"])
+
+
+@pytest.mark.parametrize("inputs", [(True, True)], indirect=True)
+@pytest.mark.parametrize("damage", ["partial", "extra", "renamed", "bytes"])
+def test_eleven_asset_capture_keeps_exact_notice_set_and_digests(staged, damage):
+    i, _, _ = staged
+    with m.private(i["out"]) as stage:
+        descriptor = m.decode(stage.read(m.DESCRIPTOR))
+        files = {name: stage.read(label) for name, label in descriptor["indexes"]["new"].items()}
+    manifest = m.decode(files["asset-manifest.json"])
+    assert len(files) == 12 and len(manifest["files"]) == 11
+    name = "third-party/deepseek-harness-LICENSE.txt"
+    row = next(row for row in manifest["files"] if row["path"] == name)
+    if damage == "partial":
+        del files[name]
+        manifest["files"].remove(row)
+    elif damage == "extra":
+        extra = {**row, "path": "third-party/extra-LICENSE.txt"}
+        files[extra["path"]] = files[name]
+        manifest["files"].append(extra)
+    elif damage == "renamed":
+        row["path"] = "third-party/other-LICENSE.txt"
+        files[row["path"]] = files.pop(name)
+    else:
+        files[name] = b"changed notice bytes"
+    files["asset-manifest.json"] = m.canonical(manifest)
+    with pytest.raises(ValueError):
+        m._manifest(files)
+
+
+@pytest.mark.parametrize("field,value", [("new_digest", "c" * 64), ("new_sha", "d" * 40),
+    ("new_tree", "e" * 40), ("old_sha", "f" * 40), ("old_tree", "0" * 40)])
+def test_real_qualification_rejects_wrong_provenance_before_stage(inputs, field, value):
+    with pytest.raises((ValueError, RuntimeError)):
+        m.stage_host(**{**inputs, field: value})
+    assert not inputs["out"].exists()
+
+
+@pytest.mark.parametrize("damage", ["bytes", "manifest", "receipt", "duplicate", "unprotected"])
+def test_stage_rejects_actual_changed_bundle_or_protected_source(inputs, damage):
+    p = inputs["new_bundle"]
+    if damage == "unprotected":
+        git(inputs["source_repo"], "update-ref", "-d", "refs/remotes/origin/master")
+    else:
+        path = p / (assets.RECEIPT if damage in ("receipt", "duplicate") else assets.DIST +
+                    ("/asset-manifest.json" if damage == "manifest" else "/assets/index-new.js"))
+        path.chmod(0o644)
+        if damage == "duplicate":
+            raw = path.read_bytes().rstrip()
+            path.write_bytes(raw[:-1] + b',"source_sha":"' + inputs["new_sha"].encode() + b'"}')
+            # Even if caller supplies the new opaque digest, duplicate JSON is rejected.
+            q = assets.qualify(p, expected_sha=inputs["new_sha"], tree_sha=inputs["new_tree"], source_repo=inputs["source_repo"])
+            inputs["new_digest"] = q.digest
+        else:
+            path.write_bytes(b"{}" if damage in ("receipt", "manifest") else b"changed")
+    with pytest.raises((ValueError, RuntimeError, KeyError)):
+        m.stage_host(**inputs)
+    assert not inputs["out"].exists()
+
+
+@pytest.mark.parametrize("bad", ["mime", "short", "extra", "bytes"])
+def test_wrong_old_bytes_before_intent(staged, bad):
+    i, _, relay = staged
+    relay.bad = bad
+    with pytest.raises(ValueError):
+        publish(staged)
+    assert not (i["out"] / m.OPERATION).exists()
+    assert ("POST", "config") not in relay.events
+
+
+@pytest.mark.parametrize("failure", ["post-lost", "readback", "receipt-write", "after-receipt", "intent-only"])
+def test_uncertain_prepare_blocks_replay_and_cutover_and_final(staged, monkeypatch, failure):
+    i, _, relay = staged
+    relay.bad = failure
+    original = m.PrivateDirectory.write
+    def broken(self, name, raw):
+        if failure == "receipt-write" and name == "prepare-receipt.json":
+            raise OSError("receipt persistence failed")
+        original(self, name, raw)
+        if failure == "after-receipt" and name == "prepare-receipt.json":
+            raise OSError("receipt fsync return uncertain")
+        if failure == "intent-only" and name == "prepare-intent.json":
+            raise OSError("crashed before POST")
+    monkeypatch.setattr(m.PrivateDirectory, "write", broken)
+    with pytest.raises((OSError, ValueError)):
+        publish(staged)
+    assert (i["out"] / m.OPERATION / "prepare-intent.json").exists()
+    post_count = relay.events.count(("POST", "config"))
+    for action in (lambda: publish(staged), lambda: publish(staged, "finalize"), lambda: ready(staged)):
+        with pytest.raises((ValueError, FileNotFoundError)):
+            action()
+    assert relay.events.count(("POST", "config")) == post_count
+
+
+def test_final_requires_new_bytes_and_original_prepare(staged):
+    publish(staged)
+    with pytest.raises(ValueError, match="selected relay"):
+        publish(staged, "finalize")
+    assert not (staged[0]["out"] / m.OPERATION / "finalize-intent.json").exists()
+    with pytest.raises(ValueError, match="target"):
+        ready(staged, new_sha="f" * 40)
+
+
+def test_cutover_refuses_later_config_drift(staged):
+    publish(staged)
+    staged[2].current["apps"]["tls"]["changed"] = True
+    with pytest.raises(ValueError, match="no longer current"):
+        ready(staged)
+
+
+def test_uncertain_final_is_not_replayed(staged):
+    publish(staged)
+    staged[2].selected = "new"
+    staged[2].bad = "post-lost"
+    with pytest.raises(OSError):
+        publish(staged, "finalize")
+    posts = staged[2].events.count(("POST", "config"))
+    with pytest.raises(ValueError):
+        publish(staged, "finalize")
+    with pytest.raises(ValueError):
+        ready(staged)
+    assert staged[2].events.count(("POST", "config")) == posts
+
+
+@pytest.mark.parametrize("phase", ["prepare", "finalize"])
+def test_reconciliation_racing_receipt_cannot_return_success(staged, monkeypatch, phase):
+    if phase == "finalize":
+        publish(staged)
+        staged[2].selected = "new"
+    original = m.PrivateDirectory.write
+    def raced(self, name, raw):
+        original(self, name, raw)
+        if name == phase + "-receipt.json":
+            original(self, phase + "-reconciliation.json", b'{"state":"RECONCILIATION_REQUIRED"}')
+    monkeypatch.setattr(m.PrivateDirectory, "write", raced)
+    with pytest.raises((ValueError, FileExistsError)):
+        publish(staged, phase)
+    posts = staged[2].events.count(("POST", "config"))
+    for action in (lambda: ready(staged), lambda: publish(staged, "finalize")):
+        with pytest.raises(ValueError):
+            action()
+    assert staged[2].events.count(("POST", "config")) == posts
+
+
+@pytest.mark.parametrize("field", ["state", "stage_digest", "config_digest", "intent_digest", "predecessor_digest", "new_bundle_digest"])
+def test_receipt_bindings_are_validated_not_just_state(staged, field):
+    publish(staged)
+    path = staged[0]["out"] / m.OPERATION / "prepare-receipt.json"
+    r = json.loads(path.read_bytes())
+    r[field] = "fabricated"
+    path.write_bytes(m.canonical(r))
+    with pytest.raises(ValueError):
+        ready(staged)
+    with pytest.raises(ValueError):
+        publish(staged, "finalize")
+
+
+@pytest.mark.parametrize("damage", ["stage-digest", "config", "extra-file", "symlink", "hardlink", "mode", "directory"])
+def test_immutable_stage_custody_and_bytes(staged, damage, tmp_path):
+    i, r, relay = staged
+    path = i["out"] / "prepare.json"
+    if damage == "stage-digest":
+        r["stage_digest"] = "0" * 64
+    elif damage == "config":
+        path.write_bytes(b"{}")
+    elif damage == "extra-file":
+        (i["out"] / "extra").write_bytes(b"unknown")
+    elif damage in ("symlink", "hardlink"):
+        backup = tmp_path / "content"
+        path.rename(backup)
+        path.symlink_to(backup) if damage == "symlink" else os.link(backup, path)
+    elif damage == "mode":
+        path.chmod(0o644)
+    else:
+        i["out"].chmod(0o755)
+    with pytest.raises((ValueError, OSError)):
+        publish(staged)
+    assert ("POST", "config") not in relay.events
+
+
+def test_descriptor_directory_replacement_is_not_followed(staged, tmp_path):
+    path = staged[0]["out"]
+    with m.private(path) as held:
+        path.rename(tmp_path / "prior")
+        path.mkdir(mode=0o700)
+        with pytest.raises(ValueError, match="replaced"):
+            held.write("intent.json", b"{}")
+    assert not list(path.iterdir())
+
+
+@pytest.mark.parametrize("drift", ["tls", "other", "etag", "pid"])
+def test_current_config_etag_listener_drift_no_post(staged, monkeypatch, drift):
+    _, _, relay = staged
+    if drift in ("tls", "other"):
+        relay.current["apps"]["tls" if drift == "tls" else "http"]["drift"] = True
+    elif drift == "etag":
+        original = m._config
+        count = 0
+        def config():
+            nonlocal count
+            count += 1
+            value, etag = original()
+            return value, etag if count == 1 else '"changed"'
+        monkeypatch.setattr(m, "_config", config)
+    with pytest.raises(ValueError):
+        publish(staged, listener_pid=999 if drift == "pid" else 123)
+    assert ("POST", "config") not in relay.events
+
+
+def test_fixed_production_listener_argv_and_no_extra_pid(monkeypatch):
+    calls = []
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, 'LISTEN 0 128 127.0.0.1:49152 0.0.0.0:* users:(("ssh",pid=123,fd=7))\n', '')
+    monkeypatch.setattr(m.subprocess, "run", run)
+    m._listener(49152, 123)
+    assert calls == [["/usr/bin/ss", "-H", "-ltnp", "sport = :49152"]]
+    with pytest.raises(ValueError):
+        m._listener(49152, 124)
+
+
+@pytest.mark.parametrize("behavior", ["redirect", "oversize", "duplicate", "lost"])
+def test_http_fixed_loopback_single_request_budget_and_no_redirect_retry(monkeypatch, behavior):
+    calls = []
+    class Response:
+        status = 302 if behavior == "redirect" else 200
+        def getheaders(self):
+            return [("ETag", '"a"'), ("eTAG", '"b"')] if behavior == "duplicate" else [
+                ("Location", "https://unrelated.example.invalid")]
+        def read(self, size):
+            calls.append(("read", size))
+            return b"12345" if behavior == "oversize" else b"ok"
+    class Connection:
+        def __init__(self, host, port, timeout):
+            calls.append(("connect", host, port, timeout))
+        def request(self, *args, **kwargs):
+            calls.append(("request", args, kwargs))
+            if behavior == "lost":
+                raise OSError("connection lost")
+        def getresponse(self):
+            return Response()
+        def close(self):
+            calls.append(("close",))
+    monkeypatch.setattr(m.http.client, "HTTPConnection", Connection)
+    monkeypatch.setenv("HTTP_PROXY", "http://unrelated.example.invalid")
+    if behavior == "redirect":
+        assert m._http(2019, "GET", "/config/", maximum=4)[0] == 302
+    else:
+        with pytest.raises((ValueError, OSError)):
+            m._http(2019, "GET", "/config/", maximum=4)
+    assert calls[0] == ("connect", "127.0.0.1", 2019, 20)
+    assert sum(c[0] == "request" for c in calls) == 1
+    assert calls[-1] == ("close",)
+    if behavior in ("redirect", "oversize"):
+        assert ("read", 5) in calls
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_fixed_caddy_validation_checks_input_after_process(inputs, monkeypatch, drift):
+    m.stage_host(**inputs)
+    path = inputs["out"] / "prepare.json"
+    candidate = json.loads(path.read_bytes())
+    calls = []
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        if drift:
+            path.write_bytes(b"{}")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+    monkeypatch.setattr(m.subprocess, "run", run)
+    with m.private(inputs["out"]) as stage:
+        if drift:
+            with pytest.raises(ValueError, match="input changed"):
+                m._validate(stage, "prepare", candidate)
+        else:
+            m._validate(stage, "prepare", candidate)
+    assert calls == [(["/usr/bin/caddy", "validate", "--config", str(path)],
+                      {"capture_output": True, "timeout": 30, "check": True})]
+
+
+@pytest.mark.parametrize("command", ["stage-host", "prepare", "verify-cutover", "finalize"])
+def test_cli_explicit_argument_wiring(command, monkeypatch, capsys):
+    calls = []
+    function = "stage_host" if command == "stage-host" else "verify_cutover" if command == "verify-cutover" else "publish"
+    monkeypatch.setattr(m, function, lambda **kwargs: calls.append(kwargs) or {"fixture": True})
+    args = [command]
+    if command == "stage-host":
+        for name in ("old-root", "new-bundle", "source-repo", "live-config", "out"):
+            args += ["--" + name, "/fixture/" + name]
+        for name in ("old-sha", "old-tree", "new-sha", "new-tree", "new-digest"):
+            args += ["--" + name, "exact-" + name]
+        args += ["--relay-port", "49152"]
+    else:
+        args += ["--stage-path", "/fixture/stage", "--stage-digest", "digest"]
+        args += ["--new-sha", "source", "--new-digest", "bundle"] if command == "verify-cutover" else ["--listener-pid", "123"]
+    m.main(args)
+    assert len(calls) == 1 and json.loads(capsys.readouterr().out) == {"fixture": True}
+    if command in ("prepare", "finalize"):
+        assert calls[0]["phase"] == command and calls[0]["listener_pid"] == 123
+    elif command == "stage-host":
+        assert calls[0]["source_repo"] == Path("/fixture/source-repo") and calls[0]["relay_port"] == 49152
+    else:
+        assert calls[0]["new_sha"] == "source" and calls[0]["new_digest"] == "bundle"
+
+
+@pytest.mark.parametrize("raw", [b'{"v":1,"v":2}', b'{"v":NaN}', b'{"v":Infinity}'])
+def test_closed_json_refusals(raw):
+    with pytest.raises(ValueError):
+        m.decode(raw)
+
+
+
+def _expand_noir_dist(app, *, rich=False, notices=False):
+    """Only exact already-approved static asset names in the local release fixture."""
+    dist = app / "dist"
+    fixed = {
+        "assets/atelier-office-fixture.jpg": b"image",
+        "assets/Manrope-Variable-fixture.ttf": b"font",
+        "assets/Inter-Variable-fixture.woff2": b"font",
+        "licenses/fonts/Inter-OFL.txt": b"Inter licensed fixture",
+        "licenses/fonts/Manrope-OFL.txt": b"Manrope licensed fixture",
+        "licenses/fonts/Manrope-FONTLOG.txt": b"Fontlog fixture",
+    }
+    if rich:
+        fixed.update({
+            "assets/SourceMarkdown-fixture.js": b"export const proof=true;",
+            "assets/SourceMarkdown-fixture.css": b".source-markdown{color:inherit}",
+        })
+    if rich or notices:
+        fixed.update({
+            "third-party/deepseek-client-dependency-NOTICES.txt": b"Fixture dependency notice",
+            "third-party/deepseek-harness-LICENSE.txt": b"Fixture MIT notice",
+        })
+    for name, raw in fixed.items():
+        path = dist / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+
+
+@pytest.mark.parametrize("old_licensed", [False, True])
+def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inputs, monkeypatch, tmp_path, old_licensed):
+    """Must fail on an obsolete 4/10 index gate, not just pass earlier staging."""
+    old = tmp_path / ("old-licensed" if old_licensed else "old-noir")
+    make_dist(old / "app/mastermind_os", "oldnoir")
+    old.chmod(0o755)  # Preserve the real dual-service traversal requirement.
+    _expand_noir_dist(old / "app/mastermind_os", notices=old_licensed)
+    old_manifest = entry.build_os_asset_manifest(old)
+    assert len(old_manifest["files"]) == (11 if old_licensed else 9)
+    (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(old_manifest))
+    seals.create(old, inputs["old_sha"], inputs["old_tree"])
+    live = tmp_path / "live-rich.json"
+    live.write_bytes(m.canonical(fullconfig(old_manifest)))
+
+    def build_rich(app, **kw):
+        tools = make_dist(app, "rich")
+        _expand_noir_dist(app, rich=True)
+        return tools
+
+    monkeypatch.setattr(assets, "_build", build_rich)
+    new_bundle = tmp_path / "bundle-rich"
+    assets.prepare(source_repo=inputs["source_repo"], expected_sha=inputs["new_sha"],
+                   web_client_id="test-public-client", output=new_bundle,
+                   build_user="fixture", node=Path("/fixture/node"),
+                   npm_cli=Path("/fixture/npm"))
+    qualified = assets.qualify(new_bundle, expected_sha=inputs["new_sha"],
+                               tree_sha=inputs["new_tree"], source_repo=inputs["source_repo"])
+    new_manifest = entry.build_os_asset_manifest(new_bundle)
+    assert len(new_manifest["files"]) == 13
+    configured = {**inputs, "old_root": old, "live_config": live,
+                  "new_bundle": new_bundle, "new_digest": qualified.digest,
+                  "out": tmp_path / "stage-rich"}
+    receipt = m.stage_host(**configured)
+    descriptor = m.decode((configured["out"] / m.DESCRIPTOR).read_bytes())
+    assert len(descriptor["indexes"]["old"]) == (12 if old_licensed else 10)
+    assert len(descriptor["indexes"]["new"]) == 14
+    relay = InertRelay(configured)
+    monkeypatch.setattr(m, "_http", relay.http)
+    monkeypatch.setattr(m, "_listener", lambda port, pid: m.require(
+        (port, pid) == (49152, 123), "listener differs"))
+    monkeypatch.setattr(m, "_validate", lambda stage, phase, config: m.require(
+        m.decode(stage.read("prepare.json" if phase == "prepare" else "final.json")) == config,
+        "validation bytes differ"))
+    original = (configured, receipt, relay)
+    assert publish(original)["state"] == "PREPARED"
+    assert ready(original)["state"] == "CUTOVER_READY"
+    assert not any(event[:2] == ("GET", "new") for event in relay.events)
+    relay.selected = "new"  # Test-host switch only. The production owner remains external.
+    assert publish(original, "finalize")["state"] == "FINAL"
+    assert relay.events.count(("POST", "config")) == 2
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    assert "/os/assets/SourceMarkdown-fixture.js" in paths
+    assert "/os/assets/SourceMarkdown-fixture.css" in paths
+    assert "/os/assets/index-oldnoir.js" not in paths
+
+
+# --- Public COO route pair (#2120) ------------------------------------------------
+# The publisher is the existing owner of the whole-configuration capture. It
+# must stage the complete CEO+COO public-MCP pair and refuse a staged
+# configuration that no longer binds it.
+
+
+def public_mcp_branches(config):
+    """The two public-MCP matcher branches of a captured configuration."""
+    branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    metadata = [b for b in branches if b.get("match")
+                and b["match"][0]["method"] == ["GET"]
+                and b["match"][0]["path"][0].startswith("/.well-known/")]
+    transport = [b for b in branches if b.get("match")
+                 and b["match"][0]["method"] == ["POST"]
+                 and b["match"][0]["path"][0] == "/mcp"]
+    assert len(metadata) == 1 and len(transport) == 1
+    return metadata[0], transport[0]
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_binds_the_complete_public_coo_route_pair(inputs):
+    result = m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        live = json.loads(stage.read("live.json"))
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    # The observed live configuration carries the CEO-only pair.
+    meta, transport = public_mcp_branches(live)
+    assert meta["match"][0]["path"] == [MCP_METADATA_ROUTE]
+    assert transport["match"][0]["path"] == list(MCP_ROUTES)
+    # Both staged configurations carry the complete CEO+COO pair, with the
+    # metadata branch on the public Host and the transport branch on the
+    # gateway's loopback Host under its 64000-byte cap.
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+        assert meta["handle"][-1]["headers"]["request"]["set"]["Host"] == [HOST]
+        assert transport["handle"][-1]["headers"]["request"]["set"]["Host"] == ["127.0.0.1"]
+        assert transport["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert meta["handle"][-1]["headers"]["request"]["delete"] == [
+            "Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"]
+    assert result["published"] is False
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_accepts_an_already_complete_public_coo_pair(inputs):
+    # An observed edge that already carries the complete pair is staged with
+    # exactly the same bytes: the transition is idempotent, not a widening.
+    live = json.loads(inputs["live_config"].read_bytes())
+    meta, transport = public_mcp_branches(live)
+    meta["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+    transport["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
+    inputs["live_config"].write_bytes(m.canonical(live))
+    m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_staged_prepare_without_the_coo_route_pair_is_refused(staged):
+    i, r, relay = staged
+    stage_path = i["out"]
+    # Drop the COO path pair from the staged prepare configuration and repair
+    # the descriptor's own recorded digest, so only the publisher's independent
+    # recomputation can detect the stale binding.
+    with m.private(stage_path) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        meta, transport = public_mcp_branches(prepared)
+        meta["match"][0]["path"] = [MCP_METADATA_ROUTE]
+        transport["match"][0]["path"] = list(MCP_ROUTES)
+        raw = m.canonical(prepared)
+        descriptor = json.loads(stage.read(m.DESCRIPTOR))
+        descriptor["files"]["prepare.json"] = {"sha256": m.digest(raw), "bytes": len(raw)}
+        descriptor_raw = m.canonical(descriptor)
+    (stage_path / "prepare.json").write_bytes(raw)
+    (stage_path / m.DESCRIPTOR).write_bytes(descriptor_raw)
+    with pytest.raises(ValueError, match="transition bindings differ"):
+        publish(staged, stage_digest=m.digest(descriptor_raw))
+    assert ("POST", "config") not in relay.events

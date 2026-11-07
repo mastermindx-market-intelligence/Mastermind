@@ -1,0 +1,39 @@
+{
+  "mission": "Latent Capital Flow, Accumulation/Distribution & Predictive Market Rotation research",
+  "operation": "latent-pressure-research-20261014-chatgpt4-001",
+  "scope": "research/latent_pressure/2026-10-14 only; no purchases, production, schemas, deployment, trading or sizing",
+  "done_when": "Six decision-ready research deliverables plus actual retrospective pilot where data available, negative evidence retained, source/architecture/data feasibility and explicit next experiment",
+  "research_outcome": "COMPLETE: tested daily proxies fail promotion; true microstructure, dated event/breadth/options/network experiments remain conditional",
+  "protected_source": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "macro_observation": "eb55c8573d94700dde35b6ce5b9af23738c710c0",
+  "carrier": "Mastermind PR #1470, exact head branch research/latent-pressure-20261014",
+  "last_implementation_ref": "c3daf4fd119df4bc5c6fcbe2992e424aaacdaff7",
+  "effect_state": "Confirmed research commits and push only; no uncertain modifying call; no production effect",
+  "review": {
+    "micro-a": "terminal, NOT accepted as scientific evidence",
+    "options-b": "terminal, NOT accepted as scientific evidence",
+    "lp-20261014-stat-review-c": "terminal rc0, ACCEPTED reviewer with principal corrections; no independent data reacquisition claimed"
+  },
+  "do_not_redo": [
+    "Original frozen LP-ETF-01 run or accepted prefix/purge/hash tests unless relevant inputs/behavior change",
+    "No retry of blocked opaque bundle transfer; independent research writes only",
+    "No promotion of old Tensor/group_flow or new proxy families",
+    "No raw bars or reconstructive per-date predictions/forward returns in public repository"
+  ],
+  "private_returns": "Original private run remains in ignored results/; PRIVATE_RUN_MANIFEST records hashes; retain workspace until separately relocated and verified",
+  "artifacts": {
+    "full_dossier_markdown_sha256": "d9f502b4653329b4ea4696d64c26b5584de7646aa03d2611f6e6efa24a28ae32",
+    "full_dossier_pdf_sha256": "c16581555a21e0cac3929d8a4ae738f074d3be58c456ce589e0dbffded70a66b",
+    "pdf_pages": 29,
+    "delivery": "conversation artifact, expanded presentation of canonical dossier; not a second production authority"
+  },
+  "mode_capability": "Attended Web commission; source recommended Pro, actual UI mode not independently verified; Studio Direct M2 read/write and admitted economical Fabric verified, no automated Pro admission fabricated",
+  "uncertainties": [
+    "Later-vintage adjusted prices, split/volume share-basis not fully audited",
+    "Not a full incumbent or clean historical constituent/theme replay",
+    "No AUC confidence interval or matched pivot-base-rate acceptance",
+    "Positive new forecast alpha remains unproven"
+  ],
+  "next_action": "Research commission complete. Deliver verified artifacts and publication receipt. No production merge/deployment requested. Later predictive experiments remain conditional on the stated data and acceptance gates.",
+  "publication": "PR #1470 created and independently read back: open, unmerged, research-only"
+}

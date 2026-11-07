@@ -1,0 +1,32 @@
+--- a/tests/test_remote_sub.py
++++ b/tests/test_remote_sub.py
+@@ -83,7 +83,8 @@
+     source_files = runpy.run_path(
+         str(SCRIPT.parent / "support_bundle.py")
+     )["SOURCE_FILES"]
+-    names = sorted(source_files | {"support_bundle.py", "remote_sub_helpers.py"})
++    # The installed publisher binds pools.yaml from ../orch/fabric, not ext/.
++    names = sorted((source_files - {"pools.yaml"}) | {"support_bundle.py", "remote_sub_helpers.py"})
+     for name in names:
+         shutil.copy2(SCRIPT.parent / name, tmp_path / name)
+     policy = tmp_path.parent / "orch/fabric/pools.yaml"
+--- a/tests/test_fabric_task.py
++++ b/tests/test_fabric_task.py
+@@ -135,6 +135,7 @@
+         "task_complexity": "C2_COMPLEX_BOUNDED",
+         "escalation_reason": f"receipt${os.linesep}exact",
+         "requested_model": "glm-5.3",
++        "route_key": "explicit-example",
+     }
+     assert launched["argv"][6] == "glm-5.3"
+     assert launched["env"]["POOL_TASK_CLASS"] == "build"
+@@ -176,6 +177,9 @@
+         "task_complexity": "C2_COMPLEX_BOUNDED",
+         "escalation_reason": WITNESS,
+         "requested_model": "glm-5.3",
++        "new_macro_worktree": None,
++        "cpu_scope_percent": None,
++        "qualification_host": None,
+     }
+ 
+ 

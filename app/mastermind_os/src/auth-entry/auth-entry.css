@@ -1,0 +1,586 @@
+/* AuthEntry — standalone private-entry presentation.
+   Presentation only: all behavior arrives through supplied ReactNode props.
+   Existing semantic aliases only. Light deliberately uses white material and
+   restrained token-derived shadow; no parallel palette or accent edge. */
+
+.auth-entry,
+.auth-entry *,
+.auth-entry *::before,
+.auth-entry *::after {
+  box-sizing: border-box;
+}
+
+.auth-entry {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  line-height: 1.5;
+}
+
+.auth-entry--light {
+  --bg: var(--mx-light-bg);
+  --panel: var(--mx-light-panel);
+  --raised: var(--mx-light-panel2);
+  --border: var(--mx-light-line);
+  --text: var(--mx-light-text);
+  --muted: var(--mx-light-muted);
+  --brass: var(--mx-light-text);
+  --control-border: var(--mx-light-muted);
+  --hover: var(--mx-light-panel2);
+  --faint: var(--mx-light-muted);
+  --focus: var(--mx-light-ink-link);
+  color-scheme: light;
+}
+
+/* ---- Masthead ------------------------------------------------------- */
+
+.auth-entry__masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 112px;
+  padding: 24px 64px;
+  border-bottom: 1px solid var(--border);
+}
+
+.auth-entry__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--text);
+}
+
+.auth-entry--zh .auth-entry__brand {
+  letter-spacing: normal;
+}
+
+.auth-entry__brand-mark,
+.auth-entry__lock-mark {
+  flex: none;
+  display: block;
+  color: currentColor;
+}
+
+.auth-entry__brand-mark {
+  width: 36px;
+  height: 36px;
+  color: var(--brass);
+}
+
+.auth-entry__lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth-entry__lock-mark {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- Main grid ------------------------------------------------------- */
+
+.auth-entry__main {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 1536px;
+  margin: 0 auto;
+  padding: 76px 64px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.auth-entry__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 720fr) minmax(0, 500fr);
+  gap: 80px;
+  align-items: center;
+}
+
+/* ---- Brand story ----------------------------------------------------- */
+
+.auth-entry__story {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+
+.auth-entry__story-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.auth-entry__title {
+  margin: 0;
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  overflow-wrap: break-word;
+  max-width: 14ch;
+  font-family: var(--font-display);
+}
+
+.auth-entry--zh .auth-entry__title {
+  letter-spacing: normal;
+}
+
+.auth-entry__subtitle {
+  margin: 0;
+  font-size: 17px;
+  line-height: 26px;
+  color: var(--muted);
+  max-width: 44ch;
+  overflow-wrap: break-word;
+}
+
+.auth-entry__figure {
+  margin: 0;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.auth-entry__art {
+  display: block;
+  width: 100%;
+  height: 420px;
+  object-fit: contain;
+}
+
+/* ---- Sign-in panel --------------------------------------------------- */
+
+.auth-entry__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  min-width: 0;
+}
+
+.auth-entry--light .auth-entry__panel {
+  /* Restrained card shadow in light, deliberately not a glow. */
+  box-shadow: 0 12px 32px
+    color-mix(in srgb, var(--mx-light-text) 9%, transparent);
+}
+
+.auth-entry__eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* No forced uppercase or tracking for CJK copy. */
+.auth-entry--zh .auth-entry__eyebrow {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.auth-entry__panel-heading {
+  margin: 0;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.auth-entry--zh .auth-entry__panel-heading {
+  letter-spacing: normal;
+}
+
+.auth-entry__panel-body {
+  margin: 0;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--muted);
+  overflow-wrap: break-word;
+}
+
+.auth-entry__feedback {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  overflow-wrap: break-word;
+}
+
+/* Neutral raised waiting state: no spinner, no elapsed-time claim. */
+.auth-entry__waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+}
+
+.auth-entry__waiting-label {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.auth-entry__waiting-detail {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- Supplied control ------------------------------------------------ */
+
+.auth-entry__control {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.auth-entry__control > button {
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 20px;
+  border: none;
+  border-radius: var(--r-ctl);
+  background: var(--brass);
+  color: var(--bg);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  text-align: center;
+  cursor: pointer;
+}
+
+.auth-entry__control > button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.auth-entry__control > button:active:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+/* An actually disabled supplied control stays visually and functionally disabled. */
+.auth-entry__control > button:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
+
+.auth-entry__preferences {
+  min-width: 0;
+}
+
+.auth-entry__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+  text-align: center;
+  overflow-wrap: break-word;
+}
+
+/* ---- Reassurance + protected recovery work --------------------------- */
+
+.auth-entry__assurance {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+  overflow-wrap: break-word;
+}
+
+/* Guarded recovery content renders visibly, never inside a closed disclosure. */
+.auth-entry__protected {
+  min-width: 0;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.auth-entry__protected > :first-child {
+  margin-top: 0;
+}
+
+.auth-entry__protected > :last-child {
+  margin-bottom: 0;
+}
+
+.auth-entry__protected textarea,
+.auth-entry__protected input,
+.auth-entry__protected select {
+  max-width: 100%;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  font: inherit;
+}
+
+.auth-entry__protected textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+/* ---- Footer ---------------------------------------------------------- */
+
+.auth-entry__footer {
+  padding: 16px 64px 24px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- Narrow two-column (761–1200) ------------------------------------ */
+
+@media (max-width: 1200px) {
+  .auth-entry__masthead {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+
+  .auth-entry__main {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+
+  .auth-entry__grid {
+    gap: 40px;
+  }
+
+  .auth-entry__footer {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+}
+
+/* ---- Single column / phone (≤760) ------------------------------------ */
+
+@media (max-width: 760px) {
+  .auth-entry__masthead {
+    padding: 24px;
+    min-height: 88px;
+    border-bottom: 0;
+  }
+
+  .auth-entry__brand {
+    font-size: 26px;
+  }
+
+  .auth-entry__main {
+    padding: 24px 24px 32px;
+    gap: 16px;
+  }
+
+  .auth-entry__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .auth-entry__story {
+    gap: 16px;
+  }
+
+  .auth-entry__title {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .auth-entry__subtitle {
+    font-size: 15px;
+    line-height: 23px;
+    max-width: none;
+  }
+
+  .auth-entry__art {
+    height: 200px;
+  }
+
+  .auth-entry__panel {
+    padding: 24px;
+  }
+
+  .auth-entry__control > button {
+    min-height: 44px;
+  }
+
+  .auth-entry__footer {
+    padding: 12px 24px 24px;
+  }
+
+  /* signing_in on phone: the accessible h1 remains; the story copy is only
+     visually hidden so the panel follows the compact sculpture directly. */
+  .auth-entry--signing_in .auth-entry__story-copy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .auth-entry--signing_in .auth-entry__art {
+    height: 180px;
+  }
+}
+
+.auth-entry__entry {
+  min-width: 0;
+  width: 100%;
+  max-width: 500px;
+  justify-self: end;
+}
+.auth-entry__assurance {
+  margin: 24px 16px 0;
+}
+.auth-entry--light .auth-entry__control > button {
+  color: var(--mx-light-panel);
+}
+.auth-entry--light .auth-entry__figure {
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--noir-canvas);
+}
+.auth-entry--signing_in .auth-entry__control > button {
+  background: transparent;
+  border: 1px solid var(--control-border);
+  color: var(--text);
+}
+.auth-entry :is(button, summary, input, textarea, select):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+@media (max-width: 760px) {
+  .auth-entry__entry {
+    max-width: none;
+  }
+  .auth-entry__lock,
+  .auth-entry__subtitle {
+    display: none;
+  }
+  .auth-entry__title {
+    max-width: 14ch;
+  }
+  .auth-entry__assurance {
+    margin: 20px 4px 0;
+  }
+  .auth-entry--signing_in .auth-entry__main {
+    padding-top: 0;
+  }
+}
+
+.auth-entry__story-eyebrow {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-transform: uppercase;
+}
+.auth-entry:lang(zh-CN) .auth-entry__story-eyebrow {
+  text-transform: none;
+  letter-spacing: normal;
+}
+@media (max-width: 760px) {
+  .auth-entry__story-eyebrow {
+    display: none;
+  }
+}
+
+/* Entry keeps the incumbent preference disclosure secondary to Sign in.
+   Only this presentation wrapper changes; the owner, fields and focus stay. */
+.auth-entry__preferences .display-preferences {
+  max-width: none;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.auth-entry__preferences .display-preferences__toggle {
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-entry__preferences .display-preferences__toggle:hover {
+  color: var(--text);
+}
+
+/* The global hover selector must not override entry action semantics. */
+.auth-entry .auth-entry__control > button:hover:not(:disabled),
+.auth-entry .auth-entry__control > button:active:not(:disabled) {
+  background: var(--brass);
+  color: var(--bg);
+}
+.auth-entry.auth-entry--signing_in .auth-entry__control > button,
+.auth-entry.auth-entry--signing_in
+  .auth-entry__control
+  > button:hover:not(:disabled),
+.auth-entry.auth-entry--signing_in
+  .auth-entry__control
+  > button:active:not(:disabled) {
+  background: var(--raised);
+  color: var(--text);
+}
+.auth-entry__preferences .display-preferences__toggle:hover {
+  background: transparent;
+}
+
+.auth-entry__recovery-notice {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+.auth-entry__recovery-notice p {
+  margin: 0;
+}
+.auth-entry__protected-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  text-underline-offset: 3px;
+}
+.auth-entry__protected-link:focus-visible,
+.auth-entry__protected:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}

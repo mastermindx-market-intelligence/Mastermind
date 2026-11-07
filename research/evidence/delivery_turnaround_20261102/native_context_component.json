@@ -1,0 +1,21 @@
+{
+  "schema": "mastermind.delivery_component_observation.v1",
+  "observed_at": "2026-11-02T19:37:19.686039+00:00",
+  "scope": "provider-free cross-repository component qualification; not installed/native-model delivery",
+  "macro_candidate_sha": "c0658dfb69d38dfa37bf6235d7a161babdc3ef11",
+  "mastermind_procedure_sha": "fbce94601823718a22466a99aeea692679266a16",
+  "budget": 4000,
+  "owner_bundle_bytes": 27398,
+  "enveloped_context_bytes": 28605,
+  "native_context_cap_bytes": 32768,
+  "selected_handoff": "agentos/handoffs/WS-ORCHESTRATOR-PROJECT-CONTINUITY-2026-11-02.md",
+  "degraded_count": 2,
+  "omitted_count": 47,
+  "source_records_digest": "sha256:e18da8090d5c90fac047332a174e4c9ab522c807e14079100fb81dde30191dd3",
+  "bundle_sha256": "c19a041a497cf10eeb8043b896b8178dd8311fbff9a4dc5d1d72dc03864e6513",
+  "before_disposition": "AGENTOS_CONTEXT_DELIVERY_TOO_LARGE",
+  "after_disposition": "COMPLETE_CONTEXT_RETURNED",
+  "native_hook_installed": false,
+  "native_model_invoked": false,
+  "runtime_admission_or_custody_granted": false
+}

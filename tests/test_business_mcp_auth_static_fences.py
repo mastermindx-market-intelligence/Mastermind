@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 import subprocess
 import sys
 from pathlib import Path
@@ -34,8 +35,11 @@ def test_business_auth_dependencies_are_security_pinned() -> None:
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"mcp==1.28.1"' in text
     assert '"mcp==1.28.0"' not in text
-    assert '"PyJWT[crypto]==2.13.0"' in text
+    assert '"PyJWT[crypto]==2.14.0"' in text
     assert "business-mcp = [" in text
+    parsed = tomllib.loads(text)
+    business = parsed["project"]["optional-dependencies"]["business-mcp"]
+    assert "PyYAML==6.0.3" in business
 
 
 def test_security_dependencies_are_not_base_runtime_dependencies() -> None:
@@ -44,7 +48,7 @@ def test_security_dependencies_are_not_base_runtime_dependencies() -> None:
     assert "mcp==" not in base
     assert "PyJWT" not in base
     assert '"mcp==1.28.1"' in optional
-    assert '"PyJWT[crypto]==2.13.0"' in optional
+    assert '"PyJWT[crypto]==2.14.0"' in optional
 
 
 def test_pure_auth_modules_do_not_import_edge_or_control_plane_packages() -> None:

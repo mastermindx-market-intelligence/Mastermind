@@ -23,7 +23,32 @@ from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROT
 
 SCHEMA = "mastermind.subscription_provider_profiles/v1"
 DEFAULT_PROFILES_PATH = Path(__file__).resolve().parents[1] / "config" / "subscription_provider_profiles.v1.json"
-_ALLOWED_MODEL_CLASSES = frozenset({"routine", "hard", "fast", "subagent"})
+_ALLOWED_MODEL_CLASSES = frozenset({
+    "routine", "hard", "fast", "subagent",
+    "backend_coding", "frontend_visual", "adversarial_review",
+})
+_BYTEPLUS_SPECIALIST_CLASSES = frozenset({
+    "backend_coding", "frontend_visual", "adversarial_review",
+})
+
+# Current non-deprecated BytePlus Personal Coding Plan coding-tool models.
+# The dedicated vendor deprecation notice removes bytedance-seed-code,
+# glm-5.1, kimi-k2.5 and gpt-oss-120b (September 23, 2026), even though
+# some general setup pages still display those stale model IDs.
+# This is only an upper bound, not account/region/model availability proof.
+# Do not interpret this list as generic ModelArk PAYG inference entitlement.
+_BYTEPLUS_CODING_TOOL_MODELS = frozenset({
+    "ark-code-latest",  # Vendor-managed auto selection, not a fixed quality tier.
+    "dola-seed-2.0-pro",
+    "dola-seed-2.0-lite",
+    "dola-seed-2.0-code",
+    "glm-5.3-flash",
+    "glm-5.2",
+    "deepseek-v4.1-flash",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+})
+
 _FORBIDDEN_HARNESS_FIELDS = frozenset({"adapter_id", "harness_id"})
 
 _MAX_STRING_CHARS = 256
@@ -294,9 +319,14 @@ def _validate_quota(value: Any, path: str, *, provider: str, product: str) -> Ma
     return quota
 
 
-def _validate_usage_policy(value: Any, path: str) -> Mapping[str, Any]:
+def _validate_usage_policy(value: Any, path: str, *, supported_coding_agents: bool = False) -> Mapping[str, Any]:
     policy = _closed_mapping(value, path, _USAGE_POLICY_ALLOWED, required=frozenset(_USAGE_POLICY_REQUIRED))
-    for key, expected in _USAGE_POLICY_REQUIRED.items():
+    required = dict(_USAGE_POLICY_REQUIRED)
+    if supported_coding_agents:
+        # BytePlus explicitly documents Claude Code subagents and the Hermes
+        # background service. Individual coding-tool scope remains mandatory.
+        required.update(interactive_only=False, unattended_background_allowed=True)
+    for key, expected in required.items():
         _exact_bool(policy[key], f"{path}.{key}", expected=expected)
     for key in _USAGE_POLICY_OPTIONAL:
         if key in policy:
@@ -319,13 +349,46 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
     if protocol not in _ALLOWED_PROTOCOLS:
         _raise(f"profile {profile_id!r} has unsupported protocol")
     _validate_base_url(mapping.get("base_url"), f"{path}.base_url")
+    byteplus_plan = provider == "byteplus" or profile_id == "byteplus-coding-plan-personal"
+    if byteplus_plan:
+        if (profile_id, provider, product, protocol) != (
+            "byteplus-coding-plan-personal", "byteplus", "coding_plan_personal", "anthropic"
+        ):
+            _raise(f"{path}: reviewed BytePlus Coding Plan identity required")
+        if mapping.get("base_url") != "https://ark.ap-southeast.bytepluses.com/api/coding":
+            _raise(f"{path}.base_url: reviewed BytePlus Coding Plan endpoint required")
     if mapping.get("credential_binding") != _CREDENTIAL_BINDING:
         _raise(f"profile {profile_id!r} leaks credential authority")
     _exact_string(mapping.get("credential_binding"), f"{path}.credential_binding")
     models = _validate_models(mapping.get("models"), f"{path}.models")
+    if not byteplus_plan and _BYTEPLUS_SPECIALIST_CLASSES.intersection(models):
+        _raise(f"{path}.models: BytePlus specialist classes are not permitted here")
+    if byteplus_plan:
+        for model_class, item in models.items():
+            model = _model_identifier(item, f"{path}.models.{model_class}")
+            if model not in _BYTEPLUS_CODING_TOOL_MODELS:
+                _raise(f"{path}.models.{model_class}: unsupported BytePlus Coding Plan model")
+        if mapping.get("supported_tool_only") is not True:
+            _raise(f"{path}: BytePlus Coding Plan requires supported coding tools")
+        policy = mapping.get("usage_policy")
+        if not isinstance(policy, Mapping) or policy.get("single_user_only") is not True:
+            _raise(f"{path}: BytePlus Coding Plan requires single-user coding-tool use")
+        quota = mapping.get("quota_profile")
+        if not isinstance(quota, Mapping) or quota.get("tier") is not None:
+            _raise(f"{path}: BytePlus quota tier requires observed entitlement")
     default = mapping.get("default_model_class")
     if default not in models:
         _raise(f"profile {profile_id!r} default model class is absent")
+    if default != "routine":
+        _raise(f"profile {profile_id!r} default model class must remain routine")
+    if "subagent" in models and "routine" in models:
+        routine_model = _model_identifier(models["routine"], f"{path}.models.routine")
+        subagent_model = _model_identifier(models["subagent"], f"{path}.models.subagent")
+        if subagent_model != routine_model:
+            _raise(
+                f"profile {profile_id!r} subagent topology cannot select a different model; "
+                "classify the bounded child difficulty before provider selection"
+            )
     _exact_bool(mapping.get("supported_tool_only"), f"{path}.supported_tool_only")
     if mapping.get("activation_gate") != _ACTIVATION_GATE:
         _raise(f"profile {profile_id!r} weakens activation gate")
@@ -339,7 +402,8 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
         provider=provider,
         product=product,
     )
-    _validate_usage_policy(mapping.get("usage_policy"), f"{path}.usage_policy")
+    _validate_usage_policy(mapping.get("usage_policy"), f"{path}.usage_policy",
+                           supported_coding_agents=byteplus_plan)
     if "metadata" in mapping:
         _validate_metadata(mapping.get("metadata"), f"{path}.metadata")
     return mapping

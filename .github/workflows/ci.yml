@@ -17,33 +17,186 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # Source scope for PR and merge-group is derived from protected code.
+  # A changing/unverifiable queue, CI, security or source-law diff runs full CI.
+  pr_scope:
+    name: PR test scope
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-
+    timeout-minutes: 3
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      tier: ${{ steps.scope.outputs.tier }}
+      needs_node: ${{ steps.scope.outputs.needs_node }}
+      source_base: ${{ steps.scope.outputs.source_base }}
+      source_head: ${{ steps.scope.outputs.source_head }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - name: Classify integrated source diff using protected base code
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          trusted="$RUNNER_TEMP/ci-trusted-base"
+          mkdir -p "$trusted"
+          trusted_base="$PR_BASE_SHA"
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            trusted_base="$(git rev-parse --verify refs/remotes/origin/master 2>/dev/null || true)"
+          fi
+          if [ -n "$trusted_base" ] &&
+             git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&
+             git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
+            git archive "$trusted_base" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |
+              tar -x -C "$trusted"
+            if grep -q '^def classify_merge_group(' "$trusted/scripts/ci_pr_scope.py"; then
+              PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
+                --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
+                --event-type "$GITHUB_EVENT_NAME" --protected-base "$trusted_base" \
+                --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+            else
+              # First protected installation: legacy scope has no merge-group
+              # support and this PR modifies CI itself, so it must run FULL.
+              PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
+                --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
+                --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+            fi
+          else
+            printf 'mode=full\ntier=HOLD\nneeds_node=false\n' >> "$GITHUB_OUTPUT"
+            echo 'CI_SCOPE source not in protected base: required full suite'
+          fi
+
+  # Fast and standard integrated queue candidates reuse the same trusted,
+  # bounded PR checks; critical or unqualified groups run every full shard.
+  # The stable protected status context is still the final job named 'test'.
+  # Heavy work must stop when this same-PR run is superseded/cancelled.
+  # Keep the small final test gate on always() so cancellation cannot look green.
+  pr_fast:
+    name: PR fast checks
+    needs: [pr_scope]
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact changed source without executing untrusted PR text
+        env:
+          PR_BASE_SHA: ${{ needs.pr_scope.outputs.source_base }}
+          PR_HEAD_SHA: ${{ needs.pr_scope.outputs.source_head }}
+        run: |
+          set -euo pipefail
+          git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"
+          python -m compileall -q scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py
+      - uses: actions/setup-python@v5
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        with:
+          python-version: "3.12"
+          cache: pip
+      # Source-proximate web tests import app.deps through the real application.
+      # Supply the same immutable engine/lib source as the full-shard job;
+      # no runtime data, new credential policy or alternate dependency owner.
+      - name: Checkout pinned Macro engine for source-proximate tests
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Install focused Python test dependencies
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+      - name: Bounded source-proximate PR tests
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        env:
+          PR_BASE_SHA: ${{ needs.pr_scope.outputs.source_base }}
+          PR_HEAD_SHA: ${{ needs.pr_scope.outputs.source_head }}
+        run: >-
+          python -m scripts.ci_pr_smoke
+          --repo . --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
+      - uses: actions/setup-node@v4
+        if: ${{ needs.pr_scope.outputs.needs_node == 'true' }}
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+      - name: Typecheck affected web application
+        if: ${{ needs.pr_scope.outputs.needs_node == 'true' }}
+        run: |
+          npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
+          npm --prefix app/mastermind_os run typecheck
+
+  # Run each canonical, disjoint pytest shard on a separate hosted runner.
+  # This changes placement only, not discovery, exclusions, selected modules
+  # or the repository's one protected status context named "test".
+  pytest_shards:
+    name: pytest shard ${{ matrix.index }}
+    needs: [pr_scope]
+    # Critical/unqualified candidates and protected pushes retain full CI.
+    # Only signed, protected-source verified fast/smoke candidates skip shards.
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    # Only the test-shard job needs read-only workflow-run evidence.
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
+    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
+    # 60 minutes stays inside the merge queue's 100-minute check response limit.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        index: [0, 1, 2, 3, 4, 5]
+    steps:
+      # The immutable corpus anchor was squash-merged; branch history alone
+      # does not acquire its original commit. Reuse the existing checkout owner
+      # without executing anchor code, then restore the triggering event source.
+      - name: Acquire immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout event source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify event source and immutable fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
 
       # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
-      # A clean hosted runner has no sibling checkout behind that symlink, so
-      # app imports would otherwise depend on untracked workstation state.
-      # Pin the exact Macro engine revision used by this release and fetch only
-      # its importable code surface; runtime data remains VPS-owned and is never
-      # copied into CI or this repository.
-      # DEC:B1-MACRO-PRIVATE-CUTOVER -- macro is going private. The default
-      # `github.token` this job otherwise relies on is scoped to THIS
-      # repository only and cannot read another repo, so this checkout works
-      # today solely because mastermindx-market-intelligence/macro is still
-      # public. The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback
-      # keeps CI green right now (an undefined secret evaluates to an empty,
-      # falsy string, so behavior stays byte-identical to today) and keeps it
-      # green after the flip once the operator adds a read-only
-      # MACRO_CI_READ_TOKEN secret (fine-grained PAT or GitHub App
-      # installation token with Contents: Read on
-      # mastermindx-market-intelligence/macro, or an `ssh-key:` deploy-key
-      # equivalent) before or at the visibility flip.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
       - name: Checkout pinned Macro engine
         uses: actions/checkout@v4
         with:
@@ -56,6 +209,15 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -66,16 +228,323 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Fast deterministic release-source checks before expensive hosted work.
+      # Reuse the incumbent strict EVAL changed-path and fixed-role package
+      # tests without replacing or excluding any discovery-first shard.
+      # These run for every shard, with the same immutable checkout; failures
+      # stop the shard early and still fail the original protected test fan-in.
+      - name: Fast source-bound release preflight
+        run: >-
+          python -m pytest -q --tb=short
+          tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
+          tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
+          tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
+
+      # Non-pytest qualification is required once per immutable CI checkout.
+      # Failure of shard 0 also fails the exact required fan-in status.
+      - name: Verify Paper direct pinned MCP SDK
+        if: matrix.index == 0
+        run: |
+          PAPER_MCP_VENV="$RUNNER_TEMP/paper-direct-mcp-ci"
+          python -m venv "$PAPER_MCP_VENV"
+          "$PAPER_MCP_VENV/bin/python" -m pip install --disable-pip-version-check \
+            -r integrations/paper_desktop/requirements-mcp.txt
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
+
+      # Exercise the guarded Paper Studio prepare action in hosted CI.
+      # These Node tests are not included in the canonical pytest shard plan.
+      - name: Verify Paper Studio prepare guard
+        if: matrix.index == 0
+        working-directory: integrations/studio_direct_mcp
+        run: node --test paper-design.test.mjs
+
+      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
+        if: matrix.index == 0
+        working-directory: integrations/studio_direct_mcp
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
+          python -m unittest discover -s . -p 'private_service*test.py'
+          python -m unittest discover -s . -p 'control_bundle*test.py'
+
       - name: Compile source
+        if: matrix.index == 0
         run: >-
           python -m compileall -q
           app bot brain bridge common control_plane data_layer integrations loop
           portfolio scripts
 
       - name: Validate shell scripts
+        if: matrix.index == 0
         run: |
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      # Supplementary fast discrimination for the three observed Linux
+      # initializer failures. A green matrix still requires every full shard.
+      - name: H1 initializer Linux fast preflight
+        if: matrix.index == 2
+        run: >-
+          python -m pytest -q --tb=short -p scripts.ci_pytest_timing
+          tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup
+          tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook
+          tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+          tests/test_paid_initializer_nosite.py
+          tests/test_paid_initializer_sysconfig.py
+          tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed
+          tests/test_paid_provider_entry_linux.py
+
+      # A hosted runner may inherit a POSIX default ACL on an account HOME
+      # ancestor. Its negative refusal is not a real positive initializer.
+      # Require the positive in an isolated non-root Linux account whose HOME
+      # has no ACL, with real /usr/bin/python3.12, real process and observer.
+      # This Docker environment has no provider/host credentials or network.
+      - name: H1 required real Linux no-ACL positive journey
+        if: matrix.index == 2
+        run: |
+          set -euo pipefail
+          H1_CI_SOURCE="$(mktemp -d "${RUNNER_TEMP}/h1-public-source.XXXXXX")"
+          # Only tracked public source enters the fixture. In particular,
+          # checkout Git metadata and its authentication config stay outside.
+          git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"
+          chmod 0555 "$H1_CI_SOURCE"
+          docker build --file tests/h1_ci_fixture/Dockerfile \
+            --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --env MMX_H1_CONTROLLED_LINUX_FIXTURE=1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /home/mmx-h1-fixture:rw,exec,nosuid,nodev,uid=1555,gid=1555,mode=0700 \
+            --mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly" \
+            mastermind-h1-noacl:${{ github.sha }} \
+            /bin/sh -eu -c '
+              /usr/bin/python3.12 -B -m pytest -q --noconftest \
+                -p no:cacheprovider -p scripts.ci_pytest_timing --junitxml=/tmp/h1-positive.xml \
+                tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+              /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_positive.py /tmp/h1-positive.xml
+              echo "::notice title=H1 isolated initializer fixture proof::exact required node passed once; zero skipped, failures or errors; CI fixture only"
+              /usr/bin/python3.12 -B -m pytest -q --noconftest \
+                -p no:cacheprovider -p scripts.ci_pytest_timing --junitxml=/tmp/h1-provider-entry.xml \
+                tests/test_paid_provider_entry_linux.py
+              /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_provider_entry.py /tmp/h1-provider-entry.xml
+              echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
+            '
+
+      - name: Verify native application admission and dispatch custody
+        if: matrix.index == 0
+        run: |
+          python - <<'PYTEST'
+          import unittest
+          suite = unittest.TestSuite()
+          for pattern in (
+              "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
+              "test_application_http_admission.py", "test_application_http_realm_projection.py",
+              "test_bailian_application_handler_composition.py",
+              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
+              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
+          ):
+              suite.addTests(unittest.defaultTestLoader.discover(
+                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
+          PYTEST
+          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
+          trap 'rm -rf "$native_rollout_test_root"' EXIT
+          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            --junitxml="$native_rollout_test_root/native-proof.xml" \
+            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
+            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
+            tests/test_native_launcher_successor_transition.py
+          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
+
+      # A root-only finite owner must have positive proof, not skipped tests.
+      # The container receives only tracked public source and disposable tmpfs.
+      - name: Verify closed application transport in isolated root fixtures
+        if: matrix.index == 0
+        run: |
+          set -euo pipefail
+          application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
+          trap 'rm -rf "$application_transport_source"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$application_transport_source"
+          # The isolated root has no DAC override; expose only this public archive.
+          chmod 0755 "$application_transport_source"
+          docker build --file tests/application_tunnel_ci/Dockerfile \
+            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
+            mastermind-application-transport:${{ github.sha }}
+
+      # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
+      # This executes before any full-suite reuse decision, including merge_group.
+      - name: Checkout paired Brain production owner fixture
+        if: matrix.index == 0
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: f0375acf4ba076718e7cb420ed28ab61fb0a4f26
+          path: .ci-production-macro
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Verify actual Brain Fabric and production inference composition
+        if: matrix.index == 0
+        env:
+          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_BROWSER: "1"
+        run: |
+          set -euo pipefail
+          brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
+          trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
+          git archive HEAD brain bot common app control_plane portfolio \
+            scripts/translate_all.py \
+            tests/integration/test_production_inference_composition.py \
+            tests/integration/test_fabric_inference_composition.py \
+            tests/integration/test_fabric_translation_composition.py \
+            tests/integration/test_fabric_chat_inference_composition.py \
+            tests/integration/test_fabric_chat_buffered_delivery.py \
+            tests/integration/test_fabric_text_native_application.py \
+            tests/integration/test_fabric_chat_browser.py \
+            ops/native_fabric/quota_continuity \
+            ops/native_fabric/experiential_proxy/gateway.py |
+            tar -x -C "$brain_composition_root"
+          mkdir -p "$brain_composition_root/vendor/macro"
+          # Isolate synthetic owner configuration in a copy of the exact source.
+          cp -R "$GITHUB_WORKSPACE/.ci-production-macro/engine" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/lib" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/config" "$brain_composition_root/vendor/macro/"
+          touch "$brain_composition_root/vendor/macro/.fabric-composition-fixture"
+          export MM_FABRIC_FIXTURE_ROOT="$brain_composition_root/vendor/macro"
+          cd "$brain_composition_root"
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p 'test_*inference_composition.py' -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_buffered_delivery.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_native_application.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_translation_composition.py -v
+          python -m pip install --disable-pip-version-check playwright==1.62.0
+          python -m playwright install --with-deps chromium
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_browser.py -v
+
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
+      # No shard JOB is skipped. Existing non-pytest security gates always
+      # execute; only a previously green, same-SHA native merge-group proof
+      # may avoid re-executing the identical pytest module suite on a push.
+      # If proof is absent or uncertain, every shard executes normally.
+      - name: Verify exact prior merge-group CI
+        id: previous_ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_postmerge_proof
+
+      - name: Run repository test shard
+        if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
+        # Give best-effort upload an opportunity inside the 60-minute job.
+        # The prior 38-minute step timed out; its snapshot retained the final
+        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
+        # for setup/cleanup opportunity, not a guaranteed future bound.
+        # Slow setup or runner loss can still prevent artifact delivery.
+        timeout-minutes: 45
+        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
+
+      - name: Upload fixed test diagnostics
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fixed-diagnostics-${{ matrix.index }}
+          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
+
+  # Branch protection requires one stable context "test", on both PRs and
+  # native merge_group candidates. Every skipped matrix requires a proven
+  # exact integrated fast/smoke check; a missing or failed check stays red.
+  test:
+    name: test
+    needs: [pr_scope, pr_fast, pytest_shards]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate parser
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
       - name: Run repository test gate
-        run: python scripts/ci_pytest.py
+        env:
+          EVENT_TYPE: ${{ github.event_name }}
+          PR_SCOPE_STATUS: ${{ needs.pr_scope.result }}
+          PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
+          PR_FAST_STATUS: ${{ needs.pr_fast.result }}
+          SHARDS_STATUS: ${{ needs.pytest_shards.result }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then
+            if [ "$PR_SCOPE_STATUS" != success ]; then
+              echo "trusted source risk qualification unavailable"
+              exit 1
+            fi
+            case "$PR_SCOPE_MODE" in
+              full)
+                if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
+                  echo "critical/unqualified source must pass all six pytest shards"
+                  exit 1
+                fi
+                ;;
+              fast|smoke)
+                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then
+                  echo "eligible source must pass its exact fast/smoke check"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "no verified CI source scope"
+                exit 1
+                ;;
+            esac
+          else
+            # Protected pushes and deliberate manual CI always run all shards.
+            if [ "$SHARDS_STATUS" != success ] ||
+               [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then
+              echo "integration/release CI must pass the full matrix"
+              exit 1
+            fi
+          fi
+          # Revalidate the same canonical test discovery/exclusion/cover plan.
+          # Source-scoped checks never change canonical discovery.
+          python scripts/ci_pytest.py --plan-only --jobs 6
