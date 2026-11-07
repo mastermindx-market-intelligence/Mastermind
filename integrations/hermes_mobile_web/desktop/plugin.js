@@ -14,13 +14,15 @@ const PURPOSES = new Map(STAFF.map(([name, , purpose]) => [name, purpose]))
 const text = value => typeof value === 'string' && value.trim().length > 0
 export const routeKey = route => JSON.stringify([route.connectionId, route.profile, route.targetProfile])
 export const labelFor = route => LABELS.get(route.targetProfile) || route.profile.replace(/[-_]+/g, ' ')
+// Presentation key from the pinned Hermes Bot Mode contract, not a new bot identity.
+export const botWorkspaceKey = route => `bot:${route.connectionId}::${route.profile}`
+export const expectsHistory = row => Number.isFinite(row.live_message_count) ? row.live_message_count > 0 : Number.isFinite(row.message_count) ? row.message_count > 0 : true
 
 export function cleanRoutes(value) {
   if (!Array.isArray(value)) throw new Error('Invalid route inventory')
   const unique = new Map()
   for (const row of value) {
-    if (!row || !text(row.connectionId) || !text(row.profile) || !text(row.targetProfile) ||
-        !['local', 'remote'].includes(row.mode)) continue
+    if (!row || !text(row.connectionId) || !text(row.profile) || !text(row.targetProfile) || !['local', 'remote'].includes(row.mode)) continue
     const route = { connectionId: row.connectionId, profile: row.profile, targetProfile: row.targetProfile, mode: row.mode }
     if (row.primary === true) route.primary = true
     unique.set(routeKey(route), Object.freeze(route))
@@ -29,7 +31,7 @@ export function cleanRoutes(value) {
   return [...unique.values()].sort((a, b) => rank(a) - rank(b) || labelFor(a).localeCompare(labelFor(b)) || routeKey(a).localeCompare(routeKey(b)))
 }
 
-// No requests submit a turn or invent a session. Exact source descriptors cross every navigation seam.
+// No request submits a turn or creates a canonical chat. Native route descriptors cross every seam.
 export function createLauncher(api = host, epoch = gatewayActivationEpoch) {
   const state = atom({ routes: [], selected: null, sessions: [], loading: false, loadingChats: false, opening: false, error: '', historyError: '' })
   let inventory = 0, history = 0, disposed = false, sourceEpoch = epoch()
@@ -38,7 +40,9 @@ export function createLauncher(api = host, epoch = gatewayActivationEpoch) {
   const stale = () => put({ routes: [], selected: null, sessions: [], loading: false, loadingChats: false, opening: false, error: 'Connection changed. Refresh your team before opening a chat.' })
   const model = {
     state,
+    activate() { disposed = false },
     async refresh(preferred = '') {
+      if (disposed) return
       const request = ++inventory, stamp = epoch()
       ++history
       sourceEpoch = stamp
@@ -66,30 +70,50 @@ export function createLauncher(api = host, epoch = gatewayActivationEpoch) {
         if (request !== history || disposed) return
         if (!current(stamp)) return stale()
         if (!result || !Array.isArray(result.sessions) || (result.errors || []).length) throw new Error('History unavailable')
-        const rows = result.sessions.filter(row => row && text(row.id) && !row.hidden && !row.archived && !row.is_internal_child &&
-          (!row.profile || row.profile === route.targetProfile))
-        put({ sessions: [...new Map(rows.map(row => [row.id, { id: row.id, title: text(row.title) ? row.title : 'Untitled conversation' }])).values()], loadingChats: false })
+        const rows = result.sessions.filter(row => row && text(row.id) && !row.hidden && !row.archived && !row.is_internal_child && (!row.profile || row.profile === route.targetProfile))
+        put({ sessions: [...new Map(rows.map(row => [row.id, { id: row.id, title: text(row.title) ? row.title : 'Untitled conversation', expectHistory: expectsHistory(row) }])).values()], loadingChats: false })
       } catch {
         if (request === history && !disposed) put({ loadingChats: false, historyError: 'Conversation history could not be read. Nothing has been sent or moved.' })
       }
     },
     async open(id) {
       if (!current(sourceEpoch)) return stale()
-      const snapshot = state.get()
-      if (!snapshot.selected || snapshot.loadingChats || snapshot.opening || !snapshot.sessions.some(row => row.id === id)) return
-      const selected = snapshot.selected
+      const snapshot = state.get(), row = snapshot.sessions.find(item => item.id === id)
+      if (!snapshot.selected || snapshot.loadingChats || snapshot.opening || !row) return
       put({ opening: true, historyError: '' })
       try {
-        await api.openSession(id, { route: selected, profile: selected.targetProfile, intent: 'tab', expectHistory: true, awaitHydration: true, forceResume: true })
+        await api.openSession(id, { route: snapshot.selected, profile: snapshot.selected.targetProfile, intent: 'tab', expectHistory: row.expectHistory, awaitHydration: true, forceResume: true })
       } catch {
         put({ historyError: 'Hermes could not open that conversation. Return to the native history list; do not resend an uncertain message.' })
+      } finally { put({ opening: false }) }
+    },
+    async openBot() {
+      if (!current(sourceEpoch)) return stale()
+      const snapshot = state.get(), route = snapshot.selected, stamp = sourceEpoch, request = history
+      if (!route || snapshot.opening || snapshot.loadingChats) return
+      put({ opening: true, historyError: '' })
+      try {
+        const result = await api.requestProfile(route, 'session.list', { profile: route.targetProfile, title: 'Bot Chat', limit: 200, include_hidden: true }, undefined, { spawnPriority: 'foreground' })
+        if (disposed || request !== history) return
+        if (!current(stamp)) return stale()
+        if (!result || !Array.isArray(result.sessions)) throw new Error('Invalid canonical read')
+        const matches = result.sessions.filter(row => row && text(row.id) && !row.archived && !row.is_internal_child &&
+          (String(row.root_title || '').trim() === 'Bot Chat' || (!row.root_title && String(row.title || '').trim() === 'Bot Chat')))
+        if (matches.length !== 1) {
+          put({ historyError: 'The existing Bot Chat could not be uniquely confirmed. Open this agent in native Bot Mode; no replacement was created.' })
+          return
+        }
+        const row = matches[0], id = text(row.resolved_id) ? row.resolved_id : row.id
+        await api.openSession(id, { route, profile: route.targetProfile, intent: 'tab', expectHistory: expectsHistory(row), awaitHydration: true, forceResume: true, keepAllProfilesScope: true, workspaceMode: 'bots', workspaceOwnerKey: botWorkspaceKey(route), tabTitle: 'Bot Chat' })
+      } catch {
+        put({ historyError: 'The existing Bot Chat could not be opened. No new chat or message was created.' })
       } finally { put({ opening: false }) }
     },
     newChat() {
       if (!current(sourceEpoch)) return stale()
       const snapshot = state.get()
       if (!snapshot.selected || snapshot.opening || snapshot.loadingChats) return
-      api.newChat(snapshot.selected)
+      try { api.newChat(snapshot.selected) } catch { put({ historyError: 'A new draft could not be opened. Nothing was sent.' }) }
     },
     dispose() { disposed = true; ++inventory; ++history }
   }
@@ -113,25 +137,18 @@ const CSS = `
 
 export function MastermindPage({ api = host, epoch = gatewayActivationEpoch, installState }) {
   const model = useMemo(() => createLauncher(api, epoch), [api, epoch])
-  const view = useValue(model.state)
-  const gateway = useValue(api.state.gateway)
-  const profile = useValue(api.state.profile)
-  const install = useValue(installState)
+  const view = useValue(model.state), gateway = useValue(api.state.gateway), profile = useValue(api.state.profile), install = useValue(installState)
   const [showAll, setShowAll] = useState(false)
   useEffect(() => {
-    const preferred = new URLSearchParams(window.location.search).get('mastermind-agent') || ''
-    void model.refresh(preferred)
+    model.activate()
+    void model.refresh(new URLSearchParams(window.location.search).get('mastermind-agent') || '')
     return () => model.dispose()
-  }, [model])
-  useEffect(() => { if (view.routes.length && epoch() !== view.epoch && !view.loading) void model.refresh() }, [gateway, profile])
-  const staff = view.routes.filter(route => LABELS.has(route.targetProfile))
-  const others = view.routes.filter(route => !LABELS.has(route.targetProfile))
-  const selected = view.selected
-  const connected = gateway === 'open'
+  }, [model, gateway, profile])
+  const staff = view.routes.filter(route => LABELS.has(route.targetProfile)), others = view.routes.filter(route => !LABELS.has(route.targetProfile))
+  const selected = view.selected, connected = gateway === 'open'
   const cards = routes => routes.map(route => jsx('button', {
     type: 'button', className: 'mm-card', disabled: !connected || view.opening,
-    'aria-pressed': !!selected && routeKey(selected) === routeKey(route),
-    onClick: () => void model.select(routeKey(route)),
+    'aria-pressed': !!selected && routeKey(selected) === routeKey(route), onClick: () => void model.select(routeKey(route)),
     children: jsxs('span', { children: [jsx('strong', { children: labelFor(route) }), jsx('p', { className: 'mm-muted', children: PURPOSES.get(route.targetProfile) || 'Specialist conversations' }), jsx('small', { children: `Connection: ${route.connectionId}` })] })
   }, routeKey(route)))
   return jsxs('main', { className: 'mm-mobile', 'aria-label': 'Mastermind', children: [
@@ -142,11 +159,12 @@ export function MastermindPage({ api = host, epoch = gatewayActivationEpoch, ins
     jsx('section', { 'aria-label': 'Leadership', className: 'mm-grid', children: cards(staff) }),
     !view.loading && !staff.length && !view.error ? jsx('p', { children: 'No leadership profiles are available on this connection.' }) : null,
     selected ? jsxs('section', { className: 'mm-history', 'aria-label': 'Saved conversations', children: [
-      jsxs('div', { className: 'mm-row', children: [jsx('h2', { children: labelFor(selected) }), jsx('button', { type: 'button', disabled: !connected || view.opening || view.loadingChats, onClick: () => model.newChat(), children: 'New chat' })] }),
-      jsx('p', { className: 'mm-muted', children: 'Saved in Hermes. Opening a chat keeps its original agent and history.' }),
+      jsx('h2', { children: labelFor(selected) }),
+      jsxs('div', { className: 'mm-row', children: [jsx('button', { type: 'button', disabled: !connected || view.opening || view.loadingChats, onClick: () => void model.openBot(), children: 'Open Bot Chat' }), jsx('button', { type: 'button', disabled: !connected || view.opening || view.loadingChats, onClick: () => model.newChat(), children: 'New separate chat' })] }),
+      jsx('p', { className: 'mm-muted', children: 'Bot Chat is your persistent conversation. Separate chats keep their own history.' }),
       view.loadingChats ? jsx('p', { role: 'status', children: 'Reading conversations...' }) : null,
       view.opening ? jsx('p', { role: 'status', children: 'Opening in Hermes...' }) : null,
-      !view.loadingChats && !view.sessions.length && !view.historyError ? jsx('p', { children: 'No recent conversations. Start a new chat when ready.' }) : null,
+      !view.loadingChats && !view.sessions.length && !view.historyError ? jsx('p', { children: 'No recent separate conversations.' }) : null,
       jsx('ul', { className: 'mm-list', children: view.sessions.map(row => jsx('li', { children: jsx('button', { type: 'button', disabled: !connected || view.opening, onClick: () => void model.open(row.id), children: row.title }) }, row.id)) })
     ] }) : null,
     view.historyError ? jsx('p', { role: 'alert', children: view.historyError }) : null,
@@ -162,19 +180,18 @@ export function installMetadata(document, basePath, metadata) {
   if (base && !/^(\/[A-Za-z0-9_-]+)+$/.test(base)) throw new Error('Unsupported base path')
   const path = `${base}/api/plugins/${ID}`
   if (metadata.manifest !== `${path}/manifest.webmanifest` || metadata.icon !== `${path}/icon-192.png`) throw new Error('Unexpected metadata origin')
+  const existing = document.querySelector('link[rel="manifest"]')
+  if (existing && existing.getAttribute('href') !== metadata.manifest) throw new Error('Another application owns install metadata')
   const owned = []
   const add = (tag, attrs) => { const node = document.createElement(tag); Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value)); node.dataset.mastermindMobile = 'true'; document.head.append(node); owned.push(node) }
-  // Do not replace another application's manifest or compete with an existing install identity.
-  if (!document.querySelector('link[rel="manifest"]')) add('link', { rel: 'manifest', href: metadata.manifest, crossorigin: 'use-credentials' })
+  if (!existing) add('link', { rel: 'manifest', href: metadata.manifest, crossorigin: 'use-credentials' })
   if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' })
   if (!document.querySelector('meta[name="apple-mobile-web-app-title"]')) add('meta', { name: 'apple-mobile-web-app-title', content: 'Mastermind' })
   return () => owned.forEach(node => node.remove())
 }
 
 export default {
-  id: ID,
-  name: 'Mastermind Mobile',
-  defaultEnabled: false,
+  id: ID, name: 'Mastermind Mobile', defaultEnabled: false,
   register(ctx) {
     const installState = atom('unavailable')
     let disposed = false, cleanup = () => {}
