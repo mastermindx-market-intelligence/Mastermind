@@ -876,8 +876,12 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     jobs = workflow["jobs"]
     shards = jobs["pytest_shards"]
     gate = jobs["test"]
+    qualification = jobs["source_qualification"]
     assert workflow["permissions"] == {"contents": "read"}
     assert shards["permissions"] == {"contents": "read", "actions": "read"}
+    assert qualification["permissions"] == {"contents": "read"}
+    assert qualification["needs"] == shards["needs"] == ["pr_scope"]
+    assert qualification["timeout-minutes"] == 30
     assert shards["timeout-minutes"] == 60
     assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
@@ -886,6 +890,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards.get("continue-on-error", False) is False
     assert gate.get("continue-on-error", False) is False
+    assert qualification.get("continue-on-error", False) is False
 
     shard_steps = shards["steps"]
     test_steps = [
@@ -900,12 +905,19 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
     for name in (
         "Verify Paper direct pinned MCP SDK",
+        "Verify Paper Studio prepare guard",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source",
         "Validate shell scripts",
+        "Verify native application admission and dispatch custody",
+        "Verify closed application transport in isolated root fixtures",
+        "Checkout paired Brain production owner fixture",
+        "Verify actual Brain Fabric and production inference composition",
     ):
-        steps = [step for step in shard_steps if step.get("name") == name]
-        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
+        steps = [step for step in qualification["steps"] if step.get("name") == name]
+        assert len(steps) == 1 and "if" not in steps[0]
+        assert not any(step.get("name") == name for step in shard_steps)
+    assert all(step.get("continue-on-error", False) is False for step in qualification["steps"])
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
@@ -916,13 +928,13 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "source_qualification", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
     assert job["name"] == "test"
     assert job["runs-on"] == "ubuntu-latest"
     assert job["if"] == "${{ always() }}"
-    assert job["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    assert job["needs"] == ["pr_scope", "pr_fast", "pytest_shards", "source_qualification"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -930,8 +942,10 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
+    assert gate["env"]["QUALIFICATION_STATUS"] == "${{ needs.source_qualification.result }}"
     assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
     assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
+    assert '[ "$QUALIFICATION_STATUS" != success ]' in gate["run"]
     assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
     assert "exit 1" in gate["run"]
     assert "python scripts/ci_pytest.py --plan-only --jobs 6" in gate["run"]

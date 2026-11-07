@@ -150,7 +150,7 @@ class TestFabricFacadePort(unittest.TestCase):
         self.assertEqual(got["result_digest"],
                          hashlib.sha256(b"verified result").hexdigest())
         self.assertEqual([n for n, _ in self.facade.calls],
-                         ["fabric_status", "fabric_result"])
+                         ["fabric_status", "fabric_result", "fabric_status"])
 
     def test_wrong_native_session_cannot_read_result(self):
         got = json.loads(self.handle(

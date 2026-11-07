@@ -26,7 +26,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
         "push": {"branches": ["master"]},
         "workflow_dispatch": None,
     }
-    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pytest_shards", "test"}
+    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pytest_shards", "source_qualification", "test"}
     shards = data["jobs"]["pytest_shards"]
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
@@ -37,7 +37,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
     assert data["jobs"]["test"]["name"] == "test"
-    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards", "source_qualification"]
 
 
 def test_smoke_checkout_uses_the_full_shard_pinned_fixture_without_credentials():
@@ -143,7 +143,7 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             "index: [0, 1, 2, 3, 4, 5]",
             "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
-        ("needs: [pr_scope, pr_fast, pytest_shards]", "needs: []"),
+        ("needs: [pr_scope, pr_fast, pytest_shards, source_qualification]", "needs: []"),
         ("if: ${{ always() }}", "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
         ('if [ "$PR_SCOPE_STATUS" != success ]; then', "if [ \"$PR_SCOPE_STATUS\" = failure ]; then"),
@@ -162,13 +162,13 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4",
             "python -m scripts.ci_parallel_shard --jobs 6 --index 0 --workers 4",
         ),
-        ("if: matrix.index == 0", "if: matrix.index == 1"),
+        ("      - name: Compile source\n        run:", "      - name: Compile source\n        if: matrix.index == 1\n        run:"),
         (
-            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 0",
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime",
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 2",
         ),
         (
-            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 0",
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime",
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: false",
         ),
         (
@@ -177,10 +177,8 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             # Otherwise a new legitimate preflight silently redirects this
             # regression to the wrong tool and produces a false failure.
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n"
-            "        if: matrix.index == 0\n"
             "        working-directory: integrations/studio_direct_mcp",
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n"
-            "        if: matrix.index == 0\n"
             "        working-directory: integrations/wrong_mcp",
         ),
         (
@@ -498,30 +496,24 @@ def test_reuse_preserves_finite_existing_full_pytest_step_timeout(timeout) -> No
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
-@pytest.mark.parametrize("mutation", ["missing", "reuse-gated", "wrong-directory", "wrong-command", "continue-on-error", "after-pytest", "duplicate"])
+@pytest.mark.parametrize("mutation", ["missing", "reuse-gated", "wrong-directory", "wrong-command", "continue-on-error", "reordered", "duplicate"])
 def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
-    steps = workflow["jobs"]["pytest_shards"]["steps"]
-    # Add the exact already-released step for the RED pre-integration fixture.
-    guard = next((step for step in steps if step.get("name") == "Verify Paper Studio prepare guard"), None)
-    if guard is None:
-        guard = {"name": "Verify Paper Studio prepare guard", "if": "matrix.index == 0",
-                 "working-directory": "integrations/studio_direct_mcp",
-                 "run": "node --test paper-design.test.mjs"}
-        steps.insert(next(i for i, step in enumerate(steps) if step.get("id") == "previous_ci"), guard)
+    steps = workflow["jobs"]["source_qualification"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Verify Paper Studio prepare guard")
     fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
     if mutation == "missing":
         steps.remove(guard)
     elif mutation == "reuse-gated":
-        guard["if"] = "${{ matrix.index == 0 && steps.previous_ci.outputs.reuse != 'true' }}"
+        guard["if"] = "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     elif mutation == "wrong-directory":
         guard["working-directory"] = "."
     elif mutation == "wrong-command":
         guard["run"] = "echo skipped"
     elif mutation == "continue-on-error":
         guard["continue-on-error"] = True
-    elif mutation == "after-pytest":
+    elif mutation == "reordered":
         steps.remove(guard)
         steps.append(guard)
     else:
@@ -653,14 +645,14 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
 # Only canonical plan execution is replaced with a recording stub; separate
 # tests above prove the real discovery plan's exact six-shard coverage.
 _GATE_PASS_CASES = [
-    ("pull_request", "full", ("success", "skipped", "success")),
-    ("pull_request", "fast", ("success", "success", "skipped")),
-    ("pull_request", "smoke", ("success", "success", "skipped")),
-    ("merge_group", "full", ("success", "skipped", "success")),
-    ("merge_group", "fast", ("success", "success", "skipped")),
-    ("merge_group", "smoke", ("success", "success", "skipped")),
-    ("push", "", ("skipped", "skipped", "success")),
-    ("workflow_dispatch", "", ("skipped", "skipped", "success")),
+    ("pull_request", "full", ("success", "skipped", "success", "success")),
+    ("pull_request", "fast", ("success", "success", "skipped", "skipped")),
+    ("pull_request", "smoke", ("success", "success", "skipped", "skipped")),
+    ("merge_group", "full", ("success", "skipped", "success", "success")),
+    ("merge_group", "fast", ("success", "success", "skipped", "skipped")),
+    ("merge_group", "smoke", ("success", "success", "skipped", "skipped")),
+    ("push", "", ("skipped", "skipped", "success", "success")),
+    ("workflow_dispatch", "", ("skipped", "skipped", "success", "success")),
 ]
 
 
@@ -687,6 +679,7 @@ def _run_exact_workflow_gate(tmp_path, event, mode, states, *, plan_exit=0):
             "PR_SCOPE_STATUS": states[0],
             "PR_FAST_STATUS": states[1],
             "SHARDS_STATUS": states[2],
+            "QUALIFICATION_STATUS": states[3],
             "CI_GATE_TEST_CALLS": str(calls),
             "CI_GATE_TEST_PLAN_EXIT": str(plan_exit),
         }, capture_output=True, text=True, timeout=5,
@@ -706,7 +699,7 @@ def test_actual_shell_gate_accepts_only_the_complete_expected_path(
 @pytest.mark.parametrize("event,mode,states,field,bad_status", [
     (*case, field, bad_status)
     for case in _GATE_PASS_CASES
-    for field in range(3)
+    for field in range(4)
     for bad_status in ("success", "skipped", "failure", "cancelled", "", "unknown")
     if bad_status != case[2][field]
 ])
@@ -722,8 +715,8 @@ def test_actual_shell_gate_rejects_missing_failed_cancelled_or_wrong_job_states(
 
 @pytest.mark.parametrize("mode", ["", "HOLD", "FAST", "unqualified"])
 @pytest.mark.parametrize("states", [
-    ("success", "skipped", "success"),
-    ("success", "success", "skipped"),
+    ("success", "skipped", "success", "success"),
+    ("success", "success", "skipped", "skipped"),
 ])
 def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
     result, calls = _run_exact_workflow_gate(tmp_path, "pull_request", mode, states)
@@ -735,7 +728,7 @@ def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
 @pytest.mark.parametrize("mode", ["fast", "smoke"])
 def test_actual_shell_gate_never_uses_pr_fast_results_for_release(tmp_path, event, mode):
     result, calls = _run_exact_workflow_gate(
-        tmp_path, event, mode, ("success", "success", "skipped"),
+        tmp_path, event, mode, ("success", "success", "skipped", "skipped"),
     )
     assert result.returncode != 0
     assert calls == []
@@ -748,3 +741,61 @@ def test_actual_shell_gate_preserves_canonical_plan_failure(tmp_path, event, mod
     )
     assert result.returncode == 17
     assert calls == ["scripts/ci_pytest.py --plan-only --jobs 6"]
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing-job", "serial-after-shards", "shards-after-qualification", "actions-permission",
+    "no-timeout", "boolean-timeout", "excess-timeout", "continue-on-error", "fast-condition",
+])
+def test_source_qualification_cannot_be_skipped_serialized_or_expand_authority(mutation):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    jobs = workflow["jobs"]
+    job = jobs["source_qualification"]
+    assert job["needs"] == jobs["pytest_shards"]["needs"] == ["pr_scope"]
+    if mutation == "missing-job":
+        del jobs["source_qualification"]
+    elif mutation == "serial-after-shards":
+        job["needs"].append("pytest_shards")
+    elif mutation == "shards-after-qualification":
+        jobs["pytest_shards"]["needs"].append("source_qualification")
+    elif mutation == "actions-permission":
+        job["permissions"]["actions"] = "read"
+    elif mutation == "no-timeout":
+        del job["timeout-minutes"]
+    elif mutation == "boolean-timeout":
+        job["timeout-minutes"] = True
+    elif mutation == "excess-timeout":
+        job["timeout-minutes"] = 31
+    elif mutation == "continue-on-error":
+        job["continue-on-error"] = True
+    else:
+        job["if"] = fan._REQUIRED_PR_FAST_IF
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("name", [
+    "Verify Paper direct pinned MCP SDK",
+    "Verify native application admission and dispatch custody",
+    "Verify closed application transport in isolated root fixtures",
+    "Verify actual Brain Fabric and production inference composition",
+])
+@pytest.mark.parametrize("mutation", ["missing", "skipped", "false-success", "ignore-failure"])
+def test_extracted_native_and_browser_qualifications_preserve_actual_commands(name, mutation):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["source_qualification"]["steps"]
+    step = next(step for step in steps if step.get("name") == name)
+    if mutation == "missing":
+        steps.remove(step)
+    elif mutation == "skipped":
+        step["if"] = "false"
+    elif mutation == "false-success":
+        step["run"] = "echo passed"
+    else:
+        step["continue-on-error"] = True
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
