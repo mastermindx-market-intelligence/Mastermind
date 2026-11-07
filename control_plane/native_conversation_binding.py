@@ -148,3 +148,61 @@ def bind_installed_native_conversation(service, *, registration, current):
             service._native_conversation_binding_source = None
         raise
     return source
+
+
+def build_native_operator_selector(runtime, registration, primary_worker_id):
+    """Select existing ownership from canonical creator/claim facts only.
+
+    Recovery does not resolve fresh policy or model admission here. The original
+    remote factory still proves execution versus containment and exact physical
+    facts; this selector only keeps native and incumbent local paths distinct.
+    """
+    from control_plane.executive_runtime import Runtime, Attempt, Job
+    import copy
+    if (not isinstance(runtime, Runtime) or type(registration) is not NativeConversationRegistration
+            or type(primary_worker_id) is not str or not primary_worker_id
+            or primary_worker_id == registration.worker_id):
+        raise ValueError("native operator selector requires distinct original owners")
+    keys = ("attempt_id", "job_id", "worker_id", "quota_class", "fence_generation",
+            "lease_owner", "authority_policy_hash", "status", "execution_mode")
+    def select(attempt, supplied_job):
+        if not isinstance(attempt, Attempt) or not isinstance(supplied_job, Job):
+            raise ValueError("native operator selection requires a canonical claim")
+        job = runtime.jobs.get_job(attempt.job_id)
+        current = runtime.attempts.get_attempt(attempt.attempt_id)
+        if (job is None or current is None or current.job_id != job.job_id
+                or any(getattr(current, key) != getattr(attempt, key) for key in keys)
+                or job.current_attempt_id != current.attempt_id
+                or job.assigned_worker_id != current.worker_id
+                or job.assigned_quota_class != current.quota_class
+                or supplied_job.job_id != job.job_id or supplied_job.worktree != job.worktree
+                or supplied_job.constraints != job.constraints):
+            raise ValueError("native operator selection claim moved")
+        before = (copy.deepcopy(job), tuple(copy.deepcopy(getattr(current, key)) for key in keys))
+        creator = runtime.jobs.get_native_conversation_binding(job.job_id)
+        if creator is None:
+            if (current.worker_id != primary_worker_id
+                    or job.constraints.get("execution_profile_id") == DSH_NATIVE_CONVERSATION_PROFILE_ID
+                    or job.constraints.get("provider") == "acp"):
+                raise ValueError("unbound native or foreign claim cannot select the primary owner")
+            selected = False
+        else:
+            if (current.worker_id != registration.worker_id
+                    or current.quota_class != registration.quota_class
+                    or job.constraints.get("provider") != "acp"
+                    or job.constraints.get("execution_profile_id") != DSH_NATIVE_CONVERSATION_PROFILE_ID):
+                raise ValueError("native creator differs from its installed selection")
+            joined = read_remote_capacity_joins(runtime.workers,
+                [(current.worker_id, current.quota_class)])
+            if (len(joined) != 1 or joined[0].provider != "acp"
+                    or joined[0].capacity_join.host_ref != registration.host_ref
+                    or joined[0].capacity_join.worker_source_config_digest != registration.worker_source_config_digest):
+                raise ValueError("native original host/source registration moved")
+            selected = True
+        after_job = runtime.jobs.get_job(job.job_id)
+        after = runtime.attempts.get_attempt(current.attempt_id)
+        if (after is None or before != (after_job, tuple(getattr(after, key) for key in keys))
+                or runtime.jobs.get_native_conversation_binding(job.job_id) != creator):
+            raise ValueError("native operator ownership changed while selecting")
+        return selected
+    return select

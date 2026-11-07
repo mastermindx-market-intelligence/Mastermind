@@ -337,6 +337,7 @@ class BindingSelectionInputs:
     destination_present: bool
     prior_secretary_conversation: Mapping[str, Any] | None = None
     prior_meta_conversation: Mapping[str, Any] | None = None
+    prior_native_conversation: Mapping[str, Any] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -491,13 +492,14 @@ def compose_binding_candidate(
     prior_remote_transports: Sequence[Mapping[str, Any]],
     prior_secretary_conversation: Mapping[str, Any] | None = None,
     prior_meta_conversation: Mapping[str, Any] | None = None,
+    prior_native_conversation: Mapping[str, Any] | None = None,
 ) -> bytes:
     """The exact immutable Fabric-binding document ONE selection publishes.
 
     The pinned execution rows, transports and any qualified conversation
     members are carried over exactly. Only the requested host-read member
     replaces its prior selection. Legacy inputs retain the existing v3 bytes;
-    Secretary and dual-role inputs retain their v4/v5 schema respectively.
+    Secretary, dual-role and native inputs retain their v4/v5/v6 schema.
     A v1 binding with no transports contributes an empty transport list.
 
     This function composes bytes and nothing else.  The read member and the
@@ -508,12 +510,15 @@ def compose_binding_candidate(
 
     from control_plane.executive_fabric_composition import (
         HOST_READ_CONFIG_SCHEMA_VERSION, SECRETARY_CONFIG_SCHEMA_VERSION,
-        CONVERSATION_CONFIG_SCHEMA_VERSION,
+        CONVERSATION_CONFIG_SCHEMA_VERSION, NATIVE_CONFIG_SCHEMA_VERSION,
     )
 
     if (prior_secretary_conversation is not None and not isinstance(prior_secretary_conversation, Mapping)
             or prior_meta_conversation is not None and not isinstance(prior_meta_conversation, Mapping)
-            or prior_meta_conversation is not None and prior_secretary_conversation is None):
+            or prior_meta_conversation is not None and prior_secretary_conversation is None
+            or prior_native_conversation is not None and (
+                not isinstance(prior_native_conversation, Mapping)
+                or prior_secretary_conversation is None or prior_meta_conversation is None)):
         raise ComponentError('control_component_hermes_read_binding_conflict')
     document = {
         "schema_version": HOST_READ_CONFIG_SCHEMA_VERSION,
@@ -529,6 +534,9 @@ def compose_binding_candidate(
     if prior_meta_conversation is not None:
         document["schema_version"] = CONVERSATION_CONFIG_SCHEMA_VERSION
         document["hermes_meta_conversation"] = copy.deepcopy(dict(prior_meta_conversation))
+    if prior_native_conversation is not None:
+        document["schema_version"] = NATIVE_CONFIG_SCHEMA_VERSION
+        document["native_conversation"] = copy.deepcopy(dict(prior_native_conversation))
     return (json.dumps(
         document, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
     ) + "\n").encode("utf-8")
@@ -579,6 +587,7 @@ def compile_candidate(
             prior_remote_transports=selection.prior_remote_transports,
             prior_secretary_conversation=selection.prior_secretary_conversation,
             prior_meta_conversation=selection.prior_meta_conversation,
+            prior_native_conversation=selection.prior_native_conversation,
         )
         candidate_sha256 = digest(composed)
         destination = binding_destination(candidate_sha256)

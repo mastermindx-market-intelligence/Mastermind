@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import inspect
 import json
 import re
 import subprocess
@@ -153,6 +154,7 @@ RemoteAdapterFactory = Callable[
 
 # Installed host observations for the already-claimed Worker; no placement authority.
 ClaimedWorkspaceIdentitySource = Callable[[Attempt, Job], WorkspaceIdentity]
+ClaimedWorkspaceIdentitySelector = Callable[[Attempt, Job], bool]
 
 
 class ClaimedOperatorAdapterFactory(Protocol):
@@ -175,6 +177,7 @@ class ExecutiveOperatorSupervisor:
         instance_id: str = "executive-coo-operator",
         claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
         workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
+        workspace_identity_selector: ClaimedWorkspaceIdentitySelector | None = None,
         plan_schema_version: str | None = None,
         foreground_only: bool = False,
     ) -> None:
@@ -187,6 +190,13 @@ class ExecutiveOperatorSupervisor:
         ):
             raise ExecutiveOperatorSupervisorError(
                 "selected-host workspace identity requires a claim-aware factory"
+            )
+        if workspace_identity_selector is not None and (
+            not callable(workspace_identity_selector) or workspace_identity_source is None
+            or claimed_adapter_factory is None
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "workspace selection requires the original selected-host source and factory"
             )
         # ``None`` is legacy omission: the retained planner receipt alone decides
         # the contract. Any explicit value is a native-producer opt-in, including
@@ -216,6 +226,7 @@ class ExecutiveOperatorSupervisor:
         self.adapter_factory = adapter_factory
         self._claimed_adapter_factory = claimed_adapter_factory
         self._workspace_identity_source = workspace_identity_source
+        self._workspace_identity_selector = workspace_identity_selector
         self.prompt_source = prompt_source
         self.instance_id = instance_id
 
@@ -418,10 +429,27 @@ class ExecutiveOperatorSupervisor:
             )
         return value
 
+    def _workspace_source_for(self, job: Job, attempt: Attempt | None):
+        source = self._workspace_identity_source
+        selector = self._workspace_identity_selector
+        if source is None or selector is None:
+            return source
+        if attempt is None:
+            raise ExecutiveOperatorSupervisorError("workspace selection has no claimed Attempt")
+        try:
+            selected = selector(copy.deepcopy(attempt), copy.deepcopy(job))
+        except Exception:
+            raise ExecutiveOperatorSupervisorError("original workspace selection refused") from None
+        if type(selected) is not bool:
+            if inspect.iscoroutine(selected):
+                selected.close()
+            raise ExecutiveOperatorSupervisorError("workspace selection is not an exact boolean")
+        return source if selected else None
+
     def _workspace_identity(
         self, job: Job, attempt: Attempt | None = None
     ) -> WorkspaceIdentity:
-        source = self._workspace_identity_source
+        source = self._workspace_source_for(job, attempt)
         if source is not None:
             # Validate the logical identity without touching the host filesystem.
             base = job.constraints.get("base_sha")
@@ -703,6 +731,8 @@ class ExecutiveOperatorSupervisor:
             ),
             harness_binary_digest=harness_digest,
             harness_version=harness_version,
+            # Supply the claim to the original helper when host selection is
+            # composed. That helper alone decides remote versus local identity.
             workspace=(
                 self._workspace_identity(job, lease.attempt)
                 if self._workspace_identity_source is not None
@@ -1531,13 +1561,12 @@ class ExecutiveOperatorSupervisor:
             )
         # Remote physical identity is not a local Git source. Source-free Jobs
         # need no local read; strict commissions still require a qualified source.
+        selected_workspace = self._workspace_source_for(job, lease.attempt) is not None
         try:
             verified_commission = verify_commission_for_job(
                 self.runtime, job,
-                (None if self._workspace_identity_source is not None
-                 else Path(job.worktree).resolve(strict=True)),
-                owner_workspace_identity=(requested.workspace
-                    if self._workspace_identity_source is not None else None),
+                (None if selected_workspace else Path(job.worktree).resolve(strict=True)),
+                owner_workspace_identity=(requested.workspace if selected_workspace else None),
             )
         except Exception as exc:
             raise ExecutiveOperatorSupervisorError(
@@ -2109,7 +2138,8 @@ class ExecutiveOperatorSupervisor:
             verified_commission = None
             if not containment:
                 owner_workspace_identity = None
-                if self._workspace_identity_source is not None:
+                selected_workspace = self._workspace_source_for(job, lease.attempt) is not None
+                if selected_workspace:
                     # The selected-host identity is only ever the canonical
                     # Runtime-sealed requested workspace of the exact current
                     # G1 writer under this exact recovery lease, re-proven
@@ -2122,7 +2152,7 @@ class ExecutiveOperatorSupervisor:
                         self.runtime,
                         job,
                         (Path(job.worktree).resolve(strict=True)
-                         if job.worktree and self._workspace_identity_source is None
+                         if job.worktree and not selected_workspace
                          else None),
                         owner_workspace_identity=owner_workspace_identity,
                     )

@@ -563,13 +563,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '64af8405aa7981c9868e14ffe7f1912d2c326bb37c976ec223e14c42ec49b61b',
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '26486f7128653f8e5f39a4e04c0d578394399ae906f460a2f7fde83e5db6edf1',
  'sites': ((349, 24, 27, 'int', '501'),
            (6961, 35, 37, 'int', '80'),
            (6962, 50, 55, 'int', '0o755'),
            (7825, 41, 46, 'int', '0o644'),
            (8593, 64, 69, 'int', '0o644'),
-           (10005, 41, 46, 'int', '0o644'))}
+           (10010, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.

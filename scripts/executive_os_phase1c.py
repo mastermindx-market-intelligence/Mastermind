@@ -1987,6 +1987,12 @@ def _service_from_config(
         if (claimed_operator_adapter_factory is None and remote_operator_binding_source is None
                 or raw.get("coo_operator_harness_armed") is not True):
             raise ServiceError("native conversation requires the existing armed claimed factory")
+        selected_worker = native_conversation_composition.registration.worker_id
+        if (selected_worker == str(raw.get("worker_id") or "codex-01")
+                or any(binding.worker_id == selected_worker
+                       for source in (fabric_worker_binding_source, paid_worker_binding_source)
+                       if source is not None for binding in source.bindings)):
+            raise ServiceError("native conversation cannot replace an existing execution owner")
         try:
             native_conversation_composition.require_current()
         except Exception:
@@ -2341,6 +2347,7 @@ def _service_from_config(
 
         factory = claimed_operator_adapter_factory
         workspace_source = None
+        workspace_selector = None
         if remote_operator_binding_source is not None:
             from control_plane.remote_attempt_transport import (
                 build_claimed_remote_operator_factory,
@@ -2350,6 +2357,17 @@ def _service_from_config(
             workspace_source = build_claimed_remote_workspace_identity_source(
                 runtime, remote_operator_binding_source
             )
+            if native_conversation_composition is not None:
+                from control_plane.native_conversation_binding import build_native_operator_selector
+                workspace_selector = build_native_operator_selector(
+                    runtime, native_conversation_composition.registration, config.worker_id)
+                native_factory = factory
+                def selected_factory(attempt, requested, loader, *, recovery):
+                    job = runtime.jobs.get_job(attempt.job_id)
+                    selected = workspace_selector(attempt, job)
+                    owner = native_factory if selected else primary_factory
+                    return owner(attempt, requested, loader, recovery=recovery)
+                factory = selected_factory
         if native_conversation_composition is not None:
             # Runtime and namespace custody exist here; listeners are not accepting.
             # This joins the original registration and never creates a Worker.
@@ -2361,6 +2379,7 @@ def _service_from_config(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
             workspace_identity_source=workspace_source,
+            workspace_identity_selector=workspace_selector,
             foreground_only=config.coo_foreground_only,
             prompt_source=(sealed_supervisor.primary
                            if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
@@ -3407,8 +3426,25 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         from integrations.mastermind_workspace_app.project_git_identity import InstalledProjectGitIdentity
         source_git_identity = InstalledProjectGitIdentity(config_path=config_path,
             expected_config_sha256=hashlib.sha256(config_path.read_bytes()).hexdigest())
+    native_composition = (physical_source.native_conversation_composition()
+                          if physical_source is not None else None)
+    if native_composition is not None:
+        from control_plane.native_conversation_binding import NativeConversationHostComposition
+        original_native_composition = native_composition
+        native_control_sha256 = control_attestation["config_sha256"]
+        def require_native_composition_current():
+            current = content_attestation_loader()
+            if (current["config_sha256"] != native_control_sha256
+                    or _sha256_file(config_path) != native_control_sha256):
+                raise ServiceError("native composition cannot rebind Control configuration")
+            original_native_composition.require_current()
+        native_composition = NativeConversationHostComposition(
+            original_native_composition.registration, require_native_composition_current)
     service = _service_from_config(
         raw,
+        native_conversation_composition=native_composition,
+        remote_operator_binding_source=(physical_source.remote_operator_binding
+                                        if native_composition is not None else None),
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
         secretary_binding_source=physical_source,
         byok_roles_reader=physical_source.hermes_roles_reader() if physical_source is not None else None,

@@ -391,3 +391,56 @@ Worker/account binding. Previously denied live-config and Fabric lanes remain
 closed. The signed-in packaged DeepSeek journey, actual eligible tool
 invocation/settlement and installed source/routing evidence are still owed.
 Hermes #2180 remains separately merged and proven; its canary is not repeated.
+
+
+## C22: original installed composition and incumbent owner preservation
+
+The existing root-pinned Fabric composition now accepts a closed v6 native slot
+alongside its preserved Hermes Secretary/Meta selections. The slot contains only
+the original five Worker/quota/model-alias/host/source selectors and expected
+binary, configuration and workspace facts. It reuses the same enrolled host
+transport; it cannot choose another endpoint, grant capabilities, enable a
+profile, register a Worker or supply executable callbacks.
+
+The existing installed Control entry joins that source to its original
+configuration attestation and deferred Runtime binder. A single canonical
+Job/Attempt selector feeds the existing claimed factory and workspace source.
+Native creator/Worker/quota/host/source mismatches refuse. The primary Codex
+factory remains byte-identical and retains its original client and local
+workspace/commission path. Native recovery uses the original sealed workspace
+identity and does not invoke launch observation or fresh model admission.
+
+The existing component updater also preserves the native slot. A compatible
+Hermes host-read update carries the complete v6 document through the same
+candidate compiler and transaction. Recovery reconstructs the exact candidate
+from the sealed prior bytes. The original effect lists, plan, apply, reconcile,
+publication methods and lifecycle owners are unchanged.
+
+Qualification in
+[the C22 evidence](../../research/evidence/deepseek-native-installed-composition-20261107.json):
+
+- **295** composition, transport, primary/local commission and recovery tests passed.
+- **558** component-update/autonomy tests passed, including native slot
+  preservation, source-retarget refusal before effects and original-byte
+  recovery without republication.
+- **412** final source regression cases passed, including the installed wrapper,
+  Control-config withdrawal, identity review, operator/Claude profiles,
+  startup and Unix listener custody.
+
+The broader run exposed an older Claude fixture missing the original Runtime
+job-reader interface. The same failure was reproduced with the committed C21
+method. The fixture now supplies the absent-native-creator read and exact job ID;
+all original test assertions and production checks remain.
+
+Two exact source review records were updated after comparing their protected
+owners. The installed event-loop and primary factory are byte-identical.
+All six autonomy identity literals and their enclosing owner ASTs are unchanged;
+only the final literal's line coordinate moves from 10005 to 10010.
+No scanner rule, topology allowance or assertion was relaxed.
+
+This is installed-source composition, not a change to installed configuration.
+The native candidate remains disabled until actual original launch, account,
+capability and confinement owners qualify it. Next: retain the exact broker
+materialization/adapter through native start uncertainty, supply the
+same-process original launcher and actual observer, then prove the signed-in
+packaged journey. Existing service and provider state were not modified.

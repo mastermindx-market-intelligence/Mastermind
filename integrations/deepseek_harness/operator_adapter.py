@@ -137,9 +137,10 @@ class NativeOperatorAdapter:
             # The original future remains owned. Never cancel or replay it.
             raise NativeEffectUnknown("NATIVE_OHF_CALL_OUTCOME_UNOBSERVED") from exc
 
-    def describe_capabilities(self):
+    @classmethod
+    def describe_capabilities(cls):
         return HarnessAdapterCapabilities(
-            self.interface_version,
+            cls.interface_version,
             ("describe_capabilities", "validate_requested_profile", "start_session", "begin_turn",
              "read_events", "interrupt_turn", "collect_candidate_result", "graceful_stop", "cancel", "reconcile"),
             ("resume_session",), True, False, False, False, False, False, False, True,

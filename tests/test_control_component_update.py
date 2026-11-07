@@ -3555,7 +3555,7 @@ def test_the_selection_is_part_of_the_same_pending_source_upgrade(
     assert host.commands == []
     assert host.binding_publications == []
 
-def _prior_role_conversations(tmp_path, dual):
+def _prior_role_conversations(tmp_path, dual, native=False):
     from control_plane import executive_fabric_composition as composition
     member = _hermes_read_member(tmp_path)
     secretary = dict(member, schema=composition.HERMES_SECRETARY_HOST_SCHEMA,
@@ -3563,9 +3563,20 @@ def _prior_role_conversations(tmp_path, dual):
         session_id="secretary-session", profile_id="secretary-profile", principal_id="principal-1")
     meta = dict(secretary, schema=composition.HERMES_META_HOST_SCHEMA, root_id="meta-root",
         root_job_id="JOB-002", work_ref="WS:META", session_id="meta-session", profile_id="meta-profile")
+    native_slot = None
+    if native:
+        assert dual
+        native_slot = dict(schema=composition.NATIVE_OPERATOR_HOST_SCHEMA,
+            registration=dict(worker_id="native-fixture", quota_class="dsh-native",
+                model_alias="dsh.native.conversation", host_ref=member["host_ref"],
+                worker_source_config_digest="e" * 64),
+            harness_binary_digest="f" * 64, harness_version="fixture-native-only",
+            expected_config_digest="d" * 64,
+            workspace=dict(workspace_path="/selected-host/workspace", base_sha="a" * 40,
+                           device=1, inode=2, uid=501, gid=20))
     raw = ccu.compose_binding_candidate(input_document=member, prior_bindings=[],
         prior_remote_transports=[], prior_secretary_conversation=secretary,
-        prior_meta_conversation=meta if dual else None)
+        prior_meta_conversation=meta if dual else None, prior_native_conversation=native_slot)
     # The paired-selection operation requires changed selector coordinates.
     # Preserve the full prior semantics with its original compact serialization;
     # the new immutable artifact is rendered by the incumbent pretty composer.
@@ -3576,9 +3587,9 @@ def _prior_role_conversations(tmp_path, dual):
     return str(path), hashlib.sha256(raw).hexdigest(), json.loads(raw)
 
 
-@pytest.mark.parametrize("dual", [False, True])
-def test_control_update_preserves_complete_role_conversations(host, publisher, tmp_path, root_owned_files, dual):
-    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+@pytest.mark.parametrize("dual,native", [(False, False), (True, False), (True, True)])
+def test_control_update_preserves_complete_role_conversations(host, publisher, tmp_path, root_owned_files, dual, native):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual, native)
     _select_binding(host, prior_path, prior_digest)
     path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
     _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
@@ -3588,15 +3599,15 @@ def test_control_update_preserves_complete_role_conversations(host, publisher, t
     assert hashlib.sha256(Path(prior_path).read_bytes()).hexdigest() == prior_digest
 
 
-@pytest.mark.parametrize("dual", [False, True])
+@pytest.mark.parametrize("dual,native", [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("field,value", [
     ("host_ref", "host-" + "f" * 64),
     ("expected_host_binding_sha256", "f" * 64),
     ("expected_implementation_sha", "f" * 40),
 ])
 def test_control_update_refuses_conversation_source_retarget_before_effect(
-        host, tmp_path, root_owned_files, dual, field, value):
-    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+        host, tmp_path, root_owned_files, dual, native, field, value):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual, native)
     _select_binding(host, prior_path, prior_digest)
     changed = dict(prior["hermes_role_metadata_read"], **{field: value})
     path, digest = _hermes_input(tmp_path, changed)
@@ -3606,10 +3617,10 @@ def test_control_update_refuses_conversation_source_retarget_before_effect(
     assert caught.value.code == "control_component_hermes_read_binding_conflict"
     assert host.files.data == before and host.binding_publications == [] and host.commands == []
 
-@pytest.mark.parametrize("dual", [False, True])
+@pytest.mark.parametrize("dual,native", [(False, False), (True, False), (True, True)])
 def test_role_conversation_recovery_keeps_original_bytes_without_republication(
-        host, publisher, tmp_path, root_owned_files, dual):
-    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+        host, publisher, tmp_path, root_owned_files, dual, native):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual, native)
     _select_binding(host, prior_path, prior_digest)
     path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
     planned = _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)

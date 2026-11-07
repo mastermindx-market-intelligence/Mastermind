@@ -9107,6 +9107,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         prior_transports: tuple[Mapping[str, Any], ...] = ()
         prior_secretary_conversation = None
         prior_meta_conversation = None
+        prior_native_conversation = None
         prior_raw = b""
         prior_binding_sha256 = ""
         if selector_present:
@@ -9143,6 +9144,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             prior_transports = tuple(prior_document.get("remote_transports") or ())
             prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
             prior_meta_conversation = prior_document.get("hermes_meta_conversation")
+            prior_native_conversation = prior_document.get("native_conversation")
             prior_binding_sha256 = sha256_bytes(prior_raw)
             if "canonical_paid_fabric" in control and (
                 prior_bindings or prior_transports
@@ -9160,6 +9162,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             prior_remote_transports=prior_transports,
             prior_secretary_conversation=prior_secretary_conversation,
             prior_meta_conversation=prior_meta_conversation,
+            prior_native_conversation=prior_native_conversation,
         )
         try:
             # Use the actual consumer's byte ceiling before the transaction
@@ -9197,6 +9200,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             "prior_remote_transports": prior_transports,
             "prior_secretary_conversation": prior_secretary_conversation,
             "prior_meta_conversation": prior_meta_conversation,
+            "prior_native_conversation": prior_native_conversation,
             "prior_raw": prior_raw,
             "prior_binding_sha256": prior_binding_sha256,
             "prior_selector_present": selector_present,
@@ -9342,6 +9346,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                     prior_remote_transports=binding["prior_remote_transports"],
                     prior_secretary_conversation=binding["prior_secretary_conversation"],
                     prior_meta_conversation=binding["prior_meta_conversation"],
+                    prior_native_conversation=binding["prior_native_conversation"],
                     input_sha256=binding["input_sha256"],
                     prior_binding_sha256=binding["prior_binding_sha256"],
                     prior_selector_present=binding["prior_selector_present"],
@@ -10669,24 +10674,31 @@ def _reconcile_control_component_update(
                 prior_transports = ()
             # The original sealed candidate identifies its composition policy.
             # Historical v3 transactions retain their original bytes even when
-            # an older writer omitted a prior conversation. New v4/v5 candidates
+            # an older writer omitted a prior conversation. New v4/v5/v6 candidates
             # preserve the complete matching prior family; never reinterpret a
             # claimed transaction from fresh installed selections.
             prior_secretary_conversation = None
             prior_meta_conversation = None
+            prior_native_conversation = None
             candidate_schema = candidate_document.get("schema_version")
             if candidate_schema in (
                 composition.SECRETARY_CONFIG_SCHEMA_VERSION,
                 composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                composition.NATIVE_CONFIG_SCHEMA_VERSION,
             ):
                 if prior_document.get("schema_version") != candidate_schema:
                     raise TransactionEffectUnknown()
                 prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
                 if type(prior_secretary_conversation) is not dict:
                     raise TransactionEffectUnknown()
-                if candidate_schema == composition.CONVERSATION_CONFIG_SCHEMA_VERSION:
+                if candidate_schema in (composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+                                        composition.NATIVE_CONFIG_SCHEMA_VERSION):
                     prior_meta_conversation = prior_document.get("hermes_meta_conversation")
                     if type(prior_meta_conversation) is not dict:
+                        raise TransactionEffectUnknown()
+                if candidate_schema == composition.NATIVE_CONFIG_SCHEMA_VERSION:
+                    prior_native_conversation = prior_document.get("native_conversation")
+                    if type(prior_native_conversation) is not dict:
                         raise TransactionEffectUnknown()
             elif candidate_schema != composition.HOST_READ_CONFIG_SCHEMA_VERSION:
                 raise TransactionEffectUnknown()
@@ -10696,6 +10708,7 @@ def _reconcile_control_component_update(
                 prior_remote_transports=prior_transports,
                 prior_secretary_conversation=prior_secretary_conversation,
                 prior_meta_conversation=prior_meta_conversation,
+                prior_native_conversation=prior_native_conversation,
             )
         except (composition.FabricCompositionError, KeyError, OSError, ValueError) as exc:
             raise TransactionEffectUnknown() from exc
@@ -10714,6 +10727,7 @@ def _reconcile_control_component_update(
             prior_remote_transports=prior_transports,
             prior_secretary_conversation=prior_secretary_conversation,
             prior_meta_conversation=prior_meta_conversation,
+            prior_native_conversation=prior_native_conversation,
             input_sha256=str(member["input_sha256"]),
             prior_binding_sha256=str(member["prior_binding_sha256"]),
             prior_selector_present=bool(member["prior_selector_present"]),

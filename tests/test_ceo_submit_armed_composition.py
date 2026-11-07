@@ -1608,12 +1608,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # compose through the existing SessionBridge and COO owners. JSON/config
     # cannot mint that native source or arm COO effects. The installed entry
     # AST and all original mutation refusals remain unchanged; no additional
-    # event loop or execution call is admitted.
+    # event loop or execution call is admitted. The native pinned selection
+    # joins the existing claimed factory and keeps primary_factory byte-identical;
+    # its config-currentness wrapper adds no listener, runner or registration.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '59172e6faee7a48ba7d922051024bcf97d5097fd20613b85d3339f111ce1ab25'):
+            'b0517d97cc38675724353928743dceae3c4630b9575533ef5cc5618b4265ce0d'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
