@@ -99,6 +99,71 @@ class TestFabricFacadePort(unittest.TestCase):
         return json.loads(self.handle({"action": action, "task_key": "build-once",
             **options}, session_id="session-owned"))
 
+    def test_effective_identity_requires_matching_native_status_and_continuation(self):
+        self.facade.state = "TERMINAL"
+        original = self.facade.call_tool
+        for case in ("malformed", "oversized", "nested_mismatch", "missing_continuation", "foreign_continuation"):
+            def changed(name, args):
+                raw = original(name, args)
+                if case == "malformed":
+                    raw["effective_run_id"] = "bad identity"
+                elif case == "oversized":
+                    raw["effective_run_id"] = "x" * 129
+                elif case == "nested_mismatch":
+                    raw["status"]["run_id"] = "other"
+                else:
+                    raw["effective_run_id"] = raw["status"]["run_id"] = "successor"
+                    if case == "foreign_continuation":
+                        raw["status"]["continuation"] = {
+                            "requested_run_id": "foreign", "effective_run_id": "successor"}
+                return raw
+            with self.subTest(case=case), self.assertRaisesRegex(Exception, "FABRIC_STATUS_"):
+                FabricFacadePort(changed).status(self.grant, self.run_id)
+
+    def test_original_absence_allows_only_matching_continuation(self):
+        original = self.facade.call_tool
+        def followed(name, args):
+            raw = original(name, args)
+            raw["status"]["continuation"] = {
+                "requested_run_id": self.run_id, "effective_run_id": self.run_id}
+            return raw
+        observed = FabricFacadePort(followed).status(self.grant, self.run_id)
+        self.assertEqual(observed["state"], "NOT_FOUND")
+        self.assertNotIn("effective_run_id", observed)
+
+    def test_absent_successor_cannot_authorize_an_original_submit(self):
+        original = self.facade.call_tool
+        def changed(name, args):
+            raw = original(name, args)
+            raw["effective_run_id"] = raw["status"]["run_id"] = "successor"
+            raw["status"]["continuation"] = {
+                "requested_run_id": self.run_id, "effective_run_id": "successor"}
+            return raw
+        port = FabricFacadePort(changed, authorize_new_run=lambda *_: True)
+        handle = native_handler(profile_id="main", authorize_session=lambda _: self.grant,
+                                port=port, currentness_guard=lambda _: True)
+        got = json.loads(handle({"action": "submit", "task_key": "build-once", **self.task()},
+                                session_id="session-owned"))
+        self.assertEqual(got["state"], "UNAVAILABLE")
+        self.assertEqual([name for name, _ in self.facade.calls], ["fabric_status"])
+
+    def test_effective_unknown_is_an_observation_without_a_result(self):
+        self.facade.state = "EFFECT_UNKNOWN"
+        got = self.ask("status")
+        self.assertEqual(got["state"], "EFFECT_UNKNOWN")
+        self.assertEqual(got["effective_run_id"], self.run_id)
+        self.assertFalse(got["worker_started"])
+        self.assertNotIn("result_text", got)
+
+    def test_unverified_and_control_projections_omit_effective_identity(self):
+        from integrations.hermes_attended_fabric.native import _attest_reply
+        for state in ("NOT_FOUND", "UNVERIFIED", "PREVIEW_ONLY", "CONTROLLER_CREATED"):
+            raw = dict(run_id=self.run_id, root_id=self.grant.root_id,
+                       parent_id=self.grant.parent_id, state=state,
+                       worker_started=False, effective_run_id="unverified-leaf")
+            with self.subTest(state=state):
+                self.assertNotIn("effective_run_id", _attest_reply(raw, self.grant, self.run_id))
+
     def task(self):
         return {"task_class": "fix_build", "task_complexity": "C1_ROUTINE_BOUNDED",
                 "work_packet": "Build one bounded fixture and prove result."}

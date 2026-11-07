@@ -165,6 +165,17 @@ def _attest_reply(raw: Any, grant: SessionGrant, run_id: str) -> dict[str, Any]:
                  "reason": str(raw.get("reason"))[:120] if raw.get("reason") else None,
                  "result_digest": digest,
                  "worker_started": raw.get("worker_started") is True}
+    if "effective_run_id" in raw:
+        effective = raw["effective_run_id"]
+        if type(effective) is not str or IDENTITY.fullmatch(effective) is None:
+            raise FabricNativeRefusal("FABRIC_OWNER_EFFECTIVE_ID_INVALID")
+        # This is an observed continuation leaf, never a new input, retry or
+        # acceptance authority. Preserve the original logical run separately.
+        if (state not in {"NOT_FOUND", "UNVERIFIED", "PREVIEW_ONLY",
+                          "CONTROLLER_CREATED", "REFUSED", "UNAVAILABLE"}
+                and raw.get("response_withheld") is not True
+                and raw.get("request_correlation_only") is not True):
+            projected["effective_run_id"] = effective
     body = raw.get("result_text")
     if body is not None:
         if (state != "TERMINAL" or type(body) is not str or digest is None

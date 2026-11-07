@@ -178,5 +178,45 @@ class CurrentSourceTests(unittest.TestCase):
                 self.prepare()
 
 
+    def write_composed_contract(self, commit, *, postimages=None):
+        package = self.adapter / "integrations/hermes_application_fabric/qualification/application_owner_support"
+        historical = (package / "contract.json").read_bytes()
+        contract = json.loads(historical)
+        current = {"schema": "mastermind.hermes_owner_committed_support.v1",
+            "owner_commit": commit, "previous_owner_commit": support.CURRENT_OWNER_COMMIT,
+            "historical_contract_sha256": support.sha256(historical),
+            "postimages": postimages or {name: support.sha256((self.source / name).read_bytes())
+                                          for name in support.CHANGED},
+            "unchanged_inputs": contract["unchanged_inputs"],
+            "source_only": True, "operational_enrollment": False}
+        (package / "attended-auto-current.json").write_text(json.dumps(current))
+        return historical
+
+    def test_composed_exports_its_actual_postimages_and_preserves_historical_contract(self):
+        target = self.source / "engine/provider_production_modes.py"
+        target.write_bytes(target.read_bytes() + b"attended_auto = True\n")
+        composed = self.commit_source()
+        historical = self.write_composed_contract(composed)
+        with patch.object(support, "COMPOSED_OWNER_COMMIT", composed):
+            result = support.prepare_current(self.source, self.adapter, self.destination, composed=True)
+        self.assertEqual(result["owner_commit"], composed)
+        self.assertEqual(result["source_context"], "committed_attended_auto")
+        self.assertFalse(result["patch_applied"])
+        self.assertFalse(result["runtime_enrollment"])
+        self.assertEqual((self.destination / "engine/provider_production_modes.py").read_bytes(), target.read_bytes())
+        path = self.adapter / "integrations/hermes_application_fabric/qualification/application_owner_support/contract.json"
+        self.assertEqual(path.read_bytes(), historical)
+
+    def test_composed_refuses_changed_factory_even_when_root_and_contract_owner_match(self):
+        expected = {name: support.sha256((self.source / name).read_bytes()) for name in support.CHANGED}
+        target = self.source / "engine/provider_production_modes.py"
+        target.write_bytes(target.read_bytes() + b"unqualified_drift = True\n")
+        composed = self.commit_source()
+        self.write_composed_contract(composed, postimages=expected)
+        with patch.object(support, "COMPOSED_OWNER_COMMIT", composed):
+            with self.assertRaisesRegex(RuntimeError, "Committed support postimage differs"):
+                support.prepare_current(self.source, self.adapter, self.destination, composed=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
