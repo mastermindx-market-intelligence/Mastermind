@@ -3448,13 +3448,10 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
         # fall back to the append-log latest() for any parked name not yet in the snapshot so the
         # surface is never thinner than before (back-compatible).
         state_by_ticker = {}
-        try:
-            for s in (watchlist.state_rows() or []):
-                t = (s.get("ticker") or "").upper()
-                if t:
-                    state_by_ticker[t] = s
-        except Exception:  # noqa: BLE001
-            state_by_ticker = {}
+        for s in (watchlist.state_rows() or []):
+            t = (s.get("ticker") or "").upper()
+            if t:
+                state_by_ticker[t] = s
         rows = []
         for r in (watchlist.latest() or []):
             t = (r.get("ticker") or "").upper()
@@ -3478,7 +3475,9 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
                              "last_review": str(s.get("last_review") or "")[:10] or None})
         return JSONResponse({"book": book, "watchlist": rows[:120]})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"book": book, "watchlist": [], "error": str(exc)})
+        _log.warning("desk_watchlist_unavailable: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "book": book,
+                             "watchlist": None, "error": "desk_watchlist_unavailable"})
 
 
 @router.get("/api/desk/scorecard")

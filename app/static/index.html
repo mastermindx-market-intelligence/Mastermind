@@ -5865,8 +5865,8 @@ function renderCalibrationPage() {
 
 // ── DESK page ───────────────────────────────────────────────────────────────
 // Lazy-loaded observability over the multi-seat Flagship desk. Fetches Desk and scheduler
-// endpoints in parallel. Failed fetches return null; the scheduler result boundary below
-// distinguishes unavailable health reads from a successful read with no job rows.
+// endpoints in parallel. Watchlist and scheduler boundaries distinguish unavailable reads
+// from successful empty results; null before a completed read remains the loading state.
 var _deskData = { strategist: null, macroRisk: null, decisions: null, watchlist: null, scorecard: null, firm: null, scheduler: null };
 
 function _deskBuilding(msgKey) {
@@ -5883,7 +5883,9 @@ window.loadDesk = function() {
   Promise.all([
     g('/api/desk/strategist'),
     g('/api/desk/decisions'),
-    g('/api/desk/watchlist?book=flagship'),
+    g('/api/desk/watchlist?book=flagship').then(function(d) {
+      return d || {status: 'unavailable', watchlist: null, error: 'desk_watchlist_unavailable'};
+    }),
     g('/api/desk/scorecard'),
     g('/api/desk/firm-exposure'),
     g('/api/desk/macro-risk'),
@@ -6131,7 +6133,18 @@ function renderDeskDecisions() {
 function renderDeskWatchlist() {
   var host = E('desk-watchlist'); if (!host) return;
   var d = _deskData.watchlist;
-  var rows = (d && d.watchlist) || [];
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (d == null) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
+      (isZh ? '正在读取观察名单…' : 'Loading watchlist…') + '</div>';
+    return;
+  }
+  if (d.status === 'unavailable' || !Array.isArray(d.watchlist)) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
+      (isZh ? '观察名单暂不可用。' : 'Watchlist unavailable.') + '</div>';
+    return;
+  }
+  var rows = d.watchlist;
   if (!rows.length) { host.innerHTML = _deskEmpty('desk.wl_empty'); return; }
   var html = '<div class="mm-rp-wrap"><table class="mm-rp-table"><thead><tr>' +
     '<th class="l">' + t('desk.col_ticker') + '</th>' +
