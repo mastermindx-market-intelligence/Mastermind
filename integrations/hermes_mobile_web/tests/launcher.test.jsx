@@ -47,11 +47,11 @@ describe('existing route ownership', () => {
     expect(model.state.get().selected).toBeNull()
     expect(model.state.get().historyError).toContain('not available')
   })
-  it('reads the selected route using its backend profile, not its display alias', async () => {
+  it('reads the selected route using its backend profile and leaves the custom page on a normal open', async () => {
     const api = apiFor([route('office', 'm2', 'secretary')]), { model } = await prepared(api)
     expect(api.listPersistedSessions).toHaveBeenCalledWith(route('office', 'm2', 'secretary'), { profile: 'secretary', limit: 12 })
     await model.open('s1')
-    expect(api.openSession).toHaveBeenCalledWith('s1', expect.objectContaining({ route: route('office', 'm2', 'secretary'), profile: 'secretary', intent: 'tab' }))
+    expect(api.openSession).toHaveBeenCalledWith('s1', expect.objectContaining({ route: route('office', 'm2', 'secretary'), profile: 'secretary', intent: 'in-place' }))
   })
   it('does not open unknown session ids or auto-send on navigation', async () => {
     const { api, model } = await prepared()
@@ -130,11 +130,11 @@ describe('stale work and navigation', () => {
 })
 
 describe('canonical persistent Bot Chat', () => {
-  it('resolves the existing canonical registry and opens its current lineage tip', async () => {
+  it('resolves the existing canonical registry and navigates in-place to its current lineage tip', async () => {
     const { api, model } = await prepared()
     await model.openBot()
     expect(api.requestProfile).toHaveBeenCalledExactlyOnceWith(route(), 'session.list', { profile: 'secretary', title: 'Bot Chat', limit: 200, include_hidden: true }, undefined, { spawnPriority: 'foreground' })
-    expect(api.openSession).toHaveBeenCalledExactlyOnceWith('bot-tip', expect.objectContaining({ route: route(), workspaceMode: 'bots', workspaceOwnerKey: 'bot:m2::secretary', forceResume: true }))
+    expect(api.openSession).toHaveBeenCalledExactlyOnceWith('bot-tip', expect.objectContaining({ route: route(), intent: 'in-place', workspaceMode: 'bots', workspaceOwnerKey: 'bot:m2::secretary', forceResume: true }))
     expect(api.newChat).not.toHaveBeenCalled()
   })
   it.each([
