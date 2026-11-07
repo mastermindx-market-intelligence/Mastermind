@@ -1,0 +1,31 @@
+{
+  "name": "guards",
+  "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+  "command": [
+    "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/private/tmp/h6-current-join-proof-ckht50ep/guards/pytest",
+    "--junitxml=/private/tmp/h6-current-join-proof-ckht50ep/guards/tests.xml",
+    "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "tests/test_hermes_fabric_native_identity_review.py"
+  ],
+  "rc": 0,
+  "seconds": 39.937,
+  "log": "/private/tmp/h6-current-join-proof-ckht50ep/guards/tests.log",
+  "log_sha256": "cf426ab35f3b06fccef8290fde5325d90af130a79da1d1752031518df77c4236",
+  "testcase_records": 3,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "suite_totals": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "junit_sha256": "5a3b8d3a867bdd9cd64d50ddc44d551e738cb48e17f7ea54ac8a19c1922cc6b9"
+}

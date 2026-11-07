@@ -1,0 +1,29 @@
+{
+  "head": "578ef18a2c6ef81ba67b208086f10d88d7d9e667",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/private/tmp/h6-current-native-repair-htvw4qtd/pytest",
+    "--junitxml=/private/tmp/h6-current-native-repair-htvw4qtd/tests.xml",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py"
+  ],
+  "rc": 0,
+  "seconds": 1.472,
+  "testcase_records": 191,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "suite_totals": {
+    "tests": 191,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "log_sha256": "052750fd84dedbba3b976ef06464a428a87b02719910e8c51e2ea48b722715c2",
+  "xml_sha256": "a1d8985c74ea768095a812b627d9c9ebab9f4c1ad87cb0ca2d70d6de190dd691",
+  "production_source_changed": false
+}

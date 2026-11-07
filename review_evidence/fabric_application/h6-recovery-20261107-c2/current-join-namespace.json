@@ -1,0 +1,35 @@
+{
+  "name": "namespace",
+  "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/private/tmp/h6-current-join-proof-ckht50ep/namespace/pytest",
+    "--junitxml=/private/tmp/h6-current-join-proof-ckht50ep/namespace/tests.xml",
+    "tests/test_fabric_participant_owner.py",
+    "tests/test_hermes_primary_application_enrollment.py",
+    "tests/test_hermes_primary_retained_enrollment.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py",
+    "tests/test_no_anonymous_macro_reads.py",
+    "tests/test_experiential_account_metadata_proxy.py"
+  ],
+  "rc": 0,
+  "seconds": 377.915,
+  "log": "/private/tmp/h6-current-join-proof-ckht50ep/namespace/tests.log",
+  "log_sha256": "ef97758699219a6a56a3db981e22a8a79167c517f08ca1625c36fb50ffc13bed",
+  "testcase_records": 245,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "suite_totals": {
+    "tests": 245,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "junit_sha256": "9fc3593003d8fd317d5d432888380501d48849fe849d1a0723441cd6a679c49d"
+}

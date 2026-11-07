@@ -1,0 +1,25 @@
+{
+  "root": "/private/tmp/h6-current-macro-fixture-vmk0t971",
+  "macro_root": "/private/tmp/h6-current-macro-fixture-vmk0t971/macro",
+  "current_head": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+  "original_fixture_unchanged": true,
+  "sparse_paths": [
+    "engine",
+    "lib",
+    "config",
+    "tests/__init__.py",
+    "tests/test_hermes_application_source_support.py",
+    "tests/test_hermes_primary_fabric_identity.py",
+    "tests/test_hermes_attended_fabric_identity.py",
+    "tests/test_fabric_service_identity.py",
+    "tests/test_fabric_application_binding.py",
+    "tests/test_fabric_application_inspection.py",
+    "tests/test_hermes_primary_fabric_endpoint.py"
+  ],
+  "required_files": 2539,
+  "unique_blobs": 2535,
+  "acquired_blobs": [],
+  "no_lazy_fetch": true,
+  "source_support_proposal_applied": false,
+  "credential_helper": "existing gh auth git-credential; no credential values inspected"
+}

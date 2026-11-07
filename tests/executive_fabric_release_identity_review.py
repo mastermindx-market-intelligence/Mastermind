@@ -967,3 +967,17 @@ REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualifica
     "sites": (),
     "utf8_sites": ((296, 26, 29, "int", "501"),),
 }
+
+# Exact retained current-composition JUnit negative-test names. These six
+# account strings occur only in the three existing identity-refusal case IDs;
+# they establish no runtime principal. Full-file and token-site drift restore
+# the unchanged identity guard. Initial failures remain byte-for-byte retained.
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/current-join-native.xml'] = {
+    'sha256': '930eba45d97f438f3fc1aae1f26e450f15f4431f25f23a43a10ad6248fb15a58',
+    'sites': ((31, 51646, 51665, 'str', '_mastermind_account'),
+              (31, 51674, 51693, 'str', '_mastermind_account'),
+              (31, 51980, 51999, 'str', '_mastermind_account'),
+              (31, 52008, 52027, 'str', '_mastermind_account'),
+              (31, 52305, 52324, 'str', '_mastermind_account'),
+              (31, 52333, 52352, 'str', '_mastermind_account')),
+}

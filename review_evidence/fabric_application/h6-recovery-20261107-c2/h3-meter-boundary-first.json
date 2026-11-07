@@ -1,0 +1,43 @@
+{
+  "broker_predecessor_sha256": "52295146ad13854adcf68a81d14e8a328b5b034e7c974b2b779387e2f32a0097",
+  "broker_sha256": "93531372cf343cd92e47fd430acf949b141759ca8cf2b4a5c86b1be4c56246c2",
+  "errors": 0,
+  "failures": 4,
+  "fixture_sha256": "63dda830a38f941323a9e37a3d2a40f3dad2b4a3c8bf41bfff4997e96822b87e",
+  "limits": [
+    "No production Go origin or integer-capacity producer is established",
+    "One HTTP POST is not asserted to equal one billable request unit",
+    "Native internal attempts and quota-epoch attribution remain unqualified",
+    "All retained original effects and settlement stay with their original owner"
+  ],
+  "live_state_mutated": false,
+  "native_selection": false,
+  "new_strict_dispatch": "REFUSED_MISSING_EXECUTION_OWNER_BILLABLE_CONTRACT",
+  "observations": [
+    {
+      "billable_meter_qualification_claimed": false,
+      "case": "ordinary_application_no_strict_h3_envelope",
+      "existing_two_steps_preserved": true
+    }
+  ],
+  "offline_boundary_sha256": "a89278e46aff2c71bffb2b8112eb55a09f6607c9c34812bd42f7fbebf146c9eb",
+  "preexisting_dispatches_created_by_exact_predecessor": true,
+  "provider_calls": false,
+  "quota_sha256": "a1a9ab24d502aad6a3a6edd38f2cb8a781be1175e9715eb36c2ddcea475c88c1",
+  "schema": "mastermind.h6.h3_meter_boundary_proof.v1",
+  "skips": 0,
+  "strict_scope_qualified": false,
+  "test_names": [
+    "test_meter_changed_original_digest_never_becomes_another_effect",
+    "test_meter_missing_bound_refuses_before_first_dispatch",
+    "test_meter_new_coherent_observation_cannot_create_dispatch_authority",
+    "test_meter_one_harness_step_is_still_not_a_billable_bound",
+    "test_meter_ordinary_application_keeps_existing_two_step_contract",
+    "test_meter_original_pending_recovers_without_new_request",
+    "test_meter_original_terminal_recovers_after_binding_change",
+    "test_meter_original_turn_recovers_after_binding_change",
+    "test_meter_original_unknown_settles_and_keeps_original_liability"
+  ],
+  "tests": 9,
+  "whole_operation_vector_enforced": false
+}

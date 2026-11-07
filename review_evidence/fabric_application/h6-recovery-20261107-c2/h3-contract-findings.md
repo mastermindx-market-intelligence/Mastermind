@@ -117,3 +117,37 @@ serialization is established. The existing cache lock does not fence a configura
 writer that ignores it, and a Broker read does not seal credential use through send.
 The fifth whole-operation consumption counterexample remains open. No native
 builder, installer, selected generation, live cache or provider was changed.
+
+
+## Missing billable-contract boundary qualified without activation
+
+The exact next H3 delta is h3-meter-boundary-only.patch. Its one Broker change
+refuses a NEW strict APPLICATION dispatch with account_dispatch_meter_unqualified.
+It runs after original request recovery and the existing unsettled-effect check.
+No qualified execution-owner vector exists in the inspected source; max_steps,
+one client POST and one native process are not substituted for billable units.
+
+The HTTP APPLICATION owner does enforce a narrower one-POST/no-local-retry/no-
+redirect path, while original recovery does not resend. That fact does not prove
+provider-side metering, physical subscription or quota-epoch attribution. Native
+one-harness-invocation semantics likewise do not bound internal attempts. These
+execution-owner files are byte-identical from e65 through the completed source
+head 3607302f; no provider or credential action was performed.
+
+Nine final cases passed. The original one-unit/two-step counterexample now refuses
+before any new request row. Original pending/unknown/terminal effects were created
+by the exact pre-guard Broker on the same disposable SQLite database, then recovered
+or settled by the new Broker without bypassing its guard. Changed-original-digest
+refusal and retained liability also passed. The ordinary APPLICATION path without
+an H3 strict envelope retains its existing two-step behavior.
+
+The first run had four assertion failures because the harness omitted the existing
+ApplicationAdmissionError message prefix. Those four guards already returned the
+intended refusal. Correcting the exact assertion made all nine pass; the Broker
+postimage was unchanged. Both runs and independent exact apply/reverse proof are
+retained in h3-meter-boundary-*.
+
+This is a truthful refusal boundary, not a hard-budget implementation or live
+capacity qualification. A qualified billable vector, conserved per-window charges,
+participating-writer serialization, real origin/quantities/coverage and transport
+binding remain prerequisites. H3 is still excluded from every selectable artifact.

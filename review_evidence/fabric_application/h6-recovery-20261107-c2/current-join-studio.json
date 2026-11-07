@@ -1,0 +1,23 @@
+{
+  "head": "3607302fb9ff5be0cb0f72458381d85579666b1b",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/private/tmp/h6-current-studio-proof-d7h8bnrk/pytest",
+    "--junitxml=/private/tmp/h6-current-studio-proof-d7h8bnrk/tests.xml",
+    "integrations/studio_direct_mcp/private_service_status_successor_test.py"
+  ],
+  "rc": 0,
+  "seconds": 38.719,
+  "testcase_records": 107,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "log_sha256": "4d026f1d0fe68b2d84284c9141ed3d18e9e1e798b5f791d2390ba85a1ddc2477",
+  "xml_sha256": "b1648afec8ae4c06249761920b94bb1f8265c29c3aac9ed8a556c6d4c0fc999a",
+  "live_state_changed": false
+}

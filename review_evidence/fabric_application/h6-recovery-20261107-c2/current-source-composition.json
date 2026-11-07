@@ -33,34 +33,37 @@
   "compatible_law_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
   "completed_hermes_successor": {
     "head": "c71cc56c3631183efed8eccdb6a6c5060b1050a5",
-    "incorporated": false,
+    "incorporated": true,
     "return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710374623"
   },
   "current_final_join": {
-    "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
-    "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
-    "governing_diff": "none",
-    "h5_baseline_incorporated": true,
-    "hosted_current_head": "NOT_YET_RUN",
-    "incoming_ci_preserved": true,
-    "native_junit_suite_counter": 542,
-    "native_receipt": "current-native-composition.json",
-    "native_testcase_records": 533,
-    "old_h2_parent": "historical inverse only",
-    "protected_source": "320611cbd7eca66af86a09d0c6f7622f229bdf73",
-    "runtime_h2_members_changed": false,
-    "source": "552375cd288ebe3c417d10afa17f47114c6319db",
-    "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
-    "worker_2225_incorporated": true
+    "completed_hermes_incorporated": "c71cc56c3631183efed8eccdb6a6c5060b1050a5",
+    "current_native_parent": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+    "hosted_current_head": "NOT_YET_DISPATCHED",
+    "native_entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+    "original_root_incorporated": "0d8174951141b1790e6121e13202e4036d1bdc20",
+    "receipt": "completed-current-composition.json",
+    "source_head": "3607302fb9ff5be0cb0f72458381d85579666b1b",
+    "source_tree": "2a1022f217f240cb4d01fa1594ac94be9df464cc"
   },
   "current_original_carriers": {
-    "Macro10740": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
-    "Mastermind2175": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
+    "Macro10740": "913c8a874f21393e8f9b0a577ccb4863247b9903",
+    "Mastermind2175": "0d8174951141b1790e6121e13202e4036d1bdc20",
     "contribution_adoption": "NOT_OBSERVED",
     "protected_Macro": "a83cfac0845baf5687d0864d56765973f69fe98d",
     "protected_Mastermind": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c"
   },
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
+  "h1_current_owner": {
+    "adapter_native_owner": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "hermes": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+    "macro": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+    "native_cases": 21,
+    "proposal_replayed": false,
+    "receipt": "current-owner-qualification.json",
+    "source_flags_overridden": false,
+    "source_materialization_cases": 8
+  },
   "h1_source_support": {
     "composed_head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
     "guard_qualification": "h1-final-guards.json",
@@ -72,6 +75,12 @@
     "source_flag_overrides": false
   },
   "h2_runtime_sources_changed": false,
+  "h3_meter_boundary": {
+    "cases": 9,
+    "new_strict_dispatch": "REFUSED_MISSING_QUALIFIED_BILLABLE_CONTRACT",
+    "receipt": "h3-meter-boundary-final.json",
+    "whole_operation_vector_enforced": false
+  },
   "h3_origin": {
     "cases_passed": 54,
     "inherited_v2_fixture_cases": 32,
@@ -144,6 +153,25 @@
   },
   "original_root": "fabric-application-integration-20261104-sol",
   "primary_core_preimage_qualification": "primary-core-preimages.json",
+  "prior_qualified_compositions": [
+    {
+      "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
+      "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+      "governing_diff": "none",
+      "h5_baseline_incorporated": true,
+      "hosted_current_head": "NOT_YET_RUN",
+      "incoming_ci_preserved": true,
+      "native_junit_suite_counter": 542,
+      "native_receipt": "current-native-composition.json",
+      "native_testcase_records": 533,
+      "old_h2_parent": "historical inverse only",
+      "protected_source": "320611cbd7eca66af86a09d0c6f7622f229bdf73",
+      "runtime_h2_members_changed": false,
+      "source": "552375cd288ebe3c417d10afa17f47114c6319db",
+      "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
+      "worker_2225_incorporated": true
+    }
+  ],
   "provider_calls": false,
   "qualified_base": "a88488670bc99f7156eff193101b76795c16733f",
   "qualified_merge_commit": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",

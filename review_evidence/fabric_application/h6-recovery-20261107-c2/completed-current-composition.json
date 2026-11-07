@@ -1,0 +1,370 @@
+{
+  "artifacts": {
+    "application-109": {
+      "all_staged_members_and_inventory_equal": true,
+      "broker_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "inventory_sha256": "6e42565f0f32914c4ee3df58b8c097961f19730de4718f20bc49fbd720308d97",
+      "manifest_sha256": "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f",
+      "members": 109
+    },
+    "h2-application-109": {
+      "all_staged_members_and_inventory_equal": true,
+      "broker_sha256": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "inventory_sha256": "9dbb7d348b8711456eab74e7457d9a5ac7cf0010701d291c53350378825e585a",
+      "manifest_sha256": "9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7",
+      "members": 109
+    },
+    "h2-http-112": {
+      "all_staged_members_and_inventory_equal": true,
+      "broker_sha256": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "inventory_sha256": "4f36c81c6a524cf7a60fd14402a4e31f97a5b797704f882f55214b3b444d6520",
+      "manifest_sha256": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d",
+      "members": 112
+    },
+    "h2-native-107": {
+      "all_staged_members_and_inventory_equal": true,
+      "broker_sha256": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+      "entry_sha256": null,
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "inventory_sha256": "bbc37ef439df13ecabc1c9c0cbcca613f57f852a704a5a226072c7e811237dcc",
+      "manifest_sha256": "4fe3fee49a6260c96eaf454aa5af14268ce94bd0019b5d06f29d7b45e4979e6c",
+      "members": 107
+    },
+    "http-112": {
+      "all_staged_members_and_inventory_equal": true,
+      "broker_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "inventory_sha256": "5faf9b583fe6398d6b6dff0b1033d498b13169d71413c51c846dcc2c8e0aaa66",
+      "manifest_sha256": "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af",
+      "members": 112
+    },
+    "native-107": {
+      "all_staged_members_and_inventory_equal": true,
+      "broker_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "entry_sha256": null,
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "inventory_sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47",
+      "manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+      "members": 107
+    }
+  },
+  "committed_guard": {
+    "cases": 3,
+    "failures": 0,
+    "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "receipt": "current-join-guards.json"
+  },
+  "coupled_worker_package_and_backend_equal_c71": true,
+  "current_macro_owner": {
+    "adapter_native_owner": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "hermes": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+    "macro": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+    "native_cases": 21,
+    "proposal_replayed": false,
+    "receipt": "current-owner-qualification.json",
+    "source_flags_overridden": false,
+    "source_materialization_cases": 8
+  },
+  "current_ordinary_native_parent": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+  "current_original_carriers": {
+    "Macro10740": "913c8a874f21393e8f9b0a577ccb4863247b9903",
+    "Mastermind2175": "0d8174951141b1790e6121e13202e4036d1bdc20"
+  },
+  "evidence": {
+    "current-join-artifacts/application-109-go-component.json": {
+      "bytes": 1689,
+      "sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4"
+    },
+    "current-join-artifacts/application-109-inventory.json": {
+      "bytes": 36359,
+      "sha256": "6e42565f0f32914c4ee3df58b8c097961f19730de4718f20bc49fbd720308d97"
+    },
+    "current-join-artifacts/application-109-manifest.json": {
+      "bytes": 10868,
+      "sha256": "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f"
+    },
+    "current-join-artifacts/h2-application-109-go-component.json": {
+      "bytes": 2031,
+      "sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878"
+    },
+    "current-join-artifacts/h2-application-109-inventory.json": {
+      "bytes": 37413,
+      "sha256": "9dbb7d348b8711456eab74e7457d9a5ac7cf0010701d291c53350378825e585a"
+    },
+    "current-join-artifacts/h2-application-109-manifest.json": {
+      "bytes": 10868,
+      "sha256": "9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7"
+    },
+    "current-join-artifacts/h2-http-112-go-component.json": {
+      "bytes": 2031,
+      "sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878"
+    },
+    "current-join-artifacts/h2-http-112-inventory.json": {
+      "bytes": 38329,
+      "sha256": "4f36c81c6a524cf7a60fd14402a4e31f97a5b797704f882f55214b3b444d6520"
+    },
+    "current-join-artifacts/h2-http-112-manifest.json": {
+      "bytes": 11199,
+      "sha256": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d"
+    },
+    "current-join-artifacts/h2-native-107-go-component.json": {
+      "bytes": 2031,
+      "sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878"
+    },
+    "current-join-artifacts/h2-native-107-inventory.json": {
+      "bytes": 36888,
+      "sha256": "bbc37ef439df13ecabc1c9c0cbcca613f57f852a704a5a226072c7e811237dcc"
+    },
+    "current-join-artifacts/h2-native-107-manifest.json": {
+      "bytes": 10669,
+      "sha256": "4fe3fee49a6260c96eaf454aa5af14268ce94bd0019b5d06f29d7b45e4979e6c"
+    },
+    "current-join-artifacts/http-112-go-component.json": {
+      "bytes": 1689,
+      "sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4"
+    },
+    "current-join-artifacts/http-112-inventory.json": {
+      "bytes": 37275,
+      "sha256": "5faf9b583fe6398d6b6dff0b1033d498b13169d71413c51c846dcc2c8e0aaa66"
+    },
+    "current-join-artifacts/http-112-manifest.json": {
+      "bytes": 11199,
+      "sha256": "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af"
+    },
+    "current-join-artifacts/native-107-go-component.json": {
+      "bytes": 1689,
+      "sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4"
+    },
+    "current-join-artifacts/native-107-inventory.json": {
+      "bytes": 35834,
+      "sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47"
+    },
+    "current-join-artifacts/native-107-manifest.json": {
+      "bytes": 10669,
+      "sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+    },
+    "current-join-guards.json": {
+      "bytes": 969,
+      "sha256": "256896996f2e36297c98a59e657a62dd88d37fe60d321037fa12eb832cf2d41a"
+    },
+    "current-join-guards.log": {
+      "bytes": 80,
+      "sha256": "cf426ab35f3b06fccef8290fde5325d90af130a79da1d1752031518df77c4236"
+    },
+    "current-join-guards.xml": {
+      "bytes": 670,
+      "sha256": "5a3b8d3a867bdd9cd64d50ddc44d551e738cb48e17f7ea54ac8a19c1922cc6b9"
+    },
+    "current-join-h5-build.log": {
+      "bytes": 1841,
+      "sha256": "248fb9f346e3aac01ab58e48cd4ce7bd68212d65c9c24cdd9d5514c3b151fec1"
+    },
+    "current-join-h5-model-view.log": {
+      "bytes": 631,
+      "sha256": "d3ea95a5bf2eeb756d384d991279a7a0183ce892800ea4b239e03f97c8d2d3fd"
+    },
+    "current-join-h5-signed-route.log": {
+      "bytes": 80,
+      "sha256": "341d5dca33250b815baddbafb6001e174c20bf1716bb74f3d612e77777db8938"
+    },
+    "current-join-h5-signed-route.xml": {
+      "bytes": 3389,
+      "sha256": "ecef284e7118c76201a00d042c213cb91c29bc3ea248a9455d06e07037ff5610"
+    },
+    "current-join-h5-typecheck.log": {
+      "bytes": 68,
+      "sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c"
+    },
+    "current-join-h5.json": {
+      "bytes": 1929,
+      "sha256": "c508813369825d7428e1bc24ded937144c04bb8ae76a58dd2a7959bc0c6c1fe1"
+    },
+    "current-join-namespace.json": {
+      "bytes": 1178,
+      "sha256": "9711bc6e49070fe9f8dfde54c01dc91611aa1a711e4298c5feadcfb662190349"
+    },
+    "current-join-namespace.log": {
+      "bytes": 320,
+      "sha256": "ef97758699219a6a56a3db981e22a8a79167c517f08ca1625c36fb50ffc13bed"
+    },
+    "current-join-namespace.xml": {
+      "bytes": 41525,
+      "sha256": "9fc3593003d8fd317d5d432888380501d48849fe849d1a0723441cd6a679c49d"
+    },
+    "current-join-native-repair.json": {
+      "bytes": 815,
+      "sha256": "c764a3716c11976d2014677949a3466034f7abb637cc6ef09e48efee23059df0"
+    },
+    "current-join-native-repair.log": {
+      "bytes": 240,
+      "sha256": "052750fd84dedbba3b976ef06464a428a87b02719910e8c51e2ea48b722715c2"
+    },
+    "current-join-native-repair.xml": {
+      "bytes": 37296,
+      "sha256": "a1d8985c74ea768095a812b627d9c9ebab9f4c1ad87cb0ca2d70d6de190dd691"
+    },
+    "current-join-native.json": {
+      "bytes": 1401,
+      "sha256": "0adaac65a46c2e3b57ebe4c16d0b8b651cbf9bf5b2e932131f37c744b2574707"
+    },
+    "current-join-native.log": {
+      "bytes": 7257,
+      "sha256": "4ff2e829f850544bcf550215f3e32bbfe9394d649fb29f7289d45e791cd65c8f"
+    },
+    "current-join-native.xml": {
+      "bytes": 120562,
+      "sha256": "930eba45d97f438f3fc1aae1f26e450f15f4431f25f23a43a10ad6248fb15a58"
+    },
+    "current-join-studio.json": {
+      "bytes": 718,
+      "sha256": "c9318594ff87cc008010c2b9ba4c96bf949e78aa587d8b140d601833fe9957b1"
+    },
+    "current-join-studio.log": {
+      "bytes": 142,
+      "sha256": "4d026f1d0fe68b2d84284c9141ed3d18e9e1e798b5f791d2390ba85a1ddc2477"
+    },
+    "current-join-studio.xml": {
+      "bytes": 21338,
+      "sha256": "b1648afec8ae4c06249761920b94bb1f8265c29c3aac9ed8a556c6d4c0fc999a"
+    },
+    "current-owner-materialization.log": {
+      "bytes": 1402,
+      "sha256": "4b983f440dca1e619e98892415b1c153c81d1b89cab26fdddef96853e58a5cbf"
+    },
+    "current-owner-native.log": {
+      "bytes": 12221,
+      "sha256": "1dd3bf4272cb455e4a886c3eb7c9f16b717c509887454fc7c31636377293f1ea"
+    },
+    "current-owner-qualification.json": {
+      "bytes": 3716,
+      "sha256": "bb15309e86c056de00e9004eb67909d25845746a8ec31d015ca97791eef3e60b"
+    },
+    "current-owner-source-acquisition.json": {
+      "bytes": 912,
+      "sha256": "be6e50654da1de19077394d926b4b35cfb3d73cc3143977c49085c0b16d03c66"
+    },
+    "h3-meter-boundary-final.json": {
+      "bytes": 2210,
+      "sha256": "648c84ac3bd387d178b53cc55fa28d45a3a6de1b69c615db3fb45fc065bb63fc"
+    },
+    "h3-meter-boundary-final.log": {
+      "bytes": 1762,
+      "sha256": "8ed00df3d005ff74dc4416103346b802ca39d6e8b3e56fe520e0ffb0e534f6b9"
+    },
+    "h3-meter-boundary-first.json": {
+      "bytes": 2035,
+      "sha256": "2c4cccee5043cb455e308aae3be887e645e7953b8c0c532df95bdeb7733ad9ae"
+    },
+    "h3-meter-boundary-first.log": {
+      "bytes": 6591,
+      "sha256": "1ba0700fc51d87a28bfc3bfa44b376e0db5cd5d0290ba880337e32af6a5854e4"
+    },
+    "h3-meter-boundary-only.patch": {
+      "bytes": 696,
+      "sha256": "ae820cbc0ef364323d770233b7e5e459b4d2d0616cd9b57307a5a79fe12452e1"
+    },
+    "qualify_h3_meter_boundary.py": {
+      "bytes": 13075,
+      "sha256": "9b11f83d2c7aef3097c5cc051e32e9f832e0ba9e28e9b28d32e88f22ed2c62d1"
+    }
+  },
+  "h3_meter_boundary": {
+    "cases": 9,
+    "new_strict_dispatch": "REFUSED_MISSING_QUALIFIED_BILLABLE_CONTRACT",
+    "receipt": "h3-meter-boundary-final.json",
+    "whole_operation_vector_enforced": false
+  },
+  "h3_origin": {
+    "cases": 54,
+    "selectable_source_changed": false,
+    "strict_scope_qualified": false
+  },
+  "h5": {
+    "build_rc": 0,
+    "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "receipt": "current-join-h5.json",
+    "signed_http_unix_cases": 18,
+    "typecheck_rc": 0,
+    "ui_cases": 10
+  },
+  "installed": false,
+  "mission_complete": false,
+  "namespace_producer_and_consumers": {
+    "errors": 0,
+    "failures": 0,
+    "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "receipt": "current-join-namespace.json",
+    "single_process_cases": 245,
+    "skips": 0
+  },
+  "native_entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+  "native_initial": {
+    "cause": "Two new exact extended-manifest identities were absent from a test-only predecessor-image map. Six cases shared that helper.",
+    "errors": 0,
+    "failures": 6,
+    "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "receipt": "current-join-native.json",
+    "skips": 0,
+    "suite_counter": 572,
+    "testcase_records": 563
+  },
+  "native_production_unchanged_since_cfc": true,
+  "native_repair": {
+    "errors": 0,
+    "failures": 0,
+    "head": "578ef18a2c6ef81ba67b208086f10d88d7d9e667",
+    "receipt": "current-join-native-repair.json",
+    "skips": 0,
+    "testcase_records": 191
+  },
+  "native_union_green_claim": false,
+  "observed_at": "2026-11-07T17:38:08.491302+00:00",
+  "original_root_current_comment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710623283",
+  "provider_calls": false,
+  "runtime_grants_created": false,
+  "schema": "mastermind.h6.completed_current_composition.v1",
+  "source_chain": [
+    {
+      "commit": "47398bf20f4d305eb5adeac7286cff186555bd49",
+      "parents": [
+        "59f9cfce43cba2f91ec49b37062f974648a48bc0",
+        "bd119dfd25db6e9b5b48ab461407faf29cb0725d"
+      ]
+    },
+    {
+      "commit": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+      "parents": [
+        "47398bf20f4d305eb5adeac7286cff186555bd49",
+        "c71cc56c3631183efed8eccdb6a6c5060b1050a5"
+      ]
+    },
+    {
+      "commit": "578ef18a2c6ef81ba67b208086f10d88d7d9e667",
+      "scope": "Five-line historical test-image correction only; no production changes"
+    },
+    {
+      "commit": "3607302fb9ff5be0cb0f72458381d85579666b1b",
+      "parents": [
+        "578ef18a2c6ef81ba67b208086f10d88d7d9e667",
+        "0d8174951141b1790e6121e13202e4036d1bdc20"
+      ]
+    }
+  ],
+  "source_head": "3607302fb9ff5be0cb0f72458381d85579666b1b",
+  "source_tree": "2a1022f217f240cb4d01fa1594ac94be9df464cc",
+  "studio_composed_fixture": {
+    "cases": 107,
+    "errors": 0,
+    "failures": 0,
+    "head": "3607302fb9ff5be0cb0f72458381d85579666b1b",
+    "receipt": "current-join-studio.json",
+    "skips": 0
+  }
+}

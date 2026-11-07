@@ -1,0 +1,58 @@
+........................................................................ [ 12%]
+............................................................... [ 23%]
+........................................................................ [ 36%]
+........................................................................ [ 49%]
+.FF........FF..........FF............................................... [ 62%]
+........................................................................ [ 75%]
+........................................................................ [ 87%]
+....................................................................     [100%]
+=================================== FAILURES ===================================
+_____ test_repaired_base_cannot_relabel_an_extended_namespace[application] _____
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:1245: in test_repaired_base_cannot_relabel_an_extended_namespace
+    manifest = before_extended_host_pull_epoch(json.loads((getattr(builds, extended) / "native-manifest.json").read_bytes()))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:136: in before_extended_host_pull_epoch
+    assert actual in historical_by_current
+E   AssertionError: assert 'a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f' in {'f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2': 'acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c467...191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44': '7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61'}
+________ test_repaired_base_cannot_relabel_an_extended_namespace[http] _________
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:1245: in test_repaired_base_cannot_relabel_an_extended_namespace
+    manifest = before_extended_host_pull_epoch(json.loads((getattr(builds, extended) / "native-manifest.json").read_bytes()))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:136: in before_extended_host_pull_epoch
+    assert actual in historical_by_current
+E   AssertionError: assert 'bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af' in {'f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2': 'acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c467...191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44': '7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61'}
+_ test_sparse_preflight_cannot_relabel_a_different_complete_parent[application109] _
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:1308: in test_sparse_preflight_cannot_relabel_a_different_complete_parent
+    bad = before_extended_host_pull_epoch(json.loads((output / "native-manifest.json").read_bytes()))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:136: in before_extended_host_pull_epoch
+    assert actual in historical_by_current
+E   AssertionError: assert 'a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f' in {'f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2': 'acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c467...191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44': '7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61'}
+__ test_sparse_preflight_cannot_relabel_a_different_complete_parent[http112] ___
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:1308: in test_sparse_preflight_cannot_relabel_a_different_complete_parent
+    bad = before_extended_host_pull_epoch(json.loads((output / "native-manifest.json").read_bytes()))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:136: in before_extended_host_pull_epoch
+    assert actual in historical_by_current
+E   AssertionError: assert 'bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af' in {'f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2': 'acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c467...191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44': '7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61'}
+_ test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[application109] _
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:1379: in test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent
+    bad = before_extended_host_pull_epoch(json.loads((output / "native-manifest.json").read_bytes()))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:136: in before_extended_host_pull_epoch
+    assert actual in historical_by_current
+E   AssertionError: assert 'a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f' in {'f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2': 'acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c467...191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44': '7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61'}
+_ test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[http112] _
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:1379: in test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent
+    bad = before_extended_host_pull_epoch(json.loads((output / "native-manifest.json").read_bytes()))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ops/native_fabric/quota_continuity/tests/test_go_native_stage.py:136: in before_extended_host_pull_epoch
+    assert actual in historical_by_current
+E   AssertionError: assert 'bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af' in {'f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2': 'acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c467...191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44': '7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61'}
+=========================== short test summary info ============================
+FAILED ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_repaired_base_cannot_relabel_an_extended_namespace[application]
+FAILED ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_repaired_base_cannot_relabel_an_extended_namespace[http]
+FAILED ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_sparse_preflight_cannot_relabel_a_different_complete_parent[application109]
+FAILED ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_sparse_preflight_cannot_relabel_a_different_complete_parent[http112]
+FAILED ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[application109]
+FAILED ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[http112]

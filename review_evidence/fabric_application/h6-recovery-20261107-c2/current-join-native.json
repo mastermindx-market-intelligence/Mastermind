@@ -1,0 +1,37 @@
+{
+  "name": "native",
+  "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/private/tmp/h6-current-join-proof-ckht50ep/native/pytest",
+    "--junitxml=/private/tmp/h6-current-join-proof-ckht50ep/native/tests.xml",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_entry.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_release.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_service_startup.py",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+    "tests/test_executive_fabric_release_identity_review.py"
+  ],
+  "rc": 1,
+  "seconds": 147.975,
+  "log": "/private/tmp/h6-current-join-proof-ckht50ep/native/tests.log",
+  "log_sha256": "4ff2e829f850544bcf550215f3e32bbfe9394d649fb29f7289d45e791cd65c8f",
+  "testcase_records": 563,
+  "failures": 6,
+  "errors": 0,
+  "skips": 0,
+  "suite_totals": {
+    "tests": 572,
+    "failures": 6,
+    "errors": 0,
+    "skipped": 0
+  },
+  "junit_sha256": "930eba45d97f438f3fc1aae1f26e450f15f4431f25f23a43a10ad6248fb15a58"
+}

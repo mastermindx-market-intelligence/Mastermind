@@ -1,0 +1,11 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -3484 +3484,7 @@
+-            self._application_account_origin(turn, lease, document, now)
++            account_admission = self._application_account_origin(turn, lease, document, now)
++            if account_admission is not None:
++                # This source has no qualified execution-owner bound in every
++                # upstream billable meter. Neither max_steps nor one POST proves
++                # that vector. Preserve original recovery above; refuse only a
++                # new strict dispatch without minting a second meter authority.
++                raise ApplicationAdmissionError("account_dispatch_meter_unqualified")

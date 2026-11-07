@@ -1,0 +1,43 @@
+{
+  "changed_paths": [
+    "ext/lease_broker.py"
+  ],
+  "exact_forward_apply": true,
+  "exact_reverse_apply": true,
+  "final_harness_sha256": "9b11f83d2c7aef3097c5cc051e32e9f832e0ba9e28e9b28d32e88f22ed2c62d1",
+  "final_run": {
+    "errors": 0,
+    "failures": 0,
+    "skips": 0,
+    "tests": 9
+  },
+  "first_harness_sha256": "447841f0dff224d533d6b4b2d197360a24df8580944577a91045ab67bb0930f0",
+  "first_run": {
+    "errors": 0,
+    "failures": 4,
+    "reason": "The assertion omitted the incumbent ApplicationAdmissionError message prefix. All four guards produced the intended refusal; no source change was required.",
+    "tests": 9
+  },
+  "preparation": {
+    "base_stage": "/private/tmp/h6-h3-origin-xsvqchj_/native-code-stage",
+    "billable_vector_enforced": false,
+    "native_builder_changed": false,
+    "patch_sha256": "ae820cbc0ef364323d770233b7e5e459b4d2d0616cd9b57307a5a79fe12452e1",
+    "postimages": {
+      "lease_broker.py": "93531372cf343cd92e47fd430acf949b141759ca8cf2b4a5c86b1be4c56246c2",
+      "quota_remote.py": "a1a9ab24d502aad6a3a6edd38f2cb8a781be1175e9715eb36c2ddcea475c88c1"
+    },
+    "preimages": {
+      "lease_broker.py": "52295146ad13854adcf68a81d14e8a328b5b034e7c974b2b779387e2f32a0097",
+      "quota_remote.py": "a1a9ab24d502aad6a3a6edd38f2cb8a781be1175e9715eb36c2ddcea475c88c1"
+    },
+    "root": "/private/tmp/h6-h3-meter-boundary-2efl9aef",
+    "schema": "mastermind.h6.h3_meter_boundary_preparation.v1",
+    "scope": "Missing billable-contract refusal for new strict APPLICATION requests only",
+    "selected": false,
+    "strict_scope_qualified": false
+  },
+  "selectable_source_changed": false,
+  "stage_regular_files": 120,
+  "whole_operation_vector_enforced": false
+}

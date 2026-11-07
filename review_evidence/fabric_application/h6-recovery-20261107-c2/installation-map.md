@@ -317,3 +317,46 @@ The next source action is to compose completed bd119 and c71 into this isolated
 contribution while retaining H2's verified preloads, H5's actual outer GET, the
 coupled c07 worker owner and every exact retained identity record. Resulting-head
 CI and original runtime/product acceptance remain owed. MISSION_COMPLETE=false.
+
+
+## Completed H6 current-source composition — 2026-11-07
+
+Current prepared source 3607302fb9ff5be0cb0f72458381d85579666b1b includes real merges
+of bd119 protected host/v10, completed c71 Hermes and current original 0d817495
+Studio/Hermes/readiness source. The original final carrier's active mutation fence
+is preserved. This remains the same registered H6 contribution, not another final PR.
+
+The combined entry is 41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc.
+The current H2 build parent is 59728; exact bcfb/c7f5 historical inverses remain.
+Validation order is H2, host-pull trio, APPLICATION/exact, sparse, admission, carrier.
+Six real artifacts and complete inventory equality are recorded in
+completed-current-composition.json. H3 remains unselectable.
+
+The initial native run emitted 563 testcase records with six failures in one
+test-only historical-image map (suite counter 572). After the exact map correction,
+the complete 191-case affected module passed; no production source changed.
+Do not describe those runs as one all-green union. The same-process namespace/
+enrollment group passed 245, current committed Macro 12efe/Hermes 1c0 native owner 21
+and materialization 8 passed without source-flag overrides or proposal replay.
+H5 signed routes 18, UI 10, typecheck/build passed. The composed Studio fixture 107
+passed. Current production native bytes equal cfc; coupled worker package/backend
+equal c71. Do not repeat unchanged accepted component work.
+
+H3 origin 54 and new missing-meter refusal 9 are exact disposable qualifications.
+The latter prevents unsupported strict dispatch while preserving original recovery,
+settlement and ordinary APPLICATION behavior. It does not establish a billable
+vector or qualify actual Go/physical account data.
+
+Original d833 CI is terminal FAILURE, its shard4 retained-evidence issue repaired
+and shard0 namespace producer repaired with the current 245-case proof. One new
+exact-head hosted run is still owed after final evidence/guard publication.
+Original #2175 currently 0d817495 and Macro #10740 now 913c8a874f21393e8f9b0a577ccb4863247b9903
+retain the final release/runtime lanes. Root's 6710623283 continuation owns the
+protected merge and preserving C3 upgrade for original J. No direct root-branch
+mutation, protected merge, native select/install, new APPLICATION grant, provider
+call, collection replay or activation occurred here.
+
+Original A–D acceptance remains open. PLAN_NOT_ORG_LINKED remains explicit.
+Next action: finish committed evidence guard and current-head CI, deliver this exact
+source through the existing #2175/#983 return, and reconcile actual adoption plus
+runtime/product inputs through their current owners. MISSION_COMPLETE=false.

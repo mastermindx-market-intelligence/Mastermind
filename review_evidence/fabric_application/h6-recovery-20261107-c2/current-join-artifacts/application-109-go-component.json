@@ -1,0 +1,34 @@
+{
+  "candidate_bytes": 190323,
+  "candidate_sha256": "1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7",
+  "candidate_source": "candidate/go_shim.py",
+  "component": "go_application_handler",
+  "dependencies": {
+    "go_lease_capability.py": {
+      "bytes": 24577,
+      "sha256": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
+      "source": "candidate/go_lease_capability.py"
+    },
+    "go_lease_gateway.py": {
+      "bytes": 45716,
+      "sha256": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+      "source": "candidate/go_lease_gateway.py"
+    },
+    "lease_broker.py": {
+      "bytes": 201422,
+      "sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "source": "candidate/lease_broker.py"
+    }
+  },
+  "destination_relative_to_stable_ext": "go_shim/go_shim.py",
+  "installation_state": "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION",
+  "installed_preimage_sha256": "4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100",
+  "native_stage_dependencies": {
+    "go_lease_capability.py": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
+    "go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360"
+  },
+  "preimage_source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6646945527",
+  "schema": "native-external-go-component.v1",
+  "stable_ext": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext"
+}

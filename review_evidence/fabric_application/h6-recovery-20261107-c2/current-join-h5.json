@@ -1,0 +1,65 @@
+{
+  "head": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+  "results": [
+    {
+      "name": "signed-route",
+      "command": [
+        "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--basetemp=/private/tmp/h6-current-h5-proof-n7enyslt/pytest",
+        "--junitxml=/private/tmp/h6-current-h5-proof-n7enyslt/signed-route.xml",
+        "tests/test_h6_model_configuration_composition.py"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2",
+      "rc": 0,
+      "seconds": 8.006,
+      "log_sha256": "341d5dca33250b815baddbafb6001e174c20bf1716bb74f3d612e77777db8938",
+      "testcase_records": 18,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    {
+      "name": "model-view",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "src/resources/ModelConfigurationRead.test.tsx"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/app/mastermind_os",
+      "rc": 0,
+      "seconds": 1.99,
+      "log_sha256": "d3ea95a5bf2eeb756d384d991279a7a0183ce892800ea4b239e03f97c8d2d3fd"
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/app/mastermind_os",
+      "rc": 0,
+      "seconds": 0.976,
+      "log_sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c"
+    },
+    {
+      "name": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/app/mastermind_os",
+      "rc": 0,
+      "seconds": 1.511,
+      "log_sha256": "248fb9f346e3aac01ab58e48cd4ce7bd68212d65c9c24cdd9d5514c3b151fec1"
+    }
+  ],
+  "live_acceptance": false
+}

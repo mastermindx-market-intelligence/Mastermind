@@ -1,0 +1,87 @@
+test_meter_changed_original_digest_never_becomes_another_effect (__main__.main.<locals>.MeterBoundaryTests.test_meter_changed_original_digest_never_becomes_another_effect) ... ok
+test_meter_missing_bound_refuses_before_first_dispatch (__main__.main.<locals>.MeterBoundaryTests.test_meter_missing_bound_refuses_before_first_dispatch) ... FAIL
+test_meter_new_coherent_observation_cannot_create_dispatch_authority (__main__.main.<locals>.MeterBoundaryTests.test_meter_new_coherent_observation_cannot_create_dispatch_authority) ... FAIL
+test_meter_one_harness_step_is_still_not_a_billable_bound (__main__.main.<locals>.MeterBoundaryTests.test_meter_one_harness_step_is_still_not_a_billable_bound) ... FAIL
+test_meter_ordinary_application_keeps_existing_two_step_contract (__main__.main.<locals>.MeterBoundaryTests.test_meter_ordinary_application_keeps_existing_two_step_contract) ... ok
+test_meter_original_pending_recovers_without_new_request (__main__.main.<locals>.MeterBoundaryTests.test_meter_original_pending_recovers_without_new_request) ... ok
+test_meter_original_terminal_recovers_after_binding_change (__main__.main.<locals>.MeterBoundaryTests.test_meter_original_terminal_recovers_after_binding_change) ... ok
+test_meter_original_turn_recovers_after_binding_change (__main__.main.<locals>.MeterBoundaryTests.test_meter_original_turn_recovers_after_binding_change) ... ok
+test_meter_original_unknown_settles_and_keeps_original_liability (__main__.main.<locals>.MeterBoundaryTests.test_meter_original_unknown_settles_and_keeps_original_liability) ... FAIL
+
+======================================================================
+FAIL: test_meter_missing_bound_refuses_before_first_dispatch (__main__.main.<locals>.MeterBoundaryTests.test_meter_missing_bound_refuses_before_first_dispatch)
+----------------------------------------------------------------------
+lease_broker.ApplicationAdmissionError: application admission refused: account_dispatch_meter_unqualified
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/qualify_h3_meter_boundary.py", line 126, in test_meter_missing_bound_refuses_before_first_dispatch
+    self.refuse_new_unchanged()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/qualify_h3_meter_boundary.py", line 99, in refuse_new_unchanged
+    with self.assertRaisesRegex(broker.ApplicationAdmissionError,
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                "^account_dispatch_meter_unqualified$"):
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "^account_dispatch_meter_unqualified$" does not match "application admission refused: account_dispatch_meter_unqualified"
+
+======================================================================
+FAIL: test_meter_new_coherent_observation_cannot_create_dispatch_authority (__main__.main.<locals>.MeterBoundaryTests.test_meter_new_coherent_observation_cannot_create_dispatch_authority)
+----------------------------------------------------------------------
+lease_broker.ApplicationAdmissionError: application admission refused: account_dispatch_meter_unqualified
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/qualify_h3_meter_boundary.py", line 148, in test_meter_new_coherent_observation_cannot_create_dispatch_authority
+    self.refuse_new_unchanged()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/qualify_h3_meter_boundary.py", line 99, in refuse_new_unchanged
+    with self.assertRaisesRegex(broker.ApplicationAdmissionError,
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                "^account_dispatch_meter_unqualified$"):
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "^account_dispatch_meter_unqualified$" does not match "application admission refused: account_dispatch_meter_unqualified"
+
+======================================================================
+FAIL: test_meter_one_harness_step_is_still_not_a_billable_bound (__main__.main.<locals>.MeterBoundaryTests.test_meter_one_harness_step_is_still_not_a_billable_bound)
+----------------------------------------------------------------------
+lease_broker.ApplicationAdmissionError: application admission refused: account_dispatch_meter_unqualified
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/qualify_h3_meter_boundary.py", line 137, in test_meter_one_harness_step_is_still_not_a_billable_bound
+    self.refuse_new_unchanged()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/qualify_h3_meter_boundary.py", line 99, in refuse_new_unchanged
+    with self.assertRaisesRegex(broker.ApplicationAdmissionError,
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                "^account_dispatch_meter_unqualified$"):
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "^account_dispatch_meter_unqualified$" does not match "application admission refused: account_dispatch_meter_unqualified"
+
+======================================================================
+FAIL: test_meter_original_unknown_settles_and_keeps_original_liability (__main__.main.<locals>.MeterBoundaryTests.test_meter_original_unknown_settles_and_keeps_original_liability)
+----------------------------------------------------------------------
+lease_broker.ApplicationAdmissionError: application admission refused: account_dispatch_meter_unqualified
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/qualify_h3_meter_boundary.py", line 171, in test_meter_original_unknown_settles_and_keeps_original_liability
+    self.refuse_new_unchanged()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/tmp/qualify_h3_meter_boundary.py", line 99, in refuse_new_unchanged
+    with self.assertRaisesRegex(broker.ApplicationAdmissionError,
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                "^account_dispatch_meter_unqualified$"):
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "^account_dispatch_meter_unqualified$" does not match "application admission refused: account_dispatch_meter_unqualified"
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.470s
+
+FAILED (failures=4)
+{"tests": 9, "success": false, "output": "/private/tmp/h6-h3-meter-boundary-2efl9aef/qualification.json"}
