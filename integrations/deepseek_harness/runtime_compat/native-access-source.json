@@ -120,8 +120,8 @@
   "installed": false,
   "provider_calls": 0,
   "production_armed": false,
-  "host_patch_sha256": "9acf1f7d9cf7d26076f7a0a076aa55244e079a4cb10e867afede245dfec3f216",
-  "host_manifest_sha256": "8f23b9147c8bc2d3f5dd6a48de2ed5c314b9ed8785456f557ac08061bd992732",
+  "host_patch_sha256": "381e548e33b388a069220d9acf4dc0583a1e39974fbcc2b34ff5ff972ef22ace",
+  "host_manifest_sha256": "f14f0470ec7ba6ae2cd3cadb819a754ecb268084b6ba13d0909064b431980954",
   "base_sha256": {
     "packages/api/gateway/src/access.ts": "84362f5c25d122f5ec262507c65bd223fd1843a560721af8480fe9c3a0c042e4",
     "packages/api/gateway/src/client/index.ts": "67b346bbb099b65ec37c6fcedb08e4efeae2aee291fe1809e7a2d6fea080030c",

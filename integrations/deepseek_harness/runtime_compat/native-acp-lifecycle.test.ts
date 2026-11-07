@@ -583,3 +583,25 @@ it("preserves original internal tool contexts without granting public inject",as
   expect(contexts.map(e=>(e.data as any).content[0].text)).toEqual(["context-native-c1","context-native-c2"]);
   expect(events.findLastIndex(e=>e.type==="tool/result")).toBeLessThan(events.indexOf(contexts[0]));
 });
+
+it("does not classify enqueue-callback abort as an already queued native effect",async()=>{
+  const h=await host([text("must never run")],false),controller=new AbortController();
+  const record=await AcpSession.create(h.ctx,{
+    sessionId:SessionId("enqueue-callback-abort-native-session"),cwd:process.cwd(),mcpServers:[],
+    agentOptions:{},fallbackSelection:{provider:"fixture",model:"fixture"},
+    signal:new AbortController().signal,notify:async()=>{},
+  });
+  const followup=vi.spyOn(record.agent,"followup");let enqueues=0;
+  try{
+    const before=record.agent.session.snapshotEvents();
+    await expect(record.prompt({sessionId:record.agent.session.id,prompt:[{type:"text",text:"must not enqueue"}]},
+      false,controller.signal,{
+        operationId:"enqueue-callback-abort",requestId:"exact-enqueue-abort-request",
+        requireCurrent(action:any){if(action==="enqueue"){enqueues++;controller.abort();}},
+        notifyClaim:async()=>{},
+      })).resolves.toMatchObject({stopReason:"cancelled"});
+    expect(enqueues).toBe(1);expect(followup).not.toHaveBeenCalled();
+    expect(record.agent.inbox.hasPending).toBe(false);
+    expect(record.agent.session.snapshotEvents()).toEqual(before);expect(h.adapter.requests).toHaveLength(0);
+  }finally{await record.close("original enqueue-abort fixture cleanup");}
+});

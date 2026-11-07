@@ -1,4 +1,3 @@
-diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
 --- a/packages/acp/acp/src/index.ts
 +++ b/packages/acp/acp/src/index.ts
 @@ -46,6 +46,9 @@
@@ -361,7 +360,6 @@ diff --git a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
  }
  
  /**
-diff --git a/packages/acp/acp/src/session.ts b/packages/acp/acp/src/session.ts
 --- a/packages/acp/acp/src/session.ts
 +++ b/packages/acp/acp/src/session.ts
 @@ -1,8 +1,9 @@
@@ -536,21 +534,25 @@ diff --git a/packages/acp/acp/src/session.ts b/packages/acp/acp/src/session.ts
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
          }
-@@ -288,6 +405,8 @@
-           imageEnabled,
+@@ -289,6 +406,8 @@
            admissionController.signal,
          )
-+        admissionController.signal.throwIfAborted()
-+        this.requireNativeCurrent(inflight, 'admit')
          admissionController.signal.throwIfAborted()
++        this.requireNativeCurrent(inflight, 'admit')
++        admissionController.signal.throwIfAborted()
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
-@@ -300,6 +419,8 @@
-         inflight.messageQueued = true
+         }
+@@ -297,9 +416,11 @@
+           source: { kind: 'user' },
+         })
+         inflight.messageId = message.id
+-        inflight.messageQueued = true
          if (promptSelection !== undefined) this.pendingSelections.set(message.id, promptSelection)
          try {
 +          this.requireNativeCurrent(inflight, 'enqueue', message)
 +          admissionController.signal.throwIfAborted()
++          inflight.messageQueued = true
            this.agent.followup(message)
          } catch (error: unknown) {
            inflight.messageQueued = false

@@ -378,3 +378,21 @@ it("keeps removal and cancellation available from an original insertion observer
   expect(owner.consumed()).toBe(1);expect(agent.inbox.hasPending).toBe(false);expect(h.modelCalls()).toBe(0);
   await handle.dispose();
 });
+
+it("folds pending input after the last authority callback before publication",async()=>{
+  let unpublished:Agent|undefined,checks=0;
+  const input:AgentInputCapability={
+    assertCurrent(){
+      if(unpublished!==undefined&&++checks===2)
+        unpublished.session.append("agent/inbox/spliced",{target:"next-step",start:0,inserted:[inputMessage()]});
+      return true;
+    },
+    consume(){throw Error("No external input grant");},
+  };
+  const h=await harness({input}),id=SessionId("native-post-fold-callback");
+  h.allow(h.caller.fiber,"create",id);
+  await expect(h.caller.agents.create({sessionId:id,setup:(_ctx,agent)=>{unpublished=agent;}}))
+    .rejects.toThrow("cannot adopt pending input");
+  expect(checks).toBe(2);expect(h.ctx.agents.get(id)).toBeUndefined();expect(h.ctx.sessions.get(id)).toBeUndefined();
+  expect(await h.ctx.sessionPersistence.stat(id)).toBeUndefined();expect(h.modelCalls()).toBe(0);
+});

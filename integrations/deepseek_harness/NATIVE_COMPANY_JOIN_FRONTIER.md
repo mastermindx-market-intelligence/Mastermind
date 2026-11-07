@@ -842,9 +842,9 @@ The source does not discard or adopt pending messages to make recovery pass.
 
 Qualification on exact final patch bytes:
 
-- **207 host tests passed**, including original donor Inbox, loop, pending-input
+- **208 host tests passed**, including original donor Inbox, loop, pending-input
   resume, reentrant publication and tool-context order assertions.
-- **199 combined host + ACP tests passed**, including actual SDK request/claim
+- **200 combined host + ACP tests passed**, including actual SDK request/claim
   correlation, one input consumed once, public bypass refusal, exact unused
   candidate retirement, callback replacement, concurrent refusal and native
   internal tool contexts through the original loop.
@@ -853,13 +853,13 @@ Qualification on exact final patch bytes:
   the host checker is now reproducible from the source carrier.
 
 Exact final test receipts and hashes are in the evidence JSON. Host receipt:
-fe685b1e69df892d4568feb3de184f4a21759225ae008984ffde73864640a194.
+6865e101edfd08ea39c03a1c47bf54a5f3925833a71310450b917ae2a139dfca.
 Combined ACP receipt:
-720521a2454b436cb92c2688d341c99fb8bf8ce212948957021b81f08f623038.
+c29bdf6580aab1df9a75fae3856806410fe6a6d17634bfad69213ca91e490e90.
 Package receipt:
-9db60d187449d828547ef0f4f2a731b8f658f3679f2180b7ca6414aabf2c3bef.
+7f9ee45f259671be7b633d3bed8b440224babf7b2b3508c79a2888a879487082.
 TypeScript receipt:
-813c0a52e68d7cae4f83b45e250419e6105a1e10fb38e6dd28f1db5db9c387b2.
+41942da416594a3dc1cea99dd3de1eb633d53d71f4c8da2f935ab7977ee590e7.
 
 The first preparation diagnostic found that Git silently skipped patch paths
 inside the enclosing source worktree. Both original preparers now constrain
@@ -874,6 +874,20 @@ validates their exact application and outputs.
 
 No real provider call, active service change, installed release, production
 Session or accepted physical canary occurred in this source qualification.
+
+Final callback-order review found and repaired two concrete cases. ACP keeps
+messageQueued false through enqueue admission and its final abort check. Native
+Inbox emptiness is folded after every authority callback, so a callback cannot
+insert pending input between the emptiness decision and persistence. Both
+regressions pass against the real original owners, alongside the preserved
+ordinary behavior.
+
+The first committed-source guard correctly invalidated the previous whole-patch
+review digest. Only the existing literal source pin and its matching digest
+assertion advance for C28. The two exact HTTP Forbidden sites, path/anchor/count
+checks, false-postimage checks and all identity/drift assertions remain intact.
+Plain patch formatting alone did not resolve the old pin. The diagnostic and
+source-linked review-pin reconciliation are retained in the evidence JSON.
 
 ### C29 immediate continuation
 

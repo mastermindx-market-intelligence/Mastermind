@@ -78,11 +78,11 @@
     "packages/client/connection/src/rpc-host.ts": "00ceca82899b88367f4df9ac69811c2f97dc840f191ba769b9b22d78c5fe4bb6",
     "packages/core/agent-loop/src/agent.ts": "7865abe18a83effea73aeb666bb57b4125bbf00a476c8412e8a82e146295dea8",
     "packages/core/agent-loop/src/inbox.ts": "dd12671aa16abb4ae619beb3ae5b3ce6109641cd51e49c10aa6b17024b7ab41f",
-    "packages/core/agent-loop/src/index.ts": "0b40a4f3a5632c05a8227cd49818ee3640eded3f545953694e39abd679da4c0d",
+    "packages/core/agent-loop/src/index.ts": "69e8c12541db77a168c4af5a8a45b1fcbfdcefac2586a6bb3d15d914bda9d691",
     "packages/core/agent/src/index.ts": "0a6b0480dfbf30bbe769f71079eaa92dcda63fcdcd0ffd60a33fe9069ed86522",
     "packages/typert/protocol/src/index.ts": "3148c1d928c7f2cf9b3bd51346d67d13eabb36434e1353c8729aa5515f750021"
   },
-  "patch_sha256": "9acf1f7d9cf7d26076f7a0a076aa55244e079a4cb10e867afede245dfec3f216",
+  "patch_sha256": "381e548e33b388a069220d9acf4dc0583a1e39974fbcc2b34ff5ff972ef22ace",
   "installed": false,
   "provider_calls": 0,
   "production_armed": false
