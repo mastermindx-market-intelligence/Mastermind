@@ -1845,3 +1845,57 @@ Source validation location remains `/Users/chriswong/hermes-discovery-correction
 5. Check the existing store's idempotent publication durability before relying on a replay after directory-sync failure; visible matching bytes alone are not a new fsync receipt.
 
 Original C26 root diagnostic denial, original runtime carrier, vault/login and physical isolation/fleet acceptance boundaries are unchanged. No alternate identity or C3 runtime substitution. Paid Fabric denials remain unretried; native children supplied principal judgments only. Outcome Learning #398 / #409 remains held. Source implementation continues.
+
+
+## 43. Original native evaluation publication and durability completed in source — 2026-11-07
+
+**MISSION_COMPLETE=false; MORE_WORK_EXISTS.** Chairman's full implementation commission remains active. This milestone completes the connected conservative native receipt publisher. It does not establish installed fleet behavior, valid learning trials, or efficacy. Compatible source law remains pinned at 66780ab7e3e9fdbfd40713bb5791fb1888529f7c; comparison through protected master 3f79e30ae184dc991102f6044f7c74f677a86040 showed no later changes to the governing protected bootstrap/law paths.
+
+### Canonical source and original ownership
+
+PR [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234), same branch `sol/hermes-native-eval-inputs-20261107-c3`, advanced by compare-and-swap from 6280c656e71d3ec88e58031c857a17c465660502 to **10bae87a03acadd6ce218ff69c62727335ec6468**. Tree **8da75d959456309b7a3a14672605a3ed9c65af75** contains the twenty-file follow-up. Exact native-publisher and source-review-table Git blobs were read back and matched. No release request is active on this Draft PR.
+
+Source contract: [NATIVE_EVAL_INPUT_SELECTION.md](https://github.com/mastermindx-market-intelligence/Mastermind/blob/10bae87a03acadd6ce218ff69c62727335ec6468/docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md). The first-party publication entry is [native_eval_publication.py](https://github.com/mastermindx-market-intelligence/Mastermind/blob/10bae87a03acadd6ce218ff69c62727335ec6468/integrations/hermes_runtime/native_eval_publication.py).
+
+New marker v2 retains the actual original release/derivation producer and artifact-root path/device/inode/UID/mode under the unchanged payload key. Original v1 bytes remain readable; missing provenance cannot be borrowed from today's process. The private capability read exposes the actual selected producer/profile descriptor for authoring a matching configuration, not an execution grant.
+
+The original Hermes common schema gains nullable `eval_publication_json`. Its exact unchanged declarative reconciler owns normal startup migration, including old parse-cache handling. Original `_row` hides the field. Original retirement's existing row copy moves it into the same admission tombstone; the accepted pruning rule preserves it while ordinary result expiry continues. No new table, prefix, result envelope, store, queue or publication journal is introduced.
+
+The private publisher accepts only original profile/session/submission/input/admission/run-binding identity. It joins the authenticated principal, stable terminal outcome, original marker and coherent retained result inside the incumbent SQLite transaction. Current writer epoch is fenced separately from historical admission epoch/generation. Steering and steered records are not stable standalone trials and are refused. Completed/partial, failed, cancelled, interrupted and rejected retain explicit documented outcome mappings.
+
+One bounded canonical PUBLIC_SAFE record freezes the final run and its original producer/root/outcome/digest. It contains no answer, transcript, reasoning, raw error or raw usage copy. Original output is referenced with its exact retained-redacted-byte digest and normal expiry. A preexisting frozen run is reused before examining current result availability. Producer and finalizer source references are separate; historical provenance is not replaced by the current publisher.
+
+After commit readback, publication uses the existing ArtifactStore. New, identical and concurrent-identical paths all sync the final inode and canonical directory chain, verify exact bytes and graph/population readback, and only then acknowledge success. Canonical files survive failures for reconciliation. Known pre-write refusals, unavailable preflight reads, a known different artifact and possible post-entry effects are distinct. No uncertainty permits inference resubmission, alternate root/run ID, overwrite or a new carrier.
+
+### Honest observation mapping
+
+Actual original request scalars require an exact unique request identity/counter join, matching EVAL assemblies, complete retained logical-call/dispatch attachment, and byte-identical content projection on every qualified HTTP attempt. Retry count is part of identity; API request ID alone is insufficient. Uniform measured seed/effort mismatches remain observed and invalid rather than copied from configuration. Process observations must join the original producer release. Exactly one physical session may yield a profile-scoped session fingerprint; ambiguous multiple sessions remain unavailable.
+
+Provider-request coverage remains partial. Response model labels do not verify serving identity; explicit wire sampling does not prove complete effective sampling; network-origin hashes are not destination-string evidence. Effective auth/environment/freshness, whole-trial source/capability/network/effect and cleanup coverage remain unproven. Contradictory or future wall times become unavailable while valid monotonic duration remains separate. This publisher records **invalid v2 attempts** and cannot promote them as valid Harness2 trials or learning improvements.
+
+### Qualification and precise limitations
+
+| Evidence | Observed result |
+| --- | --- |
+| C3 component composition | **383 checks passed; 0 failures/errors/skips**. XML SHA256 `eee718ade4b2abbf6791b8b8248a0fecbb289f88859b8f5a7ff1112d3226e8ad`. |
+| Final response-boundary refinement | **176 affected publication/private-control checks passed; 0 failures/errors/skips**. XML `d17ffb3f1124d197706e011672f197ea04d92ddc8316990190f4e7f9d8c2949c`. The 208 unchanged input/store/v2 cases retain the earlier receipt; these suites overlap. |
+| Exact pristine Hermes derivation | **14 files verified**, donor unchanged, driver not started, not installed. Receipt `ed58b01b2e5a1c5e9757e35552d32e253363ae199a0d3b07f1c8ba6379c4a5c6`. |
+| Derivation patch | `8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211`; previous eleven postimages, including accepted actual-retirement repair, unchanged. |
+| Production D8 collector | **135 source files; no identity/evidence findings**; complete working postimages including new files. Receipt `56f48c47017ea3b6f7c453b7e1f967ca08b6905f441885970ee6c89f51bc1c52`. |
+| Inertness/scope | **155 passed**, two actual-repository diff checks lacked `origin/master` in the source-validation composition. Those two are not passed; current PR/synthetic-merge CI remains owed. XML `e07261b8e681050552ec42ed64496a305c14d5cc9ed770fa8be6d31967f3faa5`. |
+
+The component checks execute actual pinned settlement, result codec, retirement, migration and worker bodies, plus real OpenAI/HTTPX serialization with in-process transport. Lost commit response, post-link failure, both retirement orders, result expiry, stale current writer, original producer/later finalizer, malformed/oversized result, request-counter/content ambiguity and wall-clock conflict are exercised. No live provider/account, runtime admission or installed service is claimed.
+
+Native child agents supplied principal/source judgments only while paid Fabric remained blocked; root implemented and verified the source. Their useful findings were applied: final ArtifactStore return-field names, current database epoch fence, exact cross-boundary retry-aware joins, original process release, single physical session identity, and precise D8 permission/source sites. They are not formal GitHub approvals or production receipts.
+
+### Newly material release frontier
+
+Discovery [#2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217) at **5bba402b3de999cbcb48d8d36728c40749946637** passed all six shards and required `test`, then its original queue advanced before being removed. Latest canonical observation against master **3f79e30ae184dc991102f6044f7c74f677a86040** is **OPEN / CONFLICTING / DIRTY / no merge queue entry / no merge proof**. This is a new source-composition blocker, not authority to create another release carrier.
+
+The exact branch/master comparison shares five paths: `app/mastermind_os/src-tauri/src/auth.rs`, `app/mastermind_os/src/App.tsx`, `integrations/executive_mcp/installed.py`, `integrations/executive_mcp/server.py`, and `tests/executive_fabric_release_identity_review.py`. Next action: three-way reconcile those against common base **7ccb72a1f751f8012190a7deda90ea7ec1db1ecb**, preserve accepted Company/Office/provider source, publish to the same discovery branch, obtain current required CI, then carry the resolved composition into the same EVAL branch. Transport #2228 remains merged at **28cbe35a87a2575b57d8a2d7a4721dcdf13a5d6a**; do not redo it.
+
+### Unchanged execution boundaries
+
+Original Ubuntu1/root C26 diagnostic PermissionError remains closed and unretried. The original runtime operation remains `meta-ceo-byok-followon-parent-20261106-c35-01` at `/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01`. C3 is source qualification only. Neither denied local AF_UNIX case was retried. Paid Fabric and Outcome Learning #398/#409 holds remain. No alternate runtime, account, admission, watcher, daemon, delivery or queue was introduced.
+
+Full mission acceptance still requires original-carrier installed proof of effective auth/model/isolation/effects/cleanup, governed memory/correction feedback, held-out efficacy and promotion/rollback, vault/browser/computer/fleet journeys, interruption/restart/endurance and original-owner recovery. Healthy safe source work continues; this milestone is not a mission closeout.
