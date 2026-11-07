@@ -589,3 +589,43 @@ The running package retains its actual486 build identity. Current8c hosted
 Hermes harness42350964042 is successful; OS42350964039 and CI42350964044 were
 still running at this checkpoint. Subsequent head/CI readback belongs in the
 existing PR continuation, not an all-green claim here.
+
+## Native window reopen repair discovered during final acceptance
+
+A later read found the same raw486 process, PID27848, alive and visible/frontmost
+but with no accessible window. The earlier close/hide trigger is not attributed.
+One exact-PID/path-guarded `open` of that existing bundle returned0; the same
+process still exposed no window. This is separate from the native creation and
+authentication effects above. No new app, model request or service was started.
+
+Pinned Tauri2.11.6 source shows Builder.run delegates to App.run with an empty
+callback, and the existing main.rs supplied no macOS Reopen handler. The repair
+retains the one App, NativeAuth, TerminalSession, setup/deep-link registration
+and complete invoke-handler list. On macOS Reopen with no visible windows, it
+reuses the fixed main window if present or recreates that exact configured label,
+then shows, unminimizes and focuses it. It never reruns auth restoration, changes
+close-to-hide policy, prevents Quit, invents another label/owner or retries a
+failed window creation. Only fixed local error codes can be logged.
+
+The original9fbc pointer and canonical zero-message session remain the next
+recovery target. A fresh source-bound package must prove window restoration
+before the user is asked to complete sign-in; the prior request to use the
+windowless486 screen is superseded. Current-ad frontend6671pass/12skip across
+384files, default and opt-in native configurations258pass/8ignored each,
+unsigned-package/locked-input verification and all four CodeQL analyses passed.
+General CI42351563551 was still running when this repair began. Those results
+are historical evidence forad, not claimed verification of the new window code.
+
+The new window code compiled under the full incumbent public package profile.
+That profile exposed an existing test-fixture dependency: the base two-resource
+transaction test inherited compiled MM_EXECUTIVE_RESOURCE and expected no third
+exchange. The test helper now explicitly constructs the base profile with no
+Executive resource; every original assertion is retained, and existing explicit
+Executive fixtures still cover the enabled chain. Production auth code is unchanged.
+The original red log retains237passed/1failed/8ignored; the corrected full native
+application suite passes238tests/8existing ignored, exit0, with the Executive
+profile compiled and refresh disabled. Green log:
+`/tmp/hermes-thin-window-reopen-native-20261107-pro-04-fixed.log`.
+Verified source SHA256s: main.rs
+`14be131790c3cb8f4e4e70c20af3c17e360926ba36d2e0725238809d576e0f4d`;
+auth.rs `55844330ebbcd982692bdf867ed766c5ed9e909ee9f64ac8c7900e5e28f643d5`.

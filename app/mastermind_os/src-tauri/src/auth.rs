@@ -3056,7 +3056,9 @@ mod tests {
         }
     }
     fn inner() -> Inner {
-        Inner::new(Some("public-client"))
+        // This fixture covers the base two-resource flow independently of the
+        // compiled optional Executive profile; enabled flows have explicit fixtures.
+        Inner::with_executive_resource(Some("public-client"), None)
     }
     fn callback_url(state: &str) -> String {
         format!("{CALLBACK}?state={state}&code=test-code")
