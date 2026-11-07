@@ -146,7 +146,7 @@
     "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
     "ext/fabric_cpu_scope.py": "15891591aba64e7d5658b7c92fd5ff90a89f6c57df952f8e5673c2a638fc0c63",
     "ext/fabric_host_qualification.py": "f50ef3208efe97c933372eada2e26b8870ba9b9590e33766f991e3416b613aa2",
-    "ext/fabric_memory_view.py": "a7bfc2567c8abc6c27e3fe2277d8b21669420d90e547aafc42e1186ea0740081",
+    "ext/fabric_memory_view.py": "5cfef82516a599baeb5a59893e7cfffae33d9819918eb0077475c12cb1370202",
     "ext/fabric_operator_client.py": "fcb79e9dc4b873832e18e1fde16f0ba900374a08d62d0fc8b9b624a40ec1cd17",
     "ext/fabric_operator_contract.py": "80358fb1fbb720441405f60cb419f659697d576bc0cdeaea0d1b8a30b78d6116",
     "ext/fabric_operator_diagnostics.py": "c0a5219a29d49f616df19fdb1e1686c78926179911d0e9c923d6c2bcae518641",
@@ -219,7 +219,7 @@
     "ext/paid_pyyaml_provenance.json": "7883d48401f41d9470660bfd6114e6199002da8e142c1e7d196d9da4e4e17f64",
     "ext/paid_yaml_runtime.py": "cf5a1fbc4617cd88133ac6a5a315c82c90fbb971784be674fbaa8a50c4baa6e8",
     "ext/participant_binding.py": "09aafda1390914e283915204459e37900123cd54a3d0f4e9116102f3a8921f56",
-    "ext/pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+    "ext/pick.py": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
     "ext/placement_view.py": "315519caa4644f9b6a431153556c5ce2080f921ce9ec4b0ddbff172517e3feb3",
     "ext/pool_ledger.py": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2",
     "ext/pool_status.py": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
@@ -247,19 +247,25 @@
     "ext/fabric_task.py": {
       "after": "c0f12526bb13cbef6be6b766232e31dc520fffc38e1353923ae97e8ff5c521d1",
       "before": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28",
-      "patch": "fabric_task.py.patch",
+      "patch": "memory118/fabric_task.py.patch",
       "patch_sha256": "fcce4fad7f238f1d54d214e3a6b049a474a6f258d9f39a8825827c31a4f9db03"
     },
     "ext/lease_broker.py": {
       "after": "7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd",
       "before": "a841230c4030d178f309f311f199caad7767d3b45b44c41c021fdc14eacc3640",
-      "patch": "lease_broker.py.patch",
+      "patch": "memory118/lease_broker.py.patch",
       "patch_sha256": "1ab8c3a5679422dbd1be6ada532ef61b5a8756db3aaaa600757b819653c05089"
+    },
+    "ext/pick.py": {
+      "after": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+      "before": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+      "patch": "patches/pick_remote_plan_modes.forward.patch",
+      "patch_sha256": "7da90e717876c1a965b9c146298577723b733ea5e5ccec163c6269fa89e919a2"
     }
   },
   "source_map": {
     "ext/artifact_delivery.py": "ops/native_fabric/quota_continuity/candidate/artifact_delivery.py",
-    "ext/fabric_memory_view.py": "ops/native_fabric/quota_continuity/candidate/fabric_memory_view.py",
+    "ext/fabric_memory_view.py": "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
     "ext/fabric_operator_contract.py": "ops/native_fabric/quota_continuity/candidate/fabric_operator_contract.py",
     "ext/fabric_operator_owner.py": "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py",
     "ext/protected_memory_economic.py": "ops/native_fabric/quota_continuity/candidate/protected_memory_economic.py",

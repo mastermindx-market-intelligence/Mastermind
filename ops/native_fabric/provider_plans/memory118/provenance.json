@@ -1,0 +1,109 @@
+{
+  "accepted_common_component": "eae4163be37bccce2a1fd3838499450517bab71c",
+  "accepted_memory_source_commit": "79fc0bec64c774d3034791af8b4b9507bea96b7c",
+  "additions": [
+    "ext/fabric_memory_view.py",
+    "ext/protected_memory_economic.py"
+  ],
+  "all_scientific_verification_flags": false,
+  "base_count": 116,
+  "base_public_source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "broker_guard_parent_sha256": "4072c76fd5d28729e4c62d44f9b700a2ac503ccb4acd1e572fc4a6c291fe23d3",
+  "broker_memory_changed_functions": [
+    "_connect",
+    "Broker.__init__",
+    "Broker._lock",
+    "Broker._conn",
+    "Broker._try_acquire_in_transaction"
+  ],
+  "canonical109_helper_unchanged_sha256": "a7bfc2567c8abc6c27e3fe2277d8b21669420d90e547aafc42e1186ea0740081",
+  "canonical_old_broker_sha256": "ac551b0c71fa13da0dad1b99a99bb51375233466062c8a447f06883d0fcb4385",
+  "canonical_old_task_sha256": "ed05bfe80371301f39cb9765bda3cd59f2ed46b4357d06f33386f5f76c58dace",
+  "changes_vs_accepted_common116": {
+    "ext/artifact_delivery.py": {
+      "after": "ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a",
+      "before": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
+    },
+    "ext/fabric_operator_contract.py": {
+      "after": "80358fb1fbb720441405f60cb419f659697d576bc0cdeaea0d1b8a30b78d6116",
+      "before": "e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e"
+    },
+    "ext/fabric_operator_owner.py": {
+      "after": "d53932a861fa7126740551ab75920a72c46f87c8a02bd40906c101898a82a2b3",
+      "before": "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7"
+    },
+    "ext/fabric_task.py": {
+      "after": "c0f12526bb13cbef6be6b766232e31dc520fffc38e1353923ae97e8ff5c521d1",
+      "before": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28"
+    },
+    "ext/lease_broker.py": {
+      "after": "7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd",
+      "before": "4072c76fd5d28729e4c62d44f9b700a2ac503ccb4acd1e572fc4a6c291fe23d3"
+    },
+    "ext/provider_outcome.py": {
+      "after": "eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b",
+      "before": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e"
+    },
+    "ext/run_observation_delivery.py": {
+      "after": "5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f",
+      "before": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b"
+    }
+  },
+  "changes_vs_selected116": {
+    "ext/artifact_delivery.py": {
+      "after": "ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a",
+      "before": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
+    },
+    "ext/fabric_operator_contract.py": {
+      "after": "80358fb1fbb720441405f60cb419f659697d576bc0cdeaea0d1b8a30b78d6116",
+      "before": "e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e"
+    },
+    "ext/fabric_operator_owner.py": {
+      "after": "d53932a861fa7126740551ab75920a72c46f87c8a02bd40906c101898a82a2b3",
+      "before": "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7"
+    },
+    "ext/fabric_task.py": {
+      "after": "c0f12526bb13cbef6be6b766232e31dc520fffc38e1353923ae97e8ff5c521d1",
+      "before": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28"
+    },
+    "ext/lease_broker.py": {
+      "after": "7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd",
+      "before": "a841230c4030d178f309f311f199caad7767d3b45b44c41c021fdc14eacc3640"
+    },
+    "ext/pick.py": {
+      "after": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+      "before": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3"
+    },
+    "ext/provider_outcome.py": {
+      "after": "eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b",
+      "before": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e"
+    },
+    "ext/run_observation_delivery.py": {
+      "after": "5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f",
+      "before": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b"
+    }
+  },
+  "incumbent_lease_reader_unchanged": true,
+  "installed_authority_claimed": false,
+  "native_parent": "01a19fff-121a-7643-bb9e-13f6e6d460cc",
+  "new_privacy_helper_sha256": "5cfef82516a599baeb5a59893e7cfffae33d9819918eb0077475c12cb1370202",
+  "original_root": "01a15741-5e68-7803-8eb4-ccac74a6c04b",
+  "paired_scope_limit": "actual pair/FD/annotation/issuer bodies unchanged; new generic privacy coexistence checked separately",
+  "paired_source_proof_reused": "ROOT_ACTUAL_PAIRED_SOURCE_ACCEPTANCE.json/8bd20769cce606460113f6bce163791aa0970c0d3dc78e63d179bbafb5c7648e",
+  "privacy_helper_profile_variant": "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
+  "runtime_effects_performed": false,
+  "schema": "mastermind.current116_memory118_source_provenance.v1",
+  "selected_source_descriptor": {
+    "generation": "9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4",
+    "previous": "205b8321c22858b568fe37b7f11b861ee9aeed9c6615bd47847d986b14dfea08",
+    "schema": "native-code-selection.v1",
+    "sequence": 37
+  },
+  "source_descriptor_is_runtime_authority": false,
+  "target_count": 118,
+  "task_privacy_seams": [
+    "inspect_run wrapper",
+    "read_result before original snapshot",
+    "main before original dispatch"
+  ]
+}
