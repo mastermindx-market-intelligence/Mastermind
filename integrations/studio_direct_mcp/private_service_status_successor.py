@@ -315,7 +315,7 @@ def _protected_source(svc, commit):
     return raw, observed
 
 
-def _original_pin(svc, account, roots):
+def _original_pin(svc, account, roots, *, forward_original=None):
     """Re-read the original immutable selection evidence, never reselect it."""
     pin = svc._pin_owner_module()
     path = roots["state"] / "native-pool-pin"
@@ -332,17 +332,24 @@ def _original_pin(svc, account, roots):
         expected_plan_sha256=pin.plan_sha(svc, original_plan),
         operation="status",
     )
-    with svc._pin_native_context(args) as binding:
-        plan, retained = pin.read_transaction(svc, path, args, binding)
-        expected = {"schema": pin.SCHEMA,
-                    "planSha256": pin.plan_sha(svc, plan), "effect": "APPLIED"}
-        result = pin.decode(svc._fabric_release_bytes(path / "result.json"))
-        if (result != expected or binding.get("phase") != "SELECTED"
-                or svc._stable_regular_file_hash(
-                    Path(plan["pool_target"]), label="selected native pool")
-                != plan["pool_bridge"]):
+    if forward_original is not None:
+        if (original_plan != forward_original["plan"]
+                or {name: digest(svc._fabric_release_bytes(path / name))
+                    for name in sorted(pin.FILES)} != forward_original["fingerprint"]):
             fail("PIN_SELECTION_INVALID")
-        original_pin_sha = pin.plan_sha(svc, plan)
+        original_pin_sha = forward_original["plan_sha256"]
+    else:
+        with svc._pin_native_context(args) as binding:
+            plan, retained = pin.read_transaction(svc, path, args, binding)
+            expected = {"schema": pin.SCHEMA,
+                        "planSha256": pin.plan_sha(svc, plan), "effect": "APPLIED"}
+            result = pin.decode(svc._fabric_release_bytes(path / "result.json"))
+            if (result != expected or binding.get("phase") != "SELECTED"
+                    or svc._stable_regular_file_hash(
+                        Path(plan["pool_target"]), label="selected native pool")
+                    != plan["pool_bridge"]):
+                fail("PIN_SELECTION_INVALID")
+            original_pin_sha = pin.plan_sha(svc, plan)
     # C4, admin-business and the two ChatGPT3 workspaces each own a newer,
     # separate selected repository-enrollment successor. Check retained
     # original evidence even after this source-only module update; never skip
@@ -355,8 +362,12 @@ def _original_pin(svc, account, roots):
         if not ep.is_dir():
             fail("C4_ENROLLMENT_MISSING")
         profile = enrollment.frozen_profile(account)
-        with enrollment.original_pin(svc, roots, "status", profile) as (
-                enpin, enoriginal, fingerprint):
+        enrollment_context = (
+            enrollment.original_pin(svc, roots, "status", profile)
+            if forward_original is None else
+            enrollment.original_pin(svc, roots, "status", profile,
+                                    forward_original=forward_original))
+        with enrollment_context as (enpin, enoriginal, fingerprint):
             stored = enpin.decode(svc._fabric_release_bytes(ep / "plan.json"))
             eplan, eraw = enrollment.retained(
                 svc, enpin, roots, ep,
@@ -375,8 +386,7 @@ def _original_pin(svc, account, roots):
     return original_pin_sha
 
 
-def _require_paper_v20_origin(svc, account, roots, original_status_manifest, *,
-                              config_bytes=None):
+def _require_paper_v20_origin(svc, account, roots, original_status_manifest, *, forward_config=None):
     """Bind a later accepted Paper cohort to the ORIGINAL private-service owner.
 
     The original native pin/enrollment is separately authenticated by
@@ -408,10 +418,10 @@ def _require_paper_v20_origin(svc, account, roots, original_status_manifest, *,
             home=svc._user_root())
     except ValueError:
         fail("PAPER_V20_ORIGIN_UNQUALIFIED")
-    observed_config = (svc._fabric_release_bytes(roots["config"], limit=65536)
-                       if config_bytes is None else strict_bytes(config_bytes))
+    current_config = (forward_config if forward_config is not None
+                      else svc._fabric_release_bytes(roots["config"], limit=65536))
     if (original_status_manifest != candidate["manifestBytes"]
-            or observed_config != candidate["configBytes"]
+            or current_config != candidate["configBytes"]
             or digest(candidate["manifestBytes"])
                != PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account]
             or digest(candidate["configBytes"])
@@ -432,7 +442,6 @@ def _retained_file_modes(roots, plan):
                 or p.st_nlink != 1):
             fail("FILE_MODE_CHANGED")
 
-
 def _preserved_runtime(svc, roots, raw):
     before = manifest_from(raw["manifest.before"])
     for name, h in before["files"].items():
@@ -446,7 +455,6 @@ def _preserved_runtime(svc, roots, raw):
                 Path(before["backend"]), label="preserved backend") != before["backendHash"]
             or svc._dependency_tree_hash(roots["node_modules"]) != before["dependencyTreeHash"]):
         fail("RUNTIME_CHANGED")
-
 
 def historical_pair(svc, account, roots, *, original_plan, original_raw,
                     config_bytes, manifest_bytes):
@@ -500,7 +508,7 @@ def historical_pair(svc, account, roots, *, original_plan, original_raw,
     elif os.path.lexists(enrollment_path):
         fail("ENROLLMENT_ACCOUNT_UNQUALIFIED")
 
-    plan, raw, pd = _retained(svc, account, roots, path, config_bytes=config_bytes)
+    plan, raw, pd = _retained(svc, account, roots, path, forward_config=config_bytes)
     if (plan["originalPinPlan"] != original_sha
             or json.loads(svc._fabric_release_bytes(path / "result.json"))
                != {"schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"}):
@@ -533,17 +541,26 @@ def historical_pair(svc, account, roots, *, original_plan, original_raw,
     return True
 
 
-def _static_state(svc, account, roots, plan, raw):
+def _static_state(svc, account, roots, plan, raw, *, forward_pair=None, forward_original=None):
     """Verify selected original bytes and the only three allowed write states."""
+    if (account == "chatgpt4" and os.path.lexists(
+            roots["state"] / "native-pool-pin-enrollment-publisher")):
+        if svc._pin_enrollment_owner_module().c4_publisher_postimage(
+                svc, account, roots, plan, raw,
+                forward_pair=forward_pair, forward_original=forward_original):
+            return "COMMITTED"
+        fail("FOREIGN_STATE")
     if set(x.name for x in (roots["state"] / TRANSACTION).iterdir()) - FILE_NAMES:
         fail("FOREIGN_TRANSACTION")
-    current_config = svc._fabric_release_bytes(roots["config"])
+    current_config = (forward_pair["config"] if forward_pair is not None
+                      else svc._fabric_release_bytes(roots["config"]))
     if digest(current_config) != plan["configSha256"]:
         fail("CONFIG_CHANGED")
     _retained_file_modes(roots, plan)
     state = (
         svc._fabric_release_bytes(roots["base"] / MODULE),
-        svc._fabric_release_bytes(roots["manifest"]),
+        (forward_pair["manifest"] if forward_pair is not None
+         else svc._fabric_release_bytes(roots["manifest"])),
     )
     if state == (raw["module.before"], raw["manifest.before"]):
         phase = "OLD"
@@ -554,7 +571,7 @@ def _static_state(svc, account, roots, plan, raw):
     else:
         fail("FOREIGN_STATE")
     _preserved_runtime(svc, roots, raw)
-    if _original_pin(svc, account, roots) != plan["originalPinPlan"]:
+    if _original_pin(svc, account, roots, forward_original=forward_original) != plan["originalPinPlan"]:
         fail("ORIGINAL_PIN_CHANGED")
     return phase
 
@@ -740,7 +757,7 @@ def _confirm_retained_durability(svc, roots, target):
         fail("EFFECT_UNKNOWN_DURABILITY_RECONCILE_SAME_OWNER")
 
 
-def _retained(svc, account, roots, path, *, config_bytes=None):
+def _retained(svc, account, roots, path, *, forward_config=None):
     svc._assert_dest_safe(path)
     if not path.is_dir() or path.is_symlink():
         fail("TRANSACTION_UNAVAILABLE")
@@ -767,13 +784,11 @@ def _retained(svc, account, roots, path, *, config_bytes=None):
         fail("INTENT_CHANGED")
     raw = {f: svc._fabric_release_bytes(path / f) for f in (
         "manifest.before", "manifest.after", "module.before", "module.after")}
-    observed_config = (svc._fabric_release_bytes(roots["config"])
-                       if config_bytes is None else strict_bytes(config_bytes))
-    _require_paper_v20_origin(svc, account, roots, raw["manifest.before"],
-                              config_bytes=observed_config)
+    _require_paper_v20_origin(svc, account, roots, raw["manifest.before"], forward_config=forward_config)
     before = qualify_exact_predecessor(
         account, manifest_bytes=raw["manifest.before"],
-        config_bytes=observed_config,
+        config_bytes=(forward_config if forward_config is not None
+                      else svc._fabric_release_bytes(roots["config"])),
         module_before_bytes=raw["module.before"],
         source_module_bytes=raw["module.after"],
     )
@@ -809,6 +824,10 @@ def _stopped(svc, account, roots):
 
 def require_start(svc, account, roots):
     """Only a completed original-owner status successor may start."""
+    if (account == "chatgpt4" and os.path.lexists(
+            roots["state"] / "native-pool-pin-enrollment-publisher")):
+        return svc._pin_enrollment_owner_module().c4_publisher_postimage(
+            svc, account, roots, durable=True)
     path = roots["state"] / TRANSACTION
     if not os.path.lexists(path):
         return False
@@ -908,3 +927,16 @@ def run(svc, args):
                 fail("EFFECT_UNKNOWN_RECONCILE_SAME_OWNER")
             raise
         return _record(svc, plan, "APPLIED", "COMMITTED", True, durable=True)
+
+def require_forward_predecessor(svc, account, roots, config, manifest, original):
+    """Retain the status, Paper and enrollment proof through a forward pin."""
+    path = roots["state"] / TRANSACTION
+    plan, raw, pd = _retained(svc, account, roots, path, forward_config=config)
+    phase = _static_state(svc, account, roots, plan, raw,
+                          forward_pair={"config": config, "manifest": manifest},
+                          forward_original=original)
+    if (phase != "COMMITTED" or not os.path.lexists(path / "result.json")
+            or json.loads(svc._fabric_release_bytes(path / "result.json"))
+            != {"schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"}):
+        fail("START_NOT_COMMITTED")
+    _confirm_retained_durability(svc, roots, path)

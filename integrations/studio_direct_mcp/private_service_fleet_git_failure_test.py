@@ -443,7 +443,8 @@ class Base(unittest.TestCase):
         the historical bootstrap reader is replaced, and it still refuses to
         invent the missing artifact.
         """
-        store = self.home / "native-code-releases"
+        # Platform temp aliases must not bypass the real canonical-store check.
+        store = (self.home / "native-code-releases").resolve()
         store.mkdir(mode=0o700)
         store.chmod(0o700)
         pool = self.home / "native-pool"

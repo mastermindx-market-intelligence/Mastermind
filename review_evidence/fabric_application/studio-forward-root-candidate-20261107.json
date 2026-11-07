@@ -1,0 +1,210 @@
+{
+  "schema": "studio-forward-root-candidate.v1",
+  "disposition": "SOURCE_CANDIDATE_NOT_ACTIVATED",
+  "original_run": "fabric-app-studio-go-forward-pin-20261107-01",
+  "root": "fabric-application-integration-20261104-sol",
+  "original_response_sha256": "229b2c5ecbc0334d3062149ef784f9378af7e725ff53be25d99421b794bf6b5c",
+  "original_patch_sha256": "84e52d2ecfcabfc36aab7ac43e515365464eee4a82e9d3ea659485caf29ac1a9",
+  "original_worker_acceptance": "NOT_ACCEPTED",
+  "base": "37061f19118ab704f04fd55e8f895409a43c75ce",
+  "apply_check_on_composed_head": "80e7404e8ea7f2b6bbd818b05bef0a9d21e0459f",
+  "patch": "review_evidence/fabric_application/studio-forward-root-candidate-20261107.patch.gz.b64",
+  "patch_bytes": 118524,
+  "patch_sha256": "17e52854e557fec24a666faab78a9ef69e9b226ce96309dc2d86e6996dd9c782",
+  "paths": {
+    "integrations/studio_direct_mcp/private_service.py": {
+      "pre_blob": "4cf9a13aa37f55528edaa1569a57d47e6eb30b8b",
+      "post_blob": "c82820a40b3bd447cb3189dd11a8d759f4571a0b",
+      "post_sha256": "ddf4112775a6b9412c039b9c36cf35cda2d6b40b3983dd89ac2ddb66b6bd9dae"
+    },
+    "integrations/studio_direct_mcp/private_service_pin.py": {
+      "pre_blob": "3520d8b16b1dad77eed91061e4f5fd7dd0863899",
+      "post_blob": "53e32d0d9b5ab9abb0b63ab3a77bafbe1c8af81c",
+      "post_sha256": "7c48d73dcb22755be45de5b6d946e37a103ae901f8fc3810607118f0d0f5ead6"
+    },
+    "integrations/studio_direct_mcp/private_service_pin_forward_selection_test.py": {
+      "pre_blob": "12c92814f578839d4f3e09c8ecc94251898d5a0c",
+      "post_blob": "85fcd7651528fd6c36e9febbacc7a8f64ffbea46",
+      "post_sha256": "9ca88da42bc12fc5f3a6812465c3f8ac782a556b0a4cf8c0ddc4b5606b1f5015"
+    },
+    "integrations/studio_direct_mcp/private_service_pin_transition_test.py": {
+      "pre_blob": "be65febebbb10c63b1f6fe3654d46471b647059c",
+      "post_blob": "d2f87e45ab54642d9c130704db2b90b426a8ea9d",
+      "post_sha256": "a8bb7f3316320c4fe62cb969bcb9fc2c0f96082993fe77a168fd3699431deb48"
+    },
+    "integrations/studio_direct_mcp/private_service_test.py": {
+      "pre_blob": "1501e9eda9a0bf48f56b275e8b6ae3d0911702d5",
+      "post_blob": "38b14b13c632bb727d9bd4e24de0ed78b7b6a8af",
+      "post_sha256": "eb2a252e6620bc4937134f40210d57978da5677334e77206a51e3cdd26018ec1"
+    },
+    "integrations/studio_direct_mcp/private_service_pin_enrollment.py": {
+      "pre_blob": "70da5e0a775d686251626084f9f81d567d518763",
+      "post_blob": "0234f97c6a7c1c073b0688b567e8d83ca8fcb870",
+      "post_sha256": "4426a5eba0c9a88a3257196366253c7100b3024a0fe51fc755f76764de83cb89"
+    },
+    "integrations/studio_direct_mcp/private_service_status_successor.py": {
+      "pre_blob": "e37bf48334b3809575a8e686dcbb3f17b305279d",
+      "post_blob": "5d705c56e26f1d53704e0986a64f6d685a59b6a9",
+      "post_sha256": "7964f7f08e8ae9eee1ff68244c1a255d11d001e3500a7aee1b0d61a03c8436c0"
+    },
+    "integrations/studio_direct_mcp/private_service_pin_forward_recovery_test.py": {
+      "pre_blob": null,
+      "post_blob": "cb27b3591b57c5b58b28fcf84d6a3e0049b76c2d",
+      "post_sha256": "44e4c5322ae041b302883cfae3c01aa44ffef70bdb294680a153e07ce74656d6"
+    }
+  },
+  "repairs": [
+    "Authenticate all seven original records through incumbent strict reader and bind its actual native successor to Go lineage.",
+    "Compose original enrollment, Paper and status successor owners against explicit retained before bytes; verify exact live after pair and completed Go separately.",
+    "Atomically publish complete forward intent through existing exclusive publisher; partial stage cannot become an active transaction.",
+    "Require file and directory durability even for visible retained receipts; report original uncertain custody after publication failures.",
+    "Allow only acknowledgment of the same COMPLETE pair after Go SELECTED; partial pair, new preparation and replay stay held.",
+    "Use complete original fixture payloads and a disposable launchd boundary; never consult the host live seat."
+  ],
+  "proofs": {
+    "original_reproduction": {
+      "schema": "studio-forward-original-artifact-qualification.v1",
+      "response_sha256": "229b2c5ecbc0334d3062149ef784f9378af7e725ff53be25d99421b794bf6b5c",
+      "patch_sha256": "84e52d2ecfcabfc36aab7ac43e515365464eee4a82e9d3ea659485caf29ac1a9",
+      "patch_bytes": 75293,
+      "base": "37061f19118ab704f04fd55e8f895409a43c75ce",
+      "root": "/tmp/mmx-studio-forward-original-proof-345lwo21",
+      "paths": {
+        "integrations/studio_direct_mcp/private_service.py": "1bda05e0881679f0c21f8271c4793685a78d058d",
+        "integrations/studio_direct_mcp/private_service_pin.py": "dc2bc965bccf4d843cf8be7791a6fc806c66a6f3",
+        "integrations/studio_direct_mcp/private_service_pin_forward_selection_test.py": "a34f5ba0b0e44923206fb09df44dc677104a2963",
+        "integrations/studio_direct_mcp/private_service_pin_transition_test.py": "8e62460793d00089abe3e5bd15226b81a36a1320",
+        "integrations/studio_direct_mcp/private_service_test.py": "38b14b13c632bb727d9bd4e24de0ed78b7b6a8af"
+      },
+      "apply_check": true,
+      "state": "ARTIFACT_RECOVERED",
+      "test": {
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "-B",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          ".",
+          "-p",
+          "private_service*test.py"
+        ],
+        "cwd": "/tmp/mmx-studio-forward-original-proof-345lwo21/integrations/studio_direct_mcp",
+        "environment": {
+          "TMPDIR": "/private/tmp"
+        },
+        "log": "/tmp/mmx-studio-forward-original-private.log",
+        "state": "COMPLETED",
+        "started_at": 1794048069.857661,
+        "pid": 142,
+        "exit_code": 1,
+        "log_sha256": "30c7ad33e5db9362e39500c82ecf05e5b8b1b42e96f5efb4d7a729e3ffaf3491",
+        "summary": [
+          "Ran 628 tests in 125.711s",
+          "FAILED (errors=44)"
+        ],
+        "duration_seconds": 126.68736600875854
+      }
+    },
+    "original_native_diagnostic": {
+      "log_sha256": "477f5f51f603c605173cec447a072db7a506a65f668a6e601a2341fb02848de5",
+      "cause": "Original real-positive fixture consulted host launchd; positive absence was not proven. No live service mutation."
+    },
+    "repaired_original_core": {
+      "exit": 0,
+      "command": [
+        "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+        "-B",
+        "-m",
+        "unittest",
+        "-v",
+        "private_service_pin_transition_test.ForwardPinTransitionTests",
+        "private_service_pin_transition_test.RealRetainedGoForwardTests",
+        "private_service_pin_forward_selection_test.NativeForwardGoSelectionTests"
+      ],
+      "sha256": "20b4e79a3d29c1dbe10bceb63601061efd25bafbe24cfa318777000b942e86fd",
+      "summary": [
+        "Ran 38 tests in 14.433s",
+        "OK"
+      ],
+      "log": "/tmp/mmx-studio-forward-repair-core.log"
+    },
+    "first_fault_run": {
+      "exit": 1,
+      "command": [
+        "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+        "-B",
+        "-m",
+        "unittest",
+        "-v",
+        "private_service_pin_forward_recovery_test"
+      ],
+      "sha256": "f19a652f86fcf222012756a17712a076f8f2275cd742b83e8c793ba4c5a57297",
+      "summary": [
+        "Ran 12 tests in 7.776s",
+        "FAILED (failures=3)"
+      ]
+    },
+    "repaired_fault_and_real_incumbent_composition": {
+      "exit": 0,
+      "command": [
+        "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+        "-B",
+        "-m",
+        "unittest",
+        "-v",
+        "private_service_pin_forward_recovery_test"
+      ],
+      "sha256": "dd50d00ad5ce211f23d2985ede0af439d0171286e707cc5efd849ac745a290be",
+      "summary": [
+        "Ran 18 tests in 11.189s",
+        "OK"
+      ]
+    }
+  },
+  "proof_limits": [
+    "Original broad628 run had44 errors:43 require Git object metadata absent in inert archive;1 live-launchd fixture error. It is not claimed green.",
+    "First12-case fault run had3 failures because source-mode owner reload bypassed fault injection. The corrected test loader returns the same actual owner; no production validator is mocked.",
+    "38 original forward/core cases and18 new recovery/incumbent-start cases pass separately, not claimed as one complete private-service run.",
+    "Native positive uses actual intact Go fixture. Strict retained-Go real-host qualification remains owed.",
+    "Candidate applies cleanly to80e but its56 executed cases used inert37061 native dependency source; final composed private/control suites remain owed."
+  ],
+  "custody": {
+    "later_correction_brief": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6705956937",
+    "brief_compiled_only": "At bounded11:01 receipt, no correction run/controller/workspace/host/START was published.",
+    "candidate_scope": "Originalfive paths plus existing enrollment and status owners and one focused recovery test file.",
+    "registered_checkout_production_files_changed": false,
+    "new_worker_dispatched": false,
+    "continuation": "Consume exact candidate and additional dependencies through the original composition; reconcile any admitted correction before overlapping source edits."
+  },
+  "runtime_effects": false,
+  "carrier": {
+    "encoding": "base64(gzip(patch))",
+    "bytes": 34549,
+    "sha256": "ed2555bf88d6b02488ad7507501f309229d8070bdc5084cb927710e0260ad493",
+    "gzip_bytes": 25573,
+    "gzip_sha256": "fbde6e699dfe570553fe0003df0fcd30ab8862120617bd9a0200b6a6ea94fc8e"
+  },
+  "followup_qualification": {
+    "state": "NOT_ACCEPTED_TWO_REMAINING_DEFECTS",
+    "at": "2026-11-07T11:26:51.033603+00:00",
+    "source_custody": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706085235",
+    "candidate_delivery": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706166477",
+    "findings": [
+      {
+        "path": "integrations/studio_direct_mcp/private_service.py",
+        "finding": "Retained Go context uses read_retained_successor_after_bootstrap_prune, whose current_bridges=True requires old live ingress after Go selection.",
+        "remedy": "Use existing retained-Go historical evidence with original_absent=True,current_bridges=False inside the closed retained-Go branch; preserve strict read_retained_go, lineage and phase checks. Do not weaken the public historical reader.",
+        "proof_owed": "Actual retained successor after live bridge changes; strict historical public reader still refuses the changed live bridge."
+      },
+      {
+        "path": "integrations/studio_direct_mcp/private_service_pin.py",
+        "finding": "Reconciliation first confirms retained intent directory durability after live pair replacements. A visible intent whose parent sync failed may therefore mutate the live pair without durable intent.",
+        "remedy": "Call existing confirm_forward_durability after content/custody/state checks and before either live replacement; retain later confirmations.",
+        "proof_owed": "Visible intent after parent-sync failure, then reconciliation while that failure persists must leave both live files unchanged."
+      }
+    ],
+    "production_candidate_applied": false
+  }
+}

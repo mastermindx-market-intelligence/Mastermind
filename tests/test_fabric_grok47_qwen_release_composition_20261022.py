@@ -81,7 +81,7 @@ def read_builder():
 def current_source_closure():
     """Bind current candidates separately from immutable historical overlays."""
     raw = (NATIVE / "rollout/native-manifest.json").read_bytes()
-    assert digest(raw) == "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459"
+    assert digest(raw) == "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
     manifest = json.loads(raw)
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_bytes())
     assert len(manifest) == len(inventory["files"]) == 107
@@ -350,7 +350,7 @@ def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
         # Carrier-cohort names stage the exact current APPLICATION successor
         # bytes; their forward pin stays the immutable carrier preimage and
         # is never overwritten with the staged successor digest.
-        carrier = builder.APPLICATION_CARRIER_DIGESTS.get(name)
+        carrier = builder.application_carrier_candidate_digests(NATIVE).get(name)
         current = digest(candidate.read_bytes())
         assert current == (carrier if carrier is not None else value)
         if carrier is not None:

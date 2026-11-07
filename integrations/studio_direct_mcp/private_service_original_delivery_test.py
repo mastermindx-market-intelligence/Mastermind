@@ -13,6 +13,8 @@ import tempfile
 import time
 from types import SimpleNamespace as S
 import unittest
+import venv
+import stat
 from unittest import mock
 
 import control_bundle_closure_test as closure
@@ -668,6 +670,14 @@ class ComposedPreservingMigrationTests(unittest.TestCase):
             self.fixture=closure.InstalledClosureTests(methodName='runTest')
             self.fixture.setUp()
         self.addCleanup(self.cleanup_fixture)
+        # Hosted toolcache executables need not satisfy the sealed helper's
+        # nlink/mode contract. Own a real interpreter copy for this fixture;
+        # never change the shared interpreter or relax production preflight.
+        environment = self.fixture.root / "pinned-python"
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(environment)
+        python = (environment / "bin/python").resolve(strict=True)
+        python.chmod(0o500)
+        self.fixture.pinned_python = str(python)
         self.fixture._install();self.home=self.fixture.home
         self.marker=self.home/'fixture-remote-reads.jsonl'
         rollout=closure.HERE.parent.parent/'ops/native_fabric/quota_continuity/rollout'
@@ -779,6 +789,26 @@ class ComposedPreservingMigrationTests(unittest.TestCase):
         self.assertEqual({k:v for k,v in after.items() if k!='originalCollection'},
                          {k:v for k,v in self.before_config.items() if k!='originalCollection'})
         self.assertEqual(json.loads(self.paths['manifest'].read_text())['dependencyTreeHash'],self.prior['dependencyTreeHash'])
+        # Bound the real descriptor to the same file predicates used by
+        # Node before spawn. A failing runner now reports the exact predicate.
+        for key, executable, owned in (("python", True, False), ("control", False, True)):
+            target = Path(configuration[key + "Path"])
+            file_stat = target.lstat()
+            facts = {
+                "regular": stat.S_ISREG(file_stat.st_mode), "nlink": file_stat.st_nlink,
+                "mode": oct(stat.S_IMODE(file_stat.st_mode)), "uid": file_stat.st_uid,
+                "owner_matches": file_stat.st_uid == os.getuid(),
+                "executable": bool(file_stat.st_mode & 0o111),
+                "not_shared_writable": not bool(file_stat.st_mode & 0o022),
+                "size_bounded": file_stat.st_size <= 256 * 1024 * 1024,
+                "hash_matches": hashlib.sha256(target.read_bytes()).hexdigest()
+                    == configuration[key + "Sha256"],
+            }
+            self.assertTrue(
+                facts["regular"] and facts["nlink"] == 1 and facts["not_shared_writable"]
+                and facts["size_bounded"] and facts["hash_matches"]
+                and (not executable or facts["executable"])
+                and (not owned or facts["owner_matches"]), (key, facts))
         descriptor_path=self.home/'descriptor.json';descriptor_path.write_text(json.dumps(configuration))
         driver=self.home/'driver.mjs';driver.write_text(DRIVER)
         child_env={'HOME':str(self.home),'PATH':'/usr/bin:/bin','LANG':'C'}

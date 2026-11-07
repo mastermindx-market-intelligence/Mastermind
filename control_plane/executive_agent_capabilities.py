@@ -231,7 +231,12 @@ _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
 )
 _MCP_APPROVAL_MODES = frozenset({"approve"})
-_NATIVE_HELPER_MECHANISMS = frozenset({"codex-multi-agent-v2-inherit-parent"})
+_NATIVE_HELPER_MECHANISMS = frozenset(
+    {
+        "codex-multi-agent-v2-inherit-parent",
+        "claude-code-agent-inherit-parent",
+    }
+)
 _REASONING_EFFORTS = frozenset(
     {"low", "medium", "high", "xhigh", "max", "ultra"}
 )
@@ -2235,14 +2240,39 @@ class ExecutionCapabilityRegistry:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} native helper model is invalid"
                     )
-                default_effort = _closed_choice(
-                    native_helper_raw.get("default_reasoning_effort"),
-                    field=(
-                        f"profiles.{profile_id}.native_helper."
-                        "default_reasoning_effort"
-                    ),
-                    choices=_REASONING_EFFORTS,
-                )
+                if mechanism == "claude-code-agent-inherit-parent":
+                    if execution_surface != "claude-code":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Claude native helper mechanism "
+                            "requires claude-code execution surface"
+                        )
+                    if default_model != "inherit-parent":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Claude native helper must "
+                            "inherit the admitted parent model"
+                        )
+                    default_effort = str(
+                        native_helper_raw.get("default_reasoning_effort") or ""
+                    ).strip().lower()
+                    if default_effort != "inherit":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Claude native helper must "
+                            "inherit the admitted parent reasoning effort"
+                        )
+                else:
+                    if execution_surface != "codex-app-server":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Codex native helper mechanism "
+                            "requires codex-app-server execution surface"
+                        )
+                    default_effort = _closed_choice(
+                        native_helper_raw.get("default_reasoning_effort"),
+                        field=(
+                            f"profiles.{profile_id}.native_helper."
+                            "default_reasoning_effort"
+                        ),
+                        choices=_REASONING_EFFORTS,
+                    )
                 if native_helper_raw.get("inherit_parent_capabilities") is not True:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} native helper must inherit the "

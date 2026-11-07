@@ -160,7 +160,7 @@ def pin_fingerprint(svc, pin, path):
 
 
 @contextmanager
-def original_pin(svc, roots, operation, profile):
+def original_pin(svc, roots, operation, profile, *, forward_original=None):
     """Authenticate retained proof with the actual existing native selection owner."""
     pin = svc._pin_owner_module()
     path = roots["state"] / "native-pool-pin"
@@ -172,6 +172,14 @@ def original_pin(svc, roots, operation, profile):
             or p.get("manifest_after") != profile["before_manifest"]
             or p.get("config_after") != profile["before_config"]):
         fail("ORIGINAL_PIN_REFUSED")
+    if forward_original is not None:
+        if (p != forward_original["plan"]
+                or fingerprint != forward_original["fingerprint"]):
+            fail("ORIGINAL_PIN_REFUSED")
+        yield pin, forward_original["raw"], fingerprint
+        if pin_fingerprint(svc, pin, path) != fingerprint:
+            fail("ORIGINAL_PIN_REFUSED")
+        return
     args = SimpleNamespace(
         account=profile["account"], expected_manifest_sha256=p["manifest_before"],
         successor_bundle=p["successor_bundle"],
@@ -239,14 +247,15 @@ def static_seal(svc, pin, roots, original):
         fail("STATIC_SEAL_REFUSED")
 
 
-def observe(svc, roots, plan, raw):
+def observe(svc, roots, plan, raw, *, forward_pair=None):
     """Only a prefix of the fixed manifest-last commit order is owned progress."""
     seen_old = False
     progress = 0
     for name in ORDER:
         path = destination(roots, name)
         if os.path.lexists(path):
-            actual = svc._fabric_release_bytes(path)
+            actual = (forward_pair[name] if forward_pair is not None and name in ("config", "manifest")
+                      else svc._fabric_release_bytes(path))
             if mode(path) != plan["files"][name]["mode"]:
                 fail("FOREIGN_STATE")
         else:
@@ -364,6 +373,9 @@ def run(svc, args):
 
 
 def _run(svc, args, effect):
+    if (args.account == ACCOUNT
+            and args.expected_manifest_sha256 == C4_PUBLISHER_BEFORE_MANIFEST):
+        return _run_c4_publisher(svc, args, effect)
     profile = frozen_profile(args.account)
     if (args.operation not in ("preview", "apply", "status", "reconcile")
             or args.expected_manifest_sha256 != profile["before_manifest"]
@@ -463,7 +475,7 @@ C4_PAPER_V20_CONFIG_SHA256 = "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f3
 C4_PAPER_V20_MANIFEST_SHA256 = "06fd20cb3f50e0e7f909506e90773c80c228556eff8e7aba6bdb6085dcfc7de8"
 
 
-def _c4_paper_v20_post_enrollment(svc, roots, plan, raw):
+def _c4_paper_v20_post_enrollment(svc, roots, plan, raw, *, forward_pair=None):
     """Read-only proof of exactly Paper-only v20 after completed enrollment.
 
     Called ONLY after retained original/second pin proofs, immutable enrollment
@@ -499,8 +511,11 @@ def _c4_paper_v20_post_enrollment(svc, roots, plan, raw):
     if any(mode(roots[name]) != plan["files"][name]["mode"]
            for name in ("config", "manifest")):
         return False
-    return (svc._fabric_release_bytes(roots["config"]) == config
-            and svc._fabric_release_bytes(roots["manifest"]) == manifest_bytes)
+    current_config = (forward_pair["config"] if forward_pair is not None
+                      else svc._fabric_release_bytes(roots["config"]))
+    current_manifest = (forward_pair["manifest"] if forward_pair is not None
+                        else svc._fabric_release_bytes(roots["manifest"]))
+    return current_config == config and current_manifest == manifest_bytes
 
 
 def require_start(svc, account, roots):
@@ -522,3 +537,382 @@ def require_start(svc, account, roots):
             complete = True
         if not complete:
             fail("START_REFUSED")
+
+def require_forward_predecessor(svc, account, roots, config, manifest, original):
+    """Qualify this incumbent enrollment against the forward before pair."""
+    if account == ACCOUNT and os.path.lexists(roots["state"] / C4_PUBLISHER_TRANSACTION):
+        return c4_publisher_postimage(
+            svc, account, roots, forward_pair={"config": config, "manifest": manifest},
+            forward_original=original)
+    profile = frozen_profile(account)
+    pin = svc._pin_owner_module()
+    path = roots["state"] / TRANSACTION
+    stored = pin.decode(svc._fabric_release_bytes(path / "plan.json"))
+    with original_pin(svc, roots, "status", profile, forward_original=original) as (
+            pin, retained_original, fingerprint):
+        plan, raw = retained(svc, pin, roots, path, digest(encode(stored)),
+                             retained_original, fingerprint, profile)
+        static_seal(svc, pin, roots, retained_original)
+        if pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan):
+            fail("START_REFUSED")
+        pair = {"config": config, "manifest": manifest}
+        try:
+            complete = observe(svc, roots, plan, raw, forward_pair=pair) == len(ORDER)
+        except SystemExit as exc:
+            if (exc.code != "NATIVE_PIN_ENROLLMENT_FOREIGN_STATE"
+                    or not _c4_paper_v20_post_enrollment(
+                        svc, roots, plan, raw, forward_pair=pair)):
+                raise
+            complete = True
+        if not complete:
+            fail("START_REFUSED")
+
+
+# One exact C4 publisher successor of the completed enrollment/Paper/status chain.
+# The original transaction and every other account remain immutable.
+C4_PUBLISHER_SCHEMA = "mastermind.studio_c4_enrollment_publisher.v1"
+C4_PUBLISHER_GENERATION = "c4-publisher-recovery-20261107-v4"
+C4_PUBLISHER_TRANSACTION = "native-pool-pin-enrollment-publisher"
+C4_PUBLISHER_BEFORE_MANIFEST = "c440f2ba4c0bdfbba3aff86303a483e3ab42a1093f330ba9e3fd6c6f923783b4"
+C4_PUBLISHER_BEFORE_CONFIG = "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df"
+C4_PUBLISHER_BEFORE = "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c"
+C4_PUBLISHER_AFTER = "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e"
+C4_ADAPTER_BEFORE = "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5"
+C4_ADAPTER_AFTER = "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c"
+C4_PUBLISHER_PAYLOADS = (
+    "publisher.before", "publisher.after", "adapter.before", "adapter.after",
+    "manifest.before", "manifest.after",
+)
+C4_PUBLISHER_FILES = frozenset((*C4_PUBLISHER_PAYLOADS,
+                              "plan.json", "intent.json", "result.json"))
+
+
+def _c4_publisher_fingerprint(svc, pin, path, names):
+    pin.directory(svc, path)
+    if {p.name for p in path.iterdir()} != set(names):
+        fail("TRANSACTION_REFUSED")
+    return {name: digest(svc._fabric_release_bytes(path / name))
+            for name in sorted(names)}
+
+
+def _c4_publisher_parents(svc, pin, roots, original, original_fingerprint, *, forward_config=None):
+    """Authenticate retained owners, not a caller's hashes or installed likeness."""
+    profile = frozen_profile(ACCOUNT)
+    ep = roots["state"] / TRANSACTION
+    enrollment_fingerprint = _c4_publisher_fingerprint(svc, pin, ep, FILES)
+    stored = pin.decode(svc._fabric_release_bytes(ep / "plan.json"))
+    ep_plan, ep_raw = retained(svc, pin, roots, ep, digest(encode(stored)),
+                               original, original_fingerprint, profile)
+    if (pin.decode(svc._fabric_release_bytes(ep / "result.json"))
+            != result_record(ep_plan)):
+        fail("RESULT_REFUSED")
+    owner = svc._fleet_status_successor_owner_module()
+    sp = roots["state"] / owner.TRANSACTION
+    status_fingerprint = _c4_publisher_fingerprint(svc, pin, sp, owner.FILE_NAMES)
+    status_plan, status_raw, status_sha = owner._retained(
+        svc, ACCOUNT, roots, sp, forward_config=forward_config)
+    if (pin.decode(svc._fabric_release_bytes(sp / "result.json"))
+            != {"schema": owner.SCHEMA, "planSha256": status_sha, "effect": "APPLIED"}
+            or status_plan["originalPinPlan"] != original_fingerprint["plan.json"]
+            or digest(status_raw["manifest.before"])
+               != owner.PAPER_V20_PREDECESSOR_MANIFEST_SHA256[ACCOUNT]
+            or digest(status_raw["manifest.after"]) != C4_PUBLISHER_BEFORE_MANIFEST
+            or status_plan["configSha256"] != C4_PUBLISHER_BEFORE_CONFIG):
+        fail("ORIGINAL_PIN_REFUSED")
+    before = pin.decode(status_raw["manifest.after"])
+    if (before.get("account") != ACCOUNT
+            or before.get("label") != "com.mastermind.studio-direct-private." + ACCOUNT
+            or before.get("host") != "127.0.0.1" or before.get("port") != 45024
+            or before.get("configHash") != C4_PUBLISHER_BEFORE_CONFIG
+            or before.get("files", {}).get("git-publish.mjs") != C4_PUBLISHER_BEFORE
+            or any(before["files"].get(name) != wanted
+                   for name, wanted in TARGET_FILES.items())
+            or before["files"].get(owner.MODULE) != owner.TARGET_SOURCE_SHA256):
+        fail("PROFILE_REFUSED")
+    # _retained requalifies Paper v20 from the original enrollment config,
+    # manifest and plist, and authenticates the protected status source.
+    return owner, status_plan, status_raw, {
+        "nativePin": original_fingerprint,
+        "enrollment": enrollment_fingerprint,
+        "fleetStatus": status_fingerprint,
+        "preservedModes": {name: mode(roots["base"] / name)
+                           for name in before["files"]
+                           if name not in ("git-publish.mjs", "workspace-access.mjs")},
+    }
+
+
+def _c4_publisher_plan(raw, modes, parents):
+    return {
+        "schema": C4_PUBLISHER_SCHEMA, "generation": C4_PUBLISHER_GENERATION,
+        "account": ACCOUNT, "uid": os.getuid(), "parents": parents,
+        "configSha256": C4_PUBLISHER_BEFORE_CONFIG,
+        "publisherBeforeSha256": C4_PUBLISHER_BEFORE,
+        "publisherAfterSha256": C4_PUBLISHER_AFTER,
+        "adapterBeforeSha256": C4_ADAPTER_BEFORE,
+        "adapterAfterSha256": C4_ADAPTER_AFTER,
+        "manifestBeforeSha256": C4_PUBLISHER_BEFORE_MANIFEST,
+        "manifestAfterSha256": digest(raw["manifest.after"]),
+        "modes": modes,
+    }
+
+
+def _c4_publisher_raw(svc, pin, roots, before, incoming, adapter):
+    if digest(before) != C4_PUBLISHER_BEFORE_MANIFEST:
+        fail("PROFILE_REFUSED")
+    if (digest(incoming) != C4_PUBLISHER_AFTER
+            or digest(adapter) != C4_ADAPTER_AFTER):
+        fail("SOURCE_REFUSED")
+    projected = copy.deepcopy(pin.decode(before))
+    projected["files"]["git-publish.mjs"] = C4_PUBLISHER_AFTER
+    projected["files"]["workspace-access.mjs"] = C4_ADAPTER_AFTER
+    if not svc._native_pin_manifest_valid(
+            projected, ACCOUNT, "com.mastermind.studio-direct-private." + ACCOUNT):
+        fail("PROFILE_REFUSED")
+    return {"publisher.after": incoming, "adapter.after": adapter, "manifest.before": before,
+            "manifest.after": encode(projected)}
+
+
+def _c4_publisher_retained(svc, pin, roots, target, status_raw, parents):
+    pin.directory(svc, target)
+    names = {p.name for p in target.iterdir()}
+    if (names - C4_PUBLISHER_FILES
+            or C4_PUBLISHER_FILES - {"result.json"} - names):
+        fail("TRANSACTION_REFUSED")
+    plan = pin.decode(svc._fabric_release_bytes(target / "plan.json"))
+    raw = {name: svc._fabric_release_bytes(target / name)
+           for name in C4_PUBLISHER_PAYLOADS}
+    projected = _c4_publisher_raw(svc, pin, roots, status_raw["manifest.after"],
+                                raw["publisher.after"], raw["adapter.after"])
+    if (any(raw[name] != value for name, value in projected.items())
+            or digest(raw["publisher.before"]) != C4_PUBLISHER_BEFORE
+            or digest(raw["adapter.before"]) != C4_ADAPTER_BEFORE):
+        fail("TRANSACTION_REFUSED")
+    modes = plan.get("modes")
+    if (type(modes) is not dict or set(modes) != {"publisher", "adapter", "manifest", "config"}
+            or any(type(m) is not int or m not in (0o400, 0o600)
+                   for m in modes.values())
+            or plan != _c4_publisher_plan(raw, modes, parents)):
+        fail("PLAN_REFUSED")
+    pd = digest(encode(plan))
+    if pin.decode(svc._fabric_release_bytes(target / "intent.json")) != {
+            "schema": C4_PUBLISHER_SCHEMA, "planSha256": pd}:
+        fail("TRANSACTION_REFUSED")
+    return plan, raw, pd
+
+
+def _c4_publisher_phase(svc, pin, roots, plan, raw, *, forward_pair=None):
+    publisher = roots["base"] / "git-publish.mjs"
+    adapter = roots["base"] / "workspace-access.mjs"
+    for name, path in (("publisher", publisher), ("adapter", adapter),
+                       ("manifest", roots["manifest"]),
+                       ("config", roots["config"])):
+        if mode(path) != plan["modes"][name]:
+            fail("FOREIGN_STATE")
+    current_config = (forward_pair["config"] if forward_pair is not None
+                      else svc._fabric_release_bytes(roots["config"]))
+    current_manifest = (forward_pair["manifest"] if forward_pair is not None
+                        else svc._fabric_release_bytes(roots["manifest"]))
+    if digest(current_config) != C4_PUBLISHER_BEFORE_CONFIG:
+        fail("FOREIGN_STATE")
+    state = (svc._fabric_release_bytes(publisher),
+             svc._fabric_release_bytes(adapter), current_manifest)
+    phase = {
+        (raw["publisher.before"], raw["adapter.before"], raw["manifest.before"]): "OLD",
+        (raw["publisher.after"], raw["adapter.before"], raw["manifest.before"]): "PUBLISHER_ONLY",
+        (raw["publisher.after"], raw["adapter.after"], raw["manifest.before"]): "MODULES",
+        (raw["publisher.after"], raw["adapter.after"], raw["manifest.after"]): "COMMITTED",
+    }.get(state)
+    if phase is None:
+        fail("FOREIGN_STATE")
+    before = pin.decode(raw["manifest.before"])
+    for name, wanted in before["files"].items():
+        if name not in ("git-publish.mjs", "workspace-access.mjs"):
+            if (mode(roots["base"] / name) not in (0o400, 0o600)
+                    or digest(svc._fabric_release_bytes(roots["base"] / name)) != wanted):
+                fail("STATIC_SEAL_REFUSED")
+    if (digest(svc._fabric_release_bytes(roots["plist"])) != before["plistHash"]
+            or svc._stable_regular_file_hash(Path(before["node"]),
+                    label="preserved C4 node") != before["nodeHash"]
+            or svc._stable_regular_file_hash(Path(before["backend"]),
+                    label="preserved C4 backend") != before["backendHash"]
+            or svc._dependency_tree_hash(roots["node_modules"]) != before["dependencyTreeHash"]):
+        fail("STATIC_SEAL_REFUSED")
+    return phase
+
+
+def _c4_publisher_result(plan):
+    return {"schema": C4_PUBLISHER_SCHEMA, "planSha256": digest(encode(plan)),
+            "effect": "APPLIED"}
+
+
+def _c4_publisher_record(plan, phase, committed, *, durable=False):
+    return {
+        "schema": C4_PUBLISHER_SCHEMA, "generation": C4_PUBLISHER_GENERATION,
+        "account": ACCOUNT, "planSha256": digest(encode(plan)), "phase": phase,
+        "effect": "APPLIED" if committed else "NOT_APPLIED" if phase in ("PREVIEW", "OLD")
+                  else "EFFECT_UNKNOWN" if phase == "COMMITTED" else "PARTIAL",
+        "publisherSha256": C4_PUBLISHER_AFTER,
+        "adapterSha256": C4_ADAPTER_AFTER,
+        "manifestSha256": plan["manifestAfterSha256"],
+        "receiptCommitted": committed, "durabilityConfirmed": durable,
+        "originalOwnersPreserved": True, "serviceStarted": False,
+        "clientAdoptionProven": False, "retryAllowed": False,
+    }
+
+
+def _c4_publisher_prepare(svc, pin, roots, owner, plan, raw, status_raw, parents, effect):
+    """Use the incumbent exclusive publication primitive, never replace a journal."""
+    import shutil
+    import tempfile
+    target = roots["state"] / C4_PUBLISHER_TRANSACTION
+    stage = Path(tempfile.mkdtemp(prefix=".c4-publisher-intent.", dir=target.parent))
+    identity = owner._identity(stage)
+    try:
+        svc._fabric_release_new(stage / "plan.json", encode(plan))
+        for name, data in raw.items():
+            svc._fabric_release_new(stage / name, data)
+        svc._fabric_release_new(stage / "intent.json", encode({
+            "schema": C4_PUBLISHER_SCHEMA, "planSha256": digest(encode(plan))}))
+        checked, checked_raw, pd = _c4_publisher_retained(
+            svc, pin, roots, stage, status_raw, parents)
+        if checked != plan or checked_raw != raw or pd != digest(encode(plan)):
+            fail("TRANSACTION_REFUSED")
+        owner._sync_directory(svc, stage)
+        effect["started"] = True  # Covers a lost callback after exclusive rename.
+        owner._rename_new(svc, stage, target)
+    finally:
+        if owner._same_identity(stage, identity):
+            shutil.rmtree(stage)
+
+
+def _run_c4_publisher(svc, args, effect):
+    if (args.account != ACCOUNT or args.expected_manifest_sha256 != C4_PUBLISHER_BEFORE_MANIFEST
+            or args.operation not in ("preview", "apply", "status", "reconcile")
+            or (args.operation != "preview"
+                and not svc._sha256_hex(args.expected_plan_sha256))):
+        fail("INPUT_REFUSED")
+    profile = frozen_profile(ACCOUNT)
+    roots = svc._build_runtime_roots(ACCOUNT)
+    target = roots["state"] / C4_PUBLISHER_TRANSACTION
+    modifying = args.operation in ("apply", "reconcile")
+    lock = svc._c2_lifecycle_mutex(ACCOUNT) if modifying else nullcontext()
+    with lock, original_pin(svc, roots, args.operation, profile) as (pin, original, fingerprint):
+        owner, status_plan, status_raw, parents = _c4_publisher_parents(
+            svc, pin, roots, original, fingerprint)
+        if args.operation in ("preview", "apply"):
+            if os.path.lexists(target):
+                fail("RECONCILIATION_REQUIRED")
+            source = Path(args.source) if isinstance(args.source, str) else Path(".")
+            if not source.is_absolute() or source.is_symlink() or not source.is_dir():
+                fail("SOURCE_REFUSED")
+            try:
+                source.relative_to(svc._user_root())
+            except ValueError:
+                fail("SOURCE_REFUSED")
+            svc._assert_no_symlink_ancestors(source)
+            incoming = svc._fabric_release_bytes(source / "git-publish.mjs")
+            adapter = svc._fabric_release_bytes(source / "workspace-access.mjs")
+            raw = _c4_publisher_raw(svc, pin, roots, status_raw["manifest.after"], incoming, adapter)
+            raw["publisher.before"] = svc._fabric_release_bytes(roots["base"] / "git-publish.mjs")
+            raw["adapter.before"] = svc._fabric_release_bytes(roots["base"] / "workspace-access.mjs")
+            modes = {name: mode(path) for name, path in (
+                ("publisher", roots["base"] / "git-publish.mjs"),
+                ("adapter", roots["base"] / "workspace-access.mjs"),
+                ("manifest", roots["manifest"]), ("config", roots["config"]))}
+            plan = _c4_publisher_plan(raw, modes, parents)
+            if (digest(raw["publisher.before"]) != C4_PUBLISHER_BEFORE
+                    or digest(raw["adapter.before"]) != C4_ADAPTER_BEFORE
+                    or _c4_publisher_phase(svc, pin, roots, plan, raw) != "OLD"):
+                fail("FOREIGN_STATE")
+            if args.operation == "preview":
+                return _c4_publisher_record(plan, "PREVIEW", False)
+            if digest(encode(plan)) != args.expected_plan_sha256:
+                fail("PLAN_REFUSED")
+            stopped(svc, roots, profile)
+            _c4_publisher_prepare(svc, pin, roots, owner, plan, raw, status_raw, parents, effect)
+        plan, raw, pd = _c4_publisher_retained(svc, pin, roots, target, status_raw, parents)
+        if pd != args.expected_plan_sha256:
+            fail("PLAN_REFUSED")
+        phase = _c4_publisher_phase(svc, pin, roots, plan, raw)
+        result = target / "result.json"
+        committed = os.path.lexists(result)
+        if committed and (phase != "COMMITTED"
+                          or pin.decode(svc._fabric_release_bytes(result)) != _c4_publisher_result(plan)):
+            fail("RESULT_REFUSED")
+        if args.operation == "status":
+            return _c4_publisher_record(plan, phase, committed)
+        if committed:
+            owner._confirm_retained_durability(svc, roots, target)
+            return _c4_publisher_record(plan, phase, True, durable=True)
+        stopped(svc, roots, profile)
+        for current, expected, path, data, file_mode in (
+                ("OLD", "PUBLISHER_ONLY", roots["base"] / "git-publish.mjs",
+                 raw["publisher.after"], plan["modes"]["publisher"]),
+                ("PUBLISHER_ONLY", "MODULES", roots["base"] / "workspace-access.mjs",
+                 raw["adapter.after"], plan["modes"]["adapter"]),
+                ("MODULES", "COMMITTED", roots["manifest"],
+                 raw["manifest.after"], plan["modes"]["manifest"])):
+            if phase != current:
+                continue
+            stopped(svc, roots, profile)
+            if (_c4_publisher_parents(svc, pin, roots, original, fingerprint)[3] != parents
+                    or _c4_publisher_phase(svc, pin, roots, plan, raw) != current):
+                fail("FOREIGN_STATE")
+            effect["started"] = True
+            svc._atomic_write_bytes(path, data, mode=file_mode)
+            phase = _c4_publisher_phase(svc, pin, roots, plan, raw)
+            if phase != expected:
+                fail("FOREIGN_STATE")
+        if phase != "COMMITTED":
+            fail("START_REFUSED")
+        owner._confirm_retained_durability(svc, roots, target)
+        svc._verify_staged_install(ACCOUNT, "com.mastermind.studio-direct-private." + ACCOUNT,
+                                  roots, require_runtime_seal=True)
+        stopped(svc, roots, profile)
+        if _c4_publisher_parents(svc, pin, roots, original, fingerprint)[3] != parents:
+            fail("ORIGINAL_PIN_REFUSED")
+        effect["started"] = True
+        owner._publish_result(svc, target, _c4_publisher_result(plan))
+        if (pin.decode(svc._fabric_release_bytes(result)) != _c4_publisher_result(plan)
+                or _c4_publisher_phase(svc, pin, roots, plan, raw) != "COMMITTED"):
+            fail("RESULT_REFUSED")
+        owner._confirm_retained_durability(svc, roots, target)
+        return _c4_publisher_record(plan, phase, True, durable=True)
+
+
+def c4_publisher_postimage(svc, account, roots, status_plan=None, status_raw=None, *,
+                           durable=False, forward_pair=None, forward_original=None):
+    """The existing status/start owner recognizes only this fully committed child."""
+    if account != ACCOUNT:
+        return False
+    target = roots["state"] / C4_PUBLISHER_TRANSACTION
+    if not os.path.lexists(target):
+        return False
+    if ((forward_pair is None) != (forward_original is None)
+            or (forward_pair is not None and (
+                type(forward_pair) is not dict or set(forward_pair) != {"config", "manifest"}
+                or any(type(value) is not bytes for value in forward_pair.values())))):
+        fail("ORIGINAL_PIN_REFUSED")
+    with original_pin(svc, roots, "status", frozen_profile(ACCOUNT),
+                      forward_original=forward_original) as (pin, original, fingerprint):
+        owner, prior_plan, prior_raw, parents = _c4_publisher_parents(
+            svc, pin, roots, original, fingerprint,
+            forward_config=None if forward_pair is None else forward_pair["config"])
+        if ((status_plan is not None and status_plan != prior_plan)
+                or (status_raw is not None and status_raw != prior_raw)):
+            fail("ORIGINAL_PIN_REFUSED")
+        plan, raw, pd = _c4_publisher_retained(svc, pin, roots, target, prior_raw, parents)
+        if (_c4_publisher_phase(svc, pin, roots, plan, raw, forward_pair=forward_pair) != "COMMITTED"
+                or pin.decode(svc._fabric_release_bytes(target / "result.json"))
+                   != _c4_publisher_result(plan)):
+            fail("START_REFUSED")
+        # A forward operation depends on this retained child's durability.
+        # Its owner validates the actual current pair, which may be CONFIG_ONLY;
+        # this reader validates only the authenticated C4 before pair and files.
+        if durable or forward_pair is not None:
+            owner._confirm_retained_durability(svc, roots, target)
+        if durable:
+            svc._verify_staged_install(
+                ACCOUNT, "com.mastermind.studio-direct-private." + ACCOUNT,
+                roots, require_runtime_seal=True)
+    return True

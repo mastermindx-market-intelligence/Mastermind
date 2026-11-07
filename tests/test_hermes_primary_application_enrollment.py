@@ -91,21 +91,26 @@ def select_role(case, profile):
     selected_purpose(case)
     case.specification["schema"] = installer.SERVICE_ROLE_SPEC_SCHEMA
     case.specification["operation_id"] = "fixture-enroll-" + profile
+    attended = profile == "hermes-attended"
+    credential_ref = "HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN" if attended else PROFILES[profile]
+    workload = "hermes_attended" if attended else "site_interactive"
     case.specification["scope"].update(service_profile=profile, principal_id=profile,
-        capability_lane=profile, credential_ref=PROFILES[profile], workload="site_interactive")
+        capability_lane=profile, credential_ref=credential_ref,
+        workload=workload, workload_profile=workload)
     case.specification["grant"].update(grant_id="fixture-" + profile, principal_id=profile,
-        credential_ref=PROFILES[profile], admission_root="service:" + profile,
-        workloads=["site_interactive"])
+        credential_ref=credential_ref, admission_root="service:" + profile,
+        workloads=[workload])
     case.service_bundle = case.root / ("review-" + profile)
     case.binding = case.ext / "go_shim" / ("application-service-" + profile + ".json")
     case.intent = case.store / "bootstrap" / (".go-service-enrollment-" + profile + "-v9.json")
     case.service_receipt = case.store / "bootstrap" / ("go-service-enrollment-" + profile + "-v9.json")
 
 
-@pytest.mark.parametrize("profile", PROFILES)
+@pytest.mark.parametrize("profile", [*PROFILES, "hermes-attended"])
 def test_role_uses_original_enrollment_once_and_actual_startup(service_owner, monkeypatch, profile):
     case = service_owner
     select_role(case, profile)
+    accounts_before = json.loads(case.accounts.read_bytes())
     plan = prepare(case)
     original_secret = installer.secrets.token_urlsafe
     with mock.patch.object(installer.secrets, "token_urlsafe", wraps=original_secret) as generated:
@@ -132,8 +137,44 @@ def test_role_uses_original_enrollment_once_and_actual_startup(service_owner, mo
         with mock.patch.object(startup.handler, "main", side_effect=original_main):
             assert boot(entry, case) == 73
         binding, = captured["application_services"]
-        assert binding.principal_id == profile and binding.credential_ref == PROFILES[profile]
+        assert binding.principal_id == profile
+        assert binding.credential_ref == case.specification["scope"]["credential_ref"]
+        assert binding.workload == ("hermes_attended" if profile == "hermes-attended" else "site_interactive")
         assert binding.admin_pool_view is False
+        if profile == "hermes-attended":
+            candidate = ROOT / "ops/native_fabric/quota_continuity/candidate/native_go_entry.py"
+            assert case.published.meta["files"][g.GO_ENTRY] == g.digest(candidate.read_bytes())
+            assert Path(entry.__file__).resolve() == (case.published.release / g.GO_ENTRY).resolve()
+            assert private["scope"]["workload_profile"] == "hermes_attended"
+            assert private["scope"]["capability_lane"] == "hermes-attended"
+            assert binding.credential_ref == "HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN"
+    accounts_after = json.loads(case.accounts.read_bytes())
+    assert accounts_after == {**accounts_before, "application_grants": [case.specification["grant"]]}
+    unchanged_ingress(case)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("workload", "site_interactive"),
+    ("workload_profile", "site_interactive"),
+    ("credential_ref", "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN"),
+])
+def test_attended_scope_refuses_borrowed_role_before_original_intent(service_owner, field, value):
+    case = service_owner
+    select_role(case, "hermes-attended")
+    accounts_before = case.accounts.read_bytes()
+    case.specification["scope"][field] = value
+    # Keep the grant internally consistent so refusal proves the closed role
+    # mapping, rather than only the generic scope/grant consistency check.
+    if field == "workload":
+        case.specification["grant"]["workloads"] = [value]
+    elif field == "credential_ref":
+        case.specification["grant"]["credential_ref"] = value
+    with mock.patch.object(installer.secrets, "token_urlsafe", side_effect=AssertionError("credential generated")):
+        with pytest.raises(ValueError):
+            prepare(case)
+    assert case.accounts.read_bytes() == accounts_before
+    assert not any(path.exists() for path in
+                   (case.intent, case.binding, case.service_receipt, case.service_bundle))
     unchanged_ingress(case)
 
 

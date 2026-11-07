@@ -23,65 +23,69 @@ REVIEWED_FILES = {
             (689, 44, 47, 'int', '400'),
         ),
     },
-    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {'sha256': '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
-         'sites': ((487, 66, 69, 'int', '502'),
-                   (1707, 32, 37, 'int', '0o700'),
-                   (2058, 140, 143, 'int', '900'),
-                   (2060, 33, 36, 'int', '900'),
-                   (2123, 22, 25, 'int', '429'),
-                   (2311, 79, 82, 'int', '500'),
-                   (2389, 34, 37, 'int', '400'),
-                   (2404, 33, 36, 'int', '500'),
-                   (2424, 34, 37, 'int', '502'),
-                   (2733, 92, 95, 'int', '400'),
-                   (2740, 99, 102, 'int', '503'),
-                   (2743, 80, 83, 'int', '409'),
-                   (2775, 110, 113, 'int', '503'),
-                   (2781, 100, 103, 'int', '409'),
-                   (2788, 101, 104, 'int', '409'),
-                   (2804, 31, 34, 'int', '409'),
-                   (2804, 51, 54, 'int', '503'),
-                   (2812, 73, 76, 'int', '409'),
-                   (2816, 99, 102, 'int', '503'),
-                   (2923, 107, 110, 'int', '503'),
-                   (2932, 102, 105, 'int', '400'),
-                   (2953, 96, 99, 'int', '429'),
-                   (2963, 103, 106, 'int', '503'),
-                   (2980, 105, 108, 'int', '503'),
-                   (3018, 27, 30, 'int', '503'),
-                   (3023, 101, 104, 'int', '502'),
-                   (3031, 91, 94, 'int', '401'),
-                   (3035, 96, 99, 'int', '400'),
-                   (3065, 113, 116, 'int', '512'),
-                   (3069, 94, 97, 'int', '400'),
-                   (3083, 101, 104, 'int', '409'),
-                   (3085, 110, 113, 'int', '503'),
-                   (3099, 101, 104, 'int', '409'),
-                   (3107, 105, 108, 'int', '409'),
-                   (3110, 101, 104, 'int', '409'),
-                   (3115, 104, 107, 'int', '400'),
-                   (3126, 105, 108, 'int', '409'),
-                   (3135, 94, 97, 'int', '400'),
-                   (3155, 109, 112, 'int', '400'),
-                   (3158, 96, 99, 'int', '400'),
-                   (3178, 96, 99, 'int', '429'),
-                   (3188, 102, 105, 'int', '503'),
-                   (3196, 106, 109, 'int', '429'),
-                   (3237, 103, 106, 'int', '503'),
-                   (3256, 74, 77, 'int', '502'),
-                   (3350, 23, 26, 'int', '400'),
-                   (3423, 35, 38, 'int', '429'),
-                   (3452, 37, 40, 'int', '404'),
-                   (3483, 27, 30, 'int', '400'),
-                   (3486, 27, 30, 'int', '400'),
-                   (3489, 27, 30, 'int', '400'),
-                   (3495, 31, 34, 'int', '400'),
-                   (3502, 31, 34, 'int', '429'))},
+    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
+        "sha256": '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
+        "sites": (
+            (487, 66, 69, 'int', '502'),
+            (1707, 32, 37, 'int', '0o700'),
+            (2058, 140, 143, 'int', '900'),
+            (2060, 33, 36, 'int', '900'),
+            (2123, 22, 25, 'int', '429'),
+            (2311, 79, 82, 'int', '500'),
+            (2389, 34, 37, 'int', '400'),
+            (2404, 33, 36, 'int', '500'),
+            (2424, 34, 37, 'int', '502'),
+            (2733, 92, 95, 'int', '400'),
+            (2740, 99, 102, 'int', '503'),
+            (2743, 80, 83, 'int', '409'),
+            (2775, 110, 113, 'int', '503'),
+            (2781, 100, 103, 'int', '409'),
+            (2788, 101, 104, 'int', '409'),
+            (2804, 31, 34, 'int', '409'),
+            (2804, 51, 54, 'int', '503'),
+            (2812, 73, 76, 'int', '409'),
+            (2816, 99, 102, 'int', '503'),
+            (2923, 107, 110, 'int', '503'),
+            (2932, 102, 105, 'int', '400'),
+            (2953, 96, 99, 'int', '429'),
+            (2963, 103, 106, 'int', '503'),
+            (2980, 105, 108, 'int', '503'),
+            (3018, 27, 30, 'int', '503'),
+            (3023, 101, 104, 'int', '502'),
+            (3031, 91, 94, 'int', '401'),
+            (3035, 96, 99, 'int', '400'),
+            (3065, 113, 116, 'int', '512'),
+            (3069, 94, 97, 'int', '400'),
+            (3083, 101, 104, 'int', '409'),
+            (3085, 110, 113, 'int', '503'),
+            (3099, 101, 104, 'int', '409'),
+            (3107, 105, 108, 'int', '409'),
+            (3110, 101, 104, 'int', '409'),
+            (3115, 104, 107, 'int', '400'),
+            (3126, 105, 108, 'int', '409'),
+            (3135, 94, 97, 'int', '400'),
+            (3155, 109, 112, 'int', '400'),
+            (3158, 96, 99, 'int', '400'),
+            (3178, 96, 99, 'int', '429'),
+            (3188, 102, 105, 'int', '503'),
+            (3196, 106, 109, 'int', '429'),
+            (3237, 103, 106, 'int', '503'),
+            (3256, 74, 77, 'int', '502'),
+            (3350, 23, 26, 'int', '400'),
+            (3423, 35, 38, 'int', '429'),
+            (3452, 37, 40, 'int', '404'),
+            (3483, 27, 30, 'int', '400'),
+            (3486, 27, 30, 'int', '400'),
+            (3489, 27, 30, 'int', '400'),
+            (3495, 31, 34, 'int', '400'),
+            (3502, 31, 34, 'int', '429'),
+        ),
+    },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
         # v9 keeps the original private account directory permission check.
-        "sha256": '36128047df407955975392e3daffe53aa080bb7488c693154357fe6d35f1e47e',
+        "sha256": 'eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320',
         "sites": (
-            (818, 60, 65, 'int', '0o700'),
+            (822, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -219,10 +223,10 @@ REVIEWED_FILES = {
                                               (1104, 100, 103, 'int', '456'))},
  'ops/executive_os/attended_worker_definition.py': {'sha256': '267ca3fceea48d2c3a1e8a4aaefbf8a90bd595d0c324f1a503826e9604ead92d',
  'sites': ((255, 31, 51, 'str', "'_mastermind_worker'"), (351, 95, 100, 'int', '0o660'))},
- 'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
-                                        'sites': ((776, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
-                                                  (778, 97, 120, 'str', '_mastermind_agent_relay'),
-                                                  (784, 89, 92, 'int', '457'))}}
+ 'ops/executive_os/bootstrap-host.sh': {'sha256': 'acb2c16a703b018fe110bf88ff576b60a32b2d029db24a769e58dac3d98daf60',
+ 'sites': ((784, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
+           (786, 97, 120, 'str', '_mastermind_agent_relay'),
+           (792, 89, 92, 'int', '457'))}}
 
 # Candidate-only fixed finite publisher principal/mode postimage for independent
 # review: SHA and precise sites are frozen, not computed at runtime. This does
@@ -690,7 +694,7 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4f6aa75978f73afcdd72cc568f54062b4560f9bedc3dc5bd65bb8a81b0ae7e8e', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '252a9d57fe21bd618875dcd2026b21947870af7a6f179a75ca80a666a8121d12', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -734,7 +738,10 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
+# 2026-11-07 attended source check: native Hermes composition and exact pending
+# auth-timer expiry move these unchanged three operands. Preserve whole-file and
+# exact-token qualification; this supplies no runtime or formal release approval.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -771,7 +778,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
 REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '2bf7475cfc2b133459cbf914b9a9cd7b327121cd40b8f6e3c9ab3428f4ea9860',
+    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
     'sites': ((1668, 26, 31, 'int', '0o700'),),
 }
 
@@ -799,7 +806,39 @@ REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
 }
 
 
-
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
+
+
+# Original #852 held subscription principals, source-qualified at exact sites.
+# This fixed source evidence grants no installed identity, credential or capacity.
+REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
+ 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
+           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
+           (170, 19, 22, 'int', '459'),
+           (171, 19, 22, 'int', '459'),
+           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
+           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
+           (182, 19, 22, 'int', '460'),
+           (183, 19, 22, 'int', '460'),
+           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
+           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {
+    "sha256": "8ff823832a3d429b619e596b9e031e300dd1689992ba72e5465e3f55088aa66b",
+    "sites": ((346, 37, 40, 'int', '409'),),
+}
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
+}
