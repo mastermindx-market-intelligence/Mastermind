@@ -146,7 +146,7 @@ def package_native_session(release, donor):
             "patch_sha256": expected["patch_sha256"], "receipt_sha256": sha(receipt_path)}
 
 
-def verify_native_session_package(release, config, accepted, source_repo, source_sha):
+def verify_native_session_package(release, config, accepted, source_repo, source_sha, *, final_source=None):
     # An older accepted package remains identified by its older protected receipt.
     if "native_session_patch" not in config and "native_session_patch" not in accepted:
         return
@@ -170,8 +170,12 @@ def verify_native_session_package(release, config, accepted, source_repo, source
         raise ValueError("Native session preparation differs from protected source")
     for name, before in expected["source_sha256"].items():
         file = release / "app" / name
-        if (file.resolve(strict=True) != file
-                or sha(file) != expected["output_sha256"].get(name, before)):
+        # A separately verified later layer may refine this exact original source.
+        # Its protected manifest and actual final bytes were checked before this call.
+        digest = expected["output_sha256"].get(name, before)
+        if final_source is not None:
+            digest = final_source.get(name, digest)
+        if file.resolve(strict=True) != file or sha(file) != digest:
             raise ValueError("Native session package source differs from protected patch")
 
 
@@ -401,8 +405,9 @@ def export_publication(*, release, source_repo, source_sha, out):
     if (host_exports != config.get("company_host_exports")
             or host_exports != accepted_build.get("company_host_exports")):
         raise ValueError("Company host export differs from protected build qualification")
-    verify_native_session_package(release, config, accepted_build, source_repo, source_sha)
-    native_owner_access.verify(release, config, accepted_build, source_repo, source_sha)
+    final_source = native_owner_access.verify(release, config, accepted_build, source_repo, source_sha)
+    verify_native_session_package(release, config, accepted_build, source_repo, source_sha,
+                                  final_source=final_source)
     for name, expected in build["source_sha256"].items():
         if not re.fullmatch(r"src/(?:client/)?[a-z.-]+\.ts", name):
             raise ValueError("Company source path refused")

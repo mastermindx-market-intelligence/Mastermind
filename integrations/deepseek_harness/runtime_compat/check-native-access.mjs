@@ -12,10 +12,11 @@ const hostBytes=readFileSync(resolve(here,"native-host-source.json"));
 if(createHash("sha256").update(hostBytes).digest("hex")!==access.host_manifest_sha256)
   throw Error("Native access host composition differs");
 const host=JSON.parse(hostBytes.toString()),session=JSON.parse(readFileSync(resolve(here,"native-session-source.json"),"utf8"));
-const candidate=resolve(here,".cache/native-access",access.patch_sha256),sessionRoot=resolve(here,".cache/native-session");
+const candidate=resolve(here,".cache/native-access",access.patch_sha256);
+const sessionRoot=access.schema==="mastermind.dsh_native_access_source.v2"?candidate:resolve(here,".cache/native-session");
 for(const [root,files] of [
   [candidate,{...host.source_sha256,...host.output_sha256,...access.base_sha256,...access.output_sha256}],
-  [sessionRoot,{...session.source_sha256,...session.output_sha256}],
+  [sessionRoot,{...session.source_sha256,...session.output_sha256,...(sessionRoot===candidate?access.output_sha256:{})}],
 ])for(const [name,digest] of Object.entries(files)){
   if(createHash("sha256").update(readFileSync(resolve(root,name))).digest("hex")!==digest)
     throw Error("Native source differs: "+name);

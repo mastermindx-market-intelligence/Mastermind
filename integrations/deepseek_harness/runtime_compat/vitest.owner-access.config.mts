@@ -13,10 +13,10 @@ if(createHash("sha256").update(hostBytes).digest("hex")!==access.host_manifest_s
   throw Error("Owner access requires its exact host composition");
 const host=JSON.parse(hostBytes.toString()),session=JSON.parse(readFileSync(resolve(here,"native-session-source.json"),"utf8"));
 const candidate=resolve(here,".cache/native-access",access.patch_sha256);
-const sessionRoot=resolve(here,".cache/native-session");
+const sessionRoot=access.schema==="mastermind.dsh_native_access_source.v2"?candidate:resolve(here,".cache/native-session");
 for(const [root,files] of [
   [candidate,{...host.source_sha256,...host.output_sha256,...access.base_sha256,...access.output_sha256}],
-  [sessionRoot,{...session.source_sha256,...session.output_sha256}],
+  [sessionRoot,{...session.source_sha256,...session.output_sha256,...(sessionRoot===candidate?access.output_sha256:{})}],
 ] as const)for(const [name,digest] of Object.entries(files)){
   if(createHash("sha256").update(readFileSync(resolve(root,name))).digest("hex")!==digest)
     throw Error("Native owner access input differs: "+name);
@@ -50,7 +50,7 @@ export default defineConfig({
     const path=id.startsWith(".")&&importer?resolve(dirname(importer),id):id.startsWith("/")?id:undefined;
     if(path){const mapped=redirect(path);if(mapped!==path)return mapped;}
   }},shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:regression?[
+  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_SEARCH_REGRESSION==="1"?[resolve(donor,"packages/api/session-controller/tests/session-search.host.spec.ts")]:regression?[
     resolve(donor,"packages/api/remote-access/tests/**/*.host.spec.ts"),
     resolve(donor,"packages/api/gateway/tests/gateway*.host.spec.ts"),
   ]:["native-owner-access.test.ts","native-owner-hold.test.ts"],

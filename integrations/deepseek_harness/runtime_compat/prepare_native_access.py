@@ -9,16 +9,19 @@ import sys
 
 if __package__:
     from . import prepare_native_host as native_host
+    from . import prepare_native_session as native_session
 else:
     import prepare_native_host as native_host
+    import prepare_native_session as native_session
 
 ROOT = Path(__file__).resolve().parent
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
-PACKAGES = ("packages/api/remote-access", "packages/api/gateway", "packages/api/remotes")
+LEGACY_PACKAGES = ("packages/api/remote-access", "packages/api/gateway", "packages/api/remotes")
+PACKAGES = (*LEGACY_PACKAGES, "packages/api/session-controller")
 PREFIXES = tuple(package + "/src/" for package in PACKAGES)
-CHANGED = frozenset((PREFIXES[0] + "index.ts", PREFIXES[0] + "types.ts",
-                     PREFIXES[1] + "index.ts", PREFIXES[1] + "types.ts",
-                     PREFIXES[2] + "index.ts"))
+CHANGED_V1 = frozenset((PREFIXES[0] + "index.ts", PREFIXES[0] + "types.ts",
+                        PREFIXES[1] + "index.ts", PREFIXES[1] + "types.ts", PREFIXES[2] + "index.ts"))
+CHANGED = CHANGED_V1 | {PREFIXES[3] + "index.ts", PREFIXES[3] + "list.ts", PREFIXES[3] + "commands.ts"}
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -28,35 +31,50 @@ def validate_manifest(value: dict, patch: bytes) -> dict:
             or type(value.get("base_sha256")) is not dict
             or type(value.get("output_sha256")) is not dict):
         raise ValueError("native access source manifest refused")
-    if (value.get("schema") != "mastermind.dsh_native_access_source.v1"
+    current = value.get("schema") == "mastermind.dsh_native_access_source.v2"
+    changed = CHANGED if current else CHANGED_V1
+    if (value.get("schema") not in {"mastermind.dsh_native_access_source.v1", "mastermind.dsh_native_access_source.v2"}
             or value.get("donor_sha") != PIN or value.get("production_armed") is not False
-            or set(value["output_sha256"]) != CHANGED
+            or set(value["output_sha256"]) != changed
             or set(value["base_sha256"]) != set(value["source_sha256"])
-            or not CHANGED <= set(value["source_sha256"])
+            or not changed <= set(value["source_sha256"])
             or not 5 <= len(value["source_sha256"]) <= 128):
         raise ValueError("native access source manifest refused")
     for mapping in ("source_sha256", "base_sha256", "output_sha256"):
         for name, digest in value[mapping].items():
             path = PurePosixPath(name)
-            if (path.is_absolute() or ".." in path.parts or not name.startswith(PREFIXES)
+            if (path.is_absolute() or ".." in path.parts or not name.startswith(PREFIXES if current else PREFIXES[:3])
                     or path.suffix != ".ts" or type(digest) is not str or len(digest) != 64
                     or any(c not in "0123456789abcdef" for c in digest)):
                 raise ValueError("native access source path or digest refused")
-    for key in ("host_patch_sha256", "host_manifest_sha256", "donor_lock_sha256"):
+    for key in ("host_patch_sha256", "host_manifest_sha256", "donor_lock_sha256",
+                *(("session_patch_sha256", "session_manifest_sha256") if current else ())):
         digest = value.get(key)
         if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("native access host identity refused")
     if hashlib.sha256(patch).hexdigest() != value.get("patch_sha256"):
         raise ValueError("native access patch changed")
     headers = patch.decode().splitlines()
-    if ({line[6:] for line in headers if line.startswith("+++ b/")} != CHANGED
-            or {line[6:] for line in headers if line.startswith("--- a/")} != CHANGED):
+    if ({line[6:] for line in headers if line.startswith("+++ b/")} != changed
+            or {line[6:] for line in headers if line.startswith("--- a/")} != changed):
         raise ValueError("native access patch scope changed")
     return value
 
 def manifest() -> dict:
     return validate_manifest(json.loads((ROOT / "native-access-source.json").read_bytes()),
                              (ROOT / "native-owner-access.patch").read_bytes())
+
+def session_source(expected: dict) -> dict | None:
+    if expected["schema"] == "mastermind.dsh_native_access_source.v1":
+        return None
+    if sha(ROOT / "native-session-source.json") != expected["session_manifest_sha256"]:
+        raise ValueError("native access requires its exact session source composition")
+    session = native_session.manifest()
+    if (session["patch_sha256"] != expected["session_patch_sha256"]
+            or any(expected["source_sha256"].get(name) != digest
+                   for name, digest in session["source_sha256"].items())):
+        raise ValueError("native access session source changed")
+    return session
 
 def host_source(expected: dict):
     if sha(ROOT / "native-host-source.json") != expected["host_manifest_sha256"]:
@@ -65,15 +83,19 @@ def host_source(expected: dict):
     host = module.manifest()
     if host["patch_sha256"] != expected["host_patch_sha256"]:
         raise ValueError("native access host patch changed")
+    session = session_source(expected)
+    outputs = {**host["output_sha256"], **(session["output_sha256"] if session else {})}
     if expected["base_sha256"] != {
-        name: host["output_sha256"].get(name, digest)
+        name: outputs.get(name, digest)
         for name, digest in expected["source_sha256"].items()
     }:
         raise ValueError("native access base is not the original host postimage")
     return module, host
 
 def prepared_receipt(expected: dict) -> dict:
-    return {"schema": "mastermind.dsh_native_access_prepared.v1", "donor_sha": PIN,
+    current = expected["schema"] == "mastermind.dsh_native_access_source.v2"
+    return {"schema": "mastermind.dsh_native_access_prepared.v2" if current else "mastermind.dsh_native_access_prepared.v1", "donor_sha": PIN,
+            **({"session_patch_sha256": expected["session_patch_sha256"]} if current else {}),
             "patch_sha256": expected["patch_sha256"], "host_patch_sha256": expected["host_patch_sha256"],
             "source_files": len(expected["source_sha256"]),
             "output_sha256": expected["output_sha256"], "installed": False, "provider_calls": 0}
@@ -104,7 +126,10 @@ def apply_to_owned_tree(tree: Path, donor: Path) -> dict:
             or (tree / ".git").exists()):
         raise ValueError("separate owned native build tree required")
     states = []
-    base = {**host["source_sha256"], **host["output_sha256"], **expected["base_sha256"]}
+    session = session_source(expected)
+    base = {**host["source_sha256"], **host["output_sha256"],
+            **(session["source_sha256"] if session else {}), **(session["output_sha256"] if session else {}),
+            **expected["base_sha256"]}
     for name, before in base.items():
         path = tree / name
         if path.resolve(strict=True) != path or not path.is_file():
@@ -113,7 +138,7 @@ def apply_to_owned_tree(tree: Path, donor: Path) -> dict:
         after = expected["output_sha256"].get(name, before)
         if observed not in {before, after}:
             raise ValueError("owned native access source differs: " + name)
-        if name in CHANGED:
+        if name in expected["output_sha256"]:
             states.append(observed == after)
     if any(states) and not all(states):
         raise ValueError("partial native access patch requires original-effect reconciliation")
@@ -140,7 +165,8 @@ def prepare(supplied: str) -> dict:
         if target.is_symlink() or target.parent.resolve(strict=False) != target.parent:
             raise ValueError("native access artifact path redirected")
         if target.exists():
-            allowed = {digest, host["output_sha256"].get(name, digest), expected["output_sha256"].get(name, digest)}
+            allowed = {digest, host["output_sha256"].get(name, digest),
+                       expected["base_sha256"].get(name, digest), expected["output_sha256"].get(name, digest)}
             if sha(target) not in allowed:
                 raise ValueError("existing native access artifact differs: " + name)
             continue
@@ -149,9 +175,14 @@ def prepare(supplied: str) -> dict:
             stream.write((donor / name).read_bytes())
     complete = all(sha(cache / name) == digest for name, digest in expected["output_sha256"].items())
     if not complete:
+        if any(sha(cache / name) == digest for name, digest in expected["output_sha256"].items()):
+            raise ValueError("partial native access patch requires original-effect reconciliation")
+        if session_source(expected) is not None:
+            native_session.apply_to_owned_tree(cache, donor)
         host_module.apply_to_owned_tree(cache, donor)
     receipt = apply_to_owned_tree(cache, donor)
-    for package in set(PACKAGES) | set(host_module.PACKAGES):
+    packages = PACKAGES if session_source(expected) is not None else LEGACY_PACKAGES
+    for package in set(packages) | set(host_module.PACKAGES):
         modules, installed = cache / package / "node_modules", donor / package / "node_modules"
         if modules.is_symlink():
             if modules.resolve(strict=True) != installed.resolve(strict=True):

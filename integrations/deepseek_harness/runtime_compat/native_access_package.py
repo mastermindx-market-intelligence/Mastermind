@@ -14,6 +14,8 @@ FILES = {
     "access_patch": PREFIX + "native-owner-access.patch",
     "host_source": PREFIX + "native-host-source.json",
     "host_patch": PREFIX + "native-host-admission.patch",
+    "session_source": PREFIX + "native-session-source.json",
+    "session_patch": PREFIX + "native-session-generation.patch",
 }
 IDENTITY_FIELDS = frozenset(("source_sha256", "patch_sha256", "host_source_sha256",
                             "host_patch_sha256", "receipt_sha256"))
@@ -21,7 +23,7 @@ IDENTITY_FIELDS = frozenset(("source_sha256", "patch_sha256", "host_source_sha25
 def digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
-def _host_record(raw: bytes, patch: bytes, expected: dict) -> dict:
+def _host_record(raw: bytes, patch: bytes, expected: dict, session: dict | None) -> dict:
     value = json.loads(raw)
     if (type(value) is not dict or value.get("schema") != "mastermind.dsh_native_host_source.v1"
             or value.get("donor_sha") != access.PIN or value.get("production_armed") is not False
@@ -46,8 +48,9 @@ def _host_record(raw: bytes, patch: bytes, expected: dict) -> dict:
     if ({line[6:] for line in headers if line.startswith("+++ b/")} != host.CHANGED
             or {line[6:] for line in headers if line.startswith("--- a/")} != host.CHANGED):
         raise ValueError("native owner package host patch scope refused")
+    outputs = {**value["output_sha256"], **(session["output_sha256"] if session else {})}
     if expected["base_sha256"] != {
-        name: value["output_sha256"].get(name, before)
+        name: outputs.get(name, before)
         for name, before in expected["source_sha256"].items()
     }:
         raise ValueError("native owner package access base differs")
@@ -55,7 +58,15 @@ def _host_record(raw: bytes, patch: bytes, expected: dict) -> dict:
 
 def _inputs(raw: dict[str, bytes]) -> tuple[dict, dict]:
     expected = access.validate_manifest(json.loads(raw["access_source"]), raw["access_patch"])
-    native_host = _host_record(raw["host_source"], raw["host_patch"], expected)
+    session = None
+    if expected["schema"] == "mastermind.dsh_native_access_source.v2":
+        session = access.native_session.validate_manifest(json.loads(raw["session_source"]), raw["session_patch"])
+        if (digest(raw["session_source"]) != expected["session_manifest_sha256"]
+                or session["patch_sha256"] != expected["session_patch_sha256"]
+                or any(expected["source_sha256"].get(name) != before
+                       for name, before in session["source_sha256"].items())):
+            raise ValueError("native owner package session composition refused")
+    native_host = _host_record(raw["host_source"], raw["host_patch"], expected, session)
     return expected, native_host
 
 def qualify_inputs() -> tuple[dict, dict]:
@@ -89,10 +100,10 @@ def package(release: Path, donor: Path) -> dict:
             "host_source_sha256": digest(raw["host_source"]), "host_patch_sha256": native_host["patch_sha256"],
             "receipt_sha256": access.sha(target)}
 
-def verify(release: Path, config: dict, accepted: dict, source_repo: Path, source_sha: str) -> None:
+def verify(release: Path, config: dict, accepted: dict, source_repo: Path, source_sha: str) -> dict[str, str]:
     # Historical accepted packages retain their original source qualification.
     if "native_owner_access" not in config and "native_owner_access" not in accepted:
-        return
+        return {}
     identity = config.get("native_owner_access")
     if (type(identity) is not dict or set(identity) != IDENTITY_FIELDS
             or any(type(value) is not str or not re.fullmatch("[0-9a-f]{64}", value) for value in identity.values())
@@ -116,3 +127,4 @@ def verify(release: Path, config: dict, accepted: dict, source_repo: Path, sourc
         path = release / "app" / name
         if path.resolve(strict=True) != path or access.sha(path) != expected_digest:
             raise ValueError("native owner package source differs from protected patch")
+    return final

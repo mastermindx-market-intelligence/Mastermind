@@ -225,13 +225,17 @@ it("reads the associated original JSONL and refuses a foreign read before persis
   const page=await h.invoke("page",{address:{kind:"session",sessionId:h.cold},throughSeq:5,maxMessages:20});
   expect(JSON.stringify(page)).toContain("Original answer");expect(h.ctx.agents.get(h.cold)).toBeUndefined();expect(h.calls()).toBe(0);
 });
-it("retires a prompt during attachment admission before the original native inbox write",async()=>{
+it.each(["signal","guard","bindings","replacement"] as const)("retires a prompt through %s during attachment admission before the original native inbox write",async(retirement)=>{
   const h=await native(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
   const admit=h.ctx.attachments.admitPromptContent.bind(h.ctx.attachments);
   vi.spyOn(h.ctx.attachments,"admitPromptContent").mockImplementation(async content=>{entered.resolve();await release.promise;return admit(content);});
   const before=h.live.session.snapshotEvents(),pending=outcome(h.invoke("prompt",h.request));
   await Promise.race([entered.promise,pending.then(()=>{throw Error("native prompt did not reach attachment admission");})]);
-  h.abort.abort(Error("association retired"));release.resolve();
+  if(retirement==="signal")h.abort.abort(Error("association retired"));
+  else if(retirement==="guard")h.state.current=false;
+  else if(retirement==="bindings")h.state.held=[];
+  else {h.dispose();h.ctx.remoteAccess.registerOwnerRestriction({...h.source,signal:new AbortController().signal});}
+  release.resolve();
   expect(await pending).toHaveProperty("error");expect(h.live.session.snapshotEvents()).toEqual(before);expect(h.calls()).toBe(0);
 });
 it("keeps the original prompt provenance, request deduplication and native Stop semantics",async()=>{
@@ -243,4 +247,83 @@ it("keeps the original prompt provenance, request deduplication and native Stop 
   await expect(h.invoke("cancel",{sessionId:"foreign"})).rejects.toMatchObject({code:"remote-access/denied"});expect(cancel).not.toHaveBeenCalled();
   await expect(h.invoke("cancel",{sessionId:h.live.id})).resolves.toEqual({accepted:true});
   expect(cancel).toHaveBeenCalledExactlyOnceWith({kind:"user"},{keepInbox:true});
+});
+
+
+function searchHit(h:Awaited<ReturnType<typeof native>>,id:string,index=0){
+  return{header:{...h.live.session.header,id:SessionId(id),cwd:h.root},live:false,persisted:true,
+    bestMatch:{sessionId:SessionId(id),seq:index,type:"user/message",time:100+index,surface:"current",snippet:"permitted match "+id}};
+}
+function searchFixture(h:Awaited<ReturnType<typeof native>>,allowed:readonly string[],pages:{items:ReturnType<typeof searchHit>[];nextCursor?:string}[]){
+  h.state.held=[...bindings(allowed).map(binding=>({...binding,role:{...binding.role,actions:[...binding.role.actions,"session/search"]}})) as RemoteAccessBinding[],
+    {resource:{kind:"global"},role:{name:"search-invocation",resource:"global",actions:["session/search"]}}];
+  const rows=[...new Map(pages.flatMap(page=>page.items).map(item=>[item.header.id,{header:item.header,live:false,persisted:true}])).values()];
+  vi.spyOn(h.ctx.sessionQuery,"listSessions").mockResolvedValue(rows as any);
+  let index=0;
+  const search=vi.spyOn(h.ctx.sessionQuery,"searchSessions").mockImplementation(async request=>{
+    expect(request).not.toHaveProperty("sessionFilters");
+    return pages[index++] as any;
+  });
+  const resume=vi.spyOn(h.ctx.agents,"resume");
+  return{search,resume};
+}
+it("searches past an unauthorized first page without spending the permitted result limit",async()=>{
+  const h=await native(),hidden=Array.from({length:20},(_,i)=>searchHit(h,"foreign-"+i));
+  const {search,resume}=searchFixture(h,["shared-late"],[
+    {items:hidden,nextCursor:"native-search-next"},{items:[searchHit(h,"shared-late")]},
+  ]);
+  await expect(h.invoke("search",{query:"match"})).resolves.toEqual({
+    items:[{sessionId:"shared-late",snippet:"permitted match shared-late"}],hasMore:false,
+  });
+  expect(search).toHaveBeenCalledTimes(2);expect(resume).not.toHaveBeenCalled();expect(h.calls()).toBe(0);
+});
+it.each([{extraAllowed:false},{extraAllowed:true}])("computes search hasMore from permitted lookahead ($extraAllowed)",async({extraAllowed})=>{
+  const h=await native(),ids=Array.from({length:20},(_,i)=>"shared-"+i);
+  const extras=extraAllowed?[searchHit(h,"shared-extra")]:Array.from({length:20},(_,i)=>searchHit(h,"foreign-extra-"+i));
+  const {search,resume}=searchFixture(h,extraAllowed?[...ids,"shared-extra"]:ids,[
+    {items:ids.map(id=>searchHit(h,id)),nextCursor:"native-search-extra"},{items:extras},
+  ]);
+  const value=await h.invoke("search",{query:"match"}) as any;
+  expect(value.items.map((item:any)=>item.sessionId)).toEqual(ids);expect(value.hasMore).toBe(extraAllowed);
+  expect(search).toHaveBeenCalledTimes(2);expect(resume).not.toHaveBeenCalled();expect(h.calls()).toBe(0);
+});
+it("does not query content when no listed Session is permitted",async()=>{
+  const h=await native(),{search,resume}=searchFixture(h,[],[{items:[searchHit(h,"foreign-only")]}]);
+  await expect(h.invoke("search",{query:"match"})).resolves.toEqual({items:[],hasMore:false});
+  expect(search).not.toHaveBeenCalled();expect(resume).not.toHaveBeenCalled();expect(h.calls()).toBe(0);
+});
+it("withholds search results when the original source retires during a page read",async()=>{
+  const h=await native(),page={items:[searchHit(h,"shared-delayed")]};
+  const {search,resume}=searchFixture(h,["shared-delayed"],[page]);
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  search.mockImplementation(async()=>{entered.resolve();await release.promise;return page as any;});
+  const pending=outcome(h.invoke("search",{query:"match"}));await entered.promise;
+  h.abort.abort(Error("original search generation retired"));release.resolve();
+  expect(await pending).toHaveProperty("error");expect(resume).not.toHaveBeenCalled();expect(h.calls()).toBe(0);
+});
+
+it("never adopts a replacement owner source between event opening and its first pull",async()=>{
+  const h=await host();eventSource(h);
+  const abort=new AbortController();cleanup.push(async()=>{abort.abort();});
+  const source=await h.ctx.typertGateway.wireStream.open("$events",{args:{}},(async function*(){})(),h.peer,abort.signal);
+  h.dispose();h.ctx.remoteAccess.registerOwnerRestriction({...h.source,signal:new AbortController().signal});
+  const iterator=source[Symbol.asyncIterator]();
+  expect(await outcome(iterator.next())).toHaveProperty("error");
+  expect((h.ctx.typertGateway as any).remoteEventClients.size).toBe(0);
+  expect(h.ctx.typertGateway.hasLiveClient()).toBe(false);
+});
+
+it("reclaims a revoked search slot before counting the next page and its permitted lookahead",async()=>{
+  const h=await native(),ids=Array.from({length:22},(_,i)=>"shared-changing-"+i);
+  const pages=[{items:ids.slice(0,20).map(id=>searchHit(h,id)),nextCursor:"native-changing-next"},
+    {items:ids.slice(20).map(id=>searchHit(h,id))}];
+  const {search,resume}=searchFixture(h,ids,pages);
+  search.mockImplementationOnce(async()=>pages[0] as any).mockImplementationOnce(async()=>{
+    h.state.held=h.state.held.filter(binding=>binding.resource.kind!=="session"||binding.resource.id!==ids[0]);
+    return pages[1] as any;
+  });
+  const value=await h.invoke("search",{query:"match"}) as any;
+  expect(value.items.map((item:any)=>item.sessionId)).toEqual(ids.slice(1,21));
+  expect(value.hasMore).toBe(true);expect(search).toHaveBeenCalledTimes(2);
+  expect(resume).not.toHaveBeenCalled();expect(h.calls()).toBe(0);
 });

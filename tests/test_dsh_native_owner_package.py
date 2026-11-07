@@ -9,7 +9,9 @@ import subprocess
 import pytest
 from integrations.deepseek_harness.runtime_compat import prepare_native_access as access
 from integrations.deepseek_harness.runtime_compat import prepare_native_host as host
+from integrations.deepseek_harness.runtime_compat import prepare_native_session as session
 from integrations.deepseek_harness.runtime_compat import native_access_package as package
+from integrations.deepseek_harness import package_attended as attended
 
 def git(root: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-c", "gc.auto=0", "-C", str(root), *args], text=True).strip()
@@ -26,15 +28,18 @@ def diff(name: str, old: bytes, new: bytes) -> str:
 
 @pytest.fixture
 def source(tmp_path, monkeypatch):
-    donor, inputs = tmp_path / "donor", tmp_path / "inputs"
-    donor.mkdir(); inputs.mkdir()
+    donor, inputs = tmp_path / "donor", tmp_path / "inputs/runtime_compat"
+    donor.mkdir(); inputs.mkdir(parents=True)
+    monkeypatch.setattr(attended, "HERE", inputs.parent)
     old, host_text, access_text = b"export const native = 'donor';\n", b"export const native = 'host';\n", b"export const native = 'access';\n"
-    for name in host.CHANGED | access.CHANGED:
+    session_inputs = session.CHANGED | {session.PREFIX + "types.ts"}
+    for name in host.CHANGED | access.CHANGED | session_inputs:
         path = donor / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(old)
     (donor / "pnpm-lock.yaml").write_text("fixture: original source\n")
     git(donor, "init", "-q", "-b", "master"); pin = commit(donor)
     monkeypatch.setattr(host, "ROOT", inputs); monkeypatch.setattr(host, "PIN", pin)
     monkeypatch.setattr(access, "ROOT", inputs); monkeypatch.setattr(access, "PIN", pin)
+    monkeypatch.setattr(session, "ROOT", inputs); monkeypatch.setattr(session, "PIN", pin)
     host_patch = "".join(diff(name, old, host_text) for name in sorted(host.CHANGED)).encode()
     native_host = {"schema": "mastermind.dsh_native_host_source.v1", "donor_sha": pin,
         "donor_lock_sha256": access.sha(donor / "pnpm-lock.yaml"),
@@ -44,14 +49,26 @@ def source(tmp_path, monkeypatch):
     host_raw = json.dumps(native_host).encode()
     (inputs / "native-host-source.json").write_bytes(host_raw)
     (inputs / "native-host-admission.patch").write_bytes(host_patch)
-    access_patch = "".join(diff(name, host_text if name in host.CHANGED else old, access_text)
-                           for name in sorted(access.CHANGED)).encode()
-    expected = {"schema": "mastermind.dsh_native_access_source.v1", "donor_sha": pin,
+    session_text = b"export const native = 'session';\n"
+    session_patch = "".join(diff(name, old, session_text) for name in sorted(session.CHANGED)).encode()
+    native_session = {"schema": "mastermind.dsh_native_session_source.v1", "donor_sha": pin,
         "donor_lock_sha256": access.sha(donor / "pnpm-lock.yaml"),
-        "source_sha256": {name: package.digest(old) for name in sorted(access.CHANGED)},
-        "base_sha256": {name: package.digest(host_text if name in host.CHANGED else old) for name in sorted(access.CHANGED)},
+        "source_sha256": {name: package.digest(old) for name in sorted(session_inputs)},
+        "output_sha256": {name: package.digest(session_text) for name in sorted(session.CHANGED)},
+        "patch_sha256": package.digest(session_patch), "installed": False, "provider_calls": 0, "production_armed": False}
+    session_raw = json.dumps(native_session).encode()
+    (inputs / "native-session-source.json").write_bytes(session_raw)
+    (inputs / "native-session-generation.patch").write_bytes(session_patch)
+    base = lambda name: session_text if name in session.CHANGED else host_text if name in host.CHANGED else old
+    access_inputs = access.CHANGED | session_inputs
+    access_patch = "".join(diff(name, base(name), access_text) for name in sorted(access.CHANGED)).encode()
+    expected = {"schema": "mastermind.dsh_native_access_source.v2", "donor_sha": pin,
+        "donor_lock_sha256": access.sha(donor / "pnpm-lock.yaml"),
+        "source_sha256": {name: package.digest(old) for name in sorted(access_inputs)},
+        "base_sha256": {name: package.digest(base(name)) for name in sorted(access_inputs)},
         "output_sha256": {name: package.digest(access_text) for name in sorted(access.CHANGED)},
         "host_manifest_sha256": package.digest(host_raw), "host_patch_sha256": native_host["patch_sha256"],
+        "session_manifest_sha256": package.digest(session_raw), "session_patch_sha256": native_session["patch_sha256"],
         "patch_sha256": package.digest(access_patch), "installed": False, "provider_calls": 0, "production_armed": False}
     (inputs / "native-access-source.json").write_text(json.dumps(expected))
     (inputs / "native-owner-access.patch").write_bytes(access_patch)
@@ -60,6 +77,7 @@ def source(tmp_path, monkeypatch):
 def owned(tmp_path, donor):
     release = tmp_path / "release"; release.mkdir()
     shutil.copytree(donor, release / "app", ignore=shutil.ignore_patterns(".git"))
+    attended.package_native_session(release, donor)
     return release
 
 def qualified(source, tmp_path):
@@ -70,7 +88,12 @@ def qualified(source, tmp_path):
         target = protected / name; target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((inputs / Path(name).name).read_bytes())
     git(protected, "init", "-q", "-b", "master"); head = commit(protected)
-    config = {"native_owner_access": identity}
+    session_source = inputs / "native-session-source.json"
+    config = {"native_owner_access": identity, "native_session_patch": {
+        "source_sha256": access.sha(session_source),
+        "patch_sha256": json.loads(session_source.read_bytes())["patch_sha256"],
+        "receipt_sha256": access.sha(release / "native-session-receipt.json"),
+    }}
     return release, config, dict(config), protected, head, native_host, expected
 
 def test_real_package_applies_host_then_access_without_changing_the_donor(source, tmp_path):
@@ -147,3 +170,38 @@ def test_legacy_accepted_packages_keep_their_original_receipt(tmp_path):
     package.verify(tmp_path, {}, {}, tmp_path, "unused")
     with pytest.raises(ValueError, match="protected build qualification"):
         package.verify(tmp_path, {}, {"native_owner_access": {}}, tmp_path, "unused")
+
+
+def test_session_parent_and_access_overlay_verify_as_one_protected_package(source, tmp_path):
+    release, config, accepted, protected, head, _, expected = qualified(source, tmp_path)
+    final = package.verify(release, config, accepted, protected, head)
+    attended.verify_native_session_package(release, config, accepted, protected, head, final_source=final)
+    with pytest.raises(ValueError, match="package source differs"):
+        attended.verify_native_session_package(release, config, accepted, protected, head)
+    path = release / "app/packages/api/session-controller/src/commands.ts"
+    path.write_text("unqualified enqueue source\n")
+    with pytest.raises(ValueError, match="source differs from protected patch"):
+        package.verify(release, config, accepted, protected, head)
+
+
+def test_v1_owner_package_retains_its_original_session_and_receipt(source, tmp_path):
+    donor, inputs, native_host, expected = source
+    legacy = dict(expected)
+    legacy["schema"] = "mastermind.dsh_native_access_source.v1"
+    legacy.pop("session_manifest_sha256"); legacy.pop("session_patch_sha256")
+    for name in ("source_sha256", "base_sha256", "output_sha256"):
+        legacy[name] = {path: digest for path, digest in legacy[name].items()
+                        if path.startswith(access.PREFIXES[:3])}
+    patch = "".join(diff(name,
+        b"export const native = 'host';\n" if name in host.CHANGED else b"export const native = 'donor';\n",
+        b"export const native = 'access';\n") for name in sorted(access.CHANGED_V1)).encode()
+    legacy["patch_sha256"] = package.digest(patch)
+    (inputs / "native-owner-access.patch").write_bytes(patch)
+    (inputs / "native-access-source.json").write_text(json.dumps(legacy))
+    release, config, accepted, protected, head, _, _ = qualified(source, tmp_path)
+    final = package.verify(release, config, accepted, protected, head)
+    attended.verify_native_session_package(release, config, accepted, protected, head, final_source=final)
+    receipt = json.loads((release / "native-owner-access-receipt.json").read_bytes())
+    assert receipt["access"]["schema"] == "mastermind.dsh_native_access_prepared.v1"
+    assert "session_patch_sha256" not in receipt["access"]
+    assert (release / "app/packages/api/session-controller/src/commands.ts").read_bytes() == b"export const native = 'session';\n"
