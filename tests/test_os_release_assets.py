@@ -49,7 +49,7 @@ NOTICE_BYTES = {
 
 
 PRIVATE_ENTRY = "assets/private-entry-a.jpg"
-PRIVATE_ENTRY_BYTES = b"\\xff\\xd8fixture private entry\\xff\\xd9"
+PRIVATE_ENTRY_BYTES = b"\xff\xd8fixture private entry\xff\xd9"
 
 
 def built_dist(app, *, noir_notices=False, private_entry=False):
