@@ -9,8 +9,8 @@ published #10740 E3 changes at 3c510817d9543b5b124a1b73277aa115883c7da7 verbatim
 its six Hermes paths, including the previously tested client/factory, are
 unchanged. The enrollment join adopts S3's complete b955c823767b504853b6d79e44d09fc71cdbdd9c
 cohort and preserves the exact v9 delta in its shared source-identity review.
-No active J source was edited. Current composed CI must supply its own result;
-the completed results below are tied to their exact earlier heads.
+No active J source was edited. The exact composed adapter result is recorded
+next; historical results remain tied to their earlier heads.
 
 The eleven-file runtime package remains byte-identical to tested 08b8daf9, with
 held_package_digest **1ae0d8967b7a59c92735271999ef6c79d29a1c28594b7abd59d35da5e98ee38d**.
@@ -21,6 +21,36 @@ During this work the incumbent joined protected master 5199647e into the adapter
 branch at 46aaa9f0a570d3647955cbb5c08ca19598e49df5. This proposal preserves that
 join in full, including its adoption of master's parameterized ModelArk tests.
 The governing INDEX and AGENTS blobs remain unchanged from the verified pin.
+
+## Current composed hosted proof at e623fb16
+
+Adapter **e623fb16dc663be5cebe73431a9e75edf0f644ed**, GitHub merge
+**562d122cb354b79361e7db3924abf7e01c714f7c** into protected
+**5199647e89166d163392905574097b2cfa16ca5b**, passed all six jobs in
+[run 42352701618](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618).
+The runtime package, test source and explicit pins are preserved by this later
+evidence/test-fixture update. [Machine-readable result](qualification/composed_e623_receipt.json).
+
+| Proof | Result | Exact job |
+| --- | --- | --- |
+| Actual pinned native primary/tools/AUTO/exact | 69 passed in 10.761 seconds; Python 3.14.10 | [128344049442](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049442) |
+| Actual native agent, current original factory/client and HTTP/Gateway/Broker | 9 passed in 63.531 seconds | [128344049767](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049767) |
+| Current native host contract | 51 passed in 21.18 seconds | [128344049634](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049634) |
+| Original/successor tunnel lifecycle | 170 passed in 30.37 seconds | [128344049675](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049675) |
+| Offline original client, Python 3.12.16 | 54 passed in 0.473 seconds | [128344049771](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049771) |
+| Offline original client, Python 3.13.18 | 54 passed in 0.516 seconds | [128344049656](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049656) |
+
+There were no reported failures, errors or skips. Instrumented native/offline
+paths recorded no ordinary provider SDK constructions or external attempts.
+The full-owner fixture checked exact Macro 669f2f18 and native-owner 5fcb76e8
+source identities. Its external provider, qualification and account inputs
+remain synthetic. These are overlapping suites, not separate production journeys.
+Hermes harness run 42352701585 and runtime run 42352701564 also succeeded.
+
+Macro 669f2f18 independently passed **62 tests in 2.78 seconds**, using its exact
+3c510817 base in [run 42352331675/job 128342932681](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42352331675/job/128342932681).
+These receipts do not assert the general repository CI, installed role or live
+provider/budget outcome.
 
 ## Latest completed adapter and installed-runtime proof
 
@@ -75,7 +105,12 @@ split. The active S3 composer has now published that repair in b955c823 and
 reports 46/46 composed Brain cases;
 [receipt 6703951320](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703951320)
 records its exact source and retained original carrier. It is not an installed
-generation. No competing fixture repair is introduced.
+generation. This proposal now adopts that published seven-line test-only repair
+verbatim: tests/integration/test_fabric_chat_inference_composition.py, Git blob
+524106f247affd2d12068b3bce5c312b4f598c55. The source was verified against
+protected 5199647e: the only change supplies the existing dedicated chat transport
+and mode in fixture setUp. No production Brain code or provider policy changes.
+The new natural general CI remains a separate required result.
 
 ## Current enrollment composition and release-manifest boundary
 
