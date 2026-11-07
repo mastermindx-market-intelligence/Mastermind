@@ -175,7 +175,7 @@ def test_conviction_buy_still_lands_through_the_triad(monkeypatch):
         return {**m, "synthesis": lenses.synthesize(m)}
 
     monkeypatch.setenv("MASTERMIND_ENTRY_GATE", "1")
-    monkeypatch.setattr(conviction, "candidates", lambda: ["GOODCO"])
+    monkeypatch.setattr(conviction, "candidates", lambda asof=None: ["GOODCO"])
     monkeypatch.setattr(lenses, "full", _fake_full)
     monkeypatch.setattr(eem, "assess", lambda t, **k: {
         "ticker": t, "verdict": "pullback_in_trend", "buyable": True, "entry_score": 75.0,
@@ -187,7 +187,8 @@ def test_conviction_buy_still_lands_through_the_triad(monkeypatch):
     import brain.neural_web_context as nwc
     monkeypatch.setattr(nwc, "decision_signals", lambda t: {"entry_shrink": None})
 
-    sized, rejected = conviction.build(0.30, name_cap=0.08, held=set(), asof="2026-07-19")
+    # Label-only current-assessor fixture; this does not certify a historical whole decision.
+    sized, rejected = conviction.build(0.30, name_cap=0.08, held=set(), asof="2026-07-19", live=True)
     tickers = [p["ticker"] for p in sized]
     assert "GOODCO" in tickers, f"triad strangled a clean buy: sized={tickers} rejected={rejected}"
     good = next(p for p in sized if p["ticker"] == "GOODCO")
@@ -211,7 +212,7 @@ def test_nw_entry_shrink_applies_subtract_only(monkeypatch):
         return {**m, "synthesis": lenses.synthesize(m)}
 
     monkeypatch.setenv("MASTERMIND_ENTRY_GATE", "1")
-    monkeypatch.setattr(conviction, "candidates", lambda: ["SHRUNKCO"])
+    monkeypatch.setattr(conviction, "candidates", lambda asof=None: ["SHRUNKCO"])
     monkeypatch.setattr(lenses, "full", _fake_full)
     monkeypatch.setattr(eem, "assess", lambda t, **k: {
         "ticker": t, "verdict": "clean", "buyable": True, "entry_score": 60.0,
@@ -223,7 +224,8 @@ def test_nw_entry_shrink_applies_subtract_only(monkeypatch):
     import brain.neural_web_context as nwc
     monkeypatch.setattr(nwc, "decision_signals", lambda t: {"entry_shrink": 0.7})
 
-    sized, _ = conviction.build(0.30, name_cap=0.08, held=set(), asof="2026-07-19")
+    # Label-only current-assessor fixture; retain the substantive subtract-only assertion.
+    sized, _ = conviction.build(0.30, name_cap=0.08, held=set(), asof="2026-07-19", live=True)
     good = next(p for p in sized if p["ticker"] == "SHRUNKCO")
     assert good.get("nw_shrink") == 0.7
     assert good.get("ctx_mult") == 0.7          # composed into the terminal subtract
