@@ -6,6 +6,8 @@ on:
       - 'tests/test_hermes_primary_application_enrollment.py'
       - 'tests/test_hermes_primary_retained_enrollment.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_native_install.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_native_stage.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py'
       - 'ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py'
       - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
@@ -48,6 +50,7 @@ jobs:
             ops/native_fabric/quota_continuity/tests/test_go_service_family_composition.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_routed_composition.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_workload_composition.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py \
             ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py
           python - "$native_rollout_test_root/proof.xml" <<'PY'
           import sys
