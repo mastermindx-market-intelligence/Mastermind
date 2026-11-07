@@ -55,6 +55,44 @@ jobs:
           node-version: '22.14.0'
       - name: Install original fixture dependencies
         run: python -m pip install --disable-pip-version-check -e '.[dev]'
+      - name: Acquire exact historical fleet fixture
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          expected_oid = "f87ac012339e82fe46bce5ddc70d1d04183d1b6e"
+          expected_sha256 = "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30"
+          expected_size = 101068
+          request = urllib.request.Request(
+              "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/git/blobs/" + expected_oid,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                  "User-Agent": "mastermind-studio-fixture",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=45) as response:
+              record = json.load(response)
+          if record.get("encoding") != "base64" or record.get("sha") != expected_oid:
+              raise SystemExit("historical fixture envelope refused")
+          raw = base64.b64decode("".join(record["content"].splitlines()), validate=True)
+          actual_oid = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+          if (record.get("size") != expected_size or len(raw) != expected_size
+                  or hashlib.sha256(raw).hexdigest() != expected_sha256 or actual_oid != expected_oid):
+              raise SystemExit("historical fixture identity refused")
+          stored = subprocess.check_output(["git", "hash-object", "-w", "--stdin"], input=raw).decode().strip()
+          if stored != expected_oid:
+              raise SystemExit("historical fixture storage refused")
+          subprocess.run(["git", "cat-file", "-e", expected_oid + "^{blob}"], check=True)
+          print("Historical fixture verified:", expected_oid, expected_size, "bytes")
+          PY
       - name: Compare unchanged baseline, observed case and original discovery context
         run: >-
           python -B integrations/hermes_application_fabric/qualification/diagnose_studio_fixture.py
