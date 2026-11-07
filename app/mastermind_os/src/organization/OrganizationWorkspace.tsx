@@ -136,6 +136,8 @@ const COPY = {
   "Open Projects": "打开项目列表",
   "Choose a project, then check its source status or use its existing refresh action.": "选择项目后，查看其来源状态或使用现有刷新操作。",
   "Observed work and reporting": "已观测工作与汇报关系",
+  "Configured reporting": "配置的汇报关系",
+  "Role charters; session enrollment is not observed.": "职责设置；会话接入情况尚未确认。",
   "Reading organization…": "正在读取组织信息…",
   "Current work is unavailable for this identity and selection. Activity remains unknown.": "当前身份和选择下的工作信息不可用，活动仍未知。",
   "Read-only reporting view": "只读汇报架构",
@@ -152,6 +154,12 @@ const COPY = {
   "Role assignment not established": "角色分配尚未证实",
   "Review": "审查",
   "Acceptance": "验收",
+  "Approved": "已批准",
+  "Rejected": "已拒绝",
+  "Pending": "待审查",
+  "Accepted": "已验收",
+  "Not accepted": "未验收",
+  "Not observed": "尚未观测",
   "Indexed result references": "索引结果引用",
   "Original parent consumption not established": "原始父任务消费尚未证实",
   "Product acceptance not established": "产品验收尚未证实",
@@ -168,20 +176,20 @@ export function OrganizationWorkspace({
   const t = (key: keyof typeof COPY) => locale === "zh-CN" ? COPY[key] : key;
   const context = qualifyOrganization(binding, missionState, observation);
   const mission = qualifyOrganizationMission(binding, missionState, missionProjection);
-  if (loading) return <section className="organization-workspace" aria-label={t("Organization")} aria-busy="true">
+  if (loading) return <section className="organization-workspace" lang={locale} aria-label={t("Organization")} aria-busy="true">
     <header className="organization-workspace__header"><h2>{t("Organization")}</h2></header>
     <p role="status">{t("Reading organization…")}</p>
     <div className="organization-workspace__skeleton" aria-hidden="true">
       <span /><span /><span /><span />
     </div>
   </section>;
-  return <section className="organization-workspace" aria-label={t("Organization")}>
+  return <section className="organization-workspace" lang={locale} aria-label={t("Organization")}>
     <header className="organization-workspace__header">
       <h2>{t("Organization")}</h2>
       <span>{t(mission ? "Observed work and reporting" : "Read-only reporting view")}</span>
     </header>
     {mission && <OrganizationMissionView key={JSON.stringify([
-      binding.authGeneration, binding.selection, binding.sessionRef, binding.bindingGeneration, binding.revisions.mission,
+      binding.authGeneration, binding.selection, binding.sessionRef, binding.bindingGeneration,
     ])} mission={mission} observedAt={missionProjection!.mission.source.observed_at!}
       onOpenProject={onOpenProject} onInspectWorkerResult={onInspectWorkerResult}
       hasPlanReader={!!planReader} locale={locale} />}
@@ -197,6 +205,10 @@ export function OrganizationWorkspace({
       mission={mission} missionSourceState={mission ? "CURRENT" : "UNAVAILABLE"}
       missionObservedAt={mission ? missionProjection!.mission.source.observed_at : null} locale={locale} />}
     {!context ? <p className="organization-workspace__notice" role="status">{t("The organization source has not been qualified for this selected mission. This is not evidence of no team or no work.")}</p> : <>
+      <div className="organization-workspace__reporting-heading">
+        <h3>{t("Configured reporting")}</h3>
+        <p className="organization-workspace__caption">{t("Role charters; session enrollment is not observed.")}</p>
+      </div>
       <div className="organization-workspace__grid">
         <section aria-label={t("Chairman")}>
           <div className="organization-workspace__root"><strong>{context.organization.human_root.title}</strong><span>{t("Human direction")}</span></div>
@@ -219,8 +231,11 @@ export function OrganizationWorkspace({
           <p>{context.goal_lineage.execution_root.selected_root_job_id}</p>
           <p>{t("Role assignment not established")}</p>
           <dl>
-            <div><dt>{t("Review")}</dt><dd>{context.goal_lineage.evidence.review_verdict}</dd></div>
-            <div><dt>{t("Acceptance")}</dt><dd>{context.goal_lineage.evidence.acceptance_state ?? t("not supplied")}</dd></div>
+            <div><dt>{t("Review")}</dt><dd>{t(context.goal_lineage.evidence.review_verdict === "approve" ? "Approved" :
+              context.goal_lineage.evidence.review_verdict === "reject" ? "Rejected" :
+              ["PENDING", "NOT_YET"].includes(context.goal_lineage.evidence.review_verdict) ? "Pending" : "Not observed")}</dd></div>
+            <div><dt>{t("Acceptance")}</dt><dd>{t(context.goal_lineage.evidence.acceptance_state === "ACCEPTED" ? "Accepted" :
+              context.goal_lineage.evidence.acceptance_state === "NOT_ACCEPTED" ? "Not accepted" : "Not observed")}</dd></div>
             <div><dt>{t("Indexed result references")}</dt><dd>{context.goal_lineage.evidence.result_reference_count}</dd></div>
           </dl>
           <p>{t("Original parent consumption not established")}</p>

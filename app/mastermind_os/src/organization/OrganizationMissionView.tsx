@@ -13,6 +13,14 @@ export interface OrganizationMissionViewProps {
 
 const COPY = {
   "Selected project": "所选项目",
+  "Current task": "当前任务",
+  "Task description unavailable": "暂无任务说明",
+  "Next step": "下一步",
+  "No next step supplied. Open the project to inspect its current state.": "暂无下一步说明。打开项目可查看当前状态。",
+  "An execution error was reported.": "执行过程中报告了错误。",
+  "More next steps": "更多后续步骤",
+  "Job details": "任务详情",
+  "Back to work list": "返回工作列表",
   "Open project": "打开项目",
   "Operation progress": "任务进度",
   "Observed jobs": "已观测任务",
@@ -33,6 +41,9 @@ const COPY = {
   "Approved": "已批准",
   "Rejected": "已拒绝",
   "Not observed": "尚未观测",
+  "Required review pending": "待完成必要审查",
+  "Review not required": "无需审查",
+  "Selected work is no longer in this view. Choose a current job or change the search.": "所选工作已不在当前视图中。请选择现有任务或更改搜索条件。",
   "This operation only. Job completion does not establish parent or product acceptance.": "仅限此任务。子任务完成不代表父任务或产品已经验收。",
   "Some job activity is unknown. Activity totals are withheld.": "部分任务活动未知，活动总数暂不显示。",
   "Coverage is incomplete. Counts and overall progress remain unknown.": "来源覆盖不完整。总数和整体进度仍未知。",
@@ -105,18 +116,37 @@ export function OrganizationMissionView({
   const searchId = useId();
   const detailId = useId();
   const detailRef = useRef<HTMLElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const missingSelectionRef = useRef<HTMLParagraphElement>(null);
   useLayoutEffect(() => { if (selectedKey !== null) detailRef.current?.focus(); }, [selectedKey]);
+  const selectRow = (key: string) => {
+    setSelectedKey(key);
+    // Returning to the selected row and reopening it is still a navigation action.
+    if (key === selectedKey) detailRef.current?.focus();
+  };
+  const returnToWork = () => {
+    listRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+  };
+  const nextSteps = mission.execution.next_actions;
+  const nextStep = nextSteps[0] ?? mission.program.next_action;
   const normalized = query.trim().toLocaleLowerCase(locale);
   const visible = model.rows.filter(row => [row.child.job_id, row.child.worker_id,
     row.child.plan_step_id, t(ROLE[row.child.orchestration_role ?? ""] ?? "Role unknown")]
     .some(value => value?.toLocaleLowerCase(locale).includes(normalized)));
-  const selected = visible.find(row => row.key === selectedKey) ?? visible[0] ?? null;
+  // A refresh or filter must never silently substitute a different deliberate selection.
+  const selected = selectedKey === null ? visible[0] ?? null
+    : visible.find(row => row.key === selectedKey) ?? null;
+  const selectionMissing = selectedKey !== null && selected === null;
+  useLayoutEffect(() => {
+    if (selectionMissing) (searchRef.current ?? missingSelectionRef.current)?.focus();
+  }, [selectionMissing]);
   const finishedResults = model.rows.filter(row => row.activity === "FINISHED" && row.result);
   const rootId = mission.mission.root_job_id!;
   const role = (value: string | null) => t(ROLE[value ?? ""] ?? "Role unknown");
   const navigate = (jobId: string) => {
     const row = model.rows.find(item => item.child.job_id === jobId && item.association === "ASSOCIATED");
-    if (row) { setQuery(""); setSelectedKey(row.key); }
+    if (row) { setQuery(""); selectRow(row.key); }
   };
   const parent = selected?.association === "ASSOCIATED"
     ? model.rows.find(row => row.child.job_id === selected.child.parent_job_id && row.association === "ASSOCIATED")
@@ -130,7 +160,7 @@ export function OrganizationMissionView({
       <div>
         <span className="organization-workspace__eyebrow">{t("Selected project")}</span>
         <h3>{mission.program.title ?? mission.program.work_ref}</h3>
-        {mission.program.next_action && <p>{mission.program.next_action}</p>}
+        <p><span>{t("Current task")}: </span><span>{mission.mission.title ?? t("Task description unavailable")}</span></p>
       </div>
       {onOpenProject && <button type="button" className="organization-workspace__action"
         onClick={() => onOpenProject({ workRef: mission.program.work_ref, rootJobId: rootId })}>
@@ -138,17 +168,28 @@ export function OrganizationMissionView({
       </button>}
     </header>
 
+    <section className="organization-workspace__next-step" aria-label={t("Next step")}>
+      <h3>{t("Next step")}</h3>
+      {mission.execution.errors_present && <p className="organization-workspace__notice" role="status">{t("An execution error was reported.")}</p>}
+      <p>{nextStep ?? t("No next step supplied. Open the project to inspect its current state.")}</p>
+      {nextSteps.length > 1 && <details className="organization-workspace__source">
+        <summary>{t("More next steps")}</summary>
+        <ul>{nextSteps.slice(1).map((step, index) => <li key={index}>{step}</li>)}</ul>
+      </details>}
+    </section>
+
     <section className="organization-workspace__progress" aria-label={t("Operation progress")}>
       <h3>{t("Operation progress")}</h3>
       <dl className="organization-workspace__metrics">
-        <div><dt>{t("Observed jobs")}</dt><dd>{model.observedJobs}</dd></div>
+        <div><dt>{t("Observed jobs")}</dt><dd>{model.observedJobs ?? t("Unknown")}</dd></div>
         <div><dt>{t("Observed running")}</dt><dd>{model.working ?? t("Unknown")}</dd></div>
         <div><dt>{t("Finished jobs")}</dt><dd>{model.finished ?? t("Unknown")}</dd></div>
       </dl>
       <dl className="organization-workspace__milestones">
         <div><dt>{t("Execution")}</dt><dd>{t(EXECUTION[mission.execution.state ?? ""] ?? "Unknown")}</dd></div>
         <div><dt>{t("Review")}</dt><dd>{t(mission.review.verdict === "approve" ? "Approved" :
-          mission.review.verdict === "reject" ? "Rejected" : "Not observed")}</dd></div>
+          mission.review.verdict === "reject" ? "Rejected" : mission.review.required === true
+            ? "Required review pending" : mission.review.required === false ? "Review not required" : "Not observed")}</dd></div>
         <div><dt>{t("Acceptance")}</dt><dd>{t(mission.acceptance.state === "ACCEPTED" ? "Accepted" : "Not observed")}</dd></div>
       </dl>
       {!model.coverageComplete && <p className="organization-workspace__notice" role="status">{t("Coverage is incomplete. Counts and overall progress remain unknown.")}</p>}
@@ -161,9 +202,12 @@ export function OrganizationMissionView({
         <h3>{t("Agents and work")}</h3>
         {model.rows.length > 0 && <div className="organization-workspace__search">
           <label htmlFor={searchId}>{t("Find agent or job")}</label>
-          <input id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} />
+          <input ref={searchRef} id={searchId} type="search" value={query} onChange={event => setQuery(event.target.value)} />
         </div>}
       </div>
+      {selectionMissing && <p ref={missingSelectionRef} tabIndex={-1} className="organization-workspace__notice" role="status">
+        {t("Selected work is no longer in this view. Choose a current job or change the search.")}
+      </p>}
       {model.rows.length === 0 ? <div className="organization-workspace__empty">
         <strong>{t(model.coverageComplete ? "No child jobs in this observation." : "Child-job coverage is unavailable or incomplete.")}</strong>
         <p>{t(model.coverageComplete ? "This does not establish that the organization has no agents." :
@@ -171,10 +215,10 @@ export function OrganizationMissionView({
       </div> : visible.length === 0 ? <div className="organization-workspace__empty" role="status">
         <strong>{t("No matching jobs")}</strong><p>{t("Try another agent or job identifier.")}</p>
       </div> : <div className="organization-workspace__work-layout">
-        <ul className="organization-workspace__jobs" aria-label={t("Observed jobs")}>
+        <ul ref={listRef} className="organization-workspace__jobs" aria-label={t("Observed jobs")}>
           {visible.map(row => <li key={row.key}>
             <button type="button" aria-pressed={selected?.key === row.key} aria-controls={detailId}
-              onClick={() => setSelectedKey(row.key)}>
+              onClick={() => selectRow(row.key)}>
               <span className="organization-workspace__job-title">{role(row.child.orchestration_role)}
                 <span className="organization-workspace__state" data-state={row.activity}>{t(ACTIVITY[row.activity])}</span>
               </span>
@@ -183,11 +227,18 @@ export function OrganizationMissionView({
             </button>
           </li>)}
         </ul>
-        {selected && <section id={detailId} ref={detailRef} tabIndex={-1} className="organization-workspace__job-detail" aria-label={t("Job") + " " + selected.child.job_id}>
+        {selected && <section id={detailId} ref={detailRef} tabIndex={-1} className="organization-workspace__job-detail"
+          aria-label={t("Job") + " " + selected.child.job_id}
+          onKeyDown={event => {
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); returnToWork(); }
+          }}>
           <div className="organization-workspace__detail-title">
             <h4>{role(selected.child.orchestration_role)}</h4>
             <span className="organization-workspace__state" data-state={selected.activity}>{t(ACTIVITY[selected.activity])}</span>
           </div>
+          <button type="button" className="organization-workspace__link" onClick={returnToWork} aria-keyshortcuts="Escape">{t("Back to work list")}</button>
+          <details key={selected.key} className="organization-workspace__source">
+            <summary>{t("Job details")}</summary>
           <dl>
             <div><dt>{t("Worker")}</dt><dd>{selected.child.worker_id ?? t("Worker not observed")}</dd></div>
             <div><dt>{t("Availability")}</dt><dd>{t("Availability unknown")}</dd></div>
@@ -198,6 +249,7 @@ export function OrganizationMissionView({
               parent ? <button type="button" className="organization-workspace__link" onClick={() => navigate(parent.child.job_id)}>{parent.child.job_id}</button> :
               selected.child.parent_job_id === rootId ? <>{t("Selected operation")} · {rootId}</> : t("Unknown")}</dd></div>
           </dl>
+          </details>
           {selected.association !== "ASSOCIATED" && <p className="organization-workspace__notice">{t("This row cannot be associated with the selected operation.")}</p>}
           {children.length > 0 && <div className="organization-workspace__children">
             <h4>{t("Child jobs")}</h4>

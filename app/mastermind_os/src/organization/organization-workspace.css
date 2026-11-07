@@ -105,3 +105,10 @@
 
 .organization-workspace__recovery { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: .75rem 0; flex-wrap: wrap; }
 .organization-workspace__recovery p { color: var(--muted, inherit); font-size: .8rem; flex: 1 1 240px; }
+
+.organization-workspace__next-step { display: grid; gap: var(--sp-2, 8px); min-width: 0; }
+.organization-workspace__next-step > p { font-size: .86rem; max-width: 74ch; overflow-wrap: anywhere; }
+.organization-workspace__next-step .organization-workspace__notice { margin: 0; }
+.organization-workspace__next-step ul { padding-inline-start: 1.25rem; display: grid; gap: var(--sp-2, 8px); overflow-wrap: anywhere; }
+.organization-workspace__reporting-heading { display: grid; gap: var(--sp-2, 8px); margin-bottom: var(--sp-3, 12px); }
+.organization-workspace:lang(zh-CN) h2, .organization-workspace:lang(zh-CN) h3, .organization-workspace:lang(zh-CN) .organization-workspace__eyebrow { letter-spacing: normal; text-transform: none; }

@@ -370,3 +370,102 @@ No watcher, worker, inference, native turn, service restart, install, deployment
 or merge was started by this final integration delta. The paid test child is
 terminal and accepted; both read-only architecture advisers received ACCEPTED /
 STOP. Original O3 and the S0 product acceptance remain incomplete.
+
+### S6 navigation, current composition and truthful path verification — 2026-11-07
+
+**MISSION_COMPLETE: false. Capability: BUILT_NOT_PROVEN.**
+The continuing assignment stays on operation `organization-live-experience-20261107-c3`,
+branch `sol/web-organization-live-experience-20261107-c3` and [PR #2193](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2193).
+Recovery verified published/local head `6f367bc43cad6a4a7e9c85fc3282a1178ed2308c`
+and the compatible protected source set at `5f8c13da926011fb5fdc8cea21287b532ac968db`.
+The prior O1/O2 foundation, actual Mission qualifiers, result identities and accepted design remain DO_NOT_REDO.
+
+#### Current component delta
+
+Configured reporting is labeled separately from observed Job/Attempt activity.
+Unavailable child observations now produce an unknown count. Current task,
+producer-supplied next step/error and required pending review are visible.
+Source identifiers are disclosed progressively. EN/ZH review and acceptance
+labels and Chinese typography follow the incumbent design.
+
+A qualified same-target refresh preserves query and chosen job without relaxing
+the exact Mission revision/auth checks. A chosen row that disappears or is filtered
+out produces an explicit notice and focus return; it never silently becomes a
+different job. Back/Escape returns keyboard focus to the selected row, including
+reopening the same detail. No additional Mission read, credential, registry,
+assignment or command path was introduced.
+
+Actual local receipts: 86 organization tests in four files passed; typecheck and
+production build exited 0. Regression tests were observed failing before their
+fixes (first 6/7, then 7/8 relevant cases). Build warnings about bundle size and
+ineffective dynamic imports remain; no performance claim follows. See
+[S6 verification](../../evidence/organization-live-experience-20261107-c3/S6_VERIFICATION.md)
+and [exact qualification](../../evidence/organization-live-experience-20261107-c3/s6-qualification.json).
+
+#### Exact S0 and incumbent handoff
+
+[INTEGRATION.md](../../../app/mastermind_os/src/organization/INTEGRATION.md)
+contains the minimal mount contract and **alternative, apply-once** contextual patches:
+
+- S0/AppIntegration `26604f550b42505808ea1b7ca2816be771aee5f5`:
+  `s0-appintegration-mount.patch`, preserving current Work/journal/composer/proposal fixes.
+- #2180 `d7d5bfdb4bc656473a7e940dee07d0b437aed40d`:
+  `incumbent-office-mount.patch`, preserving Hermes/native composition.
+
+Each patch passed Git apply-check against its exact isolated index. Both full
+production-source TypeScript virtual compositions passed with zero diagnostics
+(290/465 root/source files for S0, 286/460 for #2180), using identical dependency
+lock bytes. Neither shared worktree was modified. The prior zero-context mount
+receipt at `2c0386936a49ab214802aee093b714626642acf6` is historical; use these
+current exact preimages and recheck any subsequent source movement.
+
+S0's retained affected-view composer matrix supplies eight FUNCTIONAL_PASS
+cases for EN/ZH, light/dark and 390/1440px, including 44px selects, preserved drafts,
+preview keyboard flow, reachable controls and no raw acceptance marker.
+Representative images are copied byte-for-byte with original paths/hashes.
+They are existing S0 fixture evidence, **not screenshots of the changed O3 view**.
+
+#### Actual remaining user-path gaps
+
+App's existing result callback changes to Projects/Overview and unmounts Office.
+Internal Back and same-target refresh preservation do not preserve local query/
+selection across that unmount. S0 must use the existing navigation/history owner
+to retain project, chosen work, query and return focus, with the original exact
+result tuple and authorization checks. The integration contract gives the
+nonfirst-row/nonempty-search → real result → Back acceptance case, including
+source refresh and revocation while the inspector is open.
+
+The existing leadership producer still lacks a qualified delivered session/viewer/
+Mission binding. No charter enrollment or available-worker claim has been fabricated.
+
+Automatic approval review denied the deployed OS origin before browser navigation,
+citing the absent originating connection and the already-closed Chrome access path.
+That action stopped; no credential request or alternate automation carrier followed.
+No fresh page loaded, so actual O3 load/navigation durations and page errors remain
+unmeasured/unobserved. DeepSeek/Hermes authenticated routing and continuity, real
+retained-result readability/return, and changed-O3 browser keyboard/layout proof
+remain NOT_PROVEN. S2/S3 still owns real assignment/worker execution acceptance.
+
+The installed bundle metadata remains source
+`fca92d5a3cef710932b46082eef98a258079f806`, build
+`mmos-project-teams-fca92d5a-20261106-sol-002`.
+[OPERATOR_RUNBOOK.md](../../../app/mastermind_os/src/organization/OPERATOR_RUNBOOK.md)
+documents only source-supported installed controls and explicit unavailable
+capabilities; proposed provider/organization additions are not called shipped.
+Native metadata, web access and responsive fixture scope stay separate.
+
+#### Continuation boundary
+
+**FINALIZATION_CLASSIFICATION: CHECKPOINTED_CONTINUATION** at the explicit S0
+shared-composition surface boundary; **MISSION_COMPLETE: false**.
+The exact candidate commit and return point are bound by the same PR and the S0
+source handoff. The next action is for S0's current shared App integration to apply
+one matching O3 mount, preserve its accepted fixes and close the external-result
+return path through the existing owner; then execute the original authenticated
+acceptance sequence when backend/access qualification permits it.
+
+This is not a component-mount acceptance, an install, a running background mission
+or a request to reopen closed credentials. Original09b holds, prior Paper/Chrome
+refusals and native writer effects remain on their original carriers. No new
+provider turn, worker admission, install, restart, deployment or merge occurred.
+The native read-only judgment assignment is ACCEPTED / STOP; no watcher was created.

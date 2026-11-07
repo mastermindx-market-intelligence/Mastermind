@@ -73,6 +73,7 @@ export function organizationWork(mission: OrganizationMission) {
     working: activityComplete ? rows.filter(row => row.activity === "WORKING").length : null,
     finished: activityComplete ? rows.filter(row => row.activity === "FINISHED").length : null,
     // All counts are this selected operation's observed jobs, never an organization/fleet census.
-    observedJobs: rows.length,
+    observedJobs: current && (mission.children.state === "AVAILABLE" || mission.children.state === "EMPTY")
+      ? rows.length : null,
   };
 }
