@@ -300,9 +300,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 142839,
+      "bytes": 152653,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+      "sha256": "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -606,9 +606,9 @@
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 61402,
+      "bytes": 61447,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db",
+      "sha256": "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {

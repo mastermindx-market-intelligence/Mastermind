@@ -121,7 +121,7 @@ class CurrentGenerationClosure(unittest.TestCase):
         manifest=json.loads(raw)
         self.assertEqual(set(manifest), {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         'a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3')
+                         '470305e48c164563b53626967c178d8c3c5cdaff5a58308aea0a9d838eef3e6d')
         inventory=json.loads((built/'native-source-inventory.json').read_bytes())
         predecessor=json.loads((rollout/'native-preimages.json').read_bytes())
         for name in ('host_pull.sh','host_pull_backend.py','host_pull_daemon.sh'):

@@ -49,6 +49,7 @@ import type {
   KnowledgeRecordKind,
   KnowledgeSourceResult,
   ProjectMemoryDocument,
+  ProjectDiscoverySource,
 } from './knowledge-library-contract';
 
 function readMetadataLines(value:ProjectKnowledgeReadMetadata|null|undefined):string[]{
@@ -161,6 +162,7 @@ interface BodyProps {
   readonly readActions?: KnowledgeLibraryProps['readActions'];
   readonly onAddFiles?: KnowledgeLibraryProps['onAddFiles'];
   readonly onEditPreference?: KnowledgeLibraryProps['onEditPreference'];
+  readonly onCorrectDiscovery?: KnowledgeLibraryProps['onCorrectDiscovery'];
   readonly renderSourceCompanion?: KnowledgeLibraryProps['renderSourceCompanion'];
 }
 
@@ -310,6 +312,7 @@ export function KnowledgeLibrary(props: KnowledgeLibraryProps) {
         readActions={props.readActions}
         onAddFiles={props.onAddFiles}
         onEditPreference={props.onEditPreference}
+        onCorrectDiscovery={props.onCorrectDiscovery}
         renderSourceCompanion={props.renderSourceCompanion}
         requestedFile={props.requestedFile}
         fileSearchOwner={props.fileSearchOwner}
@@ -348,6 +351,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
   const liveProps=useRef(props); liveProps.current=props;
   const bodyLive=useRef(false);
   const catalogueWitness=useRef<{catalogue:KnowledgeCatalogue;current:()=>boolean}|null>(null);
+  const discoveryWitness=useRef<{source:ProjectDiscoverySource;current:()=>boolean}|null>(null);
   useLayoutEffect(()=>{bodyLive.current=true;return()=>{bodyLive.current=false;catalogueWitness.current=null;};},[]);
   // This fixed host owner supplies current signed scope independently of the
   // destination draft. Missing owner remains a read-only presentation.
@@ -388,7 +392,9 @@ function KnowledgeLibraryBody(props: BodyProps) {
     if(!catalogue||witness?.catalogue!==catalogue){registration(null);return;}
     const bound=Object.freeze({workRef:catalogue.workRef,sourceCommit:catalogue.sourceCommit,baseRevision:catalogue.workstreamSha256});
     const current=()=>bodyLive.current&&catalogueWitness.current===witness&&witness.current();
-    registration(Object.freeze({codeContext(){
+    registration(Object.freeze({discoveryCurrent(source:ProjectDiscoverySource){
+      try{return current()&&discoveryWitness.current?.source===source&&discoveryWitness.current.current();}catch{return false;}
+    },codeContext(){
       try{return current()?catalogueState.result?.codeContext??null:null;}catch{return null;}
     },current(snapshot:KnowledgeLibrarySourceContext){
       try {
@@ -409,6 +415,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
 
   const runCatalogue = useCallback(() => {
     catalogueWitness.current=null;
+    discoveryWitness.current=null;
     if (!workRef || scopeError) {
       setCatalogueState({ phase: 'OWNER_UNAVAILABLE', result: unavailableCatalogue(['SOURCE_UNAVAILABLE']), detail: scopeError ? [scopeError] : [] });
       return;
@@ -556,6 +563,8 @@ function KnowledgeLibraryBody(props: BodyProps) {
       const read = props.readSource;
       const handle = sourceRead.begin();
       const sourceIsCurrent=captureSourceGuard(handle);
+      const originalCatalogue=catalogueWitness.current;
+      discoveryWitness.current=null;
       const destination=liveProps.current.draftPort;
       const ticket=destination?captureProjectSourceDraftRead(destination,workRef,sourceIsCurrent):null;
       setDraftProof(null);
@@ -592,6 +601,16 @@ function KnowledgeLibraryBody(props: BodyProps) {
           if(!sourceRead.isCurrent(handle))return;
           if(ticket&&!sourceIsCurrent()){setSourceState({phase:'STALE',result:null,detail:['SOURCE_CONTEXT_CHANGED']});return;}
           setDraftProof(proof);
+          if('kind' in candidate&&candidate.kind==='DISCOVERY'&&sourceIsCurrent()&&originalCatalogue&&originalCatalogue.catalogue===catalogue){
+            const match=/^agentos\/discoveries\/DSC-([A-Z0-9]+(?:-[A-Z0-9]+)*)\.md$/.exec(candidate.path);
+            if(match&&match[1]!.length>=2&&match[1]!.length<=64){
+              const source=Object.freeze({workRef,sourceRef,title:validated.document.title,
+                mediaType:validated.document.mediaType,contentUtf8:validated.document.contentUtf8,
+                contentSha256:digest,source:validated.source,discoveryRef:'DSC:'+match[1],
+                sourceContext:Object.freeze({workRef,sourceCommit:catalogue.sourceCommit,baseRevision:catalogue.workstreamSha256})});
+              discoveryWitness.current={source,current:()=>sourceIsCurrent()&&liveProps.current.readSource===read&&catalogueWitness.current===originalCatalogue&&originalCatalogue.current()};
+            }
+          }
           setSourceState({ phase: 'READY', result: validated, detail: [] });
         } catch (error) {
           if (handle.controller.signal.aborted) return;
@@ -665,6 +684,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
   const closeReader = useCallback(() => {
     restoreFocusRef.current=true;
     sourceRead.cancel();
+    discoveryWitness.current=null;
     setDraftProof(null);
     setSourceState(initialRead()); setOpenRow(null);
     if (props.requestedFile && props.onReturnToSearch) { props.onReturnToSearch(); return; }
@@ -1012,6 +1032,11 @@ function KnowledgeLibraryBody(props: BodyProps) {
             )}
           </article>
           <aside className="knowledge-library-aside">
+            {discoveryWitness.current?.current()&&actions?.correctDiscovery==='AVAILABLE'&&props.onCorrectDiscovery?
+              <button type="button" className="knowledge-library-button" onClick={()=>{
+                const issued=discoveryWitness.current;
+                if(issued?.current()&&actions?.correctDiscovery==='AVAILABLE')props.onCorrectDiscovery?.(issued.source);
+              }}>{locale==='zh-CN'?'更正发现':'Correct discovery'}</button>:null}
             {props.draftPort?<ProjectSourceDraftCompanion proof={draftProof} port={props.draftPort} locale={locale}/>:null}
             {props.renderSourceCompanion ? props.renderSourceCompanion(sourceDocument) : null}
             <div className="knowledge-library-aside-panel">

@@ -1045,7 +1045,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         from brain import research_paper
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"research store unavailable: {exc}"}, status_code=503)
+        _log.warning("research paper store import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_store_unavailable",
+            "note": "research store unavailable",
+        }, status_code=503)
 
     paper = None
     try:
@@ -1055,15 +1060,24 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
         if paper is None and ticker:
             paper = research_paper.latest_for(ticker)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"could not load paper: {exc}"}, status_code=500)
+        _log.warning("research paper read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_paper_unavailable",
+            "note": "research paper unavailable",
+        }, status_code=500)
     if paper is None:
-        return JSONResponse({"error": "research paper not found"}, status_code=404)
+        return JSONResponse({"error": "research paper not found", "note": "research paper not found"}, status_code=404)
 
     try:
         from app import research_pdf
     except Exception as exc:  # noqa: BLE001 — reportlab missing, etc.
-        return JSONResponse({"error": f"PDF engine unavailable (is reportlab installed?): {exc}"},
-                            status_code=503)
+        _log.warning("research PDF engine import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_engine_unavailable",
+            "note": "PDF engine unavailable",
+        }, status_code=503)
 
     meta = {}
     try:
@@ -1073,7 +1087,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         pdf = research_pdf.build(paper, meta)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"PDF generation failed: {exc}"}, status_code=500)
+        _log.warning("research PDF generation failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_generation_failed",
+            "note": "PDF generation failed",
+        }, status_code=500)
 
     tkr = (paper.get("ticker") or "research").upper()
     datestr = str(paper.get("asof") or paper.get("generated_at") or "")[:10]
@@ -1367,11 +1386,16 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
     if view is not None:
         return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
                             status_code=400, headers={"Cache-Control": "no-store"})
-    path = _portfolio_dir(portfolio) / "latest.json"
-    if not path.exists():
-        return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
     try:
-        payload = json.loads(path.read_text())
+        path = _portfolio_dir(portfolio) / "latest.json"
+        try:
+            payload = json.loads(path.read_text())
+        except FileNotFoundError:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
+            raise
         from portfolio import registry
         # Runtime registry is authoritative: persisted book contracts may predate a benchmark
         # migration and must never make CSI 300 / Hang Seng appear as FXI or SPY in the UI.
@@ -1583,7 +1607,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
 
         return JSONResponse(payload)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("portfolio snapshot read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "error": "portfolio_unavailable",
+            "snapshot_status": "unavailable",
+            "portfolio_id": portfolio,
+        }, status_code=500)
 
 
 # The tab-switcher status payload is just NAV/return chips — re-pricing every book on every poll or
@@ -1594,55 +1623,134 @@ _portfolios_cache: dict[str, Any] = {}  # {"payload": dict, "ts": float}
 
 
 def _portfolio_status(meta: dict) -> dict:
-    """Assemble one book's tab-switcher row (metadata + quick status). I/O-bound (live marks +
-    benchmark history), so callers run these concurrently across books."""
+    """Assemble one book's tab-switcher row without converting failed reads into zero state."""
     from portfolio import registry
-    pid = meta["id"]
-    status: dict[str, Any] = {"nav": None, "total_return_pct": None,
-                              "vs_benchmark_pct": None, "vs_spy_pct": None,
-                              "day_change_pct": None, "holdings": 0, "cash_pct": None, "as_of": None}
-    if registry.is_archived(pid):
-        perf = _archived_performance(pid)
-        nav = perf.get("current_nav") or 0
-        status.update({
-            "nav": perf.get("current_nav"),
-            "total_return_pct": perf.get("total_return_pct"),
-            "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
-            "vs_spy_pct": perf.get("vs_spy_pct"),
-            "day_change_pct": perf.get("day_change_pct"),
-            "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
-            "as_of": perf.get("frozen_as_of"),
-        })
-        snapshot = _read_json_object(registry.data_dir(pid) / "latest.json")
-        status["holdings"] = len(snapshot.get("positions") or [])
-        return {**{k: meta.get(k) for k in (
-                    "id", "name", "tagline", "kind", "manager", "benchmark",
-                    "benchmark_name", "benchmark_name_zh", "currency")},
-                "active": False, "lifecycle": "archived",
-                "superseded_by": meta.get("superseded_by"),
-                "archived_reason": meta.get("archived_reason"),
-                "status": status}
 
-    # the self-directed book has its own engine (not paper_account) — read its NAV/return directly
+    pid = meta["id"]
+    status: dict[str, Any] = {
+        "nav": None,
+        "total_return_pct": None,
+        "vs_benchmark_pct": None,
+        "vs_spy_pct": None,
+        "day_change_pct": None,
+        "holdings": None,
+        "cash_pct": None,
+        "as_of": None,
+    }
+    failed_sources: list[str] = []
+    status_reasons: list[str] = []
+
+    def _finish(*, primary_ok: bool = True, secondary_ok: bool = True) -> dict[str, Any]:
+        if not primary_ok:
+            status["read_status"] = "unavailable"
+        elif failed_sources or status_reasons or not secondary_ok:
+            status["read_status"] = "partial"
+        else:
+            status["read_status"] = "available"
+        if failed_sources:
+            status["failed_sources"] = list(failed_sources)
+        if status_reasons:
+            status["status_reasons"] = list(status_reasons)
+        return status
+
+    common_keys = (
+        "id", "name", "tagline", "kind", "manager", "benchmark",
+        "benchmark_name", "benchmark_name_zh", "currency",
+    )
+
+    if registry.is_archived(pid):
+        perf_ok = False
+        snapshot_ok = False
+        try:
+            perf = _archived_performance(pid)
+            nav = perf.get("current_nav") or 0
+            status.update({
+                "nav": perf.get("current_nav"),
+                "total_return_pct": perf.get("total_return_pct"),
+                "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
+                "vs_spy_pct": perf.get("vs_spy_pct"),
+                "day_change_pct": perf.get("day_change_pct"),
+                "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
+                "as_of": perf.get("frozen_as_of"),
+            })
+            perf_ok = True
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher archived performance failed for %s: %s", pid, type(exc).__name__)
+            failed_sources.append("performance")
+
+        try:
+            latest = registry.data_dir(pid) / "latest.json"
+            snapshot_missing = False
+            try:
+                snapshot = json.loads(latest.read_text())
+            except FileNotFoundError:
+                try:
+                    latest.lstat()
+                except FileNotFoundError:
+                    status_reasons.append("snapshot_missing")
+                    snapshot_missing = True
+                else:
+                    raise
+            if not snapshot_missing:
+                if not isinstance(snapshot, dict) or not isinstance(snapshot.get("positions"), list) or not all(isinstance(row, dict) for row in snapshot["positions"]):
+                    raise ValueError("portfolio snapshot positions must be a list")
+                status["holdings"] = len(snapshot["positions"])
+                status["as_of"] = snapshot.get("as_of") or status["as_of"]
+                snapshot_ok = True
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher archived snapshot failed for %s: %s", pid, type(exc).__name__)
+            failed_sources.append("snapshot")
+
+        _finish(primary_ok=(perf_ok or snapshot_ok), secondary_ok=(perf_ok and snapshot_ok))
+        return {
+            **{k: meta.get(k) for k in common_keys},
+            "active": False,
+            "lifecycle": "archived",
+            "superseded_by": meta.get("superseded_by"),
+            "archived_reason": meta.get("archived_reason"),
+            "status": status,
+        }
+
     if pid == "self_directed":
+        book_ok = False
         try:
             from portfolio import self_directed
+
             held = list((self_directed._load_account().get("positions") or {}).keys())
             bk = self_directed.book(
                 prices=_live_prices(held, refresh=False),
                 read_only=True,
                 resolve_missing_prices=False,
-            )  # tab badges are snapshot-only; the active-book live endpoint refreshes quotes
-            alloc = bk.get("allocation") or {}
+            )
+            if not isinstance(bk, dict):
+                raise ValueError("book must be an object")
+            alloc = bk.get("allocation")
+            if not isinstance(alloc, dict):
+                raise ValueError("book allocation must be an object")
+            cash_pct = alloc.get("cash_pct")
+            n_positions = alloc.get("n_positions")
+            if n_positions is None and isinstance(bk.get("positions"), list):
+                n_positions = len(bk.get("positions") or [])
+            if n_positions is not None and (isinstance(n_positions, bool) or not isinstance(n_positions, int) or n_positions < 0):
+                raise ValueError("book holdings must be a nonnegative count")
+            valuation_complete = bk.get("valuation_complete")
+            unpriced = list(bk.get("unpriced_tickers") or [])
             status.update({
                 "nav": bk.get("nav"),
                 "total_return_pct": alloc.get("total_return_pct"),
-                "cash_pct": round((alloc.get("cash_pct") or 0) * 100, 1),
-                "holdings": alloc.get("n_positions") or 0,
+                "cash_pct": round(cash_pct * 100, 1) if cash_pct is not None else None,
+                "holdings": n_positions,
                 "as_of": bk.get("inception_date"),
+                "valuation_complete": valuation_complete,
+                "unpriced_tickers": unpriced,
             })
-        except Exception:
-            pass
+            if valuation_complete is False:
+                status_reasons.append("valuation_incomplete")
+            book_ok = True
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher self-directed book failed: %s", type(exc).__name__)
+            failed_sources.append("book")
+
         # vs_spy and vs_defensive: the ledger's stored bogey returns are each renormalized on that
         # BOGEY's own inception, so subtracting them from the book's since-inception return compared
         # different windows (#1433). Recompute every leg over ONE shared window at READ time via
@@ -1673,17 +1781,25 @@ def _portfolio_status(meta: dict) -> dict:
             else:
                 for k in ("vs_spy_pct", "vs_defensive_pct", "vs_benchmark_pct"):
                     status.pop(k, None)
-        except Exception:  # noqa: BLE001
-            pass
-        return {**{k: meta.get(k) for k in (
-                    "id", "name", "tagline", "kind", "manager", "benchmark",
-                    "benchmark_name", "benchmark_name_zh", "currency")},
-                "status": status}
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher self-directed benchmark failed: %s", type(exc).__name__)
+            failed_sources.append("benchmark")
+
+        _finish(primary_ok=book_ok)
+        return {**{k: meta.get(k) for k in common_keys}, "status": status}
+
     from portfolio import paper_account
+    perf_ok = False
+    snapshot_ok = False
     try:
         # The switcher is navigation metadata, not a reason to live-fetch every book at once.
         # Use cache/snapshot marks here; /api/live_marks updates the active tab during its session.
         perf = paper_account.performance(portfolio_id=pid, prices=_book_marks(pid, refresh=False))
+        if not isinstance(perf, dict):
+            raise ValueError("performance must be an object")
+        availability = perf.get("availability")
+        if availability is not None and not isinstance(availability, dict):
+            raise ValueError("performance availability must be an object")
         nav = perf.get("current_nav") or 0
         status.update({
             "nav": perf.get("current_nav"),
@@ -1697,51 +1813,96 @@ def _portfolio_status(meta: dict) -> dict:
             "performance_status": (perf.get("availability") or {}).get("status"),
             "as_of": (perf.get("availability") or {}).get("as_of"),
         })
-    except Exception:
-        pass
+        perf_status = (availability or {}).get("status")
+        perf_ok = perf_status in ("available", "provisional")
+        if perf_status == "provisional":
+            status_reasons.append("performance_provisional")
+        elif not perf_ok:
+            status_reasons.append("performance_unavailable")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("portfolio switcher performance failed for %s: %s", pid, type(exc).__name__)
+        failed_sources.append("performance")
+
     try:
         latest = registry.data_dir(pid) / "latest.json"
-        if latest.exists():
-            d = json.loads(latest.read_text())
-            status["holdings"] = len(d.get("positions") or [])
-            status["as_of"] = d.get("as_of") or status["as_of"]
-    except Exception:
-        pass
-    return {**{k: meta.get(k) for k in (
-                "id", "name", "tagline", "kind", "manager", "benchmark",
-                "benchmark_name", "benchmark_name_zh", "currency")},
-            "active": bool(meta.get("active", True)),
-            "lifecycle": meta.get("status") or ("active" if meta.get("active", True) else "archived"),
-            "superseded_by": meta.get("superseded_by"),
-            "archived_reason": meta.get("archived_reason"),
-            "status": status}
+        snapshot_missing = False
+        try:
+            snapshot = json.loads(latest.read_text())
+        except FileNotFoundError:
+            try:
+                latest.lstat()
+            except FileNotFoundError:
+                status_reasons.append("snapshot_missing")
+                snapshot_missing = True
+            else:
+                raise
+        if not snapshot_missing:
+            if not isinstance(snapshot, dict) or not isinstance(snapshot.get("positions"), list) or not all(isinstance(row, dict) for row in snapshot["positions"]):
+                raise ValueError("portfolio snapshot positions must be a list")
+            status["holdings"] = len(snapshot["positions"])
+            status["as_of"] = snapshot.get("as_of") or status["as_of"]
+            snapshot_ok = True
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("portfolio switcher snapshot failed for %s: %s", pid, type(exc).__name__)
+        failed_sources.append("snapshot")
+
+    _finish(primary_ok=(perf_ok or snapshot_ok), secondary_ok=(perf_ok and snapshot_ok))
+    return {
+        **{k: meta.get(k) for k in common_keys},
+        "active": bool(meta.get("active", True)),
+        "lifecycle": meta.get("status") or ("active" if meta.get("active", True) else "archived"),
+        "superseded_by": meta.get("superseded_by"),
+        "archived_reason": meta.get("archived_reason"),
+        "status": status,
+    }
 
 
 @router.get("/api/portfolios")
 def api_portfolios() -> JSONResponse:
-    """The set of portfolios the dashboard switches between, each with a quick status
-    (NAV, return, versus-book-benchmark, holdings) for the tab labels. US Brain is the active US
-    Mastermind Portfolio; Flagship, Heavyweight, and ETF remain read-only archived history.
+    """Dashboard portfolio registry + quick status, with degraded rows kept explicit."""
+    try:
+        from portfolio import registry
 
-    Each book's status is I/O-bound (live marks + benchmark history); we price them concurrently
-    and cache the assembled payload for ``_PORTFOLIOS_TTL`` so a tab click / poll doesn't re-price."""
-    from portfolio import registry
-    now = time.time()
-    cached = _portfolios_cache.get("payload")
-    if cached is not None and (now - _portfolios_cache.get("ts", 0.0)) < _PORTFOLIOS_TTL:
-        return JSONResponse(cached)
+        now = time.time()
+        def fully_available(payload):
+            rows = payload.get("portfolios") if isinstance(payload, dict) else None
+            return isinstance(rows, list) and all(
+                isinstance(row, dict) and isinstance(row.get("status"), dict)
+                and row["status"].get("read_status") == "available"
+                for row in rows
+            )
 
-    metas = registry.all_portfolios()
-    # Price the books concurrently — each row is independent and network-bound, so wall-clock
-    # collapses to roughly the slowest single book instead of the sum across all of them.
-    with ThreadPoolExecutor(max_workers=max(1, len(metas))) as ex:
-        out = list(ex.map(_portfolio_status, metas))
+        cached = _portfolios_cache.get("payload")
+        if fully_available(cached) and (now - _portfolios_cache.get("ts", 0.0)) < _PORTFOLIOS_TTL:
+            return JSONResponse(cached)
 
-    payload = {"portfolios": out, "default": registry.DASHBOARD_DEFAULT_ID,
-               "scope": "mastermind_portfolio"}
-    _portfolios_cache["payload"] = payload
-    _portfolios_cache["ts"] = now
-    return JSONResponse(payload)
+        metas = registry.all_portfolios()
+        with ThreadPoolExecutor(max_workers=max(1, len(metas))) as ex:
+            out = list(ex.map(_portfolio_status, metas))
+
+        payload = {
+            "portfolios": out,
+            "default": registry.DASHBOARD_DEFAULT_ID,
+            "scope": "mastermind_portfolio",
+        }
+        if fully_available(payload):
+            _portfolios_cache["payload"] = payload
+            _portfolios_cache["ts"] = now
+        else:
+            _portfolios_cache.pop("payload", None)
+            _portfolios_cache.pop("ts", None)
+        return JSONResponse(payload)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("portfolio switcher registry read failed: %s", type(exc).__name__)
+        _portfolios_cache.pop("payload", None)
+        _portfolios_cache.pop("ts", None)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "portfolios": None,
+            "default": _PRODUCT_DEFAULT_ID,
+            "scope": "mastermind_portfolio",
+            "error": "portfolios_unavailable",
+        }, status_code=503)
 
 
 @router.get("/api/forward-evaluation")
@@ -2718,7 +2879,13 @@ def api_rejections() -> JSONResponse:
         from portfolio import rejections
         return JSONResponse(rejections.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
+        _log.warning("rejections read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "rejections_unavailable",
+            "coverage": None,
+            "scorecard": None,
+        })
 
 
 @router.get("/api/shadow_bandit")
@@ -2946,16 +3113,38 @@ class _MMAIActNudgesReq(BaseModel):
     codes: list[str] | None = None    # missing/empty = all currently open nudges
 
 
+def _mastermind_ai_mutation_module():
+    """Load the incumbent mutation owner before any effectful method is called."""
+    import bot  # noqa: F401
+    from brain import mastermind_ai
+    return mastermind_ai
+
+
+def _mastermind_ai_mutation_failure(error: str, *, effect_status: str, retry_safe: bool) -> JSONResponse:
+    return JSONResponse({
+        "ok": False,
+        "effect_status": effect_status,
+        "retry_safe": retry_safe,
+        "error": error,
+    }, status_code=500)
+
+
 @router.post("/api/mastermind_ai/settings")
 def api_mastermind_ai_settings(req: _MMAISettingsReq) -> JSONResponse:
     """Operator settings patch — bounded to the known mastermind_ai keys (unknown/out-of-range
     keys are rejected, never applied)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio settings setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_settings_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.update_settings(req.settings or {}))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio settings update effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_settings_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/directive")
@@ -2964,11 +3153,17 @@ def api_mastermind_ai_directive(req: _MMAIDirectiveReq) -> JSONResponse:
     snapshot push, ingested by the next nightly macro build). Intake-scrubbed: secrets,
     env names, and $-amounts are refused — this text lands on a public artifact."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio directive setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_directive_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.add_directive(req.text))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio directive effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_directive_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/act_on_nudges")
@@ -2978,11 +3173,17 @@ def api_mastermind_ai_act_on_nudges(req: _MMAIActNudgesReq) -> JSONResponse:
     as a standing grant via the auto_act_on_findings setting (in which case run_cycle drafts
     them automatically). Every drafted text passes the same intake scrub as a typed one."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio nudge-action setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_act_on_nudges_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.draft_directives_from_nudges(req.codes))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio nudge-action effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_act_on_nudges_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/run")
@@ -2990,11 +3191,17 @@ def api_mastermind_ai_run() -> JSONResponse:
     """Run one self-improvement cycle now (non-LLM, observational; same code path as the
     nightly loop_maintenance step)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio manual-run setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_run_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.run_cycle(trigger="manual"))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio manual-run effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_run_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.get("/api/readiness")
@@ -3690,14 +3897,32 @@ def api_firm_allocator(rebuild: bool = False) -> JSONResponse:
         if rebuild:
             artifact = _fa.build_latest()
         else:
-            artifact = _fa.latest_artifact()
-            if artifact is None:
+            read_status, artifact = _fa.latest_artifact_checked()
+            if read_status == "unavailable":
+                return JSONResponse({
+                    "advisory_only": True,
+                    "computed": False,
+                    "read_status": "unavailable",
+                    "error": "firm_allocator_artifact_unavailable",
+                    "reason": "firm allocator artifact unavailable",
+                })
+            if read_status == "absent":
                 artifact = _fa.build_latest()
+        if artifact and artifact.get("build_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "unavailable"})
+        if artifact and artifact.get("persist_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "partial"})
         return JSONResponse(artifact or {"advisory_only": True, "computed": False,
                                          "reason": "no artifact available"})
     except Exception as exc:  # noqa: BLE001 — never 500
-        return JSONResponse({"advisory_only": True, "computed": False,
-                             "reason": f"firm_allocator endpoint error: {exc}"})
+        _log.warning("firm allocator endpoint failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "advisory_only": True,
+            "computed": False,
+            "read_status": "unavailable",
+            "error": "firm_allocator_unavailable",
+            "reason": "firm allocator unavailable",
+        })
 
 
 @router.get("/api/desk/experiments")

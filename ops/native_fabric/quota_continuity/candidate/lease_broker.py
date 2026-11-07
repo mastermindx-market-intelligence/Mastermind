@@ -484,6 +484,169 @@ def _broker_controller_pid_observation(pid: object) -> str:
 class Broker:
     """Single-writer lease broker. All mutating methods take the file lock."""
 
+    @staticmethod
+    def inspect_qualification_quiescence(*, orchestrator_id, pool, host,
+                                         db_path=DEFAULT_DB, lock_path=DEFAULT_LOCK):
+        """Current scoped broker facts only; never a historical release ACK.
+
+        No Broker construction, schema migration, GC, expiry, account/provider
+        read, heartbeat or lease action. No row is treated as expired by time.
+        Caller must retain terminal-operation evidence and independently hold the
+        physical admission namespace for any later maintenance decision.
+        """
+        from pathlib import Path
+        import stat
+        from urllib.parse import quote
+        result = {'schema': 'mastermind.fabric_qualification_quiescence.v1',
+                  'root': orchestrator_id, 'pool': pool, 'host': host,
+                  'state': 'UNKNOWN', 'historical_release_ack': False,
+                  'maintenance_authorized': False}
+        if (type(orchestrator_id) is not str
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', orchestrator_id)
+                or pool != 'minimax' or host != 'ubuntu4'):
+            return dict(result, reason='scope_unqualified')
+        descriptors, connection = [], None
+        try:
+            database, lock_name = Path(db_path).absolute(), Path(lock_path).absolute()
+            parent = database.parent.resolve(strict=True)
+            if lock_name.parent.resolve(strict=True) != parent:
+                raise ValueError('broker_namespace')
+            parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            descriptors.append(parent_fd)
+            def identity(info):
+                return (info.st_dev, info.st_ino, info.st_uid, info.st_mode,
+                        info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            def existing(name):
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=parent_fd)
+                descriptors.append(fd)
+                item = os.fstat(fd)
+                if (not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid()
+                        or item.st_nlink != 1 or item.st_mode & 0o022):
+                    raise ValueError('broker_file_unqualified')
+                return fd, identity(item)
+            parent_identity = identity(os.fstat(parent_fd))[:4]
+            if parent_identity[2] != os.getuid() or parent_identity[3] & 0o022:
+                raise ValueError('broker_namespace')
+            lock_fd, lock_identity = existing(lock_name.name)
+            fcntl.flock(lock_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            db_fd, db_identity = existing(database.name)
+            sidecars = {}
+            for suffix in ('-wal', '-shm', '-journal'):
+                name = database.name + suffix
+                try:
+                    fd, ident = existing(name)
+                    sidecars[suffix] = ident
+                except FileNotFoundError:
+                    sidecars[suffix] = None
+            if sidecars['-journal'] is not None:
+                raise ValueError('broker_recovery_journal_present')
+            if (sidecars['-wal'] is None) != (sidecars['-shm'] is None):
+                raise ValueError('broker_sidecar_unknown')
+            # Under the incumbent lock, no WAL/SHM means a checkpointed database.
+            # Immutable read avoids SQLite creating missing sidecars. With a live
+            # WAL, use normal mode=ro so committed WAL pages are never ignored.
+            immutable = sidecars['-wal'] is None
+            uri = 'file:' + quote(str(parent/database.name), safe='/') + '?mode=ro'
+            if immutable:
+                uri += '&immutable=1'
+            connection = sqlite3.connect(uri, uri=True, timeout=0)
+            connection.execute('PRAGMA query_only=ON')
+            until = time.monotonic() + 2.0
+            connection.set_progress_handler(lambda: int(time.monotonic() >= until), 1000)
+            connection.execute('BEGIN')
+            states = dict(connection.execute(
+                'SELECT state, COUNT(*) FROM leases WHERE orchestrator_id=? AND pool=? AND host=? GROUP BY state',
+                (orchestrator_id, pool, host)).fetchall())
+            waiters = connection.execute(
+                'SELECT COUNT(*) FROM waiters WHERE orchestrator_id=? AND pool=? AND (host=? OR host IS NULL)',
+                (orchestrator_id, pool, host)).fetchone()[0]
+            connection.close()
+            connection = None
+            # Rejoin the original named owner and files after blocking SQLite IO.
+            if (database.parent.resolve(strict=True) != parent
+                    or lock_name.parent.resolve(strict=True) != parent
+                    or identity(os.stat(parent))[:4] != parent_identity
+                    or identity(os.stat(lock_name, follow_symlinks=False)) != lock_identity
+                    or identity(os.stat(database, follow_symlinks=False)) != db_identity
+                    or identity(os.fstat(db_fd)) != db_identity):
+                raise ValueError('broker_namespace_changed')
+            for suffix, before in sidecars.items():
+                try:
+                    after = identity(os.stat(parent/(database.name+suffix), follow_symlinks=False))
+                except FileNotFoundError:
+                    after = None
+                # SQLite may update read marks in existing SHM. Its exact owned
+                # inode/mode stays bound; DB and committed WAL bytes stay fixed.
+                if suffix == '-shm' and before is not None and after is not None:
+                    before, after = before[:5], after[:5]
+                if before != after:
+                    raise ValueError('broker_sidecar_changed')
+            if any(state not in {'held', 'rented', 'released', 'expired'} for state in states):
+                raise ValueError('broker_state_unknown')
+            held = states.get('held', 0) + states.get('rented', 0)
+            return dict(result, state='QUIESCENT_IN_SCOPE' if held == 0 and waiters == 0 else 'HELD_IN_SCOPE',
+                        held_lease_count=held, pending_waiter_count=waiters,
+                        account_coverage='ALL_ACCOUNTS', reason='current_locked_snapshot')
+        except (OSError, ValueError, sqlite3.Error):
+            return dict(result, reason='owner_read_unqualified')
+        finally:
+            if connection is not None:
+                connection.close()
+            for fd in reversed(descriptors):
+                os.close(fd)
+
+    @staticmethod
+    @contextmanager
+    def qualification_maintenance_guard(*, orchestrator_id, pool, host,
+                                        db_path=DEFAULT_DB, lock_path=DEFAULT_LOCK):
+        """Keep incumbent broker writers fenced during one bounded handoff.
+
+        The yielded live object is evidence continuity, not an effect grant.
+        No serialized snapshot can reopen it. Caller must prevent new scoped
+        dispatch, use only its separately authorized fixed maintenance owner,
+        and retain that owner's all-host physical admission fence.
+        """
+        import stat
+        if pool != 'minimax' or host != 'ubuntu4':
+            raise ValueError('qualification_guard_scope')
+        fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        alive = [True]
+        entered = time.monotonic()
+        try:
+            opened = os.fstat(fd)
+            def identity(item):
+                return (item.st_dev, item.st_ino, item.st_uid, item.st_mode, item.st_nlink)
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
+                    or opened.st_nlink != 1 or opened.st_mode & 0o022):
+                raise ValueError('qualification_guard_lock')
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            def held_current():
+                if not alive[0] or time.monotonic() - entered >= 30:
+                    raise ValueError('qualification_guard_retired_or_expired')
+                if (identity(os.fstat(fd)) != identity(opened)
+                        or identity(os.stat(lock_path, follow_symlinks=False)) != identity(opened)):
+                    raise ValueError('qualification_guard_retired_or_changed')
+            class LiveGuard:
+                def require_current(self):
+                    held_current()
+                    result = Broker.inspect_qualification_quiescence(
+                        orchestrator_id=orchestrator_id, pool=pool, host=host,
+                        db_path=db_path, lock_path=lock_path)
+                    # The read may block and may have used a replacement named
+                    # lock. Rejoin OUR held inode and deadline before handoff.
+                    held_current()
+                    if result['state'] != 'QUIESCENT_IN_SCOPE':
+                        raise ValueError('qualification_guard_not_quiescent')
+                    return result
+            guard = LiveGuard()
+            guard.require_current()
+            yield guard
+            guard.require_current()
+        finally:
+            alive[0] = False
+            os.close(fd)
+
     def __init__(
         self,
         db_path: str = DEFAULT_DB,
@@ -2777,10 +2940,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     pp.add_argument("--need", type=int, required=True)
     pp.add_argument("--orchestrator-id", default=None)
 
+    pq = sub.add_parser("inspect-qualification-quiescence")
+    pq.add_argument("--orchestrator-id", required=True)
+    pq.add_argument("--pool", required=True)
+    pq.add_argument("--host", required=True)
+
     sub.add_parser("status")
     sub.add_parser("gc")
 
     args = p.parse_args(argv)
+    if args.cmd == "inspect-qualification-quiescence":
+        result = Broker.inspect_qualification_quiescence(
+            orchestrator_id=args.orchestrator_id, pool=args.pool, host=args.host,
+            db_path=os.environ.get("POOL_BROKER_DB") or DEFAULT_DB,
+            lock_path=os.environ.get("POOL_BROKER_LOCK") or DEFAULT_LOCK)
+        print(json.dumps(result, sort_keys=True))
+        return 0 if result["state"] == "QUIESCENT_IN_SCOPE" else 75
+
     if args.cmd == "acquire" and args.not_before is not None:
         from commission_deadline import (require_not_before, CallerNotBeforePending, CallerNotBeforeInvalid)
         try:

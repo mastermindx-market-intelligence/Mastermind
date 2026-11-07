@@ -8,7 +8,7 @@ borrow CREATE's grant or publisher mode.
 from __future__ import annotations
 from contextlib import nullcontext
 
-from common.workspace_source_operation_wire import validate_frame, MAX_RESPONSE_BYTES
+from common.workspace_source_operation_wire import validate_frame, MAX_RESPONSE_BYTES, operation_response_limit
 from common.workspace_source_operation_contract import validate_status
 from common.executive_workspace_contract import canonical
 from integrations.mastermind_workspace_app.project_creation_service import ProjectCreationSourceOwner
@@ -81,7 +81,7 @@ class WorkspaceSourceOperationService:
                 raise ValueError("SAME_S19_PREPARATION_REQUIRED")
         elif value["action"] == "ADOPT_PLAN":
             owner = self._adoption
-        elif value["action"] in {"add_project_file", "set_project_communication_preference"}:
+        elif value["action"] in {"add_project_file", "set_project_communication_preference", "correct_project_discovery"}:
             owner = self._knowledge
         else:
             owner = None
@@ -104,6 +104,8 @@ class WorkspaceSourceOperationService:
                 result = owner.prepare(value["request"], principal)
             elif operation == "read":
                 result = owner.read_status(value, principal)
+            elif operation == "read_original" and type(owner) is ProjectKnowledgeSourceOwner:
+                result = owner.read_original(value, principal)
             elif operation == "reconcile":
                 result = owner.reconcile(value, principal)
             elif operation == "submit":
@@ -114,9 +116,9 @@ class WorkspaceSourceOperationService:
                 result = owner.advance(value, principal)
             else:
                 raise ValueError("SOURCE_OPERATION_OWNER_UNAVAILABLE")
-        if operation != "prepare":
+        if operation not in {"prepare", "read_original"}:
             result = validate_status(result)
-        if len(canonical(result)) + 1 > MAX_RESPONSE_BYTES or guarded_peer() is not True:
+        if len(canonical(result)) + 1 > operation_response_limit(operation) or guarded_peer() is not True:
             raise PermissionError("SOURCE_OPERATION_UNAVAILABLE")
         return result
 
@@ -141,7 +143,7 @@ class WorkspaceSourceOperationService:
                     raise ValueError("actual installed plan adoption adapter required")
                 return common + (owner._capture,owner._actor,owner._qualify_recipe,
                                  owner.advance,owner._adapter._recipes.context)
-            return common + (owner._publisher_events, owner._adapter._compiler,
+            return common + (owner.read_original, owner._private.read, owner._publisher_events, owner._adapter._compiler,
                              owner._adapter._compiler._installed_reader_binding,
                              owner._adapter._compiler._installed_context_owner,
                              owner._adapter._compiler._installed_context_binding)

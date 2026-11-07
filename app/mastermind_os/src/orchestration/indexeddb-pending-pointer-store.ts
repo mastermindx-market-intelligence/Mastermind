@@ -135,7 +135,7 @@ const KIND_RECORDS = {
   project_create: { v: 4, key: /^mmos-project-create-[0-9a-f]{40}$/, consume: false },
   project_adopt: { v: 4, key: /^mmos-project-adopt-[0-9a-f]{40}$/, consume: false },
   direction_accept: { v: 4, key: /^mmos-direction-accept-[0-9a-f]{40}$/, consume: false },
-  project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set)-[0-9a-f]{40}$/, consume: false },
+  project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set|discovery-correct)-[0-9a-f]{40}$/, consume: false },
   instruction_pause: { v: 6, key: /^mmos-instruction-pause-[0-9a-f]{40}$/, consume: false },
   conversation_create: { v: 7, key: CONVERSATION_CREATE_KEY_RE, consume: false },
   conversation_consume: { v: 10, key: /^mmos-conversation-consume-[0-9a-f]{40}$/, consume: false },
