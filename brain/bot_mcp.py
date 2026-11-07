@@ -124,6 +124,43 @@ def _json(obj) -> dict:
     return _ok(json.dumps(fallback, default=str, ensure_ascii=False))
 
 
+def _read_first_nonempty_mapping_checked(paths):
+    """Read usable mappings without treating unavailable artifacts as absent."""
+    had_failure = False
+    for path in paths:
+        try:
+            value = json.loads(path.read_text())
+        except FileNotFoundError:
+            absent = False
+            try:
+                import stat
+
+                candidate = path
+                while True:
+                    try:
+                        info = candidate.lstat()
+                    except FileNotFoundError:
+                        if candidate.parent == candidate:
+                            break
+                        candidate = candidate.parent
+                        continue
+                    absent = candidate != path and stat.S_ISDIR(info.st_mode)
+                    break
+            except Exception:
+                pass
+            had_failure = had_failure or not absent
+            continue
+        except Exception:  # noqa: BLE001 - caller projects a closed source status
+            had_failure = True
+            continue
+        if not isinstance(value, dict) or not value:
+            had_failure = True
+            continue
+        return value, had_failure
+    return None, had_failure
+
+
+
 def _read_json(p: Path):
     return json.loads(p.read_text()) if p.exists() else None
 
@@ -289,20 +326,100 @@ async def get_overnight_tape(args):
 @tool("get_themes", "Narrative baskets with recent relative performance (the theme universe).",
       {"type": "object", "properties": {"region": {"type": "string"}}})
 async def get_themes(args):
-    d = _read_json(_V / "site" / "basketdata" / "baskets.json") or {}
-    out = [{"id": b["id"], "name": b.get("name"), "category": b.get("category"),
-            "perf_20d_rel": ((b.get("perf") or {}).get("20d") or {}).get("rel"),
-            "n_members": b.get("n_members")} for b in (d.get("baskets") or [])]
-    return _json({"as_of": d.get("as_of"), "themes": out})
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "basketdata" / "baskets.json",
+    ))
+    if data is None:
+        return _json({
+            "as_of": None,
+            "themes": None,
+            "read_status": "unavailable",
+            "error": "themes_unavailable",
+            "failed_sources": ["themes"],
+        })
+    baskets = data.get("baskets")
+    if not isinstance(baskets, list):
+        return _json({
+            "as_of": data.get("as_of"),
+            "themes": None,
+            "read_status": "unavailable",
+            "error": "themes_unavailable",
+            "failed_sources": ["themes"],
+        })
+    out = []
+    row_failed = read_failed
+    for basket in baskets:
+        if not isinstance(basket, dict) or not basket.get("id"):
+            row_failed = True
+            continue
+        perf = basket.get("perf")
+        if perf is None:
+            perf = {}
+        if not isinstance(perf, dict):
+            perf = {}
+            row_failed = True
+        perf_20d = perf.get("20d")
+        if perf_20d is None:
+            perf_20d = {}
+        if not isinstance(perf_20d, dict):
+            perf_20d = {}
+            row_failed = True
+        out.append({
+            "id": basket.get("id"),
+            "name": basket.get("name"),
+            "category": basket.get("category"),
+            "perf_20d_rel": perf_20d.get("rel"),
+            "n_members": basket.get("n_members"),
+        })
+    payload = {"as_of": data.get("as_of"), "themes": out}
+    if row_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["themes"]
+        payload["note"] = "Theme-universe evidence is incomplete; malformed rows are unknown."
+    return _json(payload)
 
 
 @tool("get_standouts", "The ranked single-name buy board (top picks with suggested size).", {})
 async def get_standouts(args):
-    d = _read_json(_V / "site" / "factordata" / "us_standouts.json")
-    if not d:
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "factordata" / "us_standouts.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "gate_go": None,
+                "rank_by": None,
+                "buy": None,
+                "read_status": "unavailable",
+                "error": "standouts_unavailable",
+                "failed_sources": ["standouts"],
+            })
         return _ok("us_standouts.json not built locally (ships in the Pages artifact).")
-    buys = (d.get("buy") or d.get("standouts") or [])[:20]
-    return _json({"gate_go": d.get("gate_go"), "rank_by": d.get("rank_by"), "buy": buys})
+
+    buys_raw = data.get("buy")
+    buys_failed = buys_raw is not None and not isinstance(buys_raw, list)
+    if not buys_raw:
+        fallback = data.get("standouts")
+        # Keep usable legacy rows, but do not erase malformed primary evidence.
+        if fallback is not None or not buys_failed:
+            buys_raw = fallback
+        buys_failed = buys_failed or (fallback is not None and not isinstance(fallback, list))
+    selected_invalid = buys_raw is not None and not isinstance(buys_raw, list)
+    buys = None if selected_invalid else list(buys_raw or [])[:20]
+    row_failed = False
+    if buys is not None:
+        row_failed = any(not isinstance(row, dict) for row in buys)
+        buys = [row for row in buys if isinstance(row, dict)]
+    payload = {
+        "gate_go": data.get("gate_go"),
+        "rank_by": data.get("rank_by"),
+        "buy": buys,
+    }
+    if read_failed or buys_failed or row_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["standouts"]
+        payload["note"] = "Standout-board evidence is incomplete; missing rows are unknown."
+    return _json(payload)
 
 
 @tool("get_portfolio", "The bot's current paper book + track record.", {})
@@ -566,12 +683,34 @@ async def get_intel_hub(args):
       "split it into ACT (high-score, corroborated) / WATCH / DIVERGENT. Context-only — never sizes.",
       {"type": "object", "properties": {"limit": {"type": "integer"}, "tiers": {"type": "boolean"}}})
 async def get_intake_candidates(args):
-    from brain import intake
-    limit = int(args.get("limit") or 30)
-    out = intake.build(limit=limit)
-    if args.get("tiers"):
-        out["salience"] = intake.salience_tiers(limit)
-    return _json(out)
+    try:
+        from brain import intake
+
+        limit = int(args.get("limit") or 30)
+        out = intake.build(limit=limit)
+        if not isinstance(out, dict):
+            raise TypeError("intake queue is not a mapping")
+        if args.get("tiers"):
+            try:
+                salience = intake.salience_tiers(limit)
+                if not isinstance(salience, dict):
+                    raise TypeError("salience tiers are not a mapping")
+                json.dumps(salience, default=str, ensure_ascii=False)
+                out["salience"] = salience
+            except Exception:  # noqa: BLE001 - preserve the available candidate queue
+                out["salience"] = None
+                out["read_status"] = "partial"
+                out["failed_sources"] = ["intake_salience"]
+                note_key = "salience_note" if "note" in out else "note"
+                out[note_key] = "Candidate queue is available; salience tiers did not complete."
+        return _json(out)
+    except Exception:  # noqa: BLE001 - setup, build and serialization share one boundary
+        return _json({
+            "read_status": "unavailable",
+            "error": "intake_candidates_unavailable",
+            "failed_sources": ["intake"],
+            "candidates": None,
+        })
 
 
 @tool("get_ticker_package",
