@@ -125,6 +125,31 @@ def test_record_deduplication_preserves_all_uses_and_equal_bytes_at_distinct_pat
     assert inventory["retention"] == "COMPLETE" and inventory["coverage"] == "PARTIAL"
 
 
+@pytest.mark.parametrize("bad", ["digest", "data", "bundle", "duplicate-use", "bool-use", "negative-use",
+                                "duplicate-path", "counts", "path", "mode", "overflow"])
+def test_retained_inventory_needs_no_context_body_but_preserves_closed_identity(tmp_path, bad):
+    _, original = capture(tmp_path, selected_bundle())
+    assert contract.validate_retained_record_sources(original, bundle_sha256=original["bundle_sha256"],
+                                                    data_commit=original["data_commit"]) == original
+    value = deepcopy(original)
+    entry = value["entries"][0]
+    if bad == "digest": entry["sha256"] = "not-a-content-digest"
+    elif bad == "data": value["data_commit"] = "f" * 40
+    elif bad == "bundle": value["bundle_sha256"] = "f" * 64
+    elif bad == "duplicate-use": entry["uses"].append(entry["uses"][0])
+    elif bad == "bool-use": entry["uses"][0][0] = False
+    elif bad == "negative-use": entry["uses"][0][0] = -1
+    elif bad == "duplicate-path": value["entries"].append(deepcopy(entry))
+    elif bad == "counts": value["retained_items"] += 1
+    elif bad == "path": entry["path"] = "agentos/workstreams/../WS-ONE.md"
+    elif bad == "mode": entry["mode"] = "120000"
+    else: value.update(retention="OVERFLOW", overflow_reason="INVENTORY_BYTES")
+    value["inventory_sha256"] = contract.canonical_digest({k: v for k, v in value.items() if k != "inventory_sha256"})
+    with pytest.raises(contract.AgentOsContextUnavailable):
+        contract.validate_retained_record_sources(value, bundle_sha256=original["bundle_sha256"],
+                                                  data_commit=original["data_commit"])
+
+
 @pytest.mark.parametrize("change", [
     lambda b: b["sections"][0].update(id="discoveries"),
     lambda b: b["sections"][0]["items"][0].update(key="WS:FOREIGN"),

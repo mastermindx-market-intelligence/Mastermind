@@ -58,6 +58,12 @@ still-current, unexpired binding. It creates no read, delivery, publication or
 memory store. Existing public readiness and delivery fields remain unchanged.
 Historical v1 rendering is unchanged and produces no new inventory.
 
+The same contract owner validates retained inventory shape, digest, immutable
+coordinates and unique use positions without requiring a copied context body.
+Live issuance additionally checks each position against the actual bundle.
+This retained-shape check is not an attestation of delivery or an authorization;
+a historical EVAL reader must join the original delivery and request records.
+
 This component ends at qualified snapshot evidence. A later original EVAL
 observer must qualify final post-hook prompt inclusion, request/transport joins,
 frozen source policy and bounded retention before promoting any contribution

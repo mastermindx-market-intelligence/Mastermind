@@ -619,7 +619,10 @@ class AgentOsMemoryProviderCore:
             if (state["state"] != "READY" or snapshot is None or snapshot.record_sources_json is None
                     or snapshot.rendered_context_sha256 != rendered_context_sha256):
                 return None
-            return json.loads(snapshot.record_sources_json)
+            from control_plane.agentos_context_bundle import validate_retained_record_sources
+            value = json.loads(snapshot.record_sources_json)
+            return validate_retained_record_sources(value, bundle_sha256=snapshot.bundle_sha256,
+                                                     data_commit=value["data_commit"])
 
     def _status_locked(self, guard_reason: Any = _GUARD_UNCHECKED) -> dict:
         """The bounded state of this instance. The caller holds the lock.

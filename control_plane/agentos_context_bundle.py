@@ -147,42 +147,84 @@ def record_source_inventory(*, bundle_sha256, data_commit, selected_items, entri
     return {**value, "inventory_sha256": canonical_digest(value)}
 
 
-def validate_record_source_inventory(value, *, raw, bundle, work_ref, data_commit):
+def validate_retained_record_sources(value, *, bundle_sha256, data_commit):
+    """Validate retained evidence without rereading or recreating its context.
+
+    This proves shape, digest and supplied bindings only. Live issuance also
+    checks exact selected positions; a historical caller must join original
+    delivery/request custody before claiming that any contribution was sent.
+    """
     if type(value) is not dict or set(value) != _INVENTORY_FIELDS:
         _refuse()
     encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,
                          separators=(",", ":")).encode("utf-8", "strict")
-    expected_uses = selected_record_uses(bundle, work_ref=work_ref)
-    selected_items = sum(map(len, expected_uses.values()))
     if (len(encoded) > MAX_RECORD_INVENTORY_BYTES or value["schema"] != RECORD_INVENTORY_SCHEMA
             or value["scope"] != RECORD_INVENTORY_SCOPE or value["coverage"] != "PARTIAL"
             or value["repository"] != RECORD_REPOSITORY or value["data_commit"] != data_commit
-            or value["bundle_sha256"] != hashlib.sha256(raw).hexdigest()
+            or not _hex(data_commit, 40) or not _hex(bundle_sha256, 64)
+            or value["bundle_sha256"] != bundle_sha256
             or not _hex(value["inventory_sha256"], 64)
             or value["inventory_sha256"] != canonical_digest({k: v for k, v in value.items() if k != "inventory_sha256"})
             or type(value["entries"]) is not list
-            or any(type(value[key]) is not int or value[key] < 0
+            or any(type(value[key]) is not int or not 0 <= value[key] <= MAX_BUNDLE_BYTES
                    for key in ("selected_items", "retained_items", "omitted_items"))
-            or value["selected_items"] != selected_items
             or value["selected_items"] != value["retained_items"] + value["omitted_items"]):
         _refuse()
     if value["retention"] == "OVERFLOW":
         # No arbitrary retained prefix can look like a complete source set.
         if (value["overflow_reason"] not in {"INVENTORY_BYTES", "RECORD_BYTES"}
-                or not selected_items or value["entries"] or value["retained_items"]):
+                or not value["selected_items"] or value["entries"] or value["retained_items"]):
             _refuse()
         return value
     if (value["retention"] != "COMPLETE" or value["overflow_reason"] is not None
-            or value["omitted_items"] or len(value["entries"]) != len(expected_uses)):
+            or value["omitted_items"]):
         _refuse()
-    for entry, path in zip(value["entries"], expected_uses):
+    paths, positions = [], set()
+    retained = 0
+    for entry in value["entries"]:
         if (type(entry) is not dict or set(entry) != {"path", "mode", "git_blob", "sha256", "bytes", "uses"}
-                or entry["path"] != path or entry["mode"] not in {"100644", "100755"}
+                or type(entry["path"]) is not str or entry["mode"] not in {"100644", "100755"}
                 or not _hex(entry["git_blob"], 40) or not _hex(entry["sha256"], 64)
                 or type(entry["bytes"]) is not int or not 0 <= entry["bytes"] <= MAX_RECORD_SOURCE_BYTES
-                or entry["uses"] != expected_uses[path]
-                or any(type(pair) is not list or len(pair) != 2 or any(type(x) is not int for x in pair)
+                or type(entry["uses"]) is not list or not entry["uses"]
+                or any(type(pair) is not list or len(pair) != 2
+                       or any(type(x) is not int or not 0 <= x < MAX_BUNDLE_BYTES for x in pair)
                        for pair in entry["uses"])):
+            _refuse()
+        path = entry["path"]
+        parts = path.split("/")
+        if (len(path.encode("utf-8", "strict")) > 256 or "\\" in path
+                or any(ord(char) < 32 or ord(char) == 127 for char in path)
+                or len(parts) != 3 or parts[0] != "agentos"
+                or parts[1] not in {"workstreams", "decisions", "discoveries", "handoffs"}
+                or not parts[2].endswith(".md") or parts[2] in {".md", "..md"}):
+            _refuse()
+        if parts[1] != "handoffs":
+            prefix = {"workstreams": "WS", "decisions": "DEC", "discoveries": "DSC"}[parts[1]]
+            if re.fullmatch(prefix + r"-[A-Z0-9]+(?:-[A-Z0-9]+)*\.md", parts[2]) is None:
+                _refuse()
+        uses = [tuple(pair) for pair in entry["uses"]]
+        if uses != sorted(set(uses)) or positions.intersection(uses):
+            _refuse()
+        paths.append(path)
+        positions.update(uses)
+        retained += len(uses)
+    if paths != sorted(set(paths)) or retained != value["retained_items"]:
+        _refuse()
+    return value
+
+
+def validate_record_source_inventory(value, *, raw, bundle, work_ref, data_commit):
+    validate_retained_record_sources(value, bundle_sha256=hashlib.sha256(raw).hexdigest(), data_commit=data_commit)
+    expected_uses = selected_record_uses(bundle, work_ref=work_ref)
+    if value["selected_items"] != sum(map(len, expected_uses.values())):
+        _refuse()
+    if value["retention"] == "OVERFLOW":
+        return value
+    if len(value["entries"]) != len(expected_uses):
+        _refuse()
+    for entry, path in zip(value["entries"], expected_uses):
+        if entry["path"] != path or entry["uses"] != expected_uses[path]:
             _refuse()
     return value
 
