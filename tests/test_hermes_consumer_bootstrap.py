@@ -64,7 +64,9 @@ class Owner:
         if relative == "integrations/hermes_harness/native_executive_consumer.py" and payload["case"] == "source_drift":
             state["changed"] = True
         if relative == "ops/executive_os/native_gateway_sources.py":
-            return b'class NativeSourceClosure:\n    def __init__(self, *args, **kwargs):\n        raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\ndef prepare_inventory(*args, **kwargs):\n    raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\n'
+            if payload["case"] == "derived_prepare":
+                return b'prepared = False\ndef prepare_vendor_derivation(owner, recipe, acl):\n    global prepared\n    assert recipe["vendor_derivation"]["kind"] == "computer_env_guard"\n    prepared = True\ndef prepare_inventory(owner, recipe, acl):\n    assert prepared\n    raise RuntimeError("DERIVATION_BEFORE_INVENTORY")\n'
+            return b'class NativeSourceClosure:\n    def __init__(self, *args, **kwargs):\n        raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\ndef prepare_vendor_derivation(owner, recipe, acl):\n    assert recipe["vendor_derivation"]["kind"] == "diagnostic_privacy"\ndef prepare_inventory(*args, **kwargs):\n    raise RuntimeError("C57_QUALIFIED_BEFORE_EFFECT")\n'
         return (source_root / relative).read_bytes()
     def directory(self, relative):
         assert entries[relative]["type"] == "directory"
@@ -139,6 +141,20 @@ def test_isolated_entry_qualifies_through_held_source_before_effect(mode, role, 
     assert result["outcome"] == "RuntimeError:C57_QUALIFIED_BEFORE_EFFECT"
     assert result["closed"] and result["effect_boundary_loaded"]
     assert result["consumer_loaded"] is (version == 3)
+    assert result["first_party_after"] == []
+
+
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_held_root_recipe_prepares_selected_derivation_before_inventory(role):
+    document = installation(role)
+    recipe = next(item["native_gateway"] for item in document["roles"] if item["role"] == role)
+    recipe["vendor_derivation"] = {
+        "kind": "computer_env_guard", "base_sha": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+        "patch_sha256": "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f",
+        "source_root": "/opt/hermes/pristine-source"}
+    result = run_isolated(document, mode="prepare", case="derived_prepare")
+    assert result["outcome"] == "RuntimeError:DERIVATION_BEFORE_INVENTORY"
+    assert result["consumer_loaded"] and result["effect_boundary_loaded"] and result["closed"]
     assert result["first_party_after"] == []
 
 

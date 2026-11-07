@@ -86,6 +86,61 @@ COO_TOOL_SCHEMA_DIGEST = (
     "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
 )
 
+# A separate reviewed catalogue. Existing descriptors and the v1 digest above
+# retain their exact meaning for every currently enrolled principal.
+from common import coo_agentos_context_contract as context_wire
+
+COO_CONTEXT_TOOL_SPECS = (*COO_TOOL_SPECS, ToolSpec(context_wire.TOOL,
+    "Read the complete canonical Agent OS context for one explicitly enrolled mission from its adopted snapshot. This read grants no execution authority.",
+    {"type": "object", "additionalProperties": False, "required": ["work_ref"],
+     "properties": {"work_ref": dict(_WORK)}},
+    "Exact adopted context bytes and source/runtime receipt, with explicit degradation and omission accounting.", True))
+COO_CONTEXT_TOOL_NAMES = tuple(spec.name for spec in COO_CONTEXT_TOOL_SPECS)
+COO_CONTEXT_TOOL_SCHEMA_DIGEST = "5fa24aa1d907d66d0ca0a56168617f955e09d063f532cf527fe0d7b923fb50af"
+COO_CURRENT_CONTEXT_TOOL_SPECS = (*COO_TOOL_SPECS, ToolSpec(context_wire.CURRENT_TOOL,
+    "Read current canonical Agent OS context for an enrolled mission using independently authenticated Executive and Workspace resources. This read grants no execution authority.",
+    {"type": "object", "additionalProperties": False, "required": ["work_ref"],
+     "properties": {"work_ref": dict(_WORK)}},
+    "Exact current DATA context with pinned CODE, original publication and source/runtime evidence.", True))
+COO_CURRENT_CONTEXT_TOOL_NAMES = tuple(spec.name for spec in COO_CURRENT_CONTEXT_TOOL_SPECS)
+
+
+def coo_context_tool_schema_snapshot():
+    return [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+             "name": spec.name, "output_schema": None}
+            for spec in sorted(COO_CONTEXT_TOOL_SPECS, key=lambda item: item.name)]
+
+
+def coo_context_tool_schema_digest():
+    return hashlib.sha256(canonical_json(coo_context_tool_schema_snapshot())).hexdigest()
+
+
+def coo_current_context_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_CURRENT_CONTEXT_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
+def catalogue_specs(catalogue):
+    if catalogue == context_wire.LEGACY_CATALOGUE: return COO_TOOL_SPECS
+    if catalogue == context_wire.CATALOGUE: return COO_CONTEXT_TOOL_SPECS
+    if catalogue == context_wire.CURRENT_CATALOGUE: return COO_CURRENT_CONTEXT_TOOL_SPECS
+    raise GatewayError("invalid_input", "unknown COO catalogue")
+
+
+def validate_coo_context_tool_arguments(name, arguments):
+    if name not in {context_wire.TOOL, context_wire.CURRENT_TOOL}:
+        return validate_coo_tool_arguments(name, arguments)
+    try:
+        from common.workspace_project_plan_contract import validate_selection
+        if type(arguments) is not dict or set(arguments) != {"work_ref"} or not _check_work_ref(arguments["work_ref"]):
+            raise ValueError()
+        validate_selection(arguments)
+        return dict(arguments)
+    except (ValueError, TypeError):
+        raise GatewayError("invalid_input", "invalid COO context selector") from None
+
 
 def validate_coo_tool_arguments(name, arguments):
     if name not in COO_TOOL_NAMES:

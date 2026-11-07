@@ -263,3 +263,143 @@ P0 current #1717 owner/source/collision reconciliation
 - [Incumbent DSH PR #1717](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1717) and [harness convergence #687](https://github.com/mastermindx-market-intelligence/Mastermind/pull/687).
 
 **No code line copied from an unlicensed Grok Bot/Dot release.**
+
+
+## 2026-11-06 thin-native-first release amendment
+
+The current Chairman directs the installed M2 Hermes thin runtime into Mastermind OS first,
+then advanced upgrades. This continues this original program and its R2 outcome. See the
+source-owned task tree and architectural boundary in [THIN_NATIVE_OS](../../hermes/THIN_NATIVE_OS.md)
+(THIN-1 through THIN-3, then ADV-1/ADV-2). Existing native company integration #2120,
+#2134, #2147 and H24 work remain intact. Native desktop integration is the first useful
+release slice, not proof of remote web or unattended company execution.
+
+## 8. Hermes/Fabric hardening continuation — 2026-11-07
+
+This extends existing P3/P4/P7 and the Hermes teammate research in PR #2159.
+Current Chairman intent assigns implementation and integration to the active
+principal; this entry does not change Runtime admission or accepted release holds.
+Source baseline: `e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46`.
+
+| Existing node | Next implementation and acceptance | Evidence boundary |
+| --- | --- | --- |
+| P3 / original result | Project the request observation already retained by #2176 through #2170's authenticated original-admission reader. Bind role, original session/admission, stored epoch and generation; retain bounded closed metadata and false dispatch/model proof flags. | A real one-request private-socket test must return A's outer observation, never B's; restart reads must create no admission or inference. |
+| P4 / memory and learning input | Reuse the merged Agent OS MemoryProvider and original result owner. Preserve missing, malformed, incomplete and corrected evidence distinctly; do not create another memory or task ledger. | Source projection alone does not establish memory inclusion, learning efficacy or a live first turn. |
+| P7 / reliability qualification | Add negative tests for foreign identity, malformed metadata, excessive size, sensitive extra fields and legacy absence; run affected runtime/identity tests and required CI. | Actual worker START, installed canaries, held-out skill improvement and the seven-day campaign remain owed. |
+
+Architecture remains: persistent role sessions initially on M2; substantial work
+through the existing Executive/Capacity/Fabric owners; Hermes may be a qualified
+worker harness. The attended worker, selected-child and APPLICATION inference
+contracts keep their original identities and effects. No second scheduler,
+retry owner or shared writable role profile is introduced.
+
+The first source slice is retained by the principal as `CRITICAL_PATH_SHORTCUT`:
+the required change is a bounded join between two newly merged native contracts,
+and this Web session has a verified isolated source workspace but no authenticated
+native root/parent binding for paid Fabric submission. Fabric's exposed adapter
+is available; worker admission is unprobed, not declared globally unavailable.
+A separate native reasoning advisor resolved the cross-contract ambiguity;
+routine implementation is not assigned to a native labor child.
+
+Preserve the original #2166/#2155 APPLICATION, #2175 composition, #2171 vendor,
+#2172 MCP and #2007 maintenance carriers and their actual live writers/effects.
+The M2 installation refusal and Ubuntu1 C26 journal-access hold are not cleared
+by these source edits. Source publication, merge, installation and real-path
+acceptance remain separate. No 99% availability claim is made without measured
+accepted-task outcomes.
+
+### P3/P7 source qualification and concurrent-carrier reconciliation
+
+The first private source slice passed 160 focused tests, including original
+producer/storage recovery and AF_UNIX reads. Its broader local runtime/harness
+run was 691 passed, 46 skipped and 83 failed, with Linux-only and workspace-path
+limitations retained in its receipt. PR #2185's original hosted runtime, harness
+and required repository checks passed.
+
+A later current-carrier check found #2181 already delivering the same original
+observation projection and ahead in the protected merge queue. Its exact source
+head is ca719fd5f74b5366a8ac57abacfff30c29bb5ffc. The #2185 queue entry was removed
+and read back absent; #2181's original branch, writer and queue entry were
+preserved. This operation now consumes that one projection contract instead of
+maintaining a second validator or response shape.
+
+The canonical contract returns the validated outer document as
+request_observation; invalid retained evidence supplies only
+request_observation_error: INVALID_RETAINED_OBSERVATION, while absence preserves
+the legacy result. Its historical scope and false provider/model proof flags
+remain unchanged. This branch adds the independent exact-admission lookup guard:
+if an explicit admission ID was requested, a different returned row is refused
+before reading its stored result. The counterexample failed against the captured
+#2181 implementation before this guard was added.
+
+The reader's unchanged numeric byte-limit literal retains its exact site; the
+whole-file source pin follows the composed implementation. Current qualification
+and source delivery are recorded in #2185. No new admission, provider call or
+installed consumer is implied by this source composition.
+
+### P3/P7 native-owner repairs — PR #2187
+
+The two additional counterexamples were repaired in PR #2187, including the
+packaged attended admission owner. Exact source/closure and qualification are
+retained in ops/native_fabric/quota_continuity/rollout/ROLLOUT_REVIEW.md.
+The original defects were confirmed on native owner blobs
+also present at protected `615146aac6a1b0c0933bc9b815517a2fd285ed4a`:
+
+- P3 original-run recovery: exclusive packet persistence can precede request JSON
+  publication. A crash in between currently reads as `NOT_FOUND`, although the
+  request writer correctly refuses to replace that same run. Extend the incumbent
+  inspector's existing unknown/unverified disposition; retain original bytes,
+  expose no unattested identity or content, and permit no new controller.
+- P7 serialized host admission: default live load is sampled before the blocking
+  `.admission.lock`. Sample inside that same existing lock before evaluation;
+  preserve explicit fixture injection, all headroom thresholds and atomic marker
+  ownership. A real lock-contention test must reject a waiter when load rises
+  before the lock becomes available.
+
+The native `candidate/fabric_task.py` and `candidate/lane_runtime.py` paths are
+absent from the current #2175/#2007 changed-path lists. Shared historical release
+manifests remain owned by their original carriers; qualify changes through the
+existing immutable forward-composition builder without rewriting old receipts.
+These fixes do not clear held attempts, re-enroll hosts or claim measured uptime.
+
+
+### Current operational and learning boundary
+
+The consolidated reader plus explicit-admission guard passed 350 focused
+runtime and identity tests before incoming ancestry reconciliation. The later
+local qualification attempt produced no terminal test receipt; its process
+and log writer were no longer present, so it is not counted as a pass. A bounded
+M2 observation found load averages 56.52/57.60/38.74 on 24 logical CPUs. This is
+one host-load sample, not an uptime metric or proof of the process exit cause.
+Further heavy qualification belongs in the already-running hosted CI; no
+unowned host processes are terminated.
+
+The installed native store was verified at generation
+ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46,
+selection sequence 35, with 107 members and the exact pre-repair task/runtime
+hashes. No Go/HTTP APPLICATION entry is present in that selected generation.
+PR #2187 supplies the complete repaired source successor; publication and
+installed-path proof remain separate.
+
+Executive v3 server 1.5.0 returned backend_unavailable on its read-only state
+operation at 2026-11-07T04:40:10Z. This is an installed backend-readiness failure,
+not permission to mint a root or another orchestrator.
+
+The existing Harness2 refinement loop, EVAL finalizer/artifact graph and Agent OS
+discovery producer already exist. The next learning join must retain actual
+native execution/provider-attempt, effective context/tool/output, environment
+and timing evidence, then satisfy the existing EVAL Trial contract. Request
+assembly metadata alone cannot manufacture provider/model proof or a VALID
+NO_EFFECT trial. Keep the native producer and APPLICATION #2155 carrier as
+owners; do not replay the refused standalone native EVAL leaf or build another
+memory/refinement plane. #2188 owns the concurrent authenticated Agent OS
+receiver composition. Outcome Learning #398 and C26 retain their exact holds.
+
+
+### Protected integration and installed-parent constraint — 2026-11-07
+
+PR #2181 merged as 1d86f77633100e7c8fe2be4c3dcc4d8ff8c735bf. This branch has now composed protected master 0bf1d891e6e22a938f184e7df02481c52f3aa2a4, retaining its other source-identity pins. Focused original-read/producer/native-identity tests and the full Executive Fabric identity review both passed with terminal exit 0 (processes 97509 and 704). The current code delta to that master is the explicit-admission mismatch guard and its regression; the original projection remains #2181's one implementation. New-head hosted CI and protected queue admission remain separate.
+
+PR #2187's CI-discovered current-manifest and historical reconstruction assertions are repaired at 3b2338d3946209b6f6ce6a0b694cf609015fb07f. Focused affected tests passed; its new hosted CI is run 42341854901. Historical fixtures remain unchanged.
+
+Full installed comparison found that the selected 107-member generation has manifest 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9, matching the active APPLICATION composer #2175. It contains eight additional component successors. Selecting #2187's protected107 baseline would replace those bytes and is prohibited for this installed predecessor. The safe contribution is an isolated composition against current #2175 source, preserving the eight members and changing only the two repaired leaves. Its exact-parent inverse must qualify the installed APPLICATION lineage before the existing APPLICATION and Go historical validation. Keep #2175 as the one final carrier; do not mutate its live writer or publish a competing release.

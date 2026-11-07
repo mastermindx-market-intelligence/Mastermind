@@ -287,6 +287,18 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
     keys = {"schema", "python", "startup", "vendor_root", "import_roots", "dependency_inventory"}
     if type(value) is not dict:
         raise ReleaseManifestError("Hermes native installation is invalid")
+    derivation = value.get("vendor_derivation")
+    if "vendor_derivation" in value:
+        keys = keys | {"vendor_derivation"}
+        if (type(derivation) is not dict
+                or set(derivation) != {"kind", "base_sha", "patch_sha256", "source_root"}
+                or derivation["base_sha"] != "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+                or (derivation["kind"], derivation["patch_sha256"]) not in (
+                    ("computer_env_guard", "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"),
+                    ("diagnostic_privacy", "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"),
+                    ("workspace_oauth_privacy", "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce"))):
+            raise ReleaseManifestError("Hermes vendor derivation is invalid")
+        derivation = dict(derivation, source_root=_safe_installation_path(derivation["source_root"]))
     version = value.get("schema")
     enrollment = None
     consumer = None
@@ -320,6 +332,15 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
             # by the complete installation limit. It is never a qualified
             # publication until the same semantic owner runs under held imports.
             consumer = _closed_json(_canonical(consumer))
+            # Context v2 imports these native memory bodies. Require the fixed
+            # privacy repair even during deferred bootstrap qualification; the
+            # held owner separately verifies its full tree and installed receipt.
+            if (consumer.get("schema") == "mastermind.hermes_native_executive_consumer/v2"
+                    and (derivation is None or derivation["kind"] != "diagnostic_privacy")):
+                raise ReleaseManifestError("Hermes context requires diagnostic privacy derivation")
+            if (consumer.get("schema") == "mastermind.hermes_native_executive_consumer/v3"
+                    and (derivation is None or derivation["kind"] != "workspace_oauth_privacy")):
+                raise ReleaseManifestError("Hermes current context requires Workspace OAuth privacy derivation")
             if not _defer_consumer:
                 try:
                     from integrations.hermes_harness.native_executive_consumer import (
@@ -356,11 +377,17 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
     inventory_path = _safe_installation_path(inventory["path"])
     if any(_within(inventory_path, root) for root in roots):
         raise ReleaseManifestError("Hermes native inventory is inside its own closure")
+    if derivation is not None and (
+        any(_within(derivation["source_root"], root) or _within(root, derivation["source_root"])
+            for root in roots) or _within(inventory_path, derivation["source_root"])
+    ):
+        raise ReleaseManifestError("Hermes vendor derivation paths overlap")
     return {"schema": value["schema"], "python": binary, "startup": startup,
             "vendor_root": vendor, "import_roots": roots,
             "dependency_inventory": {"path": inventory_path, "sha256": inventory["sha256"],
                                      "size": inventory["size"]},
             **({"session_enrollment": dict(enrollment)} if enrollment is not None else {}),
+            **({"vendor_derivation": derivation} if derivation is not None else {}),
             **({"executive_consumer": json.loads(json.dumps(consumer))}
                if consumer is not None else {})}
 
@@ -950,6 +977,10 @@ class _NativeGatewayLaunch:
         self.launcher_bytes = owner.source("integrations/hermes_runtime/native/hermes")
         self.adapter_bytes = owner.source("integrations/hermes_runtime/native_gateway_entry.py")
         self._births = {}
+        self.derivation = None
+        if "vendor_derivation" in self.recipe:
+            from ops.executive_os.native_gateway_sources import verify_vendor_derivation
+            self.derivation = verify_vendor_derivation(owner, self.recipe, _linux_source_acl)
 
     def check(self):
         self.finder.check()
@@ -989,6 +1020,7 @@ class _NativeGatewayLaunch:
                 or receipt.get("native_adapter_sha256") != hashlib.sha256(self.adapter_bytes).hexdigest()
                 or receipt.get("profile_sha256") != profile_sha256(dump_profile(profile))
                 or receipt.get("upstream_attested") is not True
+                or receipt.get("native_vendor_derivation") != self.derivation
                 or receipt.get("sha") != profile.sha or receipt.get("role") != profile.role):
             raise RuntimeRefusal("NATIVE_GATEWAY_RECEIPT_MISMATCH")
         consumer = self.recipe.get("executive_consumer")
@@ -1174,7 +1206,8 @@ def _prepare_hermes_dependencies(argv: list[str]) -> int:
             if native is None:
                 continue
             path = native["dependency_inventory"]["path"]
-            selection = (native["import_roots"], native["dependency_inventory"])
+            selection = (native["import_roots"], native["dependency_inventory"],
+                         native.get("vendor_derivation"))
             if path in selected and selected[path][0] != selection:
                 raise ReleaseManifestError("native dependency inventory selection conflicts")
             selected[path] = (selection, native)
@@ -1191,6 +1224,9 @@ def _prepare_hermes_dependencies(argv: list[str]) -> int:
             # complete documents now passed the same semantic/source boundary.
             from ops.executive_os.native_gateway_sources import prepare_inventory
             for _, native in selected.values():
+                if "vendor_derivation" in native:
+                    from ops.executive_os.native_gateway_sources import prepare_vendor_derivation
+                    prepare_vendor_derivation(owner, native, _linux_source_acl)
                 prepare_inventory(owner, native, _linux_source_acl)
         owner.check()
     finally:

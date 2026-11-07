@@ -114,7 +114,7 @@ def render_consumer_mcp_server(publication: Any) -> dict[str, Any]:
     mcp = publication.mcp
     if mcp.server != CONSUMER_MCP_SERVER:
         raise RuntimeRefusal("NATIVE_CONSUMER_MCP_SERVER_INVALID")
-    return {
+    server = {
         "url": mcp.url,
         "enabled": True,
         "auth": "oauth",
@@ -129,6 +129,11 @@ def render_consumer_mcp_server(publication: Any) -> dict[str, Any]:
             "prompts": False,
         },
     }
+    if mcp._workspace_principal_scope is not None:
+        from integrations.hermes_harness.native_executive_consumer import workspace_oauth_descriptor
+        server["oauth"]["workspace"] = workspace_oauth_descriptor(mcp._workspace_principal_scope)
+        server.update(transport="streamable-http", strict_redirect_headers=True)
+    return server
 
 
 def render_consumer_plugin_config(publication: Any) -> dict[str, Any]:

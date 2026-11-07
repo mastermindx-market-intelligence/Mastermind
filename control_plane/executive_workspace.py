@@ -51,6 +51,25 @@ class WorkspaceError(RuntimeError):
     """A job workspace could not be prepared without sharing authority."""
 
 
+class LinkedWorkspaceReleaseEffectUnknown(WorkspaceError):
+    """The original native release may have changed files or custody metadata."""
+
+    def __init__(self, message: str, *, phase: str, operation_id: str | None,
+                 workspace_path: str, head_sha: str, branch: str,
+                 lock_restoration: str):
+        super().__init__(message)
+        self.details = {
+            "code": "LINKED_WORKSPACE_RELEASE_EFFECT_UNKNOWN",
+            "release_phase": phase,
+            "operation_id": operation_id,
+            "workspace_path": workspace_path,
+            "head_sha": head_sha,
+            "branch": branch,
+            "lock_restoration": lock_restoration,
+            "retry_authorized": False,
+        }
+
+
 class GitHandoffError(WorkspaceError):
     """Shared Git metadata is not a valid control-to-worker handoff."""
 
@@ -1967,8 +1986,9 @@ def _registered_linked_worktree_status_record(
     `git worktree list --porcelain` may exceed the publisher's bounded precheck.
     Git's own .git -> common/worktrees/<id> -> gitdir reciprocal registration and
     the exact managed lock are sufficient for this *read-only* status lookup.
-    The regular release, removal and acquisition paths keep the existing fleet
-    enumeration and safety rules. No worktree registry is created here.
+    This read-only lookup is not release authority. Release independently binds
+    the original target, native selection, cleanliness and recoverability;
+    acquisition retains its existing enumeration. No registry is created here.
     """
     try:
         dot_git = destination / ".git"
@@ -2448,6 +2468,238 @@ def inspect_linked_worktree(
     )
 
 
+def _release_file_fingerprint(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _release_metadata_file(
+    path: Path, *, limit: int = 4096, allow_absent: bool = False,
+) -> tuple[bytes, tuple[int, ...]] | None:
+    """Bound one stable regular-file read; absence never follows a symlink."""
+    descriptor = -1
+    try:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                                 | getattr(os, "O_NONBLOCK", 0))
+        except FileNotFoundError:
+            if not allow_absent:
+                raise
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            raise WorkspaceError("release metadata is present but cannot be opened")
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise WorkspaceError("release metadata is not a bounded regular file")
+        raw = os.read(descriptor, limit + 1)
+        after = os.fstat(descriptor)
+        fingerprint = _release_file_fingerprint(before)
+        if (len(raw) != before.st_size or len(raw) > limit
+                or _release_file_fingerprint(after) != fingerprint
+                or _release_file_fingerprint(path.lstat()) != fingerprint):
+            raise WorkspaceError("release metadata changed during observation")
+        return raw, fingerprint
+    except (OSError, ValueError) as exc:
+        raise WorkspaceError(f"release metadata is unavailable: {path.name}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _release_directory_identity(path: Path) -> tuple[int, int]:
+    try:
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise WorkspaceError("release directory is not an original real directory")
+        return info.st_dev, info.st_ino
+    except OSError as exc:
+        raise WorkspaceError("release directory identity is unavailable") from exc
+
+
+def _release_native_suffix_matches(path: str, destination: str) -> bool:
+    # Git first selects a unique suffix, then falls back to canonical paths.
+    # Conservatively include case-insensitive matches on every platform. Keep
+    # raw spelling: normalizing // or dot components changes Git's predicate.
+    path, destination = path.casefold(), destination.casefold()
+    start = len(path) - len(destination)
+    return (start >= 0 and path.endswith(destination)
+            and (start == 0 or path[start - 1] == "/"))
+
+
+def _release_unique_native_selection(common: Path, destination: Path, admin: Path) -> None:
+    """Qualify Git's target in its existing registry without peer HEAD/prune reads."""
+    registry = common / "worktrees"
+    before = _release_directory_identity(registry)
+    try:
+        with os.scandir(registry) as entries:
+            names = []
+            for entry in entries:
+                names.append(entry.name)
+                if len(names) > 32768:
+                    raise WorkspaceError("release registration census exceeds its bound")
+        names.sort()
+        records = []
+        main = str(common)
+        if main.endswith("/.git"):
+            main = main[:-5]
+        matches = [None] if _release_native_suffix_matches(main, str(destination)) else []
+        for name in names:
+            peer = registry / name
+            identity = _release_directory_identity(peer)
+            observed = _release_metadata_file(peer / "gitdir", allow_absent=True)
+            records.append((peer, identity, observed))
+            if observed is None or not observed[0]:
+                continue  # Git omits a provably missing or empty gitdir.
+            raw = observed[0].decode("utf-8").rstrip(" \t\r\n\v\f")
+            if (not raw.startswith("/") or any(ord(c) < 32 for c in raw)
+                    or "\x7f" in raw):
+                raise WorkspaceError("release registration has an unqualified native path")
+            native = raw[:-5] if raw.endswith("/.git") else raw
+            if _release_native_suffix_matches(native, str(destination)):
+                matches.append(peer)
+        # Detect additions, replacements and in-place record edits during the
+        # census. A later fresh census may admit unrelated registrations; this
+        # observation does not claim a global lock or another registry.
+        with os.scandir(registry) as entries:
+            after_names = sorted(entry.name for entry in entries)
+        if after_names != names or _release_directory_identity(registry) != before:
+            raise WorkspaceError("release registration membership changed")
+        for peer, identity, observed in records:
+            if _release_directory_identity(peer) != identity:
+                raise WorkspaceError("release administrative directory changed")
+            try:
+                current = _release_file_fingerprint((peer / "gitdir").lstat())
+            except FileNotFoundError:
+                current = None
+            if current != (None if observed is None else observed[1]):
+                raise WorkspaceError("release registration record changed")
+        if matches != [admin]:
+            raise WorkspaceError("release target is not Git's unique original registration")
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise WorkspaceError("release registration census is unavailable") from exc
+
+
+@dataclasses.dataclass(frozen=True)
+class _LinkedReleaseIdentity:
+    workspace: str
+    directory: tuple[int, int]
+    common: str
+    common_directory: tuple[int, int]
+    admin: str
+    admin_directory: tuple[int, int]
+    gitfile: tuple[bytes, tuple[int, ...]]
+    backref: tuple[bytes, tuple[int, ...]]
+    commondir: tuple[bytes, tuple[int, ...]]
+    head_file: tuple[bytes, tuple[int, ...]]
+    head: str
+    branch: str
+    lock: tuple[bytes, tuple[int, ...]] | None = dataclasses.field(compare=False)
+
+
+def _linked_release_identity(
+    source: Path, destination: Path, *, env: dict[str, str], allow_unlocked: bool = False,
+) -> _LinkedReleaseIdentity:
+    """Capture one full original release target, not a read-only status permit."""
+    try:
+        directory = _release_directory_identity(destination)
+        gitfile = _release_metadata_file(destination / ".git")
+        pointer = gitfile[0].decode("utf-8")
+        if (not pointer.startswith("gitdir: ") or pointer.count("\n") > 1
+                or any(c in pointer for c in "\r\x00")):
+            raise WorkspaceError("release target has an invalid Git pointer")
+        value = pointer[len("gitdir: "):].strip()
+        if not value:
+            raise WorkspaceError("release target has an empty Git pointer")
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            raise WorkspaceError("release administrative pointer is a symlink")
+        common = _common_git_dir(source, env=env)
+        common_identity = _release_directory_identity(common)
+        registry = common / "worktrees"
+        _release_directory_identity(registry)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != registry:
+            raise WorkspaceError("release target is outside its original Git registry")
+        admin_identity = _release_directory_identity(admin)
+        backref = _release_metadata_file(admin / "gitdir")
+        # Exact spelling guarantees the native unique-suffix branch wins; do
+        # not infer authority from a peer's canonical-path fallback.
+        if backref[0].decode("utf-8").rstrip("\n") != str(destination / ".git"):
+            raise WorkspaceError("release target lacks its exact reciprocal registration")
+        commondir = _release_metadata_file(admin / "commondir")
+        head_file = _release_metadata_file(admin / "HEAD")
+        lock = _release_metadata_file(admin / "locked", limit=2048, allow_absent=True)
+        if not allow_unlocked:
+            reason = "" if lock is None else lock[0].decode("utf-8").strip()
+            if (not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")
+                    or "\n" in reason or "\r" in reason):
+                raise WorkspaceError("release target lacks its original managed custody lock")
+        if _common_git_dir(destination, env=env) != common:
+            raise WorkspaceError("release target Git common directory changed")
+        head = _run(["git", "-C", str(destination), "rev-parse", "HEAD"], cwd=None, env=env)
+        branch = _run(["git", "-C", str(destination), "branch", "--show-current"], cwd=None, env=env)
+        if head != _run(["git", "-C", str(destination), "rev-parse", "HEAD"], cwd=None, env=env):
+            raise WorkspaceError("release target HEAD changed during observation")
+        _release_unique_native_selection(common, destination, admin)
+        for path, observed in [(destination / ".git", gitfile), (admin / "gitdir", backref),
+                               (admin / "commondir", commondir), (admin / "HEAD", head_file)]:
+            if _release_file_fingerprint(path.lstat()) != observed[1]:
+                raise WorkspaceError("release target registration changed during observation")
+        if (_release_directory_identity(destination) != directory
+                or _release_directory_identity(common) != common_identity
+                or _release_directory_identity(admin) != admin_identity):
+            raise WorkspaceError("release target directory changed during observation")
+        return _LinkedReleaseIdentity(str(destination), directory, str(common), common_identity,
+            str(admin), admin_identity, gitfile, backref, commondir, head_file, head, branch, lock)
+    except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+        if isinstance(exc, WorkspaceError):
+            raise
+        raise WorkspaceError("release target identity is unavailable") from exc
+
+
+def _same_linked_release_target(
+    original: _LinkedReleaseIdentity, current: _LinkedReleaseIdentity, *, unlocked: bool,
+) -> None:
+    if current != original:
+        raise WorkspaceError("release target identity changed; preserve the original workspace")
+    if (unlocked and current.lock is not None) or (not unlocked and current.lock != original.lock):
+        raise WorkspaceError("release custody lock changed")
+
+
+def _restore_original_release_lock(
+    source: Path, destination: Path, original: _LinkedReleaseIdentity, *, env: dict[str, str],
+) -> str:
+    """Never put the captured lock onto a replacement or newly owned target."""
+    try:
+        current = _linked_release_identity(source, destination, env=env, allow_unlocked=True)
+        if current != original:
+            return "TARGET_CHANGED_NOT_TOUCHED"
+        if current.lock is not None:
+            return "PRESENT_LOCK_NOT_CHANGED"
+        reason = original.lock[0].decode("utf-8").strip()
+        _run(["git", "-C", str(source), "worktree", "lock", "--reason", reason, str(destination)],
+             cwd=None, env=env)
+        restored = _linked_release_identity(source, destination, env=env, allow_unlocked=True)
+        if (restored != original or restored.lock is None
+                or restored.lock[0].decode("utf-8").strip() != reason):
+            return "RESTORATION_UNVERIFIED"
+        return "ORIGINAL_LOCK_RESTORED"
+    except BaseException:
+        return "ORIGINAL_TARGET_OR_RESTORATION_UNVERIFIED"
+
+
+def _release_path_absent(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    return False
+
+
 def release_linked_worktree(
     source_repository: str | Path,
     workspace_root: str | Path,
@@ -2457,67 +2709,70 @@ def release_linked_worktree(
     published_branch: str | None = None,
     published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
-    """Remove a managed linked worktree only after fail-closed recoverability checks."""
+    """Release one original, recoverable target through canonical non-force Git.
 
-    inspection = inspect_linked_worktree(
-        source_repository,
-        workspace_root,
-        workspace_path,
-        expected_operation_id=expected_operation_id,
-        published_branch=published_branch,
-        published_pull_request=published_pull_request,
-    )
-    if inspection.state != "RELEASABLE":
-        return inspection
-
+    Caller-owned completion/live-writer fences still apply. Target observations
+    do not create atomic exclusion, and native Git may still enumerate worktrees.
+    """
     source = Path(source_repository).expanduser().resolve()
     root = Path(workspace_root).expanduser().resolve()
     destination = Path(workspace_path).expanduser().resolve()
-    env = _git_env(root / ".control-home")
-    record = _worktree_record(source, destination, env=env)
-    if record is None:
-        raise WorkspaceError("workspace registration disappeared before release")
-    original_lock_reason = record.get("locked", "")
-    if not original_lock_reason.startswith(LINKED_WORKTREE_LOCK_PREFIX):
-        raise WorkspaceError("workspace custody lock disappeared before release")
-
-    _run(
-        ["git", "-C", str(source), "worktree", "unlock", str(destination)],
-        cwd=None,
-        env=env,
-    )
     try:
-        _run(
-            ["git", "-C", str(source), "worktree", "remove", str(destination)],
-            cwd=None,
-            env=env,
-        )
-    except BaseException:
-        # Preserve the exact original custody identity if removal did not
-        # complete. Never synthesize a replacement operation/base on failure.
-        if destination.exists():
-            _run_status(
-                [
-                    "git",
-                    "-C",
-                    str(source),
-                    "worktree",
-                    "lock",
-                    "--reason",
-                    original_lock_reason,
-                    str(destination),
-                ],
-                cwd=None,
-                env=env,
-            )
-        raise
-
-    return dataclasses.replace(
-        inspection,
-        state="REMOVED",
-        removed=True,
-        reason="clean recoverable linked worktree removed; branch/ref history retained",
+        destination.relative_to(root)
+    except ValueError as exc:
+        raise WorkspaceError("workspace is outside the managed linked-worktree root") from exc
+    if destination == root:
+        raise WorkspaceError("managed workspace may not be the workspace root itself")
+    env = _git_env(root / ".control-home")
+    original = _linked_release_identity(source, destination, env=env)
+    inspection = inspect_linked_worktree(
+        source, root, destination, expected_operation_id=expected_operation_id,
+        status_direct_registration=True,
+        published_branch=published_branch, published_pull_request=published_pull_request,
     )
+    if inspection.state != "RELEASABLE":
+        return inspection
+    if inspection.head_sha != original.head or inspection.branch != original.branch:
+        raise WorkspaceError("release target changed during recoverability inspection")
+    cleanliness = observe_launch_cleanliness(
+        lambda arguments: _run_bytes(["git", *arguments], cwd=destination, env=git_observation_env(env))
+    )
+    if cleanliness.dirty:
+        return dataclasses.replace(inspection, state="PRESERVED_DIRTY", dirty=True,
+            recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
+            reason="new tracked or untracked changes appeared before release; no files removed")
+    _same_linked_release_target(original,
+        _linked_release_identity(source, destination, env=env), unlocked=False)
+    phase = "unlock"
+    try:
+        # Uncertainty starts BEFORE invoking the first mutating native command.
+        _run(["git", "-C", str(source), "worktree", "unlock", str(destination)], cwd=None, env=env)
+        phase = "verify_original_unlocked_target"
+        current = _linked_release_identity(source, destination, env=env, allow_unlocked=True)
+        _same_linked_release_target(original, current, unlocked=True)
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: _run_bytes(["git", *arguments], cwd=destination, env=git_observation_env(env))
+        )
+        if cleanliness.dirty:
+            raise WorkspaceError("workspace changed after unlock; removal was not attempted")
+        _same_linked_release_target(original,
+            _linked_release_identity(source, destination, env=env, allow_unlocked=True), unlocked=True)
+        phase = "remove"
+        _run(["git", "-C", str(source), "worktree", "remove", str(destination)], cwd=None, env=env)
+        phase = "verify_removal"
+        if not _release_path_absent(destination) or not _release_path_absent(Path(original.admin)):
+            raise WorkspaceError("native removal did not prove the original target fully absent")
+    except BaseException as exc:
+        restoration = _restore_original_release_lock(source, destination, original, env=env)
+        reason = original.lock[0].decode("utf-8").strip()
+        raise LinkedWorkspaceReleaseEffectUnknown(
+            f"original release requires reconciliation after {phase}: {exc}",
+            phase=phase, operation_id=expected_operation_id or _lock_value(reason, "operation"),
+            workspace_path=str(destination), head_sha=original.head, branch=original.branch,
+            lock_restoration=restoration,
+        ) from exc
+    return dataclasses.replace(inspection, state="REMOVED", removed=True,
+        reason="clean recoverable linked worktree removed; branch/ref history retained")
 
 
 # This capability is local to the allocator's actual return. Persisted DTOs and

@@ -16,7 +16,7 @@ from pathlib import Path
 import threading
 import textwrap
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Callable, Optional
 
 import pytest
 
@@ -43,6 +43,9 @@ def definitions(monkeypatch, vendor, path, names, *, values=None, methods=None):
     item = MANIFEST["files"][path]
     data = (FIXTURES / item["fixture"]).read_bytes()
     assert hashlib.sha256(data).hexdigest() == item["sha256"]
+    if "blob" in item:
+        assert hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() == item["blob"]
+        assert len(data) == item["bytes"]
     target = vendor / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
@@ -110,6 +113,12 @@ def native(tmp_path, monkeypatch):
                 "sanitize_outbound_kwargs": lambda *args: calls.append("sanitize"),
                 "strip_images_for_rejecting_model": lambda *args: None,
                 "observe_request_tools": lambda *args: None})
+    tool_executor = definitions(monkeypatch, vendor, "agent/tool_executor.py",
+        {"_ToolCallRef", "_ManagedToolResult", "_dispatch_authorized_once", "_commit_tool_result",
+         "_run_agent_tool_execution_middleware", "_flush_session_db_after_tool_progress"},
+        values={"dataclass": dataclass, "Any": Any, "Callable": Callable, "Optional": Optional,
+                "BudgetConfig": object, "_ConcurrentToolAuthorizationGate": object,
+                "threading": threading, "json": json, "logging": logging, "logger": logging.getLogger(__name__)})
     authority_module = definitions(monkeypatch, vendor, "gateway/session_authority.py", {"SessionAuthority"},
         methods={"_handle", "_stamp_claim", "adopt_agent", "check_approval_generation", "_execute_claimed"},
         values={"contextlib": contextlib, "asyncio": asyncio, "RuntimeStoreError": NativeStoreError,
@@ -190,7 +199,8 @@ def native(tmp_path, monkeypatch):
         return requests.build_api_request(agent, **args)
     return SimpleNamespace(vendor=vendor, home=home, calls=calls, publications=publications, requests=requests, results=results,
                            terminal=terminal, ingress=ingress, finite=finite, authority=authority, runner=runner,
-                           launch=launch, binding=binding, rows=rows, claim=claim, build=build, lifecycle=lifecycle)
+                           launch=launch, binding=binding, rows=rows, claim=claim, build=build, lifecycle=lifecycle,
+                           tool_executor=tool_executor)
 
 
 def run_admission(native, *, behavior=None, text="question"):
@@ -210,7 +220,7 @@ def run_admission(native, *, behavior=None, text="question"):
     return ref, row, agent, response
 
 
-def test_actual_ingress_assembly_and_terminal_storage_join(native):
+def test_actual_ingress_assembly_and_terminal_storage_join(native, monkeypatch):
     ref, row, agent, response = run_admission(native)
     assert response == "PRIVATE_OUTPUT"
     outer = native.authority.pending_results[row["admission_id"]]
@@ -235,6 +245,34 @@ def test_actual_ingress_assembly_and_terminal_storage_join(native):
     metadata = json.dumps(doc)
     assert all(value not in metadata for value in ("SECRET_HEADER", "PRIVATE_OUTPUT", "hook system", "middleware instruction", "requested-label"))
     assert observation._current.get() is None
+    # Continue the actual producer/redaction/codec output through the original
+    # authenticated-owner reader. Only its storage edge is a fixture here.
+    from integrations.hermes_runtime import native_session_control as control
+    retained = dict(row, principal_id="uid:994", target_session_id=ref.session_id,
+        request_id="original-submission", intent="queue", seq=1, status="terminal",
+        outcome=outcome, owner_epoch=doc["scope"]["authority_epoch"])
+    reads, closes = [], []
+    db = SimpleNamespace(close=lambda: closes.append(True))
+    monkeypatch.setattr(control, "_db", lambda home: db)
+    module(monkeypatch, "hermes_state_runtime", find_session_admission=lambda *a, **kw: retained,
+           get_session_admission=lambda *a, **kw: retained)
+    def original(_db, admission_id):
+        assert _db is db
+        reads.append(admission_id)
+        return restored
+    monkeypatch.setattr(native.results, "admission_result", original, raising=False)
+    # A restart changes today's descriptor. Original evidence keeps its own
+    # instance/epoch and joins the stored historical receipt, not this descriptor.
+    native.runner.session_runtime_descriptor.update(instance_id="successor-instance", authority_epoch=99)
+    result = control._read_original(native.home, {
+        "operation": "read_original", "profile_id": str(native.home), "session_id": ref.session_id,
+        "submission_id": "original-submission", "input_sha256": control.input_digest(row["payload"]["text"]),
+        "admission_id": row["admission_id"]}, "uid:994")
+    assert result["request_observation"] == doc
+    assert result["answer"] == "[redacted]" and result["successful"] is True
+    assert result["terminal_metadata"]["output"]["sha256"] == hashlib.sha256(b"[redacted]").hexdigest()
+    assert reads == [row["admission_id"]] and closes == [True]
+    assert restored[observation.RESULT_KEY] == doc
 
 
 @pytest.mark.parametrize("outcome", ["failed", "interrupted"])
@@ -384,6 +422,25 @@ def test_content_depth_cycle_and_work_bounds(monkeypatch):
     with pytest.raises(observation._ObservationLimit): observation._content_digest({"messages": {str(i): i for i in range(50)}})
     monkeypatch.setattr(observation, "MAX_CONTENT_BYTES", 16)
     with pytest.raises(observation._ObservationLimit): observation._content_digest({"messages": "é" * 12})
+
+
+def test_shared_prompt_digest_preserves_historical_value_budget(monkeypatch):
+    # This helper is also used by the accepted native Agent OS prompt receipt.
+    # Two nested lists plus their leaf have exactly three value nodes, depth 2.
+    value = {"messages": [["kept"]]}
+    monkeypatch.setattr(observation, "MAX_DEPTH", 2)
+    monkeypatch.setattr(observation, "MAX_NODES", 3)
+    raw = b'{"messages":[["kept"]]}'
+    got = observation._content_digest(value)
+    assert got["content_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert got["content_bytes"] == len(raw)
+    # The tools digest deliberately includes its supplied object's root/keys.
+    assert observation._tools_digest({"tools": value}) == {"status": "unavailable", "reason": "content_limit"}
+    monkeypatch.setattr(observation, "MAX_NODES", 2)
+    with pytest.raises(observation._ObservationLimit): observation._content_digest(value)
+    monkeypatch.setattr(observation, "MAX_NODES", 3)
+    monkeypatch.setattr(observation, "MAX_DEPTH", 1)
+    with pytest.raises(observation._ObservationLimit): observation._content_digest(value)
 
 
 def test_source_mutation_or_duplicate_install_refuses_before_rebinding(native):
