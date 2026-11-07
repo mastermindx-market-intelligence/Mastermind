@@ -2400,3 +2400,23 @@ The credential owner may compare already-selected private values inside its exis
 All core import, environment, credential, process, network, dependency, workflow and forbidden-path restrictions remain intact. No new credential store/auth service/client/retry/publication registry, runtime grant, provider inference, deployment, fleet activation or bypass of originalC26/Fabric/socket denials is authorized. Tests use only explicit synthetic credentials and in-process SDK transports. Historical schemas must stay closed, and the shared observation budget and current native-invalid validity/effect/cleanup gates remain controlling.
 
 PR2234's original protected release request is not to be replaced or repeated. This follow-up depends on its actual accepted source; pending parent acceptance is not a grant to bypass integrated CI. No new auth source postimage or test result exists at this authorization checkpoint. **MISSION_COMPLETE=false.**
+
+## 55. Principal authorization and repair: EVAL archive contract — 2026-11-07
+
+PR2234 at de966803faff6033a5d0e6b164843ab22edabe42 remains the single original EVAL source carrier. Hosted CI42420547116 failed only tests/test_linux_secondary_worker_enrollment.py::test_release_archive_scope_excludes_vendor_and_unneeded_surfaces in shard0/job128548903530. The actual integrated test commit was 9c5de8c333f4e0ac71b429c324b1e3dc477eccb7, combining de966 with protected efab46368e13e9553e489cb61a58ca28055df175. All five Hermes workflows passed. A fresh native readback retained the original auto-merge request enabled2026-11-07T22:28:47Z, headde966, OPEN/Ready, mergeQueueEntry=null, no merge. This readback is reconciliation, not another request; the failed required gate still binds.
+
+### Explicit finite contextual amendment before repair
+
+Under the current Chairman Hermes implementation commission, the assigned integration principal authorizes **tests/test_linux_secondary_worker_enrollment.py** as an additional exact contextual connection for the existing PR2234 operation/carrier **sol/hermes-native-eval-inputs-20261107-c3**. Add this exact path to NATIVE_EVAL_INTEGRATION_PATHS, excluded from PROGRAM_SURFACE_PATHS, and cite this amendment. Preserve every core import, environment, credential, process, network, dependency, workflow and forbidden-path restriction. This is source-test repair, not enrollment, installation, live host access or a new release operation.
+
+The existing enrolled archive intentionally selects six exact integrations/hermes_omh files, including vendor/__init__.py and vendor/dag_core.py. Eager package/adapter imports need the existing pure DAG helper. The selected initializer already carries its complete MIT notice. The old all("vendor" not in item ...) assertion is a stale lexical proxy, not proof that the archive now includes the upstream Hermes vendor tree.
+
+The authorized repair must replace that proxy with the exact allowed vendor-path set, retain the broad-package exclusions, and extend the **existing real Git archive/extracted isolated-import proof** to require the six selected OMH files and exclude a tracked neighbouring unreviewed vendor file. Preserve production RELEASE_PATHS and archive behavior. No production scope expansion is authorized or needed.
+
+The exact-context fence must still reject adjacent unlisted tests and treat unrelated shared-owner deltas as outside EVAL ownership. Qualify the actual archive and fence tests, then publish by the existing GitHub API tree/commit/CAS carrier and reconcile the same protected release request. No direct/self/admin merge, failure override, queue duplication or administrative-access retry is authorized.
+
+### Authentication source frontier
+
+The separate §54 authentication source remains uncommitted in its isolated validation checkout. Initial synthetic qualification exposed and corrected a recursive admission-lock acquisition in the observer; the exact stalled test session was terminated and reconciled before another run. The next run observed the original direct credential, SDK client and request mechanism, while the EVAL publisher correctly withheld a configured READ_ONLY class from an API_KEY witness. The positive fixture must select the matching public class before input freezing; the mismatched class must remain a negative case. These are development findings, not accepted tests or live authentication proof.
+
+Original installed C26 denial, paid Fabric refusal, socket-test denials, active primary APPLICATION owner and genuine security/release holds remain unchanged. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
