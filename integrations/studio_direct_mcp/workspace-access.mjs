@@ -200,10 +200,15 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
     return { status: 'PRESENT', operation_id: args.operation_id, repository: args.repository, receipt };
   }
   async function publication(method, args) {
-    const keys = ['status', 'commissionStatus'].includes(method) ? ['operation_id', 'repository'] : method === 'commit'
-      ? ['operation_id', 'repository', 'expected_head_sha', 'message', 'merge'] : method === 'commitCommission'
-        ? ['operation_id', 'repository', 'expected_head_sha', 'expected_content_sha256']
-        : ['operation_id', 'repository', 'expected_head_sha'];
+    // Exact closed key sets. These mirror the incumbent publisher's own
+    // admitted surface: the router adds only `repository`, and the publisher
+    // keeps ownership of recovery shape, hex, head, ancestry and effect
+    // classification. No adapter-side recovery interpretation lives here.
+    const keys = method === 'status' ? ['operation_id', 'repository', 'action_ref']
+      : method === 'commissionStatus' ? ['operation_id', 'repository']
+      : method === 'commit' ? ['operation_id', 'repository', 'expected_head_sha', 'message', 'merge']
+      : method === 'commitCommission' ? ['operation_id', 'repository', 'expected_head_sha', 'expected_content_sha256']
+      : ['operation_id', 'repository', 'expected_head_sha', 'recovery'];
     closed(args, keys);
     if (args.repository === undefined) return legacy[method](args);
     selectAlias(args.repository);
