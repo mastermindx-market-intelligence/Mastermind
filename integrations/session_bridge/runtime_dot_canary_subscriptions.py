@@ -265,8 +265,9 @@ class RuntimeCanarySubscriptionStore:
                 aggregate_type=_AGGREGATE,aggregate_id=record.subscription_id,
                 event_type=semantic["kind"],actor=_ACTOR,
                 command_id="reply-subscription:"+digest,
-                payload={**semantic, "schema": _SCHEMA, "envelope": envelope,
-                         "operation_digest": digest})
+                payload={"schema": _SCHEMA, "previous": expected_version,
+                         "record": metadata, "binding": binding,
+                         "envelope": envelope, "operation_digest": digest})
         return record
 
     async def remove(self, ident, *, owner_key, channel_id, callback_url_digest,
@@ -298,7 +299,8 @@ class RuntimeCanarySubscriptionStore:
                 aggregate_type=_AGGREGATE,aggregate_id=ident,
                 event_type=semantic["kind"],actor=_ACTOR,
                 command_id="reply-subscription:"+digest,
-                payload={**semantic,"schema":_SCHEMA,"envelope":None,
+                payload={"schema":_SCHEMA,"previous":expected_version,
+                         "record":None,"binding":binding,"envelope":None,
                          "operation_digest":digest})
 
     def delivery_view(self, ident, *, expected_version, owner_key):
