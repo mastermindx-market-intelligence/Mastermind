@@ -994,3 +994,13 @@ REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-file
     "sites": (),
     "utf8_sites": ((39, 18, 21, 'int', '501'), (52, 18, 21, 'int', '501'), (65, 18, 21, 'int', '501'), (78, 18, 21, 'int', '501'), (91, 18, 21, 'int', '501'), (104, 18, 21, 'int', '501'), (121, 18, 21, 'int', '501'), (134, 18, 21, 'int', '501'), (147, 18, 21, 'int', '501'), (160, 18, 21, 'int', '501'), (173, 18, 21, 'int', '501'), (186, 18, 21, 'int', '501'), (199, 18, 21, 'int', '501'), (212, 18, 21, 'int', '501'), (229, 18, 21, 'int', '501'), (242, 18, 21, 'int', '501'), (263, 18, 21, 'int', '501'), (276, 18, 21, 'int', '501'), (289, 18, 21, 'int', '501'), (302, 18, 21, 'int', '501'), (319, 18, 21, 'int', '501')),
 }
+
+# The unchanged optional observation owner limits a regular binding file to
+# 512 KiB. This sole multiplication operand is bytes, not a UID/GID, peer,
+# socket, principal or port. Exact whole-source and token coordinates only;
+# any changed path, operand, custody logic or other byte restores D8 scrutiny.
+# This test evidence grants no profile access, installation or runtime authority.
+REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
+    "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
+    "sites": ((252, 46, 49, "int", "512"),),
+}

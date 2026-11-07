@@ -8,7 +8,17 @@ Fully connect Hermes primary inference, native workers, Capacity Fabric routing/
 
 Compatible protected law pin: de6966ce1524c01ab6ac06af5461370aa79f3994. Operation: hermes-native-worker-binding-20261107-c2. Branch: sol/web-hermes-native-worker-binding-20261107-c2. Root direct implementation remains under the earlier recorded paid-Fabric refusal; the native child supplied principal judgment only.
 
-## Current composition
+## Protected source join
+
+The current candidate extends published a3d4da4d79a5a0e7fe4a51d938a132f74f07c574 with protected ad2484d2330a865f604c3c98abd20d20189cba29 as real merge parents. Nineteen protected paths are preserved. The only conflict is an appended finite review record; both exact records remain. All governing scopes are unchanged at the compatible pin.
+
+The two automatic merges have disjoint changed functions: the Fabric tool wrappers and attended configuration parser remain exact to their owner; protected evidence readers and guarded web-observation service construction remain exact to protected source. All Hermes package, source projection, worker/backend and native patch bytes remain identical to a3d4.
+
+Receipt: attended-protected-source-join-20261107.json. The optional local observation suite did not reach any tests because the two available interpreters lack parts of its dependency closure. Environment reconstruction stopped; configured repository CI owns that ordinary regression. No passing result is claimed from those attempts.
+
+Next: commit this exact union, run actual committed D8, publish/read back and return the successor through the existing source thread. Required hosted CI, source absorption, active provider-preserving/latency followthrough and live acceptance remain open.
+
+## Qualified Hermes and Macro composition
 
 - Actual merge parents to retain: owned 5f05b4ea24ff62e49114ca6623853e0c56e7ce6e and original 7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f.
 - The two historical test conflicts are equivalent fixes. Retain the exact owned postimages, which also enforce the whole manifest, exact three-file inverse, input immutability and current/historical guard separation. All 13 targeted controls passed on the composed native source.
