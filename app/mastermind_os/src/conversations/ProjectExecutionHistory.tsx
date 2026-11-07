@@ -43,7 +43,7 @@ export function ProjectExecutionHistory(props:ProjectExecutionHistoryProps){
     if(focus.current==='list'&&!selected){if(opener.current?.isConnected)opener.current.focus();else heading.current?.focus();focus.current=null;}
   },[selected,visible]);
   function back(){cancel();selectedRef.current=null;setSelected(null);setNotice(null);setPhase('ready');focus.current='list';}
-  useEffect(()=>{if(!selected)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();back();}};
+  useLayoutEffect(()=>{if(!selected)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();back();}};
     document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape);},[selected]);
   async function read(){
     if(busy.current)return;
