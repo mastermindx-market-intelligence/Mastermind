@@ -9,9 +9,9 @@ For capabilities already solved reliably in the broader ecosystem, **look for a 
 1. **Inspect the incumbent first.** Find the existing Mastermind/Macro/Terminal/Fabric/Hermes owner, contracts, libraries and in-flight work. Prefer extending it to creating a second control plane, store, queue, retry mechanism, tool registry, agent lifecycle or credential path.
 2. **Do a bounded donor scan when a new component is warranted.** Check relevant open-source packages, templates, maintained reference implementations, upstream frameworks and supported APIs. Use primary project docs, exact versions and source repos. Search effort is proportional to the decision; a routine fix does not demand a procurement report.
 3. **Choose the smallest sound path:** use the existing component unchanged; add an adapter around a proven library; compose a few narrow modules; extend/fork selectively when justified; **write custom** only for genuine differentiation, missing fit, unacceptable risk or a simpler overall solution. Avoid lifting an entire donor architecture when one utility suffices.
-4. **Evaluate real adoption cost, not GitHub stars.** Confirm feature fit, release/maintainer health, support and security posture, dependency burden, license/commercial compatibility, data/privacy exposure, runtime/OS integration, latency, operational cost, upgrade friction, testability and reversibility. For consequential selections, compare the leading viable options and state the choice succinctly in the existing design/PR/task record.
-5. **Integrate through incumbent owners.** Pin package versions or donor commit and retain required notices; use supported upstream distribution where feasible. Build a thin adapter preserving stable Mastermind interfaces, exact owner/custody boundaries and security properties. Avoid vendor lock-in when an affordable interface boundary can preserve choice.
-6. **Prove the consumer.** Run focused tests, actual compatibility/integration paths, security/licensing checks where relevant, performance checks where claimed and production/user acceptance when owed. Donor quality or a green upstream CI does not prove the Mastermind integration. Record actual evidence and rollback/update approach.
+4. **Evaluate real adoption cost, not GitHub stars.** Check real feature fit, maintainer activity, dependency footprint, data exposure, runtime/OS integration, latency, operational cost, upgrade friction, testability and reversibility. Make the choice proportionate to the implementation, not a separate audit. For consequential selections, compare the leading viable options and state the choice succinctly in the existing design/PR/task record.
+5. **Integrate through incumbent owners.** Pin package versions or donor commits and use supported upstream distributions where feasible. Build a thin adapter preserving stable Mastermind interfaces, exact owner/custody boundaries and security properties. Avoid vendor lock-in when an affordable interface boundary can preserve choice.
+6. **Prove the consumer.** Run focused tests, actual compatibility/integration paths, relevant safety checks when actually implicated, performance checks where claimed and production/user acceptance when owed. Donor quality or a green upstream CI does not prove the Mastermind integration. Record actual evidence and rollback/update approach.
 
 **Fast-path rule:** When an existing compatible approved component is obvious, use it and proceed. When a credible donor is unsuitable, record the decisive reason briefly and build. Do not create an exhaustive marketplace survey, mandatory new sign-off, or per-task reuse form. Do not sacrifice the delivery critical path to research theater.
 
@@ -25,12 +25,11 @@ For capabilities already solved reliably in the broader ecosystem, **look for a 
 
 The distinction is about **differentiation and correctness**, not the label on the product. A quant engine may reuse numerical primitives; a visually polished chart can use an open-source renderer while Mastermind owns data semantics and decision overlays. A harness may reuse mature tools while Capacity Fabric/Executive OS retain canonical admission, routing, lifecycle, billing and continuity. Do not import a second competing owner for convenience.
 
-## Licensing, security and provenance
+## Existing operating boundaries — no new gate
 
-- Respect OSS licenses, attribution, copyleft obligations, redistribution rights and commercial-use restrictions. Preserve third-party NOTICE/LICENSE files when required and identify the donor/version. **Public code is not automatically open source.**
-- No copying of proprietary competitor code, branding, private datasets, unlicensed chart assets, or credentials. Recreate useful workflows with independent implementation and lawful sources.
-- Do not execute unknown installation scripts, install services, grant broad tokens, expose data to new vendors, or auto-enable remote agents just because an OSS project is promising. Use actual permissions, sandboxing and security review proportionate to risk.
-- Preserve protected source, custody, release, review, human-only controls and effect reconciliation. A donor does not authorize production deployment or live trading.
+- This engineering preference does **not** add procurement, legal review, extra approval, or component-admission steps. Work through normal package-management and source practices; proceed when a viable component fits.
+- Do not copy private competitor implementations, branding, confidential data or credentials. Implement comparable workflows independently when needed.
+- Keep existing tool permissions, source ownership, credential and deployment safeguards. A dependency choice does not grant extra access or prove a live consumer. Address concrete integration risks, not imagined blockers.
 
 ## Agent and instruction distribution
 

@@ -13,7 +13,7 @@ Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGH
 
 ## Reuse-first implementation
 
-For substantial commodity infrastructure, harnesses, charting and UI builds, apply `docs/REUSE_FIRST_ENGINEERING.md`: inspect incumbent capabilities and suitable maintained open source before bespoke work; choose thin adaptation/composition when qualified. Preserve safety, license, quality, data and system ownership. Proprietary models and edge hypotheses still need custom scientific validation. No new approval stage or scan for trivial repairs.
+For substantial commodity infrastructure, harnesses, charting and UI builds, apply `docs/REUSE_FIRST_ENGINEERING.md`: inspect incumbent capabilities and suitable maintained open source before bespoke work; choose thin adaptation/composition when qualified. Preserve established safety, quality, data and system ownership. Proprietary models and edge hypotheses still need custom scientific validation. No new approval stage or scan for trivial repairs.
 
 ## Deliver the assigned outcome
 

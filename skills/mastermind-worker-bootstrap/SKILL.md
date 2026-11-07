@@ -18,7 +18,7 @@ Do not duplicate all eight roles or copy the parent conversation into the worker
 
 For substantive engineering leaves, apply the accepted protected
 `docs/REUSE_FIRST_ENGINEERING.md` policy before inventing another commodity
-component: check the incumbent, maintained OSS and lawful adapter path. This is
+component: check the incumbent, maintained OSS and sound adapter path. This is
 not a new worker approval, tool grant or prerequisite survey for small repairs.
 
 Read [launch-input.md](references/launch-input.md) when preparing a task.

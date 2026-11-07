@@ -10,7 +10,7 @@ POLICY = "docs/REUSE_FIRST_ENGINEERING.md"
 class ReuseFirstInstructionsTest(unittest.TestCase):
     def test_policy_and_entrypoints(self):
         policy = (ROOT / POLICY).read_text(encoding="utf-8")
-        for term in ("maintained", "license", "incumbent", "quant", "consumer"):
+        for term in ("maintained", "adapter", "incumbent", "quant", "consumer"):
             self.assertIn(term, policy.lower())
         for path in (
             "AGENTS.md",

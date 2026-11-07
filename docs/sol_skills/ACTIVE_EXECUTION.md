@@ -102,7 +102,7 @@ Execute the next material action in the phase, however many necessary tool opera
 **Reuse-first implementation.** For substantial new components, apply same-pin
 `docs/REUSE_FIRST_ENGINEERING.md`: inspect existing owner/interfaces and qualified
 maintained OSS before rebuilding common machinery. Prefer thin adaptation/composition;
-protect unique quant/scientific logic, licensing, security and consumer proof.
+protect unique quant/scientific logic, existing security boundaries and consumer proof.
 Keep the search proportional and proceed without a new approval stage.
 
 ## Step 2A — Decide execution ownership before routine labor

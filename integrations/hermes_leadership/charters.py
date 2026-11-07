@@ -10,7 +10,7 @@ CHARTER_KEYS = ('meta_ceo', 'secretary', 'delivery', 'engineering', 'reliability
 # charter reader is actually consumed. Installed SOUL.md profiles are separate.
 _REUSE_FIRST_BUILD_GUIDANCE = (
     'For substantial engineering, inspect incumbent owners and maintained open-source '
-    'libraries before custom commodity builds; prefer adapters, preserve licensing, '
+    'libraries before custom commodity builds; prefer adapters, preserve existing '
     'security and unique quantitative logic (docs/REUSE_FIRST_ENGINEERING.md).'
 )
 
