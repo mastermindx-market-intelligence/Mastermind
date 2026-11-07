@@ -444,3 +444,46 @@ capability and confinement owners qualify it. Next: retain the exact broker
 materialization/adapter through native start uncertainty, supply the
 same-process original launcher and actual observer, then prove the signed-in
 packaged journey. Existing service and provider state were not modified.
+
+
+## C23 — original broker launch and send custody (2026-11-07)
+
+Parent source: `74536c850aef45e78b06996bb435727b759ceab1`.
+Evidence: `research/evidence/deepseek-native-broker-custody-20261107.json`.
+
+The original broker now publishes its exact adapter, operation, generation and
+materialization task in the admission critical section before provider dispatch.
+Start and begin waiters are shielded; a disconnected caller cannot release the
+physical task's custody. Native outer timeouts keep the original launch/begin
+future, even after the generic pending set removes a completed future.
+
+The existing materialization-status path can read a late successful original
+launch and publish/reconcile the same receipt target, retaining an already
+written receipt's timestamp. No replayed start/resume or replacement process is
+permitted. Receipt completion checks the same retained owner after each await
+and clears only that materialization's own uncertainty, never a later authority
+withdrawal.
+
+Current and pending begin identities and the accepted exact Stop identity remain
+on the same run across ACK and prior-turn observation. The synchronous final-write
+producer checks original loop, adapter, native connection, generation, Session
+and accepted operation, then current autonomy. Validation remains unarmed.
+Close binds its identity before draining original launch/begin work; terminal and
+shutdown UID sweeps cannot overtake an unsettled native call. The original final
+physical-write guards, native open/observation/reconciliation, terminal sweep and
+retirement owner functions are byte-identical to C22.
+
+Final focused tests: **124 passed**, including20 actual broker/native-adapter
+fixture cases. Broader compatibility: **473 passed**. Both receipts prove
+unchanged input hashes. The original close/observation test retains its no-prompt
+assertion and now schedules close concurrently because close drains the original
+begin. Earlier error-order/fixture failures and the interrupted test run are
+recorded; no production guard or assertion was weakened.
+
+This is source proof, not installed acceptance. C24 must recover a late original
+native claim after the inner claim timeout and reconcile the original Runtime
+begin receipt. A persisted EFFECT_UNKNOWN cannot simply become APPLIED: its
+original facts and strict turn-result/predecessor validators must be preserved.
+Installed native factory/source closure, actual account/restriction observations
+and the signed-in packaged end-to-end journey remain explicit production holds.
+No service was restarted, no live provider was called, and Hermes was not rerun.

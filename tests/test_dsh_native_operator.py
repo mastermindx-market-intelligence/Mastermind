@@ -402,9 +402,24 @@ def test_begin_observation_cannot_outlive_original_admission(tmp_path, monkeypat
             return f.observed
         f.adapter.binding = replace(f.adapter.binding, observe_attestation=observe)
         task = asyncio.create_task(begin(f)); await entered.wait()
+        closing = None
         if change == "close":
-            await asyncio.to_thread(f.adapter.graceful_stop, f.generation,
-                                    operation_id=OperationId("ohf-op:close-during-observation"))
+            close_bound = asyncio.Event()
+            original_close = f.adapter._close
+            async def close_and_mark(*args):
+                owned = asyncio.create_task(original_close(*args))
+                # Observe the retained close identity before releasing the
+                # original begin observation; close now drains that exact call.
+                while f.adapter.close_operation is None:
+                    await asyncio.sleep(0)
+                close_bound.set()
+                return await owned
+            monkeypatch.setattr(f.adapter, "_close", close_and_mark)
+            closing = asyncio.create_task(asyncio.to_thread(
+                f.adapter.graceful_stop, f.generation,
+                operation_id=OperationId("ohf-op:close-during-observation")))
+            await asyncio.wait_for(close_bound.wait(), 2)
+            assert not closing.done()
         elif change == "binding":
             f.adapter.binding = replace(f.adapter.binding, verify_source=lambda: None)
         elif change == "generation":
@@ -414,5 +429,7 @@ def test_begin_observation_cannot_outlive_original_admission(tmp_path, monkeypat
         release.set()
         with pytest.raises(NativeOperatorError):
             await task
+        if closing is not None:
+            await closing
         assert f.adapter.native.prompt_calls == 0 and f.adapter.current is None
     asyncio.run(exercise())

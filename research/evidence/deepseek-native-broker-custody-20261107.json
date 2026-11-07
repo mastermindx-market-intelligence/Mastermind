@@ -1,0 +1,317 @@
+{
+  "schema": "mastermind.deepseek_native_broker_custody_evidence/v1",
+  "created_at": "2026-11-07T19:55:07.755033+00:00",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "pr": 2177,
+  "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+  "source_parent_sha": "74536c850aef45e78b06996bb435727b759ceab1",
+  "procedure_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "source_sha256": {
+    "control_plane/executive_worker_broker.py": "a21b6d8ff9ed6d14fe3ae18ad1ee409a83464e718778ba59512ae4ce0692ad67",
+    "integrations/deepseek_harness/operator_adapter.py": "351d9a8c1d29387ae61473ac2b4bafa11d288b0b9aaa08b14bba13bee6a19e27",
+    "tests/test_dsh_native_operator.py": "177673a5f630426f7d07bb761ccae1e2467c943600e09384e94bece5154a5564",
+    "tests/test_dsh_native_broker.py": "d571ed2aa5faf572bc58a3f4946e966cc83e528f3e76ba504e25c088416ef7c3"
+  },
+  "tests": [
+    {
+      "passed": 124,
+      "scope": "Final original broker/native adapter lifecycle and final-write guards, including20 combined cases",
+      "path": "/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro7.json",
+      "sha256": "541e900958e702001a4efb0095250206f4dff226dfdd2e11749f08765137d364",
+      "receipt": {
+        "started": "2026-11-07T19:52:48.475075+00:00",
+        "finished": "2026-11-07T19:52:53.104944+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_broker.py",
+          "tests/test_executive_operator_broker.py",
+          "tests/test_operator_only_worker_broker.py",
+          "tests/test_dsh_native_operator.py",
+          "--junitxml=/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro7.xml"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/992dfa45d3eaee8381a1ad7dbb733c36087d47189f4ab94d0a4834f0f17a4cf3.json",
+          "sha256": "992dfa45d3eaee8381a1ad7dbb733c36087d47189f4ab94d0a4834f0f17a4cf3",
+          "entries": 1597
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/992dfa45d3eaee8381a1ad7dbb733c36087d47189f4ab94d0a4834f0f17a4cf3.json",
+          "sha256": "992dfa45d3eaee8381a1ad7dbb733c36087d47189f4ab94d0a4834f0f17a4cf3",
+          "entries": 1597
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "8f29d4e5d92fc37d7c4c80d5d318b434da2d615ff13032c2235cee77bf9a1c2c"
+      }
+    },
+    {
+      "passed": 473,
+      "scope": "Final native/broker/remote adapter, primary flat and native Claude worker/supervisor compatibility",
+      "path": "/private/tmp/mmx-dsh-c23-source-regression-20261107-pro1.json",
+      "sha256": "e4403570bfa5aee215a7bb8442e6d6e8e0fd1956c2b9b762896f9b2b14bbca13",
+      "receipt": {
+        "started": "2026-11-07T19:52:48.475106+00:00",
+        "finished": "2026-11-07T19:53:13.240682+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_broker.py",
+          "tests/test_executive_operator_broker.py",
+          "tests/test_operator_only_worker_broker.py",
+          "tests/test_dsh_native_operator.py",
+          "tests/test_executive_worker_broker.py",
+          "tests/test_remote_operator_harness_adapter.py",
+          "tests/test_native_claude_worker_factory.py",
+          "tests/test_native_claude_operator_supervisor.py",
+          "tests/test_executive_operator_supervisor.py",
+          "tests/test_dsh_native_protocol.py",
+          "tests/test_dsh_native_composition.py",
+          "--junitxml=/private/tmp/mmx-dsh-c23-source-regression-20261107-pro1.xml"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1e02713e6452e529e2c78fbb934bd000ce8a126d2e550d3a28cb62233b2d05d4.json",
+          "sha256": "1e02713e6452e529e2c78fbb934bd000ce8a126d2e550d3a28cb62233b2d05d4",
+          "entries": 1601
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/1e02713e6452e529e2c78fbb934bd000ce8a126d2e550d3a28cb62233b2d05d4.json",
+          "sha256": "1e02713e6452e529e2c78fbb934bd000ce8a126d2e550d3a28cb62233b2d05d4",
+          "entries": 1601
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "bf8aa15e0f84d5b4c81b82ed5c5e9cd3026c6516024a8af338721c0d6e96eac0"
+      }
+    },
+    {
+      "passed": 318,
+      "scope": "Carried parent committed-source full protected guard; C23 committed guard is recorded separately after commit",
+      "path": "/private/tmp/mmx-dsh-c22-protected-guard-20261107-pro1.json",
+      "sha256": "3e8659bbf0f55109630ac39133ca9a4668f136c4477b143c19f5cd5c610bddf6",
+      "receipt": {
+        "started": "2026-11-07T19:34:05.703360+00:00",
+        "finished": "2026-11-07T19:34:56.647276+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_ceo_submit_armed_composition.py",
+          "--junitxml=/private/tmp/mmx-dsh-c22-protected-guard-20261107-pro1.xml"
+        ],
+        "returncode": 0,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/c4c6d013e9a1674d7fd1ac149d86658271bc2f1255081ea9ce772a81a33d1d1d.json",
+          "sha256": "c4c6d013e9a1674d7fd1ac149d86658271bc2f1255081ea9ce772a81a33d1d1d",
+          "entries": 1595
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/c4c6d013e9a1674d7fd1ac149d86658271bc2f1255081ea9ce772a81a33d1d1d.json",
+          "sha256": "c4c6d013e9a1674d7fd1ac149d86658271bc2f1255081ea9ce772a81a33d1d1d",
+          "entries": 1595
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "9eb5e328092a0d9074bafb7ebf65d321d43bb768a9326e22bc026239009946c7"
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "note": "54 passed then interrupt error-order assertion: restored original active-operation classification before new admission check.",
+      "path": "/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro1.json",
+      "sha256": "8a1739d378bcc9463db63482fe99970bfaf49e6cdf16f908662f78f776b26416",
+      "receipt": {
+        "started": "2026-11-07T19:43:27.367555+00:00",
+        "finished": "2026-11-07T19:43:31.115941+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_executive_operator_broker.py",
+          "tests/test_operator_only_worker_broker.py",
+          "tests/test_dsh_native_operator.py",
+          "--junitxml=/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro1.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/0703ee6c478e54f211e39bc9f5609f4952cd6fbbe4c5cde3bec8682db7b5910f.json",
+          "sha256": "0703ee6c478e54f211e39bc9f5609f4952cd6fbbe4c5cde3bec8682db7b5910f",
+          "entries": 1596
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/0703ee6c478e54f211e39bc9f5609f4952cd6fbbe4c5cde3bec8682db7b5910f.json",
+          "sha256": "0703ee6c478e54f211e39bc9f5609f4952cd6fbbe4c5cde3bec8682db7b5910f",
+          "entries": 1596
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "eeba7304c0c1be003babab8f2eb9f9a6296410dadbd582ab3749e363974b654b"
+      }
+    },
+    {
+      "note": "New combined fixture initially nested workspace/run/provider roots; corrected fixture to existing disjoint-root policy, no production relaxation.",
+      "path": "/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro4.json",
+      "sha256": "20ff27589025e068e9e812e1d40367f43cb5409e2abac6c5bbd4717eaa43b074",
+      "receipt": {
+        "started": "2026-11-07T19:49:07.932762+00:00",
+        "finished": "2026-11-07T19:49:12.052940+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_broker.py",
+          "tests/test_executive_operator_broker.py",
+          "tests/test_operator_only_worker_broker.py",
+          "tests/test_dsh_native_operator.py",
+          "--junitxml=/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro4.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/9f382be545cb7d769d538e3fb7d201cd3d3ef5e6de74345a455092e43a576183.json",
+          "sha256": "9f382be545cb7d769d538e3fb7d201cd3d3ef5e6de74345a455092e43a576183",
+          "entries": 1597
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/9f382be545cb7d769d538e3fb7d201cd3d3ef5e6de74345a455092e43a576183.json",
+          "sha256": "9f382be545cb7d769d538e3fb7d201cd3d3ef5e6de74345a455092e43a576183",
+          "entries": 1597
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "eb77fb5fadb6c95859eb0ee120998a36c6fd1d5a3ecb119c86b4f094c1daa4eb"
+      }
+    },
+    {
+      "note": "New resume fixture initially used generation1; corrected to original required generation2 and same-request duplicate check, no production relaxation.",
+      "path": "/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro5.json",
+      "sha256": "78aa649087ed9aa42fc2df9110c3a622aa174e1329fe1b94079d6025512101ef",
+      "receipt": {
+        "started": "2026-11-07T19:49:50.064343+00:00",
+        "finished": "2026-11-07T19:49:55.033245+00:00",
+        "argv": [
+          "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+          "-m",
+          "pytest",
+          "-vv",
+          "-x",
+          "tests/test_dsh_native_broker.py",
+          "tests/test_executive_operator_broker.py",
+          "tests/test_operator_only_worker_broker.py",
+          "tests/test_dsh_native_operator.py",
+          "--junitxml=/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro5.xml"
+        ],
+        "returncode": 1,
+        "inputs_before": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/a1c34be1de1263d0f0d0ca523836375ee0b9e8eb14c23a3ae182d6bffde51024.json",
+          "sha256": "a1c34be1de1263d0f0d0ca523836375ee0b9e8eb14c23a3ae182d6bffde51024",
+          "entries": 1597
+        },
+        "inputs_after": {
+          "input_manifest": "research/evidence/deepseek-native-input-manifests/a1c34be1de1263d0f0d0ca523836375ee0b9e8eb14c23a3ae182d6bffde51024.json",
+          "sha256": "a1c34be1de1263d0f0d0ca523836375ee0b9e8eb14c23a3ae182d6bffde51024",
+          "entries": 1597
+        },
+        "inputs_unchanged": true,
+        "log_sha256": "ec76a453929eb4f08337ee3e33df489168d0ee0e8c37d1003e11e6d5640f2f39"
+      }
+    },
+    {
+      "path": "/private/tmp/mmx-dsh-c23-broker-custody-20261107-pro2.log",
+      "log_sha256": "38435992de3f75ddde25513ed8f5bab8b912d026bdb43d43d19975905f6063cc",
+      "note": "Interrupted original test process790 after the close/observation test waited in its old sequential schedule. Native close now drains the original begin. Changed only the test scheduling to concurrent close plus observed close fence; retained original no-prompt assertion. Termination was confirmed, no service affected. Wrapper ended KeyboardInterrupt while computing post-input hashes, so no receipt/pass claim."
+    }
+  ],
+  "preserved_owner_functions": {
+    "control_plane/executive_worker_broker.py::_require_current_autonomy": {
+      "byte_identical": true,
+      "ast_sha256": "e4e85be647102134bea1d84e1d48ac698475920f681aaae8f5ce7e8138539756"
+    },
+    "control_plane/executive_worker_broker.py::_operator_factory": {
+      "byte_identical": true,
+      "ast_sha256": "d7834939f6065a70a1d7a6314be1ad0eef040a26aeb37cff61da7066810f334f"
+    },
+    "control_plane/executive_worker_broker.py::_ohf_validate": {
+      "byte_identical": true,
+      "ast_sha256": "007aa5966473cd48741596b52eacc71ed0116367fcba54fdf29ce69e1e1738ac"
+    },
+    "control_plane/executive_worker_broker.py::_terminal_operator_sweep": {
+      "byte_identical": true,
+      "ast_sha256": "be66a66965cd5336ecb5f3be0b581511fe2b46356646b32e0b7fb1bde58f4d53"
+    },
+    "control_plane/executive_worker_broker.py::_remember_operator_terminal": {
+      "byte_identical": true,
+      "ast_sha256": "d86817205ed4707e19814863820e8796ad559f9324b5d67335bf6f37acb1e084"
+    },
+    "control_plane/executive_worker_broker.py::_start": {
+      "byte_identical": true,
+      "ast_sha256": "45abe0d3d1b866b5e82cb15f76ba6604c2607083e1b9d95adfa3c6346025bd97"
+    },
+    "control_plane/executive_worker_broker.py::_cancel": {
+      "byte_identical": true,
+      "ast_sha256": "68ffe97912477c294ffa146c860557716c3b017b6a85fd3c19e5a92d23fdb7db"
+    },
+    "control_plane/executive_worker_broker.py::_collect": {
+      "byte_identical": true,
+      "ast_sha256": "6ee2548d3b64694412acd5951720d1a0c7b22423437c1163fef580733fac5557"
+    },
+    "integrations/deepseek_harness/operator_adapter.py::_before_send": {
+      "byte_identical": true,
+      "ast_sha256": "51c6d1045682f94f00f85480d686b4f47a5a3853344f5ba3c8c14faeb24ef1aa"
+    },
+    "integrations/deepseek_harness/operator_adapter.py::_before_write": {
+      "byte_identical": true,
+      "ast_sha256": "2df0fd4fdf6cfb58f300414f28f293729d386fb8e887fa542a9d75992757a4a3"
+    },
+    "integrations/deepseek_harness/operator_adapter.py::_open": {
+      "byte_identical": true,
+      "ast_sha256": "7162b2a4c8153f04eec4eae461df93c03619bd9b0ec24ac24b885bd1644bca38"
+    },
+    "integrations/deepseek_harness/operator_adapter.py::_observe_attestation": {
+      "byte_identical": true,
+      "ast_sha256": "5f8b39df91c961d5ca77bfa1849dbf3437a2e909509a3a58cbcd6fa365398310"
+    },
+    "integrations/deepseek_harness/operator_adapter.py::_native_result": {
+      "byte_identical": true,
+      "ast_sha256": "89fc0b3abcbd5c63cd0edf3b48595cbb987d2e2c3470b2c251a11d15e9def720"
+    },
+    "integrations/deepseek_harness/operator_adapter.py::_reconcile": {
+      "byte_identical": true,
+      "ast_sha256": "2500048833b2a567ca2a0c978adb5d56976bdc69dd967cc9b0ff4b4d247b878e"
+    }
+  },
+  "original_test_assertions_preserved": 1,
+  "diff_check_exit": 0,
+  "implementation": [
+    "Publish original run, adapter, operation and materialization task atomically in original admission lock before native dispatch.",
+    "Shield start/begin socket waiters. Retain original native launch and begin futures after pending-set removal. Unknown effects never authorize replacement.",
+    "Original materialization-status can observe exact late launch success and reconcile the original receipt target and timestamp; no start/resume replay.",
+    "Retain current/pending begin and Stop operation identities across ACK and prior-turn observation. Native guard binds exact original broker loop/adapter/connection/session/operation and current autonomy.",
+    "Close binds its original intent before draining original launch/begin futures. Terminal/shutdown sweeps refuse while native calls remain pending; no premature released claim.",
+    "Generic unacknowledged begins retain uncertainty; incumbent Claude ACK without native turn ID remains accepted; native ACK requires its actual ID."
+  ],
+  "release_state": "SOURCE_SLICE_PROVEN_NOT_INSTALLED_OR_PRODUCTION_ACCEPTED",
+  "effects": {
+    "provider_calls": 0,
+    "service_restarts": 0,
+    "repeated_hermes_canary": false,
+    "new_worker_or_session_owner": false,
+    "paid_fabric_denial_retried": false
+  },
+  "production_holds": [
+    "C24: native inner claim-timeout recovery and original Runtime begin receipt reconciliation; completed begin future retention alone does not recover a persisted EFFECT_UNKNOWN.",
+    "Installed DeepSeek worker factory, source-owned same-process native entry, actual profile/source/realm/account binding.",
+    "Actual runtime capability/config/confinement observation, including original passive MCP/resource owners and tool/helper enforcement; requested values are not observed facts.",
+    "Installed source/routing and signed-in packaged authentication/create/history/send/original answer/logout/reconnect/uncertain-send/receipt-first Stop/same-Session resume/eligible tool execution evidence.",
+    "Installed Executive reader backend_unavailable remains un-retried without material recovery; prior permission denials remain closed."
+  ]
+}

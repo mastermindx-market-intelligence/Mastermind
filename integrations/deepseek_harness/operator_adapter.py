@@ -118,15 +118,29 @@ class NativeOperatorAdapter:
         self.current: _Turn | None = None
         self.events: list[NormalizedEvent] = []
         self.pending_calls: set[concurrent.futures.Future] = set()
+        # Retain the one original launch result after its pending-set entry is
+        # removed. The broker may observe late success; it may never relaunch.
+        self.materialization_call: tuple[tuple[Any, ...], concurrent.futures.Future] | None = None
         self.pending_lock = threading.Lock()
+        self.begin_calls: dict[TurnRef, tuple[OperationId, concurrent.futures.Future]] = {}
 
-    def _call(self, coroutine, *, timeout: float = 120):
+    def _call(self, coroutine, *, timeout: float = 120, materialization=None, begin=None):
         if threading.get_ident() == self.loop_thread or not self.loop.is_running():
             coroutine.close()
             raise NativeOperatorError("OHF call must use the incumbent broker worker thread")
-        future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
         with self.pending_lock:
+            if materialization is not None and self.materialization_call is not None:
+                coroutine.close()
+                raise NativeOperatorError("original native materialization remains owned")
+            if begin is not None and (begin[1] in self.begin_calls or len(self.begin_calls) >= 64):
+                coroutine.close()
+                raise NativeOperatorError("original native begin remains owned")
+            future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
             self.pending_calls.add(future)
+            if materialization is not None:
+                self.materialization_call = (materialization, future)
+            if begin is not None:
+                self.begin_calls[begin[1]] = (begin[0], future)
         def done(value):
             with self.pending_lock:
                 self.pending_calls.discard(value)
@@ -228,12 +242,33 @@ class NativeOperatorAdapter:
     def start_session(self, *, operation_id, requested, epoch, generation, staged_config_receipt=None):
         if staged_config_receipt is not None:
             raise NativeOperatorError("native config remains with its installed owner")
-        return self._call(self._open(operation_id, requested, epoch, generation, None))
+        return self._call(self._open(operation_id, requested, epoch, generation, None),
+                          materialization=(operation_id, requested, epoch, generation))
 
     def resume_session(self, *, operation_id, requested, epoch, generation, provider_session):
         if not isinstance(provider_session, ProviderSessionHandoff) or provider_session.worker_id != requested.worker_id:
             raise NativeOperatorError("original provider session handoff required")
-        return self._call(self._open(operation_id, requested, epoch, generation, provider_session.provider_session_id))
+        return self._call(self._open(operation_id, requested, epoch, generation, provider_session.provider_session_id),
+                          materialization=(operation_id, requested, epoch, generation))
+
+    def observe_materialization_result(self, *, operation_id, requested, epoch, generation):
+        """Read the original completed future; never schedule native work."""
+        with self.pending_lock:
+            owned = self.materialization_call
+        if owned is None or owned[0] != (operation_id, requested, epoch, generation):
+            raise NativeOperatorError("original materialization observation differs")
+        future = owned[1]
+        if not future.done():
+            return None
+        if future.cancelled() or future.exception() is not None or self.close_operation is not None:
+            raise NativeOperatorError("original materialization did not succeed", effect_unknown=True)
+        observed = future.result()
+        if (not isinstance(observed, SessionStartObservation)
+                or self.epoch != epoch or self.generation != generation
+                or self.launch_operation != operation_id or self.native is None
+                or observed.provider_session_id != self.native.provider_session_id):
+            raise NativeOperatorError("original materialization result changed", effect_unknown=True)
+        return observed
 
 
     async def _observe_attestation(self, native):
@@ -322,7 +357,31 @@ class NativeOperatorAdapter:
 
     def begin_turn(self, *, operation_id, turn, generation, launch):
         text = self.turn_input_loader(turn)
-        return self._call(self._begin(operation_id, turn, generation, launch, text))
+        return self._call(self._begin(operation_id, turn, generation, launch, text),
+                          begin=(operation_id, turn))
+
+    def has_pending_native_calls(self):
+        with self.pending_lock:
+            return any(not future.done() for future in self.pending_calls)
+
+    def observe_begin_result(self, *, operation_id, turn, generation):
+        if generation != self.generation:
+            raise NativeOperatorError("original begin generation differs")
+        with self.pending_lock:
+            owned = self.begin_calls.get(turn)
+        if owned is None or owned[0] != operation_id:
+            raise NativeOperatorError("original begin observation differs")
+        future = owned[1]
+        if not future.done():
+            return None
+        if future.cancelled() or future.exception() is not None or self.close_operation is not None:
+            raise NativeOperatorError("original begin did not succeed", effect_unknown=True)
+        observed = future.result()
+        state = self._require_turn(turn)
+        if (not isinstance(observed, TurnStartObservation) or state is None or state.claim is None
+                or observed.provider_native_turn_id != str(state.claim.native_turn)):
+            raise NativeOperatorError("original begin result changed", effect_unknown=True)
+        return observed
 
     async def _begin(self, operation, turn, generation, launch, text):
         native = self._require_generation(generation)
@@ -442,6 +501,19 @@ class NativeOperatorAdapter:
         if self.close_operation is not None and (self.close_operation, self.close_reason) != (operation, reason):
             raise NativeOperatorError("original native close remains owned")
         self.close_operation, self.close_reason = operation, reason
+        # Revoke pending begin admission before awaiting its observation.
+        # Join original launch/begin completion before closing their exact
+        # process. A socket timeout never authorizes cleanup to overtake them.
+        with self.pending_lock:
+            original = ([self.materialization_call[1]] if self.materialization_call else [])
+            original += [value[1] for value in self.begin_calls.values()]
+        if original:
+            await asyncio.gather(*(asyncio.shield(asyncio.wrap_future(future))
+                                   for future in original), return_exceptions=True)
+        if self._require_generation(generation) is not native:
+            raise NativeOperatorError("original native close owner changed")
+        if (self.close_operation, self.close_reason) != (operation, reason):
+            raise NativeOperatorError("original native close identity changed")
         self.settlement = await native.close(reason)
         return self._reconcile()
 
