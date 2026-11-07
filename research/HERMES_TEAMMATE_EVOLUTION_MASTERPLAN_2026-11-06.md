@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Research proposal and implementation plan; no runtime deployment or product acceptance is claimed.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §53. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2347,3 +2347,23 @@ The formerly ambiguous #537 reference is now source-linked to Mastermind PR537 t
 This resolves identity, not current disposition. The already-returned PR/issue404s were not repeated; empty commit-associated pulls is not release proof. Current source lacks the specific earlier helper/warning strings, a narrow observation only. One comparison failed Transport closed; no ancestry conclusion is invented. The actionable source predicate is current canonical accepted-successor/terminal disposition plus protected repair compatibility and writer/effect release for the overlapping legacy inventory paths. It is not an original-author approval gate or demonstrated human credential gate. Historical #531 refused custody inspection remains closed.
 
 Outcome Learning398, governed repair409, active primary2175 and original installed-carrier gates remain distinct. Original Ubuntu1/root C26 permission denial, paid Fabric refusal, local execution unavailability and two denied AF_UNIX tests remain closed. No alternative runtime carrier, fleet/browser activation, daemon/watcher/queue, external message or additional memory/auth/publication owner was created.
+
+## 53. Context fixture protected merge and next original-auth boundary — 2026-11-07
+
+**MISSION_COMPLETE=false / MORE_WORK_EXISTS.** The independent context fixture is accepted source; full installed teammate and learning acceptance remain outstanding.
+
+[PR2254](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2254) published exact one-file head **bb0fb312cab6045e05798c00bd8a8be01f8451e8**, tree65971aae51069ed1e8c06a85d00221a8572951bc, and actually merged at **2026-11-07T22:42:37Z** as **1cdca3c8b6f46bc4b1687b6a616a2e41e3475631**. Five focused existing cases passed, zero failure/error/skip; XML SHA256 **fbc19c9cff393383f2492e4d4b914bf8177e50043798312dcd88d6595854b725**. Exact tree/status/postimage and whitespace were verified. CI **42421391149** completed SUCCESS.
+
+Original release preflight found OPEN/Ready/MERGEABLE at exactbb0fb312, no reviews/holds, no autoMergeRequest or queue entry and only pending checks. Protectede7a7→b51375f436d1f81a03e77abdcf2b68a55d3977bf movement changes12 unrelated app/Paper/hygiene paths, with no fixture or governing-law overlap. The retained genuine enforcement receipt remained applicable. One ordinary head-leased request (PID80633, exit0) was confirmed enabled **2026-11-07T22:37:10Z** (readbackPID84607), then the original effect completed in the merge above. **Do not re-arm or redo this accepted fixture.** Principal source judgment found no remaining semantic blocker or need for another cohort; this is judgment, not a second executed test claim.
+
+At the same fresh native release readback (PID14224), [PR2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) remains OPEN/Ready at **de966803faff6033a5d0e6b164843ab22edabe42**, with its original22:28:47 autoMergeRequest and queue entrynull; no merged commit. Runtime42420547096, harness42420547182, qualification42420547463, OAuth42420547249 and proxy42420547113 have completed SUCCESS. Main CI42420547116 remains in progress. No second request, cancellation or merge claim.
+
+[PR2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175) remains OPEN at52cb239df9c058031875ecc52393d7978f50d2a3, with its original active primary/application composition and distinct installed holds. Root has not taken over that writer.
+
+Next source boundary is actual native authentication-mechanism evidence. No auth source change, live credential read or runtime activation has yet occurred. Existing parent primary_model_env cannot transfer a private closure into the child. Any child observation must join the actual selected credential, copied client kwargs/cache return and actual original HTTP request while keeping all secret comparisons private. Broad API_KEY must not become account identity, exact realm, authorization or remote acceptance.
+
+Material pinned-source correction to the earlier design: gateway/session_worker_construct.py::route_runtime imports and first calls **hermes_cli.runtime_provider_custom._resolve_named_custom_runtime directly**, under frozen config, with explicit_api_key=key. Wrapping only hermes_cli.runtime_provider's imported alias misses this successful LOCAL policy route. The actual runtime is resolved before _resolve_turn_agent creates the existing memory claim; original execution scope already exists. Both actual source/alias identity and warm-cache lifetime must be resolved before implementation. Unknown/unjoined observations remain unavailable.
+
+The existing integrations/hermes_harness/native_model_credential.py owner is outside2234's finite contextual path set. Principal source-scope adjudication is underway before edits; no self-expanded exemption or disconnected precursor has been published. A dedicated source-only checkout **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/auth-original-request-validation** was requested from exactde966 for this work; original checkoutPID13308 remains to be read back. No auth implementation or test run is claimed.
+
+Original runtimeC26 denial, paid Fabric refusal, two denied AF_UNIX cases, local execution unavailability, held398/409 owners and fleet predecessor/writer predicates remain unchanged. Original runtime carrier stays meta-ceo-byok-followon-parent-20261106-c35-01. C3 is source validation only.
