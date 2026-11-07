@@ -6,7 +6,7 @@ Operation: hermes-capacity-m2-20261106-c3.
 Procedure/source pin: ad6275a9c4d237bce75e52d0d6a8f41264b4ded5; skillpack 1.0.1 / bootstrap major 1.
 Authority: current Chairman request to implement capacity/load balancing for the current M2 Hermes across existing OpenCode Go, Z.AI and Experiential subscriptions.
 This file is the Hermes consumer implementation/acceptance supplement, not a second runtime task, account, quota, retry or credential registry.
-PLAN_NOT_ORG_LINKED: existing Agent OS record remains the organizational owner.
+Organizational owner: WS:EXECUTIVE-CAPACITY-FABRIC. The dated canonical-record carrier is [Macro #10814](https://github.com/mastermindx-market-intelligence/macro/pull/10814); it must not be described as merged until GitHub proves it.
 
 ## Outcome and acceptance
 
@@ -32,10 +32,10 @@ Completion requires actual running Hermes-to-provider proof, observed eligible a
 ## Delegation and effects
 
 The principal retains C3 architecture, host integration and acceptance (PRINCIPAL_JUDGMENT / UNIQUE_APPROVED_ACCESS). A native read-only architectural adviser evaluates conflicting Hermes/Fabric ownership; routine separable labor uses eligible paid Fabric. WHY NOT FABLE: frozen bounded work does not require scarce principal continuity.
-No provider call, service restart, credential change or configuration mutation has been performed by this operation at this checkpoint. Its only mutation is this isolated source branch/plan.
+No provider call, service restart, credential change or configuration mutation has been performed by this operation at this checkpoint. Subsequent isolated source and qualification mutations are recorded in the milestones below.
 
 
-## 2026-11-07 M2 gateway milestone (verified)
+## Historical 69-case M2 gateway milestone (superseded by the 81-case milestone below)
 
 Implementation follows the existing #2155 adapter; it does not replace it.
 New bounded follow-on: [Mastermind #2166](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166), Draft, stacked on #2155.
@@ -59,9 +59,38 @@ A bounded paid-Fabric source audit was attempted exactly once as hermes-m2-appli
 
 No provider call, credential mutation, production configuration change, service restart, broker grant, merge or runtime installation was performed. Immutable test material used an isolated temporary Hermes home and the installed runtime launcher. Original root/secretary configurations remain untouched.
 
-Next material actions:
+Next actions at the historical milestone (current frontier follows):
 1. Complete the matching attended relation/workload and qualification through the original APPLICATION owner; do not borrow a site/role identity.
 2. Integrate the authenticated gateway startup/turn hook and native keyless CLI/session resolver. Qualify in-process and managed-worker recovery, not only the programmatic constructor.
 3. Reconcile/release the existing handler and qualify one strict Go/GLM-Flash account using real reservation/tool/usage/settlement evidence, then extend official GLM and permitted Experiential application routes.
 4. Required protected-source CI/release and real main-Hermes acceptance remain open.
 Mission state remains MORE_WORK_EXISTS; no automatic background execution or human-only gate is asserted.
+
+## Current 81-case native gateway milestone — 2026-11-07
+
+Consumer source and records are [Mastermind #2166](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166), head `5efad759b70969cbcedf48bfb389cc77815cf61f`; exact tested candidate `83f78197ad0c21ade49059b880582c1fc9f7c61b`. The final record commit changes documentation and adds the receipt only. Product/test postimages are retained.
+
+The generic eight-file Hermes core patch now provides a keyless registered provider route, native gateway turn-context hook and original-owner atomic admission claim. The real plugin entrypoint attaches the existing APPLICATION binding to that admitted local turn. Native SQLite admission/run generation/recovery remain authoritative; a failed binding stays terminal across plugin replacement, model change and facade reconstruction. The actual plugin loader, local CLI resolver, native gateway sync scope and primary/tool continuation all passed. Managed workers and non-local paths remain unqualified.
+
+Final installed-runtime fixture result: **81 tests, zero failures/errors/skips, zero external provider connections, no standard OpenAI/AsyncOpenAI construction**. The fixture uses exact Hermes `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`, its installed Python 3.14.9 dependency environment and pinned original Macro client `2ef828e569b683b9dfaa94f81116da3ac55f6186`. Native source was archived into an isolated immutable test fixture and patched there; live installation was untouched.
+
+[Machine receipt](https://github.com/mastermindx-market-intelligence/Mastermind/blob/5efad759b70969cbcedf48bfb389cc77815cf61f/integrations/hermes_application_fabric/qualification/gateway_native_receipt.json) includes exact product/test/core hashes. Log SHA256 `abf569ee65e7fb795fe9c470c8b4cb3070fe9a550d1e28d0c4c2fe93e949fc38`.
+
+Hosted checks on tested candidate83f78197 succeeded: APPLICATION contract run [42323910202](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42323910202), Python3.12/3.13, and repository CI [42323910176](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42323910176). Earlier failures were a stale expected test count and blank patch-context whitespace; both were repaired without weakening failure/skip/network/diff guards.
+
+### Exact remaining dependencies
+
+1. Original APPLICATION source must enroll and qualify attended -> hermes-attended/hermes_attended_fabric, through its existing service/workload/capability controls. The original request for mmmeta/mmsecretary is not an acknowledgement of this attended relation.
+2. Neither port4142 nor actual owner-pinned50142 listened at the 01:14UTC M2 check. The installed shim lacked APPLICATION support. Reconcile original C1 and J/carrier release controls and install the existing service through its owner.
+3. The current Go APPLICATION route is fixed to DeepSeek; it does not prove GLM Flash. Qualify the exact requested Go model and physical-account admission first, then official Z.AI GLM5.3 and permitted Experiential. Preserve original entitlement, quota/budget, tool, usage and settlement truth.
+4. Install the tested core/plugin using the existing Hermes release path, preserve concurrent configuration, then prove ordinary CLI RPC plus real primary/tool calls, capacity-exhaustion behavior, settlement and recovery. AUTO/effort/streaming require their original protocol/selection extensions.
+
+The exact [ENROLLMENT_CONTRACT](https://github.com/mastermindx-market-intelligence/Mastermind/blob/83f78197ad0c21ade49059b880582c1fc9f7c61b/integrations/hermes_application_fabric/ENROLLMENT_CONTRACT.md) is prepared for the active original owner. Its active programme remains visible in [#983 comment6700223682](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6700223682); current retained source is Mastermind4bb7bb9c/Macro1d09f389. That activity is not proof the attended dependency was picked up.
+
+### Continuity, communication and authority
+
+[Agent OS record carrier #10814](https://github.com/mastermindx-market-intelligence/macro/pull/10814) contains the full source-linked brief, do-not-redo list, effects and exact next return. Its initial source is `a3c334a5664bdb9b77ecfb4b1e9247a884d764a1`. The actual pinned Agent OS validator exited0 for the single record; optional program-registry join was reported unavailable in the isolated fixture. Full-store hosted validation remains a separate receipt.
+
+Material delivery-law change triggered one compatible refresh to protected Mastermind `5ca25e561ffaeacb4ef94bb08f507617f80d0607`. INDEX/bootstrap and core/universal law hashes were compatible; changed DELIVERY_WORKFLOW blob `19a13a3b50286607874673f8b12e825b4d63a375` was read. No blanket reviewer or human release gate was invented.
+
+The session's developer communication instruction requires explicit user authorization before messaging other operators. A concrete message to the current APPLICATION owner on original Macro#10740 is prepared in the handoff and has not been sent. Source work already authorized by the user is complete to this blocked integration frontier. No delivery, pickup, START, watcher or background execution is claimed. No live provider, account, credential, broker grant, configuration or service mutation occurred. User-requested live integration remains incomplete.
