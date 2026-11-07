@@ -1,0 +1,11 @@
+F....                                                                    [100%]
+=================================== FAILURES ===================================
+_______________ test_d8_template_topology_and_protected_defaults _______________
+tests/test_ceo_submit_armed_composition.py:2632: in test_d8_template_topology_and_protected_defaults
+    assert _scan_added_identity_diff(
+E   AssertionError: assert ['501'] == []
+E     
+E     Left contains one more item: '501'
+E     Use -v to get more diff
+=========================== short test summary info ============================
+FAILED tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults

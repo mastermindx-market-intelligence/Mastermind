@@ -1,0 +1,26 @@
+{
+  "schema": "mastermind.h6.guard_failure_reconciliation.v1",
+  "failed_head": "de8e43abd695e335cdaf7bb74f35145a607e1c28",
+  "cases": 5,
+  "failures": 1,
+  "other_cases_passed": 4,
+  "cause": "The original 0d readiness evidence records its observed proof-host UID; its exact immutable token had no static review record.",
+  "artifact_path": "review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json",
+  "artifact_sha256": "ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33",
+  "literal_site": [
+    61,
+    13,
+    16,
+    "int",
+    "501"
+  ],
+  "artifact_bytes_changed": false,
+  "identity_guard_changed": false,
+  "production_source_changed": false,
+  "failed_receipts": [
+    "current-final-guard-first.json",
+    "current-final-guard-first.log",
+    "current-final-guard-first.xml"
+  ],
+  "repair_result": "NOT_YET_RUN"
+}
