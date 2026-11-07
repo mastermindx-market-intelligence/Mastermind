@@ -1,0 +1,771 @@
+--- a/packages/api/remote-access/src/index.ts
++++ b/packages/api/remote-access/src/index.ts
+@@ -11,6 +11,7 @@
+ import type {} from '@deepseek-ai/dsh-host-webserver'
+ import {
+   Remote,
++  RemoteError,
+   TypertRemoteService,
+   readOwnerAccessRestriction,
+   type Principal,
+@@ -25,6 +26,8 @@
+   RemoteAccessGrant,
+   RemoteAccessPolicy,
+   RemoteAccessRequest,
++  OwnerAccessSource,
++  OwnerAccessScope,
+ } from './types.ts'
+ 
+ export type * from './types.ts'
+@@ -67,6 +70,15 @@
+ interface PolicyEntry {
+   readonly kind: string
+   readonly policy: RemoteAccessPolicy<Principal>
++  readonly owner?: {
++    readonly source: OwnerAccessSource
++    readonly sourceSignal: AbortSignal
++    readonly sourceGuard: () => void
++    readonly bindings: RemoteAccessPolicy<Principal>['bindings']
++    readonly explain: RemoteAccessPolicy<Principal>['explain']
++    readonly retirement: AbortController
++    readonly signal: AbortSignal
++  }
+ }
+ 
+ /** A condition's refusal. */
+@@ -123,19 +135,18 @@
+  * the Gateway mounts this service too.
+  */
+ export class RemoteAccessService extends TypertRemoteService {
++  private readonly ownerRequired: boolean
+   private readonly policies = new Map<string, PolicyEntry>()
+   /** Policies whose failure was logged since the last `invalidate()`; their later failures stay silent. */
+   private readonly reported = new Set<PolicyEntry>()
+   private readonly followers = new Set<AccessFollower>()
+   /** Aborted when this instance unloads; every open snapshot generation ends with it. */
+   private readonly lifetime = new AbortController()
+-  /** Sticky launch restriction; removing a child consumer cannot restore owner access. */
+-  readonly ownerRestricted: boolean
+ 
+   /** @param ctx - owning Host plugin Context. */
+   constructor(ctx: Context) {
+     super(ctx, 'remoteAccess')
+-    this.ownerRestricted = readOwnerAccessRestriction(ctx)
++    this.ownerRequired = readOwnerAccessRestriction(ctx)
+     ctx.effect(() => () => { this.lifetime.abort() }, 'remoteAccess: snapshot generations')
+     // Every index the webServer renders belongs to the owner; snapshotFor documents non-owner pages.
+     ctx.inject(['webServer'], (webCtx) => {
+@@ -145,6 +156,93 @@
+     })
+   }
+ 
++  /** Fixed by the original package composition, never cleared by policy unload. */
++  get ownerRestricted(): boolean { return this.ownerRequired }
++
++  /** Install one trusted source in the existing policy owner. Late adoption of
++   * an unrestricted native service is deliberately unsupported. */
++  registerOwnerRestriction(source: OwnerAccessSource): () => void {
++    if (!this.ownerRequired) throw new Error('owner restriction must be required before native startup')
++    if (source === null || typeof source !== 'object' || !(source.signal instanceof AbortSignal)
++      || typeof source.requireCurrent !== 'function' || source.policy === null
++      || typeof source.policy !== 'object' || typeof source.policy.bindings !== 'function') {
++      throw new TypeError('original native owner restriction source required')
++    }
++    if (this.policies.has('owner')) throw new Error('original owner restriction must retire before replacement')
++    const retirement = new AbortController()
++    const entry: PolicyEntry = {
++      kind: 'owner', policy: source.policy,
++      owner: {
++        source, sourceSignal: source.signal, sourceGuard: source.requireCurrent,
++        bindings: source.policy.bindings, explain: source.policy.explain, retirement,
++        signal: AbortSignal.any([source.signal, retirement.signal, this.lifetime.signal]),
++      },
++    }
++    const sourceSignal = source.signal
++    const changed = (): void => { this.invalidate(OWNER) }
++    const retire = (): void => {
++      retirement.abort()
++      sourceSignal.removeEventListener('abort', changed)
++      if (this.policies.get('owner') === entry) this.policies.delete('owner')
++      this.invalidate(OWNER)
++    }
++    const dispose = this.ctx.effect(() => {
++      this.policies.set('owner', entry)
++      if (!this.ownerCurrent(entry)) {
++        retire()
++        throw new Error('original native owner restriction source is unavailable')
++      }
++      sourceSignal.addEventListener('abort', changed)
++      this.invalidate(OWNER)
++      return retire
++    }, 'remoteAccess: required owner restriction')
++    // Retirement is synchronous even when the caller's fiber drains asynchronously.
++    return () => { retire(); void dispose() }
++  }
++
++  /** Gateway captures this same registration before any receiver or lookup. */
++  captureOwnerRestriction(): OwnerAccessScope | undefined {
++    if (!this.ownerRequired) return undefined
++    const entry = this.policies.get('owner')
++    const requireCurrent = (): void => {
++      if (entry === undefined || !this.ownerCurrent(entry)) {
++        throw new RemoteError('remote-access/denied', 'original owner restriction is unavailable', {
++          action: 'owner', reason: 'owner-restricted',
++        })
++      }
++    }
++    requireCurrent()
++    return Object.freeze({ signal: entry!.owner!.signal, requireCurrent })
++  }
++
++  private ownerCurrent(entry: PolicyEntry): boolean {
++    const owner = entry.owner
++    if (owner === undefined) return false
++    const matches = (): boolean => this.policies.get('owner') === entry
++      && !owner.signal.aborted
++      && owner.source.signal === owner.sourceSignal
++      && owner.source.requireCurrent === owner.sourceGuard
++      && owner.source.policy === entry.policy
++      && entry.policy.bindings === owner.bindings
++      && entry.policy.explain === owner.explain
++    try {
++      if (!matches()) throw new Error('owner source changed')
++      const result: unknown = owner.sourceGuard()
++      if (result !== undefined) {
++        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
++          void Promise.resolve(result).catch(() => undefined)
++        }
++        throw new Error('owner source currentness must be synchronous')
++      }
++      if (!matches()) throw new Error('owner source changed')
++      return true
++    } catch {
++      // A failed original registration cannot revive when its labels later return.
++      owner.retirement.abort()
++      return false
++    }
++  }
++
+   /**
+    * Register the policy of one non-owner principal kind in the caller's
+    * fiber; open snapshots are recomputed on registration and removal.
+@@ -154,8 +252,8 @@
+    * @throws Error when `kind` already has a policy.
+    */
+   registerPolicy<K extends Exclude<keyof PrincipalMap, 'owner'>>(kind: K, policy: RemoteAccessPolicy<PrincipalMap[K]>): () => void {
++    if ((kind as string) === 'owner') throw new Error('use the required owner restriction source')
+     const policies = this.policies
+-    if ((kind as string) === 'owner') throw new Error('remote access: owner policy registration is forbidden')
+     if (policies.has(kind)) throw new Error(`remote access: principal kind ${JSON.stringify(kind)} already has a policy`)
+     const entry: PolicyEntry = { kind, policy }
+     const dispose = this.ctx.effect(() => {
+@@ -203,9 +301,11 @@
+   decide(request: RemoteAccessRequest<Principal>): RemoteAccessDecision {
+     const { principal, action } = request
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
++    if (principal.kind === 'owner' && !this.ownerRequired) return ALLOW
+     if (action === FOLLOW_ACTION) return ALLOW
+-    if (principal.kind === 'owner') return this.ownerRestricted ? NO_ALLOW : ALLOW
+     const entry = this.policies.get(principal.kind)
++    if (principal.kind === 'owner' && (entry === undefined || !this.ownerCurrent(entry))) return POLICY_FAILED
++    if (principal.kind === 'owner' && request.resources.length === 0) return NO_ALLOW
+     if (entry === undefined) return NO_ALLOW
+     const bindings = this.bindingsOf(entry, principal, action)
+     if (bindings === undefined) return POLICY_FAILED
+@@ -223,7 +323,7 @@
+           return assertNever(evaluation)
+       }
+     }
+-    return ALLOW
++    return principal.kind === 'owner' && !this.ownerCurrent(entry) ? POLICY_FAILED : ALLOW
+   }
+ 
+   /**
+@@ -239,14 +339,16 @@
+    */
+   allows(resource: RemoteAccessResource): boolean {
+     const invocation = this.ctx.invocation
+-    const principal = invocation?.peer.principal
+-    if (invocation === undefined || principal === undefined) return true
+-    if (principal.kind === 'owner') return !this.ownerRestricted
+-    const action: RemoteAccessAction = `${invocation.request.namespace}/${invocation.request.method}`
++    if (invocation === undefined) return true
++    const principal = invocation.peer.principal
++    if (principal.kind === 'owner' && !this.ownerRequired) return true
++    if (principal.kind === 'owner' && invocation.signal?.aborted === true) return false
++    const action = (invocation.request.namespace + '/' + invocation.request.method) as RemoteAccessAction
+     const entry = this.policies.get(principal.kind)
+     if (entry === undefined) return false
+     const bindings = this.bindingsOf(entry, principal, action)
+     return bindings !== undefined && this.evaluate(entry, bindings, action, resource, undefined).kind === 'allow'
++      && (principal.kind !== 'owner' || this.ownerCurrent(entry))
+   }
+ 
+   /**
+@@ -259,8 +361,7 @@
+    */
+   snapshotFor(principal: Principal): RemoteAccessBaseline {
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (principal.kind === 'owner') return this.ownerRestricted
+-      ? { type: 'baseline', owner: false, grants: [] } : OWNER_BASELINE
++    if (principal.kind === 'owner' && !this.ownerRequired) return OWNER_BASELINE
+     return { type: 'baseline', owner: false, grants: this.grantsFor(principal) }
+   }
+ 
+@@ -278,8 +379,8 @@
+   async *follow(signal: AbortSignal): AsyncIterable<RemoteAccessFrame> {
+     signal.throwIfAborted()
+     const generation = AbortSignal.any([signal, this.lifetime.signal])
+-    const principal = this.ctx.invocation?.peer.principal
+-    if (principal === undefined || principal.kind === 'owner') {
++    const principal = this.ctx.invocation?.peer.principal ?? OWNER
++    if (principal.kind === 'owner' && !this.ownerRequired) {
+       yield this.snapshotFor(OWNER)
+       await abortion(generation)
+       return
+@@ -309,7 +410,13 @@
+   /** One `bindings()` call; `undefined` after a logged failure. */
+   private bindingsOf(entry: PolicyEntry, principal: Principal, purpose: string): readonly ErasedBinding[] | undefined {
+     try {
+-      return entry.policy.bindings(principal)
++      if (entry.kind === 'owner' && !this.ownerCurrent(entry)) return undefined
++      const bindings = entry.policy.bindings(principal)
++      if (!Array.isArray(bindings)) {
++        discardThenable(bindings)
++        throw new TypeError('remote access: bindings must be a synchronous array')
++      }
++      return entry.kind === 'owner' && !this.ownerCurrent(entry) ? undefined : bindings
+     } catch (error) {
+       // A policy failure is contained to this question, so one faulty rule cannot break a shared event stream.
+       this.report(entry, `list bindings for ${purpose}`, error)
+@@ -332,6 +439,12 @@
+       let decision: RemoteAccessDecision
+       try {
+         decision = binding.condition(args === undefined ? { action, resource } : { action, resource, args })
++        if (decision === null || typeof decision !== 'object'
++          || (decision.kind !== 'allow' && (decision.kind !== 'deny' || typeof decision.reason !== 'string'))
++          || typeof (decision as unknown as PromiseLike<unknown>).then === 'function') {
++          discardThenable(decision)
++          throw new TypeError('remote access: conditions must return a synchronous decision')
++        }
+       } catch (error) {
+         this.report(entry, `evaluate a condition for ${action}`, error)
+         return FAILED
+@@ -347,6 +460,10 @@
+     let reason: string | undefined
+     try {
+       reason = entry.policy.explain?.(request)
++      if (reason !== undefined && typeof reason !== 'string') {
++        discardThenable(reason)
++        throw new TypeError('remote access: refusal explanations must be synchronous strings')
++      }
+     } catch (error) {
+       this.report(entry, `explain a refusal of ${request.action}`, error)
+       return POLICY_FAILED
+@@ -380,7 +497,7 @@
+       const actions = [...candidates].filter(action => this.evaluate(entry, bindings, action, resource, undefined).kind === 'allow').sort()
+       if (actions.length > 0) grants.push(Object.freeze({ resource, actions: Object.freeze(actions) }))
+     }
+-    return grants
++    return entry.kind === 'owner' && !this.ownerCurrent(entry) ? [] : grants
+   }
+ 
+   /** Log a policy failure once per policy until the next `invalidate()`; snapshots and lists ask many times per change. */
+@@ -429,3 +546,11 @@
+ }
+ 
+ export default RemoteAccessService
++
++/** Do not leave a rejected malformed async policy result unobserved. */
++function discardThenable(value: unknown): void {
++  if (value !== null && (typeof value === 'object' || typeof value === 'function')
++    && typeof (value as PromiseLike<unknown>).then === 'function') {
++    void Promise.resolve(value).catch(() => undefined)
++  }
++}
+--- a/packages/api/remote-access/src/types.ts
++++ b/packages/api/remote-access/src/types.ts
+@@ -140,3 +140,16 @@
+   | { readonly type: 'baseline'; readonly owner: false; readonly grants: readonly RemoteAccessGrant[] }
+   | { readonly type: 'upsert'; readonly grant: RemoteAccessGrant }
+   | { readonly type: 'remove'; readonly resource: RemoteAccessResource }
++
++/** Live authority is supplied by the original native association producer. */
++export interface OwnerAccessSource {
++  readonly policy: RemoteAccessPolicy<Extract<Principal, { kind: 'owner' }>>
++  readonly signal: AbortSignal
++  readonly requireCurrent: () => void
++}
++
++/** A captured registration; an old invocation cannot adopt its replacement. */
++export interface OwnerAccessScope {
++  readonly signal: AbortSignal
++  readonly requireCurrent: () => void
++}
+--- a/packages/api/gateway/src/index.ts
++++ b/packages/api/gateway/src/index.ts
+@@ -11,7 +11,7 @@
+   ConnectionRpcAttachment,
+   ConnectionRpcHandler,
+ } from '@deepseek-ai/dsh-client-connection'
+-import type { RemoteAccessDecision } from '@deepseek-ai/dsh-api-remote-access'
++import type { RemoteAccessDecision, OwnerAccessScope } from '@deepseek-ai/dsh-api-remote-access'
+ import { callResources, eventResources } from './access.ts'
+ import { Deque } from '@deepseek-ai/dsh-deque'
+ import type { WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
+@@ -100,6 +100,7 @@
+   readonly args: readonly unknown[]
+   readonly method: (...args: never[]) => unknown
+   readonly invocation: GatewayInvocation
++  readonly requireAccess: () => void
+ }
+ 
+ /** Carrier inputs `GatewayInvocation.uplink()` decodes on first use. */
+@@ -130,6 +131,7 @@
+   readonly principal: Principal
+   /** Only owner streams receive scoped waterfalls they could answer; other Peers receive admitted broadcasts only. */
+   readonly answers: boolean
++  readonly ownerAccess: OwnerAccessScope | undefined
+ }
+ 
+ interface PendingRemoteEvent {
+@@ -137,6 +139,8 @@
+   readonly source: TypertRemoteEventInvocation
+   readonly frame: RemoteEventInvocationFrame
+   readonly deliveries: Set<RemoteEventClient>
++  readonly ownerAccess: OwnerAccessScope | undefined
++  readonly resources: readonly RemoteAccessResource[] | undefined
+   releaseContext: () => void
+   releaseSignal: () => void
+ }
+@@ -321,7 +325,11 @@
+    */
+   hasLiveClient(): boolean {
+     for (const client of this.remoteEventClients.values()) {
+-      if (client.answers && !client.signal.aborted) return true
++      if (!client.answers || client.signal.aborted) continue
++      try {
++        client.ownerAccess?.requireCurrent()
++        return true
++      } catch { /* The original source retires this Client generation. */ }
+     }
+     return false
+   }
+@@ -417,8 +425,11 @@
+       )
+     }
+ 
++    let result: unknown
+     try {
+-      return await Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
++      prepared.requireAccess()
++      result = await Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
++      prepared.requireAccess()
+     } catch (error) {
+       if (prepared.invocation.signal.aborted) throw remoteCancelled(prepared.endpoint, error)
+       throw error
+@@ -426,6 +437,8 @@
+       // A unary call's uplink is readable only while the method runs.
+       await prepared.invocation.close()
+     }
++    prepared.requireAccess()
++    return result
+   }
+ 
+   /**
+@@ -453,6 +466,7 @@
+     }
+     let source: unknown
+     try {
++      prepared.requireAccess()
+       source = Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
+     } catch (error) {
+       await prepared.invocation.close()
+@@ -468,17 +482,13 @@
+         { field: 'result' },
+       )
+     }
+-    return cancellableStream(source, prepared.endpoint, prepared.invocation)
+-  }
+-
+-  /** Company launch holds stock-owner commands before lookup or event ownership. */
+-  private assertOwnerRoute(peer: PeerScope, endpoint: string): void {
+-    if (peer.principal.kind === 'owner' && this.ctx.remoteAccess.ownerRestricted
+-      && endpoint !== 'remoteAccess/follow') {
+-      throw new RemoteError('remote-access/denied', 'native company commands require the admitted company operation', {
+-        action: endpoint, reason: 'owner-restricted',
+-      })
+-    }
++    return cancellableStream(source, prepared.endpoint, prepared.invocation, prepared.requireAccess)
++  }
++
++  /** Preserve the host's launch hold before receiver lookup or event ownership. */
++  private assertOwnerRoute(peer: PeerScope, endpoint: string): OwnerAccessScope | undefined {
++    if (peer.principal.kind !== 'owner' || endpoint === 'remoteAccess/follow') return undefined
++    return this.ctx.remoteAccess.captureOwnerRestriction()
+   }
+ 
+   private async dispatchRpc(
+@@ -565,7 +575,10 @@
+         'forwarded Remote event source is unavailable',
+       )
+     }
+-    const lifetime = AbortSignal.any([signal, registration.lifetime.signal, peer.signal])
++    const ownerAccess = peer.principal.kind === 'owner'
++      ? this.ctx.remoteAccess.captureOwnerRestriction() : undefined
++    const lifetime = AbortSignal.any([signal, registration.lifetime.signal, peer.signal,
++      ...ownerAccess === undefined ? [] : [ownerAccess.signal]])
+     let clientId = randomUUID() as RemoteEventClientId
+     while (this.remoteEventClients.has(clientId)) clientId = randomUUID() as RemoteEventClientId
+     const client: RemoteEventClient = {
+@@ -577,12 +590,14 @@
+       principal: peer.principal,
+       // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+       answers: peer.principal.kind === 'owner',
++      ownerAccess,
+     }
+     this.remoteEventClients.set(clientId, client)
+     if (client.answers) {
+       for (const pending of this.pendingRemoteEvents.values()) this.deliverRemoteEvent(pending, client)
+     }
+     try {
++      ownerAccess?.requireCurrent()
+       yield { ...REMOTE_EVENT_STREAM_READY, clientId, host: registration.host }
+       yield* client.queue.iterate(lifetime)
+     } finally {
+@@ -614,20 +629,26 @@
+       event: frame.event,
+       args: frame.args,
+     }
++    let resources: readonly RemoteAccessResource[] | undefined
+     let resolved = false
+-    let resources: readonly RemoteAccessResource[] | undefined
++    const readResources = (): readonly RemoteAccessResource[] | undefined => {
++      if (!resolved) { resources = eventResources(frame.resources, wire.args); resolved = true }
++      return resources
++    }
+     for (const client of this.remoteEventClients.values()) {
+-      if (!client.answers) {
+-        // A non-owner receives the whole notification or nothing: its resources decide, payloads are never trimmed,
+-        // and a notification with invalid resources reaches no non-owner.
+-        if (!resolved) {
+-          resources = eventResources(frame.resources, frame.args)
+-          resolved = true
+-        }
+-        if (resources === undefined) continue
+-        if (this.ctx.remoteAccess.decide({ principal: client.principal, action: `event:${frame.event}`, resources }).kind === 'deny') continue
+-      }
+-      client.queue.push(wire)
++      const mayDeliver = (): boolean => {
++        try {
++          if (client.signal.aborted) return false
++          client.ownerAccess?.requireCurrent()
++          if (client.answers && client.ownerAccess === undefined) return true
++          const touched = readResources()
++          return touched !== undefined && this.ctx.remoteAccess.decide({
++            principal: client.principal, action: `event:${wire.event}`, resources: touched,
++          }).kind === 'allow'
++        } catch { return false }
++      }
++      if (mayDeliver()) client.queue.push(wire,
++        client.ownerAccess === undefined ? undefined : mayDeliver)
+     }
+   }
+ 
+@@ -638,6 +659,16 @@
+         throw new TypeError(
+           'typert gateway: scoped Remote events require a non-empty Agent identity',
+         )
++      }
++      const ownerAccess = this.ctx.remoteAccess.captureOwnerRestriction()
++      const resources = scopedEventResources(source.context.resources)
++      if (ownerAccess !== undefined && (resources === undefined
++        || this.ctx.remoteAccess.decide({
++          principal: { kind: 'owner' }, action: `event:${source.event}`, resources,
++        }).kind !== 'allow')) {
++        throw new RemoteError('remote-access/denied', 'Scoped event authority is unavailable', {
++          action: `event:${source.event}`, reason: 'resource-unavailable',
++        })
+       }
+       const projected = projectRemoteEventRequest(source.request, source.context.subject)
+       let id = randomUUID() as RemoteEventId
+@@ -658,7 +689,10 @@
+         source.resolve({ kind: 'next' })
+         return
+       }
+-      const signals = new Set(projected.signal === undefined ? [] : [projected.signal])
++      const signals = new Set<AbortSignal>([
++        ...projected.signal === undefined ? [] : [projected.signal],
++        ...ownerAccess === undefined ? [] : [ownerAccess.signal],
++      ])
+       const abort = (): void => {
+         const reason: unknown = [...signals].find(signal => signal.aborted)?.reason
+         this.cancelRemoteEvent(pending, reason instanceof Error
+@@ -676,6 +710,7 @@
+           request: projected.request,
+         },
+         deliveries: new Set(),
++        ownerAccess, resources,
+         releaseContext,
+         releaseSignal: () => {
+           for (const signal of signals) signal.removeEventListener('abort', abort)
+@@ -694,10 +729,29 @@
+     }
+   }
+ 
++  private allowsRemoteEvent(pending: PendingRemoteEvent, client: RemoteEventClient): boolean {
++    try {
++      if (client.signal.aborted) return false
++      client.ownerAccess?.requireCurrent()
++      pending.ownerAccess?.requireCurrent()
++      if (client.ownerAccess === undefined && pending.ownerAccess === undefined) return true
++      return pending.resources !== undefined && this.ctx.remoteAccess.decide({
++        principal: client.principal, action: `event:${pending.source.event}`, resources: pending.resources,
++      }).kind === 'allow'
++    } catch { return false }
++  }
++
+   private deliverRemoteEvent(pending: PendingRemoteEvent, client: RemoteEventClient): void {
++    if (!this.allowsRemoteEvent(pending, client)) return
+     pending.deliveries.add(client)
+     client.deliveries.set(pending.id, pending)
+-    client.queue.push(pending.frame)
++    client.queue.push(pending.frame, () => {
++      if (client.ownerAccess === undefined) return true
++      if (this.pendingRemoteEvents.get(pending.id) !== pending) return false
++      if (this.allowsRemoteEvent(pending, client)) return true
++      this.cancelRemoteEvent(pending, new Error('Original scoped event authority retired'))
++      return false
++    })
+   }
+ 
+   private receiveRemoteEventResult(
+@@ -708,6 +762,12 @@
+     // Settlement and Client replacement may race the result request. Results
+     // from a completed event or a superseded delivery are idempotent no-ops.
+     if (pending === undefined || !pending.deliveries.has(client)) return
++    if (!this.allowsRemoteEvent(pending, client)) {
++      this.cancelRemoteEvent(pending, new Error('Original scoped event authority retired'))
++      throw new RemoteError('remote-access/denied', 'Original scoped event authority retired', {
++        action: `event:${pending.source.event}`, reason: 'owner-source-unavailable',
++      })
++    }
+     this.removeRemoteEventDelivery(pending, client)
+     if (result.outcome.kind === 'result') {
+       this.settleRemoteEvent(pending, {
+@@ -753,6 +813,8 @@
+       type: 'cancel',
+       eventId: pending.id,
+     }
++    // This carries no new data: original recipients must release an already delivered
++    // invocation even when its action is no longer permitted.
+     for (const client of clients) client.queue.push(cancellation)
+   }
+ 
+@@ -775,6 +837,7 @@
+         new AbortController(),
+       )
+       const value = await this.invokePrepared(prepared)
++      prepared.requireAccess()
+       // A void or explicitly absent business result carries no `value` field;
+       // JSON has no `undefined`, and the envelope's optional slot is the one
+       // representation of absence that both args and results already use.
+@@ -791,36 +854,47 @@
+   ): Promise<PreparedInvocation> {
+     const endpoint = endpointOf(request.namespace, request.method)
+     assertPeerLive(request.peer, endpoint)
+-    this.assertOwnerRoute(request.peer, endpoint)
++    const ownerAccess = this.assertOwnerRoute(request.peer, endpoint)
+     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
+     assertExactArguments(request.args, descriptor, endpoint)
+     const validated = validateArguments(descriptor, request.args, endpoint)
+-    // Access precedes lookup resolution, so a refused call activates nothing.
+-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (request.peer.principal.kind !== 'owner') {
++    const restricted = request.peer.principal.kind !== 'owner' || ownerAccess !== undefined
++    const admittedRequest = ownerAccess === undefined ? request : {
++      ...request,
++      signal: AbortSignal.any([request.signal ?? NEVER_ABORTED_SIGNAL, request.peer.signal, ownerAccess.signal]),
++    }
++    // The original question and registration remain pinned across every await.
++    const checkAccess = (): void => {
++      assertPeerLive(request.peer, endpoint)
++      ownerAccess?.requireCurrent()
++      if (ownerAccess !== undefined && admittedRequest.signal?.aborted) {
++        throw remoteCancelled(endpoint, admittedRequest.signal.reason)
++      }
++      if (!restricted) return
+       const resources = callResources(
+-        this.ctx.typert,
+-        this.resourceReaders(descriptor),
+-        descriptor,
+-        validated,
+-        request.signal ?? NEVER_ABORTED_SIGNAL,
++        this.ctx.typert, this.resourceReaders(descriptor), descriptor, validated,
++        admittedRequest.signal ?? NEVER_ABORTED_SIGNAL,
+       )
+       const decision: RemoteAccessDecision = resources === undefined
+         ? { kind: 'deny', reason: 'resource-invalid' }
+         : this.ctx.remoteAccess.decide({
+           principal: request.peer.principal,
+           action: `${descriptor.namespace}/${descriptor.method}`,
+-          resources,
+-          args: validated,
++          resources, args: validated,
+         })
+-      if (decision.kind === 'deny') {
++      if (decision.kind !== 'allow') {
+         throw new RemoteError('remote-access/denied', `remote access: ${endpoint}: access denied (${decision.reason})`, {
+-          action: endpoint,
+-          reason: decision.reason,
++          action: endpoint, reason: decision.reason,
+         })
+       }
+     }
++    // Preserve ordinary native invocation semantics; required owner sources
++    // alone add a captured generation and post-await checks.
++    const requireAccess = ownerAccess === undefined ? (): void => {} : checkAccess
++    // Refuse before a receiver or lookup can activate a native object.
++    checkAccess()
+     const receiverContext = await this.resolveReceiverContext(descriptor, validated, endpoint)
++    requireAccess()
+     const receiver: unknown = receiverContext.get(descriptor.service)
+     if (!isObject(receiver)) {
+       throw new TypertGatewayError(
+@@ -830,9 +904,20 @@
+       )
+     }
+     validateBinding(receiver, descriptor.service, descriptor.namespace, endpoint)
+-    const args = await Promise.all(descriptor.parameters.map(parameter =>
+-      this.resolveParameter(parameter, validated, endpoint)))
+-    const signal = methodSignal(request, control, descriptor.mode === 'stream')
++    let args: unknown[]
++    if (ownerAccess === undefined) {
++      args = await Promise.all(descriptor.parameters.map(parameter =>
++        this.resolveParameter(parameter, validated, endpoint)))
++    } else {
++      args = []
++      for (const parameter of descriptor.parameters) {
++        requireAccess()
++        args.push(await this.resolveParameter(parameter, validated, endpoint))
++        requireAccess()
++      }
++    }
++    requireAccess()
++    const signal = methodSignal(admittedRequest, control, descriptor.mode === 'stream')
+     const invocation = new GatewayInvocation(
+       { namespace: request.namespace, method: request.method, args: request.args },
+       descriptor.service,
+@@ -868,6 +953,7 @@
+       args,
+       method: method as (...args: never[]) => unknown,
+       invocation,
++      requireAccess,
+     }
+   }
+ 
+@@ -1184,13 +1270,13 @@
+ 
+ /** Pull-driven queue owned by one connected Client event generation. */
+ class RemoteEventQueue {
+-  private readonly frames = new Deque<RemoteEventWireFrame>()
++  private readonly frames = new Deque<{ frame: RemoteEventWireFrame; mayDeliver: () => boolean }>()
+   private waiter: (() => void) | undefined
+   private closed = false
+ 
+-  push(frame: RemoteEventWireFrame): void {
++  push(frame: RemoteEventWireFrame, mayDeliver: () => boolean = () => true): void {
+     if (this.closed) return
+-    this.frames.pushBack(frame)
++    this.frames.pushBack({ frame, mayDeliver })
+     this.waiter?.()
+   }
+ 
+@@ -1211,7 +1297,10 @@
+     signal.addEventListener('abort', abort, { once: true })
+     try {
+       while (true) {
+-        while (this.frames.size > 0 && !signal.aborted) yield this.frames.popFront() as RemoteEventWireFrame
++        while (this.frames.size > 0 && !signal.aborted) {
++          const next = this.frames.popFront()!
++          if (next.mayDeliver() && !signal.aborted) yield next.frame
++        }
+         if (this.closed || signal.aborted) return
+         await new Promise<void>((resolve) => { this.waiter = resolve })
+         this.waiter = undefined
+@@ -1220,6 +1309,20 @@
+       signal.removeEventListener('abort', abort)
+     }
+   }
++}
++
++/** Retain the original Host projection; a generic Agent label is never a resource. */
++function scopedEventResources(value: readonly RemoteAccessResource[] | undefined): readonly RemoteAccessResource[] | undefined {
++  if (!Array.isArray(value) || value.length === 0) return undefined
++  const captured: RemoteAccessResource[] = []
++  for (const resource of value) {
++    if (resource === null || typeof resource !== 'object' || typeof resource.kind !== 'string'
++      || resource.kind.length === 0 || resource.kind === 'global'
++      || !('id' in resource) || typeof resource.id !== 'string' || resource.id.length === 0
++      || Object.keys(resource).length !== 2) return undefined
++    captured.push(Object.freeze({ kind: resource.kind, id: resource.id }) as RemoteAccessResource)
++  }
++  return Object.freeze(captured)
+ }
+ 
+ function assertRemoteEventFrame(frame: TypertRemoteEventFrame): void {
+@@ -1315,6 +1418,7 @@
+   source: Iterable<unknown> | AsyncIterable<unknown>,
+   endpoint: string,
+   invocation: GatewayInvocation,
++  requireAccess: () => void,
+ ): AsyncGenerator {
+   const { signal } = invocation
+   const asyncFactory: unknown = Reflect.get(source, Symbol.asyncIterator)
+@@ -1330,12 +1434,14 @@
+   try {
+     while (true) {
+       if (signal.aborted) throw streamAbortFailure(endpoint, signal.reason)
++      requireAccess()
+       // Reusing a pending cancellation promise retains every completed race.
+       const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject })
+       // next() can abort and throw synchronously before the race subscribes.
+       void aborted.catch(() => undefined)
+       const next = await Promise.race([Promise.resolve(iterator.next()), aborted])
+       rejectAbort = undefined
++      requireAccess()
+       if (next.done === true) return
+       yield next.value
+     }
+--- a/packages/api/gateway/src/types.ts
++++ b/packages/api/gateway/src/types.ts
+@@ -4,7 +4,7 @@
+  */
+ 
+ import type { Context } from '@deepseek-ai/cordis'
+-import type { PeerScope, RemoteUplinkWindow, TypertResourceReader } from '@deepseek-ai/dsh-typert-protocol'
++import type { PeerScope, RemoteAccessResource, RemoteUplinkWindow, TypertResourceReader } from '@deepseek-ai/dsh-typert-protocol'
+ import type { RemoteEventHostInfo } from './stream-protocol.ts'
+ 
+ /** One Remote method request after a carrier has decoded its envelope. */
+@@ -50,6 +50,8 @@
+   readonly subject: object
+   /** Agent identity read directly from the scoped event subject. */
+   readonly agentId: string
++  /** Exact Host-owned resource projection, never reconstructed from a wire Agent label. */
++  readonly resources?: readonly RemoteAccessResource[]
+ }
+ 
+ /** Result returned from a Client waterfall, or delegation back to the Host chain. */
+--- a/packages/api/remotes/src/index.ts
++++ b/packages/api/remotes/src/index.ts
+@@ -71,7 +71,8 @@
+           queue,
+           event,
+           request,
+-          { value: agent.ctx, subject: agent, agentId: agent.id },
++          { value: agent.ctx, subject: agent, agentId: agent.id,
++            resources: Object.freeze([Object.freeze({ kind: 'session' as const, id: agent.session.id })]) },
+           next,
+         )
+       }) as never)
