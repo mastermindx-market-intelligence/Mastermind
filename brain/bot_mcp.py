@@ -472,13 +472,26 @@ async def get_intelligence(args):
       {"type": "object", "properties": {"tickers": {"type": "array", "items": {"type": "string"}}},
        "required": ["tickers"]})
 async def get_quote(args):
-    from data_layer import polygon
     tks = [str(t) for t in (args.get("tickers") or []) if t]
-    px = polygon.quotes(tks)
-    if not any(v is not None for v in px.values()):
-        return _ok("no live quotes available — Polygon layer offline or unkeyed (set POLYGON_API_KEY).")
-    return _json({"quotes": px,
-                  "note": "Live 15-min delayed prices (Polygon). For marks/entry checks — not a signal."})
+    try:
+        from data_layer import polygon
+
+        px = polygon.quotes(tks)
+        if not isinstance(px, dict):
+            raise TypeError("live quote result is not a mapping")
+        if not any(v is not None for v in px.values()):
+            return _ok("no live quotes returned for the requested tickers.")
+        return _json({
+            "quotes": px,
+            "note": "Live 15-min delayed prices (Polygon). For marks/entry checks — not a signal.",
+        })
+    except Exception:  # noqa: BLE001 - setup, read and serialization share one evidence boundary
+        return _json({
+            "read_status": "unavailable",
+            "error": "live_quotes_unavailable",
+            "failed_sources": ["quotes"],
+            "quotes": None,
+        })
 
 
 @tool("get_daily_briefing",
@@ -665,16 +678,54 @@ async def get_anticipation(args):
 @tool("read_signal", "Read a published signal/data JSON by path (allowlisted to the dashboard + bot data roots).",
       {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]})
 async def read_signal(args):
-    p = (Path(args["path"]) if Path(args["path"]).is_absolute() else _ROOT / args["path"]).resolve()
-    roots = [r.resolve() for r in _READ_ROOTS]
+    def unavailable():
+        return _json({
+            "read_status": "unavailable",
+            "error": "signal_read_unavailable",
+            "failed_sources": ["signal"],
+        })
+
+    try:
+        requested = Path(args["path"])
+        if not requested.is_absolute():
+            requested = _ROOT / requested
+        # Retain the requested entry for absence proof; use the resolved,
+        # authorized target for the content read.
+        p = requested.resolve()
+        roots = [r.resolve() for r in _READ_ROOTS]
+    except Exception:  # noqa: BLE001 - resolution failure does not authorize a read
+        return unavailable()
     if not any(p == root or root in p.parents for root in roots):
         return _ok("DENIED: path outside the allowed data roots.")
     if any(p == r or r in p.parents for r in _DENY_ROOTS):
         _audit_denied_book_read(p)
         return _ok("DENIED: portfolio book state (positions/ledger/research) is not readable "
                    "via read_signal — read your OWN book through your desk tool.")
-    d = _read_json(p)
-    return _json(d) if d is not None else _ok(f"not found: {p}")
+    try:
+        # JSON null is valid content. An exists() preflight cannot prove readable absence.
+        return _json(json.loads(p.read_text()))
+    except FileNotFoundError:
+        try:
+            import stat
+
+            candidate = requested
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        break
+                    candidate = candidate.parent
+                    continue
+                if candidate != requested and stat.S_ISDIR(info.st_mode):
+                    return _ok("not found: requested signal path")
+                # A dangling entry or an entry that appeared after the read is not absence.
+                break
+        except Exception:
+            pass
+    except Exception:  # noqa: BLE001 - never disclose file/parser/serialization exceptions
+        pass
+    return unavailable()
 
 
 def _audit_denied_book_read(p: Path) -> None:
