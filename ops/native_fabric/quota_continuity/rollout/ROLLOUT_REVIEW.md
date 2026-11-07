@@ -555,3 +555,14 @@ The packaged attended backend retains its existing enrollment boundary.
 These repairs neither establish a measured 99% useful-task SLO nor guarantee
 that a host can never fill. They prevent two concrete unsafe decisions while
 preserving finite capacity and conservative recovery.
+
+
+### CI current-manifest reconciliation — 2026-11-07
+
+The first hosted run, 42339309433 at source a6c849d76d5c16d3853e9a70cf16486872c7d11d, exposed stale current-manifest assertions in catalog staging, host-pull admission, and the paid initializer. The native manual-AUTO historical reconstruction also still began at the prerepair task. The related current-generation source-closure assertion was found by a bounded source scan and corrected with the same complete current manifest.
+
+Only current qualification pins now identify the actual repaired 107-member manifest 8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6 and lane b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b. The historical manual-AUTO test first inverses the hash-bound forward repair in its disposable stage, proves the exact 2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4 predecessor, and retains every older fixture and hash unchanged.
+
+Focused verification of all five affected qualification files passed (process 92160, terminal exit 0). The actual runtime repair, repaired release output, installer history, security floors, and production selector are unchanged. A fresh hosted run at the successor commit remains required; the earlier failing run is not delivery proof.
+
+Deployment constraint: the observed live 107-member generation ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46, sequence 35, has complete manifest 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9. It contains eight other component successors that this protected107 source baseline does not contain. Do not select this baseline over it. The original APPLICATION composer #2175 must preserve those bytes and qualify the two repaired members against that complete parent before existing publication/selection. No live release was published or selected in this work.
