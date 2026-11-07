@@ -1,5 +1,80 @@
 # Hermes APPLICATION qualification evidence
 
+## Latest completed adapter and installed-runtime proof
+
+Exact tested adapter source: **08b8daf9b6bdfe717007da1917aa771268011768**.
+GitHub tested merge **1c1d3e7da4eea5c2c22808d57ef18f2ea1589bb5** with protected
+base **5f8c13da926011fb5fdc8cea21287b532ac968db**. All six jobs in
+[run 42347086744](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744)
+passed. The table reports overlapping suites, not distinct production journeys.
+
+| Proof | Result | Exact job |
+| --- | --- | --- |
+| Pinned Hermes v0.23 native primary, tools, AUTO and exact model | 69 passed in 10.175 seconds; no failures, errors, skips, standard provider SDK constructions or external connection attempts | [128327066356](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744/job/128327066356) |
+| Actual native agent through original factory/client, HTTP handler, Gateway and Broker/SQLite | 9 passed in 62.686 seconds; no failures, errors, skips, standard provider SDK constructions or external connection attempts | [128327066654](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744/job/128327066654) |
+| Current native host admission/source/role contract | 51 passed in 20.69 seconds | [128327066655](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744/job/128327066655) |
+| Original and successor APPLICATION tunnel | 170 passed in 37.61 seconds | [128327066711](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744/job/128327066711) |
+| Offline original client, Python 3.12.16 | 54 passed | [128327066555](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744/job/128327066555) |
+| Offline original client, Python 3.13.18 | 54 passed | [128327066613](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347086744/job/128327066613) |
+
+The nine full-owner cases exercise fixed, AUTO and exact selection. Each route
+has a native tool conversation, original max_steps refusal, and partial-result
+recovery with no replay. Real native tool dispatch occurs once, both inference
+steps retain one account/lease, tool history and IDs round-trip, and the original
+SQLite receipts retain observed token counts. External provider responses and
+qualification/auth/account inputs are synthetic. Live acceptance remains false.
+
+The same 08b8daf9 adapter also passed **69 tests in 28.262 seconds** using the
+actual installed M2 Hermes v0.23.0 commit
+**2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19**, Python 3.14.9 and jsonschema
+4.26.0. The new [installed-runtime receipt](qualification/installed_native_08b8daf9_receipt.json)
+records the exact 19 source files, Git blobs, client bytes, all test identities,
+terminal result and log digest. The first launcher attempt timed out while the
+original native bootstrap prepared dependencies for the isolated data root.
+After its terminal failure and absence of remaining fixture processes were
+verified, the same carrier completed the second attempt with exit 0. Production
+installation and role configuration were not modified. Zero external attempts
+describes the completed tests, not the preceding fixture dependency setup.
+
+Current dependency composition is Macro #10818 at
+**915189b2538c8b952a53e921ba170459cd1eb624**, client SHA256
+**70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0**;
+the full-owner fixture uses APPLICATION #2175 at
+**d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6**. Hosted Hermes remains pinned
+to **1c0cd667746d3395fe9e1b6c74f8f85952486f18**. Macro's natural
+[run 42346514961](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42346514961/job/128325333011)
+passed all 62 cases in 2.43 seconds. This is the current composition; dependency
+tables in the historical sections below describe those earlier runs only.
+
+Separate Hermes harness run 42347086848 and runtime run 42347086735 succeeded.
+General repository CI is not claimed green. The inherited Brain chat fixture
+still lacks the dedicated chat service record after its production identity
+split in the currently published owner source. The active S3 composer has now
+included that repair and qualified 46/46 Brain cases in its retained patch;
+[receipt 6703479140](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703479140)
+records the exact source and original staged merge. That patch is not yet a
+published or installed generation. No competing fixture repair is introduced.
+
+## Current enrollment composition and release-manifest boundary
+
+Enrollment #2186 at **505d3782b3e6d659e90fd7ceef8caee3ab5a8395** joins the
+13 disjoint incumbent APPLICATION changes through d5df6b2 without altering its
+five Hermes-owned implementation/test paths. Its current natural
+[run 42347901268](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347901268/job/128329532370)
+tested merge **fa67641c1fc400d1d175693ce4f8356cf2eebfe7** and ended with
+**7 passed, 311 setup errors** in 5.66 seconds. The first error is the original
+builder's refusal: `application carrier cannot relabel a prior or mixed native base`.
+The updated handler/Broker hashes require the incumbent S3 composer's complete
+release manifest/generation. No guard was weakened and no active J-owned file
+was edited. The earlier 318-case enrollment result remains historical evidence,
+not a pass for this newly composed head. The release owner must compose the
+Hermes deltas with its current publisher/J work, not overwrite whole files.
+The same S3 receipt identifies the retained 32-path composition, its exact
+historical publisher corrections and candidate base/APPLICATION/HTTP manifests.
+Those candidates have not yet incorporated this Hermes v9 delta or established
+a current #2186 hosted pass. Consume the resulting canonical owner head and
+qualify the complete joined generation before installation.
+
 ## Exact scoped-model source join
 
 The current adapter composes the published APPLICATION exact-model v3 contract
@@ -16,8 +91,7 @@ The new standalone client loopback checks passed12 cases on local Python3.12:
 four retained AUTO cases and eight exact-selection/receipt/override/429 cases.
 They verify unchanged concrete model, null routed digest, closed schema/scope,
 serving-model equality and no third send after a post-tool refusal. The natural
-CI adds full native fixed/AUTO/exact conversations through the real handler and
-Broker. That expanded source needs its own receipt; no result is inferred here.
+CI's completed nine-case fixed/AUTO/exact result is recorded above.
 
 The previous source8c49f959b91d892d27f5fc24a8c9322ab86793f2 passed all six
 APPLICATION jobs in run42345675195, plus Hermes harness42345675206 and runtime
@@ -26,7 +100,7 @@ closed chat-specific service record after the original production identity split
 The exact failure and minimal incumbent-owner repair are recorded in
 [APPLICATION join6703255977](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703255977).
 
-## Current source proof
+## Historical source proof at 470b479
 
 Exact tested source: 470b479b53e0120b26f238d9251489ebdef260c5.
 GitHub tested its merge composition 85ea06b9499b9b64bd3954df881e64934c8024ab
@@ -62,7 +136,7 @@ An incomplete second response retains its unknown request and lease; both a
 rebuilt native facade and original request readback produce no replay. The
 original usage rows remain est_usd=null: this is not monetary acceptance.
 
-## Pinned dependencies
+## Historical pinned dependencies for the 470b479 proof
 
 | Dependency | Exact identity |
 | --- | --- |

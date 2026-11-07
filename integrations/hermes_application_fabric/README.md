@@ -146,15 +146,19 @@ The model is absent from that key. That grouping must not be mistaken for one
 unique physical account or for a monetary budget.
 
 The inspected incumbent quota circuit enforces capacity cooldown/probe policy;
-without a hard cooldown it does not reserve or sum money. The inspected Go
-APPLICATION path still needs durable dispatch-correlated usage before settlement
-and unknown economic holds that survive expiry. Unknown cost is not zero.
+without a hard cooldown it does not reserve or sum money. The original Go
+APPLICATION Broker durably stores per-dispatch token usage in its SQLite
+terminal receipt. Optional usage/spend reporting still has documented
+unknown-price limits; unknown cost is not zero.
 
-The APPLICATION/provider owners must supply the budget/usage repair in their
-existing transaction, request rows and usage writer. For the first canary,
-a fresh Extra Usage OFF receipt must cover the actual selected account AND the
-qualifying Go endpoint/configuration, with current included headroom. It is a
-financial boundary, not a measured zero-cost receipt or final budget acceptance.
+For the first included-plan canary, a fresh provider-owner Extra Usage OFF or
+equivalent hard no-overage receipt must cover the actual selected account AND
+qualifying Go endpoint/configuration, with current included headroom and policy.
+Together with original SQLite usage settlement and any stricter existing budget,
+this can qualify the bounded budget proof. It is not a measured zero-cost receipt.
+No new general USD reservation plane is required for that canary. Broader
+on-demand/pooled budgets and unresolved effects still require their applicable
+original-owner enforcement; optional reporting defects are not hidden.
 See [host integration and live acceptance](HOST_INTEGRATION.md).
 
 ## Qualification and integration

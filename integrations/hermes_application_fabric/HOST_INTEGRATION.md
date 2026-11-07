@@ -186,15 +186,41 @@ included headroom and its validity window. The source default Go endpoint is
 https://opencode.ai/zen/go/v1, but GO_UPSTREAM_BASE is configurable; account
 identity alone does not establish the financial boundary.
 
+The [current provider documentation](https://opencode.ai/docs/console/go)
+distinguishes included allowance from Extra Usage and documents different
+defaults for Go Teams. Teams service accounts are not covered by that plan;
+the upstream account type must therefore be verified. A Mastermind internal
+service identity does not establish the upstream provider account type. Current
+[inference documentation](https://opencode.ai/docs/console/api/inference/)
+describes a newer endpoint and separate cost, billing-source and allowance
+fields. Qualify the actual installed endpoint; do not silently migrate it or
+equate allowance consumption with billed USD. The original Go APPLICATION
+transport already emits its identifiable User-Agent and a stable provider
+session derived from the admitted lease, across all tool steps. Hermes adds no
+provider-selected header or alternate session owner.
+
 The existing owner must bind this policy to the original request/admission.
 Hermes must not assert it via prompt text, headers or model arguments. The
 declared quota scope can join multiple accounts/products, so another account's
 receipt is insufficient. Do not record a missing monetary amount as zero.
 
-Final monetary acceptance needs original-owner reservation/settlement, durable
-dispatch-correlated usage, physical/shared-account treatment across models and
-consumers, and holds that survive unknown effects. A capacity cooldown is not an
-economic hold: it can expire and allow a probe.
+For this one included-plan canary, the authoritative hard spending boundary and
+the original Broker's durable per-dispatch SQLite token-usage settlement can
+satisfy budget and usage acceptance. A new general USD reservation feature is
+not a prerequisite. Preserve any stricter applicable existing account or service
+budget; a prepaid balance without a verified hard no-overage boundary is not
+enough. Report monetary cost as unknown when no qualified cost receipt exists.
+Provider [request-start budget checks](https://opencode.ai/docs/console/budgets/)
+can permit in-flight overshoot; a displayed budget alone is not proof of a
+strict no-overage ceiling. This qualification uses the applicable existing
+owner receipts and policy, not a new runtime finance payload or ledger.
+
+On-demand or broader pooled rollout still needs its applicable original-owner
+budget admission and settlement, accurate physical/shared-account treatment and
+holds across uncertain effects. Optional JSONL/spend-report defects remain
+separate known limits. A capacity cooldown may expire and permit a probe; it
+cannot stand in for a required unresolved economic hold. Missing price evidence
+alone is not proof that the provider request itself has an unknown outcome.
 
 ## Acceptance journey
 
@@ -204,8 +230,8 @@ economic hold: it can expire and allow a probe.
 | Selection | Actual provider, selected AND served model, physical account, applicable shared allowance scope, policy/recipe/configuration and original lease. |
 | Primary turn | Real authenticated APPLICATION dispatch through that account, bounded usable native output, observed usage. No provider credential inside Hermes. |
 | Tool continuation | Offered native tool ID, exactly one harmless read-only tool execution, original result in the next native request, same original owner/account commitment. |
-| Budget denial | Deterministic existing-owner refusal before dispatch at the applicable budget/entitlement limit. Do not consume a real account just to exhaust it. |
-| Settlement | Durable original dispatch/request-linked usage and financial interpretation, original reservation/lease/close disposition. |
+| Budget enforcement | Fresh owner evidence of the selected account's hard spending boundary and applicable admission policy, plus deterministic refusal evidence at its entitlement/budget limit. Do not consume a real account just to exhaust it. |
+| Settlement | Durable original dispatch/request-linked SQLite usage and truthful financial interpretation, original lease/close and any applicable reservation disposition. |
 | Recovery | Original result/unknown-effect readback after a controlled disruption, no second provider submission or duplicate tool effect. |
 | AUTO/strict policy | Eligible capability/complexity/latency/headroom/cost selection and strict model/pool refusal before effects, through the incumbent contract. |
 
