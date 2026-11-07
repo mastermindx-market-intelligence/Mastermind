@@ -200,6 +200,20 @@ def test_capture_refuses_atomic_key_replacement_during_read(tmp_path, monkeypatc
     with pytest.raises(CredentialUseRefused): capture_existing_vault(selected)
 
 
+def test_actual_donor_writer_keeps_crypto_dependency_identity_across_vaults(tmp_path):
+    from tests.fixtures.hermes_vault.fixture_writer import write_login
+    from cryptography.fernet import Fernet
+    import sys
+    aliases = {name: sys.modules.get(name) for name in ("utils", "hermes_dir_acl", "hermes_constants")}
+    for index in range(3):
+        root = tmp_path / str(index)
+        item = write_login(root, password="synthetic-interop-only")
+        document = json.loads(Fernet((root / "vault.key").read_bytes()).decrypt((root / "vault.json.enc").read_bytes()))
+        assert document["items"][0]["id"] == item.id
+        assert document["items"][0]["secret"]["password"] == "synthetic-interop-only"
+    assert all(sys.modules.get(name) is value for name, value in aliases.items())
+
+
 def test_relay_does_not_read_vault_before_target_ready_and_aborts_same_target(tmp_path, monkeypatch):
     from integrations.workbench_browser_mcp import vault_files as files
     selected = private_use(grant(vault_files(tmp_path)))

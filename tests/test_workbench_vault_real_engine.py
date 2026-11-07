@@ -68,7 +68,7 @@ def representations(value):
     return values | {json.dumps(v, ensure_ascii=False)[1:-1] for v in values}
 
 
-@pytest.mark.parametrize("password", ['fixture-"quote\' &<xml>\\slash\n雪', "FILLED"])
+@pytest.mark.parametrize("password", ['fixture-"quote\' &<xml>\\slash\\n雪', "FILLED"])
 def test_actual_writer_fernet_mcp_dom_and_persisted_redaction(tmp_path, password):
     selected = selected_vault(tmp_path, password)
     use = private_use(selected, expires=selected["expires_at_ms"])
@@ -124,11 +124,11 @@ def test_actual_dom_target_changes_never_create_false_applied(tmp_path, path, ex
         session.close()
 
 
-@pytest.mark.parametrize("fault", ["none", "wrong-key", "truncated", "tampered", "wrong-item", "wrong-account", "wrong-origin"])
+@pytest.mark.parametrize("fault", ["none", "wrong-key", "truncated", "tampered", "wrong-item", "wrong-account", "wrong-origin", "newline"])
 def test_actual_node_fernet_decodes_only_the_selected_hermes_record(tmp_path, fault):
     from cryptography.fernet import Fernet
     password = "fixture-cryptographic-canary"
-    selected = selected_vault(tmp_path, password)
+    selected = selected_vault(tmp_path, password + ("\n" if fault == "newline" else ""))
     material = capture_existing_vault(selected)
     if fault == "wrong-key": material["key"] = Fernet.generate_key().decode()
     elif fault == "truncated": material["ciphertext"] = "gAAAAA=="

@@ -181,7 +181,7 @@ function decodeLogin(fernet, material, grant) {
       || !['username', 'email', 'phone'].includes(row.identifier_type)
       || !row.secret || typeof row.secret !== 'object' || Array.isArray(row.secret)
       || typeof row.secret.password !== 'string' || !row.secret.password
-      || Buffer.byteLength(row.secret.password) > 4096 || row.secret.password.includes('\0')) refuse();
+      || Buffer.byteLength(row.secret.password) > 4096 || /[\x00\r\n]/.test(row.secret.password)) refuse();
   return { password: row.secret.password, identifier: row.identifier };
 }
 

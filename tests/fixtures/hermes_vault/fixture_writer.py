@@ -12,7 +12,6 @@ from pathlib import Path
 import sys
 import tempfile
 import types
-from unittest.mock import patch
 
 
 def write_login(directory: Path, *, password: str, identifier="fixture@example.test", origin="https://vault.test"):
@@ -46,9 +45,21 @@ def write_login(directory: Path, *, password: str, identifier="fixture@example.t
     spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("vault_store_upstream.py"))
     donor = importlib.util.module_from_spec(spec)
     modules[name] = donor
-    with patch.dict(sys.modules, modules):
+    # Restore only our injected environment edges. Rolling back the complete
+    # sys.modules dictionary would unload dependencies imported by the real
+    # writer while native cryptography type registries still reference them.
+    absent = object()
+    previous = {key: sys.modules.get(key, absent) for key in modules}
+    sys.modules.update(modules)
+    try:
         spec.loader.exec_module(donor)
         item = donor.VaultStore(directory).add_item("login", "Synthetic engine qualification", {
             "identifier_type": "email", "identifier": identifier, "password": password,
         }, origin=origin)
+    finally:
+        for key, value in previous.items():
+            if value is absent:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = value
     return item

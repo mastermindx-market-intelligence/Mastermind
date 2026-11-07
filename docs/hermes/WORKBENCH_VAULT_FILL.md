@@ -49,6 +49,9 @@ uses disposable engines and does not qualify a Linux fleet installation.
    representations in the exact shared upstream redaction map. It reclassifies
    the held fields before each write and verifies their native values through
    Playwright utility-world inputValue. It never presses the login button.
+   Passwords containing NUL or line breaks refuse before writing: native password
+   fields cannot preserve those values, and silently normalizing a credential
+   would select a different secret.
 8. A closed result returns through the original relay and durable action ledger.
    Transport loss leaves the original claim uncertain. Reconciliation never makes
    a second fill attempt.
