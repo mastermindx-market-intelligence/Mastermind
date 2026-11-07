@@ -140,7 +140,14 @@ def main():
             if scoped:
                 row["route_scope"] = route_scope
             document["application_fabric_modes"] = {"hermes_secretary_fabric": row}
-            (config / "provider_production_modes.v1.json").write_text(json.dumps(document))
+            # Fixture only: `secret_ref` is an env-var NAME, never a token
+            # value; SERVICE_TOKEN is injected via os.environ below and must
+            # never reach disk — asserted here so a fixture change that
+            # breaks that guarantee fails loudly instead of silently.
+            rendered = json.dumps(document)
+            assert SERVICE_TOKEN not in rendered
+            # codeql[py/clear-text-storage-sensitive-data]
+            (config / "provider_production_modes.v1.json").write_text(rendered)  # lgtm[py/clear-text-storage-sensitive-data]
             (config / "capability_manifest.yml").write_text(json.dumps({"capabilities": [{
                 "capability_id": qualified.capability_id, "secret_ref": qualified.secret_ref,
                 "kill_state": "active", "allowed_lanes": ["hermes-secretary"]}]}))

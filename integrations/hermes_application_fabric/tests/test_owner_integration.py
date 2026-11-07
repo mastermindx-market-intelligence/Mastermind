@@ -97,15 +97,20 @@ class OwnerLoopbackTests(unittest.TestCase):
                     payload["application"] = dict(schema=AUTO_SCHEMA, disposition=state, turn_id=turn,
                         request_id=req, dispatch_permitted=False, effect_unknown=False, routing=routing,
                         serving_model=parent.serving_model, usage={"input_tokens": 11, "output_tokens": 7})
+                def _header(value):
+                    # Defense in depth: fixture-derived header values must
+                    # never carry CR/LF into a response header.
+                    return str(value).replace("\r", "").replace("\n", "")
+
                 body = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("X-MM-Application-Disposition", state)
+                self.send_header("X-MM-Application-Disposition", _header(state))
                 if turn is not None:
-                    self.send_header("X-MM-Application-Turn-ID", turn)
+                    self.send_header("X-MM-Application-Turn-ID", _header(turn))
                 if req is not None:
-                    self.send_header("X-MM-Application-Request-ID", req)
+                    self.send_header("X-MM-Application-Request-ID", _header(req))
                 self.end_headers()
                 self.wfile.write(body)
 
