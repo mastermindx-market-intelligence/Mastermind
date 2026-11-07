@@ -90,6 +90,35 @@ class EffectTests(ApplicationFixture):
         self.gateway.close_application_turn(principal_id="macro", turn_id="turn-1")
         self.assertEqual(self.rows("leases")[0]["state"], "released")
 
+    def test_unknown_on_one_model_holds_account_capacity_for_another_model(self):
+        self.document["providers"]["go"]["accounts"] = [{"name": "account-a", "per_account_cap": 1}]
+        self.grant["accounts"] = ["account-a"]
+        self.save()
+        binding = self.begin()
+        prepared = self.prepare(binding)
+        self.gateway.mark_application_unknown(prepared["dispatch_id"], reason="transport_interrupted")
+        self.clock[0] = binding["expires_at"] + 1
+        closed = self.gateway.close_application_turn(principal_id="macro", turn_id="turn-1")
+        self.assertEqual(closed["disposition"], "effect_unknown")
+        restarted = self.new_gateway(self.new_broker())
+        other = {"workload": "site_interactive", "turn_id": "other-model-turn",
+                 "pool": "go", "model": "other-model"}
+        self.assertFalse(restarted.begin_application(other, principal_id="macro", host="vps")["ok"])
+        self.assertEqual(len(self.rows("leases")), 1)
+        self.assertEqual(len(self.rows("application_requests")), 1)
+        self.assertEqual(self.rows("application_requests")[0]["dispatch_id"], prepared["dispatch_id"])
+        self.assertIn(self.rows("leases")[0]["state"], ("held", "rented"))
+
+        terminal = self.gateway.complete_application(prepared["dispatch_id"],
+            terminal_receipt=self.receipt(prepared))
+        self.assertEqual(terminal["disposition"], "terminal")
+        self.assertEqual(self.rows("leases")[0]["state"], "released")
+        admitted = restarted.begin_application(other, principal_id="macro", host="vps")
+        self.assertTrue(admitted["ok"])
+        self.assertEqual((admitted["account"], admitted["model"]), ("account-a", "other-model"))
+        self.assertNotEqual(admitted["lease_id"], binding["lease_id"])
+        self.assertEqual(len(self.rows("application_requests")), 1)
+
     def test_identical_completion_is_idempotent_conflict_and_late_unknown_cannot_overwrite(self):
         binding = self.begin()
         prepared = self.prepare(binding)

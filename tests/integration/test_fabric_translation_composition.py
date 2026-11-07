@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 from brain import translate
 
-# Forward fixture epoch: original APPLICATION carrier d5df6b2.
+# Forward fixture epoch: original APPLICATION carrier b955c82.
 # These exact blobs qualify its selected/native/HTTP and scoped-model paths.
 # Historical input fixtures and the full source validation remain unchanged.
 PINS = {
@@ -41,7 +41,7 @@ PINS = {
     "rollout/application_http_realm_projection.py": "684c54d5c9d8dbdd5bc046d123af31d20fc99dd1",
     "tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
-    "tests/test_application_turn_admission.py": "8487163bb0904f8b95f0a9b326efa1622cd0ad0e",
+    "tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
 }
 # Protected 5f8c13d realm consumed through original carrier 3ec62ff.
 # Complete source pin; the candidate commercial realm is not enrolled here.

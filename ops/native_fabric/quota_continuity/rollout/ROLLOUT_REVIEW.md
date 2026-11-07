@@ -677,3 +677,100 @@ The actual chat JavaScript and browser test are byte-identical to the preceding 
 The current Mastermind OS web source also builds successfully with locked npm dependencies, Node v26.5.0, npm 11.17.0, TypeScript 7.0.2 and Vite 8.3.0. No VITE_* environment or dotenv configuration was supplied. The existing build_os_asset_manifest owner (blob b5465858e011a4651ffe9e822a7ebe3905be823c) and closed profile owner (blob 4f70ff2625d1a3fd8e5d12235d2c3baa28e739c8) accept its actual 12-file licensed profile. All five font/license/notice files are byte-identical to their source public files. Asset-manifest SHA256: f861184272825e11f095eb3f60a3f7c73c6b039b89d02d40306e5cc1058f7f77. The build retains its nonfatal large-chunk and ineffective-dynamic-import warnings; no output was deleted to fit a profile. This is compilation and asset-contract proof, not a canonical protected release receipt or installed/authenticated OS proof.
 
 The complete structured source qualification and source-file capture are retained in review_evidence/fabric_application/hardening-consumer-qualification-20261107.json and hardening-consumer-source-capture-20261107.json. All captured source files matched the working tree before adding these proof documents and this report section. These documentation additions do not change the exercised code. Hosted exact-head checks and incorporation through original #2175 remain separate; J and all existing runtime holds retain their original custody.
+
+
+
+### Admission repair on the active APPLICATION carrier — 2026-11-07
+
+This isolated dependent contribution targets the existing #2175 branch at 312be66141bf58c564a11818d63ddd3f958ca0c0. It consumes the exact repair source of #2187 at 3b2338d3946209b6f6ce6a0b694cf609015fb07f, without importing unrelated protected changes into the active branch. #2175 remains the sole final APPLICATION composition carrier. Its live workspace and branch were not changed.
+
+The installed APPLICATION parent has 107-member manifest 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9. The current repaired source differs in exactly ext/fabric_task.py and ext/lane_runtime.py. All 105 other entries, including the eight additional APPLICATION component successors absent from the independent WORKER baseline, remain identical.
+
+The existing builder first qualifies and inverses the exact repaired pair against one of two explicit whole parents: the original WORKER 815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347 or the complete APPLICATION 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9 with its exact five-member carrier cohort. Its existing APPLICATION inverse then requires e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4, followed by the existing Go historical and dependency checks. Neither the captured dependency map nor the three APPLICATION dependency members are normalized. Both main and Go validation use this same ordering; published manifests and inventories retain actual repaired bytes.
+
+Actual builder receipts:
+
+| Variant | Members | Manifest SHA-256 |
+| --- | ---: | --- |
+| Native base | 107 | b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4 |
+| Go APPLICATION | 109 | a6de024d6b6d5a560fb670c2a53ff60401e94e843b15a8a112f3a4c469ce8a67 |
+| APPLICATION HTTP | 112 | 2fd27a08a973ac153f3f896a2d3213452feeeea46609ddec80c8e3a6eb073bd7 |
+
+Qualification:
+
+- Before composition, the original APPLICATION normalizer rejected the actual two-member repair as a mixed native base. The implemented composition accepts only the exact qualified parents.
+- The first 132-case release/packaging suite passed, including distinct WORKER/APPLICATION lineages, partial/foreign/backdated closures, alterations to each preserved APPLICATION member, unchanged caller inputs, and rejection of 109/112 namespaces at the 107-member base boundary.
+- After narrowing to the dependent contribution, 376 focused Python cases passed with zero errors, failures or skips (process 49731; 107.725 seconds), covering original-run continuity, real lock contention in both runtime copies, Go closure and extension builds, historical launcher composition, packaging and exact identity review.
+- The actual Studio Fabric facade suite passed all 70 cases, including fresh backend generations refusing to redispatch a run with retained orphan evidence; the same process completed with terminal exit 0.
+- The active parent already contained a four-line Go shim recovery change but retained its older whole-file identity review. This contribution preserves that code, maps every unchanged reviewed literal to its new source position, and records the one new HTTP conflict status literal at line 2804. The exact current source is c01fffa59c0095355cddda7f31aa76a218f0ee87a30769998d9627ec2ee37cef; the existing identity review now qualifies all 53 sites.
+- The broader local native-security module reported 35 passes and 32 failures at the existing FABRIC_SPARSE_GIT_OBSERVATION_UNQUALIFIED boundary. That is not a green security receipt. Hosted Linux qualification remains required; no guard, assertion, Git binary, environment contract or CI gate was weakened.
+
+No live generation was published or selected, no provider task was dispatched, and no APPLICATION profile or service was activated. Final acceptance requires incorporation into #2175 at its then-current head, the original #2187 protected-source integration, exact-head hosted checks, the final protected merge, fresh installed predecessor verification, the existing immutable publisher/selector, and authenticated consumer proof. The installed M2/C26, #398 and original APPLICATION operation holds remain distinct.
+
+
+### S3 APPLICATION publisher and scoped-model composition — 2026-11-07
+
+The first S3 source phase preserves the original #2175 / Macro#10740 carrier. Its exact input is #2175 `d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6`, including the scoped-model code and retained J candidate, rather than the earlier312be checkpoint. It incorporates #2187 through #2194's exact two-repair contribution `4d0b4979711759bfe23725246daeae27a7ff94ca` and #2182 publisher `b6174452467a458463b2592d15faeeb939f431d7`. The later sparse-executor delta is not imported: it is not needed for these builds and would change an additional installed member.
+
+The publisher is merged into the APPLICATION support owner; its resulting support SHA256 is `8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca`, not the publisher-only bd805865 source. One exact three-member successor binds that support source plus d5df's gateway/broker against the complete repaired APPLICATION107 parent b9fd5f76. Every other104 member is preserved. Relative to the actually installed3ad8c699 base, exactly five members change: the two admission repairs, this support extension and the two already-published d5df dependencies. The eight installed APPLICATION members are never replaced by the old WORKER baseline.
+
+The private inverse view enters the existing admission/APPLICATION/historical validators. Captured Go dependencies are checked against the untouched actual input, so a caller cannot supply stale normalized hashes. Actual emitted manifests/inventories and all historical source/namespace pins retain their meanings. The publisher-only107 c651b8e5 is an explicitly rejected input to this APPLICATION composition, not an allowlisted precursor. The three-member source patch is byte-reversible and source-bound (SHA256 3fe89c2b49afc8b96352c339790d302806fb3d4516407c4476524168367b428c).
+
+| Actual builder variant | Members | Manifest SHA256 | Source inventory SHA256 |
+| --- | ---: | --- | --- |
+| base | 107 | d8a112411c28c42e812907435f5b182ce351a4cb4c00e47b94ca1ddf58294ac9 | fe542e742b2eb529db9bec2472d4cac236dba8d8403cb99d4d1b7f4ee8939119 |
+| application | 109 | 9cad523f30aa098c71c0892005e32a706d1be91921e886e85aa1af0d52781255 | d5aba23e26f5e7f9f57e1b6740efa5f0fe0abea88ffa68cfbac2bc0b63f42670 |
+| http | 112 | 6cc737e65083c4af6bfd6f0e60b4de90e19c121148d748dba73271ba11f84771 | 4447318bcea36a4b5471e819d1790445dfbca2adeb2eada2d7db7353fab5fa45 |
+
+Validation is recorded as separate actual runs, never a sum of earlier suites:
+
+- Closure, publisher CAS/unknown-effect behavior, three original builders, missing/partial/foreign/backdated cohorts, stale captured dependencies, publisher-only rejection, actual output provenance and reversible source: **188 passed**, no failures/errors/skips.
+- Material packaging/current inventory assertions and the exact historical95/current107 diff: **15 passed**, no failures/errors/skips.
+- Changed Go-shim and packaged lane identity checks: **6 passed**, no failures/errors/skips. The d5df Go shim now has53 source-bound reviewed status/permission/input-limit tokens at SHA2561cab35bd; no principal/account identity was introduced.
+- Earlier204+83+70 repair receipts remain separate prior evidence. The two repaired runtime members and bound lane are exact source bytes; no unchanged broad repair suite was repeated.
+- The broader initializer diagnostic is retained: bundled Python produced40 passes/3 failures (one stale assertion repaired, two runtime limitations); system Python produced75 passes/1 unchanged directory-premise failure/3 skips. No runtime guard, environment contract or CI requirement was weakened. Required hosted qualification remains owed.
+
+Fresh read-only verification through the existing native generation owner confirmed selected ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46, sequence35,107 members, manifest3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9, unchanged during read. This is a predecessor observation, not a new installed receipt. No live generation, policy, provider turn, service or profile was changed.
+
+Exact inputs, commands, suite/JUnit digests, outputs, installed predecessor observation and remaining acceptance are retained in `review_evidence/fabric_application/s3-source-composition-20261107.json`. Original J, C1#2109, Hermes and Macro consumer custody remains distinct. Source composition does not complete the native owner/compiler/profile/parser and entitlement joins, financial reservation/unknown-spending proof, E3/fresh research/Metabolism consumers, protected release or real application/delegated-child consumed-result acceptance.
+
+### Inherited chat fixture qualification
+
+The incumbent Hermes receipt in #2175/comment6703255977 identified a general-CI fixture that enrolled only the text service while the existing production chat path correctly required `mastermind_chat_fabric`. The chat fixture now qualifies its synthetic transport under that existing service relation and adds a copied mode with the correct transport ID. Production chat identity and the text fixture are unchanged.
+
+The actual required three-module Brain inference discovery passed **46/46** with zero skips, using a disposable copy of paired Macro `abab96df55f82cb5c26459a6f51b568d73a6a6f8` (2,530 exact Git blob checks) and synthetic provider responses. This is separate from the 188 closure/publisher, 15 affected packaging and 6 identity checks above. The whitespace-clean source-forward fixture was also rechecked independently (1/1); its reconstructed source bytes remain exact. Hosted exact-head CI and live consumer acceptance remain owed.
+
+## S3 protected-merge composition and custody follow-through
+
+Protected merge `3ec62ffe02f277e3bab530e3ba069f2f86dcd18d` is composed with the qualified S3 source. Both overlapping files retain the protected realm-preimage and identity changes. The original 107/109/112 builders reproduce the same exact output manifests and inventories above. A separate 46-case material-source revalidation passed; the unchanged prior suites remain their own receipts. Separate shared-account/original-effect checks passed 18 cases, and the new cross-model account-cap concurrency/unknown-hold cases passed 3. No aggregate-suite claim is made.
+
+The six-file J preserving-migration repair is retained as a source candidate under `review_evidence/fabric_application/j-preserving-migration-repair-20261107.*`. Its 28 private-owner, 44 collector and 1 additional Node-owner checks are separate runs. The modern/legacy HTTP suite could not collect locally because its preinstalled MCP client package is absent. This artifact does not change the current collector/native/control generation or authorize a live original-J action. Exact sources, output hashes, receipts and outstanding live qualification are in `review_evidence/fabric_application/s3-source-composition-20261107.json`.
+
+
+### Combined publisher and sparse APPLICATION source — 2026-11-07
+
+This contribution consumes original #2175 published b955c823767b504853b6d79e44d09fc71cdbdd9c without modifying its active workspace. The original source composer retains the Hermes/native release join. The combined base has exactly 107 members: compared with b955/d8a112, only the sparse executor changes; compared with 317cc5d/d416ac, only the support publisher changes. All 106 other members in each comparison are byte-identical. The installed-parent comparison is against the retained 3ad8c699 observation, not a fresh live read: exactly task, lane, executor, support, gateway and broker differ, with 101 unchanged members.
+
+Both unmodified predecessor builders reject the combined manifest. The existing pool-composition inverse now admits the already-qualified complete sparse parent 1bb6 alongside its unchanged complete parent b9fd. It still requires all three exact publisher/gateway/broker hashes before checking the entire inverse manifest. The normalizer dispatches by the exact publisher member, preserving the older scoped-pair path, then applies the unchanged sparse, admission and APPLICATION inverses. Four explicit complete candidate maps cover the two accepted predecessors and their union. Historical constants remain fixed; actual captured Go dependency equality and staged-byte checks remain unchanged. There is no new transition registry or publication owner.
+
+Actual source builds succeeded:
+
+| Variant | Members | Manifest SHA256 |
+| --- | ---: | --- |
+| Native base | 107 | 0084f7d0a3b78f3c434c872c9bbf2c5ab764f54cf565d5f24c00480a1855cbfe |
+| Go APPLICATION | 109 | 4be0e9c3658fb46d15a795615bf4dc4f7f1502e25e544c00a339d3a5057f5e8a |
+| APPLICATION HTTP | 112 | f7b15466dc9e42c20a28814462ecb05c9327d9f12312ff1c5cb45eda0d416ff6 |
+
+The initial focused source run was 561 passed, 3 failed, 6 skipped across 570 cases. All three failures were in the publisher suite. Two were predecessor-specific fixture expectations; the repaired tests retain the exact new sparse-parent assertion, the frozen old-parent assertion and both direct-cohort and full-normalizer unknown-publisher refusals. The selected-publisher child failure was separately diagnosed: the proof venv found PyYAML 6.0.3 only in user site, while the unchanged production child deliberately sets PYTHONNOUSERSITE=1. The same isolated child import failed with ModuleNotFoundError. Installing the already-declared exact PyYAML 6.0.3 dependency into the disposable proof venv made that child import succeed; no production code or isolation guard changed. The complete publisher suite then passed 44/44, including the actual selected immutable publisher subprocess, same-target observation, stale-selection/older-owner refusal and uncertain-reply preservation. The initial 570-case run remains recorded as failed, not retrospectively green. Six skips are the existing Linux-only checks on macOS.
+
+Separate complete qualification passed 169 admission/effect cases and 22 native HTTP startup cases. The actual paired Macro abab96df55f82cb5c26459a6f51b568d73a6a6f8 translation path passed 23/23 after binding its one changed admission-fixture blob 4cc542888358bf6b46a1e78c581af5ef2f7178aa. The incoming admission fixture adds shared-account/model contention and unknown-effect capacity tests; its existing consumer fixture behavior is unchanged. All other current translation/AUTO pins remain exact. The stricter distinct-chat-service fixture and negative substitution case are retained.
+
+The earlier 198 consumer, three browser, and complete 12-file frontend results remain separate receipts. The complete frontend source and actual chat asset are byte-identical through this publisher merge; no unnecessary build/browser rerun was used to inflate the counts. Detailed logs, source inputs, before-fix refusals, dependency evidence and actual build digests are retained in review_evidence/fabric_application/hardening-publisher-composition-qualification-20261107.json and its source capture. These source results do not constitute protected final-source delivery, enrolled runtime selection or authenticated live acceptance.
+
+### Retained J candidate: missing HTTP proof closed — 2026-11-07
+
+The exact independent six-file source candidate retained by b955 was applied only to a disposable source export. All six preimages and postimages, compressed digest 4e6c61cdc049aa7f0f24f7b55d1de48158e0fe8eb1ebc175d67c87e9a62c460c and expanded patch digest 5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36 were verified. The locked private MCP package was installed with dev dependencies in that export; package and lock inputs remained unchanged.
+
+The complete patched original-delivery.test.mjs suite passed 22/22 using modern client 2.3.1 and legacy SDK 1.25.1 through actual loopback HTTP, the existing private gateway and owned inert Python helpers. This closes the previously missing compatibility check. It verifies both clients retain the sealed predecessor observations, use one subordinate reconciliation attempt, preserve held/null slots, and refuse malformed/duplicate predecessor data. No installed host, provider, original collection or real native transition was invoked. The prior 28/44/1 candidate tests remain their separate original receipts. Exact proof is in review_evidence/fabric_application/j-preserving-migration-http-qualification-20261107.json.
+
+A fresh canonical status read also reconciled source-repair migration02 as VERIFIED_TERMINAL, rc1, root_verified=true and controller_return=RECORDED, with reason continuation_evidence_unqualified. Its acceptance remains UNVERIFIED/EXECUTION_NOT_ELIGIBLE; result consumption, retry and dispatch remain unauthorized, and execution_absence_proven=false. Its 190-byte result was not read. This does not settle the original native-driver J effects, which remain UNKNOWN. The separately published candidate has not been applied to the main source or live installation by this contribution. Final source incorporation and native/control closure qualification stay on the original active #2175 carrier.

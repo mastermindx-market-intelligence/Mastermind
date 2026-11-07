@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from threading import Barrier
 import unittest
 from unittest.mock import patch
 
@@ -155,6 +156,51 @@ class AdmissionTests(ApplicationFixture):
             {"fixture-model"}, clock=lambda: self.clock[0], application_broker=self.broker)
         self.assertFalse(self.begin(gateway=gateway)["ok"])
         self.assertEqual(self.rows("leases"), [])
+
+    def test_distinct_models_share_one_canonical_account_slot_concurrently(self):
+        self.document["providers"]["go"]["accounts"] = [{"name": "account-a", "per_account_cap": 1}]
+        self.grant["accounts"] = ["account-a"]
+        self.save()
+        barrier = Barrier(2)
+
+        def admit(model):
+            gateway = self.new_gateway(self.new_broker())
+            barrier.wait(timeout=5)
+            return gateway.begin_application({"workload": "site_interactive",
+                "turn_id": model, "pool": "go", "model": model}, principal_id="macro", host="vps")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(admit, ["fixture-model", "other-model"]))
+        self.assertEqual(sum(result["ok"] for result in results), 1)
+        leases = self.rows("leases")
+        self.assertEqual(len(leases), 1)
+        self.assertEqual((leases[0]["pool"], leases[0]["account"]), ("go", "account-a"))
+        self.assertEqual(len(self.rows("application_turns")), 1)
+        self.assertEqual(self.rows("application_requests"), [])
+
+    def test_model_caps_cannot_expand_the_shared_account_cap(self):
+        self.document["providers"]["go"]["accounts"] = [{"name": "account-a", "per_account_cap": 2,
+            "per_model_caps": {"fixture-model": 10, "other-model": 10}}]
+        self.grant["accounts"] = ["account-a"]
+        self.save()
+        barrier = Barrier(2)
+
+        def admit(model):
+            gateway = self.new_gateway(self.new_broker())
+            barrier.wait(timeout=5)
+            return gateway.begin_application({"workload": "site_interactive",
+                "turn_id": model, "pool": "go", "model": model}, principal_id="macro", host="vps")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(admit, ["fixture-model", "other-model"]))
+        self.assertTrue(all(result["ok"] for result in results))
+        self.assertEqual({result["model"] for result in results}, {"fixture-model", "other-model"})
+        self.assertEqual({result["account"] for result in results}, {"account-a"})
+        self.assertEqual(len({result["lease_id"] for result in results}), 2)
+        self.assertFalse(self.begin("third-operation")["ok"])
+        self.assertEqual(len(self.rows("leases")), 2)
+        self.assertEqual(len(self.rows("application_turns")), 2)
+        self.assertEqual(self.rows("application_requests"), [])
 
     def test_duplicate_turn_preserves_binding_deadline_and_changed_input_refuses(self):
         first = self.begin()

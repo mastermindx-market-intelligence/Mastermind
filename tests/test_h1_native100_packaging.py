@@ -40,7 +40,7 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
         'native_remote.py', 'remote_sub.sh', 'remote_sub_exec.py',
         'remote_sub_helpers.py', 'support_bundle.py',
     }
-    for name, expected in m._application_carrier_candidate_digests(DRAFT.parent).items():
+    for name, expected in m.application_carrier_candidate_digests(DRAFT.parent).items():
         raw = (DRAFT.parent / 'candidate' / name).read_bytes()
         row = inventory['files']['ext/' + name]
         assert hashlib.sha256(raw).hexdigest() == manifest['ext/' + name] == expected
@@ -49,7 +49,7 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     historical = m.normalize_application_carrier_base_manifest(manifest)
     assert {key for key in manifest if historical[key] != manifest[key]} == {
         'ext/' + name for name in m.APPLICATION_CARRIER_DIGESTS
-    } | set(m.ADMISSION_INTEGRITY_DIGESTS) | set(m.EXACT_SCOPED_MODEL_DIGESTS)
+    } | set(m.ADMISSION_INTEGRITY_DIGESTS) | set(m.APPLICATION_POOL_COMPOSITION_DIGESTS)
     for name, expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
         actual = hashlib.sha256((DRAFT.parent / 'candidate' / name).read_bytes()).hexdigest()
         assert actual == manifest['ext/' + name]

@@ -648,9 +648,9 @@
       "source": "candidate/sub.sh"
     },
     "ext/support_bundle.py": {
-      "bytes": 19456,
+      "bytes": 39302,
       "installed_preimage_sha256": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
-      "sha256": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+      "sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
       "source": "candidate/support_bundle.py"
     },
     "ext/yes": {

@@ -33,9 +33,9 @@ The preflight bounds YAML events/depth before invoking the existing decoder, ref
 
 ## Publication and original-request preservation
 
-There is deliberately **no apply, rotate, enable, reload, reset or retry command** here. The existing native generation builder, installer prepare/apply/reconcile operations, account/credential owner, physical admission lock, lease ledger and original application-turn owner retain their jobs. Do not copy an arbitrary candidate over installed `pools.yaml`, infer that old leases are absent, bind a replacement key to an active turn, or replay an unknown request based on this preview.
+Preview and candidate authoring confer **no apply, rotate, enable, reload, reset or retry authority**. The opt-in compatible publication path below delegates to the selected original native publisher; it does not replace it with checkout code. The existing native generation builder, installer prepare/apply/reconcile operations, account/credential owner, physical admission lock, lease ledger and original application-turn owner retain their jobs. Do not copy an arbitrary candidate over installed `pools.yaml`, infer that old leases are absent, bind a replacement key to an active turn, or replay an unknown request based on this preview.
 
-The original #2060/#10740 application-selection/enrollment migration and #2109 OS view retain their source writers. This additive module, its focused tests and this runbook do not edit their picker, broker, installer, generation manifests, authentication or UI files. Native model/pool activation, key-reference generation changes, drain/rollback and installed consumer proof remain separate required programme work.
+The original application-selection/enrollment migration and #2109 OS view retain their source writers. Inspection/staging do not edit their picker, broker, installer, authentication or UI files. The compatible-publication extension updates the original support publisher and its exact derived row in this candidate's default native manifest/inventory; it does not write an active root's APPLICATION generation variants or workspace. Those variants must be regenerated from the composed source before installation. Native model/pool activation, key-reference generation changes, drain/rollback and installed consumer proof remain separate required programme work.
 
 ## Evidence at authoring
 
@@ -94,3 +94,80 @@ This reports only `ARTIFACT_PRESENT_VERIFIED`: the exact candidate is available.
 The staged operator was exercised against the incumbent public ten-pool source at revision `db4e4b1768809bd991003ef045568b480cdb42ea0715a6b73ea5353930bf90d8`. A deliberately unactivated GLM executor change to its already-declared `glm-5.3` produced candidate `e1c0e3b2f00d315568e8fc7e6a9a39e145e8b35124af8d2952cd8d635e81d468`. CLI stage and readback returned exit0, with critical-policy/requalification/drain requirements preserved and the original live file byte-identical afterward. This was source-backed private candidate authoring, not a provider call, native generation install, account activation or model-choice recommendation.
 
 The source regression cases cover closed edit semantics, model-map ownership, untouched values, no-op and stale revisions, credential rejection, private destinations, no-overwrite races, input drift, lost final-publication acknowledgment and actual subprocess CLI composition. They are authored for required hosted CI; no discretionary local suite was run.
+
+## Publish compatible policy through the selected native owner
+
+The `publish-compatible` and `publication-status` commands extend the same operator. They never load a new writer from a caller-supplied module or execute this checkout's candidate writer against the live kit. They select the current immutable native generation through `rollout/native_generation.py`, verify its complete code closure, require the original `ext/support_bundle.py` API version and adjacent policy validator, and hold the existing generation publication lock during the finite owner call. An older installed publisher returns `NATIVE_POLICY_PUBLISHER_UPGRADE_REQUIRED` without invoking a substitute implementation. Source merge is not installed enrollment.
+
+Before any authorized change, retain the exact old **public policy** as a separate owner-writable regular artifact so the original owner can confirm its file/directory sync without changing bytes. The command never chmods a read-only source. Do not supply the live file itself or a hard link as rollback evidence. Both candidate and retained old bytes must match their expected digests. The original publisher revalidates the actual live preimage under its existing physical `.admission.lock`; a prior inspect outside the lock is insufficient. It confirms the retained rollback file and directory are synced before attempting the policy replacement.
+
+```sh
+python3 -B -m ops.native_fabric.quota_continuity.policy_change publish-compatible \
+  --stable-ext /absolute/original/kit/ext \
+  --expected-native-generation <current-qualified-generation> \
+  --expected-current-sha256 <exact-old-public-policy-sha256> \
+  --expected-candidate-sha256 <exact-new-public-policy-sha256> \
+  --candidate /absolute/private/candidate.json \
+  --rollback-source /absolute/private/retained-old-policy.yaml
+```
+
+Only the incumbent policy owner's **same critical fingerprint** is allowed on this path. New or removed pools, different models, entitlement/limit changes and other critical policy changes refuse with `CRITICAL_CHANGE_REQUIRES_NATIVE_GENERATION`. They require a separate coordinated native generation transition, not a momentary global edit that would make active snapshots incompatible. No pool/account/model grant is synthesized from this command. It neither refreshes provider quota nor sets model-serving authority.
+
+For a nontrivial compatible update, the original owner requires its existing active directory to contain no unclosed workers or unrecognized entries. Qualified retained settlement metadata is classified by its existing validator; nothing is removed or reaped here. A busy lock, unsafe directory, changed source, symlink or multiply linked operand, changed target, missing retained preimage or mismatched generation fails closed. No missing installation, lock or state store is created.
+
+After staging into the original target directory, the owner rechecks the held directory/lock identities, active entries, candidate, retained preimage and current target. One atomic replacement is followed by directory sync and exact new inode/content readback. The reply distinguishes `POLICY_PUBLISHED` from `UNCHANGED`; account/credential access, generation selection and original-operation rebinding remain false. Legacy three-argument native `ensure_policy` callers retain their existing contract; the strict behavior is opt-in.
+
+### Uncertain publication and rollback
+
+A missing, malformed or timed-out modifying response—or a failure after attempted replacement—returns `EFFECT_UNKNOWN` and no retry authority. Do not issue another publication, choose a new target, alter the expected revision, or switch the service to manufacture success. Observe the same original target through the same selected owner:
+
+```sh
+python3 -B -m ops.native_fabric.quota_continuity.policy_change publication-status \
+  --stable-ext /absolute/original/kit/ext \
+  --expected-native-generation <original-qualified-generation> \
+  --expected-current-sha256 <original-old-public-policy-sha256> \
+  --expected-candidate-sha256 <original-new-public-policy-sha256>
+```
+
+This read can report `CANDIDATE_BYTES_OBSERVED`, `PREVIOUS_BYTES_OBSERVED` or `OTHER_POLICY_OBSERVED`. It deliberately retains `original_publication_proven=false` and `retry_authorized=false`; present bytes alone cannot reconstruct a lost invocation or prove an earlier write never happened. Unknown third-party content is neither printed nor hashed into public output. A different selected generation must be reconciled through its existing owner rather than bypassing the original selection fence.
+
+An authorized rollback after a **confirmed** publication is the same compatible publisher in reverse: retained old bytes become the candidate, the confirmed current digest becomes the expected prior revision, and the retained newer candidate is its rollback preimage. It rechecks original locks, compatibility and idle state. There is no force flag, new rollback journal, pointer rewind, credential copy or implicit replay after uncertainty.
+
+### Source and installed boundary
+
+The strict native functionality is in the original `candidate/support_bundle.py`; its historical `source/` preimage and existing installer/generation schemas are unchanged. The operator transport is `policy_publication.py`. The active application integration has separate support membership and generated closure manifests: compose these function-disjoint changes into that exact current source and regenerate its actual closure through the existing builder before installation. Never rewrite an installed sealed file or reuse a manifest that omits these new bytes.
+
+At authoring, the current native selection was sequence34, generation `a7671e6e0f275e25b296e8d0c972c2c45f68d8cb737152cb4a282d3bc450a775`. A real **read-only** `publication-status` call returned exit2 / `NATIVE_POLICY_PUBLISHER_UPGRADE_REQUIRED`, `writes_applied=false` and no reconciliation/retry authority. No live policy change, key rotation, lease action or service installation occurred. The command did not fall back to source-checkout code. This identifies the exact native rollout dependency, not a user-credential requirement.
+
+Regression source covers under-lock expected-current CAS, critical-change refusal, retained preimage, active/unknown marker preservation, symlinks and unsafe files, source movement, replacement acknowledgment loss, directory-sync failure, read-only observations, reverse CAS, legacy-call compatibility and actual selected native owner subprocess composition. Local validation is limited to syntax/diff and the stated real read-only command; regression execution must be established by the exact hosted CI receipt, not inferred from authored cases.
+
+## Native application packaging of this publisher successor
+
+The publication owner is an existing member of the native107 closure. Updating its
+actual bytes also changes that closure's identity. The Go/application builder now
+recognizes **one exact publisher-only successor**, with new publisher SHA256
+`bd8058657f884ee4fb7fbad1d937c24041e6d4c204fb1e3dc00953f7482bf3b3` and complete
+107-member predecessor manifest SHA256
+`815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347`.
+It verifies every original member before feeding a private predecessor copy into
+the unchanged historical Go validator. The actual candidate object and emitted
+manifests retain the new publisher hash. Partial namespaces, mixed cohorts, changed
+other members and unknown publisher hashes do not receive compatibility.
+
+The current default107 manifest/inventory bind the actual publisher. The separate
+historical102 fixture restores its original protected19070-byte module from
+`rollout/preimages/support_bundle_e5e6153.py`, identical to the integration root's
+retained preimage. Historical95 already carries its own distinct module; its
+manifest and assertions remain unchanged. This is not permission to relabel a
+historical installed generation.
+
+After the evidenced build failure at `validate_go_base_manifest`, the source-only
+Go109 and HTTP112 builds completed successfully. Their manifests retain the new
+publisher module, with SHA256 `c7871dc79fcd64f38ded3ef6afc1700356e5fefa9eff0e8bd3af96fb768218f9`
+and `df8f18de6ce2f6c248344a01b2314f98f0900595d3c457a15e013b74fd7d9210`, respectively.
+These are this isolated candidate's build receipts, **not** the active APPLICATION
+root's different107/109/112 composition, installation or service qualification.
+The final joined source must preserve both contributions and be regenerated by the
+existing root. Authored regression coverage checks exact-cohort recognition,
+unchanged caller manifests, legacy validation, mixed-source refusal and unknown
+publisher rejection; it is not claimed executed before hosted CI concludes.

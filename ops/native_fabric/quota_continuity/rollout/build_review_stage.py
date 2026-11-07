@@ -561,6 +561,44 @@ APPLICATION_CARRIER_PREIMAGES = {
 APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
 
 
+# One complete successor of #2194's exact two-repair APPLICATION closure.
+# It composes #2182's publisher into APPLICATION's support owner and preserves
+# #2175/d5df6b2's scoped-model dependencies. The publisher-only WORKER closure
+# is not this precursor. Each accepted parent binds all other 104 members. The second complete
+# parent is the already qualified sparse-executor successor; older pins stay fixed.
+APPLICATION_POOL_COMPOSITION_PARENT_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+APPLICATION_POOL_COMPOSITION_PREIMAGES = {
+    "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+APPLICATION_POOL_COMPOSITION_DIGESTS = {
+    "ext/support_bundle.py": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+
+
+def before_application_pool_composition(manifest):
+    """Validate the exact complete successor; return its private parent view."""
+    if type(manifest) is not dict:
+        return manifest
+    if not any(manifest.get(name) == digest
+               for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        raise ValueError("application pool composition cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (APPLICATION_POOL_COMPOSITION_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256):
+        raise ValueError("application pool composition parent closure differs")
+    return previous
+
+
 # Exact adoption of #2007's two-hunk sparse preflight repair on the already
 # qualified APPLICATION admission-repair parent. Historical carrier hashes stay
 # frozen; this inverse is only a validation view of the new actual executor.
@@ -613,21 +651,26 @@ def before_sparse_commit_preflight(manifest):
     return previous
 
 
-def _application_carrier_candidate_digests(root):
+def application_carrier_candidate_digests(root):
     observed = {name: sha((root / "candidate" / name).read_bytes())
                 for name in APPLICATION_CARRIER_DIGESTS}
-    successor = {**APPLICATION_CARRIER_DIGESTS,
-                 "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
-    if observed == APPLICATION_CARRIER_DIGESTS or observed == successor:
+    sparse = {**APPLICATION_CARRIER_DIGESTS,
+              "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    publisher = {**APPLICATION_CARRIER_DIGESTS,
+                 "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
+    combined = {**publisher,
+                "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
+    if any(observed == cohort for cohort in cohorts):
         return observed
-    if any(observed[name] in {APPLICATION_CARRIER_DIGESTS[name], successor[name]}
+    if any(observed[name] in {cohort[name] for cohort in cohorts}
            for name in APPLICATION_CARRIER_DIGESTS):
         raise ValueError("application carrier candidate cohort is incomplete")
     return {}
 
 
 def application_carrier_candidate_cohort(root):
-    return bool(_application_carrier_candidate_digests(root))
+    return bool(application_carrier_candidate_digests(root))
 
 
 def normalize_application_carrier_base_manifest(manifest):
@@ -640,7 +683,10 @@ def normalize_application_carrier_base_manifest(manifest):
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
-    manifest = before_exact_scoped_models(manifest)
+    if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
+        manifest = before_application_pool_composition(manifest)
+    else:
+        manifest = before_exact_scoped_models(manifest)
     manifest = before_sparse_commit_preflight(manifest)
     manifest = before_admission_integrity(manifest)
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
@@ -682,7 +728,7 @@ def main():
     (stage / "ext").mkdir(parents=True, exist_ok=True)
     manifest = {}
     files = {}
-    application_carrier = _application_carrier_candidate_digests(root)
+    application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
         if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
             source = root / "candidate" / name
