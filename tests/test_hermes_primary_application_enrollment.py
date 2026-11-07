@@ -40,19 +40,20 @@ def routed_role(case, profile):
 def test_routed_role_uses_original_grants_and_one_physical_owner(service_owner, profile):
     case = service_owner
     routed_role(case, profile)
-    accounts_before = json.loads(case.accounts.read_bytes())["accounts"]
+    accounts_before = json.loads(case.accounts.read_bytes())
     plan = prepare(case)
     assert plan["grant_sha256"] == g.digest(g.canonical(case.specification["grants"]))
     receipt = installer.apply_go_service_enrollment(case.service_bundle)
     assert installer.reconcile_go_service_enrollment(case.service_bundle) == receipt
-    assert json.loads(case.accounts.read_bytes())["accounts"] == accounts_before
+    accounts_after = json.loads(case.accounts.read_bytes())
+    assert accounts_after == {**accounts_before, "application_grants": case.specification["grants"]}
     with loaded_entry(case.published, clean_yaml=True) as entry:
         startup = entry.inspect(verified_root=case.published.release, verified_metadata=case.published.meta)
         (binding,), _, account_profile = entry.load_completed_application_startup(startup, profile)
         assert binding.route_scope == startup.handler.ApplicationRouteScope(case.specification["scope"]["route_scope"])
         assert binding.credential_ref == PROFILES[profile] and not binding.admin_pool_view
         assert account_profile == case.profile
-    installed = json.loads(case.accounts.read_bytes())["application_grants"]
+    installed = accounts_after["application_grants"]
     assert installed == case.specification["grants"]
     assert len({tuple(row["accounts"]) for row in installed}) == 1
 
