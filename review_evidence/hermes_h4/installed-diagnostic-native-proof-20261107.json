@@ -1,0 +1,57 @@
+{
+  "before": {
+    "authority_epoch": 3,
+    "execution_generation": 1,
+    "message_count": 0,
+    "revision": 0,
+    "running": false,
+    "session_id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027",
+    "stored_session_id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027"
+  },
+  "bridge_sha256": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+  "bridge_source_unchanged": true,
+  "closed_diagnostic_observed": false,
+  "command_attempted": true,
+  "detach_requested": true,
+  "detached": true,
+  "gateway_reload": false,
+  "native_reply": {
+    "output": "{\"admitted\": false, \"capacity_reason\": \"FABRIC_PREVIEW_REFUSED\", \"dispatched\": false, \"reason\": \"NATIVE_CAPACITY_REFUSED\", \"state\": \"REFUSED\"}",
+    "type": "exec"
+  },
+  "new_canary_created": false,
+  "observed_at": "2026-11-07T13:49:45.295515+00:00",
+  "operation_id": "hermes-capacity-routing-completion-20261107-c4",
+  "prompt_submissions": 0,
+  "provider_request": false,
+  "route": {
+    "admitted": false,
+    "capacity_reason": "FABRIC_PREVIEW_REFUSED",
+    "dispatched": false,
+    "reason": "NATIVE_CAPACITY_REFUSED",
+    "state": "REFUSED"
+  },
+  "runtime": {
+    "authority_epoch": 3,
+    "instance_id": "a9115d5bee674ff98a3fac21d9ad5ca8",
+    "profile_id": "/Users/chriswong/.hermes"
+  },
+  "schema": "mastermind.hermes_h4_installed_diagnostic_native_proof.v1",
+  "session_id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027",
+  "source_commit": "f008b67333ecf627270a7d8378720f1f034864ce",
+  "state": "ACTUAL_RETURN_RETAINED",
+  "stored_after": {
+    "id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027",
+    "message_count": 0,
+    "running": false,
+    "session_id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027"
+  },
+  "stored_before": {
+    "id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027",
+    "message_count": 0,
+    "running": false,
+    "session_id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027"
+  },
+  "subscription_id": "8c3ce5888aa64ba589077945cd1f4c03",
+  "worker_dispatch": false
+}

@@ -1,0 +1,70 @@
+{
+  "bridge_sha256": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+  "capacity_processes_before": [
+    "48733 48443 Fri Nov  6 15:17:37 2026     /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /Users/chriswong/.hermes/bridges/fabric_capacity_mcp.py",
+    "89469 48443 Sat Nov  7 01:50:59 2026     /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /Users/chriswong/.hermes/bridges/fabric_capacity_mcp.py",
+    "90941 48443 Fri Nov  6 16:43:38 2026     /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /Users/chriswong/.hermes/bridges/fabric_capacity_mcp.py"
+  ],
+  "command_attempted": false,
+  "control_recovery": "Original private-control identify returned ready with pid48443, same instance and epoch3",
+  "effects": {
+    "command_sent": false,
+    "gateway_restart": false,
+    "provider_request": false,
+    "reload_sent": false,
+    "resume_sent": false,
+    "subscription_created": false,
+    "worker_dispatch": false
+  },
+  "exception_type": "GatewayRPCError",
+  "gateway_restart": false,
+  "global_reload_plan": "STOPPED_BEFORE_SEND: native reload.mcp reinitializes secondary profiles; cross-profile management was not granted",
+  "independent_default_startup_receipt": "/private/tmp/hermes-h4-capacity-default-startup-20261107.json",
+  "mcp_reload_attempted": false,
+  "mcp_servers_before": {
+    "default": {
+      "checked_at": 1794059994871,
+      "servers": [
+        {
+          "connected": true,
+          "disabled": false,
+          "name": "mastermind-fabric-capacity",
+          "needs_auth": false,
+          "plugin": null,
+          "source": "config",
+          "status": "connected",
+          "tools": 2,
+          "transport": "stdio"
+        }
+      ]
+    }
+  },
+  "new_canary_created": false,
+  "observed_at": "2026-11-07T13:59:54.928199+00:00",
+  "operation_id": "hermes-capacity-routing-completion-20261107-c4",
+  "preparation_failure": {
+    "exception_type": "TimeoutError",
+    "observed_at": "2026-11-07T13:53:34.062472+00:00",
+    "reload_attempted": false
+  },
+  "profile_write": false,
+  "prompt_submissions": 0,
+  "purpose": "Apply the qualified read-only capacity diagnostic source through its existing MCP lifecycle",
+  "reconciled_at": "2026-11-07T14:16:44.709331+00:00",
+  "runtime_before": {
+    "authority_epoch": 3,
+    "instance_id": "a9115d5bee674ff98a3fac21d9ad5ca8",
+    "profile_id": "/Users/chriswong/.hermes"
+  },
+  "schema": "mastermind.hermes_h4_capacity_mcp_owner_reload.v1",
+  "scope_refusal": {
+    "method": "mcp.servers.status",
+    "observed_error": "profile_mismatch",
+    "prior_default_status_succeeded": true,
+    "profile": "marketing",
+    "replayed": false
+  },
+  "session_id": "local-0b988abfa6d9d0e2a8916c713ece3c2c0032c979a70a178e6d4066ea1228c027",
+  "source_commit": "f008b67333ecf627270a7d8378720f1f034864ce",
+  "state": "STOPPED_BEFORE_RELOAD_PROFILE_SCOPE_REFUSAL"
+}
