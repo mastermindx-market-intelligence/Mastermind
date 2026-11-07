@@ -11,14 +11,21 @@ from contextlib import redirect_stderr, redirect_stdout
 import importlib.machinery
 import importlib.util
 import io
+import os
 from pathlib import Path
 import runpy
+import re
+import stat
 import sys
+import types
 
 _STARTUP_PATHS = tuple(sys.path)
 _CODE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_CODE_ROOT))
-from control_plane.agentos_context_bundle import MAX_BUNDLE_BYTES, TOKEN_BUDGET, validate_selection
+from control_plane.agentos_context_bundle import (
+    MAX_BUNDLE_BYTES, TOKEN_BUDGET, validate_selection,
+    REQUIRED_COMPILER_PATHS, MAX_COMPILER_SOURCE_BYTES,
+)
 
 
 class _ClosedParser(argparse.ArgumentParser):
@@ -122,14 +129,34 @@ def _require_source_helper(root: Path):
     raise ValueError("SOURCE_UNAVAILABLE")
 
 
+def _compiler_bytes(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
+        before = os.fstat(source.fileno())
+        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= MAX_COMPILER_SOURCE_BYTES:
+            raise ValueError("SOURCE_UNAVAILABLE")
+        body = source.read(MAX_COMPILER_SOURCE_BYTES + 1)
+        after = os.fstat(source.fileno())
+    if (len(body) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_mtime_ns, after.st_ctime_ns)):
+        raise ValueError("SOURCE_UNAVAILABLE")
+    return body
+
+
 def main(argv=None):
     parser = _ClosedParser(add_help=False)
     parser.add_argument("--macro-root", required=True)
     parser.add_argument("--work-ref", required=True)
     parser.add_argument("--site-packages", required=True)
+    parser.add_argument("--code-root")
+    parser.add_argument("--code-commit")
     output = _BoundedOutput()
     try:
         args = parser.parse_args(argv)
+        if ((args.code_root is None) != (args.code_commit is None)
+                or (args.code_commit is not None and re.fullmatch(r"[0-9a-f]{40}", args.code_commit) is None)):
+            raise ValueError("SOURCE_UNAVAILABLE")
         validate_selection({"work_ref": args.work_ref})
         root, dependencies = Path(args.macro_root), Path(args.site_packages)
         if not root.is_absolute() or root.is_symlink() or not root.is_dir():
@@ -140,7 +167,39 @@ def main(argv=None):
         sys.argv[:] = [str(script), "compile-context", "--workstream", args.work_ref, "--json", "--budget", str(TOKEN_BUDGET)]
         with redirect_stdout(output), redirect_stderr(_DiscardDiagnostics()):
             try:
-                runpy.run_path(str(script), run_name="__main__")
+                if args.code_root is None:
+                    runpy.run_path(str(script), run_name="__main__")
+                else:
+                    # Execute the installed CODE bytes. The logical filename
+                    # selects the separately qualified DATA root for the
+                    # unmodified compiler's records, Git history and probes.
+                    # Its one explicit sibling loader is allowed only after
+                    # exact equality to that same installed CODE helper.
+                    code = Path(args.code_root)
+                    if not code.is_absolute() or code.is_symlink() or not code.is_dir():
+                        raise ValueError("SOURCE_UNAVAILABLE")
+                    captured = {}
+                    for relative in sorted(REQUIRED_COMPILER_PATHS):
+                        source, data = code / relative, root / relative
+                        if source.is_symlink() or data.is_symlink():
+                            raise ValueError("SOURCE_UNAVAILABLE")
+                        body = _compiler_bytes(source)
+                        if body != _compiler_bytes(data):
+                            raise ValueError("SOURCE_UNAVAILABLE")
+                        captured[relative] = body
+                    module = types.ModuleType("__main__")
+                    module.__file__ = str(script)
+                    module.__package__ = ""
+                    module.__spec__ = None
+                    previous = sys.modules.get("__main__")
+                    sys.modules["__main__"] = module
+                    try:
+                        exec(compile(captured["scripts/agentos.py"], str(script), "exec"), module.__dict__)
+                    finally:
+                        if previous is None:
+                            sys.modules.pop("__main__", None)
+                        else:
+                            sys.modules["__main__"] = previous
             except SystemExit as exc:
                 if type(exc.code) is not int or exc.code != 0:
                     raise ValueError("SOURCE_UNAVAILABLE") from None
