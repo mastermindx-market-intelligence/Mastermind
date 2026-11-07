@@ -74,7 +74,11 @@
     "installed": false,
     "outputs_verified": 3,
     "patch_sha256": "a494cb84d86c5592527943d8bb119726949efec62919def65f75cd31701e6ef8",
-    "source": "https://github.com/mastermindx-market-intelligence/macro/tree/ef95049fa2e1f8c981497c8a21b643fcbe59f25b/research/h3_expiration_account_admission"
+    "source": {
+      "commit": "ef95049fa2e1f8c981497c8a21b643fcbe59f25b",
+      "path": "research/h3_expiration_account_admission",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
   },
   "hosted_ci": {
     "conclusion": "failure",

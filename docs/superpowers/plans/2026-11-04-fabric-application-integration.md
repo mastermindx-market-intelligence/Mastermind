@@ -173,3 +173,44 @@ Macro original #10740 already incorporated #10832/#10833 at `c2261cb826d1bd76c2e
 H3 was reconstructed from every exact upstream preimage, semantically joined to emitted H2 in a disposable complete stage, and passed its original 32 admission cases. Five additional counterexamples show the proposed join can accept pending/failed/refused/rebound outer cache evidence and prepare two application dispatches against a one-request reservation. The qualification patch is deliberately outside the native builder/installer. Strict expiry scope remains unqualified. Exact evidence, common-fence placements, bootstrap/helper/source-custody gates and next acceptance inputs are in `review_evidence/fabric_application/h6-recovery-20261107-c2/h3-contract-findings.md` and companion JSON files.
 
 P1–P4 and the handoff's phases B–D remain open. Original source/Studio/J/native/reload effects are preserved. Current-source CI, protected release, installation/enrollment, actual account/endpoint/product/workload qualification, enforceable consumption bounds, real primary/tool/settlement and original-result recovery are separate gates. The existing Agent OS plan-link/projection gap remains explicit; this unmerged source plan is not an adopted organizational status update. MISSION_COMPLETE=false.
+
+### H6 native entry repair and hosted CI reconciliation — 2026-11-07
+
+Actual complete H2 APPLICATION/HTTP stages exposed an entry-registry defect:
+quota_remote and glm_keys loaded lazily from the verified closure but were not
+owned by native_go_entry on repeat inspection. The existing byte-verified loader
+now preloads both; foreign-module rejection and all custody checks remain. The
+regression reproduced two failures before the fix. The corrected native suite
+passed140 testcase records with zero failures/errors/skips (the distinct JUnit
+suite total149 is retained). The source identity review passed. All six complete
+layouts rebuilt, and all four APPLICATION/HTTP variants passed the actual
+installer component checks. The default107 and H2base107 identities are unchanged;
+new109/112 identities and exact evidence are in the updated installation-map.md
+and native-loader qualification/build receipts.
+
+Hosted a884 run42380455963 is terminal failure, not pending or green. Its original
+Studio/private HTTP, native admission and isolated transport gates succeeded.
+Shard0 lacked the pinned earnings-worker plist in the existing Macro fixture;
+shard2 rejected the historical H3 URL shape in executable/config JSON. Added the
+original pinned ops/launchd fixture directory and represented H3 provenance as
+repository/commit/path metadata, with no read transport or guard exception.
+The target Qwen regression, all27 anonymous-read guard cases and the unchanged
+parallel-workflow validator pass. The local paired archive passed117/118; its
+single failure requires Git metadata absent from that disposable archive.
+New exact-head hosted CI remains required. Upstream H2's six shards and required
+test are now green; that does not qualify this changed integration source.
+
+Prepared the existing H2 reader's historical derived view and exact H2-to-H5
+consumer contract. Producer timestamps, missing physical bindings and quantities,
+staleness and not-evaluated admission/no-overage remain explicit. No percentage is
+converted into an integer budget or live capacity. H5's configured-read baseline
+and actual physical-pool join are not claimed incorporated. Its active consumer
+writer remains preserved.
+
+The next source phase reconciles current final-carrier/worker returns and the
+missing H5 baseline. Phase B can use a separately qualified primary without H3
+activation, but still requires actual account/product/workload authority,
+whole-operation limits, enforceable no-overage, current binding, installed
+service enrollment and original usage/settlement/recovery. No such live envelope
+is supplied by these source fixtures. The original effect and release holds,
+Agent OS plan-link gap and P1–P4/B–D acceptance rows remain. MISSION_COMPLETE=false.

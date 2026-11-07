@@ -12,12 +12,12 @@ H6 source contribution and preserves the original M1 writer and M2 runtime owner
 | Component | Exact input or resulting identity | Installation boundary |
 | --- | --- | --- |
 | Protected source/law | Mastermind 4fb0d3825b5b4b4439e65e7382660112b7c2ef8c | Reused compatible pin; later material source movement requires reconciliation. |
-| Complete Hermes contribution | c821b2df717022e3f3b6abcebeabeb2eadeb35a6, including a03e3672 | Already joined in the qualification contribution; original final #2175 is unchanged. |
+| Complete Hermes contribution | c40f58b42383684e0ded1db7a7cb48741ddb7abf, including original carrier da2db390 | Joined in the isolated qualification contribution; final #2175 continues on its original carrier. |
 | Hermes runtime package | SHA256 c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa | Same source package. Installed acceptance is not inferred. |
 | Hermes core | Base 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19; patch SHA256 0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba | Eight exact regular-file preimages and two absent additions; retain disjoint active TUI edits. |
 | H2 source | 69ead1bdc1b7f6e1b62ef186d955d07cbd718dce | All four native components must move together; the optional builder flag creates a complete successor. |
 | H3 source | Macro ef95049fa2e1f8c981497c8a21b643fcbe59f25b | All 16 declared inputs match this source; exact reconstruction verified three outputs. Producer, enforcement and shared publication fence remain separate joins. |
-| Paired Macro | #10740 c1647bf55ad5faf07e682f7055e3791280d6d41f | Preserve the dedicated attended relation. #10832 remains qualification-only; #10833's Metabolism delta remains to reconcile. |
+| Paired Macro at latest consumed source read | #10740 a577dbbf605474f97bbafa4ceeb0daf841292421 | #10832 and #10833 are incorporated at c2261cb826d1bd76c2e980efb68edb9ed7d0829c; do not reapply. Preserve the dedicated attended relation and operational admission gates. |
 
 The ten Hermes paths and every pre/postimage are in
 [integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.json](../../../integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.json).
@@ -46,15 +46,36 @@ pinned. Inventory records preserve the patch provenance.
 | Complete layout | Files | Native manifest SHA256 |
 | --- | ---: | --- |
 | Incumbent default | 107 | c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459 |
+| Default APPLICATION | 109 | f5064b6ede765313e2fce2e865d29d6ab9e4eb7a94acc6e61256d2c458e7325d |
+| Default APPLICATION + HTTP | 112 | 643fd74c290d3f4bb5010b5f65361dd92a7cc010d9c6289c4c02b9f4adb38f95 |
 | H2 base | 107 | d07566feab8355ecaa7f1a1e189a26de8c19242b0365c00121a76f88f773aa55 |
-| H2 APPLICATION | 109 | 41b5fc84b09d6aa70c687f904d8cf4cb6472f31a7f59d61e1321c5d4b18627c6 |
-| H2 APPLICATION + HTTP | 112 | b031deaa7a4c18769ffcee528291c8479bb5ef2ccf21ff260daad7c57566c0d7 |
+| H2 APPLICATION | 109 | 057e16c39db2f1e745136e24c72d2a2511fe5c350f4774cb0fd0cd52a07c38fe |
+| H2 APPLICATION + HTTP | 112 | bdf0848bddb2aa5c57bca25a91efd767b8266e02d7661dfa8639c95895f62375 |
 
-The unflagged manifest and source inventory remain byte-identical.
-Both H2 APPLICATION variants passed the actual installer component validation.
+The default 107-file manifest and source inventory remain byte-identical, as does
+the H2 base. All four APPLICATION/HTTP variants passed actual installer component
+validation. The loader fix changes both 109/112-file families; earlier Go-stage
+manifest identities are superseded by the table above and native-loader-builds.json.
 The common builder/installer resolver checks the composed broker source, not a
 historical broker hash copied into metadata. Whole-parent validation reverses
 H2 before the existing pool, admission-integrity and APPLICATION-carrier inverses.
+
+## Native entry ownership repair
+
+The complete H2 APPLICATION and HTTP artifacts reproduced a repeated-inspection
+failure: quota_remote and glm_keys had loaded from the authenticated stage but
+were absent from the entry's owned-module registry. The native entry now preloads
+both through its existing byte-verified loader. Its SHA256 is
+e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721.
+All four H2 runtime member bytes are unchanged. Foreign module rejection and
+whole-file/inode/namespace custody remain intact.
+
+The six new regression cases reproduced two failures before the fix. The corrected
+six-module native suite passed 140 testcase records with zero failures/errors/skips;
+its separate JUnit suite counter is149. The release-identity review module also
+exited zero. Exact sources, commands, logs, inventories and installer checks are in
+native-loader-qualification.json and native-loader-builds.json. These disposable
+stage exercises do not publish, select or install a live generation.
 
 ## Original-owner sequence and rollback
 
@@ -104,9 +125,19 @@ component cases also passed before the fixture gained its staged-source seam.
 
 On M2, 74 original-delivery/control-closure tests passed. On Linux, the 39-case
 original-delivery module passed using the private real interpreter fixture.
-The original hosted c821 CI run 42376517849 failed its composed migration fixture;
-its five other shards and role/inference workflows are separate evidence.
-A new exact-head hosted result is required. The production preflight guard was
-not changed. File-state diagnostics now have an actual spawn positive control.
+The original hosted c821 CI run42376517849 failed its composed migration fixture.
+The subsequent a884 run42380455963 passed the original Studio/private-HTTP,
+native-admission and isolated-transport gates, but finished failed on two other
+defects: an omitted pinned worker-plist fixture and an evidence-provenance URL
+caught by the repository read-transport guard. Both source defects are repaired;
+the Qwen regression, 27 guard cases and unchanged CI structure validator pass.
+The paired archive passed117/118 cases; its sole local failure requires Git
+metadata that the disposable archive lacks, unlike actions/checkout. This is not
+full paired-suite success. New exact-head hosted CI remains required.
+
+Upstream H2 run42376635292 now has all six shards and its required test green.
+That upstream result does not qualify this changed integration head. The
+production preflight guard was not changed. File-state diagnostics retain an
+actual spawn positive control.
 
 This map does not close Phase A or the original B–D acceptance rows.

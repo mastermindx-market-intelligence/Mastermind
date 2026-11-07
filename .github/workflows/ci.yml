@@ -411,6 +411,7 @@ jobs:
             lib
             config
             tests
+            ops/launchd
             research/earnings_intelligence/e3/gold
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}

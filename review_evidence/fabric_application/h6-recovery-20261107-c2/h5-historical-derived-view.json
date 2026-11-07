@@ -1,0 +1,127 @@
+{
+  "schema": "mastermind.h6-h5-historical-read-view-evidence.v1",
+  "sample_only": true,
+  "current_capacity_claim": false,
+  "assessment_at": "2026-11-07T14:48:11.714765+00:00",
+  "producer_clock_replaced": false,
+  "source_receipt": {
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "ref": "69ead1bdc1b7f6e1b62ef186d955d07cbd718dce",
+    "path": "docs/evidence/hermes-pool-h2-original-refresh-reset-2026-11-07.json",
+    "sha256": "d0e2543185f8c4af72396e41bef7f1351de8a93928f8f0d76c9a04a75ba024cd",
+    "after_read_at": "2026-11-07T12:03:22.830520+00:00",
+    "selected_generation": {
+      "generation": "ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46",
+      "previous": "a7671e6e0f275e25b296e8d0c972c2c45f68d8cb737152cb4a282d3bc450a775",
+      "schema": "native-code-selection.v1",
+      "sequence": 35
+    },
+    "proof_scope": "Original installed refresh and natural GLM window replenishment; not exhausted-account recovery or APPLICATION admission."
+  },
+  "projection_source_sha256": "91c89d4197d791a078e804db9c591c4cddc197f1e35f54f46fba95fe7b27a9a5",
+  "freshness_limit_seconds": 600,
+  "redactions": [
+    "local account aliases replaced by stable sample labels"
+  ],
+  "not_retained_in_original_receipt": [
+    "endpoint",
+    "config_generation",
+    "account_generation",
+    "allowance_scope",
+    "confidence",
+    "native integer meter quantities",
+    "entitlement",
+    "no_overage",
+    "execution budget"
+  ],
+  "confidence_handling": "0.0 means unqualified/unknown; no confidence was inferred from the authoritative source label",
+  "views": [
+    {
+      "provider": "glm",
+      "account": "glm-account-1",
+      "allowance_scope": null,
+      "account_generation": null,
+      "config_generation": null,
+      "endpoint": null,
+      "windows": [
+        {
+          "window": "5h",
+          "remaining_pct": 100.0,
+          "reset_at": null,
+          "observed_at": "2026-11-07T12:03:21Z",
+          "source": "PROVIDER_AUTHORITATIVE",
+          "age_s": 9890.714765071869,
+          "confidence": 0.0,
+          "units": "provider_percent",
+          "reset_state": "UNKNOWN",
+          "ready": false,
+          "reason": "CONFIG_GENERATION_UNQUALIFIED"
+        },
+        {
+          "window": "weekly",
+          "remaining_pct": 99.0,
+          "reset_at": "2026-11-14T06:25:24Z",
+          "observed_at": "2026-11-07T12:03:21Z",
+          "source": "PROVIDER_AUTHORITATIVE",
+          "age_s": 9890.714765071869,
+          "confidence": 0.0,
+          "units": "provider_percent",
+          "reset_state": "FUTURE",
+          "ready": false,
+          "reason": "CONFIG_GENERATION_UNQUALIFIED"
+        }
+      ],
+      "refresh_error": null,
+      "failure_config_generation": null,
+      "quota_ready": false,
+      "entitlement": "NOT_EVALUATED",
+      "no_overage": "NOT_EVALUATED",
+      "admission": "NOT_EVALUATED"
+    },
+    {
+      "provider": "minimax",
+      "account": "minimax-account-1",
+      "allowance_scope": null,
+      "account_generation": null,
+      "config_generation": null,
+      "endpoint": null,
+      "windows": [
+        {
+          "window": "5h",
+          "remaining_pct": 96.0,
+          "reset_at": "2026-11-07T15:00:00Z",
+          "observed_at": "2026-11-07T12:03:18Z",
+          "source": "PROVIDER_AUTHORITATIVE",
+          "age_s": 9893.714765071869,
+          "confidence": 0.0,
+          "units": "provider_percent",
+          "reset_state": "FUTURE",
+          "ready": false,
+          "reason": "CONFIG_GENERATION_UNQUALIFIED"
+        },
+        {
+          "window": "weekly",
+          "remaining_pct": 20.0,
+          "reset_at": "2026-11-09T00:00:00Z",
+          "observed_at": "2026-11-07T12:03:18Z",
+          "source": "PROVIDER_AUTHORITATIVE",
+          "age_s": 9893.714765071869,
+          "confidence": 0.0,
+          "units": "provider_percent",
+          "reset_state": "FUTURE",
+          "ready": false,
+          "reason": "CONFIG_GENERATION_UNQUALIFIED"
+        }
+      ],
+      "refresh_error": null,
+      "failure_config_generation": null,
+      "quota_ready": false,
+      "entitlement": "NOT_EVALUATED",
+      "no_overage": "NOT_EVALUATED",
+      "admission": "NOT_EVALUATED"
+    }
+  ],
+  "provider_calls": false,
+  "credentials_read": false,
+  "state_writes": false
+}

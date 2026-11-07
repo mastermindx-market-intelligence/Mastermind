@@ -1,0 +1,75 @@
+{
+  "baseline": {
+    "failed": 2,
+    "log_sha256": "3e21b01c58fdc2a90ad265a0cea6309ec87ac41ffe050200a07baef4a9ac3f93",
+    "passed": 4,
+    "returncode": 1,
+    "seconds": 5.914,
+    "source_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+    "testcase_records": 6
+  },
+  "build_receipt": "native-loader-builds.json",
+  "corrected": {
+    "command": [
+      "python3",
+      "-m",
+      "pytest",
+      "-q",
+      "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_entry.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_release.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_startup.py",
+      "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+      "--junitxml=/tmp/h6-h2-native-entry-corrected.xml",
+      "--tb=short"
+    ],
+    "errors": 0,
+    "failures": 0,
+    "log_sha256": "5e3439bb261b2c6fd2717d20de0c02b8f099b281ca597323dc8a44f36fdb6b22",
+    "native_entry_sha256": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+    "returncode": 0,
+    "seconds": 190.13,
+    "skipped": 0,
+    "source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+    "suite_counters": [
+      {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "149",
+        "time": "189.293",
+        "timestamp": "2026-11-07T07:45:50.493919-07:00"
+      }
+    ],
+    "testcase_records": 140
+  },
+  "defect": "H2 lazily imports quota_remote and glm_keys from the authenticated stage, but the native entry omitted them from its owned-module registry; repeated inspection rejects those legitimate modules as foreign.",
+  "enrolled": false,
+  "installed": false,
+  "mission_complete": false,
+  "observed_at": "2026-11-07T15:04:03.309338+00:00",
+  "provider_calls": false,
+  "release_identity_review": {
+    "log_sha256": "1aef39059ce6dd7cd09b917b31d94600f82d86b88a265beb9272edf52f651799",
+    "returncode": 0,
+    "seconds": 19.806,
+    "tail": [
+      "........................................................................ [ 36%]",
+      "........................................................................ [ 73%]",
+      "...................................................                      [100%]"
+    ]
+  },
+  "repair": "Authenticate and preload the two existing declared dependency modules through the incumbent loader; keep foreign-module, whole-file, inode and namespace checks.",
+  "runtime_h2_members_changed": false,
+  "schema": "mastermind.h6-native-loader-qualification.v1",
+  "selected": false,
+  "source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+  "source_sha256": {
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py": "b6cf3b87dc46fd7c38cbf895bb37ca063265227910ed2e4ae6f2863a5d08dd51",
+    "tests/executive_fabric_release_identity_review.py": "7dcb8221c3232a7de7a103465d9de15a9300ca219ea943bb48ce43915fa5b145"
+  }
+}
