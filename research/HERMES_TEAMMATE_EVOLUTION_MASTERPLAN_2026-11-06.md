@@ -2296,3 +2296,54 @@ The accepted latest contract permits deterministic source work independent of in
 For409, current law permits a clean same-PR RCH1 release through actual procedural custody when the technical writer gate is unavailable; it does not permit abandoning an unqualified dirty writer under RCH1A. RULES_ABSENT is not a universal source-write denial. Current original workspace/writer/effect disposition remains unestablished; no clean-predecessor or terminal-no-effect claim is fabricated. Existing49917repair and265-case proof are retained; real final-head non-author security approval remains owed. Outcome Learning398 retains its distinct current-AgentOS/canary/adjudication hold.
 
 Original Ubuntu1/root C26 permission denial, paid Fabric refusal, two denied AF_UNIX tests and local execution unavailability remain closed/unretried. Original installed carrier remains meta-ceo-byok-followon-parent-20261106-c35-01. C3 is source validation only. No live account, vault login, inference, browser/computer/fleet activation, new runner/watcher or external message occurred.
+
+## 52. Direct-EVAL qualification, original protected release request and independent context-child repair — 2026-11-07
+
+**MISSION_COMPLETE=false / MORE_WORK_EXISTS.** This supersedes §51's pending intake/readiness state. Installed acceptance remains on the original carrier and is not implied by this source release.
+
+### Exact scoped intake and source
+
+[PR2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) is now OPEN/Ready at **de966803faff6033a5d0e6b164843ab22edabe42**, tree **5a9db90d3b147ca41d0b9ef552f50511c5850580**, parent5f9664c140b433ff961e4a9af49e7ea6be7624d7. API source publication was read back. Source-only original candidate44a0abf0101fadacb9c514cefde1e259c430dead and CI-parent viewdd4a9abcfeaaf687a5457ecd4250b8552639e015 have the same published tree.
+
+The completed da1713d77eeaa24e34b42cb53f1a0cf942a327a6 return is adjudicated, not ignored: actual Git comparison contains266 commits and502 paths, exceeding the API's300-file projection. Independent mixed EVAL/primary refusal guards are incorporated in existing install/supervisor owners. Public install refuses after original recipe validation and before credential/source/state/unit work; leaf release refuses before home/mkdir/render; supervisor refuses EVAL plus master-fabric before filesystem reads. The public validators and allowed EVAL route are unchanged. Six negative cases exercise explicit profile-loader fixture substitution, actual earlier parser refusal, leaf combinations and supervisor ordering; an existing positive selection remains.
+
+The connected APPLICATION host/profile/provider/configuration/environment/TCP changes remain together with their required package under active original [PR2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175), last observed52cb239df9c058031875ecc52393d7978f50d2a3. PR2232 merged into that source branch, not protected master. No APPLICATION import, new provider/recipe acceptance, port, test path, broad branch merge or D7 exemption was introduced into2234. The separate context-child test correction is carried independently below.
+
+### Hosted failure resolved without weakening evidence
+
+At old head5f9664, hosted Hermes harness run42418851538 failed test_actual_provider_changes_cannot_be_hidden_by_restored_agent_labels[retry_restore] (inspected3.12 job128542724632). Actual diagnostic execution made3 SDK HTTP sends but retained2 attempts, with transport.overflow=true and metadata_overflow=true. NOT_OBSERVED was the correct result: final JSON size does not equal the shared reservation total, which includes scope and terminal-update reserves. No history rows were present; no history double charge was found.
+
+The corrected positive fixture selects one short synthetic request ID before execution and passes it through both the original pre-request hook/assembly and SDK dispatch. It retains3 sends/3 attempts with custom→OTHER→custom selector samples and no overflow, proving OBSERVATION_CONFLICT despite restored labels. A separate valid128-character ID case exercises genuine reservation overflow, fewer than3 retained attempts and NOT_OBSERVED/invalid output. An intermediate shortened-ID mismatch failed the original join and was corrected; retained records were never rewritten. Production16KiB budget, reserve accounting, identity/content joins and validity semantics remain unchanged.
+
+Focused resulting-source execution:
+-7 mixed-selection/ordering/positive-selection cases passed, zero failures/errors/skips; XML SHA25631adc1fd1b06f1be88467b6bc1f48f605b6a81f18b44fae440a70448785e0a56.
+-2 actual SDK retry/provider-conflict and metadata-pressure cases passed, zero failures/errors/skips; XMLabea7d4ad67c5f75c96747d50b06d2c6740d1796a3aeeddcf47cc15874aee43a.
+-3 exact-tree EVAL scope and D8 gates passed, zero failures/errors/skips; XMLca81a41640ec0310edf741f1b798cc3dbde8fd5961e797f6b5754a98088356cd.
+
+The original40 history and10 publisher proofs in §51 remain attributed to their unchanged source. Cohorts overlap and are not summed. Fourteen-file upstream derivation/patch and exact D8 source pin remain unchanged. No refused socket test, live inference/account/credential flow or installed role ran.
+
+### One ordinary protected release effect
+
+The prior genuine same-repository/master enforcement observation remains applicable alongside fresh exact-head checks: strict trusted test, admins enforced, native protected queue and zero mandatory approvals as actually recorded in preceding source receipts. No fresh administrative protection GET is universally required by DELIVERY_WORKFLOW; the closed403 was not replayed and does not itself prove changed requirements.
+
+Immediately preceding release, exact head/candidate, Ready state, current reviews/requests/comments/holds/conflicts and checks were reconciled; both autoMergeRequest and mergeQueueEntry were absent. One ordinary head-leased request was issued for de966 using the original C3 release command (PID50746, exit0). Original readback PID51482 confirms **autoMergeRequest.enabledAt=2026-11-07T22:28:47Z**, enabledBychriswong6031-creator, mergeMethodMERGE selected by repository policy, mergeQueueEntrynull, OPEN/Ready and no merge. **Do not arm again.** The original request must be reconciled.
+
+Current observed head workflows: CI42420547116, Harness42420547182 and Runtime42420547096 in progress; qualification42420547463, OAuth42420547249 and proxy42420547113 successful. Pending required checks remain controlling. Armed is not queued, merged, deployed or accepted.
+
+Protected master was subsequently observed at **e7a7d17b5727175e4e44cea10a20ad9ff38d16e7**, treea6c9ce8dcc96e12a7c6c09fc44f7187a7dd5627b. Bounded20e17→efab46368e13e9553e489cb61a58ca28055df175 andefab→e7a7 comparisons contain provider-plan/maintenance and portfolio/appweb paths, with no EVAL or governing-law overlap. No ancestry-only rebase is required; compatible protected66780 pin remains.
+
+### Independent selected-child fixture repair
+
+A separate exact one-file candidate **bb0fb312cab6045e05798c00bd8a8be01f8451e8**, tree65971aae51069ed1e8c06a85d00221a8572951bc, is published on **sol/hermes-context-child-runtime-20261107-c3**, parent current protectede7a7. Branch and exact postimage were read back. Only tests/test_installed_current_agentos_context.py changes,19 additions/4 deletions; reused incoming blob **6684fda6eb9c05eaa565c62f3a8b570f17c7579e**.
+
+The fixture probes its already-selected collector._python with an isolated -I/-B child, obtains that child's Python/PyYAML facts and yaml/_yaml sites, asserts actual LibYAML plus same site, and binds the existing fixture runtime contract to those facts. It no longer substitutes pytest's outer interpreter/site. Original compiler/provenance assertions and production source are unchanged. This is an independent test correction from the completed da171/51639024 return, outside2234's finite scope; no competing2175 writer or release was taken over.
+
+Dedicated source validation checkout: /Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/context-child-fixture-validation, exactbb0fb312. The first run collected0 tests because the new worktree inherited sparse app/mastermind_os materialization; its tree contained the correct test blob. One bounded diagnostic established this. Worktree-local sparse materialization was disabled, with clean exact-head readback. The selected5 existing capture/late-change/record-source tests are running in original PID64919 on outerPython3.12.13; no result is claimed yet. The donor's heterogeneous interpreter proof remains attributed to that donor. No PR or release request existed at this checkpoint.
+
+### Fleet inventory predecessor identified; custody still unresolved
+
+The formerly ambiguous #537 reference is now source-linked to Mastermind PR537 through [#501 comment5592792563](https://github.com/mastermindx-market-intelligence/Mastermind/issues/501#issuecomment-5592792563) and exact commit **0bbcdc1fa786f5f062e91ef0f3a6eebdc64e380a**, fix(control-room): preserve observed build inventory coverage. It changes Control Room JavaScript, control_plane/chairman_control_room.py and two test files, preserving partial-inventory uncertainty and observation-scoped absence wording. The protected October22 executive-cross-plane reconciliation plan explicitly links that Mastermind PR and describes later scripts/chairman_control_room.py footprint with historical DRAFT HOLD.
+
+This resolves identity, not current disposition. The already-returned PR/issue404s were not repeated; empty commit-associated pulls is not release proof. Current source lacks the specific earlier helper/warning strings, a narrow observation only. One comparison failed Transport closed; no ancestry conclusion is invented. The actionable source predicate is current canonical accepted-successor/terminal disposition plus protected repair compatibility and writer/effect release for the overlapping legacy inventory paths. It is not an original-author approval gate or demonstrated human credential gate. Historical #531 refused custody inspection remains closed.
+
+Outcome Learning398, governed repair409, active primary2175 and original installed-carrier gates remain distinct. Original Ubuntu1/root C26 permission denial, paid Fabric refusal, local execution unavailability and two denied AF_UNIX tests remain closed. No alternative runtime carrier, fleet/browser activation, daemon/watcher/queue, external message or additional memory/auth/publication owner was created.
