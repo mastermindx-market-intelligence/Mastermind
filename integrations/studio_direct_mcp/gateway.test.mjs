@@ -493,6 +493,10 @@ test('configured fleet routing advertises one-way host selection and refuses lat
   const listed = await a.client.listTools();
   const selector = listed.tools.find((tool) => tool.name === 'studio_select_host');
   assert.ok(selector, 'configured fleet router must advertise studio_select_host');
+  // Verify the metadata that an actual MCP client sees, not just the library constant.
+  assert.match(selector.description, /leave the MCP session unselected and use local tools/);
+  assert.match(selector.description, /Only fleetRouting.routes entries are selectable/);
+  assert.match(selector.description, /physicalFleet is advisory, not the route allowlist/);
   assert.deepEqual(
     [
       selector.annotations.readOnlyHint,
@@ -516,6 +520,16 @@ test('configured fleet routing advertises one-way host selection and refuses lat
   assert.equal(unknown.structuredContent.effect_state, 'NOT_APPLIED');
   assert.equal(unknown.structuredContent.hostRef, undefined);
   assert.equal(JSON.stringify(unknown.structuredContent).includes('example-tailnet.ts.net'), false);
+
+  // A physical/local M2 fleet host is not a configured remote route on this gateway.
+  const localM2 = await a.client.callTool({
+    name: 'studio_select_host',
+    arguments: { hostRef: 'm2' },
+  });
+  assert.equal(localM2.isError, true);
+  assert.equal(localM2.structuredContent.code, 'FLEET_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(localM2.structuredContent.reason_code, 'FLEET_ROUTE_HOST_NOT_CONFIGURED');
+  assert.equal(localM2.structuredContent.effect_state, 'NOT_APPLIED');
 
   const localRead = await a.client.callTool({
     name: 'read_file',
