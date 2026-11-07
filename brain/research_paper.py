@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,7 +45,7 @@ def llm_enabled() -> bool:
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PAPERS = _ROOT / "data" / "research" / "papers"
-_INDEX = _PAPERS / "index.jsonl"
+_INDEX = _PAPERS / "index.jsonl"  # legacy auxiliary catalog; canonical readers scan paper JSON files
 _NOTES = _ROOT / "data" / "research" / "notes"
 
 SCHEMA = "research_paper.v1"
@@ -1064,6 +1065,10 @@ def render_markdown(paper: dict) -> str:
     return "\n".join(out).strip()
 
 
+class _PaperSaveNotCommittedError(OSError):
+    """This save attempt failed before canonical replacement was invoked."""
+
+
 
 # ---------------------------------------------------------------------------
 # Explicit saved-paper re-digest. The existing paper owns the original request
@@ -1763,26 +1768,67 @@ def redigest_saved_paper(paper_id: str, *, operation_id: str) -> dict:
 
 
 def save_paper(paper: dict) -> Path:
-    """Persist through the incumbent paper/index owners; preserve Fabric custody."""
-    path = _paper_path(paper["id"], create=True)
-    day, ticker = _paper_identity(paper["id"])
-    if paper["asof"] != day or paper["ticker"] != ticker:
-        raise ValueError("paper_identity_conflict")
-    with _paper_lock(path):
-        current = _paper_read(path)
-        if current is not None and _REDI_KEY in current:
-            _, _, _, cache = _redigest_owner()
-            current = _redigest_document(current, path, cache)
-            if _paper_public(paper) != _paper_public(current):
-                raise ValueError("paper_original_owned")
-            return path
-        if _REDI_KEY in paper:
-            raise ValueError("paper_original_not_owned")
-        value = _paper_decode(json.dumps(paper, default=str, ensure_ascii=False, allow_nan=False))
-        _paper_write(path, value)
-        with _paper_lock(Path(_INDEX)):
-            _paper_index_read()
-            _paper_index_append(_paper_index_row(value, path))
+    """Save one canonical paper while preserving original Fabric custody.
+
+    Failures before replacement are classified as not committed. Once replacement
+    is attempted, failures retain an unknown outcome; the auxiliary index cannot
+    revoke a confirmed canonical save.
+    """
+    tmp_name: str | None = None
+    replacement_attempted = False
+    try:
+        path = _paper_path(paper["id"], create=True)
+        day, ticker = _paper_identity(paper["id"])
+        if paper["asof"] != day or paper["ticker"] != ticker:
+            raise ValueError("paper_identity_conflict")
+        with _paper_lock(path):
+            current = _paper_read(path)
+            if current is not None and _REDI_KEY in current:
+                _, _, _, cache = _redigest_owner()
+                current = _redigest_document(current, path, cache)
+                if _paper_public(paper) != _paper_public(current):
+                    raise ValueError("paper_original_owned")
+                return path
+            if _REDI_KEY in paper:
+                raise ValueError("paper_original_not_owned")
+            value = _paper_decode(json.dumps(
+                paper, default=str, ensure_ascii=False, allow_nan=False))
+            payload = json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)
+            if len(payload.encode("utf-8")) > 4 * 1024 * 1024:
+                raise ValueError("paper_file_bound")
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as tmp:
+                tmp_name = tmp.name
+                tmp.write(payload)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            replacement_attempted = True
+            os.replace(tmp_name, path)
+            tmp_name = None
+            _paper_confirm_bytes(path, payload.encode("utf-8"))
+            # Ordinary filing keeps the legacy index auxiliary. Re-digest filing
+            # retains its original index and notes transaction checks.
+            try:
+                with _paper_lock(Path(_INDEX)):
+                    _paper_index_read()
+                    _paper_index_append(_paper_index_row(value, path))
+            except Exception:
+                pass
+    except Exception as exc:
+        # Custody/schema refusals retain their established validation contract.
+        if replacement_attempted or isinstance(exc, ValueError):
+            raise
+        raise _PaperSaveNotCommittedError(
+            "research paper replacement was not attempted"
+        ) from exc
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
     return path
 
 

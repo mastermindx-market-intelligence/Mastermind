@@ -7,6 +7,12 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
+    # Exact reviewed preview source/site only; any byte drift re-exposes it.
+    'ops/fleet_storage_cleanup/linux_cache_preview.py': {
+        'sha256': '1fc025101f08a052223a79f494fa28c489f48a85590bc9b37e8ef1af0ea3796d',
+        'sites': ((204, 43, 46, 'int', '512'),),
+    },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
     # These exact spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
@@ -750,7 +756,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "96ce16654faa9a5e124d9056752f803458bc415f508e7f8c29cf9e7037718cbd",
+    "sha256": "44eef790fb1af899e2ddd24df561c7e6a909550f6e030d6b3494df8070587593",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -782,7 +788,6 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
-    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+    "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
+    "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
-

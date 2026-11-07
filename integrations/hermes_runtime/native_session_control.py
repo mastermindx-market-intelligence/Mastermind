@@ -128,6 +128,163 @@ def _admission(row, home: Path, session_id: str, *, stored=False):
     return result
 
 
+def _terminal_metadata(value: dict, answer: str | None) -> dict:
+    """Bounded projection of the original stored result, not EVAL qualification.
+
+    Omitted fields stay omitted; false is not confused with missing. Model
+    labels are configured/reported labels, never proof of the serving model.
+    Do not forward reasoning, history, raw errors, tools or served_model:
+    upstream's latter field can contain a proxy address or a fallback hint.
+    """
+    reported, invalid = {}, []
+    for key in ("completed", "failed", "partial", "interrupted",
+                "response_transformed", "response_previewed", "response_reused"):
+        if key in value:
+            if type(value[key]) is bool:
+                reported[key] = value[key]
+            else:
+                invalid.append(key)
+    for key in ("session_id", "model", "requested_model", "provider", "turn_exit_reason"):
+        if key not in value:
+            continue
+        item = value[key]
+        if item is None:
+            reported[key] = None
+            continue
+        valid = (type(item) is str and len(item) <= 256
+                 and not any(ord(c) < 32 or ord(c) == 127 for c in item))
+        if valid:
+            try:
+                valid = len(item.encode("utf-8")) <= 256
+            except UnicodeEncodeError:
+                valid = False
+        if valid:
+            reported[key] = item
+        else:
+            invalid.append(key)
+    if "api_calls" in value:
+        count = value["api_calls"]
+        if type(count) is int and 0 <= count <= 2**53 - 1:
+            reported["api_calls"] = count
+        else:
+            invalid.append("api_calls")
+    output = None
+    if answer is not None:
+        raw = answer.encode("utf-8")
+        output = {"stage": "retained_redacted_final_response",
+                  "sha256": hashlib.sha256(raw).hexdigest(), "utf8_bytes": len(raw)}
+    return {"schema": "mastermind.hermes_native_terminal_metadata/v1",
+            "reported": reported, "invalid_fields": invalid, "output": output,
+            "model_identity_verified": False}
+
+
+def _request_observation(value, *, receipt: dict, role: str) -> dict:
+    """Project one whole retained outer document after the original receipt join.
+
+    This validates bounded owner metadata, not the original content digest,
+    provider delivery, historical process attestation or model identity.
+    """
+    from .native_request_observation import (
+        SCHEMA as observation_schema, STAGE, CONTENT_FIELDS,
+        MAX_CONTENT_BYTES, MAX_EVENTS, MAX_METADATA_BYTES,
+    )
+
+    def refuse():
+        raise ValueError("INVALID_RETAINED_OBSERVATION")
+
+    def shape(item, required, optional=()):
+        if type(item) is not dict or not len(required) <= len(item) <= len(required) + len(optional):
+            refuse()
+        allowed = set(required) | set(optional)
+        if any(type(key) is not str or key not in allowed for key in item) or not set(required) <= item.keys():
+            refuse()
+
+    def text(item):
+        if (type(item) is not str or not 0 < len(item) <= 256
+                or any(ord(char) < 32 or ord(char) == 127 for char in item)):
+            refuse()
+        if len(item.encode("utf-8", "strict")) > 256:
+            refuse()
+        return item
+
+    def integer(item, minimum=0):
+        if type(item) is not int or not minimum <= item <= 2**53 - 1:
+            refuse()
+        return item
+
+    def literal(item, expected):
+        return type(item) is str and item == expected
+
+    fields = ("schema", "stage", "scope", "observations", "errors", "overflow", "coverage",
+              "provider_dispatch_proven", "model_identity_verified")
+    shape(value, fields)
+    if (not literal(value["schema"], observation_schema) or not literal(value["stage"], STAGE)
+            or value["provider_dispatch_proven"] is not False or value["model_identity_verified"] is not False
+            or type(value["overflow"]) is not bool):
+        refuse()
+    source_scope = value["scope"]
+    scope_fields = ("role", "session_id", "admission_id", "authority_epoch", "execution_generation", "instance_id")
+    shape(source_scope, scope_fields)
+    scope = {key: text(source_scope[key]) for key in ("role", "session_id", "admission_id", "instance_id")}
+    scope["authority_epoch"] = integer(source_scope["authority_epoch"], 1)
+    scope["execution_generation"] = integer(source_scope["execution_generation"])
+    if (scope["role"] != role or scope["session_id"] != receipt["ref"]["session_id"]
+            or scope["admission_id"] != receipt["admission_id"]
+            or scope["authority_epoch"] != receipt["authority_epoch"]
+            or scope["execution_generation"] != receipt["execution_generation"]):
+        refuse()
+    # instance_id describes the original producer. Never join it to today's
+    # process or replace it with the implementation serving this historical read.
+    source_events = value["observations"]
+    if type(source_events) is not list or len(source_events) > MAX_EVENTS:
+        refuse()
+    events = []
+    required = ("fields", "content_sha256", "content_bytes", "canonicalization")
+    identifiers = ("turn_id", "api_request_id", "agent_session_id")
+    counters = ("api_call_count", "retry_count")
+    optional = (*identifiers, *counters, "invalid_fields")
+    for source in source_events:
+        shape(source, required, optional)
+        selected = source["fields"]
+        if (type(selected) is not list or len(selected) > len(CONTENT_FIELDS)
+                or any(type(key) is not str or key not in CONTENT_FIELDS for key in selected)
+                or selected != [key for key in CONTENT_FIELDS if key in selected]):
+            refuse()
+        digest, size = source["content_sha256"], source["content_bytes"]
+        if (type(digest) is not str or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)
+                or type(size) is not int or not 2 <= size <= MAX_CONTENT_BYTES
+                or not literal(source["canonicalization"], "json_sorted_keys_utf8_no_spaces_v1")):
+            refuse()
+        event = {"fields": list(selected), "content_sha256": digest, "content_bytes": size,
+                 "canonicalization": "json_sorted_keys_utf8_no_spaces_v1"}
+        for key in identifiers:
+            if key in source: event[key] = text(source[key])
+        for key in counters:
+            if key in source: event[key] = integer(source[key])
+        if "invalid_fields" in source:
+            invalid = source["invalid_fields"]
+            if (type(invalid) is not list or not 1 <= len(invalid) <= len(identifiers) + len(counters)
+                    or any(type(key) is not str or key not in (*identifiers, *counters) or key in source for key in invalid)
+                    or len(set(invalid)) != len(invalid)):
+                refuse()
+            event["invalid_fields"] = list(invalid)
+        events.append(event)
+    errors = value["errors"]
+    allowed_errors = ("unbound_or_stale_agent", "content_limit", "unsupported_content", "observation_failed")
+    if (type(errors) is not list or len(errors) > len(allowed_errors)
+            or any(type(error) is not str or error not in allowed_errors for error in errors)
+            or errors != sorted(set(errors))
+            or not literal(value["coverage"], "assembly_hooks_only" if events else "no_assembly_observation")
+            or value["overflow"] and len(events) != MAX_EVENTS):
+        refuse()
+    projected = {"schema": observation_schema, "stage": STAGE, "scope": scope,
+        "observations": events, "errors": list(errors), "overflow": value["overflow"],
+        "coverage": value["coverage"], "provider_dispatch_proven": False, "model_identity_verified": False}
+    if len(json.dumps(projected, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_METADATA_BYTES:
+        refuse()
+    return projected
+
+
 def _read_original(home: Path, params, principal: str, *, role: str = "mmsecretary"):
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
@@ -145,6 +302,7 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
             # Active-row absence is not proof of nonexecution or permission to resend.
             return _result("EFFECT_UNKNOWN", role=role)
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
+                or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
                 or row.get("request_id") != submission or row.get("intent") != "queue"
                 or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
                 or row["payload"].get("finite") is not True
@@ -153,13 +311,29 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
         receipt = _admission(row, home, sid, stored=True)
         result = _result("OBSERVED", role=role, admission=receipt)
         saved = admission_result(db, receipt["admission_id"])
-        if saved is not None and receipt["status"] == "terminal":
+        if type(saved) is dict and receipt["status"] == "terminal":
             value = saved.get("result")
             answer = value.get("final_response") if type(value) is dict else None
-            if (type(answer) is str and len(answer.encode("utf-8")) <= MAX_ANSWER_BYTES
-                    and not any(ord(c) < 32 and c not in "\n\r\t" for c in answer)):
+            valid_answer = (type(answer) is str and len(answer) <= MAX_ANSWER_BYTES
+                            and not any(ord(c) < 32 and c not in "\n\r\t" for c in answer))
+            if valid_answer:
+                try:
+                    valid_answer = len(answer.encode("utf-8")) <= MAX_ANSWER_BYTES
+                except UnicodeEncodeError:
+                    valid_answer = False
+            if valid_answer:
                 result["answer"] = answer
                 result["successful"] = not any(value.get(key) for key in ("failed", "error", "interrupted"))
+            if type(value) is dict:
+                result["terminal_metadata"] = _terminal_metadata(value, answer if valid_answer else None)
+            if "mastermind_request_observation" in saved:
+                try:
+                    result["request_observation"] = _request_observation(
+                        saved["mastermind_request_observation"], receipt=receipt, role=role)
+                except (ValueError, TypeError, UnicodeError, RecursionError):
+                    # Close only the evidence projection. Preserve the original
+                    # answer, native outcome and existing terminal metadata.
+                    result["request_observation_error"] = "INVALID_RETAINED_OBSERVATION"
         return result
     finally:
         db.close()
