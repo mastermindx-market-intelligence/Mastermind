@@ -1,0 +1,12 @@
+test_byteplus_real_policy_guard_preserves_unknown_quota (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_byteplus_real_policy_guard_preserves_unknown_quota) ... ok
+test_duplicate_subscription_cannot_multiply_physical_headroom (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_duplicate_subscription_cannot_multiply_physical_headroom) ... ok
+test_each_exhausted_byteplus_window_stays_nongrantable_when_old (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_each_exhausted_byteplus_window_stays_nongrantable_when_old) ... ok
+test_experiential_real_registration_guard_preserves_single_physical_owner (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_experiential_real_registration_guard_preserves_single_physical_owner) ... ok
+test_provider_account_and_operator_caps_are_explicit (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_provider_account_and_operator_caps_are_explicit) ... ok
+test_worker_auto_cannot_override_explicit_model_pool_or_higher_complexity (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_worker_auto_cannot_override_explicit_model_pool_or_higher_complexity) ... ok
+test_worker_plan_presence_does_not_expand_application_authority (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_worker_plan_presence_does_not_expand_application_authority) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.202s
+
+OK

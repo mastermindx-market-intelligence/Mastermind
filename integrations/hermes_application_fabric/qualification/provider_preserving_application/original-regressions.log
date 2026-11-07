@@ -1,0 +1,23 @@
+test_duplicate_subscription_cannot_multiply_physical_headroom (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_duplicate_subscription_cannot_multiply_physical_headroom) ... FAIL
+test_experiential_real_registration_guard_preserves_single_physical_owner (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_experiential_real_registration_guard_preserves_single_physical_owner) ... FAIL
+
+======================================================================
+FAIL: test_duplicate_subscription_cannot_multiply_physical_headroom (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_duplicate_subscription_cannot_multiply_physical_headroom)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/8b297bb7b6e2/exact-owner-compose/provider-preserving-proposal/original/tests/test_hermes_provider_preserving_application_join.py", line 79, in test_duplicate_subscription_cannot_multiply_physical_headroom
+    self.assertIsNone(self.broker._base_account_cap("byteplus", row))
+AssertionError: 2 is not None
+
+======================================================================
+FAIL: test_experiential_real_registration_guard_preserves_single_physical_owner (test_hermes_provider_preserving_application_join.ProviderPreservingApplicationJoin.test_experiential_real_registration_guard_preserves_single_physical_owner)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/8b297bb7b6e2/exact-owner-compose/provider-preserving-proposal/original/tests/test_hermes_provider_preserving_application_join.py", line 125, in test_experiential_real_registration_guard_preserves_single_physical_owner
+    self.assertIsNone(self.broker._base_account_cap("experiential", provider["accounts"][0]))
+AssertionError: 2 is not None
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.058s
+
+FAILED (failures=2)

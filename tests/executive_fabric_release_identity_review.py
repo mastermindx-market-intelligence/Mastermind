@@ -902,3 +902,8 @@ REVIEWED_FILES['integrations/hermes_application_fabric/qualification/application
            (1026, 49, 52, 'int', '503'),
            (1031, 45, 48, 'int', '409'),
            (1048, 34, 37, 'int', '409'))}
+
+# Combined provider-preservation/latency proposal: synthetic latency and HTTP status only.
+# Preserve complete-path/postimage binding and every unreviewed identity token.
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/provider_preserving_application/application-provider-latency.patch'] = {'sha256': '02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919',
+ 'sites': ((918, 48, 51, 'int', '500'), (1051, 56, 59, 'int', '401'))}

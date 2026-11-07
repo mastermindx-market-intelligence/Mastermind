@@ -1,0 +1,1407 @@
+--- a/ops/native_fabric/quota_continuity/candidate/lease_broker.py
++++ b/ops/native_fabric/quota_continuity/candidate/lease_broker.py
+@@ -117,7 +117,8 @@
+         raise ApplicationSelectionError("purpose_source_invalid")
+     task = value["task"]
+     required = {"task_class", "route_key"}
+-    optional = {"task_complexity", "needs", "subject_pool", "escalation_reason"}
++    optional = {"task_complexity", "needs", "subject_pool", "escalation_reason",
++                "max_expected_latency_ms"}
+     if type(task) is not dict or not required <= set(task) or set(task) - required - optional:
+         raise ApplicationSelectionError("purpose_task_invalid")
+     for key in required:
+@@ -133,6 +134,12 @@
+     if witness is not None and (type(witness) is not str or len(witness) > 2048
+             or any(ord(c) < 32 for c in witness)):
+         raise ApplicationSelectionError("purpose_witness_invalid")
++    if "max_expected_latency_ms" in task and (
++            type(task["max_expected_latency_ms"]) is not int
++            or not 1 <= task["max_expected_latency_ms"] <= 86_400_000):
++        raise ApplicationSelectionError("purpose_latency_invalid")
++    if "max_expected_latency_ms" in task and not task.get("task_complexity"):
++        raise ApplicationSelectionError("purpose_latency_complexity_required")
+     encoded = _application_json(value)
+     return encoded, hashlib.sha256(encoded.encode()).hexdigest()
+ 
+@@ -514,11 +521,14 @@
+                 needs.add("vision")
+         elif content is not None and type(content) is not str:
+             raise ApplicationSelectionError("selection_payload_invalid")
+-    return {"task_class": task["task_class"].lower(),
++    result = {"task_class": task["task_class"].lower(),
+         "route_key": task["route_key"], "task_complexity": str(task.get("task_complexity") or "").upper(),
+         "needs": sorted(needs), "subject_pool": task.get("subject_pool"),
+         "escalation_reason": str(task.get("escalation_reason") or ""),
+         "requested_model": payload["model"]}
++    if "max_expected_latency_ms" in task:
++        result["max_expected_latency_ms"] = task["max_expected_latency_ms"]
++    return result
+ 
+ def _application_requested_model(turn):
+     """Read frozen request intent without today's policy, grants or catalogue."""
+@@ -800,6 +810,120 @@
+ }
+ 
+ 
++def _application_latency_qualification(value, grant):
++    """Validate optional evidence published by the existing grant owner.
++
++    It describes expected completion time for one bounded model request, not
++    time to first token, a whole tool conversation, or a guaranteed deadline.
++    It grants no accounts/capacity and cannot be supplied by an HTTP caller.
++    """
++    fields = {"schema", "metric", "evidence_ref", "observed_at", "expires_at",
++              "source_profile_digest", "provider_config_digest", "transport_binding",
++              "accounts", "models"}
++    if (type(value) is not dict or set(value) != fields
++            or value["schema"] != "mastermind.application_latency_qualification.v1"
++            or value["metric"] != "request_completion_ms"):
++        raise ApplicationAdmissionError("latency_qualification_invalid")
++    reference = value["evidence_ref"]
++    if (type(reference) is not str or not reference.strip() or len(reference) > 512
++            or any(ord(c) < 32 for c in reference)):
++        raise ApplicationAdmissionError("latency_qualification_invalid")
++    observed, expires = (_application_time(value[key])
++                         for key in ("observed_at", "expires_at"))
++    if not observed < expires <= min(observed + 86_400, grant["expires_at"]):
++        raise ApplicationAdmissionError("latency_qualification_invalid")
++    for key in ("source_profile_digest", "provider_config_digest"):
++        _application_digest(value[key])
++    binding = value["transport_binding"]
++    if (type(binding) is not dict
++            or set(binding) != {"schema", "pool", "instance_id", "configuration_digest"}
++            or binding["schema"] != "mastermind.application_latency_binding.v1"
++            or binding["pool"] != grant["pool"]):
++        raise ApplicationAdmissionError("latency_qualification_invalid")
++    _application_id(binding["instance_id"])
++    _application_digest(binding["configuration_digest"])
++    if (type(value["accounts"]) is not list
++            or value["accounts"] != sorted(grant["accounts"])):
++        raise ApplicationAdmissionError("latency_qualification_invalid")
++    models = value["models"]
++    if (type(models) is not dict or not 1 <= len(models) <= 128
++            or not set(models) <= set(grant["models"])):
++        raise ApplicationAdmissionError("latency_qualification_invalid")
++    row_fields = {"served_model", "expected_ms", "sample_count", "max_request_bytes",
++                  "max_output_tokens", "task_classes", "task_complexities", "capabilities"}
++    for model, row in models.items():
++        if (type(row) is not dict or set(row) != row_fields
++                or row["served_model"] != model):
++            raise ApplicationAdmissionError("latency_qualification_invalid")
++        for key, bound in (("expected_ms", 86_400_000), ("sample_count", 1_000_000),
++                           ("max_request_bytes", 1024 * 1024), ("max_output_tokens", 1_000_000)):
++            if type(row[key]) is not int or not 1 <= row[key] <= bound:
++                raise ApplicationAdmissionError("latency_qualification_invalid")
++        for key in ("task_classes", "task_complexities", "capabilities"):
++            values = row[key]
++            if (type(values) is not list or len(values) > 32
++                    or any(type(item) is not str for item in values)
++                    or values != sorted(set(values))
++                    or key != "capabilities" and not values):
++                raise ApplicationAdmissionError("latency_qualification_invalid")
++            for item in values:
++                _application_id(item)
++        if (any(item != item.lower() for item in row["task_classes"])
++                or any(item != item.upper() for item in row["task_complexities"])
++                or any(re.fullmatch(r"[a-z][a-z0-9_]{0,63}", item) is None
++                       for item in row["capabilities"])):
++            raise ApplicationAdmissionError("latency_qualification_invalid")
++    return value
++
++
++def _application_latency_fact(document, grant, *, pool, model, profile, task,
++                              payload, transport_binding, now):
++    """One existing-owner qualification; no history inference or provider I/O.
++
++    The evidence covers the complete grant account cohort. A faster account's
++    estimate cannot qualify a slower or unknown account selected by the Broker.
++    The transport binding is supplied by the actual loaded transport owner,
++    never inferred from an account alias/path or a quota-scope identifier.
++    """
++    value = grant.get("latency_qualification")
++    if value is None or type(profile) is not dict or type(task) is not dict:
++        return None
++    try:
++        value = _application_latency_qualification(value, grant)
++    except (ApplicationAdmissionError, ValueError, TypeError, KeyError, OverflowError):
++        # An invalid performance annotation cannot authorize a constrained call,
++        # nor does it revoke unrelated permission in this same owner document.
++        return None
++    if not value["observed_at"] <= now < value["expires_at"]:
++        return None
++    if (value["transport_binding"] != transport_binding
++            or value["source_profile_digest"] != hashlib.sha256(
++                _application_json(profile).encode()).hexdigest()
++            or value["provider_config_digest"] != hashlib.sha256(
++                _application_json(document["providers"][pool]).encode()).hexdigest()):
++        return None
++    row = value["models"].get(model)
++    if (row is None or task.get("task_class") not in row["task_classes"]
++            or task.get("task_complexity") not in row["task_complexities"]
++            or not set(task.get("needs") or []) <= set(row["capabilities"])):
++        return None
++    fields = {"model", "messages", "stream", "max_tokens", "temperature", "top_p",
++              "stop", "tools", "tool_choice", "parallel_tool_calls"}
++    if (type(payload) is not dict or set(payload) - fields
++            or type(payload.get("messages")) is not list
++            or payload.get("model") not in (None, model)
++            or payload.get("stream", False) is not False
++            or type(payload.get("max_tokens")) is not int
++            or not 1 <= payload["max_tokens"] <= row["max_output_tokens"]):
++        return None
++    # The declared envelope includes history, tools and all sampling controls.
++    # Only the model label is omitted so AUTO and exact intent have equal bounds.
++    body = {key: item for key, item in payload.items() if key != "model"}
++    if len(_application_json(body).encode()) > row["max_request_bytes"]:
++        return None
++    return row["expected_ms"]
++
++
+ def _read_application_accounts(path):
+     """Fresh owner document; no mtime fallback, duplicate keys or secret lookup."""
+     try:
+@@ -839,7 +963,7 @@
+             expected_fields = (_APPLICATION_NATIVE_GRANT_FIELDS if native else
+                 _APPLICATION_GRANT_FIELDS | {"recipe_digest"} if grant.get("pool") in _APPLICATION_HTTP_POOLS
+                 else _APPLICATION_GRANT_FIELDS)
+-            if set(grant) != expected_fields:
++            if set(grant) not in (expected_fields, expected_fields | {"latency_qualification"}):
+                 raise ApplicationAdmissionError("invalid_application_grant")
+             if "recipe_digest" in grant:
+                 _application_digest(grant["recipe_digest"])
+@@ -1645,6 +1769,23 @@
+             return None
+         base = acct.get("per_account_cap")
+         pname = self.provider_name(pool)
++        if pname in ("byteplus", "experiential"):
++            if self.provider(pool).get("enabled") is not True or acct.get("enabled") is not True:
++                return None
++            if type(base) is not int or not 1 <= base <= 32:
++                return None
++            if pname == "byteplus":
++                import byteplus_coding_plan
++                if not byteplus_coding_plan.account_eligible(acct, now=now):
++                    return None
++                rows = self.provider(pool).get("accounts", [])
++                scopes = [row.get("coding_plan", {}).get("subscription_ref") for row in rows]
++                if len(set(scopes)) != len(scopes):
++                    return None
++            else:
++                from experiential_plan_policy import registered_plan_account
++                if not registered_plan_account(acct, self.provider(pool)):
++                    return None
+         if self.provider(pool).get("capacity_policy") == "host_admitted":
+             # No provider seat count. Configuring both forms fails closed.
+             if pname not in ("grok", "cursor") or base is not None:
+@@ -2565,12 +2706,18 @@
+                 raise ApplicationAdmissionError("recipe_mismatch")
+         elif expected_recipe_digest is not None:
+             raise ApplicationAdmissionError("recipe_mismatch")
+-        digest = hashlib.sha256(_application_json(grant).encode()).hexdigest()
++        # Optional performance evidence is not permission. Publishing or
++        # refreshing it must not revoke unrelated open turns or change legacy
++        # authorization identities. Constrained selections bind it separately.
++        authority = {key: value for key, value in grant.items() if key != "latency_qualification"}
++        digest = hashlib.sha256(_application_json(authority).encode()).hexdigest()
+         return document, grant, digest
+ 
+     def application_selection_facts(self, conn, *, principal_id, caller_host,
+                                     workload, pool, model, credential_ref, transport_accounts,
+-                                    mode, expected_recipe_digest=None, document=None):
++                                    mode, expected_recipe_digest=None, document=None,
++                                    selection_profile=None, selection_task=None,
++                                    selection_payload=None, latency_transport_binding=None):
+         """Read one registered route's ledger room; no admission, GC, secret or provider I/O.
+ 
+         This is concurrency evidence, not a provider-quota observation. B keeps
+@@ -2585,10 +2732,22 @@
+             document, principal_id, caller_host, workload, pool, model,
+             credential_ref, expected_recipe_digest)
+         room = self._application_room(conn, document, grant, pool, model, transport_accounts)
+-        return grant, digest, {"source": "broker-ledger-room", "observed_at": self.now(),
++        observation = {"source": "broker-ledger-room", "observed_at": self.now(),
+             "fresh_s": 5.0, "cooldown": False,
+             "model_room": {model: room} if room is not None else {},
+             "host": caller_host, "mode": mode}
++        if selection_task is not None and "max_expected_latency_ms" in selection_task:
++            expected = _application_latency_fact(document, grant, pool=pool, model=model,
++                profile=selection_profile, task=selection_task, payload=selection_payload,
++                transport_binding=latency_transport_binding, now=self.now())
++            observation["model_latency_ms"] = ({model: expected}
++                if expected is not None and room is not None else {})
++            # Capacity is observed now; the qualification's expiry is a separate
++            # validity boundary. A fresh read must not renew old timing evidence.
++            if expected is not None:
++                observation["fresh_s"] = min(5.0,
++                    grant["latency_qualification"]["expires_at"] - observation["observed_at"])
++        return grant, digest, observation
+ 
+     def _application_room(self, conn, document, grant, pool, model, transport_accounts):
+         """The incumbent exact-model room calculation on one ledger snapshot.
+@@ -2838,7 +2997,8 @@
+                                expected_credential_ref=None, application_recipe=None,
+                                expected_recipe_digest=None, expected_selection=None,
+                                selection_purpose=None, selection_profile=None, selection_task=None,
+-                               selection_route_scope=None):
++                               selection_route_scope=None, selection_payload=None,
++                               latency_transport_binding=None):
+         for value in (principal_id, caller_host, workload, turn_id):
+             _application_id(value)
+         _application_model(model)
+@@ -2915,6 +3075,16 @@
+                 if transport_accounts is not None and prior["account"] not in transport_accounts:
+                     raise ApplicationAdmissionError("account_unavailable")
+                 return self._application_binding(conn, prior)
++            latency_limit = (selection_task or {}).get("max_expected_latency_ms")
++            if latency_limit is not None:
++                expected = _application_latency_fact(document, grant, pool=pool, model=model,
++                    profile=selection_profile, task=selection_task, payload=selection_payload,
++                    transport_binding=latency_transport_binding, now=self.now())
++                if (selected is None or expected is None or expected > latency_limit
++                        or selected["commitments"].get("expected_latency_ms") != expected
++                        or selected["commitments"].get("latency_qualification_sha256") != hashlib.sha256(
++                            _application_json(grant.get("latency_qualification")).encode()).hexdigest()):
++                    raise ApplicationSelectionError("selection_latency_unavailable")
+             admitted_accounts = frozenset(grant["accounts"])
+             if transport_accounts is not None:
+                 admitted_accounts &= transport_accounts
+@@ -2932,6 +3102,11 @@
+             expires = min(grant["expires_at"], lease["granted_at"] + lease["ttl"])
+             if _application_time(self.now()) >= expires:
+                 raise ApplicationAdmissionError("grant_expired")
++            if latency_limit is not None and _application_latency_fact(
++                    document, grant, pool=pool, model=model, profile=selection_profile,
++                    task=selection_task, payload=selection_payload,
++                    transport_binding=latency_transport_binding, now=self.now()) is None:
++                raise ApplicationSelectionError("selection_latency_unavailable")
+             conn.execute("INSERT INTO application_turns (principal_id,turn_id,grant_id,grant_digest,"
+                          "caller_host,workload,admission_root,pool,account,model,lease_id,created_at,"
+                          "expires_at,max_steps,recipe_json,recipe_digest,selection_json,selection_digest,transport_kind,state) "
+@@ -3023,7 +3198,9 @@
+         return {"kind": "turn_present_new_step", "turn": binding}
+ 
+     def prepare_application_request(self, *, principal_id, turn_id, request_id, request_digest,
+-                                    transport_commitment=None, native_payload=None, original_payload=None):
++                                    transport_commitment=None, native_payload=None, original_payload=None,
++                                    selection_payload=None, selection_profile=None,
++                                    latency_transport_binding=None):
+         self._application_request_identity(principal_id, turn_id, request_id, request_digest)
+         with self._application_transaction() as conn:
+             turn = self._application_turn(conn, principal_id, turn_id)
+@@ -3117,6 +3294,29 @@
+             expires = min(grant["expires_at"], turn["expires_at"], lease["granted_at"] + lease["ttl"])
+             if now >= expires:
+                 raise ApplicationAdmissionError("turn_closed")
++            selected = json.loads(turn["selection_json"]) if turn["selection_json"] else None
++            if selected is not None and "max_expected_latency_ms" in selected["purpose"]["task"]:
++                # Recovery returned above. Every *new* dispatch, including a
++                # direct-token tool continuation, stays within the qualified
++                # envelope and the same current physical transport cohort.
++                body = _application_json({"path": "/v1/chat/completions",
++                    "payload": selection_payload}).encode()
++                if hashlib.sha256(body).hexdigest() != request_digest:
++                    raise ApplicationSelectionError("selection_latency_payload_changed")
++                task = _application_selection_task(selected["purpose"], selection_payload)
++                frozen_task = selected["identity"]["task"]
++                if not set(task["needs"]) <= set(frozen_task["needs"]):
++                    raise ApplicationSelectionError("selection_capability_changed")
++                expected = _application_latency_fact(document, grant,
++                    pool=turn["pool"], model=turn["model"], profile=selection_profile,
++                    task=task, payload=selection_payload,
++                    transport_binding=latency_transport_binding, now=now)
++                if (expected is None or expected > task["max_expected_latency_ms"]
++                        or expected != selected["commitments"].get("expected_latency_ms")
++                        or selected["commitments"].get("latency_qualification_sha256") != hashlib.sha256(
++                            _application_json(grant.get("latency_qualification")).encode()).hexdigest()):
++                    raise ApplicationSelectionError("selection_latency_unavailable")
++                expires = min(expires, grant["latency_qualification"]["expires_at"])
+             dispatch_id = uuid.uuid4().hex
+             invocation_json = invocation_digest = None
+             if native:
+--- a/ops/native_fabric/quota_continuity/candidate/pick.py
++++ b/ops/native_fabric/quota_continuity/candidate/pick.py
+@@ -2007,6 +2007,24 @@
+             return False, "provider quota cooldown"
+     except Exception:
+         return False, "provider quota state unavailable"
++    if pool in {"byteplus", "experiential"}:
++        try:
++            import sqlite3
++            from pathlib import Path
++            from lease_broker import default_broker
++            br = default_broker()
++            conn = sqlite3.connect(Path(br.db_path).resolve().as_uri()+"?mode=ro", uri=True, timeout=.25)
++            conn.row_factory = sqlite3.Row
++            try:
++                available = any(
++                    br._account_held(conn, pool, row["name"]) < row["_eff_cap"]
++                    for row in br.grantable_accounts(pool, conn=conn))
++            finally:
++                conn.close()
++            if not available:
++                return False, "plan account at shared cap or unavailable"
++        except Exception:
++            return False, "plan account capacity unavailable"
+     if pool in {"codex-native", "claude-native"}:
+         try:
+             from lease_broker import default_broker
+@@ -2071,7 +2089,7 @@
+     "go": ("go-codex",), "bailian": ("qwen",), "minimax": ("minimax",),
+     "glm": ("glm-codex", "glm"), "cursor": ("cursor",), "grok": ("grok",),
+     "codex-native": ("codex-native",), "claude-native": ("claude-native",),
+-    "ocfree": ("oc-free",),
++    "ocfree": ("oc-free",), "byteplus": ("byteplus",), "experiential": ("experiential",),
+ }
+ 
+ 
+@@ -2167,6 +2185,124 @@
+     return routes
+ 
+ 
++def _plan_active_directory():
++    """Resolve only the incumbent publisher's declared shared-active binding."""
++    from pathlib import Path
++    active = Path(HERE) / "active"
++    if active.is_symlink():
++        release = json.loads((Path(HERE).parent / "RELEASE.json").read_text())
++        stable = Path(release["stable_ext"])
++        expected = str(stable / "active")
++        if (not stable.is_absolute() or release["links"].get("ext/active") != expected
++                or os.readlink(active) != expected):
++            raise ValueError("plan shared active binding mismatch")
++        active = active.resolve(strict=True)
++    return active
++
++
++def _plan_auto_pick(task_class, *, context, host, pool, prefer, requested_model,
++                    needs, subject_pool, task_complexity, route_key,
++                    required_modes, required_platforms, excluded_hosts):
++    """Observe prepaid plan candidates inside this picker; never reserve or send.
++
++    The incumbent request owner supplies task/consent facts. Existing local
++    physical admission and Broker capacity remain the actual grantors.
++    """
++    if (type(context) is not dict or set(context) !=
++            {"schema", "root_id", "parent_run_id", "response_only", "consents"}
++            or context.get("schema") != "mastermind.provider_plan_auto_context.v1"
++            or type(context.get("root_id")) is not str
++            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", context["root_id"]) is None
++            or pool is not None or requested_model is not None
++            or prefer not in (None, "byteplus", "experiential")
++            or host not in ("auto", "m2") or needs
++            or os.environ.get("FABRIC_OPERATOR_CHILD_ID")
++            or os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0"
++            or os.environ.get("LANE_LEASED") == "1" or os.environ.get("POOL_LEASE_ID")
++            or task_complexity not in ("", "C0_MECHANICAL", "C1_ROUTINE_BOUNDED")
++            or task_class not in {"mechanical", "fix_build", "build", "fix", "execute",
++                                  "executor", "tests-only-repair", "census"}):
++        return None
++    consents = context.get("consents")
++    if (type(context.get("response_only")) is not bool
++            or type(consents) is not dict or set(consents) !=
++            {"retention_acknowledged", "sensitive_data_opt_in",
++             "proprietary_code", "code_exposure_opt_in"}
++            or any(type(value) is not bool for value in consents.values())):
++        return None
++    known_modes = {mode for values in _HOST_POOL_MODES.values() for mode in values}
++    if (required_modes is not None and (type(required_modes) is not list
++            or not 0 < len(required_modes) <= len(known_modes)
++            or any(type(x) is not str or x not in known_modes for x in required_modes))):
++        return None
++    if (required_platforms is not None and (type(required_platforms) is not list
++            or not 0 < len(required_platforms) <= 2 or "darwin" not in required_platforms
++            or any(type(x) is not str or x not in {"linux", "darwin"} for x in required_platforms))):
++        return None
++    if excluded_hosts is not None and (type(excluded_hosts) is not list
++            or len(excluded_hosts) > 64 or any(type(x) is not str
++                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", x) is None for x in excluded_hosts)
++            or len(set(excluded_hosts)) != len(excluded_hosts) or "m2" in excluded_hosts):
++        return None
++    from pathlib import Path
++    import socket
++    import slot
++    from lane_runtime import enforce_remote_first_lane_launch, read_lane_occupancy
++    candidates = ["experiential", "byteplus"]
++    if prefer in candidates:
++        candidates = [prefer] + [value for value in candidates if value != prefer]
++    for candidate in candidates:
++        if required_modes is not None and candidate not in required_modes:
++            continue
++        if candidate == "experiential" and not (
++                context["response_only"] and consents["retention_acknowledged"]
++                and consents["sensitive_data_opt_in"]
++                and (not consents["proprietary_code"] or consents["code_exposure_opt_in"])):
++            continue
++        try:
++            limits = enforce_remote_first_lane_launch(Path(HERE), requested_engines=(candidate,))
++            if limits is None or slot._local_host_admission_refusal(candidate):
++                continue
++            occupancy = read_lane_occupancy(_plan_active_directory())
++            if occupancy.status != "known" or occupancy.active_count >= limits["max_active"]:
++                continue
++            registry = json.loads((Path(HERE) / "hosts.json").read_text())
++            entry = registry.get("m2", {})
++            physical_host = socket.gethostname().split(".", 1)[0]
++            if (entry.get("local") is not True
++                    or physical_host not in entry.get("hostnames", [])):
++                continue
++            if candidate == "byteplus":
++                import byteplus_coding_plan
++                route = byteplus_coding_plan.native_route(task_class=task_class)
++            else:
++                import experiential_bridge
++                from experiential_plan_policy import FREE_CHAT_MODELS
++                route = experiential_bridge.qualified_route(
++                    run_id=route_key, task_class=task_class, runtime_root=Path(HERE),
++                    model=None, plan_lane="free")
++                if route.get("MODEL") not in FREE_CHAT_MODELS:
++                    continue
++            model = route["MODEL"]
++            if route.get("POOL") != candidate or route.get("MODE") != candidate or route.get("HOST") != "m2":
++                continue
++            if not policy_allows(candidate, task_class, model=model)[0]:
++                continue
++            if not _subject_ok(candidate, task_class, subject_pool, load_pools())[0]:
++                continue
++            if floor_demotes(candidate, task_class, model=model):
++                continue
++            if not hard_filter(candidate, task_class, model=model)[0]:
++                continue
++            return (f"POOL={candidate} KEY=- MODEL={model} "
++                    f"REASON=prepaid_plan_auto HOST=m2 MODE={candidate}")
++        except Exception:
++            # Unavailable observations remove this candidate. No request has
++            # been sent, and ordinary incumbent selection still runs once.
++            continue
++    return None
++
++
+ def format_pick(task_class: str, prefer: Optional[str] = None,
+                 host: Optional[str] = None, pool: Optional[str] = None,
+                 needs: Optional[List[str]] = None,
+@@ -2177,8 +2313,16 @@
+                 route_key: Optional[str] = None,
+                 required_modes: Optional[List[str]] = None,
+                 required_platforms: Optional[List[str]] = None,
+-                excluded_hosts: Optional[List[str]] = None) -> str:
++                excluded_hosts: Optional[List[str]] = None,
++                provider_plan_context: Optional[Dict[str, Any]] = None) -> str:
+     """Select a new request, preserving Grok model affinity on quota exhaustion."""
++    plan = _plan_auto_pick(task_class, context=provider_plan_context, host=host,
++        pool=pool, prefer=prefer, requested_model=requested_model, needs=needs,
++        subject_pool=subject_pool, task_complexity=task_complexity, route_key=route_key,
++        required_modes=required_modes, required_platforms=required_platforms,
++        excluded_hosts=excluded_hosts)
++    if plan is not None:
++        return plan
+     if os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0":
+         # Same model is not the same harness capability. The existing operator
+         # grant admits child-launch only on these modes; this can only narrow.
+@@ -3073,11 +3217,12 @@
+ _APPLICATION_SELECTION_SCHEMA = "mastermind.fabric_application_selection.v1"
+ _APPLICATION_TASK_REQUIRED = frozenset({"task_class", "route_key"})
+ _APPLICATION_TASK_OPTIONAL = frozenset({"task_complexity", "needs", "subject_pool",
+-                                        "escalation_reason", "requested_model"})
++                                        "escalation_reason", "requested_model",
++                                        "max_expected_latency_ms"})
+ _APPLICATION_OBS_REQUIRED = frozenset({"source", "observed_at", "fresh_s",
+                                        "cooldown", "model_room"})
+ _APPLICATION_OBS_OPTIONAL = frozenset({"cooldown_reason", "host", "mode",
+-                                       "burn_down_window", "grok_exhausted"})
++                                       "burn_down_window", "grok_exhausted", "model_latency_ms"})
+ _APPLICATION_RECIPE_FIELDS = frozenset({"model", "mode", "protocol", "streaming",
+     "driver", "profile", "source", "capabilities", "order_rank",
+     "max_turn_seconds", "max_steps", "qualification_ref",
+@@ -3306,8 +3451,16 @@
+                 or any(not _application_finite_number(value) for value in window)
+                 or not 0 < window[0] <= 168 or not 0 <= window[1] <= 100):
+             return None, "observation_invalid"
++    latency = raw.get("model_latency_ms", {})
++    if (type(latency) is not dict or len(latency) > 64
++            or not set(latency) <= set(room)
++            or any(type(value) is not int or not 1 <= value <= 86_400_000
++                   for value in latency.values())):
++        return None, "observation_invalid"
+     row = dict(raw)
+     row["model_room"] = dict(room)
++    if "model_latency_ms" in raw:
++        row["model_latency_ms"] = dict(latency)
+     return row, None
+ 
+ 
+@@ -3524,6 +3677,11 @@
+         elif not _application_model_name(requested):
+             return refusal("task_requested_model_invalid")
+ 
++    latency_limit = task.get("max_expected_latency_ms")
++    if "max_expected_latency_ms" in task and (
++            type(latency_limit) is not int or not 1 <= latency_limit <= 86_400_000):
++        return refusal("task_latency_invalid")
++
+     if type(quality_records) is not list \
+             or any(type(record) is not dict for record in quality_records):
+         return refusal("quality_history_unavailable")
+@@ -3548,6 +3706,10 @@
+                      "needs": sorted(needs), "subject_pool": subject,
+                      "escalation_reason": witness, "route_key": route_key,
+                      "requested_model": requested_token}
++    # Omit the optional field entirely for historical purposes: adding a null
++    # would change already-issued task identities without a routing change.
++    if latency_limit is not None:
++        task_identity["max_expected_latency_ms"] = latency_limit
+     commitments = {
+         "policy_bytes_sha256": policy.bytes_sha256,
+         "policy_text_sha256": policy.text_sha256,
+@@ -3664,6 +3826,12 @@
+                     defect = "model_room_unknown"
+                 elif room < 1:
+                     defect = "model_room_exhausted"
++            if defect is None and latency_limit is not None:
++                expected_latency = row.get("model_latency_ms", {}).get(recipe.model)
++                if expected_latency is None:
++                    defect = "model_latency_unknown"
++                elif expected_latency > latency_limit:
++                    defect = "model_latency_exceeded"
+             if defect is None:
+                 eligible.append(recipe)
+             elif first_defect is None:
+@@ -3694,11 +3862,27 @@
+             if matching:
+                 chosen, order_source = matching[0], "task_default_policy"
+         if chosen is None:
+-            if len(eligible) > 1 and len({recipe.order_rank for recipe in eligible}) != len(eligible):
++            tied = (len(eligible) > 1
++                    and len({recipe.order_rank for recipe in eligible}) != len(eligible))
++            if tied and latency_limit is not None:
++                # Preserve economic/catalogue rank. Qualified latency can only
++                # resolve a tie inside its best rank; it never promotes a pool
++                # or bypasses a requested model, capability, grant or quota.
++                rank = min(recipe.order_rank for recipe in eligible)
++                ranked = [recipe for recipe in eligible if recipe.order_rank == rank]
++                fastest = min(row["model_latency_ms"][recipe.model] for recipe in ranked)
++                best = [recipe for recipe in ranked
++                        if row["model_latency_ms"][recipe.model] == fastest]
++                if len(best) != 1:
++                    pool_defect(pool, "model_order_unqualified", coverage)
++                    continue
++                chosen, order_source = best[0], "catalogue_latency"
++            elif tied:
+                 pool_defect(pool, "model_order_unqualified", coverage)
+                 continue
+-            chosen = min(eligible, key=lambda recipe: (recipe.order_rank, recipe.model))
+-            order_source = "catalogue_order"
++            else:
++                chosen = min(eligible, key=lambda recipe: (recipe.order_rank, recipe.model))
++                order_source = "catalogue_order"
+         same_model = [recipe for recipe in eligible if recipe.model == chosen.model]
+         grants = {recipe.grant_ref["digest"] for recipe in same_model}
+         identities = {(recipe.driver, recipe.profile, recipe.protocol, recipe.mode)
+@@ -3726,6 +3910,9 @@
+             "policy": {"parsed_sha256": policy.parsed_sha256,
+                        "critical_sha256": policy.critical_sha256},
+         }
++        if latency_limit is not None:
++            commitments = dict(commitments,
++                expected_latency_ms=row["model_latency_ms"][chosen.model])
+         if expected_identity is not None:
+             if type(expected_identity) is not dict:
+                 return refusal("identity_input_invalid", coverage=coverage,
+--- a/ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py
++++ b/ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py
+@@ -430,7 +430,8 @@
+         return frozenset(pair for pair in pairs if self._application_route(*pair)[0] is not None)
+ 
+     def select_application(self, request, *, principal_id, host, credential_ref, purpose, payload,
+-                           route_scope=None, transport_candidates=None):
++                           route_scope=None, transport_candidates=None,
++                           latency_transport_binding=None):
+         """Select once from registered, granted routes inside trusted service scope."""
+         try:
+             import pick
+@@ -466,7 +467,7 @@
+             policy = pick.read_application_policy()
+             quality = pool_ledger.read_recent(limit=10000, strict=True)
+             document = _read_application_accounts(broker.accounts_path)
+-            pools, observations, projections = {}, {}, {}
++            pools, observations, projections, latency_qualifications = {}, {}, {}, {}
+             connection = self._connection()
+             try:
+                 connection.row_factory = sqlite3.Row
+@@ -501,9 +502,16 @@
+                                 workload=request["workload"], pool=pool, model=model,
+                                 credential_ref=credential_ref, transport_accounts=accounts,
+                                 mode=projection["mode"], expected_recipe_digest=digest,
+-                                document=document)
++                                document=document,
++                                **(dict(selection_profile=projection, selection_task=task,
++                                    selection_payload=payload,
++                                    latency_transport_binding=latency_transport_binding)
++                                   if "max_expected_latency_ms" in task else {}))
+                         except Exception:
+                             continue
++                        if model in observation.get("model_latency_ms", {}):
++                            latency_qualifications[(pool, model)] = hashlib.sha256(
++                                _application_json(grant.get("latency_qualification")).encode()).hexdigest()
+                         recipe = {key: projection[key] for key in
+                             ("mode", "protocol", "streaming", "driver", "profile", "source", "capabilities")}
+                         # Equal ranks assert no model preference. The existing
+@@ -516,6 +524,8 @@
+                         pools.setdefault(pool, {"enabled": True, "recipes": []})["recipes"].append(recipe)
+                         if pool not in observations:
+                             observations[pool] = dict(observation, model_room=dict(observation["model_room"]))
++                            if "model_latency_ms" in observation:
++                                observations[pool]["model_latency_ms"] = dict(observation["model_latency_ms"])
+                         else:
+                             previous = observations[pool]
+                             if any(previous[key] != observation[key] for key in ("source", "host", "cooldown")):
+@@ -523,6 +533,12 @@
+                             if set(previous["model_room"]) & set(observation["model_room"]):
+                                 raise ValueError("duplicate model room")
+                             previous["model_room"].update(observation["model_room"])
++                            if ("model_latency_ms" in previous) != ("model_latency_ms" in observation):
++                                raise ValueError("incoherent latency observations")
++                            if "model_latency_ms" in observation:
++                                if set(previous["model_latency_ms"]) & set(observation["model_latency_ms"]):
++                                    raise ValueError("duplicate model latency")
++                                previous["model_latency_ms"].update(observation["model_latency_ms"])
+                             previous["observed_at"] = min(previous["observed_at"], observation["observed_at"])
+                             previous["fresh_s"] = min(previous["fresh_s"], observation["fresh_s"])
+                             if previous.get("mode") != observation.get("mode"):
+@@ -549,6 +565,9 @@
+             bound = projections[(identity["pool"], identity["model"])]
+             if identity["source"] != bound["source"]:
+                 raise ValueError("selected source changed")
++            if "max_expected_latency_ms" in task:
++                selected["commitments"]["latency_qualification_sha256"] = latency_qualifications[
++                    (identity["pool"], identity["model"])]
+             purpose_json, purpose_digest = _application_selection_purpose(purpose)
+             result = {"schema": "mastermind.application_turn_selection.v1",
+                 "purpose": json.loads(purpose_json), "purpose_digest": purpose_digest,
+@@ -567,7 +586,7 @@
+     def begin_application(self, request, *, principal_id, host, deadline_ns=None,
+                           expected_credential_ref=None, expected_recipe_digest=None,
+                           expected_selection=None, selection_purpose=None, selection_payload=None,
+-                          selection_route_scope=None):
++                          selection_route_scope=None, latency_transport_binding=None):
+         """Internal authenticated service context; never caller-supplied identity."""
+         try:
+             broker = self._application_owner()
+@@ -584,6 +603,9 @@
+                 selection_args = dict(expected_selection=expected_selection, selection_purpose=selection_purpose,
+                     selection_profile=route[2], selection_route_scope=selection_route_scope,
+                     selection_task=self.application_selection_task(selection_purpose, selection_payload))
++                if "max_expected_latency_ms" in selection_args["selection_task"]:
++                    selection_args.update(selection_payload=selection_payload,
++                        latency_transport_binding=latency_transport_binding)
+             result = broker.begin_application_turn(principal_id=principal_id, caller_host=host,
+                 workload=request["workload"], turn_id=request["turn_id"], pool=request["pool"],
+                 model=request["model"], deadline_ns=deadline_ns, transport_accounts=accounts,
+@@ -651,7 +673,8 @@
+             raise LeaseGatewayError("application recovery refused") from None
+ 
+     def prepare_application(self, token, *, principal_id, host, turn_id, request_id, path, payload,
+-                            expected_pool="go", transport_commitment=None):
++                            expected_pool="go", transport_commitment=None,
++                            latency_transport_binding=None):
+         try:
+             broker = self._application_owner()
+             if (path != "/v1/chat/completions" or not isinstance(payload, dict)
+@@ -695,12 +718,24 @@
+             if (claims["account"] not in accounts
+                     or expected_pool != "go" and claims["recipe_digest"] != digest):
+                 raise LeaseGatewayError("application request refused")
++            selection_args = {}
++            selected = json.loads(turn["selection_json"]) if turn["selection_json"] else None
++            if selected is not None and "max_expected_latency_ms" in selected["purpose"]["task"]:
++                selection_args = dict(selection_payload=original_payload,
++                    selection_profile=self._application_route(expected_pool, claims["model"])[2],
++                    latency_transport_binding=latency_transport_binding)
+             prepared = broker.prepare_application_request(principal_id=principal_id, turn_id=turn_id,
+                 request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
+                 transport_commitment=transport_commitment,
+                 native_payload=frozen if expected_pool in NATIVE_APPLICATION_POOLS else None,
+-                original_payload=original_payload if routed_digest is not None or scoped else None)
++                original_payload=original_payload if routed_digest is not None or scoped else None,
++                **selection_args)
+             if prepared.get("dispatch_permitted"):
++                if selection_args:
++                    # Private dispatch material, not another durable identity or
++                    # public credential. The actual transport freezes matching
++                    # endpoint/account bytes before its one send.
++                    prepared["latency_transport_binding"] = dict(latency_transport_binding)
+                 # The original handler sends these immutable, digest-bound bytes.
+                 # They are internal dispatch material, never a public receipt/log.
+                 prepared["payload_bytes"] = json.dumps(frozen, sort_keys=True, separators=(",", ":"),
+--- a/ops/native_fabric/quota_continuity/candidate/go_shim.py
++++ b/ops/native_fabric/quota_continuity/candidate/go_shim.py
+@@ -2080,6 +2080,24 @@
+         self._persist_state()
+         return True
+ 
++    def application_latency_binding(self) -> Dict[str, str]:
++        """Opaque provenance of the actual loaded owner; never credentials.
++
++        The existing authenticated /status surface exposes this qualification
++        input. An account, endpoint, wire/concurrency change or process restart
++        invalidates prior evidence. This is not an admission or retry token.
++        """
++        with self.lock:
++            material = json.dumps({"accounts": self.accounts,
++                "upstream_base": self.upstream_base, "wire_compat": self.wire_compat,
++                "max_inflight": self.max_inflight}, sort_keys=True,
++                separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
++            digest = hmac.new(self.token.encode(),
++                b"mastermind.application_latency_binding.v1\0" + material,
++                hashlib.sha256).hexdigest()
++            return {"schema": "mastermind.application_latency_binding.v1", "pool": "go",
++                "instance_id": self.gateway_instance_id, "configuration_digest": digest}
++
+     def status(self) -> Dict[str, Any]:
+         now = self.now()
+         # One lock snapshot joins per-account and exact-lease reservations.
+@@ -2106,6 +2124,7 @@
+                 for name in self.accounts
+             },
+             "gateway_instance_id": self.gateway_instance_id,
++            "application_latency_binding": self.application_latency_binding(),
+             "worker_settlement": "lease-inflight-v1",
+             "worker_in_flight": worker_inflight,
+             "pool": {"accounts": len(self.accounts), "eligible": sum(1 for name in self.accounts if self.eligible(name, next(iter(self.prices["models"]))))},
+@@ -2236,10 +2255,18 @@
+         # a caller-selected header; every tool step retains the same session.
+         session = "ses_mm_" + hashlib.sha256(
+             b"mastermind-go-application-session/v1\0" + lease_id.encode("utf-8")).hexdigest()
+-        request = Request(upstream_url(self.upstream_base, "/v1/chat/completions"),
+-            data=body, method="POST", headers={"Authorization": "Bearer " + self.accounts[account],
+-            "Content-Type": "application/json", "Accept": "application/json",
+-            "User-Agent": "mastermind-go-shim/1", "x-opencode-session": session})
++        with self.lock:
++            expected = permit.get("latency_transport_binding")
++            if expected is not None and (
++                    expected != self.application_latency_binding()
++                    or not self.application_model_supported(permit["model"], "/v1/chat/completions")):
++                raise ApplicationTransportUncertain("application_latency_binding_changed")
++            # Freeze the actual endpoint and credential under the same lock as
++            # the binding/wire snapshot; no lock is held across provider I/O.
++            request = Request(upstream_url(self.upstream_base, "/v1/chat/completions"),
++                data=body, method="POST", headers={"Authorization": "Bearer " + self.accounts[account],
++                "Content-Type": "application/json", "Accept": "application/json",
++                "User-Agent": "mastermind-go-shim/1", "x-opencode-session": session})
+         try:
+             status, raw, _, _, _ = self._application_exchange(request,
+                 expires_at=permit["expires_at"], timeout_seconds=APPLICATION_IO_TIMEOUT_S)
+@@ -2310,10 +2337,11 @@
+             )
+             if wire is None or current_status is None or int(current_status) < 500 or not has_other_ok:
+                 return False
+-            self.wire_compat.setdefault(model.lower(), [])
+-            if wire not in self.wire_compat[model.lower()]:
+-                self.wire_compat[model.lower()].append(wire)
+-            table = self.wire_compat.copy()
++            with self.lock:
++                self.wire_compat.setdefault(model.lower(), [])
++                if wire not in self.wire_compat[model.lower()]:
++                    self.wire_compat[model.lower()].append(wire)
++                table = {key: list(value) for key, value in self.wire_compat.items()}
+             table["_semantics"] = (
+                 "map model_id -> list of wires KNOWN INCOMPATIBLE for that model. "
+                 "Wire tokens: chat | messages | responses. A model absent from this table, "
+@@ -2760,7 +2788,9 @@
+                 selection = lease_gateway.select_application(scope, principal_id=service.principal_id,
+                     host=service.host, credential_ref=service.credential_ref, purpose=purpose, payload=payload,
+                     **({"route_scope": service.route_scope.document, "transport_candidates": candidates}
+-                       if candidates is not None else {}))
++                       if candidates is not None else {}),
++                    **({"latency_transport_binding": router.application_latency_binding()}
++                       if "max_expected_latency_ms" in purpose["task"] else {}))
+             except Exception:
+                 # The initial absence snapshot may have raced another request
+                 # for this turn. Its own new lease can consume the last slot.
+@@ -3170,7 +3200,10 @@
+                     expected_selection=selection, selection_purpose=purpose, selection_payload=original_payload,
+                     selection_route_scope=(service.route_scope.document
+                         if original_payload["model"] is None or recovery_args.get("expected_route_scope_digest") is not None
+-                        else None))
++                        else None),
++                    **({"latency_transport_binding": router.application_latency_binding()}
++                       if selection is not None and pool == "go" and purpose is not None
++                       and "max_expected_latency_ms" in purpose["task"] else {}))
+             except Exception as error:
+                 self._application_admission_failed(scope, recovery_args, error)
+                 return
+@@ -3197,7 +3230,10 @@
+                         return
+                 permit = lease_gateway.prepare_application(binding["token"], principal_id=service.principal_id,
+                     host=service.host, turn_id=turn_id, request_id=request_id, path=path, payload=original_payload,
+-                    expected_pool=pool, transport_commitment=commitment)
++                    expected_pool=pool, transport_commitment=commitment,
++                    **({"latency_transport_binding": router.application_latency_binding()}
++                       if pool == "go" and purpose is not None
++                       and "max_expected_latency_ms" in purpose["task"] else {}))
+                 if not permit.get("dispatch_permitted"):
+                     self._application_recovered(permit)
+                     return
+--- /dev/null
++++ b/ops/native_fabric/quota_continuity/tests/test_hermes_application_latency_qualification.py
+@@ -0,0 +1,403 @@
++"""Disjoint owner proposal: real picker/Broker/Go handler, fixture provider only.
++
++Unit cases deny external I/O; handler cases reuse the incumbent numeric-loopback
++boundary. No live provider, production credential, enrollment or grant is used.
++"""
++import copy
++import hashlib
++import http.client
++import json
++import unittest
++from unittest.mock import patch
++
++from test_application_turn_pick import (
++    ApplicationPickFixture, catalogue, observation, observations, policy_document,
++    recipe, task, offline_acquire, offline_release)
++from test_application_turn_selection_admission import SelectedIngressFixture
++from test_go_application_handler_composition import SERVICE_TOKEN, CONTROLLER_TOKEN
++from go_lease_gateway import ApplicationSelectionRefused, LeaseGatewayError
++import lease_broker
++import pick
++
++
++def digest(value):
++    return hashlib.sha256(lease_broker._application_json(value).encode()).hexdigest()
++
++
++class LatencyPickerTests(ApplicationPickFixture):
++    def setUp(self):
++        offline_acquire()
++        self.addCleanup(offline_release)
++        super().setUp()
++
++    def test_absent_requirement_preserves_exact_legacy_identity_and_commitments(self):
++        old = self.select()
++        enriched = self.select(obs=observations(model_latency_ms={"fixture-model": 200}))
++        self.assertEqual(old["identity"], enriched["identity"])
++        self.assertEqual(old["commitments"]["task_digest"], enriched["commitments"]["task_digest"])
++        self.assertNotIn("max_expected_latency_ms", old["identity"]["task"])
++        self.assertNotIn("expected_latency_ms", old["commitments"])
++
++    def test_unknown_and_slow_models_never_become_zero_latency(self):
++        for values in ({}, {"fixture-model": 101}):
++            with self.subTest(values=values):
++                self.assertFalse(self.select(task(max_expected_latency_ms=100),
++                    obs=observations(model_latency_ms=values))["ok"])
++        result = self.select(task(max_expected_latency_ms=100),
++            obs=observations(model_latency_ms={"fixture-model": 100}))
++        self.assertTrue(result["ok"])
++        self.assertEqual(result["commitments"]["expected_latency_ms"], 100)
++
++    def test_latency_requirement_and_facts_reject_nonintegers_and_bounds(self):
++        for value in (None, True, False, 0, -1, 86_400_001, 1.5, float("nan"), "100"):
++            with self.subTest(value=repr(value)):
++                self.assertFalse(self.select(task(max_expected_latency_ms=value))["ok"])
++                self.assertFalse(self.select(task(max_expected_latency_ms=100),
++                    obs=observations(model_latency_ms={"fixture-model": value}))["ok"])
++        self.assertFalse(self.select(task(max_expected_latency_ms=100),
++            obs=observations(model_latency_ms={"unknown-model": 1}))["ok"])
++
++    def model_options(self, default=None, ranks=(0, 0)):
++        document = policy_document()
++        document["pools"]["go"]["worker_models"] = ["fixture-model", "other-model"]
++        if default is None:
++            document["pools"]["go"].pop("default_model")
++        else:
++            document["pools"]["go"]["default_model"] = default
++        self.write_policy(document)
++        policy = pick.read_application_policy()
++        cat = catalogue(go={"enabled": True, "recipes": [
++            recipe(order_rank=ranks[0]), recipe(model="other-model", order_rank=ranks[1])]})
++        obs = observations(go=observation(model_room={"fixture-model": 1, "other-model": 1},
++            model_latency_ms={"fixture-model": 500, "other-model": 100}))
++        return dict(pol=policy, cat=cat, obs=obs)
++
++    def test_qualified_latency_resolves_only_best_rank_ties(self):
++        options = self.model_options()
++        self.assertFalse(self.select(**options)["ok"])
++        chosen = self.select(task(max_expected_latency_ms=1000), **options)
++        self.assertTrue(chosen["ok"])
++        self.assertEqual(chosen["identity"]["model"], "other-model")
++        options["obs"]["go"]["model_latency_ms"]["fixture-model"] = 100
++        self.assertFalse(self.select(task(max_expected_latency_ms=1000), **options)["ok"])
++
++    def test_incumbent_default_and_catalogue_economic_rank_remain_authoritative(self):
++        for options in (self.model_options(default="fixture-model"),
++                        self.model_options(ranks=(0, 1))):
++            selected = self.select(task(max_expected_latency_ms=1000), **options)
++            self.assertEqual(selected["identity"]["model"], "fixture-model")
++
++    def test_strict_model_and_capacity_are_not_bypassed_for_fast_alternative(self):
++        options = self.model_options()
++        self.assertFalse(self.select(task(requested_model="fixture-model", max_expected_latency_ms=200),
++            **options)["ok"])
++        options["obs"]["go"]["model_room"]["other-model"] = 0
++        self.assertFalse(self.select(task(max_expected_latency_ms=200), **options)["ok"])
++
++
++    def test_latency_does_not_resolve_same_model_source_ambiguity(self):
++        options = self.model_options()
++        options["cat"]["pools"]["go"]["recipes"] = [
++            recipe(source="source-a"), recipe(source="source-b")]
++        self.assertFalse(self.select(task(max_expected_latency_ms=1000), **options)["ok"])
++
++
++class LatencyIngressFixture(SelectedIngressFixture):
++    def setUp(self):
++        super().setUp()
++        self.payload["max_tokens"] = 64
++        self.purpose_document["task"].update(max_expected_latency_ms=1000, needs=["tools"])
++        self.restart_service(self.purpose_document)
++        self.qualify()
++
++    def qualify(self):
++        profile = self.gateway._application_route("go", "fixture-model")[2]
++        row = {"served_model": "fixture-model", "expected_ms": 250, "sample_count": 5,
++            "max_request_bytes": 4096, "max_output_tokens": 128,
++            "task_classes": ["mechanical"], "task_complexities": ["C1_ROUTINE_BOUNDED"],
++            "capabilities": ["tools"]}
++        self.qualification = {"schema": "mastermind.application_latency_qualification.v1",
++            "metric": "request_completion_ms", "evidence_ref": "fixture:qualified-account-cohort",
++            "observed_at": self.clock[0] - 1, "expires_at": self.clock[0] + 100,
++            "source_profile_digest": digest(profile),
++            "provider_config_digest": digest(self.document["providers"]["go"]),
++            "transport_binding": self.router.application_latency_binding(),
++            "accounts": sorted(self.grant["accounts"]),
++            "models": {"fixture-model": row,
++                       "other-model": {**row, "served_model": "other-model", "expected_ms": 100}}}
++        self.grant["latency_qualification"] = self.qualification
++        self.save()
++
++    def select(self):
++        return self.gateway.select_application(self.original_scope(), principal_id="macro", host="vps",
++            credential_ref="MACRO_APPLICATION_TOKEN", purpose=self.purpose_document, payload=self.payload,
++            latency_transport_binding=self.router.application_latency_binding())
++
++    def admit(self, *, selected=None, turn="turn-1"):
++        selected = selected or self.select()
++        return self.gateway.begin_application({**self.original_scope(), "turn_id": turn},
++            principal_id="macro", host="vps", expected_credential_ref="MACRO_APPLICATION_TOKEN",
++            expected_selection=selected, selection_purpose=self.purpose_document,
++            selection_payload=self.payload, latency_transport_binding=self.router.application_latency_binding())
++
++    def direct_prepare(self, binding, *, payload=None, step="step-1", transport_binding=True):
++        return self.gateway.prepare_application(binding["token"], principal_id="macro", host="vps",
++            turn_id=binding["turn_id"], request_id=step, path="/v1/chat/completions",
++            payload=self.payload if payload is None else payload,
++            latency_transport_binding=self.router.application_latency_binding() if transport_binding else None)
++
++    def owner_get(self, path, token=None):
++        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
++        try:
++            conn.request("GET", path, headers={"Authorization": "Bearer " + token} if token else {})
++            reply = conn.getresponse()
++            return reply.status, json.loads(reply.read())
++        finally:
++            conn.close()
++
++
++class LatencyIngressTests(LatencyIngressFixture):
++    def test_host_requirement_reaches_real_selection_admission_and_native_tool_history(self):
++        tool = {"type": "function", "function": {"name": "fixture_echo", "parameters": {"type": "object"}}}
++        first = {**self.payload, "tools": [tool]}
++        self.response["choices"][0]["finish_reason"] = "tool_calls"
++        self.response["choices"][0]["message"] = {"role": "assistant", "content": None,
++            "tool_calls": [{"id": "call-fixture", "type": "function",
++                            "function": {"name": "fixture_echo", "arguments": "{}"}}]}
++        status, reply, _ = self.request(payload=first)
++        self.assertEqual(status, 200)
++        selected = json.loads(self.rows("application_turns")[0]["selection_json"])
++        self.assertEqual(selected["commitments"]["expected_latency_ms"], 250)
++        second = {**first, "messages": first["messages"] + [reply["choices"][0]["message"],
++            {"role": "tool", "tool_call_id": "call-fixture", "content": "fixture result"}]}
++        self.response["choices"][0].update(finish_reason="stop", message={"role": "assistant", "content": "Done"})
++        with patch.object(pick, "select_application", side_effect=AssertionError("continuation reselected")):
++            self.assertEqual(self.request(step="step-2", payload=second)[0], 200)
++        self.assertEqual(json.loads(self.posts[1][1]), second)
++        self.assertEqual(len(self.rows("leases")), 1)
++        self.assertEqual(len(self.rows("application_requests")), 2)
++        self.assertEqual(self.posts[0][2], self.posts[1][2])
++
++    def test_actual_auto_route_uses_qualified_latency_when_default_exceeds_budget(self):
++        self.policy_document["pools"]["go"]["worker_models"] = ["fixture-model", "other-model"]
++        self.policy_path.write_text(json.dumps(self.policy_document))
++        self.qualification["models"]["fixture-model"]["expected_ms"] = 2000
++        self.save()
++        self.server.shutdown()
++        self.server.server_close()
++        self.service = self.go.ApplicationServiceBinding("macro", "vps", "site_interactive",
++            "MACRO_APPLICATION_TOKEN", SERVICE_TOKEN,
++            selection_purpose=self.go.ApplicationSelectionPurpose(self.purpose_document),
++            route_scope=self.go.ApplicationRouteScope({"schema": "mastermind.application_route_scope.v1", "pools": ["go"]}))
++        self.server = self.go.make_server(self.router, lease_gateway=self.gateway, application_services=(self.service,))
++        self._serve(self.server)
++        self.response["model"] = "other-model"
++        payload = {**self.payload, "model": None}
++        self.assertEqual(self.request(payload=payload,
++            headers={"X-MM-Application-Route-Scope-Digest": self.service.route_scope.digest})[0], 200)
++        turn = self.rows("application_turns")[0]
++        selected = json.loads(turn["selection_json"])
++        self.assertEqual((turn["pool"], turn["model"]), ("go", "other-model"))
++        self.assertIsNone(selected["identity"]["task"]["requested_model"])
++        self.assertEqual(json.loads(self.posts[0][1])["model"], "other-model")
++
++    def test_latency_qualification_is_obtainable_only_from_existing_authenticated_status(self):
++        self.assertEqual(self.owner_get("/status")[0], 401)
++        self.assertNotIn("application_latency_binding", self.owner_get("/health")[1])
++        status, body = self.owner_get("/status", CONTROLLER_TOKEN)
++        self.assertEqual(status, 200)
++        self.assertEqual(body["application_latency_binding"], self.router.application_latency_binding())
++        encoded = json.dumps(body)
++        for value in (*self.router.accounts.values(), CONTROLLER_TOKEN, SERVICE_TOKEN):
++            self.assertNotIn(value, encoded)
++
++    def test_loaded_account_endpoint_wire_concurrency_and_instance_changes_invalidate_binding(self):
++        before = self.router.application_latency_binding()
++        mutations = [("accounts", {**self.router.accounts, "account-a": "fixture-rotated"}),
++            ("upstream_base", self.router.upstream_base + "/changed"),
++            ("wire_compat", {"fixture-model": ["chat"]}),
++            ("max_inflight", self.router.max_inflight + 1), ("gateway_instance_id", "new-fixture-instance")]
++        for key, value in mutations:
++            with self.subTest(key=key), patch.object(self.router, key, value):
++                self.assertNotEqual(before, self.router.application_latency_binding())
++                with self.assertRaises(ApplicationSelectionRefused):
++                    self.select()
++        self.assert_no_effect()
++
++    def test_missing_stale_future_source_provider_and_transport_evidence_refuse_before_lease(self):
++        initial = copy.deepcopy(self.qualification)
++        changes = [{"expires_at": self.clock[0]}, {"observed_at": self.clock[0] + 1},
++            {"source_profile_digest": "f" * 64}, {"provider_config_digest": "f" * 64},
++            {"transport_binding": {**initial["transport_binding"], "configuration_digest": "f" * 64}}]
++        for change in changes:
++            self.grant["latency_qualification"] = {**initial, **change}
++            self.save()
++            with self.subTest(change=change), self.assertRaises(ApplicationSelectionRefused):
++                self.select()
++        self.grant.pop("latency_qualification")
++        self.save()
++        with self.assertRaises(ApplicationSelectionRefused):
++            self.select()
++        self.assert_no_effect()
++
++    def test_closed_qualification_rejects_partial_account_or_served_model_claim(self):
++        initial = copy.deepcopy(self.qualification)
++        bad = [dict(initial, accounts=["account-a"]), dict(initial, accounts=["account-b", "account-a"]),
++               dict(initial, metric="ttft_ms"), dict(initial, invented=1)]
++        wrong_model = copy.deepcopy(initial)
++        wrong_model["models"]["fixture-model"]["served_model"] = "other-model"
++        bad.append(wrong_model)
++        for value in bad:
++            self.grant["latency_qualification"] = value
++            self.save()
++            with self.subTest(value=value), self.assertRaises(ApplicationSelectionRefused):
++                self.select()
++        self.assert_no_effect()
++
++    def test_unconstrained_existing_route_does_not_require_fresh_latency_evidence(self):
++        self.qualification["expires_at"] = self.clock[0]
++        self.save()
++        self.purpose_document["task"].pop("max_expected_latency_ms")
++        self.restart_service(self.purpose_document)
++        self.assertEqual(self.request()[0], 200)
++
++    def test_latency_publication_preserves_open_unconstrained_grant_identity(self):
++        self.purpose_document["task"].pop("max_expected_latency_ms")
++        self.restart_service(self.purpose_document)
++        self.grant.pop("latency_qualification")
++        self.save()
++        self.assertEqual(self.request()[0], 200)
++        original = self.rows("application_turns")[0]
++        self.assertEqual(original["grant_digest"], digest(self.grant))
++        self.grant["latency_qualification"] = {"invalid-performance-annotation": True}
++        self.save()
++        self.assertEqual(self.request(step="step-2")[0], 200)
++        self.assertEqual(self.rows("application_turns")[0], original)
++        self.assertEqual(len(self.rows("leases")), 1)
++
++    def test_qualified_evidence_refresh_requires_new_constrained_selection(self):
++        selected = self.select()
++        self.qualification["evidence_ref"] = "fixture:new-qualified-cohort-evidence"
++        self.save()
++        with self.assertRaises(LeaseGatewayError):
++            self.admit(selected=selected)
++        self.assert_no_effect()
++
++    def test_host_must_supply_complexity_for_a_latency_requirement(self):
++        self.purpose_document["task"].pop("task_complexity")
++        with self.assertRaises(lease_broker.ApplicationSelectionError):
++            self.go.ApplicationSelectionPurpose(self.purpose_document)
++
++    def test_http_payload_cannot_supply_latency_or_owner_qualification(self):
++        for key in ("max_expected_latency_ms", "latency_qualification", "latency_transport_binding"):
++            with self.subTest(key=key):
++                self.assertEqual(self.request(payload={**self.payload, key: 1})[0], 400)
++        self.assert_no_effect()
++
++    def test_new_turn_requires_explicit_bounded_output_and_qualified_request_size(self):
++        for payload in ({key: value for key, value in self.payload.items() if key != "max_tokens"},
++                        {**self.payload, "max_tokens": 129},
++                        {**self.payload, "messages": [{"role": "user", "content": "x" * 5000}]}):
++            with self.subTest(payload_size=len(json.dumps(payload))):
++                self.assertEqual(self.request(payload=payload)[0], 409)
++        self.assert_no_effect()
++
++    def test_expiry_after_acquisition_rolls_back_lease_and_turn(self):
++        original = self.broker._try_acquire_in_transaction
++        def race(*args, **kwargs):
++            acquired = original(*args, **kwargs)
++            self.clock[0] = self.qualification["expires_at"]
++            return acquired
++        with patch.object(self.broker, "_try_acquire_in_transaction", race):
++            self.assertEqual(self.request()[0], 409)
++        self.assert_no_effect()
++
++    def test_fresh_binding_is_rechecked_between_selection_and_admission(self):
++        selected = self.select()
++        self.router.accounts["account-b"] = "fixture-rotated-b"
++        with self.assertRaises(LeaseGatewayError):
++            self.admit(selected=selected)
++        self.assert_no_effect()
++
++    def test_direct_token_cannot_bypass_latency_or_payload_commitment(self):
++        binding = self.admit()
++        with self.assertRaises(LeaseGatewayError):
++            self.direct_prepare(binding, transport_binding=False)
++        with self.assertRaises(LeaseGatewayError):
++            self.direct_prepare(binding, payload={**self.payload, "max_tokens": 129})
++        self.assertEqual(self.rows("application_requests"), [])
++        self.assertTrue(self.direct_prepare(binding)["dispatch_permitted"])
++
++    def test_tool_continuation_rechecks_envelope_and_never_allocates_another_account(self):
++        self.assertEqual(self.request()[0], 200)
++        before = self.rows("application_turns")
++        self.assertNotEqual(self.request(step="step-2", payload={**self.payload, "max_tokens": 129})[0], 200)
++        self.assertEqual(len(self.posts), 1)
++        self.assertEqual(len(self.rows("application_requests")), 1)
++        self.assertEqual(self.rows("application_turns"), before)
++
++    def test_new_step_refuses_expired_or_drifted_evidence_without_reselection(self):
++        binding = self.admit()
++        permit = self.direct_prepare(binding)
++        self.broker.complete_application_request(dispatch_id=permit["dispatch_id"], terminal_receipt=self.receipt(permit))
++        with patch.object(pick, "select_application", side_effect=AssertionError("reselected")):
++            self.router.accounts["account-a"] = "fixture-rotated-a"
++            with self.assertRaises(LeaseGatewayError):
++                self.direct_prepare(binding, step="step-2")
++            self.router.accounts["account-a"] = "fixture-provider-a"
++            self.clock[0] = self.qualification["expires_at"]
++            with self.assertRaises(LeaseGatewayError):
++                self.direct_prepare(binding, step="step-2")
++        self.assertEqual(len(self.rows("application_requests")), 1)
++
++    def test_original_pending_and_unknown_recovery_precedes_expiry_and_missing_binding(self):
++        binding = self.admit()
++        permit = self.direct_prepare(binding)
++        self.clock[0] = self.qualification["expires_at"]
++        self.accounts.unlink()
++        with patch.object(lease_broker, "_application_latency_fact", side_effect=AssertionError("recovery refreshed latency")):
++            recovered = self.direct_prepare(binding, transport_binding=False)
++            self.assertEqual(recovered["disposition"], "pending")
++            self.assertFalse(recovered["dispatch_permitted"])
++            self.broker.mark_application_request_unknown(dispatch_id=permit["dispatch_id"], reason="fixture_timeout")
++            recovered = self.direct_prepare(binding, transport_binding=False)
++            self.assertEqual(recovered["disposition"], "effect_unknown")
++        self.assertEqual(len(self.rows("application_requests")), 1)
++        self.assertEqual(self.rows("leases")[0]["state"], "held")
++
++    def test_dispatch_freezes_binding_and_stops_drift_before_any_provider_post(self):
++        transport = self.router.application_transport
++        def drift(permit):
++            self.assertEqual(permit["latency_transport_binding"], self.qualification["transport_binding"])
++            self.router.accounts["account-a"] = "fixture-rotated-after-prepare"
++            return transport(permit)
++        with patch.object(self.router, "application_transport", drift):
++            self.assertEqual(self.request()[0], 503)
++        self.assertEqual(self.posts, [])
++        self.assertEqual(len(self.rows("application_requests")), 1)
++        self.assertEqual(self.rows("application_requests")[0]["state"], "unknown")
++        self.assertEqual(self.rows("leases")[0]["state"], "held")
++        self.assertEqual(self.request()[0], 409)
++        self.assertEqual(self.posts, [])
++
++    def test_prepared_dispatch_expiry_cannot_outlive_qualification(self):
++        permit = self.direct_prepare(self.admit())
++        self.assertEqual(permit["expires_at"], self.qualification["expires_at"])
++        self.clock[0] = permit["expires_at"]
++        with self.assertRaises(self.go.ApplicationTransportUncertain):
++            self.router.application_transport(permit)
++        self.assertEqual(self.posts, [])
++
++    def test_terminal_http_recovery_does_not_read_current_transport_binding(self):
++        self.assertEqual(self.request()[0], 200)
++        self.accounts.unlink()
++        self.clock[0] = self.qualification["expires_at"]
++        with patch.object(self.router, "application_latency_binding", side_effect=AssertionError("recovery requalified")):
++            status, body, _ = self.request()
++        self.assertEqual(status, 409)
++        self.assertEqual(body["application"]["disposition"], "terminal_receipt_only")
++        self.assertEqual(len(self.posts), 1)
++
++
++if __name__ == "__main__":
++    unittest.main()
+--- /dev/null
++++ b/tests/test_hermes_provider_preserving_application_join.py
+@@ -0,0 +1,155 @@
++"""Public provider guards joined to the actual APPLICATION Broker; no provider I/O."""
++from copy import deepcopy
++import hashlib
++import os
++from pathlib import Path
++import sys
++import unittest
++from unittest.mock import patch
++
++ROOT = Path(__file__).resolve().parents[1]
++SOURCE = ROOT / "ops/native_fabric/quota_continuity"
++sys.path[:0] = [str(SOURCE / "tests"), str(SOURCE / "candidate"),
++               str(SOURCE / "source"), str(ROOT / "control_plane")]
++from _offline_boundary import acquire as offline_acquire, release as offline_release
++from test_application_turn_admission import ApplicationFixture
++import byteplus_coding_plan as byteplus
++import experiential_plan_policy as experiential
++import lease_broker
++import pick
++
++
++def setUpModule():
++    offline_acquire()
++
++
++def tearDownModule():
++    offline_release()
++
++
++def byteplus_account(name="plan-one", scope="1" * 64):
++    reference = "subscription-" + scope
++    return {"name": name, "enabled": True, "per_account_cap": 2,
++        "quota_scope": "byteplus:" + reference,
++        "coding_plan": {"schema": byteplus.ACCOUNT_SCHEMA,
++            "subscription_ref": reference, "binding_id": byteplus.BINDING_ID,
++            "base_url": byteplus.BASE_URL, "models": sorted(byteplus.MODELS),
++            "scope": "individual_supported_coding_tools",
++            "quota_enforcement": "provider_hard_stop_no_payg",
++            "entitlement_source": "chairman_declared_plan", "plan_price_usd_per_month": 50,
++            "concurrency_source": "operator_limit_not_provider_entitlement",
++            "launcher_sha256": hashlib.sha256(Path(byteplus.__file__).read_bytes()).hexdigest(),
++            "credential_ref": "provider-home:" + name, "provider_home": "/fixture/provider/" + name,
++            "owner_uid": os.getuid(), "owner_gid": os.getgid(), "quota_observation": None}}
++
++
++def experiential_provider():
++    org = "2" * 64
++    name = experiential.PLAN_ACCOUNT_PREFIX + org
++    row = {"name": name, "enabled": True, "per_account_cap": 2,
++        "plan": {"schema": experiential.PLAN_ACCOUNT_SCHEMA,
++            "organization_sha256": org, "plan_policy": "free_only", "account": name,
++            "policy_digest": experiential.plan_policy_digest("free_only"),
++            "free_credits_per_day": experiential.PLAN_FREE_CREDITS_PER_DAY,
++            "paid_allowance_usd_per_month": experiential.PLAN_PAID_ALLOWANCE_USD_PER_MONTH,
++            "entitlement_source": "chairman_declared_plan", "funding": "provider_prepaid_wallet"}}
++    return {"enabled": True, "accounts": [row], "plan_gateway": {"account": name}}
++
++
++class ProviderPreservingApplicationJoin(ApplicationFixture):
++    def add_provider(self, pool, provider):
++        self.document["providers"][pool] = provider
++        self.save()
++        self.broker.load_accounts_doc()
++
++    def test_byteplus_real_policy_guard_preserves_unknown_quota(self):
++        row = byteplus_account()
++        self.add_provider("byteplus", {"enabled": True, "accounts": [row]})
++        self.assertEqual(self.broker._base_account_cap("byteplus", row), 2)
++        quota = byteplus._closed_account(row, now=self.clock[0])[1]
++        self.assertEqual(quota["state"], "UNKNOWN")
++        self.assertIsNone(quota["remaining_requests"])
++        self.assertEqual(quota["enforced_by"], "provider")
++        self.assertEqual(self.rows("leases"), [])
++
++    def test_duplicate_subscription_cannot_multiply_physical_headroom(self):
++        rows = [byteplus_account("plan-one"), byteplus_account("plan-two")]
++        self.add_provider("byteplus", {"enabled": True, "accounts": rows})
++        for row in rows:
++            self.assertIsNone(self.broker._base_account_cap("byteplus", row))
++        rows[1] = byteplus_account("plan-two", "3" * 64)
++        self.add_provider("byteplus", {"enabled": True, "accounts": rows})
++        for row in rows:
++            self.assertEqual(self.broker._base_account_cap("byteplus", row), 2)
++        self.assertEqual(self.rows("leases"), [])
++
++    def test_each_exhausted_byteplus_window_stays_nongrantable_when_old(self):
++        for window in ("session", "weekly", "monthly"):
++            with self.subTest(window=window):
++                row = byteplus_account()
++                row["coding_plan"]["quota_observation"] = {
++                    "schema": "mastermind.byteplus_personal_plan_readback_projection/v1",
++                    "subscription_ref": row["coding_plan"]["subscription_ref"],
++                    "acquisition_source": "authenticated_arkcli", "usage_observed_at_unix": 1,
++                    "windows": {name: {"used_percent_rounded": 100 if name == window else 20,
++                        "reset_at": None if name == "session" else "2099-01-01T00:00:00+00:00"}
++                        for name in ("session", "weekly", "monthly")}}
++                self.add_provider("byteplus", {"enabled": True, "accounts": [row]})
++                self.assertIsNone(self.broker._base_account_cap("byteplus", row))
++
++    def test_provider_account_and_operator_caps_are_explicit(self):
++        for enabled, account_enabled, cap in ((False, True, 2), (True, False, 2),
++                (True, True, True), (True, True, 0), (True, True, 33), (True, True, "2")):
++            with self.subTest(provider=enabled, account=account_enabled, cap=cap):
++                row = byteplus_account()
++                row.update(enabled=account_enabled, per_account_cap=cap)
++                self.add_provider("byteplus", {"enabled": enabled, "accounts": [row]})
++                self.assertIsNone(self.broker._base_account_cap("byteplus", row))
++
++    def test_experiential_real_registration_guard_preserves_single_physical_owner(self):
++        original = experiential_provider()
++        self.add_provider("experiential", original)
++        self.assertEqual(self.broker._base_account_cap("experiential", original["accounts"][0]), 2)
++        variants = []
++        duplicate = deepcopy(original)
++        duplicate["accounts"].append(deepcopy(duplicate["accounts"][0]))
++        variants.append(duplicate)
++        wrong_gateway = deepcopy(original)
++        wrong_gateway["plan_gateway"]["account"] = "wrong-account"
++        variants.append(wrong_gateway)
++        wrong_policy = deepcopy(original)
++        wrong_policy["accounts"][0]["plan"]["policy_digest"] = "0" * 64
++        variants.append(wrong_policy)
++        for provider in variants:
++            self.add_provider("experiential", provider)
++            self.assertIsNone(self.broker._base_account_cap("experiential", provider["accounts"][0]))
++        self.assertEqual(self.rows("leases"), [])
++
++    def test_worker_plan_presence_does_not_expand_application_authority(self):
++        self.add_provider("byteplus", {"enabled": True, "accounts": [byteplus_account()]})
++        self.add_provider("experiential", experiential_provider())
++        for pool in ("byteplus", "experiential"):
++            with self.subTest(pool=pool):
++                with self.assertRaises(lease_broker.ApplicationSelectionError):
++                    lease_broker._application_route_scope({
++                        "schema": "mastermind.application_route_scope.v1", "pools": [pool]})
++        self.assertEqual(self.rows("application_turns"), [])
++        self.assertEqual(self.rows("leases"), [])
++
++    def test_worker_auto_cannot_override_explicit_model_pool_or_higher_complexity(self):
++        context = {"schema": "mastermind.provider_plan_auto_context.v1", "root_id": "fixture-root",
++            "parent_run_id": None, "response_only": True, "consents": {
++                "retention_acknowledged": True, "sensitive_data_opt_in": True,
++                "proprietary_code": False, "code_exposure_opt_in": False}}
++        args = dict(context=context, host="m2", pool=None, prefer=None, requested_model=None,
++            needs=[], subject_pool=None, task_complexity="C1_ROUTINE_BOUNDED", route_key="fixture-route",
++            required_modes=None, required_platforms=None, excluded_hosts=None)
++        with patch.object(lease_broker, "default_broker", side_effect=AssertionError("unexpected observation")):
++            for delta in ({"pool": "go"}, {"requested_model": "fixture-model"},
++                          {"task_complexity": "C2_COMPLEX_BOUNDED"}, {"context": None}):
++                with self.subTest(delta=delta):
++                    self.assertIsNone(pick._plan_auto_pick("build", **{**args, **delta}))
++
++
++if __name__ == "__main__":
++    unittest.main()
