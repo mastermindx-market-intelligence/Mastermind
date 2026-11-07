@@ -1646,3 +1646,39 @@ Pinned Hermes1c0cd667746d3395fe9e1b6c74f8f85952486f18 supplies perform_api_call'
 HTTPX0.28.1 source commit26d48e0634e6ee9cdc0533996db289ce4b430177 supplies Client._send_single_request below redirect iteration; the complete _client.py blob is2249231f8c3b912c731ff160344d3672e2f11738 and installed local source SHA256c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d. Qualified transport entry/return is still not independent model-weight or complete network-policy attestation.
 
 The source workspace copy reported one existing broken vendor/macro symlink (target macro_src); all other copy operations completed. The exact original symlink was recreated only at the new absent destination. No existing source workspace, upstream checkout, runtime or original release carrier was rewritten.
+
+
+## 39. Transport contribution published; discovery reconciliation retains protected behavior
+
+Status: **MORE_WORK_EXISTS** for the mission. Runtime remains **EXACT_HUMAN_GATE** at the original Ubuntu1/root C26 administrator connection. **MISSION_COMPLETE=false.** This milestone publishes one coherent source contribution; it does not declare the complete native EVAL producer, evaluated improvement, installed activation or fleet acceptance finished.
+
+### 39.1 Original transport increment
+
+[PR2228](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2228), branch `sol/hermes-native-transport-observation-20261107-c3`, head **25326a02050715df3b685b4850e02f5f362fce09**, complete tree **621c3fdb246e5cd1b5606d3ffe698b6bac505b6a**, original parent **7df8f907711a8ad4a8ac4ba927d8525f80b99b50**. GitHub commit/PR readback matches. The complete source tree was independently constructed on C3 and matches all19 exact local postimages. The initial update-ref request returned an explicit missing-reference422 with no branch effect; the proper create-branch operation then succeeded once. No force update, replacement branch or uncertain retry occurred.
+
+V3 extends the same original scope, pending result and authenticated reader with logical calls, original nonstream dispatches, HTTPX single-request invocations, returned headers, already-consumed response metadata, execution wall/monotonic timing and held process-image facts. The actual pinned conversation loop imports a cached perform_api_call alias and introspects its signature; both original aliases are qualified/bound and functools.wraps preserves that signature. Copied dispatch contexts retain their original call identity. All contributions seal under existing locks before slow end-process I/O. Observational client qualification cannot replace the original factory exception or returned client.
+
+Model labels are digest-only. Raw effort values use a closed vocabulary. No raw URL/header/prompt/tool/body/error is retained. Redirected requests may expose only a stream at entry; this stays unavailable, with no added drain. SDK retry and redirect invocations are distinct from every TCP attempt, complete network coverage, provider delivery or independently attested model identity. All arrays share the incumbent16-KiB envelope. V1/V2 retain their exact historical reader shape. No new client/request/retry/store/validity/cleanup/runner is introduced.
+
+### 39.2 Exact source and SDK evidence
+
+Actual OpenAI **2.54.0** and HTTPX **0.28.1**, original C3 isolated source-validation root, no live provider/network service: **114 passed, zero skipped**, consisting of37 transport/reader cases and77 existing request/tool cases. Test process63810 exited0; JUnit SHA256 **e5f7ef1b893f670140d4bf7b75e361b864fa0e00d5cb48d6a89d0a7182f7221c**. Tests execute pinned caller/phase/worker/context-copy/SDK-bypass/dispatch source with declared phase, watchdog registry, process custody and storage edges. They cover retry, redirect, synthesized/multiple middleware results, privacy canaries, same exception/cleanup, late context sealing, source drift, shared bounds, redaction/codec and authenticated historical reading. This is not installed process, account, Control socket, provider or EVAL proof.
+
+Complete added-source D8: **no findings**. One actually flagged HTTPX donor site, HTTPS upgrade port443 at (73,42,45), is recorded under exact full-source SHA256c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d. The neighboring mapping occurrence is not masked. The existing native-session512-byte-multiplier review was re-pinned only to the exact changed complete source. Source/site drift tests preserve ordinary refusal. Principal judgment resolved the named defects; it is not formal GitHub approval or a second executed-test receipt.
+
+### 39.3 Existing release carriers and reconciliation
+
+- Current-context **#2207 MERGED**, merge commit **8c1261ebf870308a4bf47f8340bb3503c462cb3b**. Accepted source is not installed adoption.
+- Tool observation **#2204** remains on exact7df8, original queue **MQE_lQDOTotz3c8AAAABNe97W84ABAiKzgPNiSQ**. Latest observed state MERGEABLE/position2; no merge receipt yet. No rearming or queued-head rewrite.
+- Discovery **#2217** retains original bbbbe6a head and branch. After automatic retarget to master,19 source conflicts were composed against accepted8c1261e using the actual3c304387 common source. All v4 additions are preserved; the three protected Dot-canary config/validation/forwarding behaviors are retained rather than reverting them. Original candidate EOF whitespace was normalized. The complete reconciliation is under source qualification on C3; not yet published or claimed accepted.
+- Observed protected **320611cbd7eca66af86a09d0c6f7622f229bdf73** adds only docs/hermes/TEAM_ORCHESTRATION_V1.md beyond8c1261e. This is bounded compatibility evidence, not a future-main guarantee.
+- Macro compiler **#10831** exacta9906c9 passed all12 packs and ci-gate. Its actual full-store proof remains2233records/0errors/107warnings. The Chairman-authorized Macro backlog owner independently qualified the source/checks and added the existing merge-on-green label. Preserve that original controller request; no duplicate native auto-merge or rearming.
+- Canonical handoff **#10836** exactfadce75 is Ready, aggregate SUCCESS, and already carries merge-on-green from the existing backlog lane. Its armed source head is retained. No merge receipt yet; its earlier frontier remains historical until the existing effect is consumed.
+
+### 39.4 Next material actions and unchanged boundaries
+
+Consume the original finite discovery qualification, run its four pinned native registration cases with the actual MASTERMIND_HERMES_VENDOR_ROOT selector, check complete merged postimages/D8, then publish the true merge composition on the same #2217 branch with exact-head CAS. Consume #2228 owning CI and existing #2204/Macro controller effects without duplicate requests. Reconcile any new actual source overlap before release.
+
+The complete EVAL/Harness2 producer remains a separate unfinished seam: required model/sampling qualification, complete context/source/tool coverage, workspace/environment/enforced policy/network identities and original effect/cleanup evidence are not manufactured by this contribution. A complete draft must use the incumbent finalizer, create-only ArtifactStore and run graph before the existing refinement consumer may receive Trial evidence. Keep Outcome Learning398/PR409 held and memory comparisons separate from the skill-only factor lock.
+
+The original C26 PermissionError, denied local Control-socket cases and paid-Fabric refusals remain unretried. C3 work is independent source/SDK validation and original GitHub release reconciliation only. No Control socket, substitute runtime carrier, provider/account call, profile enablement, daemon, new admission or Slack/email handoff was used. The retained original M2/C26 operation and parent return path remain unchanged.
