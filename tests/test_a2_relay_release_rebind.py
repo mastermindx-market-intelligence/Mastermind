@@ -842,3 +842,25 @@ def test_new_canary_has_no_extra_slack_scopes_and_legacy_enroll_stays_closed():
         a2.build_parser().parse_args([
             "enroll","--expected-bot-user-id",BOT,"--enable-dot-canary",
         ])
+
+
+
+def test_w3c_and_dot_canary_combined_mode_refused_until_separate_d8_review(host):
+    # D8's exact immutable w3c_plist_configured() was intentionally not edited.
+    # Therefore it must never be asked to certify additional unreviewed argv.
+    with pytest.raises(a2.A2EnrollmentError,match="ARGUMENTS_REFUSED"):
+        a2.build_config_document(
+            bot_user_id=BOT,release_sha=NEW,w3c_enabled=True,
+            dot_canary_enabled=True,
+        )
+    with pytest.raises(a2.A2EnrollmentError,match="ARGUMENTS_REFUSED"):
+        a2.render_plist(
+            bot_user_id=BOT,release_sha=NEW,w3c_enabled=True,
+            dot_canary_enabled=True,
+        )
+    before=pair()
+    with pytest.raises(a2.A2EnrollmentError,match="ARGUMENTS_REFUSED"):
+        asyncio.run(a2._rebind(
+            bot_user_id=BOT,enable_w3c=True,enable_dot_canary=True,
+        ))
+    assert pair()==before
