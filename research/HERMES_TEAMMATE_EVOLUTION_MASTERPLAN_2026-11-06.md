@@ -759,3 +759,14 @@ A local isolated source checkout has been acquired at the exact pin. The exposed
 ### Continuing order
 
 After the first verified source result, compose the actual Hermes provider registration and an owner-compiler integration proof, then advance corrections/continuity, credential/computer qualification and the Office consumer where dependencies permit. Reconcile existing active carriers before touching shared integration paths. Retain the original R2/H1–H8 and live/endurance acceptance; a source packet does not close the program.
+
+
+### Independent computer-use hardening packet
+
+Live read-only M2 inspection found native Hermes at 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19 with the existing OMH memory provider selected. Its native vault/browser/computer modules exist; that is source presence, not credential or desktop enrollment. The existing provider and profile are preserved.
+
+The installed permissions helper and its inner sanitizer can both return a parent-derived environment when sanitization fails. Independent source work will repair this exact donor behavior before broader computer qualification. Assigned new namespace: integrations/hermes_qualification/computer_env_guard/. Deliver a pinned, reproducible two-file source patch, offline qualification and source manifest/license attribution; no live installation, process restart, new credential broker or permission grant. The sanctioned installer remains the only installation owner.
+
+Proof must show sanitizer import and execution failures, malformed sanitizer output, and the nested helper cannot launch a subprocess or expose synthetic secret values; valid sanitization preserves required desktop/telemetry fields. Test the actual selected donor bytes, not a restated reimplementation. Denial and readiness must remain truthful across the existing callers.
+
+Memory original run hermes-teammate-memory-read-20261107-c3-01 has controller PID67433 and retained launch evidence on M1, but its last canonical projection has root/worker start unverified and no result. No retry, failover or replacement writer is allowed while that effect is unresolved. The computer packet is a separate disjoint source task under the same program root.
