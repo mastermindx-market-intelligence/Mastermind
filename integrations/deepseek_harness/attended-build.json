@@ -1,10 +1,10 @@
 {
   "schema": "mastermind.dsh_attended_build.v1",
   "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
-  "package_manifest_sha256": "ef07aaa2286312d16fbed175c5cd9bc038510b6f0287cefec1af3f31ce0f753c",
-  "app_config_sha256": "13fe555d87e2840e0ba42a0bb4e6489c470e0dd3e5477eebea26de9399ce73c9",
+  "package_manifest_sha256": "aafbf51ce1c110ada3d5c48acc3e176a9fe7ef5d91eaae77349702c312611322",
+  "app_config_sha256": "52139a052badc0159185b9d3ccc9350ceb0379f86b7f11d1fc667069c51e59ca",
   "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
-  "native_client_build_sha256": "e6823e9997948272c4ec271b581afdbdfd39fafe89f1c75265e514130c07c2c9",
+  "native_client_build_sha256": "90920b75e9fa36327591604c2d5433715cfc9d3bf70f6760b77de9320eb77720",
   "index_sha256": "2690f794b0b04377d96dbfbd0d5bf3515a840045fd5f692a297f00997ab41ade",
   "company_host_exports": {
     "./company-peer": {
@@ -21,15 +21,15 @@
     "patch_sha256": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
     "receipt_sha256": "a026a25beac1b32b422974e800e4084e999f13621573a8e0426a1bd7ec5c0aea"
   },
-  "evidence_commit": "56f65ba6dc128b70a40539ebbfcc1548f9bb32e5",
+  "evidence_commit": "96d6d9efc81ba941e7219c941dfe8f7baad9ba46",
   "custody": "Protected-source acceptance of the qualified attended build; snapshot evidence only",
   "installed": false,
   "provider_calls": 0,
   "native_owner_access": {
-    "source_sha256": "fa93ca41786c71018e333e2e1ebf3b746507e540566faaec4a0770a471060cbb",
-    "patch_sha256": "9d8a62e30a2ae1d9e7434fb9a519284c54ccde3cb76b967b54bab8e8dfd671e3",
+    "source_sha256": "15b9d2ae15792886c40878415ea3cd37cc4f40c5391ca6dfaa7fbff6105d5c25",
+    "patch_sha256": "396ce2c75267a007c30e1969e82b2b5c7305caac74e635e92c86bd4e82e4d969",
     "host_source_sha256": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
     "host_patch_sha256": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
-    "receipt_sha256": "9b4a0ab6ae7dc00bd396dd35a6cbe9105d37fe0f32b903c7b24418208007f02f"
+    "receipt_sha256": "6185070c2efcbf55b73db0822b3d40793a222404d7fac42f07bdae7864df70c3"
   }
 }
