@@ -1,6 +1,6 @@
 # MastermindX lightning CI architecture and execution plan
 
-Date: 2026-11-06 America/Vancouver.
+Created: 2026-11-06 America/Vancouver. Execution checkpoint updated 2026-11-07 UTC.
 Program: existing Mastermind #917 / #1607, Macro #6351, WS:CI-MERGE-CONTROL-PLANE.
 Implementation operation: ci-lightning-architecture-20261107-c2.
 Procedure: Mastermind protected master 615146aac6a1b0c0933bc9b815517a2fd285ed4a,
@@ -8,6 +8,10 @@ Skillpack mastermind.sol_skillpack.v1 / 1.0.1 / bootstrap 1.
 This is a detailed CI extension of P3.O3 / Phase 4 of the existing
 [delivery-turnaround task tree](superpowers/plans/2026-11-02-delivery-turnaround-execution.md).
 It introduces no new workstream, queue, scheduler, runtime or acceptance owner.
+
+The final **Current execution checkpoint** section supersedes historical execution
+statuses below. Baselines, earlier receipts and unachieved acceptance targets remain
+explicitly distinguished.
 
 ## Outcome and completion criterion
 
@@ -368,7 +372,7 @@ use natural candidate validation and actual changed-source canaries where needed
 No merge, approval, runner activation or publication of held operations is inferred
 from this plan. Source edits and qualified ordinary PR publication are in scope.
 
-## Initial continuation
+## Initial execution record (historical)
 
 Architecture/planning and non-overlapping source investigation are assigned to the
 current session. Native child advice is C3 architecture judgment only. Routine
@@ -496,24 +500,179 @@ current-checkout capture decision reports full-pr-proof despite zero drifted
 files; preserving its assurance while reducing capture/setup remains a separate
 design task. Do not claim unmeasured route or trace savings.
 
-The next admitted request is paid Fabric child
-**ci-lightning-mastermind-fixture-impl-20261107-c2-01**, root/parent
-ci-lightning-architecture-20261107-c2, task_class fix_build / C2_COMPLEX_BOUNDED.
-It must return an exact fixture-only diff, isolated-copy regressions, unchanged
-collection/outcomes and separate timing evidence; no repository publication,
-production changes or descendants. Controller52548 is created; this alone is not
-START. Observe the same run, do not duplicate it.
-
-Its principal-owned integration workspace is existing-owner operation
-ci-lightning-fixture-20261107-c2 at exact base
-7fee845723c44dafe1e9e1159058ad9bd3f3e06b, target fixture blob
-b3341d2768bbc21c229bd25d86261cb9d05c3231 (unchanged from the audited source).
-A full-module baseline is running on the intended macOS host before any candidate
-edit. Template construction must precede per-test monkeypatches; copies may not
-share writable Git objects/index/refs, hardlinks or alternates. Security assertions
-still run for each test. Publish a new source slice only after actual qualification.
+The fixture-only child and its parent experiment are now terminal; see the current
+checkpoint below. Its principal-owned integration workspace remains at base
+7fee845723c44dafe1e9e1159058ad9bd3f3e06b with no candidate published. The experiment
+did not demonstrate a whole-module wall-time improvement. Production batching
+remains deferred under the safety and measurement requirements above.
 
 Posting a PR status comment was rejected by automatic approval review because
 explicit permission to message others was absent. That comment is not retried or
 repackaged. Source authoring and qualification continue independently. No source
 merge, runner activation or product acceptance is claimed.
+
+
+## Current execution checkpoint — 2026-11-07 UTC
+
+### Published source and native evidence
+
+| Carrier | Exact current source | Observed outcome and remaining gate |
+| --- | --- | --- |
+| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | 91d1d8dd76f8a7d0d42cd2f479b4bb6832ebee96; tree 50db06f262c5e818a8348810766a09f40bcd253a; protected parent 5f8c13da926011fb5fdc8cea21287b532ac968db | Parallel qualification and strict ten-job proof reader published on the original branch. Required [run 42348719795](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42348719795) and shadow run 42348719763 require consumption. No latest-head green, queue or merge claim. |
+| [Terminal #1297](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1297) | 689757a5fecab76bac601efbef9178f8115ae01e | Full native [run 42344305342](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42344305342) **SUCCESS**, including every browser shard and required Terminal typecheck + tests. Started 05:49:00, completed 06:53:13 UTC: approximately 64m13s end to end. Release-rule verification remains blocked by the GitHub integration's explicit 403 on Terminal branch protection. |
+| [Macro #10825](https://github.com/mastermindx-market-intelligence/macro/pull/10825) | d49837ea333bfef114466139d410ee217ed1c999 | Authored pointer added to the existing W-ACCELERATION-20261104 record; Agent OS validation exited 0 and exact GitHub readback matched. Ready source PR, not a new workstream or runtime owner. |
+| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier | Earlier doc head 3db9d30 ran all six shards; five passed and shard 0 correctly refused the same protected-base realm pin mismatch. Source #2065 contains the qualified compatibility repair. The architecture still owes current required CI and normal release. |
+
+The protected procedure pin 615146aac6a1b0c0933bc9b815517a2fd285ed4a remains compatible:
+bounded comparison through 5f8c13 found no changes in AGENTS, sol_skills, session
+review, delivery workflow or active-execution law. No new review waiver is invented.
+
+### Mastermind scheduling slice
+
+The nine former matrix-zero qualification steps now run as one **Source qualification**
+job alongside pytest. Every moved step field, command, pinned source, environment
+binding and relative order is unchanged except removal of the matrix-zero predicate.
+The existing source/runtime bootstrap is copied intact. The six retained pytest
+jobs keep their canonical membership, four workers, loadfile placement and zero
+worker restart. Their retained step dictionaries are unchanged.
+
+```mermaid
+flowchart TD
+    S["Trusted source scope"] -->|Full| Q["Source qualification"]
+    S -->|Full| P["Six pytest shards"]
+    S -->|Fast or smoke| F["Focused checks"]
+    Q --> G["Required test gate"]
+    P --> G
+    F --> G
+    G --> M["Existing merge queue"]
+```
+
+For full scope, both heavy results must be successful and fast checks skipped.
+For verified fast/smoke scope, focused checks must succeed and both heavy results
+must be skipped. Protected pushes and deliberate dispatches always require full
+qualification. Failed, missing, cancelled, unknown or unexpectedly skipped
+qualification remains red. The new job has source-read permission, a 30-minute cap,
+and depends only on the incumbent scope decision. Actions-read permission remains
+confined to pytest jobs; their existing 60-minute budget is unchanged.
+
+The incumbent reuse reader previously expected seven job records, while the
+trusted-scope workflow already emitted nine. It now requires the actual full
+ten-record shape, including successful source qualification and scope, the exactly
+skipped empty fast job, all six successful shards and the successful required gate.
+Same commit/clean checkout, native queue actor, exact workflow/attempt, freshness,
+unique job/step identities and authenticated API boundaries remain. Executed-job
+timestamps remain ordered; skipped-fast metadata is bounded to the run even when
+GitHub stamps its start after the skip decision. Missing proof still runs pytest.
+Current source qualifications remain mandatory even when pytest can be reused.
+Native merge-group/post-merge acceptance of this optimization is still owed.
+
+Qualification evidence:
+
+- Complete-checkout guard run: 736 passed; two old workflow-layout expectations were
+  corrected and both passed against the same source. This is 738 qualified cases
+  across the full run and focused repair, not a fabricated single green invocation.
+- Real gate-shell tests reject each wrong dependency state across PR, merge group,
+  push and dispatch. New mutations reject serialized heavy dependencies, additional
+  Actions permission, omitted/conditional/false-success native checks and error
+  suppression. Canonical discovery, source selection, H1, cancellation and xdist
+  contracts are retained.
+- Earlier 433105 required run 42340989000 was green. Earlier a4aa976 shadow
+  run 42344275466 is fully green after the CLI metadata repair. Neither earlier
+  receipt qualifies 91d1d8d.
+- The CLI repair changes only eleven parametrized test IDs: the 131073-byte input
+  and assertions remain unchanged. All 99 tests passed locally; Linux E2BIG was
+  reproduced with the old inherited node ID and avoided with the short ID.
+
+### Protected-base composition repair
+
+Accepted protected #1824 changed the live provider realm to blob
+a51e2bce8d9bb312107f975d503abd6541bd5000. The translation fixture still required
+eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37. Actual integrated source 081a934b therefore
+correctly failed required run 42344275487; the architecture run 42343812671 refused
+the same mismatch. This was not a floating Macro dependency or a reason to remove
+the exact source assertion.
+
+The new candidate integrates protected 5f8c13 and deliberately advances that one
+explicit live-realm pin. Frozen native A/B pins and hash checking remain fixed.
+From the exact candidate tree 50db06, the unchanged translation composition ran
+against paired Macro f0375acf4ba076718e7cb420ed28ab61fb0a4f26: **23 tests passed**.
+All 16 commercial-realm tests also passed, zero skips. Eight generic realm tests
+passed; the unchanged installed-Codex-binary test refused this Mac's different
+binary digest. No host binary, provider setting or assertion was changed.
+
+Impact planning must include explicit source-pin consumers as dependency edges;
+Python imports alone do not express these contracts.
+
+### Fixture experiment disposition
+
+Paid child ci-lightning-mastermind-fixture-impl-20261107-c2-01 returned a complete
+candidate and report, then terminated with rc 1 with provider_error/unrecognized_model
+for MiniMax-M3. Root lineage was verified; this is not a successful worker return.
+Response SHA256:
+94aa09b2bdc28349cbda24c650d9785ba6bcb092a0a52d47f9042762f113f58b.
+Patch SHA256:
+de0b7c446b79e2d9292a6a4e2d5c4fa6b9a5706fc93e621c669adb4e4778c42e.
+No retry or replacement dispatch was issued.
+
+The parent independently checked the exact fixture candidate
+db267ebbbc2d1c593fa16fc3b00c5bce5e1c85c244401527e8a33413d5913296.
+All 167 existing test functions retain identical ASTs; the three new isolation,
+pre-initialization and no-Git-on-copy checks pass. A private Linux parent was
+verified against the actual custody guard before benchmarking:
+
+| Run | Cases | Pass | Fail | Skip | Whole-module wall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Unchanged source | 466 | 415 | 15 | 36 | 148.632s |
+| Fixture candidate | 469 | 418 | 15 | 36 | 148.704s |
+
+Failure IDs and messages are identical. The isolated snapshot lacks the workflow
+file and historical Git object used by two tests; its nonstandard /tmp topology
+and absent supplementary group account for the other failures. This is partial
+environmental parity, not an all-green native qualification. Mac baselines also
+exposed real custody refusals from temporary-directory groups and home-directory
+ACLs. No production permission check or security assertion was relaxed.
+
+**Disposition: do not publish this as an accepted performance optimization.**
+Git subprocess reduction and a faster fixture microbenchmark did not produce a
+demonstrated whole-module gain. No hosted speedup is claimed. The principal-owned
+fixture integration worktree remains unchanged; the experiment does not authorize
+production Git batching.
+
+The separate paid preflight-DAG child
+ci-lightning-mastermind-preflight-dag-20261107-c2-01 terminated at admission with
+rc 75 / EXECUTION_NOT_ELIGIBLE and no qualified source return. It was not retried.
+The principal performed the bounded integration in #2065's existing workspace,
+using C3 architecture judgment and direct-source self-checks
+(PRINCIPAL_JUDGMENT / CRITICAL_PATH_SHORTCUT / LOWER_TOTAL_OVERHEAD). No second
+worker, source carrier, runtime route or approval identity was introduced.
+
+### Remaining critical path and next actions
+
+1. Consume #2065's new native runs, repair concrete failures, verify actual overlap
+   and then use the existing head-fenced release path under current rules. Do not
+   equate the new graph or focused tests with a five-minute outcome.
+2. Retained fixed diagnostics from successful canary 42340989000 identify
+   test_capacity_host_artifacts.py at **898.915 reported seconds for 466 cases** in
+   shard 2. Source is integrated checkout 8fbd91d937adc20cdbe2722b2a6a09dfada2c8d6.
+   Both inspected artifacts retain 512 progress records and explicitly truncate;
+   they are not a complete timing inventory. This long module still exceeds the
+   full-suite target under loadfile placement. Qualify smaller independent test
+   units through the existing discovery/coverage owner, or demonstrate safe work
+   reduction; do not create an exclusion list or extrapolate local microtimings.
+3. Terminal #1297 is native green. Its full run remains about 64 minutes; green is
+   not speed acceptance. Recover the existing #1223 source/effect before integrating
+   its weighted topology, Node-discovery correction and per-attempt timing report.
+   Global route warmup remains unjustified. Treat build/auth compatibility and
+   repeated capture cost as separate measured changes. No runner activation or
+   branch-rule fallback follows the 403.
+4. Preserve Macro's original #10674 uncertain effect and #10656 hold. #10755 is
+   already merged with DISPLAY_BOARD_CAP=640. Continue the incumbent #10674 →
+   #10745 → #10735 sequence only when its source/effect evidence permits. Keep
+   overlap among two/four-worker/FIF/capacity proposals under their existing owner.
+5. Continue the architecture and Agent OS source carriers through their normal
+   checks; add the next pointer-plus-delta handoff at an actual continuity boundary.
+   Do not create a parallel memory registry or fabricate a durable execution owner.
+6. Accept the program only from a representative natural cohort by risk class,
+   including cold/warm setup, queue delay, failures, flakes, fallback and cancellation.
+   The proposed five-minute p95, ordinary three-minute and docs 90-second targets
+   remain unproved. All original safety and product journeys remain in scope.
