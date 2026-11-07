@@ -1,0 +1,249 @@
+{
+  "account_io": false,
+  "bootstrap_stub": "app.deps.data_dir only",
+  "captures": [
+    {
+      "bytes": 96960,
+      "file": "1440-en-light-constraints.png",
+      "sha256": "b269f82db001ecdfd446375b9acf7d47c6830ea364c1389f19490ffd48d2fd91"
+    },
+    {
+      "bytes": 92953,
+      "file": "1440-en-light-qualified.png",
+      "sha256": "a052ffd82670029bca88e0255a36b9535d4e34dd38bd30c37e18c178fc8d675b"
+    },
+    {
+      "bytes": 112543,
+      "file": "1440-zh-dark-constraints.png",
+      "sha256": "a51047e3e7527e4681b6a9a7e25d7b36328432d86ce3d9147faaefcd33632536"
+    },
+    {
+      "bytes": 108217,
+      "file": "1440-zh-dark-qualified.png",
+      "sha256": "da7a45e6347bc5cdec83c74aeb80bbf86ea32ebd203d37ab75cd743f1ac3f95c"
+    },
+    {
+      "bytes": 123807,
+      "file": "390-en-light-constraints.png",
+      "sha256": "4bd57fb41aa56f33f02e545b4aece0323c1946638a0fc8b5b329a25e2872fa1f"
+    },
+    {
+      "bytes": 120474,
+      "file": "390-en-light-qualified.png",
+      "sha256": "3e53bab0611849f34dcdcf4ed19483937d9b194e900268bd726fc3fa847ed413"
+    },
+    {
+      "bytes": 134151,
+      "file": "390-zh-dark-constraints.png",
+      "sha256": "e43706431cab1cc48f0bbb2f6c990e6e58e1a32e2550c7d9c7268bfc47a81d79"
+    },
+    {
+      "bytes": 130501,
+      "file": "390-zh-dark-qualified.png",
+      "sha256": "5365ac979860ab4d0b8a1486f04bd24606f7f253566f64b1b22a6ad7b1c2d7dd"
+    },
+    {
+      "bytes": 96978,
+      "file": "820-en-light-constraints.png",
+      "sha256": "8fa1cab1d4e2fb09ac8eb4079a73134b1dbcf7a8e11c6e9c34f592c045b10fc7"
+    },
+    {
+      "bytes": 93182,
+      "file": "820-en-light-qualified.png",
+      "sha256": "2aacd2ebcce9c57941f697267b5416dda060fbcdfaefd4020e1e5819ab98e037"
+    },
+    {
+      "bytes": 107695,
+      "file": "820-zh-dark-constraints.png",
+      "sha256": "09c185031bc6a13c0aee15b248d709a4f0aa57e9c94223e36a09a86a9d76139b"
+    },
+    {
+      "bytes": 103323,
+      "file": "820-zh-dark-qualified.png",
+      "sha256": "bdb9f3621723cdadec0d542a96d7792749ed476582b128b83244a1e752def0d3"
+    }
+  ],
+  "instrument_identity": "synthetic-only",
+  "matrices": [
+    {
+      "cases": [
+        "real_http_native_comparison",
+        "no_automatic_submission",
+        "credential_cleared",
+        "keyboard",
+        "viewport",
+        "storage_absence",
+        "positive_delta_still_ineligible",
+        "language_change_no_post",
+        "constraint_visible_on_phone",
+        "late_result_withdrawn",
+        "duplicate_keys_not_laundered",
+        "real_operator_denial",
+        "missing_prices_not_zero",
+        "unsafe_authority_response_withdrawn",
+        "source_labels_not_html"
+      ],
+      "language": "en",
+      "page_errors": [],
+      "posts": 7,
+      "theme": "light",
+      "viewport": [
+        1440,
+        1000
+      ]
+    },
+    {
+      "cases": [
+        "real_http_native_comparison",
+        "no_automatic_submission",
+        "credential_cleared",
+        "keyboard",
+        "viewport",
+        "storage_absence",
+        "positive_delta_still_ineligible",
+        "language_change_no_post",
+        "constraint_visible_on_phone",
+        "late_result_withdrawn",
+        "duplicate_keys_not_laundered",
+        "real_operator_denial",
+        "missing_prices_not_zero",
+        "unsafe_authority_response_withdrawn",
+        "source_labels_not_html"
+      ],
+      "language": "zh",
+      "page_errors": [],
+      "posts": 7,
+      "theme": "dark",
+      "viewport": [
+        1440,
+        1000
+      ]
+    },
+    {
+      "cases": [
+        "real_http_native_comparison",
+        "no_automatic_submission",
+        "credential_cleared",
+        "keyboard",
+        "viewport",
+        "storage_absence",
+        "positive_delta_still_ineligible",
+        "language_change_no_post",
+        "constraint_visible_on_phone",
+        "late_result_withdrawn",
+        "duplicate_keys_not_laundered",
+        "real_operator_denial",
+        "missing_prices_not_zero",
+        "unsafe_authority_response_withdrawn",
+        "source_labels_not_html"
+      ],
+      "language": "en",
+      "page_errors": [],
+      "posts": 7,
+      "theme": "light",
+      "viewport": [
+        820,
+        1180
+      ]
+    },
+    {
+      "cases": [
+        "real_http_native_comparison",
+        "no_automatic_submission",
+        "credential_cleared",
+        "keyboard",
+        "viewport",
+        "storage_absence",
+        "positive_delta_still_ineligible",
+        "language_change_no_post",
+        "constraint_visible_on_phone",
+        "late_result_withdrawn",
+        "duplicate_keys_not_laundered",
+        "real_operator_denial",
+        "missing_prices_not_zero",
+        "unsafe_authority_response_withdrawn",
+        "source_labels_not_html"
+      ],
+      "language": "zh",
+      "page_errors": [],
+      "posts": 7,
+      "theme": "dark",
+      "viewport": [
+        820,
+        1180
+      ]
+    },
+    {
+      "cases": [
+        "real_http_native_comparison",
+        "no_automatic_submission",
+        "credential_cleared",
+        "keyboard",
+        "viewport",
+        "storage_absence",
+        "positive_delta_still_ineligible",
+        "language_change_no_post",
+        "constraint_visible_on_phone",
+        "late_result_withdrawn",
+        "duplicate_keys_not_laundered",
+        "real_operator_denial",
+        "missing_prices_not_zero",
+        "unsafe_authority_response_withdrawn",
+        "source_labels_not_html"
+      ],
+      "language": "en",
+      "page_errors": [],
+      "posts": 7,
+      "theme": "light",
+      "viewport": [
+        390,
+        844
+      ]
+    },
+    {
+      "cases": [
+        "real_http_native_comparison",
+        "no_automatic_submission",
+        "credential_cleared",
+        "keyboard",
+        "viewport",
+        "storage_absence",
+        "positive_delta_still_ineligible",
+        "language_change_no_post",
+        "constraint_visible_on_phone",
+        "late_result_withdrawn",
+        "duplicate_keys_not_laundered",
+        "real_operator_denial",
+        "missing_prices_not_zero",
+        "unsafe_authority_response_withdrawn",
+        "source_labels_not_html"
+      ],
+      "language": "zh",
+      "page_errors": [],
+      "posts": 7,
+      "theme": "dark",
+      "viewport": [
+        390,
+        844
+      ]
+    }
+  ],
+  "production": false,
+  "scheduler_started": false,
+  "schema": "mastermind.scenario_browser_receipt/v1",
+  "scope": "local_synthetic_http_not_production",
+  "source_hashes": {
+    "app/auth.py": "91b74622db04370ce6e98b3fa02f93db8726bfbcc94c4f193002bdf478341268",
+    "app/main.py": "ae0959c660f7cd8a7ea6d1e017d4370f358f2891ec8a4274f03a16e7c9e01395",
+    "app/portfolio_scenarios.py": "2f3ff2591a3b8e0a409180ac8695e889ff1aa6206ff1ca3a8894392338ed4413",
+    "app/static/index.html": "fd6f79e46320d2d891d37619aa0017efafce6efcd1142b15156ce34f7f49555c",
+    "app/static/portfolio_scenarios.css": "0b8076055ac0f72b0c01f47bd237458c2e66b13177cde502c5fb4c75b0eb7c1c",
+    "app/static/portfolio_scenarios.js": "e0f6ffa10e23b7ea1ab0e8215a89f3eedb7df30b6681cdd9f7cb21dd8f2e4e2a",
+    "portfolio/global_scenario_account.py": "918f63d438c8a66e5dc2f65f7e3311304d1b0ae85850d601c4bfe806daf32fd3",
+    "portfolio/global_scenario_context.py": "592c269bcf879b0b6fa6e8e4b13452c5cc8df67eefd937e2e2ea5052b896245c",
+    "portfolio/global_scenario_summary.py": "576b40b9c47ed981e5b619144f7e4427475235d5d9b3c044f46510c05479288c",
+    "scripts/verify_portfolio_scenarios_browser.py": "8d2ebbfce539425c1c0d9a179dcb75b2505bd3b088872965629c86371efa4add"
+  },
+  "total_behavior_assertions": 90,
+  "total_matrices": 6
+}
