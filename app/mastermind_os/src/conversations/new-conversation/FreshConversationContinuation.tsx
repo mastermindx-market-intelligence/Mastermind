@@ -10,7 +10,7 @@ import type {FreshConversationTurnDraftState} from "./useFreshConversationTurnDr
 export type FreshConversationContinuationEntry=
   |{kind:"initial";read:FreshConversationOriginalRead;initialConsumption?:FreshConversationTurnConsumption|null}
   |{kind:"reference";window:FreshConversationWindow;current:()=>boolean};
-export interface FreshConversationContinuationProps extends Omit<HookProps,"read"|"selection"|"initialConsumption"|"message"|"draftOwner"|"onMessageChange">{
+export interface FreshConversationContinuationProps extends Omit<HookProps,"read"|"selection"|"initialConsumption"|"message"|"draftOwner"|"onMessageChange"|"recordedTurns">{
   entry:FreshConversationContinuationEntry;
   message?:string;
   draftOwner?:OwnerContext|null;
@@ -41,7 +41,8 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
   },[entry.kind,source,witness]);
   const selection=entry.kind==="initial"?entry.read.selection:
     {work_ref:entry.window.reference.work_ref,reference:entry.window.reference};
-  const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||entry.window.turns.length>0);
+  const sourceReadOnly=entry.kind==="reference"&&(entry.window.state!=="RETAINED"||!entry.window.epoch||
+    entry.window.turns.some(turn=>turn.state!=="RECORDED"));
   const readIsCurrent=props.active&&read?.current()===true;
   useLayoutEffect(()=>{
     props.onReadCurrent?.(props.active&&read?.current()===true?read:null);
@@ -54,6 +55,7 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
     freshConversationTarget(props.turnDraft.selection)===freshConversationTarget(read.selection);
   const associated=matchesDraft();
   const view=useFreshConversationContinuation({...props,read,selection,
+    recordedTurns:entry.kind==="reference"?entry.window.turns:undefined,
     draftSubmission:associated&&props.turnDraft?.captureSubmission&&props.turnDraft.submissionFor&&props.turnDraft.settleSubmission
       ?{captureSubmission:props.turnDraft.captureSubmission,submissionFor:props.turnDraft.submissionFor,
         settleSubmission:props.turnDraft.settleSubmission,get submittedTurnKey(){return props.turnDraft?.submittedTurnKey??null;}}:props.draftSubmission,

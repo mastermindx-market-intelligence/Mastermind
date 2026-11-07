@@ -127,7 +127,7 @@ export function decodeFreshConversationWindow(raw:unknown,expected:unknown):Fres
   if(value.initial_consumption!==null){const item=exact(value.initial_consumption,['state','event_id','event_sha256','initial_digest']);
     if(item.state!=='CONSUMED'||!initial||hex(item.initial_digest)!==initial.digest)fail();
     consumed={state:'CONSUMED',event_id:integer(item.event_id,1),event_sha256:hex(item.event_sha256),initial_digest:initial.digest};}
-  const turns=list(value.turns,1).map(rawTurn=>{
+  const turns=list(value.turns,64).map(rawTurn=>{
     const turn=exact(rawTurn,['turn_key','message','state','result','parent_consumed']);
     if(turn.parent_consumed!==false||!['RECORDED','RECONCILIATION_REQUIRED'].includes(turn.state as string)||!initial||!consumed)fail();
     const result=turn.result===null?null:decodeFreshConversationInitialResult(jsonData(turn.result),locator);

@@ -3,7 +3,7 @@ import type {OperationPointer, OperationState, OwnerContext} from "../../orchest
 import {freshConversationTarget, type FreshConversationOriginalSelector} from "../../orchestration/fresh-conversation-target";
 import {FreshConversationTurnPanel} from "./FreshConversationTurnPanel";
 import type {FreshConversationAttendedBinding, FreshConversationOriginalRead, PreparedFreshConversationTurn} from "./fresh-conversation-attended-binding";
-import {decodeFreshConversationTurnResult, validateFreshConversationTurnRequest, type FreshConversationTurnData, type FreshConversationTurnRequest, type FreshConversationTurnConsumption} from "./fresh-conversation-turn";
+import {decodeFreshConversationTurnResult, validateFreshConversationTurnRequest, type FreshConversationRecordedTurn, type FreshConversationTurnData, type FreshConversationTurnRequest, type FreshConversationTurnConsumption} from "./fresh-conversation-turn";
 import "./new-conversation-journey.css";
 import type {FreshConversationTurnDraftCapture,FreshConversationTurnDraftState} from "./useFreshConversationTurnDraftState";
 
@@ -21,6 +21,8 @@ export interface FreshConversationContinuationProps {
   read:FreshConversationOriginalRead|null;
   /** Supplied only from the same actual current reader, never a permission. */
   initialConsumption?:FreshConversationTurnConsumption|null;
+  /** Every actually recorded turn of this original, oldest first. */
+  recordedTurns?:readonly FreshConversationRecordedTurn[];
   /** Separate controlled follow-up text, never the initial first message. */
   message:string;
   draftOwner:OwnerContext|null;
@@ -58,6 +60,10 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   const mounted=useRef(false),committedScope=useRef(scope),latch=useRef<object|null>(null);
   const abort=useRef<AbortController|null>(null),root=useRef<HTMLDivElement>(null);
   const requestedFocus=useRef<{scope:object;selector:string}|null>(null);
+  /* Actually recorded turns of THIS original, oldest first. The sent text and
+     the sealed result are the recorded facts; nothing here is synthesised. */
+  const history=useRef<{target:string;messages:Record<string,string>;turns:FreshConversationRecordedTurn[]}>({target:"",messages:{},turns:[]});
+  if(history.current.target!==(target??"")){history.current={target:target??"",messages:{},turns:[]};}
   const [stored,setStored]=useState<View>(()=>blank(scope));
   const current=useRef(stored);current.current=stored.scope===scope?stored:blank(scope);
   const view=current.current;
@@ -122,6 +128,12 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
       const draft=latest.current.draftSubmission;
       const token=current.current.draftCapture??draft?.submissionFor(turnKey);
       if(draft&&token)draft.settleSubmission(token,raw);
+      // Record the actual turn. A later turn never replaces an earlier one.
+      const known=history.current.turns;
+      if(!known.some(turn=>turn.turn_key===turnKey)){
+        history.current.turns=[...known,{turn_key:turnKey,message:history.current.messages[turnKey]??"",
+          state:"RECORDED",result:decoded.data.result}];
+      }
     }
     patch({data:decoded.data,error:null});
     const settled=kind==="consume"?decoded.data.state==="CONSUMED"&&decoded.data.initial_consumption!==null
@@ -154,7 +166,10 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     const c=enter(true);if(!c)return;
     try{
       if((await pending(c)).held||!valid(c,true)||latest.current.messageReadOnly||!sameOwner(latest.current.draftOwner,c.owner))return;
-      if(!(current.current.data?.initial_consumption??currentConsumption())||current.current.data?.state==="RECORDED"||current.current.lastKind==="turn")return;
+      if(!(current.current.data?.initial_consumption??currentConsumption()))return;
+      /* A recorded predecessor opens the next explicit message on the same
+         original. An unresolved one keeps its own request and blocks here. */
+      if(current.current.lastKind==="turn"&&current.current.data?.state!=="RECORDED")return;
       const prior=current.current.request;
       const request=prior&&"message"in prior&&prior.message===c.message?prior:c.b.makeTurnRequest(c.read!,c.message);
       if(!request){patch({error:"unavailable"});return;}
@@ -170,13 +185,14 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     const c=enter(true);if(!c)return;
     try{
       const prepared=current.current.prepared;
-      if(latest.current.messageReadOnly||current.current.lastKind==="turn"||!prepared||!("message"in prepared.request)||prepared.request.message!==c.message||
+      if(latest.current.messageReadOnly||(current.current.lastKind==="turn"&&current.current.data?.state!=="RECORDED")||!prepared||!("message"in prepared.request)||prepared.request.message!==c.message||
         !sameOwner(latest.current.draftOwner,c.owner)||(await pending(c)).held||!valid(c,true))return;
       const intent=c.b.makeTurnIntent(prepared);if(!intent){patch({prepared:null,error:"changed"});return;}
       if(!("turn_key"in prepared.request))return;
       const key=prepared.request.turn_key;
       const draft=latest.current.draftSubmission,token=draft?.captureSubmission(key,c.message)??null;
       if(draft&&!token){patch({prepared:null,error:"changed"});return;}
+      history.current.messages[key]=c.message;
       patch({busy:"sending",lastTurnKey:key,lastKind:"turn",originalTurnMessage:c.message,draftCapture:token,prepared:null,error:null});
       const state=await c.b.controller.begin(intent);
       if(!valid(c))return;
@@ -223,9 +239,25 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     :view.error==="readFirst"?t("The original request was checked. Reopen its first response to continue.","已查询原请求。请重新打开首条回复后继续。")
     :view.error==="unavailable"?t("This action could not be completed here. Check the original request for its outcome.","此处暂时无法完成此操作。请查看原请求以确认结果。") :null;
   const turnAttempted=view.lastKind==="turn";
-  const canReview=editable&&!props.messageReadOnly&&!turnAttempted&&!!consumption&&view.data?.state!=="RECORDED"&&props.message.length>0;
+  /* A turn is resolved only when the owner recorded a complete reply for the
+     exact turn key that was sent. Anything else keeps its request identity
+     and blocks the next message. */
+  const turnResolved=turnAttempted&&view.data?.state==="RECORDED"&&view.data.turn_key===view.lastTurnKey;
+  const turnPending=turnAttempted&&!turnResolved;
+  const canReview=editable&&!props.messageReadOnly&&!turnPending&&!!consumption&&props.message.length>0;
+  /* Every actually recorded turn of this original: the parent's decoded
+     window first, then the turns this session actually recorded. */
+  const recordedTurns=useMemo(()=>{
+    const merged:FreshConversationRecordedTurn[]=[...(props.recordedTurns??[])];
+    for(const turn of history.current.turns){
+      const index=merged.findIndex(item=>item.turn_key===turn.turn_key);
+      if(index>=0)merged[index]=turn;else merged.push(turn);
+    }
+    return merged;
+  },[props.recordedTurns,view.data]);
   const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
-    <FreshConversationTurnPanel locale={props.locale} data={view.data} initialConsumption={suppliedConsumption} responsePending={turnAttempted&&view.data?.state!=="RECORDED"} operationState={view.operation}
+    <FreshConversationTurnPanel locale={props.locale} data={view.data} initialConsumption={suppliedConsumption} responsePending={turnPending} operationState={view.operation}
+      turns={recordedTurns}
       activity={view.busy==="reviewing"?null:view.busy} message={ownsDraft?props.message:""} originalTurnMessage={view.originalTurnMessage}
       onMessageChange={value=>{if(latest.current.messageReadOnly||!capture(true)||!ownsDraft)return;patch({prepared:null,error:null});props.onMessageChange(value);}}
       messagePreview={prepared?<section className="new-conversation-preview"><h3 data-turn-review tabIndex={-1}>{t("Review message","预览消息")}</h3>
@@ -235,7 +267,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
       messageReadOnly={props.messageReadOnly} onMessageFocus={props.onMessageFocus}
       readOnly={!editable} feedback={errorText?<p role="status">{errorText}</p>:view.busy==="reviewing"?<p role="status">{t("Reviewing message…","正在预览消息…")}</p>:null}
       keepControl={!props.readOnly&&!view.attempted&&!consumption&&readCurrent&&!held?<button type="button" className="primary" disabled={!editable} onClick={()=>void keep()}>{t("Keep first response","保留第一条回复")}</button>:undefined}
-      sendControl={!props.readOnly&&!turnAttempted&&consumption&&!held?<button type="button" className="primary" disabled={!canReview} onClick={()=>void(prepared?send():review())}>{prepared?t("Send message","发送消息"):t("Review message","预览消息")}</button>:undefined}
+      sendControl={!props.readOnly&&!turnPending&&consumption&&!held?<button type="button" className="primary" disabled={!canReview} onClick={()=>void(prepared?send():review())}>{prepared?t("Send message","发送消息"):t("Review message","预览消息")}</button>:undefined}
       checkControl={<button type="button" disabled={!props.active||!liveOwner||!!view.busy||view.discovering} onClick={()=>void check()}>{view.error==="other"?t("Check for pending requests","检查待处理请求"):t("Check original request","查看原请求状态")}</button>}/>
   </div>;
   return {panel,hasUnresolvedOriginal:held||view.busy==="keeping"||view.busy==="sending"};

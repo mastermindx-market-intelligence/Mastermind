@@ -66,6 +66,10 @@ def _native_read_owner(j,tmp_path):
 
 def test_signed_created_n_preview_measures_complete_preeffect_callgraph(joined,tmp_path,monkeypatch,rsa_key):
     async def run():
+        from control_plane import executive_service
+        # One attended conversation settles on its own bounded retention
+        # window, so the settled archive below is reached in this fixture.
+        monkeypatch.setattr(executive_service,"_NATIVE_ATTENDED_TURN_WAIT_SECONDS",0.5)
         from tests.test_fresh_conversation_http import mounted,post
         j=joined;reader,doc=_native_read_owner(j,tmp_path)
         workspace=neutral_principal_projection(**dataclasses.asdict(j['workspace']))

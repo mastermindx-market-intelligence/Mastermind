@@ -255,9 +255,17 @@ class _NativeOperatorDispatch:
     continuation: asyncio.Future
     retained: Any = None
     source: Any = None
+    # Attended writer hand-off for successive explicit messages on the same
+    # retained native session. The dispatch owns it; it holds no session,
+    # queue, history or authority of its own.
+    attended: Any = None
 
 
 _NATIVE_CONTINUATION_WAIT_SECONDS = 300.0
+# Bounded wait for the next explicit message of one retained attended
+# conversation. It reuses the incumbent native retention window and never
+# extends the writer's own lease.
+_NATIVE_ATTENDED_TURN_WAIT_SECONDS = 300.0
 
 
 class BackupBackendProtocol(Protocol):
@@ -8549,7 +8557,29 @@ class ExecutiveControlService:
             read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
             from control_plane.fresh_conversation_turn import FreshConversationTurnSource, execute_attended_turn
             if type(read_ref) is FreshConversationTurnSource:
-                await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+                # One retained native writer serves successive explicit
+                # messages of the same attended conversation. Every turn is
+                # separately reserved, executed and recorded by the existing
+                # owners; this loop never reserves, replays or grants
+                # authority, and it ends with the incumbent retention window.
+                from control_plane.fresh_conversation_turn import FreshConversationAttendedSlot
+                slot = FreshConversationAttendedSlot()
+                dispatch.attended = slot
+                try:
+                    await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+                    while True:
+                        try:
+                            source = await slot.take(_NATIVE_ATTENDED_TURN_WAIT_SECONDS)
+                        except asyncio.TimeoutError:
+                            break
+                        slot.open()
+                        if type(source) is not FreshConversationTurnSource:
+                            break
+                        await self._run_owned_coroutine(execute_attended_turn(self, dispatch, source))
+                finally:
+                    slot.close()
+                    if dispatch.attended is slot:
+                        dispatch.attended = None
             else:
                 root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
                 if root is None:

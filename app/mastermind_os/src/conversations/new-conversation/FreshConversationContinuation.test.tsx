@@ -52,6 +52,27 @@ it("leaves the actual archived recorded window to its existing readonly reader",
   expect(screen.queryByRole("heading",{name:"Continue this conversation"})).toBeNull();
   for(const fn of Object.values(h.transport))expect(fn).not.toHaveBeenCalled();
 });
+it("a retained window with recorded turns keeps this conversation open",async()=>{
+ const h=setup();
+ /* The actual archived turn of the same original, re-read over the actual
+    retained window: the conversation stays open for the next message. */
+ const retained=decodeFreshConversationWindow({
+   ...fixture.initial_read,
+   initial_consumption:fixture.archived_read.initial_consumption,
+   turns:fixture.archived_read.turns,
+ },fixture.initial_read.reference);
+ expect(retained.state).toBe("RETAINED");
+ expect(retained.turns.length).toBe(1);
+ render(<FreshConversationContinuation {...h.props} entry={{kind:"reference",window:retained,current:h.currentSource}}/>);
+ await waitFor(()=>expect(screen.getByRole("heading",{name:"Continue this conversation"})).toBeTruthy());
+ // The actually recorded turn of this original is rendered.
+ const bodies=[...document.querySelectorAll(".mm-fresh-conversation-turn-followups .mm-new-conversation-outcome-pre")].map(node=>node.textContent);
+ expect(bodies[0]).toBe(retained.turns[0]!.message);
+ // The next message of the same conversation is available.
+ expect((screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement).disabled).toBe(false);
+ expect(screen.getByRole("button",{name:"Review message"})).toBeTruthy();
+ for(const fn of Object.values(h.transport))expect(fn).not.toHaveBeenCalled();
+});
 it("a revoked source window cannot offer Keep/Review/Send and unmount does not clear its original",async()=>{
   const h=setup();const mounted=render(<FreshConversationContinuation {...h.props}/>);
   await waitFor(()=>expect((screen.getByRole("button",{name:"Keep first response"}) as HTMLButtonElement).disabled).toBe(false));

@@ -126,6 +126,18 @@ export interface FreshConversationTurnError {
   readonly message: string;
 }
 
+/** One actually recorded turn of an original conversation.
+ *
+ * The message, the state and the result are the recorded facts of that turn.
+ * An unresolved turn keeps its request identity; it is never presented as an
+ * absent or invented answer. */
+export interface FreshConversationRecordedTurn {
+  readonly turn_key: string;
+  readonly message: string;
+  readonly state: "RECORDED" | "RECONCILIATION_REQUIRED";
+  readonly result: FreshConversationPayload | null;
+}
+
 /** Normalized decoded response AFTER validating the actual five-field wire
  * envelope, schema and operation. Never accepts a pre-normalized surrogate. */
 export type FreshConversationTurnResult =

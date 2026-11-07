@@ -59,14 +59,14 @@ def test_lost_original_keep_readonly_recovery_before_any_turn_then_same_turn(tmp
                 m.setattr(owner._app.workspace_read_provider_factory(runtime),'authorize',lambda _:False)
                 _,revoked=await post(app,'turn',{**turn_request,'preview_digest':ready['data']['preview_digest']},token,wt)
                 assert not revoked['ok'] and runtime.events.list_events()==before and adapters[0].begin_turn_calls==1
-            # No reconsume after the lost response. Only one new attended turn.
+            # No reconsume after the lost response. One new attended turn.
             final_turn_request={**turn_request,'preview_digest':ready['data']['preview_digest']}
             _,turn=await post(app,'turn',final_turn_request,token,wt)
             assert turn['ok'] and turn['data']['state']=='RECORDED',turn
             assert adapters[0].begin_turn_calls==2 and len(runtime.jobs.list_jobs())==2 and len(runtime.attempts.list_attempts())==1
             assert len([e for e in runtime.events.list_events() if e.event_type=='FRESH_CONVERSATION_INITIAL_CONSUMED'])==1
-            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
-            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
+            # The recorded turn keeps the retained writer open for the next
+            # explicit message; it never reconsumes or replays this turn.
             after=runtime.events.list_events()
             _,not_ready=await post(app,'turn_preview',turn_request,token,wt)
             assert not not_ready['ok'] and runtime.events.list_events()==after and adapters[0].begin_turn_calls==2

@@ -74,6 +74,41 @@ it("uses genuine lost Keep→readonly original status→pure review→one exact 
   expect(screen.queryByRole("button",{name:"Send message"})).toBeNull();
   expect(screen.getByText(fixture.turn_read.data.result.envelope.summary)).toBeTruthy();
 });
+it("a recorded turn opens the next explicit message on the same original",async()=>{
+ const h=setup();
+ /* Named synthetic echo of the actual A4E6 frames: only the turn key and the
+    sent text differ between the two explicit messages of one conversation. */
+ const withKey=(frame:unknown,key:string)=>({...frame,data:{...(frame as {data:Record<string,unknown>}).data,turn_key:key}}) as never;
+ h.transport.turnPreview.mockImplementation(async(request)=>withKey(fixture.turn_preview,request.turn_key));
+ h.transport.turn.mockImplementation(async(request)=>withKey(fixture.turn,request.turn_key));
+ h.transport.turnRead.mockImplementation(async(request)=>withKey(fixture.turn_read,request.turn_key));
+ render(<Harness config={h.props}/>);await keepAndRecover(h);
+ fireEvent.click(screen.getByRole("button",{name:"Review message"}));await screen.findByRole("heading",{name:"Review message"});
+ fireEvent.click(screen.getByRole("button",{name:"Send message"}));await screen.findByText("Follow-up response recorded");
+ expect(h.transport.turn).toHaveBeenCalledTimes(1);
+ // The recorded response keeps the next message of this conversation open.
+ const field=screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement;
+ expect(field.disabled).toBe(false);
+ expect(screen.getByRole("button",{name:"Review message"})).toBeTruthy();
+ const secondMessage="Explain the next bounded step. 下一步二";
+ fireEvent.change(field,{target:{value:secondMessage}});
+ /* The suite's fixed random stub repeats its bytes, so the second message
+    needs its own distinct turn key, exactly as the real client mints one. */
+ let draw2=0;
+ vi.stubGlobal("crypto",{getRandomValues:(a:Uint8Array)=>{const start=100+(++draw2);for(let i=0;i<a.length;i++)a[i]=(start+i)&0xff;return a;}});
+ fireEvent.click(screen.getByRole("button",{name:"Review message"}));await screen.findByRole("heading",{name:"Review message"});
+ fireEvent.click(screen.getByRole("button",{name:"Send message"}));
+ await waitFor(()=>expect(h.transport.turn).toHaveBeenCalledTimes(2));
+ await screen.findByText("Follow-up response recorded");
+ const keys=h.transport.turn.mock.calls.map(call=>call[0].turn_key);
+ expect(new Set(keys).size).toBe(2);
+ expect(h.transport.turn.mock.calls[1]?.[0]).toMatchObject({message:secondMessage});
+ // Every actually recorded turn of this original is rendered.
+ expect(screen.getAllByRole("heading",{name:"Follow-up response"})).toHaveLength(2);
+ const bodies=[...document.querySelectorAll(".mm-fresh-conversation-turn-followups .mm-new-conversation-outcome-pre")].map(node=>node.textContent);
+ expect(bodies[0]).toBe(fixture.turn_request.message);
+ expect(bodies[2]).toBe(secondMessage);
+});
 it("same-store successor checks lost Keep without consuming again",async()=>{
   const h=setup();const first=render(<Harness config={h.props}/>);await readyKeep();
   fireEvent.click(screen.getByRole("button",{name:"Keep first response"}));

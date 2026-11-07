@@ -88,10 +88,11 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             assert runtime.events.list_events() == events and adapters[0].begin_turn_calls == 2
             _, status = await post(app,"turn_status",turn_selected,token)
             assert status["ok"] and status["data"]["result"] == second["data"]["result"]
-            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
-            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
+            # One retained native writer keeps the attended conversation open
+            # for the next explicit message, so the original stays RETAINED
+            # until the incumbent retention window ends.
             archived=FreshConversationOwner(service,expected_policy=expected,authorized_policies=policies).read_reference(read_principal,reference)
-            assert archived["epoch"] is None and archived["state"]=="SETTLED"
+            assert archived["epoch"] is not None and archived["state"]=="RETAINED"
             assert archived["initial_result"]["digest"]==initial_digest
             assert archived["turns"][0]["result"]==second["data"]["result"]
             assert "operation_key" not in consume_request and second["data"]["operation_key"] is None
@@ -232,8 +233,8 @@ def test_pending_same_key_and_distinct_key_cannot_dispatch_another_turn(tmp_path
             assert len([e for e in runtime.events.list_events() if e.event_type=="FRESH_CONVERSATION_TURN_REQUESTED"])==1
             release.set();_,completed=await first
             assert completed["ok"] and completed["data"]["state"]=="RECORDED",completed
-            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
-            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
+            # The finished turn is no longer the dispatch's current source. The
+            # retained writer stays open for the next explicit message.
             with pytest.raises(ValueError):retained_sources[0].check()
             assert adapters[0].begin_turn_calls==2 and len(runtime.attempts.list_attempts())==1
         finally:
@@ -247,18 +248,22 @@ def test_real_expiry_before_second_turn_io_leaves_original_unknown(tmp_path,rsa_
         from tests import test_mastermind_executive_app_asgi as auth
         from tests import test_workspace_read_app as workspace_auth
         app,long_token,long_wt,service,runtime,request,adapters,calls,sink=await mounted(tmp_path,rsa_key,monkeypatch)
-        now=int(time.time());expiry=now+10
-        token=auth._submit_token(rsa_key,iat=now-1,nbf=now-1,exp=expiry)
-        wt=auth._token(rsa_key,scope=workspace_auth.SCOPE,aud=workspace_auth.RESOURCE,iat=now-1,nbf=now-1,exp=expiry)
         try:
-            _,preview=await post(app,"preview",request,token,wt)
-            _,created=await post(app,"create",{**request,"preview_digest":preview["data"]["preview"]["digest"]},token,wt)
+            # The original is admitted under the long-lived fixture grant. The
+            # short-lived grant below covers only the attended turn, so this
+            # test measures the expiry at that turn's own I/O and not the
+            # duration of the earlier admission.
+            _,preview=await post(app,"preview",request,long_token,long_wt)
+            _,created=await post(app,"create",{**request,"preview_digest":preview["data"]["preview"]["digest"]},long_token,long_wt)
             assert created["ok"],created
             selected={key:request[key] for key in ("work_ref","operation_key")}
-            _,initial=await post(app,"read",selected,token)
+            _,initial=await post(app,"read",selected,long_token)
             consume_request={**selected,"initial_digest":initial["data"]["result"]["digest"]}
-            _,consumed=await post(app,"consume",consume_request,token,wt)
+            _,consumed=await post(app,"consume",consume_request,long_token,long_wt)
             assert consumed["ok"],consumed
+            now=int(time.time());expiry=now+10
+            token=auth._submit_token(rsa_key,iat=now-1,nbf=now-1,exp=expiry)
+            wt=auth._token(rsa_key,scope=workspace_auth.SCOPE,aud=workspace_auth.RESOURCE,iat=now-1,nbf=now-1,exp=expiry)
             def before_io(kwargs):time.sleep(max(0,expiry-time.time()+0.02))
             service._fixture_before_turn_io=before_io
             turn={**consume_request,"turn_key":"expired-original-turn","message":"One attended follow-up."}

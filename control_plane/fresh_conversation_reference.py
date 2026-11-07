@@ -15,6 +15,9 @@ _SCHEMA = "mastermind.fresh_conversation_reference.v1"
 _KEYS = {"schema", "work_ref", "root_job_id", "root_event_id", "root_event_sha256", "principal_scope_sha256"}
 _IDENTITY = ("policy_id", "issuer_digest", "resource", "subject_digest", "client_ref")
 _LIMIT = 8
+# Bounded number of recorded turns one original may expose. It is a read
+# window, not a store: every turn is an existing immutable Event.
+_TURN_LIMIT = 64
 
 
 def origin_identity(owner, principal):
@@ -158,8 +161,8 @@ def read_reference(owner, principal, reference):
             raise ValueError("CONVERSATION_CONSUMPTION_CHANGED")
         consumption=dict(state="CONSUMED",event_id=consumed.event_id,event_sha256=wire.canonical_digest(consumed.to_dict()),initial_digest=initial["digest"])
     with owner._runtime.store.read() as connection:
-        requests=connection.execute("SELECT command_id FROM events WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type=? ORDER BY event_id LIMIT 2",(root.job_id,_REQUEST)).fetchall()
-    if len(requests)>1:raise ValueError("CONVERSATION_TURN_HISTORY_CONFLICT")
+        requests=connection.execute("SELECT command_id FROM events WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type=? ORDER BY event_id LIMIT ?",(root.job_id,_REQUEST,_TURN_LIMIT+1)).fetchall()
+    if len(requests)>_TURN_LIMIT:raise ValueError("CONVERSATION_TURN_HISTORY_CONFLICT")
     turns=[]
     for row in requests:
         requested=_event(owner._runtime,row["command_id"],_REQUEST,root.job_id)
@@ -223,8 +226,8 @@ def resolve_action_reference(owner, principal, reference, *, for_write=True):
         read_reference(owner,principal,reference)
         candidates=[]
         with owner._runtime.store.read() as connection:
-            rows=connection.execute("SELECT command_id,event_type FROM events WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type IN ('FRESH_CONVERSATION_INITIAL_CONSUMED','FRESH_CONVERSATION_TURN_REQUESTED') ORDER BY event_id LIMIT 3",(root.job_id,)).fetchall()
-        if len(rows)>2:raise ValueError("CONVERSATION_ORIGINAL_KEY_UNAVAILABLE")
+            rows=connection.execute("SELECT command_id,event_type FROM events WHERE aggregate_type='fresh_conversation' AND aggregate_id=? AND event_type IN ('FRESH_CONVERSATION_INITIAL_CONSUMED','FRESH_CONVERSATION_TURN_REQUESTED') ORDER BY event_id LIMIT ?",(root.job_id,_TURN_LIMIT+1)).fetchall()
+        if len(rows)>_TURN_LIMIT:raise ValueError("CONVERSATION_ORIGINAL_KEY_UNAVAILABLE")
         from control_plane.fresh_conversation_turn import _event
         for row in rows:
             event=_event(owner._runtime,row["command_id"],row["event_type"],root.job_id)

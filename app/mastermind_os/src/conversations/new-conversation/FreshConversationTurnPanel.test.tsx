@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { FreshConversationTurnPanel } from "./FreshConversationTurnPanel";
-import type { FreshConversationTurnData } from "./fresh-conversation-turn";
+import type { FreshConversationRecordedTurn, FreshConversationTurnData } from "./fresh-conversation-turn";
 import type { OperationState } from "../../orchestration/operation-controller";
 
 afterEach(cleanup);
@@ -80,6 +80,8 @@ interface EntryOverrides {
   sendControl?: ReactNode | null;
   checkControl?: ReactNode | null;
   feedback?: ReactNode;
+  responsePending?: boolean;
+  turns?: readonly FreshConversationRecordedTurn[];
   onMessageChange?: (value: string) => void;
 }
 
@@ -98,6 +100,8 @@ const entry = (locale: "en" | "zh-CN", overrides: EntryOverrides = {}) => {
       : <button type="button" onClick={onSend}>Unit send</button>}
     checkControl={"checkControl" in overrides ? overrides.checkControl
       : <button type="button" onClick={onCheck}>Unit check</button>}
+    turns={overrides.turns}
+    responsePending={overrides.responsePending ?? false}
     feedback={overrides.feedback ?? null} />;
   return { ui, onMessageChange, onKeep, onSend, onCheck };
 };
@@ -150,7 +154,7 @@ describe("FreshConversationTurnPanel", () => {
     expect(screen.getByText("Continuing is unavailable here right now. Your message remains a draft.")).toBeTruthy();
   });
 
-  it("recorded window shows the follow-up body once, without a second input or action", () => {
+  it("recorded window shows the follow-up body once and keeps the next message open", () => {
     const handle = entry("en", {
       data: unitData({ state: "RECORDED", result: unitResult, turn_key: "unit-turn-0001", can_send: false }),
       message: "Sent follow-up text", feedback: <p>Unit feedback line</p>,
@@ -161,15 +165,51 @@ describe("FreshConversationTurnPanel", () => {
     expect(screen.getByText("Unit follow-up reply line")).toBeTruthy();
     expect(screen.getByText("Reading this result does not acknowledge it.")).toBeTruthy();
     expect(screen.getByText("First response kept")).toBeTruthy();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    // A recorded response opens the next explicit message of this original.
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Unit send" })).toBeTruthy();
     expect(screen.queryByRole("heading",{name:"Initial response"})).toBeNull();
-    expect(screen.queryByRole("button", { name: "Unit send" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Unit keep" })).toBeNull();
     expect(screen.getByRole("button", { name: "Unit check" })).toBeTruthy();
     expect(screen.getByText("Unit feedback line")).toBeTruthy();
     expect(screen.queryByText("Follow-up response accepted")).toBeNull();
     expect(screen.queryByText("Follow-up response applied")).toBeNull();
     expect(screen.queryByText("Continuing is unavailable here right now. Your message remains a draft.")).toBeNull();
+  });
+
+  it("renders every actually recorded turn of this original, oldest first", () => {
+    const handle = entry("en", {
+      data: unitData({ state: "RECORDED", result: unitResult, turn_key: "unit-turn-0002" }),
+      message: "Second unsent draft",
+      turns: [
+        { turn_key: "unit-turn-0001", message: "First recorded message", state: "RECORDED", result: unitResult },
+        { turn_key: "unit-turn-0002", message: "Second recorded message", state: "RECORDED", result: unitResult },
+      ],
+    });
+    render(handle.ui);
+    expect(screen.getByText("First recorded message")).toBeTruthy();
+    expect(screen.getByText("Second recorded message")).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: "Follow-up response" })).toHaveLength(2);
+    // The bare turn DATA is not rendered a second time beside the list.
+    expect(screen.getAllByText("Unit follow-up reply line")).toHaveLength(2);
+  });
+
+  it("an unresolved recorded turn keeps the next message closed", () => {
+    const handle = entry("en", {
+      data: unitData({ state: "RECONCILIATION_REQUIRED", result: null, turn_key: "unit-turn-0002" }),
+      responsePending: true,
+      turns: [
+        { turn_key: "unit-turn-0001", message: "First recorded message", state: "RECORDED", result: unitResult },
+        { turn_key: "unit-turn-0002", message: "Unresolved message", state: "RECONCILIATION_REQUIRED", result: null },
+      ],
+    });
+    render(handle.ui);
+    expect(screen.getByText("Unresolved message")).toBeTruthy();
+    expect(screen.getByText("This turn needs a status check before another message.")).toBeTruthy();
+    // The draft stays visible and held; no further message is offered.
+    expect((screen.getByLabelText("Your next message") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Unit send" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unit check" })).toBeTruthy();
   });
 
   it("unknown controller dominates a recorded success heading and the receipt", () => {
@@ -263,10 +303,11 @@ describe("FreshConversationTurnPanel", () => {
     expect(screen.getByText("已保留第一条回复")).toBeTruthy();
     expect(screen.getByText("已记录后续回复")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "后续回复" })).toBeTruthy();
-    expect(screen.queryByLabelText("下一条消息")).toBeNull();
+    // A recorded response keeps the next message open in this conversation.
+    expect(screen.getByLabelText("下一条消息")).toBeTruthy();
+    expect(screen.getByText("在此对话保持打开期间，可继续发送消息。")).toBeTruthy();
     view.rerender(entry("zh-CN",{data:unitData()}).ui);
     expect(screen.getByLabelText("下一条消息")).toBeTruthy();
-    expect(screen.getByText("此视图仅支持一条后续消息。")).toBeTruthy();
   });
 
   it("null window invents no receipt, no state and no raw source values", () => {
@@ -310,8 +351,9 @@ it("labels only the exact supplied recorded turn message, never a different curr
  render(<FreshConversationTurnPanel locale="en" data={unitData({state:"RECORDED",result:unitResult})} operationState={null}
  activity={null} message="Different new unsent draft" originalTurnMessage={raw} onMessageChange={vi.fn()} readOnly={true}/>);
  expect(screen.getByText(raw,{normalizer:value=>value}).textContent).toBe(raw);
- expect(screen.queryByText("Different new unsent draft")).toBeNull();
- expect(screen.getByText("Your message")).toBeTruthy();
+ // The current draft stays the editable field; it is never a recorded reply.
+ expect(screen.getAllByText("Your message")).toHaveLength(1);
+ expect((screen.getByLabelText("Your next message") as HTMLTextAreaElement).value).toBe("Different new unsent draft");
 });
 
 it.each(["en","zh-CN"] as const)("unknown Keep %s shows only original-status recovery without an unavailable-draft conclusion",locale=>{

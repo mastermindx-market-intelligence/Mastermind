@@ -112,6 +112,122 @@ def _live(owner, principal, workspace, request, host_current, identity):
     return dispatch, wire.canonical_digest(dataclasses.asdict(facts)), binding, project
 
 
+def _turn_requests(owner, root_id):
+    """Ordered reserved turn requests of one original, oldest first."""
+    return [event for event in owner._runtime.events.list_events(
+        aggregate_type=_AGGREGATE, aggregate_id=root_id)
+        if event.event_type == _REQUEST]
+
+
+def _recorded_reply(owner, root, requested):
+    """The validated complete reply of one reserved turn, or None.
+
+    An absent reply is not an absent response: the request keeps its identity
+    and its writer. An inconsistent reply is a contradiction, never clearance.
+    """
+    replied = _event(owner._runtime, requested.command_id + ":reply", _REPLY, root.job_id)
+    if replied is None:
+        return None
+    data = replied.payload
+    candidate = owner._runtime.events.get_event_by_command_id("ohf-candidate:" + data["turn_id"])
+    if (data.get("request_event_id") != requested.event_id
+            or data.get("request_event_sha256") != wire.canonical_digest(requested.to_dict())
+            or data.get("operation_id") != requested.payload["operation_id"]
+            or data.get("native_acknowledged") is not True or data.get("parent_consumed") is not False
+            or data["result"]["digest"] != wire.canonical_digest(data["result"]["envelope"])
+            or candidate is None or candidate.event_type != "OHF_CANDIDATE_RESULT_RECORDED"
+            or candidate.aggregate_id != data["turn_id"]
+            or wire.canonical_digest(candidate.to_dict()) != data["candidate_event_sha256"]):
+        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    return data
+
+
+def _unresolved_turn(owner, root):
+    """True when a reserved turn has no validated complete recorded response.
+
+    One unresolved original keeps its own request and its own writer. A later
+    message never replaces, replays or supersedes it.
+    """
+    for requested in _turn_requests(owner, root.job_id):
+        if _recorded_reply(owner, root, requested) is None:
+            return True
+    return False
+
+
+def _unresolved_in_transaction(connection, root_id):
+    """Atomic reservation guard for one original, inside its own transaction.
+
+    A concurrent submit of another message is visible here as a reserved
+    request without a reply, so only one next turn can be reserved at a time.
+    """
+    rows = connection.execute(
+        "SELECT command_id FROM events WHERE aggregate_type=? AND aggregate_id=? AND event_type=? ORDER BY event_id",
+        (_AGGREGATE, root_id, _REQUEST)).fetchall()
+    for row in rows:
+        if connection.execute(
+                "SELECT event_id FROM events WHERE aggregate_id=? AND event_type=? AND command_id=? LIMIT 1",
+                (root_id, _REPLY, row["command_id"] + ":reply")).fetchone() is None:
+            return True
+    return False
+
+
+def _turn_channel_available(dispatch):
+    """Whether the incumbent retained writer can accept one more message.
+
+    The first explicit message signals the incumbent single native waiter.
+    Later messages are handed to the attended slot that same dispatch owns
+    while it keeps the one retained writer.
+    """
+    slot = getattr(dispatch, "attended", None)
+    if slot is not None:
+        return slot.available()
+    return not dispatch.continuation.done()
+
+
+class FreshConversationAttendedSlot:
+    """One transient attended-turn hand-off on the incumbent native dispatch.
+
+    The dispatch owns the slot and arms it before every turn. A submitted turn
+    claims it exactly once. It holds no session, queue, history or authority:
+    the reserved request Event and the existing retained writer remain the
+    only evidence of an attended turn.
+    """
+
+    __slots__ = ("_loop", "_future", "_closed")
+
+    def __init__(self):
+        self._loop = asyncio.get_running_loop()
+        self._future = self._loop.create_future()
+        self._closed = False
+
+    def open(self):
+        """Arm the slot for the next explicit message on the same writer."""
+        if self._closed:
+            return False
+        if self._future.done():
+            self._future = self._loop.create_future()
+        return True
+
+    def close(self):
+        """Retire the slot with its dispatch. No pending turn is invented."""
+        self._closed = True
+        if not self._future.done():
+            self._future.cancel()
+
+    def available(self):
+        return not self._closed and not self._future.done()
+
+    def offer(self, source):
+        """Hand one already reserved turn to the incumbent writer waiter."""
+        if not self.available():
+            return False
+        self._future.set_result(source)
+        return True
+
+    async def take(self, timeout):
+        return await asyncio.wait_for(self._future, timeout)
+
+
 def _response(request, state, *, consumption, locator, effect="NONE", result=None, can_send=False):
     return dict(schema="mastermind.executive.fresh_conversation_turn_data.v1",
         work_ref=request["work_ref"], operation_key=request["operation_key"],
@@ -128,7 +244,7 @@ async def consume_initial(owner, principal, workspace, request, *, host_current)
     if existing is not None:
         captured = _live(owner, principal, workspace, request, host_current, identity)
         return _response(request, "CONSUMED", consumption=existing, locator=identity["locator"],
-            can_send=not captured[0].continuation.done())
+            can_send=_turn_channel_available(captured[0]))
     captured = _live(owner, principal, workspace, request, host_current, identity)
     def check():
         if _live(owner, principal, workspace, request, host_current, identity) != captured:
@@ -142,7 +258,8 @@ async def consume_initial(owner, principal, workspace, request, *, host_current)
             attempt_id=identity["locator"]["attempt_id"])
         check()
     return _response(request, "CONSUMED", consumption=_consumption(owner, identity),
-        locator=identity["locator"], effect="COMMITTED", can_send=True)
+        locator=identity["locator"], effect="COMMITTED",
+        can_send=_turn_channel_available(captured[0]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,10 +305,14 @@ async def preview_turn(owner, principal, workspace, request, *, host_current):
     if consumption is None:
         raise ValueError("CONVERSATION_INITIAL_NOT_CONSUMED")
     captured = _live(owner, principal, workspace, request, host_current, identity)
-    if captured[0].continuation.done() or any(event.event_type == _REQUEST
-            for event in owner._runtime.events.list_events(job_id=root.job_id)):
+    reserved = _event(owner._runtime, _command("turn", _scope(principal), root.job_id,
+        request["turn_key"]), _REQUEST, root.job_id)
+    if (not _turn_channel_available(captured[0]) or _unresolved_turn(owner, root)
+            or reserved is not None):
         # A recorded/unknown original is recoverable through status/read only;
-        # preview never reserves, resends or reports that operation ready.
+        # preview never reserves, resends or reports that operation ready. A
+        # resolved predecessor only opens the next explicit message, and one
+        # turn key is spent by its own reserved request.
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
     if (_live(owner, principal, workspace, request, host_current, identity) != captured
             or _consumption(owner, identity) != consumption):
@@ -230,11 +351,10 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
             and request["preview_digest"] != _preview_digest(request, identity, consumption, captured)):
         raise ValueError("CONVERSATION_TURN_PREVIEW_CHANGED")
     dispatch = captured[0]
-    if dispatch.continuation.done():
-        raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
-    prior_turns = [event for event in owner._runtime.events.list_events(job_id=root.job_id)
-        if event.event_type == _REQUEST]
-    if prior_turns:
+    if not _turn_channel_available(dispatch) or _unresolved_turn(owner, root):
+        # Only a resolved predecessor opens the next explicit message. The
+        # retained writer, the original identity and the reserved request
+        # Event stay exactly as they are.
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
     def guard():
         if (_live(owner, principal, workspace, request, host_current, identity) != captured
@@ -250,8 +370,7 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
         project_digest=wire.canonical_digest(captured[3]))
     with owner._runtime.store.transaction() as connection:
         guard()
-        if connection.execute("SELECT event_id FROM events WHERE aggregate_type=? AND aggregate_id=? AND event_type=? LIMIT 1",
-                (_AGGREGATE, root.job_id, _REQUEST)).fetchone() is not None:
+        if _unresolved_in_transaction(connection, root.job_id):
             raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
         _append(owner._runtime, connection, command=command, kind=_REQUEST, root_id=root.job_id,
             payload=payload, attempt_id=identity["locator"]["attempt_id"])
@@ -262,9 +381,22 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
         time.monotonic() + min(300.0, principal.expires_at - time.time(), workspace.expires_at - time.time()))
     dispatch._fresh_turn_source = source
     source.check()
-    # Signal only the incumbent single native waiter. Reopened/status/duplicate
-    # requests never signal it again or re-enter a provider operation.
-    dispatch.continuation.set_result(source)
+    # Signal only the incumbent writer waiter. The first explicit message
+    # wakes the single native continuation; later messages are handed to the
+    # attended slot that same dispatch owns. Reopened/status/duplicate requests
+    # never signal it again or re-enter a provider operation.
+    slot = getattr(dispatch, "attended", None)
+    if slot is not None:
+        if not slot.offer(source):
+            dispatch._fresh_turn_source = None
+            raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
+    else:
+        if dispatch.continuation.done():
+            # The retained writer already served its continuation. This
+            # request keeps its own reserved identity; it is never replayed.
+            dispatch._fresh_turn_source = None
+            raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
+        dispatch.continuation.set_result(source)
     await asyncio.shield(source._completion)
     return await read_turn(owner, principal, request)
 
@@ -341,6 +473,12 @@ async def execute_attended_turn(service, dispatch, source):
                 attempt_id=retained.session.attempt_id)
         if not source._completion.done(): source._completion.set_result(None)
         raise
+    finally:
+        # A finished turn is no longer the dispatch's current source. The
+        # dispatch keeps its own writer; only the next reserved turn may
+        # replace this pointer.
+        if getattr(dispatch, "_fresh_turn_source", None) is source:
+            dispatch._fresh_turn_source = None
 
 
 def _original_root(owner, principal, request):

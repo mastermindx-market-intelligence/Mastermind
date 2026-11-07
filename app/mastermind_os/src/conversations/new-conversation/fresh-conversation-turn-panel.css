@@ -9,6 +9,7 @@
 .mm-fresh-conversation-turn-input { width:100%; min-width:0; min-height:120px; resize:vertical; font:16px/24px var(--font-ui); color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:var(--r-ctl); padding:var(--sp-3); }
 .mm-fresh-conversation-turn-input:disabled { color:var(--faint); cursor:not-allowed; }
 .mm-fresh-conversation-turn-hint { font-size:14px; line-height:20px; color:var(--faint); overflow-wrap:anywhere; }
+.mm-fresh-conversation-turn-followups { display:grid; gap:var(--sp-5); min-width:0; }
 .mm-fresh-conversation-turn-followup { display:grid; gap:var(--sp-3); min-width:0; }
 .mm-fresh-conversation-turn-actions { display:flex; flex-wrap:wrap; gap:var(--sp-3); min-width:0; }
 .mm-fresh-conversation-turn button { min-height:44px; font:inherit; border-radius:var(--r-btn); padding:var(--sp-2) var(--sp-4); }

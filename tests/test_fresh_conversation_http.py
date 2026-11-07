@@ -37,7 +37,10 @@ class Sink:
     def emit(self, event): self.events.append(event)
 
 
-async def post(app, operation, arguments, executive_token, workspace_token=None, *, change=None, timeout_seconds=15):
+async def post(app, operation, arguments, executive_token, workspace_token=None, *, change=None, timeout_seconds=90):
+    # The workspace fixture's own git calls pay a host-specific stall on some
+    # machines, so the create round trip is not bounded by a 15-second budget.
+    # The guard still refuses a genuine hang.
     path = "/os/executive/conversation/" + operation.replace("_", "/")
     scope = dict(type="http", asgi={"version": "3.0", "spec_version": "2.4"}, http_version="1.1",
         scheme="https", method="POST", path=path, raw_path=path.encode(), root_path="", query_string=b"",
