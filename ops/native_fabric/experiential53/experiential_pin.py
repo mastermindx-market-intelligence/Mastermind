@@ -46,6 +46,26 @@ import re
 import sys
 from typing import Any, Dict, FrozenSet, Optional, Tuple
 
+# Direct source CLI and flat native releases use the same policy source.
+from pathlib import Path as _PolicyPath
+import sys as _policy_sys
+_policy_source_root = _PolicyPath(__file__).resolve().parents[3]
+if (_policy_source_root / "control_plane" / "experiential_plan_policy.py").is_file():
+    _policy_sys.path.insert(0, str(_policy_source_root))
+
+try:
+    from control_plane.experiential_plan_policy import (
+        PLAN_MODELS, PlanRequestRefused, admit_plan_account,
+        plan_policy_digest, route_policy_generation, select_plan_model,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name not in {"control_plane", "control_plane.experiential_plan_policy"}:
+        raise
+    from experiential_plan_policy import (
+        PLAN_MODELS, PlanRequestRefused, admit_plan_account,
+        plan_policy_digest, route_policy_generation, select_plan_model,
+    )
+
 #: Exact pool slug.  No alias folds into it and nothing folds out of it.
 POOL = "experiential"
 
@@ -148,10 +168,10 @@ def enforce_pin(pool: Any, model: Any) -> Tuple[str, str]:
             "EXPERIENTIAL_MODEL_DISTINCT",
             f"{named_model!r} is a canonical glm-pool model, not this provider",
         )
-    if named_model.casefold() != MODEL:
+    if named_model.casefold() != MODEL and named_model not in PLAN_MODELS:
         raise ExperientialPinRefused(
             "EXPERIENTIAL_MODEL_SLUG_MISMATCH",
-            f"exact slug {MODEL!r} required, got {named_model!r}",
+            "exact registered legacy or plan model slug required",
         )
     return named_pool.casefold(), named_model.casefold()
 
@@ -297,6 +317,17 @@ def admit_execution(
         raise ExperientialPinRefused(
             "PROPRIETARY_CODE_EXPOSURE_REFUSED",
             "proprietary code is never exposed automatically")
+    if pinned[1] in PLAN_MODELS:
+        try:
+            plan = admit_plan_account(
+                model=pinned[1], account=account,
+                registration=registry_entry.get("plan"),
+                observation=quota_readback,
+            )
+        except PlanRequestRefused as exc:
+            raise ExperientialPinRefused(exc.reason) from exc
+        return {"state": "ADMITTED", "pool": pinned[0], "model": pinned[1],
+                "task_class": cls, "escalate_to": None, "fallback": None, **plan}
     name = str(account or "").strip().lower()
     if not name:
         raise ExperientialPinRefused("ACCOUNT_UNRESOLVED")

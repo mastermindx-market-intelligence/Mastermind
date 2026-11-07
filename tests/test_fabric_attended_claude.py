@@ -503,7 +503,7 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
         with self.assertRaises((AttendedClaudePreparationError, ValueError)):
             dataclasses.replace(descriptor, preparation_only=False)
 
-    def test_byteplus_real_catalog_prepares_attended_only_without_credential(self) -> None:
+    def test_byteplus_real_catalog_prepares_supported_coding_without_credential(self) -> None:
         """Prove the actual BytePlus binding enters the existing Claude compiler.
 
         This is *preparation*, not authentication, provider execution, quota
@@ -515,15 +515,16 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
         prepared = _prepare(profile=profile, binding=binding, spec=spec, model_class="routine")
         self.assertEqual(prepared.endpoint, "https://ark.ap-southeast.bytepluses.com/api/coding")
         self.assertEqual(prepared.model, "glm-5.3-flash")
-        self.assertEqual(prepared.implementation_state, "SPEC_ONLY")
+        self.assertEqual(prepared.implementation_state, "BUILT_NOT_PROVEN")
         self.assertTrue(prepared.preparation_only)
         self.assertFalse(prepared.start_authorized)
         self.assertFalse(prepared.binding_autonomous_allowed)
-        self.assertEqual(prepared.profile_usage_policy["interactive_only"], True)
+        self.assertEqual(prepared.profile_usage_policy["interactive_only"], False)
         self.assertEqual(prepared.profile_usage_policy["single_user_only"], True)
-        self.assertFalse(prepared.profile_usage_policy["unattended_background_allowed"])
+        self.assertTrue(prepared.profile_usage_policy["unattended_background_allowed"])
         self.assertFalse(prepared.profile_usage_policy["production_backend_allowed"])
         self.assertTrue(_usage_policy_satisfied(profile, "interactive_canary"))
+        self.assertTrue(_usage_policy_satisfied(profile, "native_supported_coding_worker"))
         self.assertFalse(_usage_policy_satisfied(profile, "executive_worker"))
         self.assertFalse(_usage_policy_satisfied(profile, "automated_fabric"))
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.environment)
@@ -549,7 +550,7 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
             self.assertEqual(prepared.endpoint, "https://ark.ap-southeast.bytepluses.com/api/coding")
             self.assertTrue(prepared.preparation_only)
             self.assertFalse(prepared.start_authorized)
-            self.assertEqual(prepared.implementation_state, "SPEC_ONLY")
+            self.assertEqual(prepared.implementation_state, "BUILT_NOT_PROVEN")
             self.assertFalse(prepared.binding_autonomous_allowed)
             self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.environment)
 
@@ -576,7 +577,7 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
                     max_turns=2, result_schema={"type": "object"},
                 )
                 self.assertEqual(descriptor.model, model)
-                self.assertEqual(descriptor.implementation_state, "SPEC_ONLY")
+                self.assertEqual(descriptor.implementation_state, "BUILT_NOT_PROVEN")
                 self.assertEqual(descriptor.endpoint, profile.base_url)
                 self.assertEqual(descriptor.required_launch_proofs, REQUIRED_LAUNCH_PROOFS)
                 self.assertTrue(descriptor.preparation_only)

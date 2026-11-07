@@ -65,6 +65,8 @@ from control_plane.attempt_inference_endpoint import (
 )
 from control_plane.opencode_go_pooled_transport import ProviderRequest, _freeze_request
 
+from control_plane.experiential_plan_policy import plan_policy_digest, route_policy_generation
+
 MAX_STREAM_BYTES = 64 * 1024 * 1024
 MAX_ERROR_BYTES = 256 * 1024
 MAX_EVENT_BYTES = 1024 * 1024
@@ -153,6 +155,7 @@ class ExperientialGatewayRoute:
     route_generation: str
     base_url: str
     path: str
+    plan_policy: str = "legacy"
 
     def __post_init__(self) -> None:
         if not isinstance(self.route_id, str) or not self.route_id.strip():
@@ -160,7 +163,7 @@ class ExperientialGatewayRoute:
         if self.path not in set(GATEWAY_PATHS.values()):
             raise ExperientialHarnessContractError("unsupported gateway route path")
         _normalize_base_url(self.base_url)
-        if gateway_route_generation(self.base_url, self.path) != self.route_generation:
+        if gateway_route_generation(self.base_url, self.path, self.plan_policy) != self.route_generation:
             raise ExperientialHarnessContractError(
                 "route generation does not attest this pinned gateway target"
             )
@@ -193,7 +196,7 @@ class GatewayStreamReceipt:
     terminal_observed: bool
 
 
-def gateway_route_generation(base_url: str, path: str) -> str:
+def gateway_route_generation(base_url: str, path: str, plan_policy: str = "legacy") -> str:
     """The attested identity of one pinned gateway target.
 
     The owner computes this once for the approved loopback gateway and injects
@@ -201,8 +204,10 @@ def gateway_route_generation(base_url: str, path: str) -> str:
     to dial, so a route that drifted after attestation is refused instead of
     being forwarded under the approved identity.
     """
-    normalized = str(base_url).rstrip("/")
-    return hashlib.sha256(f"{normalized}\n{path}".encode("utf-8")).hexdigest()
+    try:
+        return route_policy_generation(base_url, path, plan_policy)
+    except ValueError as exc:
+        raise ExperientialHarnessContractError("invalid gateway plan policy") from exc
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -595,7 +600,7 @@ def forward_to_gateway(
         raise ExperientialHarnessContractError("invalid idempotency key")
     # Re-attest the pinned target: the identity in the receipt must describe
     # the target this call actually dials.
-    if gateway_route_generation(route.base_url, route.path) != route.route_generation:
+    if gateway_route_generation(route.base_url, route.path, route.plan_policy) != route.route_generation:
         raise ExperientialHarnessContractError(
             "pinned gateway target does not match its attested route generation"
         )
@@ -639,6 +644,8 @@ def forward_to_gateway(
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }
+        if route.plan_policy != "legacy":
+            headers["X-Fabric-Plan-Policy"] = plan_policy_digest(route.plan_policy)
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
         try:
