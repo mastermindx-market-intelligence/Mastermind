@@ -1221,6 +1221,11 @@ def forward_predecessor(svc, account, roots, binding, config, manifest):
     enrollment = svc._pin_enrollment_owner_module()
     status_path = roots["state"] / status.TRANSACTION
     enrollment_path = roots["state"] / enrollment.TRANSACTION
+    publisher_path = roots["state"] / enrollment.C4_PUBLISHER_TRANSACTION
+    if os.path.lexists(publisher_path) and (
+            account != enrollment.ACCOUNT or not os.path.lexists(status_path)
+            or not os.path.lexists(enrollment_path)):
+        fail_forward("ORIGINAL_REFUSED")
     if os.path.lexists(status_path):
         status.require_forward_predecessor(
             svc, account, roots, config, manifest, original)
@@ -1239,7 +1244,8 @@ def forward_predecessor(svc, account, roots, binding, config, manifest):
         ):
             fail_forward("ORIGINAL_REFUSED")
     for path, names in ((enrollment_path, enrollment.FILES),
-                        (status_path, status.FILE_NAMES)):
+                        (status_path, status.FILE_NAMES),
+                        (publisher_path, enrollment.C4_PUBLISHER_FILES)):
         if os.path.lexists(path):
             directory(svc, path)
             if {p.name for p in path.iterdir()} != set(names):

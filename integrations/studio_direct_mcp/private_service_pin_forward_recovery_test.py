@@ -416,3 +416,159 @@ class ForwardStatusSuccessorTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 svc.cmd_start(SimpleNamespace(account=self.account))
         self.assertFalse(self.loaded)
+
+
+class ForwardC4PublisherTests(unittest.TestCase):
+    """The completed C4 child remains the same owner through native forward."""
+    capture = fx.ForwardPinTransitionTests.capture
+    forward_context = fx.ForwardPinTransitionTests.forward_context
+    invoke = fx.ForwardPinTransitionTests.invoke
+    prepare = fx.ForwardPinTransitionTests.prepare
+
+    def setUp(self):
+        import private_service_status_successor_test as status_fixture
+        self.case = status_fixture.C4PublisherSuccessorTests(methodName="runTest")
+        self.addCleanup(self.case.doCleanups)
+        self.case.setUp()
+        self.case.apply()
+        self.home, self.account, self.roots = svc._user_root(), self.case.account, self.case.roots
+        self.new_pool = b"qualified-c4-publisher-forward-bridge"
+        self.binding = binding_for_existing(self.roots, self.new_pool)
+        Path(self.binding["original_successor"]["successor_bundle"]).mkdir(mode=0o700)
+        self.args = SimpleNamespace(account=self.account,
+            forward_go_bundle=str(self.home / "qualified-go"),
+            expected_plan_sha256=None, operation="preview")
+        self.histories = {name: {p.name: p.read_bytes()
+                                for p in (self.roots["state"] / name).iterdir()}
+                          for name in ("native-pool-pin",
+                                       svc._pin_enrollment_owner_module().TRANSACTION,
+                                       svc._fleet_status_successor_owner_module().TRANSACTION,
+                                       svc._pin_enrollment_owner_module().C4_PUBLISHER_TRANSACTION)}
+
+    @property
+    def tx(self):
+        return self.roots["state"] / "native-pool-pin-forward"
+
+    def selected(self):
+        self.prepare()
+        self.assertEqual(self.invoke()["effect"], "APPLIED")
+        Path(self.binding["pool_target"]).write_bytes(self.new_pool)
+        self.binding["phase"] = "SELECTED"
+
+    def assert_histories_unchanged(self):
+        for name, expected in self.histories.items():
+            self.assertEqual(expected, {p.name: p.read_bytes()
+                                       for p in (self.roots["state"] / name).iterdir()})
+
+    def start(self):
+        with mock.patch.object(svc, "_pin_forward_native_context", self.forward_context):
+            return self.capture(lambda: svc.cmd_start(SimpleNamespace(account=self.account)))
+
+    def test_complete_c4_chain_forwards_and_starts_without_rewriting_history(self):
+        self.selected()
+        plan = json.loads((self.tx / "plan.json").read_bytes())
+        name = "native-pool-pin-enrollment-publisher"
+        self.assertEqual(plan["predecessor_records"][name],
+                         {k: hashlib.sha256(v).hexdigest() for k, v in self.histories[name].items()})
+        self.assertTrue(self.start()["started"])
+        self.assertTrue(any(call[:2] == ["launchctl", "bootstrap"]
+                            for call in self.case.fixture["calls"]))
+        self.assert_histories_unchanged()
+
+    def test_config_only_interruption_reconciles_same_forward_without_publisher_writes(self):
+        self.prepare()
+        actual = svc._atomic_write_bytes
+        def stop_after_config(path, data, mode=0o600):
+            actual(path, data, mode=mode)
+            if Path(path) == self.roots["config"]:
+                raise OSError("inert interruption after forward config")
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=stop_after_config):
+            with self.assertRaises(SystemExit):
+                self.invoke()
+        original_intent = (self.tx / "plan.json").read_bytes()
+        writes = []
+        def reconcile_write(path, data, mode=0o600):
+            writes.append(Path(path))
+            return actual(path, data, mode=mode)
+        self.args.operation = "reconcile"
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=reconcile_write):
+            self.assertEqual(self.invoke()["effect"], "APPLIED")
+        self.assertEqual(writes, [self.roots["manifest"]])
+        self.assertEqual((self.tx / "plan.json").read_bytes(), original_intent)
+        self.assert_histories_unchanged()
+
+    def mutate_history(self, damage):
+        target = self.case.target / ({"missing-result": "result.json", "changed-result": "result.json",
+                                     "changed-payload": "publisher.before", "unexpected-file": "foreign.json"}[damage])
+        original = target.read_bytes() if target.exists() else None
+        if damage == "missing-result":
+            target.unlink()
+        else:
+            target.write_bytes(b"foreign retained evidence")
+            target.chmod(0o600)
+        return target, original
+
+    def restore_history(self, target, original):
+        if original is None:
+            target.unlink()
+        else:
+            target.write_bytes(original)
+            target.chmod(0o600)
+
+    def test_changed_c4_history_refuses_before_forward_effect(self):
+        self.prepare()
+        before = {name: self.roots[name].read_bytes() for name in ("config", "manifest")}
+        for damage in ("missing-result", "changed-result", "changed-payload", "unexpected-file"):
+            with self.subTest(damage=damage):
+                target, original = self.mutate_history(damage)
+                try:
+                    with mock.patch.object(svc, "_atomic_write_bytes", side_effect=AssertionError("forward write")):
+                        with self.assertRaises(SystemExit):
+                            self.invoke()
+                    self.assertFalse(self.tx.exists())
+                    self.assertEqual(before, {name: self.roots[name].read_bytes() for name in before})
+                finally:
+                    self.restore_history(target, original)
+
+    def test_changed_c4_history_refuses_forward_start(self):
+        self.selected()
+        for damage in ("missing-result", "changed-result", "changed-payload", "unexpected-file"):
+            with self.subTest(damage=damage):
+                target, original = self.mutate_history(damage)
+                try:
+                    with self.assertRaises(SystemExit):
+                        self.start()
+                finally:
+                    self.restore_history(target, original)
+        self.assertFalse(any(call[:2] == ["launchctl", "bootstrap"]
+                             for call in self.case.fixture["calls"]))
+
+    def test_installed_c4_modules_remain_sealed_after_forward(self):
+        self.selected()
+        for name in ("git-publish.mjs", "workspace-access.mjs", svc._fleet_status_successor_owner_module().MODULE):
+            with self.subTest(name=name):
+                target = self.roots["base"] / name
+                original = target.read_bytes()
+                try:
+                    target.write_bytes(b"foreign installed module")
+                    with self.assertRaises(SystemExit):
+                        self.start()
+                finally:
+                    target.write_bytes(original)
+        self.assertFalse(any(call[:2] == ["launchctl", "bootstrap"]
+                             for call in self.case.fixture["calls"]))
+
+    def test_c4_receipt_durability_failure_prevents_forward_pair_write(self):
+        self.prepare()
+        owner = svc._fleet_status_successor_owner_module()
+        actual = owner._confirm_retained_durability
+        before = {name: self.roots[name].read_bytes() for name in ("config", "manifest")}
+        def fail_c4(service, roots, target):
+            if target == self.case.target:
+                raise SystemExit("FLEET_STATUS_SUCCESSOR_DURABILITY_REFUSED")
+            return actual(service, roots, target)
+        with mock.patch.object(owner, "_confirm_retained_durability", side_effect=fail_c4):
+            with self.assertRaises(SystemExit):
+                self.invoke()
+        self.assertFalse(self.tx.exists())
+        self.assertEqual(before, {name: self.roots[name].read_bytes() for name in before})

@@ -33,7 +33,7 @@ def main():
     ).stdout.strip()
     expected = {
         "adapter_root": candidate,
-        "macro_root": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+        "macro_root": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
         "native_owner_root": candidate,
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
