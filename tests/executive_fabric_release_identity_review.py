@@ -786,7 +786,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '40c4b86eba715a405242474513b51f26c461fbe3535f3983aa29b2b67e69ce94', 'sites': ((1700, 26, 31, 'int', '0o700'),)}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2', 'sites': ((1717, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -896,7 +896,7 @@ REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualifica
 # The sealed verifier ModuleType label is a Python module identity, never an OS
 # account, principal or service. This exact source/string site alone is reviewed;
 # any full-source or token drift restores the ordinary identity guard.
-REVIEWED_FILES["integrations/hermes_application_fabric/source_context.py"] = {'sha256': 'e44e24c39ca09ece5a857aee5f92c207ce386a4a75bf5eac588cac87be4fd36d', 'sites': ((378, 36, 73, 'str', '"_mastermind_attended_native_sources"'),)}
+REVIEWED_FILES["integrations/hermes_application_fabric/source_context.py"] = {'sha256': '887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597', 'sites': ((425, 36, 73, 'str', '"_mastermind_attended_native_sources"'), (444, 42, 78, 'str', '"_mastermind_attended_configuration"'))}
 
 # Exact retained readiness qualification records the observed proof parent UID.
 # This grants no runtime identity. Any source, path or token drift exposes it

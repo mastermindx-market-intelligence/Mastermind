@@ -79,8 +79,69 @@ this projection refuses; the installer never grafts files into a sealed release.
 The three projection roots live under
 `native-dependencies/hermes-attended-macro/` in that release. They are not a
 partial repository in the existing full `macro-sources/<sha>` namespace.
-The release also contains the inventory and receipt. No new selected-release
-pointer, configuration store, daemon, credential or admission owner is added.
+The release also contains the inventory and receipt. The existing Control observation remains the only selector; daemon,
+credential and admission ownership remain unchanged.
+
+## Current enrollment to installed consumer configuration
+
+The committed Macro projection intentionally ships with no application
+enrollment. The existing native Go service-enrollment owner now exports a
+bounded public eligibility observation through
+`ops/native_fabric/quota_continuity/rollout/export_application_consumer.py`.
+The exporter reads the completed v9 attended role, checks its original private
+binding/intent/receipt, and reuses the original Broker's current grant matcher.
+Revoked, expired, ambiguous, mismatched or absent grants refuse. The export
+contains references and current route eligibility, never a credential, a grant
+issuance, a capacity reservation or a claim that a provider is ready.
+
+Use the original completed ingress bundle and existing source/host authority:
+
+```sh
+python3 -B ops/native_fabric/quota_continuity/rollout/export_application_consumer.py --go-ingress-bundle "$COMPLETED_GO_INGRESS_BUNDLE" --service-profile hermes-attended > "$HERMES_ATTENDED_OBSERVATION"
+python3 -B ops/executive_os/capacity_host_artifacts.py build-hermes-attended-configuration --observation "$HERMES_ATTENDED_OBSERVATION" --observation-sha256 "$HERMES_ATTENDED_OBSERVATION_SHA256" --archive "$HERMES_ATTENDED_SOURCE_ARCHIVE" --commitment integrations/hermes_application_fabric/macro-source.json --output "$HERMES_ATTENDED_CONFIGURATION"
+```
+
+The observation digest identifies the original source-linked return; it is not
+authentication or installation authority. The existing release owner accepts
+that concrete observation under the existing installation authority.
+
+The data-only builder reads the exact Macro owner's literal transport and
+service declarations without executing projected Python. It derives the
+attended production-mode record, preserves the original workload-policy bytes,
+and creates one consumer-local capability view. AUTO preserves the original
+enrollment's pool restriction. Fixed mode requires its actual source-owned model
+in the current grants. Qualification expires at the earliest represented grant
+expiry. Other application's source/configuration remains under its own owner.
+
+Supply these additional inputs to the **existing full Executive installer**:
+
+```text
+--hermes-attended-source <exact-source-archive>
+--hermes-attended-configuration <exact-configuration-capsule>
+--hermes-attended-configuration-sha256 <builder-returned-capsule-digest>
+--control-config <preserved-complete-current-Control-input>
+```
+
+The installer validates the capsule before maintenance, rederives its contents
+from the installed measured source, and atomically stages immutable data under
+`/Library/Application Support/MastermindExecutive/config/hermes-attended/<digest>`.
+An occupied digest slot must be identical. The existing Control writer selects
+only that digest, and its existing observation publisher emits the closed v2
+observation. With no selected capsule it preserves the exact legacy v1 form.
+Neither capsule publication nor a digest grants provider permission.
+
+A full same-SHA reinstall can renew selection without modifying the sealed
+release. Preserve the complete current Control input during renewal. Revocation
+uses a preserved Control input with the optional
+`hermes_attended_configuration_sha256` field removed. Do not invoke the
+observation publisher separately or bypass the existing maintenance interval.
+
+The running plugin retains one canonical Macro code context. Each catalog
+request or turn acquires its own current configuration lease. After renewal,
+a new operation sees the new capsule without recreating factory classes; the
+prior operation retains its original capsule for cleanup and cannot silently
+reauthorize under the replacement. The actual native Broker still checks current
+grants and route/account admission on every real operation.
 
 ## Runtime discovery and lifetime
 
@@ -126,8 +187,9 @@ the session command accepted by that picker:
 /model mastermind-fabric/auto --provider mastermind-fabric --tui-session
 ```
 
-The original factory owns AUTO ranking, pool/account eligibility, capacity
-admission and serving observations. An exact model under an enrolled AUTO scope
+The original Capacity Fabric router and APPLICATION broker own AUTO ranking,
+pool/account eligibility, capacity admission and serving observations. The
+factory supplies the trusted consumer identity and its route restriction. An exact model under an enrolled AUTO scope
 narrows the existing owner before inspection freezes. One admitted turn,
 including tools and reconstructed agents, retains one route and original effect;
 a later newly admitted turn may select a different eligible route.
@@ -137,8 +199,8 @@ a later newly admitted turn may select a different eligible route.
 | Closure | Current identity |
 | --- | --- |
 | Native 15-file patch | SHA256 f0d088d9d83311d29461161d13185aa4549f9c0ce27fcbda9fe7b0a46344e9fa |
-| Attended 17-file runtime list | SHA256 fbe561f91bfe73d0c529aa2a8bbf34e2f6f6466e294e96a65041fc69d890ead7 |
-| Original role 11-file publication | SHA256 c6b9a7ee27c69b545ddff4d5b509746bea1e96c9dc2b6ccf597e5df3af107454 |
+| Attended 17-file runtime list | SHA256 7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376 |
+| Original role 11-file publication | SHA256 c801409819ce3cbc2e95414d685ccc7663753bd992e81158448488fd4ac06be2 |
 | Macro source archive | SHA256 9380af04320616d210b45eb26168c20dee6967ce267153c6de521d70d2b0b99b; 75,612,290 bytes |
 
 The attended runtime list and existing role publication are different contracts;
@@ -157,6 +219,8 @@ The shipped application mode map remains empty and runtime capability/service
 enrollment remains absent. Real acceptance still requires the original approved
 generation and service enrollment, eligible physical account/headroom, actual
 model/account/usage attribution, native tools, settlement and denial/recovery
-proof. Preserve the original H4 gateway/profile writer, original J unknown
-effect, account-authentication refusals and existing release holds. They cannot
+proof. Preserve the original H4 gateway/profile writer, original J collection
+and settlement recovery, account-authentication refusals and existing release holds.
+J has terminal execution-success evidence; its controller collection and root
+acceptance are still unresolved, so no replay or re-homing is authorized. They cannot
 be replaced by a fixture credential, a new request identity or a second runner.

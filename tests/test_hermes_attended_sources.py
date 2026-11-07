@@ -215,6 +215,31 @@ class AttendedSourcesTests(unittest.TestCase):
         self.assertIs(source._SHARED, original)
         self.assertEqual(original.references, 1)
 
+    def test_same_release_control_renewal_retains_code_and_freezes_original_operation(self):
+        plugin = self.open()
+        with plugin.operation() as original:
+            first = original.factory()
+            module = sys.modules["engine.provider_production_modes"]
+            pending = self.config / ".next-control"
+            pending.write_text('{"fixture_private_control":"renewed"}\n')
+            pending.chmod(0o440)
+            os.replace(pending, self.control)
+            self.control_inode = (self.control.stat().st_dev, self.control.stat().st_ino)
+            public = json.loads(self.observation.read_bytes())
+            public["control_identity"] = list(source._identity(self.proxy.stat(self.control)))
+            public["control_sha256"] = hashlib.sha256(self.control.read_bytes()).hexdigest()
+            pending = self.config / ".next-observation"
+            pending.write_bytes(artifacts.canonical_json(public) + b"\n")
+            pending.chmod(0o444)
+            os.replace(pending, self.observation)
+            with self.assertRaises(HermesFabricError):
+                original.check()
+            with plugin.operation() as renewed:
+                self.assertEqual(first, renewed.factory())
+                self.assertIs(sys.modules["engine.provider_production_modes"], module)
+                renewed.check()
+        plugin.check()
+
     def test_changed_sealed_verifier_never_executes(self):
         (self.root / source._VERIFIER).write_text('raise AssertionError("executed changed verifier")\n')
         with self.assertRaises(HermesFabricError):

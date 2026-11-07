@@ -533,3 +533,28 @@ def test_exact_receipt_is_still_required_after_directory_creation(publication_cu
     with pytest.raises(owner.TransactionEffectUnknown):
         publisher._publish(SHA, allow_publication=True)
     assert state['writes'] == 1
+
+
+def test_optional_attended_configuration_uses_exact_v2_without_changing_legacy_v1():
+    prior = control()
+    legacy = c.encode_observation(prior, identity(prior), SHA)
+    document = json.loads(prior)
+    document[c.CONFIGURATION_FIELD] = "d" * 64
+    raw = json.dumps(document).encode()
+    extended = c.parse_observation(c.encode_observation(raw, identity(raw), SHA))
+    assert extended["schema"] == c.CONFIGURATION_SCHEMA
+    assert set(extended) == c.FIELDS | {c.CONFIGURATION_FIELD}
+    assert extended[c.CONFIGURATION_FIELD] == "d" * 64
+    assert c.encode_observation(prior, identity(prior), SHA) == legacy
+    extended["schema"] = c.SCHEMA
+    with pytest.raises(c.ControlObservationError):
+        c.parse_observation(json.dumps(extended).encode())
+
+
+@pytest.mark.parametrize("digest", [None, "", "0" * 64, "D" * 64, "d" * 63, True])
+def test_attended_configuration_selector_rejects_invalid_optional_digest(digest):
+    document = json.loads(control())
+    document[c.CONFIGURATION_FIELD] = digest
+    raw = json.dumps(document).encode()
+    with pytest.raises(c.ControlObservationError):
+        c.encode_observation(raw, identity(raw), SHA)

@@ -6174,6 +6174,170 @@ def materialize_hermes_attended_source_projection(
     return receipt
 
 
+
+def _attended_configuration_owner():
+    try:
+        from ops.executive_os import hermes_attended_configuration
+    except ModuleNotFoundError:
+        import hermes_attended_configuration
+    return hermes_attended_configuration
+
+
+def _attended_configuration_inputs(archive, commitment_path):
+    owner = _attended_configuration_owner()
+    source, _, raw = _read_attended_projection(archive, commitment_path)
+    with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+        inputs = {name: bundle.read("payload/" + name) for name in owner.INPUTS}
+    return source, inputs
+
+
+def build_hermes_attended_configuration(
+    observation_path, expected_observation_sha256, archive, commitment_path, output,
+):
+    owner = _attended_configuration_owner()
+    source, inputs = _attended_configuration_inputs(archive, commitment_path)
+    observation = owner.parse_json(_read_small_nofollow(observation_path, 262144))
+    raw = owner.build_capsule(observation, expected_observation_sha256, source, inputs)
+    _write_bytes_exclusive(output, raw, 0o600)
+    return {"schema": owner.SCHEMA, "sha256": hashlib.sha256(raw).hexdigest(),
+            "size": len(raw), "observation_sha256": expected_observation_sha256,
+            "source_commit": source["commit"]}
+
+
+def check_hermes_attended_configuration(
+    capsule_path, expected_sha256, archive, commitment_path,
+):
+    owner = _attended_configuration_owner()
+    source, inputs = _attended_configuration_inputs(archive, commitment_path)
+    raw = _read_small_nofollow(capsule_path, owner.MAX_BYTES)
+    value, _ = owner.validate_capsule(raw, expected_sha256, source, inputs)
+    return {"schema": owner.SCHEMA, "sha256": expected_sha256,
+            "qualified_until": value["observation"]["eligibility"]["qualified_until"]}
+
+
+def _installed_attended_configuration_inputs(release_root):
+    """Read the existing sealed source projection; never execute its Python."""
+    owner = _attended_configuration_owner()
+    source = _attended_commitment(_read_small_nofollow(
+        release_root / HERMES_ATTENDED_COMMITMENT, 8192))
+    receipt = _attended_json(_read_small_nofollow(
+        release_root / HERMES_ATTENDED_RECEIPT_SUFFIX, 8192))
+    inventory_raw = _read_small_nofollow(
+        release_root / HERMES_ATTENDED_INVENTORY_SUFFIX, _ATTENDED_MANIFEST_MAX)
+    wanted = receipt["dependency_inventory"]
+    if (wanted["path"] != str(release_root / HERMES_ATTENDED_INVENTORY_SUFFIX)
+            or wanted["size"] != len(inventory_raw)
+            or wanted["sha256"] != hashlib.sha256(inventory_raw).hexdigest()
+            or receipt["release_sha"] != release_root.name
+            or any(receipt[k] != source[k] for k in ("repository", "commit", "tree", "projection",
+                                                    "material_manifest_sha256", "archive_sha256"))):
+        raise CapacityHostArtifactError("ATTENDED_INSTALLED_SOURCE_MISMATCH")
+    inventory = _attended_json(inventory_raw)
+    roots = {entry["path"]: entry["entries"] for entry in inventory["roots"]}
+    inputs = {}
+    projection = release_root / HERMES_ATTENDED_SOURCE_SUFFIX
+    for name in owner.INPUTS:
+        prefix, relative = name.split("/", 1)
+        entries = {entry["path"]: entry for entry in roots[str(projection / prefix)]}
+        row = entries[relative]
+        raw = _read_small_nofollow(projection / name, owner.MAX_BYTES)
+        if (row["type"] != "file" or row["size"] != len(raw)
+                or row["sha256"] != hashlib.sha256(raw).hexdigest()):
+            raise CapacityHostArtifactError("ATTENDED_INSTALLED_SOURCE_MISMATCH")
+        inputs[name] = raw
+    return source, inputs
+
+
+def check_installed_hermes_attended_configuration(release_root, expected_sha256, *, parent=None):
+    owner = _attended_configuration_owner()
+    if type(expected_sha256) is not str or _DIGEST_RE.fullmatch(expected_sha256) is None:
+        raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_DIGEST_INVALID")
+    parent = parent or Path("/Library/Application Support/MastermindExecutive/config") / owner.DIRECTORY
+    target = parent / expected_sha256
+    source, inputs = _installed_attended_configuration_inputs(release_root)
+    raw = _read_small_nofollow(target / owner.CAPSULE_FILE, owner.MAX_BYTES)
+    value, files = owner.validate_capsule(raw, expected_sha256, source, inputs)
+    inventory = owner.inventory_bytes(files, target)
+    expected = {owner.CAPSULE_FILE: raw, owner.INVENTORY_FILE: inventory, **files}
+    observed = set()
+    for directory in (parent, target, target / "config"):
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o755
+                or _descriptor_path_has_acl(directory)):
+            raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_METADATA_INVALID")
+    for path in target.rglob("*"):
+        name = path.relative_to(target).as_posix()
+        if name == "config" and path.is_dir() and not path.is_symlink():
+            continue
+        observed.add(name)
+        info = path.lstat()
+        if (name not in expected or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid() or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o444
+                or _descriptor_path_has_acl(path)
+                or _read_small_nofollow(path, owner.MAX_BYTES) != expected[name]):
+            raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_METADATA_INVALID")
+    if observed != set(expected):
+        raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_MEMBERS_INVALID")
+    return value
+
+
+def _descriptor_path_has_acl(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        return _descriptor_has_extended_acl(fd)
+    finally:
+        os.close(fd)
+
+
+def materialize_hermes_attended_configuration(
+    capsule_path, expected_sha256, release_root, *, parent=None,
+):
+    """Create inert immutable content; only the existing Control writer selects it."""
+    owner = _attended_configuration_owner()
+    source, inputs = _installed_attended_configuration_inputs(release_root)
+    raw = _read_small_nofollow(capsule_path, owner.MAX_BYTES)
+    _, files = owner.validate_capsule(raw, expected_sha256, source, inputs)
+    parent = parent or Path("/Library/Application Support/MastermindExecutive/config") / owner.DIRECTORY
+    if not parent.is_absolute() or parent.parent.is_symlink():
+        raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_PARENT_INVALID")
+    outer = parent.parent.lstat()
+    if (not stat.S_ISDIR(outer.st_mode) or outer.st_uid != os.geteuid()
+            or stat.S_IMODE(outer.st_mode) & 0o022 or _descriptor_path_has_acl(parent.parent)):
+        raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_PARENT_INVALID")
+    if not parent.exists() and not parent.is_symlink():
+        parent.mkdir(mode=0o755)
+        parent.chmod(0o755)
+    info = parent.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o755 or _descriptor_path_has_acl(parent)):
+        raise CapacityHostArtifactError("ATTENDED_CONFIGURATION_PARENT_INVALID")
+    target = parent / expected_sha256
+    if target.exists() or target.is_symlink():
+        check_installed_hermes_attended_configuration(release_root, expected_sha256, parent=parent)
+        return {"sha256": expected_sha256, "state": "EXISTING_IDENTICAL"}
+    candidate = Path(tempfile.mkdtemp(prefix=".candidate-", dir=parent))
+    (candidate / "config").mkdir(mode=0o755)
+    (candidate / "config").chmod(0o755)
+    payloads = {owner.CAPSULE_FILE: raw,
+                owner.INVENTORY_FILE: owner.inventory_bytes(files, target), **files}
+    for name, payload in payloads.items():
+        _write_bytes_exclusive(candidate / name, payload, 0o444)
+        (candidate / name).chmod(0o444)
+    _fsync_directory(candidate / "config")
+    candidate.chmod(0o755)
+    _fsync_directory(candidate)
+    fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        _rename_exclusive(fd, candidate.name, fd, target.name)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    check_installed_hermes_attended_configuration(release_root, expected_sha256, parent=parent)
+    return {"sha256": expected_sha256, "state": "STAGED_UNSELECTED"}
+
+
 def build_source_transport(
     source_repository: Path,
     output: Path,
@@ -9417,6 +9581,21 @@ def _parser() -> argparse.ArgumentParser:
     attended_stage.add_argument("--archive", type=Path, required=True)
     attended_stage.add_argument("--release-root", type=Path, required=True)
     attended_stage.add_argument("--published-release-root", type=Path, required=True)
+    config_build = commands.add_parser("build-hermes-attended-configuration")
+    config_build.add_argument("--observation", type=Path, required=True)
+    config_build.add_argument("--observation-sha256", required=True)
+    config_build.add_argument("--archive", type=Path, required=True)
+    config_build.add_argument("--commitment", type=Path, required=True)
+    config_build.add_argument("--output", type=Path, required=True)
+    config_check = commands.add_parser("check-hermes-attended-configuration")
+    config_check.add_argument("--capsule", type=Path, required=True)
+    config_check.add_argument("--sha256", required=True)
+    config_check.add_argument("--archive", type=Path, required=True)
+    config_check.add_argument("--commitment", type=Path, required=True)
+    config_stage = commands.add_parser("stage-hermes-attended-configuration")
+    config_stage.add_argument("--capsule", type=Path, required=True)
+    config_stage.add_argument("--sha256", required=True)
+    config_stage.add_argument("--release-root", type=Path, required=True)
     build = commands.add_parser("build-source-transport")
     build.add_argument("--source-repository", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
@@ -9530,6 +9709,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 published_release_root=args.published_release_root,
                 adapter_package_sha256=hermes_attended_adapter_digest(
                     args.release_root / "integrations/hermes_application_fabric"))
+        elif args.command == "build-hermes-attended-configuration":
+            value = build_hermes_attended_configuration(
+                args.observation, args.observation_sha256, args.archive, args.commitment, args.output)
+        elif args.command == "check-hermes-attended-configuration":
+            value = check_hermes_attended_configuration(
+                args.capsule, args.sha256, args.archive, args.commitment)
+        elif args.command == "stage-hermes-attended-configuration":
+            value = materialize_hermes_attended_configuration(
+                args.capsule, args.sha256, args.release_root)
         elif args.command == "build-source-transport":
             value: Any = build_source_transport(
                 args.source_repository,

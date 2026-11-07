@@ -32,6 +32,8 @@ CONTROL_AEAD_BUNDLE=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
 HERMES_ATTENDED_SOURCE=""
+HERMES_ATTENDED_CONFIGURATION=""
+HERMES_ATTENDED_CONFIGURATION_SHA256=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
 PYTHON_RUNTIME_ROOT=""
@@ -402,6 +404,8 @@ while [ "$#" -gt 0 ]; do
     --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --hermes-attended-source) HERMES_ATTENDED_SOURCE="${2:-}"; shift 2 ;;
+    --hermes-attended-configuration) HERMES_ATTENDED_CONFIGURATION="${2:-}"; shift 2 ;;
+    --hermes-attended-configuration-sha256) HERMES_ATTENDED_CONFIGURATION_SHA256="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
     --python-team-identifier) PYTHON_TEAM_ID="${2:-}"; shift 2 ;;
@@ -1286,6 +1290,19 @@ if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
       exit 65
     }
 fi
+if [ -n "$HERMES_ATTENDED_CONFIGURATION" ] || [ -n "$HERMES_ATTENDED_CONFIGURATION_SHA256" ]; then
+  [ -n "$HERMES_ATTENDED_CONFIGURATION" ] && [ -n "$HERMES_ATTENDED_CONFIGURATION_SHA256" ] \
+    && [ -n "$HERMES_ATTENDED_SOURCE" ] && [ "$STAGE_RELEASE_ONLY" = "0" ] \
+    && [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] || {
+      /bin/echo "Hermes configuration requires its exact digest, source artifact and full installer" >&2; exit 65
+    }
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" check-hermes-attended-configuration \
+    --capsule "$HERMES_ATTENDED_CONFIGURATION" --sha256 "$HERMES_ATTENDED_CONFIGURATION_SHA256" \
+    --archive "$HERMES_ATTENDED_SOURCE" \
+    --commitment "$SOURCE_REPO/integrations/hermes_application_fabric/macro-source.json" >/dev/null || {
+      /bin/echo "Hermes attended configuration preflight refused before maintenance" >&2; exit 65
+    }
+fi
 # Optional event-only dependency artifact is qualified against committed lock
 # bytes before maintenance/service stop. It never reuses the MCP network runtime.
 if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
@@ -1836,6 +1853,11 @@ require_native_no_acl one "$INSTALLED_CODEX" || {
   /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
 }
 
+if [ -n "$HERMES_ATTENDED_CONFIGURATION" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" stage-hermes-attended-configuration \
+    --capsule "$HERMES_ATTENDED_CONFIGURATION" --sha256 "$HERMES_ATTENDED_CONFIGURATION_SHA256" \
+    --release-root "$RELEASE_ROOT" >/dev/null
+fi
 prepare_admin_checkout
 (
   cd "$RELEASE_ROOT"
@@ -1844,7 +1866,7 @@ prepare_admin_checkout
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
     "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$ARM_PRIVILEGED_BROKER" \
-    "$PYTHON_RUNTIME_PROVENANCE_DIGEST" <<'PY'
+    "$PYTHON_RUNTIME_PROVENANCE_DIGEST" "$HERMES_ATTENDED_CONFIGURATION_SHA256" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -1875,6 +1897,7 @@ from scripts.executive_os_phase1c import (
     operator_harness_version,
     arm_privileged_broker,
     python_runtime_provenance_digest,
+    hermes_attended_configuration_sha256,
 ) = sys.argv[1:]
 
 ceo_ingress_expected = {
@@ -1990,6 +2013,16 @@ if source:
     value["python_runtime_provenance_digest"] = python_runtime_provenance_digest
 else:
     value = {**expected, **defaults}
+
+# The existing full installer remains the sole selector/publisher. A same-SHA
+# renewal changes private Control data, never the sealed release. Revocation is
+# an explicitly supplied preserved Control config with this optional key removed.
+if hermes_attended_configuration_sha256:
+    value["hermes_attended_configuration_sha256"] = hermes_attended_configuration_sha256
+if "hermes_attended_configuration_sha256" in value:
+    from ops.executive_os.capacity_host_artifacts import check_installed_hermes_attended_configuration
+    check_installed_hermes_attended_configuration(
+        pathlib.Path(release_root), value["hermes_attended_configuration_sha256"])
 
 # Older installed inputs can omit these optional fields. Materialize only the
 # reviewed disabled defaults admitted by this release; retain every explicit

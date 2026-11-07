@@ -1,5 +1,54 @@
 # Hermes attended installation frontier — 2026-11-07
 
+## Current continuation: installed consumer configuration
+
+This section supersedes the source-currentness details in the earlier milestone
+retained below. Mission remains incomplete and execution continues.
+
+- Source parent is actual composed commit `76cb21520f0aa987ae0f16c005d415e1f76a838c`,
+  including original #2175 through0d817, #2232 throughce625, H4 through12f57 and
+  the native ProviderProfile compatibility correction97e893.
+- Current evidence:
+  `review_evidence/hermes_primary/attended-configuration-qualification-20261107.json`
+  SHA256 `e162f8f276836a9ece9ebf7580433c140ae55263c2030c210f6187b48a0f4cf5`.
+  Actual native APPLICATION/Broker qualification passed27 on MM76cb/Macrofff/native1c.
+  Enrollment export passed8; actual export-to-capsule validation passed2.
+  Publication/installer checks passed197; identity checks passed230.
+- Actual two-home native PM build and isolated installed adapter passed. Complete
+  runtime17 digest is `7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376`;
+  role11 digest is `c801409819ce3cbc2e95414d685ccc7663753bd992e81158448488fd4ac06be2`.
+- Exact Macro archivefff remains unchanged. The real2531-file stager, real
+  canonical factory and native source closure now prove fixed/AUTO/exact
+  selection, same-release renewal, revocation, preserved original configuration,
+  canonical class identity and six rehashed-tampering refusals. Control/root
+  metadata and finite eligibility are explicit fixtures; no live acceptance.
+- The same existing full installer owns capsule selection through private
+  Control and its public v2 observation. Legacy v1 is unchanged when absent.
+  A configuration digest is integrity, not grant or provider authority.
+- Live source carriers read back at MM#2175=`887b7d5df575e8c6492513161f3cb921995fbef5`
+  and Macro#10740=`339e14b58e331a3eda16d619b3a97c324e7f4eca`. Macrofff still needs
+  explicit composition into the original carrier; never replace that branch.
+- Secretary's existing-thread return confirms original gateway/reload custody,
+  no source-changing enrollment repair, and no live non-Go APPLICATION issuer/
+  registration receipt. Source: #983 comment6710784749. No new dispatch/replay.
+- J execution is TERMINAL-SUCCESS, while original controller collection remains
+  UNKNOWN/STALE and root acceptance/settlement NOT_RECORDED. Preserve the missing
+  capture and original collection fence; do not replay/re-home J.
+- Concrete next source action: strict observational effective-config API in the
+  native patch, then use it in native worker evidence. Current native
+  load_config_readonly can initialize/backup files and return FailedConfigRead
+  with old enrollment after malformed current YAML; that is not acceptable.
+- Reconcile the earlier failed qualifier's original PM facts/receipts: its
+  pre-exec prepare_launch path was entered, while post-exec dependency recovery
+  was not reached. Do not infer historical zero effects or repeat that launcher.
+- Remaining acceptance: original protected composition/required CI; native patch
+  and plugin installation under H4 custody; actual current service grants,
+  account/model/tool/usage/settlement journeys; original recovery.
+- No live provider call, privileged install, enrollment, paid START or mission
+  completion is claimed. Native child supplied bounded architecture judgment
+  only; root direct implementation remains under the recorded Fabric refusal.
+
+
 Mission: complete primary/attended APPLICATION and native Subagent Fabric
 integration through the original routing, admission, accounting and release owners.
 Current compatible law pin: protected Mastermind
