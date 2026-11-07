@@ -15,7 +15,7 @@ from typing import Any
 EXECUTIVE_READ_TOOLS = (
     "executive_state", "executive_inbox", "executive_job",
     "executive_fabric", "ceo_intent_status", "session_targets",
-    "executive_mdm", "reconcile_ceo_request", "session_reply_read",
+    "executive_mdm",
 )
 PAPER_READ_TOOLS = ("paper_inspect", "paper_catalog", "paper_read")
 SERVER_NAMES = ("mastermind_executive_v3", "mastermind_paper")
