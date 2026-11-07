@@ -13,7 +13,7 @@ from unittest import mock
 import pytest
 
 from test_go_native_stage import builds, native_stage, ROOT, g, installer, loaded_entry
-from test_go_native_install import go_owner, assert_history
+from test_go_native_install import go_owner, assert_history, retained_go_owner, assert_retained_history
 from test_native_launcher_successor_transition import source_owners, owner
 
 
@@ -290,7 +290,10 @@ def test_selected_purpose_is_closed_and_never_inserted_into_legacy_scope(service
 
 
 def unchanged_ingress(case):
-    assert_history(case)
+    if case.go_plan["schema"] == installer.GO_RETAINED_SCHEMA:
+        assert_retained_history(case)
+    else:
+        assert_history(case)
     assert (case.store / "CURRENT.json").read_bytes() == case.current_before
     assert {name: Path(row["target"]).read_bytes() for name, row in case.go_plan["entries"].items()} == case.bridge_before
 
@@ -596,3 +599,23 @@ def test_recovered_rename_is_durable_and_revalidated_before_receipt(service_owne
         action(case.service_bundle)
     assert "progress" in events and case.service_receipt.exists()
     assert (path.read_bytes(), path.stat().st_ino) == before
+
+
+@pytest.fixture
+def retained_service_owner(retained_go_owner):
+    # Reuse the actual existing service fixture, choosing the genuine retained
+    # transition instead of the intact transition at its installer call.
+    case = retained_go_owner
+    case.go_bundle = case.retained_bundle
+    case.go_plan = case.retained_plan
+    with mock.patch.object(installer, "apply_go", side_effect=installer.apply_retained_go) as applied:
+        result = service_owner.__wrapped__(case)
+        assert applied.call_count == 1
+    return result
+
+
+def test_retained_go_enrolls_and_reconciles_through_actual_service_owner(retained_service_owner, capsys):
+    case = retained_service_owner
+    assert installer._completed_go_for_service(case.go_bundle)[0]["schema"] == installer.GO_RETAINED_SCHEMA
+    test_enrollment_commits_one_private_binding_and_one_scoped_grant(case, capsys)
+    assert_retained_history(case)

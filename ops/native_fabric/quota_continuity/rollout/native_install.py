@@ -139,7 +139,8 @@ def _upgrade_plan(original, target, previous):
 
 
 def _upgrade_entries(plan, *, partial=False, complete=False):
-    mutable = {"pool", "task", "go"} if plan["schema"] == GO_SCHEMA else {"pool", "task"}
+    mutable = ({"pool", "task", "go"}
+               if plan["schema"] in (GO_SCHEMA, GO_RETAINED_SCHEMA) else {"pool", "task"})
     for name, entry in plan["entries"].items():
         target = Path(entry["target"])
         if not target.is_absolute() or target.parent.resolve(strict=True) != target.parent:
@@ -299,6 +300,12 @@ _GO_PLAN_FIELDS = frozenset({
     "to_launcher", "manifest_sha256", "component_bundle", "component_sha256",
     "entries", "digest",
 })
+# The one closed forward admission that may use a COMPLETED successor whose
+# ORIGINAL bootstrap artifact was pruned. It is a distinct, explicit plan
+# shape: the intact-history identities above are never relabelled or widened.
+GO_RETAINED_SCHEMA = "native-ingress-go-application-retained.v1"
+RETAINED_GO_ORIGIN = "retained-completed-successor-after-bootstrap-prune"
+_GO_RETAINED_PLAN_FIELDS = frozenset(_GO_PLAN_FIELDS | {"predecessor_origin"})
 
 
 def _successor_directory(path):
@@ -550,15 +557,21 @@ RETAINED_STATUS_PROOF_SHA256 = {
 }
 
 
-def read_retained_successor_after_bootstrap_prune(bundle):
-    """Read one byte-pinned COMPLETED selection after its bootstrap was pruned.
+def _retained_successor_evidence(bundle, *, original_absent, current_bridges):
+    """Authenticate ONE byte-pinned COMPLETED successor's retained evidence.
 
-    Admitted callers are native-pin status and the closed chatgpt1 gateway
-    formatter's artifact check. This is not native apply or reconcile. The
-    deleted historical bootstrap is never synthesized. Any unknown chain,
-    foreign byte, incomplete transaction or invalid selected generation refuses.
-    Callers must separately prove the enrolled account's original pin and actual
-    current/native selected state. This helper never writes a file or a pointer.
+    Pure and read-only: it proves the retained documents, receipts, verified
+    generations and the published predecessor launcher. It never writes a file,
+    never changes a pointer and grants no mutation admission. Each admitted
+    caller states its own distinct boundary conditions:
+
+    ``original_absent`` - True admits only an ACTUALLY absent original
+    bootstrap artifact; False refuses a present one so the original strict
+    verifier remains the only owner of that history.
+    ``current_bridges`` - True requires the installed ingress bridges to still
+    be the completed successor's own bridges. A later Go ingress replaces
+    them, so a forward admission reads the Go plan's own compare-and-swap
+    instead of this historical one.
     """
     def fixed_files(directory, expected, *, exact=True):
         generation.require(directory, stat.S_ISDIR, stat.S_IRWXU)
@@ -601,6 +614,8 @@ def read_retained_successor_after_bootstrap_prune(bundle):
             or original.parent.resolve(strict=True) != original.parent):
         # Original present but malformed? Use the ORIGINAL strict verifier.
         # Original missing at a new/foreign location? The fixed plan hash refuses.
+        if original_absent:
+            raise ValueError("retained Go predecessor requires an actually absent original bootstrap")
         raise ValueError("strict original bootstrap verifier required")
     generation.require(original.parent, stat.S_ISDIR, stat.S_IRWXU)
     store = Path(plan["store"])
@@ -640,10 +655,27 @@ def read_retained_successor_after_bootstrap_prune(bundle):
         plan["target_generation"],
     ):
         generation.verify(store, identity)
-    _upgrade_entries(plan, complete=True)
-    _require_successor_launcher(
-        plan, {name: raw for name, raw in frozen.items() if name != "PLAN.json"})
-    return plan, {name: raw for name, raw in frozen.items() if name != "PLAN.json"}
+    if current_bridges:
+        _upgrade_entries(plan, complete=True)
+    payloads = {name: raw for name, raw in frozen.items() if name != "PLAN.json"}
+    _require_successor_launcher(plan, payloads)
+    return {"bundle": bundle, "plan": plan, "prior": prior, "original": original,
+            "store": store, "payloads": payloads}
+
+
+def read_retained_successor_after_bootstrap_prune(bundle):
+    """Read one byte-pinned COMPLETED selection after its bootstrap was pruned.
+
+    Admitted callers are native-pin status and the closed chatgpt1 gateway
+    formatter's artifact check. This is not native apply or reconcile. The
+    deleted historical bootstrap is never synthesized. Any unknown chain,
+    foreign byte, incomplete transaction or invalid selected generation refuses.
+    Callers must separately prove the enrolled account's original pin and actual
+    current/native selected state. This helper never writes a file or a pointer.
+    """
+    evidence = _retained_successor_evidence(
+        bundle, original_absent=False, current_bridges=True)
+    return evidence["plan"], evidence["payloads"]
 
 
 def _require_successor_launcher(plan, payloads):
@@ -663,7 +695,7 @@ def _transition_records(plan):
     if schema == SUCCESSOR_SCHEMA:
         prior_key = "prior_upgrade_digest"
         intent_name, suffix, mutable = ".launcher-successor-v1.json", ".successor.json", ("pool", "task")
-    elif schema == GO_SCHEMA:
+    elif schema in (GO_SCHEMA, GO_RETAINED_SCHEMA):
         prior_key = "prior_successor_digest"
         intent_name, suffix, mutable = ".go-application-ingress-v1.json", ".go.json", ("pool", "task", "go")
     else:
@@ -686,6 +718,8 @@ def _apply_ingress_transition(bundle, expected_schema, *, reconcile_only=False):
         reader = read_successor
     elif expected_schema == GO_SCHEMA:
         reader = read_go
+    elif expected_schema == GO_RETAINED_SCHEMA:
+        reader = read_retained_go
     else:
         raise ValueError("unsupported ingress transition")
     plan, payloads = reader(bundle)
@@ -985,6 +1019,201 @@ def reconcile_go(bundle):
     return _apply_ingress_transition(bundle, GO_SCHEMA, reconcile_only=True)
 
 
+def _retained_pool_context(payloads, plan, store):
+    """Recover the interpreter, launcher and store from the pinned pool bridge.
+
+    The retained pool bridge is the exact shell bridge this installer wrote for
+    the completed successor. Re-deriving it from its own parsed argument vector
+    proves the interpreter, the launcher identity and the store without
+    reconstructing any deleted historical artifact.
+    """
+    raw = payloads["pool.bridge"]
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("retained Go predecessor pool bridge differs") from None
+    prefix = "#!/bin/bash\n# " + BRIDGE_MARKER + "\nset -u\nexec "
+    suffix = ' "$@"\n'
+    if not text.startswith(prefix) or not text.endswith(suffix):
+        raise ValueError("retained Go predecessor pool bridge differs")
+    middle = text[len(prefix):-len(suffix)]
+    try:
+        arguments = shlex.split(middle)
+    except ValueError:
+        raise ValueError("retained Go predecessor pool bridge differs") from None
+    if len(arguments) != 8 or shlex.join(arguments) != middle:
+        raise ValueError("retained Go predecessor pool bridge differs")
+    python, launcher, command, store_flag, store_path, entry_flag, entry, terminator = arguments
+    if (command != "exec" or store_flag != "--store" or entry_flag != "--entry"
+            or entry != "pool" or terminator != "--"):
+        raise ValueError("retained Go predecessor pool bridge differs")
+    if not os.path.isabs(python):
+        raise ValueError("retained Go predecessor interpreter differs")
+    launcher_path = Path(launcher)
+    if (store_path != str(store)
+            or launcher_path != store / "launchers" / (SUCCESSOR_TO + ".py")):
+        raise ValueError("retained Go predecessor launcher identity differs")
+    if shell_bridge(python, launcher_path, store, "pool") != raw:
+        raise ValueError("retained Go predecessor pool bridge differs")
+    if plan["entries"]["pool"]["bridge"] != generation.digest(raw):
+        raise ValueError("retained Go predecessor pool bridge differs")
+    return python, launcher_path
+
+
+def _retained_task_bridge(payloads, plan, store, python, old_launcher, new_launcher):
+    """Derive the forward task bridge from the pinned retained one.
+
+    Only the launcher reference changes. The interpreter, the arguments and
+    every original business byte are preserved, and the transformation is
+    exact, bounded to one occurrence and reversible.
+    """
+    raw = payloads["task.bridge"]
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("retained Go predecessor task bridge differs") from None
+    old_branch = _task_bridge_branch(python, old_launcher, store)
+    new_branch = _task_bridge_branch(python, new_launcher, store)
+    if text.count(old_branch) != 1:
+        raise ValueError("retained Go predecessor task bridge differs")
+    if plan["entries"]["task"]["bridge"] != generation.digest(raw):
+        raise ValueError("retained Go predecessor task bridge differs")
+    return text.replace(old_branch, new_branch, 1).encode("utf-8")
+
+
+def _retained_go_plan(prior_successor, target, component, previous):
+    """Derive one forward Go plan from the retained completed successor.
+
+    The shared evidence proves the retained documents, receipts, verified
+    generations and the published predecessor launcher. This admission adds its
+    own distinct conditions: the ORIGINAL bootstrap artifact must be actually
+    absent, the retained bridges must re-derive exactly from the recovered
+    interpreter, and the ordinary Go component, generation, entrypoint,
+    selection compare-and-swap and Studio fences still apply unchanged. No
+    historical artifact is synthesized and no deleted source is reconstructed.
+    """
+    evidence = _retained_successor_evidence(
+        prior_successor, original_absent=True, current_bridges=False)
+    plan = evidence["plan"]
+    payloads = evidence["payloads"]
+    store = evidence["store"]
+    completed = {"schema": generation.POINTER_SCHEMA,
+                 "generation": plan["target_generation"],
+                 "previous": plan["expected_selection"]["generation"],
+                 "sequence": plan["expected_selection"]["sequence"] + 1}
+    _upgrade_pointer(previous)
+    if (previous["sequence"] < completed["sequence"]
+            or previous["sequence"] == completed["sequence"] and previous != completed):
+        raise ValueError("Go selection predates its completed successor")
+    _, before = generation.verify(store, previous["generation"])
+    target_root, after = generation.verify(store, target)
+    if (before["entrypoints"] != generation.ENTRYPOINTS
+            or after["entrypoints"] != dict(generation.ENTRYPOINTS, go=generation.GO_ENTRY)):
+        raise ValueError("Go entrypoint transition differs")
+    component = Path(component)
+    if component.is_relative_to(store.parent):
+        raise ValueError("Go component must be outside the live owner")
+    stable_ext = Path(after["stable_ext"])
+    component_sha, manifest_sha, old_go = _go_component(component, stable_ext, after["files"])
+    new_launcher = _go_file(Path(generation.__file__).resolve())
+    launcher_sha = generation.digest(new_launcher)
+    if launcher_sha == SUCCESSOR_TO:
+        raise ValueError("Go requires its reviewed successor launcher")
+    launcher = store / "launchers" / (launcher_sha + ".py")
+    python, old_launcher = _retained_pool_context(payloads, plan, store)
+    entries = {}
+    forward = {"native_generation.py": new_launcher}
+    for name in ("pool", "task", "remote"):
+        entry = plan["entries"][name]
+        row = {"target": entry["target"], "mode": entry["mode"],
+               "previous": entry["previous"] if name == "remote" else entry["bridge"]}
+        if name != "remote":
+            bridge = (shell_bridge(python, launcher, store, "pool")
+                      if name == "pool" else _retained_task_bridge(
+                          payloads, plan, store, python, old_launcher, launcher))
+            forward[name + ".bridge"] = bridge
+            row["bridge"] = generation.digest(bridge)
+        entries[name] = row
+    go_target = stable_ext / "go_shim/go_shim.py"
+    info = generation.require(go_target, stat.S_ISREG)
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & 0o7022 or info.st_nlink != 1:
+        raise ValueError("Go ingress mode or link custody differs")
+    bridge = go_bridge(old_go, launcher, store)
+    forward["go.bridge"] = bridge
+    entries["go"] = {"target": str(go_target), "mode": mode,
+        "previous": stage_builder.GO_INSTALLED_PREIMAGE, "bridge": generation.digest(bridge)}
+    forward_plan = {"schema": GO_RETAINED_SCHEMA,
+        "prior_successor_bundle": str(evidence["bundle"]),
+        "prior_successor_digest": plan["digest"],
+        "bootstrap_digest": plan["bootstrap_digest"],
+        "store": str(store), "expected_selection": previous,
+        "target_generation": target_root.name,
+        "from_launcher": SUCCESSOR_TO, "to_launcher": launcher_sha,
+        "manifest_sha256": manifest_sha, "component_bundle": str(component),
+        "component_sha256": component_sha, "predecessor_origin": RETAINED_GO_ORIGIN,
+        "entries": entries}
+    forward_plan["digest"] = generation.digest(generation.canonical(forward_plan))
+    return forward_plan, forward
+
+
+def prepare_retained_go(prior_successor, target, component, output):
+    """Prepare one forward Go plan from the retained completed successor.
+
+    Preparation writes only a review bundle. It changes no selection, no
+    ingress bridge, no launcher and no service.
+    """
+    evidence = _retained_successor_evidence(
+        prior_successor, original_absent=True, current_bridges=False)
+    store = evidence["store"]
+    output = Path(output).absolute()
+    generation.require(output.parent, stat.S_ISDIR)
+    if (output.parent.resolve(strict=True) != output.parent
+            or output.is_relative_to(store.parent) or os.path.lexists(output)):
+        raise ValueError("fresh external canonical retained Go bundle required")
+    with generation.publication_lock(store):
+        plan, payloads = _retained_go_plan(prior_successor, target, component,
+                                           generation.current(store))
+        _upgrade_entries(plan)
+        if os.path.lexists(store / "bootstrap/.go-application-ingress-v1.json"):
+            raise ValueError("Go ingress already has an original transaction")
+        output.mkdir(mode=0o700)
+        for name, raw in payloads.items():
+            generation.atomic_bytes(output / name, raw, 0o600)
+        generation.atomic_bytes(output / "PLAN.json", generation.canonical(plan) + b"\n", 0o600)
+    return plan
+
+
+def read_retained_go(bundle):
+    bundle = _successor_directory(bundle)
+    plan = _successor_json(bundle / "PLAN.json")
+    if (type(plan) is not dict or set(plan) != _GO_RETAINED_PLAN_FIELDS
+            or plan["schema"] != GO_RETAINED_SCHEMA
+            or plan["predecessor_origin"] != RETAINED_GO_ORIGIN):
+        raise ValueError("invalid retained Go ingress plan")
+    expected, payloads = _retained_go_plan(plan["prior_successor_bundle"],
+                                           plan["target_generation"],
+                                           plan["component_bundle"],
+                                           plan["expected_selection"])
+    if plan != expected or {p.name for p in bundle.iterdir()} != {"PLAN.json", *payloads}:
+        raise ValueError("retained Go plan or artifact set differs")
+    for name, raw in payloads.items():
+        generation.require(bundle / name, stat.S_ISREG, 0o600)
+        if _go_file(bundle / name) != raw:
+            raise ValueError("retained Go payload differs")
+    return plan, payloads
+
+
+def apply_retained_go(bundle):
+    """Advance only this retained forward Go transition; no process or service control."""
+    return _apply_ingress_transition(bundle, GO_RETAINED_SCHEMA)
+
+
+def reconcile_retained_go(bundle):
+    """Finish only this original missing receipt; never reinstall or select again."""
+    return _apply_ingress_transition(bundle, GO_RETAINED_SCHEMA, reconcile_only=True)
+
+
 SERVICE_SPEC_SCHEMA = "native-go-service-enrollment-specification.v1"
 SERVICE_HTTP_SPEC_SCHEMA = "native-go-service-enrollment-specification.v2"
 SERVICE_SELECTED_SPEC_SCHEMA = "native-go-service-enrollment-specification.v3"
@@ -1006,7 +1235,14 @@ _SERVICE_PREDECESSOR = "application-service.predecessor.private.json"
 def _completed_go_for_service(bundle):
     """Read completed original ingress; never call a transition as inspection."""
     bundle = _successor_directory(bundle)
-    plan, payloads = read_go(bundle)
+    envelope = _successor_json(bundle / "PLAN.json")
+    schema = envelope.get("schema") if type(envelope) is dict else None
+    if schema == GO_SCHEMA:
+        plan, payloads = read_go(bundle)
+    elif schema == GO_RETAINED_SCHEMA:
+        plan, payloads = read_retained_go(bundle)
+    else:
+        raise ValueError("unsupported completed Go ingress schema")
     intent_name, suffix, _, intent, selected, receipt = _transition_records(plan)
     store = Path(plan["store"])
     if (_successor_json(store / "bootstrap" / intent_name) != intent
@@ -2329,6 +2565,21 @@ def shell_bridge(python, launcher, store, entry):
             + " ".join(map(shlex.quote, args)) + ' "$@"\n').encode("utf-8")
 
 
+def _task_bridge_branch(python, launcher, store):
+    """The exact bridge branch this installer appends to the original task source.
+
+    The retained forward admission reuses these exact bytes, so the interpreter,
+    the arguments and every original business byte are preserved and only the
+    launcher reference is transformed.
+    """
+    command = [str(python), str(launcher), "exec", "--store", str(store), "--entry", "task", "--"]
+    return ("\n# " + BRIDGE_MARKER + "\nif __name__ == '__main__':\n"
+            "    import os as _native_ingress_os\n"
+            "    import sys as _native_ingress_sys\n"
+            f"    _native_ingress_os.execv({str(python)!r}, "
+            f"{command!r} + _native_ingress_sys.argv[1:])\n\n")
+
+
 def task_bridge(original, python, launcher, store):
     text = original.decode("utf-8")
     if BRIDGE_MARKER in text:
@@ -2344,12 +2595,7 @@ def task_bridge(original, python, launcher, store):
         break
     # Imports retain the original API body. CLI exec happens before any business
     # import can create mixed flat/generation module identities.
-    command = [str(python), str(launcher), "exec", "--store", str(store), "--entry", "task", "--"]
-    branch = ("\n# " + BRIDGE_MARKER + "\nif __name__ == '__main__':\n"
-              "    import os as _native_ingress_os\n"
-              "    import sys as _native_ingress_sys\n"
-              f"    _native_ingress_os.execv({str(python)!r}, "
-              f"{command!r} + _native_ingress_sys.argv[1:])\n\n")
+    branch = _task_bridge_branch(python, launcher, store)
     lines = text.splitlines(keepends=True)
     result = "".join(lines[:first_business_line]) + branch + "".join(lines[first_business_line:])
     compile(result, "fabric_task.bridge.py", "exec")
@@ -2674,6 +2920,14 @@ def main():
     for command in ("apply-go", "reconcile-go"):
         action = sub.add_parser(command)
         action.add_argument("--bundle", type=Path, required=True)
+    prepare_retained = sub.add_parser("prepare-go-retained")
+    prepare_retained.add_argument("--prior-successor-bundle", type=Path, required=True)
+    prepare_retained.add_argument("--target-generation", required=True)
+    prepare_retained.add_argument("--component-bundle", type=Path, required=True)
+    prepare_retained.add_argument("--output", type=Path, required=True)
+    for command in ("apply-go-retained", "reconcile-go-retained"):
+        action = sub.add_parser(command)
+        action.add_argument("--bundle", type=Path, required=True)
     prepare_service = sub.add_parser("prepare-go-service")
     prepare_service.add_argument("--go-ingress-bundle", type=Path, required=True)
     prepare_service.add_argument("--specification", type=Path, required=True)
@@ -2704,6 +2958,13 @@ def main():
         result = apply_go(args.bundle)
     elif args.command == "reconcile-go":
         result = reconcile_go(args.bundle)
+    elif args.command == "prepare-go-retained":
+        result = prepare_retained_go(args.prior_successor_bundle, args.target_generation,
+                                     args.component_bundle, args.output)
+    elif args.command == "apply-go-retained":
+        result = apply_retained_go(args.bundle)
+    elif args.command == "reconcile-go-retained":
+        result = reconcile_retained_go(args.bundle)
     elif args.command == "prepare-go-service":
         result = prepare_go_service_enrollment(args.go_ingress_bundle, args.specification, args.output)
     elif args.command == "apply-go-service":
