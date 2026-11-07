@@ -2795,10 +2795,14 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                         code="application_selection_changed" if changed else "application_admission_refused",
                         status=409 if changed else 503)
                     return
-                if (original.get("kind") == "turn_present_new_step"
-                        and original["turn"]["disposition"] != "existing"):
-                    self._application_recovered(original["turn"])
-                    return
+                if original.get("kind") == "turn_present_new_step":
+                    if original["turn"]["disposition"] != "existing":
+                        self._application_recovered(original["turn"])
+                        return
+                    if isinstance(error, ApplicationSelectionRefused):
+                        self._application_reply("refused",
+                            code="application_selection_changed", status=409)
+                        return
             except BaseException:
                 pass
             self._application_reply("effect_unknown", code="application_admission_unknown", status=503)

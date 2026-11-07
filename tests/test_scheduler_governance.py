@@ -745,10 +745,23 @@ class TestOvernightSettleLockBoundary:
         settled: list[str] = []
         watch_calls: list[str] = []
 
-        def blocking_watch():
+        retained_handles = []
+        start_run = sched_mod._ledger_start
+
+        def retain_start(*args, **kwargs):
+            handle = start_run(*args, **kwargs)
+            assert handle is not None
+            retained_handles.append(handle)
+            return handle
+
+        monkeypatch.setattr(sched_mod, "_ledger_start", retain_start)
+
+        def blocking_watch(*, handle):
+            assert handle is retained_handles[0]
             watch_calls.append("watch")
             entered.set()
             assert release.wait(timeout=5)
+            return {"autonomous": {"skipped": "tape_calm"}}
 
         monkeypatch.setattr(overnight, "watch_us", blocking_watch)
         monkeypatch.setattr(settle, "settle_us", lambda: settled.append("settled"))
@@ -784,10 +797,23 @@ class TestOvernightSettleLockBoundary:
         settles: list[str] = []
         watch_calls: list[str] = []
 
-        def blocking_watch():
+        retained_handles = []
+        start_run = sched_mod._ledger_start
+
+        def retain_start(*args, **kwargs):
+            handle = start_run(*args, **kwargs)
+            assert handle is not None
+            retained_handles.append(handle)
+            return handle
+
+        monkeypatch.setattr(sched_mod, "_ledger_start", retain_start)
+
+        def blocking_watch(*, handle):
+            assert handle is retained_handles[0]
             watch_calls.append("watch")
             entered.set()
             assert release.wait(timeout=5)
+            return {"china": {"skipped": "tape_calm"}, "hk": {"skipped": "tape_calm"}}
 
         monkeypatch.setattr(overnight, "watch_asia", blocking_watch)
         monkeypatch.setattr(settle, "settle_asia", lambda: settles.append("settled"))

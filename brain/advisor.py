@@ -314,8 +314,8 @@ def _validate_fabric_turns(doc):
 
 def save_fabric_conversation(doc: dict) -> None:
     """Atomic, observable persistence; callers hold fabric_conversation's lock."""
-    _validate_fabric_turns(doc)
     path = _hist_path(doc["conversation_id"])
+    _validate_fabric_turns(doc)
     try:
         raw = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
         if len(raw) > _MAX_CONVERSATION_BYTES:
