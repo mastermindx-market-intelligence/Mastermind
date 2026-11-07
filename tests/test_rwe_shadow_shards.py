@@ -177,7 +177,16 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     runners = [s for s in shards["steps"] if "--shard-index" in s.get("run", "")]
     assert len(runners) == 1
     assert runners[0]["run"] == (
-        "python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}"
+        'python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }} '
+        '--processes "$RWE_PROCESSES"'
+    )
+    assert runners[0]["env"] == {"RWE_PROCESSES": "${{ inputs.processes || '0' }}"}
+    assert document["on"]["workflow_dispatch"]["inputs"]["processes"] == {
+        "description": "Existing precollection children per shard (0 keeps the serial control)",
+        "type": "choice", "options": ["0", "4"], "default": "0", "required": True,
+    }
+    assert {"scripts/ci_xdist_guard.py", "tests/test_ci_prepartition.py"}.issubset(
+        document["on"]["pull_request"]["paths"]
     )
     receipts = [s for s in shards["steps"] if s.get("uses") == "actions/upload-artifact@v4"]
     assert len(receipts) == 1

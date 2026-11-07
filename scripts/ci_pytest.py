@@ -542,6 +542,8 @@ def run_shards(
     # A direct child can exit while its descendants retain this group. Keep
     # group custody until the controller's cancellation grace has completed.
     owned_groups: set[int] = set()
+    retired_groups: set[int] = set()
+    cleanup_failed_groups: set[int] = set()
     cancel_signal = 0
     cancel_started = None
     previous_handlers = {}
@@ -568,17 +570,29 @@ def run_shards(
             cancel_signal = signum
             cancel_started = time.monotonic()
 
+    def signal_group(group, signum):
+        # Reservation and outcome stay under the existing custody lock. A
+        # refused signal is never retried or escalated, and one group's error
+        # must not strand the other original groups before executor shutdown.
+        with running_lock:
+            if (group in retired_groups or group in cleanup_failed_groups
+                    or group in signalled_groups[signum]):
+                return
+            signalled_groups[signum].add(group)
+            try:
+                os.killpg(group, signum)
+            except ProcessLookupError:
+                # The kernel observed no group. Do not target a later reuse of
+                # this numeric process-group identity during the kill phase.
+                retired_groups.add(group)
+            except OSError:
+                cleanup_failed_groups.add(group)
+
     def signal_owned(signum):
         with running_lock:
             groups = tuple(owned_groups)
         for group in groups:
-            if group in signalled_groups[signum]:
-                continue
-            try:
-                os.killpg(group, signum)
-            except ProcessLookupError:
-                pass
-            signalled_groups[signum].add(group)
+            signal_group(group, signum)
 
     def _run(index: int) -> tuple[int, int, str, float]:
         started = time.monotonic()
@@ -609,11 +623,8 @@ def run_shards(
                     running[index] = process
                     owned_groups.add(process.pid)
                 if cancel_signal:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL
-                            if time.monotonic() - cancel_started >= 5 else signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
+                    signal_group(process.pid, signal.SIGKILL
+                        if time.monotonic() - cancel_started >= 5 else signal.SIGTERM)
             try:
                 assert process.stdout is not None
                 for line in process.stdout:
@@ -648,10 +659,7 @@ def run_shards(
                             returncode = 1
             except BaseException:
                 if completion_proof:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    signal_group(process.pid, signal.SIGKILL)
                     process.wait()
                 raise
             finally:
@@ -740,6 +748,9 @@ def run_shards(
 
     # Lowest shard index wins so the reported code is stable across runs
     # rather than depending on which shard happened to finish first.
+    if cleanup_failed_groups:
+        print("CI_CHILD_CLEANUP signal failed; cleanup is unconfirmed", file=sys.stderr, flush=True)
+        return 1
     if cancel_signal:
         return 128 + cancel_signal
     if len(codes) != len(shards):

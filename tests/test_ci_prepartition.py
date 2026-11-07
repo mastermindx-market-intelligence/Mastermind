@@ -363,3 +363,79 @@ def test_broken_controller_output_drains_children_before_executor_join(tmp_path)
                     try: os.killpg(int(path.read_text()), signal.SIGKILL)
                     except ProcessLookupError: pass
                 process.kill(); process.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("refusal", ["permission", "absent"])
+def test_one_group_signal_refusal_does_not_strand_other_owned_groups(tmp_path, refusal):
+    slow = (
+        "from pathlib import Path\nimport os,signal,subprocess,sys,time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "child = subprocess.Popen([sys.executable, '-c', \"import os,signal,time;"
+        "from pathlib import Path;signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+        "Path('seen/grandchild').write_text(str(os.getpid()));time.sleep(60)\"])\n"
+        "Path('seen/slow').write_text(str(os.getpid()))\n"
+        "def test_wait(): time.sleep(60)\n"
+    )
+    fast = ("import os\nfrom pathlib import Path\n"
+            "def test_completed(): Path('seen/fast').write_text(str(os.getpid()))\n")
+    root, output, env = _fixture(tmp_path, {
+        "tests/test_fast.py": fast, "tests/test_slow.py": slow,
+    })
+    env["PYTEST_ADDOPTS"] = "-s"
+    controller = r'''
+import json, os, signal, sys
+from pathlib import Path
+from scripts import ci_pytest as ci
+original = os.killpg
+refusal = sys.argv[1]
+def observed(group, signum):
+    fast = Path("seen/fast")
+    refused = fast.exists() and int(fast.read_text()) == group
+    with Path("seen/signals").open("a") as output:
+        output.write(json.dumps({"group": group, "signal": signum, "refused": refused}) + "\n")
+    if refused:
+        if refusal == "permission":
+            raise PermissionError(1, "fixture signal refusal")
+        raise ProcessLookupError(3, "fixture group is absent")
+    return original(group, signum)
+ci.os.killpg = observed
+raise SystemExit(ci.run_shards((("tests/test_fast.py",), ("tests/test_slow.py",)),
+    root=Path.cwd(), completion_proof=True))
+'''
+    process = subprocess.Popen([sys.executable, "-u", "-c", controller, refusal],
+                               cwd=root, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            ready = all((root / "seen" / name).exists() for name in ("fast", "slow", "grandchild"))
+            if ready and not _running(int((root / "seen/fast").read_text())):
+                break
+            assert process.poll() is None
+            time.sleep(0.02)
+        assert ready
+        fast_pid, slow_pid, descendant = (
+            int((root / "seen" / name).read_text()) for name in ("fast", "slow", "grandchild")
+        )
+        assert not _running(fast_pid)
+        process.send_signal(signal.SIGTERM)
+        text, _ = process.communicate(timeout=12)
+        assert process.returncode == (1 if refusal == "permission" else 128 + signal.SIGTERM), text
+        assert ("CI_CHILD_CLEANUP signal failed; cleanup is unconfirmed" in text) is (refusal == "permission")
+        records = [json.loads(line) for line in (root / "seen/signals").read_text().splitlines()]
+        assert len([row for row in records if row["group"] == fast_pid]) == 1
+        assert {row["signal"] for row in records if row["group"] == slow_pid} == {
+            signal.SIGTERM, signal.SIGKILL,
+        }
+        assert not _running(slow_pid) and not _running(descendant)
+    finally:
+        for name in ("fast", "slow"):
+            path = root / "seen" / name
+            if path.exists():
+                try:
+                    os.killpg(int(path.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=3)
