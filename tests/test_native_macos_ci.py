@@ -39,8 +39,39 @@ def test_native_job_is_independent_and_failure_enforcing():
 def test_existing_frontend_gate_is_preserved():
     job = workflow()["jobs"]["frontend"]
     assert job["runs-on"] == "ubuntu-latest"
-    assert commands(job)[:4] == ["npm ci", "npm run typecheck", "npm test", "npm run build"]
+    assert commands(job)[:3] == ["npm ci", "npm run typecheck", "npm test"]
+    assert "npm run build" in commands(job)[3]
     assert all("continue-on-error" not in step for step in job["steps"])
+
+
+def test_frontend_build_uses_exact_app_only_production_source_closure():
+    job = workflow()["jobs"]["frontend"]
+    build = next(step for step in job["steps"]
+                 if step.get("name") == "Build exact app-only release archive")
+    assert build["working-directory"] == "."
+    command = build["run"]
+    for required in (
+        'release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"',
+        'git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"',
+        'cd "$release_root/app/mastermind_os"',
+        "npm ci --ignore-scripts",
+        "npm run build",
+        'test -s "$release_root/app/mastermind_os/dist/index.html"',
+        'PYTHONPATH="$GITHUB_WORKSPACE" python3 -c',
+        'from ops.executive_os.executive_mcp_entry import build_os_asset_manifest',
+        'build_os_asset_manifest(Path(sys.argv[1]))',
+        'rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"',
+        'cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"',
+    ):
+        assert required in command
+    assert command.index('test -s "$release_root/app/mastermind_os/dist/index.html"') < command.index(
+        'build_os_asset_manifest(Path(sys.argv[1]))'
+    ) < command.index('rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"')
+    assert command.index('rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"') < command.index(
+        'cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"'
+    )
+    assert "|| true" not in command
+    assert not any("continue-on-error" in step for step in job["steps"])
 
 
 def test_compiled_browser_evidence_is_separate_bounded_and_source_bound():
