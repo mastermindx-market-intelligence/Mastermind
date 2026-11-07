@@ -1,0 +1,44 @@
+{
+  "added_path": "tests/integration/test_fabric_chat_cross_pool_auto.py",
+  "hosted_execution": "pending actual original required paired step; archive inclusion alone is not execution proof",
+  "local_paired_qualification": {
+    "macro_fixture_commit": "1636134041b05feb278f3fbb7f44f1847bafac22",
+    "named_tests": 16,
+    "rc": 0,
+    "require_composition": true,
+    "seconds": 4.842,
+    "sha256": "30079ac90c8e92fe7e51ebbf08b8e5ec7029d92a08896ddb835c282adb3b057e",
+    "tail": "................                                               [100%]\n",
+    "test_names": [
+      "test_cancellation_during_close_keeps_held_answer_and_original_close",
+      "test_cancellation_observes_and_saves_original_response_before_unlock",
+      "test_cognition_read_round_freezes_the_actual_auto_route_and_closes_before_publication",
+      "test_completed_original_replays_before_configuration_or_accounting",
+      "test_durable_receipt_corruption_refuses_before_mutable_binding",
+      "test_late_invalid_cognition_call_prevents_the_earlier_business_handler",
+      "test_malformed_route_preserves_unattributed_counts_in_original_step",
+      "test_original_close_lost_ack_holds_answer_without_publication_or_replay",
+      "test_partial_usage_mismatch_does_not_relabel_prior_known_tokens",
+      "test_persistence_failure_does_not_retry_or_publish_held_answer",
+      "test_rich_chat_cannot_be_flattened_into_plaintext_native_harness",
+      "test_rich_tool_turn_freezes_actual_route_and_closes_before_public_answer",
+      "test_second_cancellation_during_cleanup_preserves_first_cancellation",
+      "test_stale_prior_observation_is_not_attached_to_new_failed_step",
+      "test_terminal_unusable_answer_keeps_actual_usage_and_remains_held",
+      "test_unknown_usage_does_not_fabricate_counts_or_prevent_valid_answer"
+    ],
+    "xml_counts_including_subtests": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 26
+    }
+  },
+  "postblob": "747df06e242d3319940f3a776eaee17135ebcf45",
+  "preblob": "892f38be55344c57df307beb48bbe1b4d607ebc5",
+  "runtime_changed": false,
+  "schema": "mastermind.auto_chat_archive_inclusion.v1",
+  "sha256": "604f587bb15a262436b5b433618b2139ea5706bc74590da913f66bd733ff04e6",
+  "source_read_boundary": "Exact hash-guarded known archive continuation edit; no baseline workflow content disclosed or interpreted.",
+  "whole_step_hosted_execution": "NOT_YET_OBSERVED"
+}

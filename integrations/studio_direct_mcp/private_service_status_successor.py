@@ -375,7 +375,8 @@ def _original_pin(svc, account, roots):
     return original_pin_sha
 
 
-def _require_paper_v20_origin(svc, account, roots, original_status_manifest):
+def _require_paper_v20_origin(svc, account, roots, original_status_manifest, *,
+                              config_bytes=None):
     """Bind a later accepted Paper cohort to the ORIGINAL private-service owner.
 
     The original native pin/enrollment is separately authenticated by
@@ -407,9 +408,10 @@ def _require_paper_v20_origin(svc, account, roots, original_status_manifest):
             home=svc._user_root())
     except ValueError:
         fail("PAPER_V20_ORIGIN_UNQUALIFIED")
+    observed_config = (svc._fabric_release_bytes(roots["config"], limit=65536)
+                       if config_bytes is None else strict_bytes(config_bytes))
     if (original_status_manifest != candidate["manifestBytes"]
-            or svc._fabric_release_bytes(roots["config"], limit=65536)
-               != candidate["configBytes"]
+            or observed_config != candidate["configBytes"]
             or digest(candidate["manifestBytes"])
                != PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account]
             or digest(candidate["configBytes"])
@@ -417,6 +419,118 @@ def _require_paper_v20_origin(svc, account, roots, original_status_manifest):
             or manifest_from(earlier_manifest)["files"]
                != manifest_from(original_status_manifest)["files"]):
         fail("PAPER_V20_ORIGIN_CHANGED")
+
+
+def _retained_file_modes(roots, plan):
+    for field, path in (
+        ("module", roots["base"] / MODULE),
+        ("manifest", roots["manifest"]),
+    ):
+        p = path.lstat()
+        if (not stat.S_ISREG(p.st_mode) or p.st_uid != os.getuid()
+                or stat.S_IMODE(p.st_mode) != plan[field + "Mode"]
+                or p.st_nlink != 1):
+            fail("FILE_MODE_CHANGED")
+
+
+def _preserved_runtime(svc, roots, raw):
+    before = manifest_from(raw["manifest.before"])
+    for name, h in before["files"].items():
+        if name != MODULE and digest(svc._fabric_release_bytes(
+                roots["base"] / name)) != h:
+            fail("OTHER_MODULE_CHANGED")
+    if (digest(svc._fabric_release_bytes(roots["plist"])) != before["plistHash"]
+            or svc._stable_regular_file_hash(
+                Path(before["node"]), label="preserved node") != before["nodeHash"]
+            or svc._stable_regular_file_hash(
+                Path(before["backend"]), label="preserved backend") != before["backendHash"]
+            or svc._dependency_tree_hash(roots["node_modules"]) != before["dependencyTreeHash"]):
+        fail("RUNTIME_CHANGED")
+
+
+def historical_pair(svc, account, roots, *, original_plan, original_raw,
+                    config_bytes, manifest_bytes):
+    """Authenticate the frozen forward-before pair through existing successors.
+
+    No native context, mutable current-pair match, durability acknowledgement or
+    lifecycle operation is acquired here. The forward owner supplies an already
+    authenticated original and owns the current phase and pair.
+    """
+    path = roots["state"] / TRANSACTION
+    if not os.path.lexists(path):
+        return False
+    pin = svc._pin_owner_module()
+    enrollment = svc._pin_enrollment_owner_module()
+
+    original_path = roots["state"] / "native-pool-pin"
+    original_sha = pin.plan_sha(svc, original_plan)
+    fingerprint = enrollment.pin_fingerprint(svc, pin, original_path)
+    actual = {name: svc._fabric_release_bytes(original_path / name)
+              for name in sorted(pin.FILES)}
+    if ({name: digest(raw) for name, raw in actual.items()} != fingerprint
+            or pin.decode(actual["plan.json"]) != original_plan
+            or any(actual[name] != raw for name, raw in original_raw.items())
+            or pin.decode(actual["intent.json"])
+               != {"schema": pin.SCHEMA, "planSha256": original_sha}
+            or pin.decode(actual["result.json"])
+               != {"schema": pin.SCHEMA, "planSha256": original_sha,
+                   "effect": "APPLIED"}):
+        fail("ORIGINAL_PIN_CHANGED")
+    intermediate_config = original_raw["config.after.json"]
+    intermediate_manifest = original_raw["manifest.after.json"]
+    enrollment_path = roots["state"] / "native-pool-pin-enrollment"
+    needs_enrollment = account == enrollment.ACCOUNT or account in enrollment.PROFILES
+    if needs_enrollment:
+        profile = enrollment.frozen_profile(account)
+        ep = pin.decode(svc._fabric_release_bytes(enrollment_path / "plan.json"))
+        eplan, eraw = enrollment.retained(
+            svc, pin, roots, enrollment_path, digest(enrollment.encode(ep)),
+            original_raw, fingerprint, profile)
+        if pin.decode(svc._fabric_release_bytes(enrollment_path / "result.json")) != enrollment.result_record(eplan):
+            fail("ENROLLMENT_NOT_COMMITTED")
+        for name, expected in enrollment.TARGET_FILES.items():
+            target = roots["base"] / name
+            info = target.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != eplan["files"][name]["mode"]
+                    or digest(svc._fabric_release_bytes(target)) != expected):
+                fail("ENROLLMENT_SOURCE_CHANGED")
+        intermediate_config, intermediate_manifest = eraw["config.after"], eraw["manifest.after"]
+    elif os.path.lexists(enrollment_path):
+        fail("ENROLLMENT_ACCOUNT_UNQUALIFIED")
+
+    plan, raw, pd = _retained(svc, account, roots, path, config_bytes=config_bytes)
+    if (plan["originalPinPlan"] != original_sha
+            or json.loads(svc._fabric_release_bytes(path / "result.json"))
+               != {"schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"}):
+        fail("ORIGINAL_PIN_CHANGED")
+    exact_edge = (config_bytes == intermediate_config
+                  and raw["manifest.before"] == intermediate_manifest)
+    c2_edge = pin._c2_paper_v20_postpin_start(
+        svc, account, roots, original_plan, original_raw,
+        config_bytes, raw["manifest.before"])
+    _, _, _, paper_edge = _cohort_pin(account, digest(raw["manifest.before"]))
+    if paper_edge:
+        # The existing Paper planner has already verified its closed projection.
+        # Bind the planner's retained input to this authenticated earlier edge.
+        origin = enrollment_path if account == "chatgpt4" else original_path
+        manifest_name, config_name = (("manifest.after", "config.after")
+                                     if account == "chatgpt4"
+                                     else ("manifest.after.json", "config.after.json"))
+        paper_edge = (svc._fabric_release_bytes(origin / manifest_name, limit=65536)
+                      == intermediate_manifest
+                      and svc._fabric_release_bytes(origin / config_name, limit=65536)
+                      == intermediate_config)
+    if not (exact_edge or c2_edge or paper_edge):
+        fail("ORIGINAL_SUCCESSOR_EDGE_CHANGED")
+    if (manifest_bytes != raw["manifest.after"]
+            or digest(config_bytes) != plan["configSha256"]
+            or svc._fabric_release_bytes(roots["base"] / MODULE) != raw["module.after"]):
+        fail("RETAINED_ENDPOINT_CHANGED")
+    _retained_file_modes(roots, plan)
+    _preserved_runtime(svc, roots, raw)
+    return True
 
 
 def _static_state(svc, account, roots, plan, raw):
@@ -432,15 +546,7 @@ def _static_state(svc, account, roots, plan, raw):
     current_config = svc._fabric_release_bytes(roots["config"])
     if digest(current_config) != plan["configSha256"]:
         fail("CONFIG_CHANGED")
-    for field, path in (
-        ("module", roots["base"] / MODULE),
-        ("manifest", roots["manifest"]),
-    ):
-        p = path.lstat()
-        if (not stat.S_ISREG(p.st_mode) or p.st_uid != os.getuid()
-                or stat.S_IMODE(p.st_mode) != plan[field + "Mode"]
-                or p.st_nlink != 1):
-            fail("FILE_MODE_CHANGED")
+    _retained_file_modes(roots, plan)
     state = (
         svc._fabric_release_bytes(roots["base"] / MODULE),
         svc._fabric_release_bytes(roots["manifest"]),
@@ -453,18 +559,7 @@ def _static_state(svc, account, roots, plan, raw):
         phase = "COMMITTED"
     else:
         fail("FOREIGN_STATE")
-    before = manifest_from(raw["manifest.before"])
-    for name, h in before["files"].items():
-        if name != MODULE and digest(svc._fabric_release_bytes(
-                roots["base"] / name)) != h:
-            fail("OTHER_MODULE_CHANGED")
-    if (digest(svc._fabric_release_bytes(roots["plist"])) != before["plistHash"]
-            or svc._stable_regular_file_hash(
-                Path(before["node"]), label="preserved node") != before["nodeHash"]
-            or svc._stable_regular_file_hash(
-                Path(before["backend"]), label="preserved backend") != before["backendHash"]
-            or svc._dependency_tree_hash(roots["node_modules"]) != before["dependencyTreeHash"]):
-        fail("RUNTIME_CHANGED")
+    _preserved_runtime(svc, roots, raw)
     if _original_pin(svc, account, roots) != plan["originalPinPlan"]:
         fail("ORIGINAL_PIN_CHANGED")
     return phase
@@ -651,7 +746,7 @@ def _confirm_retained_durability(svc, roots, target):
         fail("EFFECT_UNKNOWN_DURABILITY_RECONCILE_SAME_OWNER")
 
 
-def _retained(svc, account, roots, path):
+def _retained(svc, account, roots, path, *, config_bytes=None):
     svc._assert_dest_safe(path)
     if not path.is_dir() or path.is_symlink():
         fail("TRANSACTION_UNAVAILABLE")
@@ -678,10 +773,13 @@ def _retained(svc, account, roots, path):
         fail("INTENT_CHANGED")
     raw = {f: svc._fabric_release_bytes(path / f) for f in (
         "manifest.before", "manifest.after", "module.before", "module.after")}
-    _require_paper_v20_origin(svc, account, roots, raw["manifest.before"])
+    observed_config = (svc._fabric_release_bytes(roots["config"])
+                       if config_bytes is None else strict_bytes(config_bytes))
+    _require_paper_v20_origin(svc, account, roots, raw["manifest.before"],
+                              config_bytes=observed_config)
     before = qualify_exact_predecessor(
         account, manifest_bytes=raw["manifest.before"],
-        config_bytes=svc._fabric_release_bytes(roots["config"]),
+        config_bytes=observed_config,
         module_before_bytes=raw["module.before"],
         source_module_bytes=raw["module.after"],
     )

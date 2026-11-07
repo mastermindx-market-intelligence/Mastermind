@@ -1,0 +1,36 @@
+{
+  "schema": "mastermind.fabric_application_ci_owner_repairs.v1",
+  "mission": "fabric-application-integration-20261104-sol",
+  "parent": "37061f19118ab704f04fd55e8f895409a43c75ce",
+  "source_blobs": {
+    "bot/overnight.py": "4b75092f618faa7c2dc299c836d923b37e95ad3f",
+    "tests/test_hermes_omh.py": "8622995086eb5eb60fa4a886c5fe419686be193b"
+  },
+  "changes": {
+    "bot/overnight.py": "Defer runner import until positive saved-original recovery, or after all fresh quarantine/market/tape gates. Original recovery still precedes fresh business mutations.",
+    "tests/test_hermes_omh.py": "Short explicit parameter IDs keep the full131073-byte stdin refusal payload while preventing RWE PYTEST_CURRENT_TEST environment from exceeding process argument/environment limits."
+  },
+  "tests": {
+    "files": [
+      "tests/test_pending_target_cutover.py",
+      "tests/test_hermes_omh.py",
+      "tests/test_overnight.py",
+      "tests/test_autonomous_etf_migration.py",
+      "tests/test_portfolio_archival.py"
+    ],
+    "total": 168,
+    "passed": 168,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "log_sha256": "eb52802bad790f667809b3158807a3c3ca07cbaeada0d1ae8900d063f4da6fdd",
+    "macro_head": "e62e0d8a2f6aa23c6938e142ab79f64c30e7e720",
+    "environment": "Existing M1 proof venv; paired Macro import path. Missing apscheduler3.11.3/tzlocal5.4.4 installed only from existing gate-macos-arm64-py312.lock with --require-hashes/--only-binary/--no-deps; no project lock changes."
+  },
+  "prior_failures_retained": [
+    "Local2scheduler import failures before locked dependencies were present.",
+    "Local1app import failure before paired Macro source was on import path."
+  ],
+  "runtime_effects": [],
+  "remaining": "Native package guard/Studio forward-pin source workers and Grok Metabolism lane; exact-head hosted CI, release and VPS consumer proof."
+}

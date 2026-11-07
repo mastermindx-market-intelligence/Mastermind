@@ -26,6 +26,23 @@ _RUNNERS = {
 }
 
 
+_REFINED_FIELDS = (
+    "decided", "queued_for_open", "holdings", "brain", "run_id", "fabric_held",
+    "target_status", "decision_effective", "skipped", "error", "cost_capped",
+    "publish_error", "write_error", "decision_log_error", "mark_error",
+    "settlement_receipt_finalization", "settlement_receipt_retained",
+)
+
+
+def _watch_kwargs(handle, pid: str) -> dict:
+    from brain import fabric_portfolio, runlog
+    kwargs = fabric_portfolio.caller_kwargs(handle, book=pid)
+    if "run_id" in kwargs:
+        # One existing watch job covers two books; their original operations are distinct.
+        kwargs["run_id"] = runlog.portfolio_id(kwargs["run_id"] + ":" + pid)
+    return kwargs
+
+
 def _overnight_directive(pid: str, t: dict) -> str:
     """Build the Brain's overnight reconsideration prompt from the live tape."""
     groups = t.get("groups") or {}
@@ -65,7 +82,8 @@ def _overnight_directive(pid: str, t: dict) -> str:
     )
 
 
-def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
+def watch(pid: str, asof: str | None = None, *, force: bool = False,
+          run_id: str | None = None, before_provider_start=None) -> dict:
     """One overnight watch tick for book `pid`. No-op (and free) unless the market is CLOSED, a target
     is QUEUED, and the live tape is MATERIAL — only then does it fire the Opus re-decision that revises
     the queued target. Never raises. `force` bypasses the tripwire (manual re-prompt)."""
@@ -76,6 +94,21 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
         if registry.is_archived(pid):
             return {**out, "skipped": "portfolio_archived",
                     "superseded_by": registry.get(pid).get("superseded_by")}
+        mod_name, fn_name = _RUNNERS.get(pid, (None, None))
+        if not mod_name:
+            return {**out, "skipped": "unknown_book"}
+        kwargs = {}
+        if run_id is not None:
+            kwargs["run_id"] = run_id
+        if before_provider_start is not None:
+            kwargs["before_provider_start"] = before_provider_start
+        from brain import runlog
+        if runlog.portfolio_lookup(run_id, book=pid) is not None:
+            # Recover the same original before tripwire, de-risk, or queue mutations.
+            fn = getattr(importlib.import_module(mod_name), fn_name)
+            res = fn(asof=asof, **kwargs) or {}
+            out["refined"] = {key: res.get(key) for key in _REFINED_FIELDS}
+            return out
         if pid == "autonomous":
             from portfolio import autonomous_migration
             if autonomous_migration.is_pending_migration():
@@ -115,22 +148,19 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
         if not (force or overnight.is_material(t)):
             return {**out, "skipped": "tape_calm"}          # deterministic tripwire → free, no LLM
         # MATERIAL overnight move → re-prompt the Brain (Opus) to refine the queued target
-        mod_name, fn_name = _RUNNERS.get(pid, (None, None))
-        if not mod_name:
-            return {**out, "skipped": "unknown_book"}
         fn = getattr(importlib.import_module(mod_name), fn_name)
-        res = fn(asof=asof, directive=_overnight_directive(pid, t)) or {}
-        out["refined"] = {k: res.get(k) for k in ("decided", "queued_for_open", "holdings", "brain")}
+        res = fn(asof=asof, directive=_overnight_directive(pid, t), **kwargs) or {}
+        out["refined"] = {key: res.get(key) for key in _REFINED_FIELDS}
         return out
     except Exception as e:                                   # noqa: BLE001 — a watch miss must never kill the scheduler
         return {**out, "error": repr(e)[:200]}
 
 
-def watch_us(asof: str | None = None) -> dict:
+def watch_us(asof: str | None = None, *, handle=None) -> dict:
     """Overnight watch tick for the one active US Brain (scheduler job)."""
-    return {"autonomous": watch("autonomous", asof)}
+    return {"autonomous": watch("autonomous", asof, **_watch_kwargs(handle, "autonomous"))}
 
 
-def watch_asia(asof: str | None = None) -> dict:
+def watch_asia(asof: str | None = None, *, handle=None) -> dict:
     """Overnight watch tick for the Greater-China Brain books (scheduler job)."""
-    return {pid: watch(pid, asof) for pid in ("china", "hk")}
+    return {pid: watch(pid, asof, **_watch_kwargs(handle, pid)) for pid in ("china", "hk")}

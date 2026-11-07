@@ -1,0 +1,107 @@
+{
+  "schema": "mastermind.fabric_application_native_composed_source.v1",
+  "mission": "fabric-application-integration-20261104-sol",
+  "parent": "2b8343dd43d2600d4c304977b125118e7ea36348",
+  "source_blobs": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "5dbf9d7256c02739464ef5b1f9bb00718b97c5a6",
+    "ops/native_fabric/quota_continuity/rollout/native-manifest.json": "f861a31f777cf1ee4012972d965247e21d429fbf",
+    "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json": "30c5d2883a1d38d426a590c30522dc8356efee98",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "8c06c4a3a57048088668565317e5e95132b6281d",
+    "tests/test_catalog_native_release_staging.py": "2654e0bb2bf555f94b5d4c44f17ef0ca7972f518",
+    "tests/test_host_pull_launchd_admission.py": "477d2426cccfecbe101368fb42bd4cec6f70d1a4",
+    "tests/test_paid_initializer.py": "09a219a0120889ba9fc6ed05f6abf700c61d5b22",
+    "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py": "07557e88d33d6a1f783fb89047f08943a5daa4bb",
+    "tests/test_fabric_native_security_composition_20261018.py": "61567c38400bf893466b297ac0dbe25b005c12ec",
+    "tests/test_native_pool_policy_publication.py": "02151e858914fe788550a5e7d45e1061cea1012d",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": "0a3f1402f21868ba251eb14653083e4c3e83af5d",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_install.py": "600306d6f1fb5f5327e482d4fbe04560c3866ec2",
+    "ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py": "9a51c86274576e9657dc1e4549086c28f60e80b6"
+  },
+  "artifact_refs": [
+    "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6704964168",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6705106327"
+  ],
+  "native_package_original": {
+    "run_id": "fabric-app-j-native-cohort-20261107-01",
+    "patch_sha256": "a71bac2d11eefbc5b56b4b72dab432279d7e2c6de860bfbc0bf83443aaf0c307",
+    "scope": "four paths, composed with six truthful current-source test pin updates; all historical constants preserved"
+  },
+  "service_owner": {
+    "original_run": "fabric-app-go-retained-predecessor-20261107-01",
+    "patch_sha256": "75e04a163f2585e9662a75db58d840da5c1281da2ff49ab93b1e31c1c02b1d9c",
+    "root_companion": "Exact-schema completed-Go dispatch, no fallback; every intent/receipt/current/bridge/launcher/generation fence retained. Third existing service test file added for actual retained-origin enrollment/reconciliation and historical absence proof."
+  },
+  "builds": [
+    {
+      "kind": "base",
+      "returncode": 0,
+      "seconds": 0.094,
+      "log_sha256": "f6f6031f40f7848ffc1ec091dee5567c21b02f6d036b2bfb7835df6223912533",
+      "output": "{\"native_files\": 107, \"total_bytes\": 3233076, \"manifest_sha256\": \"c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459\", \"source_inventory_sha256\": \"8ea3e85095428833c78ce08309ca1a2db748a92e69f3023f03679df54298bc5f\"}\n",
+      "files": 107,
+      "bytes": 3233076,
+      "manifest_sha256": "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459",
+      "collector_sha256": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d",
+      "output_names": [
+        "external-go-component",
+        "native-code-stage",
+        "native-manifest.json",
+        "native-source-inventory.json"
+      ]
+    },
+    {
+      "kind": "http",
+      "returncode": 0,
+      "seconds": 0.094,
+      "log_sha256": "b430df9160d6394cc00443cf90d7f34a64e2eb006771d8dee2754c97859c45a1",
+      "output": "{\"native_files\": 112, \"total_bytes\": 3553408, \"manifest_sha256\": \"4d2f717cd2b9c18d0d1ffa004757b26c5fa1a2b537882d38b0e10d561bdc7b4f\", \"source_inventory_sha256\": \"8860516dcdac08c98c579621c8a6b26e91010a3682822252da71fe9cc6f02c69\"}\n",
+      "files": 112,
+      "bytes": 3553408,
+      "manifest_sha256": "4d2f717cd2b9c18d0d1ffa004757b26c5fa1a2b537882d38b0e10d561bdc7b4f",
+      "collector_sha256": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d",
+      "output_names": [
+        "external-go-component",
+        "native-code-stage",
+        "native-manifest.json",
+        "native-source-inventory.json"
+      ]
+    }
+  ],
+  "tests": {
+    "package": {
+      "total": 334,
+      "passed": 328,
+      "skipped": 6,
+      "failures": 0,
+      "errors": 0,
+      "log_sha256": "030c7fc9377c5af9781755c6159cd9e7382ee6788fb3817211769b576845813c",
+      "skip_reason": "Six actual Linux initializer/memfd/FD/getpath/xattr/proc tests require Linux; hosted exact-head proof remains owed."
+    },
+    "native_and_service_first": {
+      "total": 154,
+      "passed": 153,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "a75dc3b6000e0ae916ac1c62132f354d4375f6854937ec2176d289463289c531",
+      "failure": "New retained service test reached genuine enrollment and all replay/startup assertions but final test history helper wrongly expected pruned bootstrap directory."
+    },
+    "service_after_fixture_correction": {
+      "total": 50,
+      "passed": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "5952b218382e51f578768c0a348723d5418c12143cc6d5f49d527f1d1b978a79",
+      "meaning": "All service tests rerun; correct retained-history verifier selected explicitly by retained schema; original and retained owner assertions preserved."
+    }
+  },
+  "runtime_effects": [],
+  "remaining": [
+    "Hosted composed-head CI including Linux-only cases",
+    "Existing Studio forward-pin source companion and command inventory fixture",
+    "Independent overnight/Hermes/Grok-Qwen test repairs are separate uncommitted root lane",
+    "Generation publication/selection, C3 installed-control preserving migration and original J reconciliation",
+    "Go service enrollment, VPS application activation, all named consumer and modality real-path proof"
+  ]
+}

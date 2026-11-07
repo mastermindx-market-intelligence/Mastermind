@@ -97,6 +97,10 @@ def source_owners(tmp_path_factory):
     assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert set(long_retained['files']) == long_names
     base_paths = {
+        # Only historical102 lacks this retained APPLICATION carrier predecessor.
+        # Historical95 already carries its distinct support bytes in its fixture.
+        'ext/support_bundle.py':
+            ROLLOUT / 'preimages/support_bundle_e5e6153.py',
         'ext/artifact_delivery.py':
             ROLLOUT.parents[1] / 'grok47/overlay/artifact_delivery.py',
         'ext/fabric_operator_contract.py':
