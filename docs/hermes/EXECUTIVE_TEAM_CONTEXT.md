@@ -63,6 +63,41 @@ The existing Agent OS/native memory/continuation lane must provide those facts t
 
 This first consumer therefore makes specialist context useful and safely callable while leaving exact missing integration visible. No existing native/OMH memory provider is replaced. No active #2134/H24/OMH/Capacity source is changed.
 
+## Company organization and goal lineage (Paperclip-inspired)
+
+The original `mmx_leadership_brief` now includes a bounded
+`organization_context` (`mastermind.hermes_organization_context.v1`) on
+**AVAILABLE** source only. It is part of the same one authenticated Mission v3
+read and the same native host-bound session/role guard; it does not register a
+second tool or call another backend.
+
+- The nine existing charter keys form one explicit *advisory reporting tree*
+  rooted in the human Chairman. Chief of Staff, Engineering, Reliability and
+  other lead/reporting relationships are editorial guidance, not proof that
+  any particular native role is enrolled, present, delegated or authorized.
+  `live_roster_state=NOT_OBSERVED` and each seat is `NOT_OBSERVED`.
+- The caller's current, already-authorized workstream and Executive root are
+  shown as a read-only goal path. Company strategic goals remain
+  `NOT_PROJECTED` until the original strategic owner supplies them.
+  No employee/job assignment is inferred merely because a role reads a
+  mission.
+- Result reference count, review verdict and original acceptance state are
+  separate observations. `original_parent_consumption=NOT_ESTABLISHED` and
+  `product_acceptance=NOT_ESTABLISHED` are deliberately not manufactured from result
+  availability or green CI. All original effect and permission holds survive.
+- Source schema, selected workstream/root identity, freshness, one-mission
+  scope and an 8 KiB organization budget are checked. A failed qualification
+  yields the same value-free overall `UNAVAILABLE`/refusal behavior, without
+  a cached org chart or privileged cross-role mission lookup.
+
+This closes the initial *source* reporting/goal-path consumer, not the
+full organizational product. The authenticated Mastermind OS view and genuine
+Chairman assignment → admitted Fabric work → Hermes parent consumption remain
+downstream of the active H24/#2134/#2166 owners and their installed evidence.
+The editorial implementation plan is
+`docs/superpowers/plans/2026-11-07-paperclip-company-organization-bridge.md`.
+Paperclip's MIT code and separate runner/database were **not** imported.
+
 ## Grok adviser policy
 
 The external Bot role is for a bounded strategic challenge or useful external investigation, not routine Secretary traffic, hourly polling or every-PR review. Its actual model is not promised by this adapter.
