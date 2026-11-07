@@ -399,8 +399,9 @@ selected-child composition do not supply the missing qualified cancellation path
 
 The first DeepSeek integration therefore registers a native **company-job tool**,
 not a `ctx.subagents` provider. The model can submit, inspect and retrieve the
-original job through the existing Fabric. Local interruption stops local waiting;
-it neither cancels the remote worker nor frees its reservation. A post-send lost
+original job through the existing Fabric. Local interruption marks the native
+invocation interrupted while any already-started owner call settles; it neither
+cancels the remote worker nor frees its reservation. A post-send lost
 reply stays EFFECT_UNKNOWN. The original native session and task key recover the
 same run after reconnect, never a replacement keyed by process generation.
 
@@ -464,3 +465,26 @@ its original carrier. Do not remove guards, fabricate grants, rerun refused
 requests, move uncertain effects or substitute an unqualified SubagentProvider.
 
 MISSION_COMPLETE: false. This plan's publication is an intermediate deliverable.
+
+
+### 8.7 F3.U2 source implementation receipt
+
+The path-disjoint native tool is implemented in
+[integrations/deepseek_attended_fabric](../integrations/deepseek_attended_fabric/README.md).
+Its actual adopted native AgentLoop, scoped Tools and Session integration passed
+**39 tests** (five native integration tests and 34 contract negatives/positives).
+The original parent retains the verified fixture result in native history;
+another Agent cannot see or call its tool. The native interrupted-call test
+recovers the original run without a second submission. Exact receipts and proof
+limits are in [EVIDENCE.md](../integrations/deepseek_attended_fabric/EVIDENCE.md).
+
+This is BUILT_NOT_PROVEN for installed production. The native application must
+still supply its authentic original-session/currentness grant, original-owner
+durable new-run admission and enrolled Fabric transport. No allow-all test
+binding, new auth service, transport, queue or lifecycle is an acceptable
+substitute. Continue on the original native installation/runtime carriers for
+those bindings; while they are blocked, inspect the existing reverse native
+worker-engine and host admission contracts for the next safe independent slice.
+
+The programme's seven production slices remain open until their original
+real-path acceptance is met. The passing source tests do not close F3.U1/F3.U2.
