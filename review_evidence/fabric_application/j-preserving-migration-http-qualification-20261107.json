@@ -1,0 +1,148 @@
+{
+  "candidate_applied_to_main_source": false,
+  "http_qualification": {
+    "complete": true,
+    "inputs_unchanged": true,
+    "live_effects": "NONE",
+    "package_inputs": {
+      "package-lock.json": "2caae8997e5e79218183a0acc4ae4e14a2a6379ad33b7694f9f052c9b2af5d39",
+      "package.json": "793f0fcca44f318b95d0ddcbeacc15dd1d3bf56c848e19c8707f0c58973ea5e6"
+    },
+    "patch_sha256": "5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36",
+    "records": [
+      {
+        "elapsed_seconds": 2.536,
+        "exit": 0,
+        "log_sha256": "2a06483e20ac51e90e137590ff5d36779d45ff3ea770dae43b9bfff04badf3f7",
+        "name": "dependencies",
+        "summary": []
+      },
+      {
+        "elapsed_seconds": 3.5,
+        "exit": 0,
+        "log_sha256": "a1df9a487f5eb477a4c338b88b26a36613ff110d98a1d6387cb7d6607614cb6f",
+        "name": "http",
+        "summary": [
+          "\u2139 tests 22",
+          "\u2139 suites 0",
+          "\u2139 pass 22",
+          "\u2139 fail 0",
+          "\u2139 skipped 0"
+        ]
+      }
+    ],
+    "root": "/tmp/mmx-j-source-qualification-a9s2fl4n",
+    "runtime_installation_or_collection": false,
+    "source": "b955c823767b504853b6d79e44d09fc71cdbdd9c"
+  },
+  "live_collection_or_installation": false,
+  "live_effects": "NONE",
+  "operation_id": "fabric-app-admission-compose-20261107-sol-001",
+  "original_migration_02_reconciliation": {
+    "acceptance_reason": "EXECUTION_NOT_ELIGIBLE",
+    "acceptance_state": "UNVERIFIED",
+    "controller_reason": "continuation_evidence_unqualified",
+    "controller_return": "RECORDED",
+    "dispatch_authorized": false,
+    "execution_absence_proven": false,
+    "lineage_state": "VERIFIED_TERMINAL",
+    "observation_source": "canonical fabric_status read in this session",
+    "original_native_driver_J": "UNKNOWN; unchanged",
+    "rc": 1,
+    "result_consumed": false,
+    "result_consumption_authorized": false,
+    "retry_authorized": false,
+    "root_id": "fabric-application-integration-20261104-sol",
+    "root_verified": true,
+    "run_id": "fabric-app-j-preserving-migration-20261107-02",
+    "state": "TERMINAL"
+  },
+  "prior_accepted_http_proof": {
+    "at": "2026-11-07T07:36:10Z",
+    "log_sha256": "b0a0e080b435ec66d39734c528019479648c5fdf9ecf16437371345754317790",
+    "relationship": "prior S3 proof discovered after independent root run; root receipt is corroborating, not first gap closure",
+    "source": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703989157",
+    "tests": 22
+  },
+  "retained_candidate": {
+    "base": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+    "compressed_sha256": "4e6c61cdc049aa7f0f24f7b55d1de48158e0fe8eb1ebc175d67c87e9a62c460c",
+    "first_caller_receipt_sha256": "b57873f0eb0ec730191154cdde0fdf4224b4b1703f78fe69489df6bd839be6e9",
+    "live_effects": "NONE",
+    "original_J": "UNKNOWN; unchanged",
+    "patch_bytes": 141833,
+    "patch_sha256": "5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36",
+    "paths": [
+      {
+        "after_sha256": "37e7cee03652f79e7cd9751651683f048e222ede22792171af465d33a87b3f75",
+        "before_sha256": "00df4ca0fb7994ca307dedfb8c2f1a8477e033caea89dd7dc7c0f29d3b94a753",
+        "path": "integrations/studio_direct_mcp/original-delivery.mjs"
+      },
+      {
+        "after_sha256": "d4224d1e655ad1373f46e4ea1298c024cd1ef9a3956fc8d142d0b9357e509303",
+        "before_sha256": "98cbcae8e8e6356849333a36fc631415169a2fe4462e9c4b4de1f4093e85dac0",
+        "path": "integrations/studio_direct_mcp/original-delivery.test.mjs"
+      },
+      {
+        "after_sha256": "82d876d278c7c3aebc99bbd1ce1393250c3631e110912a2457822f48337cc606",
+        "before_sha256": "1f0389dc50a1e6c16f652e0eea625e5aaf6124183da5e417cb5b894f1dd98706",
+        "path": "integrations/studio_direct_mcp/private_service.py"
+      },
+      {
+        "after_sha256": "ab9d233b0f333aa9c70689712f16593c13b6e1f69dac6960711f32c6c520577f",
+        "before_sha256": "d46a3bc85732c94d349e99b3c5b1657a60fd07deb1d0cb5499159833337ef17b",
+        "path": "integrations/studio_direct_mcp/private_service_original_delivery_test.py"
+      },
+      {
+        "after_sha256": "f790e95373d30ea5bb1da7c399ca0c202586677852b6a3116860126b9dcfed3b",
+        "before_sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
+        "path": "ops/native_fabric/quota_continuity/candidate/original_delivery_collector.py"
+      },
+      {
+        "after_sha256": "180c355bca3462b33e6359bec251a8436d9b8074b20454a562a367895563b9c7",
+        "before_sha256": "6689b85985145cae7729fee0132ce6ecefb2342692f82c98d05f184adc81c1ea",
+        "path": "ops/native_fabric/quota_continuity/rollout/test_application_original_collection_bridge.py"
+      }
+    ],
+    "retained_original_candidate_patch_sha256": "55abc3c1c0b71a49c8e5240d633d2d7b1d33fa107154328cd32f4146bf409c28",
+    "source_blob": "59004a991ed644dd26c21eac2c39a7b00ce59861",
+    "source_candidate_only": true,
+    "source_receipt": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703879773",
+    "tests": [
+      {
+        "log": "s3-j-private-final.log",
+        "sha256": "1192e217a0a8ec473dc159fa9c5bc0a208aecb1cba4a96a7b7c2d4cecf8ce2fd",
+        "state": "passed",
+        "tests": 28
+      },
+      {
+        "log": "s3-j-collector-final.log",
+        "sha256": "493eb8423df45dff1b9b9aaa672b360136c06674af2ca46620f6291ac8dfa278",
+        "state": "passed",
+        "tests": 44
+      },
+      {
+        "log": "s3-j-node-owner-final.log",
+        "sha256": "38c9123ad85dcb2843f9d9b38003af2a9b55de299e8fa601d05a96947d0d4307",
+        "state": "passed",
+        "tests": 1
+      },
+      {
+        "log": "s3-j-node-sdk.log",
+        "sha256": "cc385f36236b18fa467f9ce4d9688aad40b8ea85bdb4f2c24a56e25a7d4854c2",
+        "state": "collection_blocked_missing_preinstalled_MCP_client",
+        "tests": null
+      }
+    ]
+  },
+  "same_six_after_hashes_verified": true,
+  "schema": "mastermind.source_qualification_receipt.v1",
+  "scope": "independent_retained_source_candidate_http_only",
+  "source_commit": "b955c823767b504853b6d79e44d09fc71cdbdd9c",
+  "source_receipt": "review_evidence/fabric_application/j-preserving-migration-repair-20261107.json",
+  "versions": {
+    "node": "v26.5.0",
+    "npm": "11.17.0",
+    "python": "Python 3.14.7"
+  }
+}

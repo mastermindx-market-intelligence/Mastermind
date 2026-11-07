@@ -23,7 +23,7 @@ from common import project_planning_private_contract as private_wire
 from tests.test_executive_service import _config
 from integrations.business_mcp_auth.contracts import load_resource_policy, subject_digest, AUTH_POLICY_SCHEMA
 from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
-from test_project_planning_admission import fixture as core_fixture
+from tests.test_project_planning_admission import fixture as core_fixture
 
 
 def fixture(tmp_path,monkeypatch):

@@ -1324,6 +1324,55 @@ def _directory_closure(paths: set[str]) -> set[str]:
     return directories
 
 
+def _macro_read_selection(expected, read_bytes, *, agentos_context=False):
+    """One finite source-selection rule for adopted and current context reads.
+
+    The caller owns immutable tree membership and captured bytes. This pure
+    selector never reads another source or grants authority to a path.
+    """
+    tracked_paths = set(expected)
+    files = _macro_brief_content_paths(tracked_paths)
+    if agentos_context:
+        from control_plane.agentos_context_bundle import REQUIRED_COMPILER_PATHS
+        files.update(tracked_paths & _AGENTOS_CONTEXT_CONFIG)
+        if not REQUIRED_COMPILER_PATHS <= files:
+            raise ValueError("required context compiler source is unavailable")
+    tree_directories = _tree_directory_paths(tracked_paths)
+    probe_directories: set[str] = set()
+    for rel in sorted(
+        path for path in files if path.startswith("agentos/workstreams/")
+    ):
+        mode, expected_oid = expected[rel]
+        if mode == "120000":
+            raise ValueError("workstream record is a symlink")
+        payload = read_bytes(rel)
+        if _git_blob_oid(payload) != expected_oid:
+            raise ValueError("workstream bytes differ from HEAD")
+        parsed = _frontmatter_lists(payload)
+        repos = parsed["repos"]
+        for field in ("artifacts", "owns_paths"):
+            for entry in parsed[field]:
+                stem = _static_macro_probe(entry, repos)
+                if stem is None:
+                    continue
+                # A tracked symlink can make an otherwise untracked stem
+                # exist in the canonical checkout. Refuse every prefix,
+                # including glob bases, without following the link target.
+                parts = stem.split("/")
+                for end in range(1, len(parts) + 1):
+                    prefix = "/".join(parts[:end])
+                    if prefix in expected and expected[prefix][0] == "120000":
+                        raise ValueError("path-existence probe traverses a symlink")
+                if stem in expected:
+                    files.add(stem)
+                elif stem in tree_directories:
+                    probe_directories.add(stem)
+    if any(expected[rel][0] == "120000" for rel in files):
+        raise ValueError("materialized read closure contains a symlink")
+    directories = _tree_directory_paths(files) | _directory_closure(probe_directories)
+    return files, directories
+
+
 def _build_macro_materialization_plan(
     source: Path, *, runner: PacketRunner, env: Mapping[str, str],
     deadline: float | None,
@@ -1341,46 +1390,8 @@ def _build_macro_materialization_plan(
                 raise ValueError("verified Macro snapshot root differs")
             head = verified_snapshot.head
             expected = dict(verified_snapshot.expected)
-        tracked_paths = set(expected)
-        files = _macro_brief_content_paths(tracked_paths)
-        if agentos_context:
-            from control_plane.agentos_context_bundle import REQUIRED_COMPILER_PATHS
-            files.update(tracked_paths & _AGENTOS_CONTEXT_CONFIG)
-            if not REQUIRED_COMPILER_PATHS <= files:
-                raise ValueError("required context compiler source is unavailable")
-        tree_directories = _tree_directory_paths(tracked_paths)
-        probe_directories: set[str] = set()
-        for rel in sorted(
-            path for path in files if path.startswith("agentos/workstreams/")
-        ):
-            mode, expected_oid = expected[rel]
-            if mode == "120000":
-                raise ValueError("workstream record is a symlink")
-            payload = (source / rel).read_bytes()
-            if _git_blob_oid(payload) != expected_oid:
-                raise ValueError("workstream bytes differ from HEAD")
-            parsed = _frontmatter_lists(payload)
-            repos = parsed["repos"]
-            for field in ("artifacts", "owns_paths"):
-                for entry in parsed[field]:
-                    stem = _static_macro_probe(entry, repos)
-                    if stem is None:
-                        continue
-                    # A tracked symlink can make an otherwise untracked stem
-                    # exist in the canonical checkout. Refuse every prefix,
-                    # including glob bases, without following the link target.
-                    parts = stem.split("/")
-                    for end in range(1, len(parts) + 1):
-                        prefix = "/".join(parts[:end])
-                        if prefix in expected and expected[prefix][0] == "120000":
-                            raise ValueError("path-existence probe traverses a symlink")
-                    if stem in expected:
-                        files.add(stem)
-                    elif stem in tree_directories:
-                        probe_directories.add(stem)
-        if any(expected[rel][0] == "120000" for rel in files):
-            raise ValueError("materialized read closure contains a symlink")
-        directories = _tree_directory_paths(files) | _directory_closure(probe_directories)
+        files, directories = _macro_read_selection(expected, lambda rel: (source / rel).read_bytes(),
+                                                     agentos_context=agentos_context)
         return _MacroMaterializationPlan(
             head=head,
             files=frozenset(files),
@@ -1525,6 +1536,81 @@ def _overlap_full_proofs(
     return results[0], results[1]
 
 
+def _require_git_history_closure(
+    path: Path, head: str, *, runner: PacketRunner, env: Mapping[str, str],
+    deadline: float | None, label: str, record_trees: bool,
+) -> None:
+    """Incumbent ancestry and selected record-tree proof for one Git database."""
+    ancestry_commits: set[str] = set()
+    try:
+        history_result = runner(
+            ["git", "rev-list", "--parents", head],
+            cwd=path,
+            timeout=_remaining_deadline_seconds(
+                deadline, label=label, ceiling=10.0,
+            ),
+            max_bytes=32 * 1024 * 1024, env=env,
+        )
+    except Exception as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        ) from exc
+    if not isinstance(history_result, Mapping) or any(
+        history_result.get(flag) is True
+        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+    ):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    history_stdout = history_result.get("stdout")
+    if history_result.get("code") != 0 or type(history_stdout) is not str:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    for line in history_stdout.splitlines():
+        object_ids = line.split()
+        if not object_ids or any(not _valid_sha(object_id) for object_id in object_ids):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
+        ancestry_commits.update(object_ids)
+    if head not in ancestry_commits:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    _require_git_object_types(
+        path, {object_id: "commit" for object_id in ancestry_commits},
+        runner=runner, env=env, deadline=deadline, label=label,
+    )
+
+    def historical_record_trees() -> None:
+        try:
+            record_history = _bounded_git_text(
+                path,
+                ["rev-list", "--objects", "--no-object-names", "--filter=blob:none",
+                 "--full-history", head, "--", *_MACRO_RECORD_DIRS],
+                runner=runner, env=env, deadline=deadline, label=label,
+                max_bytes=32 * 1024 * 1024,
+            )
+            historical_trees: dict[str, str] = {}
+            for oid in record_history.splitlines():
+                if not _valid_sha(oid):
+                    raise ValueError("record history contains an invalid object")
+                if oid not in ancestry_commits:
+                    historical_trees[oid] = "tree"
+            _require_git_object_types(
+                path, historical_trees, runner=runner, env=env,
+                deadline=deadline, label=label,
+            )
+        except (GatewayError, ValueError) as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            ) from exc
+
+    if record_trees:
+        historical_record_trees()
+
+
 def _clean_git_snapshot(
     path: Path, *, runner: PacketRunner, env: Mapping[str, str], label: str,
     content_scope: str = "all", include_seal: bool = False,
@@ -1643,74 +1729,8 @@ def _clean_git_snapshot(
         )
 
     def _history_closure() -> None:
-        ancestry_commits: set[str] = set()
-        try:
-            history_result = runner(
-                ["git", "rev-list", "--parents", head],
-                cwd=path,
-                timeout=_remaining_deadline_seconds(
-                    deadline, label=label, ceiling=10.0,
-                ),
-                max_bytes=32 * 1024 * 1024, env=env,
-            )
-        except Exception as exc:
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            ) from exc
-        if not isinstance(history_result, Mapping) or any(
-            history_result.get(flag) is True
-            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
-        ):
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            )
-        history_stdout = history_result.get("stdout")
-        if history_result.get("code") != 0 or type(history_stdout) is not str:
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            )
-        for line in history_stdout.splitlines():
-            object_ids = line.split()
-            if not object_ids or any(not _valid_sha(object_id) for object_id in object_ids):
-                raise GatewayError(
-                    "backend_unavailable", f"installed {label} repository objects are incomplete"
-                )
-            ancestry_commits.update(object_ids)
-        if head not in ancestry_commits:
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            )
-        _require_git_object_types(
-            path, {object_id: "commit" for object_id in ancestry_commits},
-            runner=runner, env=env, deadline=deadline, label=label,
-        )
-
-        def historical_record_trees() -> None:
-            try:
-                record_history = _bounded_git_text(
-                    path,
-                    ["rev-list", "--objects", "--no-object-names", "--filter=blob:none",
-                     "--full-history", head, "--", *_MACRO_RECORD_DIRS],
-                    runner=runner, env=env, deadline=deadline, label=label,
-                    max_bytes=32 * 1024 * 1024,
-                )
-                historical_trees: dict[str, str] = {}
-                for oid in record_history.splitlines():
-                    if not _valid_sha(oid):
-                        raise ValueError("record history contains an invalid object")
-                    if oid not in ancestry_commits:
-                        historical_trees[oid] = "tree"
-                _require_git_object_types(
-                    path, historical_trees, runner=runner, env=env,
-                    deadline=deadline, label=label,
-                )
-            except (GatewayError, ValueError) as exc:
-                raise GatewayError(
-                    "backend_unavailable", f"installed {label} repository objects are incomplete"
-                ) from exc
-
-        if content_scope == "macro_brief":
-            historical_record_trees()
+        _require_git_history_closure(path, head, runner=runner, env=env,
+            deadline=deadline, label=label, record_trees=content_scope == "macro_brief")
 
     scoped_capture_files = (
         _macro_brief_content_paths(set(expected))
@@ -2578,6 +2598,25 @@ class InstalledBootPacketCollector:
             raise ValueError("SOURCE_UNAVAILABLE")
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout), agentos_context_request=work_ref)
 
+    def read_current_agentos_context(self, *, work_ref: str, timeout: float = 25.0):
+        """Read current DATA only inside the original nominal installed view.
+
+        This method neither selects a principal nor acquires publication or
+        latest-DATA authority. The existing installed DATA owner supplies both.
+        """
+        from common.workspace_project_plan_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        bound = _CANONICAL_PROJECT_DATA.get()
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 25
+                or self._expected_source_sha is None or self._allow_synthetic_fixture
+                or type(bound) is not tuple or len(bound) != 3
+                or bound[0] is not self or bound[2] != work_ref
+                or _CANONICAL_PROJECT_COMPILATION.get() is not None):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    agentos_context_request=work_ref, agentos_context_current=True)
+
     def project_plan_reader(self, *, macro_root: Path):
         """Issue a read facade bound to this exact installed source owner."""
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader, _SOURCE_ROOT
@@ -2850,6 +2889,7 @@ class InstalledBootPacketCollector:
     def _collect_packet(self, *, repo: Path, now: str | None,
                         timeout: float, acceptance_request: tuple | None = None,
                         agentos_context_request: str | None = None,
+                        agentos_context_current: bool = False,
                         project_plan_request: str | None = None,
                         project_journal_request: str | None = None,
                         project_creation_request: tuple | None = None,
@@ -2862,10 +2902,13 @@ class InstalledBootPacketCollector:
         if sum(x is not None for x in (acceptance_request, agentos_context_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request, project_instructions_request, project_discovery_request)) > 1:
             raise ValueError("ambiguous installed source read")
         bound_data = _CANONICAL_PROJECT_DATA.get()
+        if type(agentos_context_current) is not bool or (agentos_context_current and agentos_context_request is None):
+            raise ValueError("SOURCE_UNAVAILABLE")
         if agentos_context_request is not None:
             from common.workspace_project_plan_contract import validate_selection
             validate_selection({"work_ref": agentos_context_request})
-            if (self._allow_synthetic_fixture or bound_data is not None
+            if (self._allow_synthetic_fixture
+                    or (bound_data is None if agentos_context_current else bound_data is not None)
                     or _CANONICAL_PROJECT_COMPILATION.get() is not None):
                 raise ValueError("SOURCE_UNAVAILABLE")
         data_view = None
@@ -2874,11 +2917,13 @@ class InstalledBootPacketCollector:
         if bound_data is not None:
             if (bound_data[0] is not self or self._allow_synthetic_fixture
                     or (project_knowledge_request is None and project_knowledge_recipe_request is None
-                        and project_plan_request is None and project_discovery_request is None)):
+                        and project_plan_request is None and project_discovery_request is None
+                        and not agentos_context_current)):
                 raise ValueError("CANONICAL_DATA_UNAVAILABLE")
             selected_work = (project_knowledge_request[1]["work_ref"] if project_knowledge_request is not None
                              else project_plan_request if project_plan_request is not None
                              else project_discovery_request[0] if project_discovery_request is not None
+                             else agentos_context_request if agentos_context_current
                              else project_knowledge_recipe_request[1]["request"].get("work_ref"))
             if selected_work != bound_data[2]:
                 raise ValueError("CANONICAL_DATA_UNAVAILABLE")
@@ -2956,7 +3001,8 @@ class InstalledBootPacketCollector:
                     yield root, materialization_plan
             else:
                 from integrations.executive_mcp.project_data_materialization import materialized_project_data
-                with materialized_project_data(data_view, pinned_macro_root=self._macro_root, deadline=deadline) as pair:
+                with materialized_project_data(data_view, pinned_macro_root=self._macro_root, deadline=deadline,
+                                               agentos_context=agentos_context_current) as pair:
                     yield pair
         with materialization() as (packet_macro_root, packet_plan):
             child_env = _installed_child_env(
@@ -2997,6 +3043,31 @@ class InstalledBootPacketCollector:
                 if materialized_observation is None or packet_plan is None:
                     raise GatewayError("backend_unavailable", "installed context materialization unavailable")
                 context_sources, context_inventory = _agentos_context_sources(packet_macro_root, packet_plan, remaining=remaining)
+                context_current = None
+                if agentos_context_current:
+                    # The installed compiler bytes, helper and fixed context
+                    # configuration must remain identical at C and N. Current
+                    # DATA supplies records/probes, never new executable code.
+                    code_sources, _ = _agentos_context_sources(self._macro_root, materialization_plan, remaining=remaining)
+                    if (context_sources != code_sources or any(
+                            materialization_plan.file_objects.get(path) != packet_plan.file_objects.get(path)
+                            for path in _AGENTOS_CONTEXT_CONFIG)):
+                        raise GatewayError("backend_unavailable", "context CODE compatibility differs")
+                    witness = data_view.witness()
+                    if "data_continuity" in witness:
+                        # The older Knowledge closure alone does not cover
+                        # all context records/config/probes or Git-derived
+                        # dates. Even equal file blobs cannot certify its full
+                        # inputs. This version needs C=N or the original
+                        # same-principal canonical publication Event.
+                        raise GatewayError("backend_unavailable", "context DATA continuity is unqualified")
+                    # N has an independent Git object database. Reuse the
+                    # original path-limited history proof before the compiler
+                    # may silently turn a failed per-record git log into None.
+                    _require_git_history_closure(packet_macro_root, expected_packet_macro_sha,
+                        runner=self._runner, env=child_env, deadline=deadline,
+                        label="current context DATA", record_trees=True)
+                    context_current = {"data_observation": witness}
                 context_site, context_runtime = _agentos_context_runtime(self._python, runner=self._runner, remaining=remaining)
                 argv = [os.fspath(self._python), "-I", "-S", "-B",
                     os.fspath(self._code_root / "scripts/agentos_context_bundle_entry.py"),
@@ -3100,24 +3171,28 @@ class InstalledBootPacketCollector:
                         raise ValueError("invalid context result")
                     raw = stdout.encode("utf-8", "strict")
                     bundle = validate_bundle(raw, agentos_context_request)
-                    if (bundle.get("repo_sha") != pre_macro_sha or type(bundle.get("token_budget")) is not int
+                    if (bundle.get("repo_sha") != expected_packet_macro_sha or type(bundle.get("token_budget")) is not int
                             or bundle["token_budget"] != context_contract.TOKEN_BUDGET):
                         raise ValueError("context identity differs")
-                    receipt = {"schema": context_contract.RECEIPT_SCHEMA, "owner": "agent_os",
-                        "source_mode": context_contract.SOURCE_MODE, "workstream": agentos_context_request,
+                    receipt = {"schema": (context_contract.CURRENT_RECEIPT_SCHEMA if agentos_context_current else context_contract.RECEIPT_SCHEMA), "owner": "agent_os",
+                        "source_mode": (context_contract.CURRENT_SOURCE_MODE if agentos_context_current else context_contract.SOURCE_MODE), "workstream": agentos_context_request,
                         "token_budget": context_contract.TOKEN_BUDGET, "bundle_sha256": hashlib.sha256(raw).hexdigest(),
                         "source_script_sha256": next(item["sha256"] for item in context_sources if item["path"] == "scripts/agentos.py"),
                         "compiler_sources": context_sources, "compiler_sources_scope": "fixed_macro_entry_and_helper",
                         "source_inventory_sha256": context_inventory, "source_inventory_files": len(packet_plan.files),
                         "compiler_closure_sha256": context_contract.compiler_closure_digest(context_sources, context_runtime, context_inventory),
                         "mastermind_source_sha": pre_source_sha, "compiler_code_commit": pre_macro_sha,
-                        "data_commit": pre_macro_sha, "repo_sha": pre_macro_sha, "runtime_commitment": context_runtime,
+                        "data_commit": expected_packet_macro_sha, "repo_sha": expected_packet_macro_sha, "runtime_commitment": context_runtime,
                         "import_policy": context_contract.IMPORT_POLICY, "deadline_semantics": context_contract.DEADLINE_SEMANTICS,
                         "source_observation": {"mastermind_generation": pre_source_seal, "macro_generation": pre_macro_seal,
                                                "materialized_generation": materialized_observation[1]},
                         "generated_at": bundle.get("generated_at"), "degraded_count": len(bundle["degraded"]),
                         "omitted_count": len(bundle["omitted_due_to_budget"]), "execution_authority": False}
-                    packet = context_contract.validate_context_read(raw, receipt, work_ref=agentos_context_request)
+                    if agentos_context_current:
+                        receipt.update(context_current)
+                    validator = (context_contract.validate_current_context_read if agentos_context_current
+                                 else context_contract.validate_context_read)
+                    packet = validator(raw, receipt, work_ref=agentos_context_request)
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed context bundle unavailable") from None
                 if _agentos_context_runtime(self._python, runner=self._runner, remaining=remaining) != (context_site, context_runtime):

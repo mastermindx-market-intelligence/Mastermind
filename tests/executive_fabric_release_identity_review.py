@@ -23,63 +23,67 @@ REVIEWED_FILES = {
             (689, 44, 47, 'int', '400'),
         ),
     },
-    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {'sha256': '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
-         'sites': ((487, 66, 69, 'int', '502'),
-                   (1707, 32, 37, 'int', '0o700'),
-                   (2058, 140, 143, 'int', '900'),
-                   (2060, 33, 36, 'int', '900'),
-                   (2123, 22, 25, 'int', '429'),
-                   (2311, 79, 82, 'int', '500'),
-                   (2389, 34, 37, 'int', '400'),
-                   (2404, 33, 36, 'int', '500'),
-                   (2424, 34, 37, 'int', '502'),
-                   (2733, 92, 95, 'int', '400'),
-                   (2740, 99, 102, 'int', '503'),
-                   (2743, 80, 83, 'int', '409'),
-                   (2775, 110, 113, 'int', '503'),
-                   (2781, 100, 103, 'int', '409'),
-                   (2788, 101, 104, 'int', '409'),
-                   (2804, 31, 34, 'int', '409'),
-                   (2804, 51, 54, 'int', '503'),
-                   (2812, 73, 76, 'int', '409'),
-                   (2816, 99, 102, 'int', '503'),
-                   (2923, 107, 110, 'int', '503'),
-                   (2932, 102, 105, 'int', '400'),
-                   (2953, 96, 99, 'int', '429'),
-                   (2963, 103, 106, 'int', '503'),
-                   (2980, 105, 108, 'int', '503'),
-                   (3018, 27, 30, 'int', '503'),
-                   (3023, 101, 104, 'int', '502'),
-                   (3031, 91, 94, 'int', '401'),
-                   (3035, 96, 99, 'int', '400'),
-                   (3065, 113, 116, 'int', '512'),
-                   (3069, 94, 97, 'int', '400'),
-                   (3083, 101, 104, 'int', '409'),
-                   (3085, 110, 113, 'int', '503'),
-                   (3099, 101, 104, 'int', '409'),
-                   (3107, 105, 108, 'int', '409'),
-                   (3110, 101, 104, 'int', '409'),
-                   (3115, 104, 107, 'int', '400'),
-                   (3126, 105, 108, 'int', '409'),
-                   (3135, 94, 97, 'int', '400'),
-                   (3155, 109, 112, 'int', '400'),
-                   (3158, 96, 99, 'int', '400'),
-                   (3178, 96, 99, 'int', '429'),
-                   (3188, 102, 105, 'int', '503'),
-                   (3196, 106, 109, 'int', '429'),
-                   (3237, 103, 106, 'int', '503'),
-                   (3256, 74, 77, 'int', '502'),
-                   (3350, 23, 26, 'int', '400'),
-                   (3423, 35, 38, 'int', '429'),
-                   (3452, 37, 40, 'int', '404'),
-                   (3483, 27, 30, 'int', '400'),
-                   (3486, 27, 30, 'int', '400'),
-                   (3489, 27, 30, 'int', '400'),
-                   (3495, 31, 34, 'int', '400'),
-                   (3502, 31, 34, 'int', '429'))},
+    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
+        "sha256": '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
+        "sites": (
+            (487, 66, 69, 'int', '502'),
+            (1707, 32, 37, 'int', '0o700'),
+            (2058, 140, 143, 'int', '900'),
+            (2060, 33, 36, 'int', '900'),
+            (2123, 22, 25, 'int', '429'),
+            (2311, 79, 82, 'int', '500'),
+            (2389, 34, 37, 'int', '400'),
+            (2404, 33, 36, 'int', '500'),
+            (2424, 34, 37, 'int', '502'),
+            (2733, 92, 95, 'int', '400'),
+            (2740, 99, 102, 'int', '503'),
+            (2743, 80, 83, 'int', '409'),
+            (2775, 110, 113, 'int', '503'),
+            (2781, 100, 103, 'int', '409'),
+            (2788, 101, 104, 'int', '409'),
+            (2804, 31, 34, 'int', '409'),
+            (2804, 51, 54, 'int', '503'),
+            (2812, 73, 76, 'int', '409'),
+            (2816, 99, 102, 'int', '503'),
+            (2923, 107, 110, 'int', '503'),
+            (2932, 102, 105, 'int', '400'),
+            (2953, 96, 99, 'int', '429'),
+            (2963, 103, 106, 'int', '503'),
+            (2980, 105, 108, 'int', '503'),
+            (3018, 27, 30, 'int', '503'),
+            (3023, 101, 104, 'int', '502'),
+            (3031, 91, 94, 'int', '401'),
+            (3035, 96, 99, 'int', '400'),
+            (3065, 113, 116, 'int', '512'),
+            (3069, 94, 97, 'int', '400'),
+            (3083, 101, 104, 'int', '409'),
+            (3085, 110, 113, 'int', '503'),
+            (3099, 101, 104, 'int', '409'),
+            (3107, 105, 108, 'int', '409'),
+            (3110, 101, 104, 'int', '409'),
+            (3115, 104, 107, 'int', '400'),
+            (3126, 105, 108, 'int', '409'),
+            (3135, 94, 97, 'int', '400'),
+            (3155, 109, 112, 'int', '400'),
+            (3158, 96, 99, 'int', '400'),
+            (3178, 96, 99, 'int', '429'),
+            (3188, 102, 105, 'int', '503'),
+            (3196, 106, 109, 'int', '429'),
+            (3237, 103, 106, 'int', '503'),
+            (3256, 74, 77, 'int', '502'),
+            (3350, 23, 26, 'int', '400'),
+            (3423, 35, 38, 'int', '429'),
+            (3452, 37, 40, 'int', '404'),
+            (3483, 27, 30, 'int', '400'),
+            (3486, 27, 30, 'int', '400'),
+            (3489, 27, 30, 'int', '400'),
+            (3495, 31, 34, 'int', '400'),
+            (3502, 31, 34, 'int', '429'),
+        ),
+    },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
         # v9 keeps the original private account directory permission check.
-        "sha256": 'c927a1fef740467518efb32f4809d4c9720a337ee1b7079cc5f2f6891c6f8e5a',
+        "sha256": 'eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320',
         "sites": (
             (822, 60, 65, 'int', '0o700'),
         ),
@@ -802,11 +806,15 @@ REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
 }
 
 
-
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
 
+# Test-owned frozen source data, merged into this same finite review table.
+from tests.test_hermes_workspace_oauth_identity_review import (
+    REVIEWED_FILES as HERMES_WORKSPACE_OAUTH_REVIEWED_FILES,
+)
+REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
 
 # Original #852 held subscription principals, source-qualified at exact sites.
 # This fixed source evidence grants no installed identity, credential or capacity.
@@ -826,9 +834,39 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {
-    "sha256": "09b3d29643aefc783e4d531dbaf679061f918fec5b72ba2e1b6398efddf12473",
-    "sites": ((341, 37, 40, "int", "409"),),
+] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da', 'sites': ((354, 37, 40, 'int', '409'),)}
+
+# Original H4 f008 receipts record the existing Darwin host's ownership.
+# These are observed identities, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these fifteen
+# typed integer tokens in the two exact files are reviewed; any byte or path
+# drift restores the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
+    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "sites": (),
+    "utf8_sites": (
+        (20, 20, 23, "int", "501"),
+        (47, 20, 23, "int", "501"),
+        (70, 20, 23, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
+    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "sites": (),
+    "utf8_sites": (
+        (29, 18, 21, "int", "501"),
+        (42, 18, 21, "int", "501"),
+        (55, 18, 21, "int", "501"),
+        (68, 18, 21, "int", "501"),
+        (85, 18, 21, "int", "501"),
+        (98, 18, 21, "int", "501"),
+        (111, 18, 21, "int", "501"),
+        (128, 18, 21, "int", "501"),
+        (141, 18, 21, "int", "501"),
+        (154, 18, 21, "int", "501"),
+        (167, 18, 21, "int", "501"),
+        (180, 18, 21, "int", "501"),
+    ),
 }
 
 # Exact HTTPS port excluded by the disposable Chisel fixture.

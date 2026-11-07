@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 
-OWNER_COMMIT = "c1647bf55ad5faf07e682f7055e3791280d6d41f"
+OWNER_COMMIT = "a577dbbf605474f97bbafa4ceeb0daf841292421"
 OWNER_SHA256 = "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e"
 
 
@@ -59,6 +59,7 @@ def main():
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         print(json.dumps({"mode": "offline-original-client-loopback-fixture",
             "owner": OWNER_COMMIT, "owner_client_sha256": OWNER_SHA256,
+            "owner_verification_scope": "client_bytes_only",
             "python": sys.version.split()[0], "jsonschema": validator,
             "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),

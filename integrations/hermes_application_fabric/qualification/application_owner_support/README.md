@@ -1,0 +1,83 @@
+# Hermes source support through the original APPLICATION owner
+
+This is an exact-source proposal for Macro #10740. It does not change that
+active branch, enroll an application, publish a credential, activate a service,
+or authorize a provider request. The existing owner consumes it under its
+original source/release rules. Macro #10832's unsupported-base CI-authority
+result is not bypassed or relabelled by this artifact.
+
+## Missing source declaration
+
+At original Macro `a577dbbf605474f97bbafa4ceeb0daf841292421`, the eight general
+AUTO application transports have source support. The five Hermes descriptors
+remain source-held. Valid runtime data alone cannot open those descriptors.
+
+The patch changes only `qualified` and `application_allowed` on these existing
+entries, plus their explanatory comment:
+
+| Descriptor | Existing service / lane | Existing route |
+| --- | --- | --- |
+| native_go_hermes_attended_v1 | hermes_attended_fabric / hermes-attended | Fixed glm-5.3-flash;127.0.0.1:50142 |
+| native_go_hermes_secretary_v1 | hermes_secretary_fabric / hermes-secretary | Fixed deepseek-v4.1-flash;127.0.0.2:50142 |
+| native_go_hermes_meta_v1 | hermes_meta_fabric / hermes-meta-ceo | Fixed deepseek-v4.1-flash;127.0.0.3:50142 |
+| native_fabric_hermes_secretary_auto_v1 | Same Secretary identity | Original AUTO/exact contract; same endpoint |
+| native_fabric_hermes_meta_auto_v1 | Same meta-CEO identity | Original AUTO/exact contract; same endpoint |
+
+The dataclass defaults remain false. All other descriptors, credential-reference
+names, capability IDs, endpoints, fixed models, service relations, workloads,
+metadata permissions and inference-only purpose are unchanged. No attended
+AUTO relation or worker permission is added.
+
+## Runtime authority stays with the owner
+
+Shipped `application_fabric_modes` stays `{}`. The three Hermes capability IDs
+are absent from the shipped manifest; this proposal adds none. Inspect/bind
+still refuse before credential resolution or client construction when runtime
+configuration is absent, disabled, unqualified, expired, missing its qualification
+reference, held by capability policy, or bound to another lane/reference.
+Frozen inspections are rechecked. Explicit source revocation still refuses.
+
+The source flags mean supported software, not current account entitlement or
+live qualification. The provider owner must still qualify the actual physical
+account/product/model/endpoint/configuration, current headroom and enforceable
+financial boundary. Existing native admission, original lease/usage settlement
+and effect recovery remain unchanged.
+
+## Exact composition and proof
+
+`contract.json` pins the parent commit, patch digest, all four source/test
+preimages and postimages, and unchanged client/configuration inputs.
+`a577-hermes-source-support.patch` changes the factory, updates the existing
+role/attended tests for supported-but-unenrolled software while preserving their
+source-revocation assertions, and adds93 focused checks. The original31-case
+attended test is already present in a577 under its exact published blob.
+
+The10 positive source-support cases fail against the unchanged a577 descriptors.
+The proposed source passes383 cases:93 new,23 primary identity,31 attended
+identity,25 shared service identity,168 binding,27 inspection and16 endpoint.
+`local-proof.json` preserves the exact counts and source attribution. These are
+disposable qualification fixtures, with no installed changes or provider calls.
+
+The existing `qualify_application_owner.py` also covers21 native cases:
+Secretary and meta-CEO fixed/AUTO/exact, plus attended fixed; each exercises a
+native tool conversation, step-limit refusal and uncertain-followup retention.
+With `--source-support-proposal`, `owner_source_support.py` archives the exact
+original Macro checkout into a new temporary directory, verifies/applies only
+the four declared files, runs the383 original-owner cases and then executes
+the native cases. The positive proposal path does not override the source
+support flags. Only the disposable endpoint/model and runtime qualification
+inputs are synthetic. The unmodified-owner path is reported separately.
+
+Hosted proposal/native results remain pending until their exact run receipts
+exist. The older12-case c164 native proof is not relabelled as this21-case proof.
+
+## Owner consumption
+
+Reconcile the active Macro head and compare every preimage before applying the
+patch once on the original carrier. A changed input requires source composition;
+do not force, replace, or move the original operation. Preserve the existing
+generic AUTO declarations and all newer source. Run the exact native and runtime
+authority checks against the resulting published source, plus required CI.
+Only then may the original release/enrollment owners proceed under their
+existing controls. No account authentication refusal, runtime hold, or uncertain
+effect is cleared by this source-support proposal.

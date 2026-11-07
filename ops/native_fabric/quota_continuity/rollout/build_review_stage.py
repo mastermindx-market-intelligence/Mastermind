@@ -584,12 +584,14 @@ APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256 = "a68a4af9834da02d85ac00300ccaf0540c0
 # One complete successor of #2194's exact two-repair APPLICATION closure.
 # It composes #2182's publisher into APPLICATION's support owner and preserves
 # #2175/d5df6b2's scoped-model dependencies. The publisher-only WORKER closure
-# is not this precursor. All other 104 members remain bound to this whole parent.
+# is not this precursor. Each accepted parent binds all other 104 members. The second complete
+# parent is the already qualified sparse-executor successor; older pins stay fixed.
 APPLICATION_POOL_COMPOSITION_PARENT_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
-# The same complete cohort with the one committed original-collection
-# successor member. Both are exact whole-manifest closures, so a mixed or
-# partially updated parent still refuses.
+APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+# The original-collection successor has exact parents with and without the
+# qualified sparse executor. Historical parent identities remain unchanged.
 APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256 = "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
+APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256 = "2ebfb9435053b90e4ce3bf9dfc6780460f6b2669f070c40c16f5772e928c9608"
 APPLICATION_POOL_COMPOSITION_PREIMAGES = {
     "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
     "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
@@ -616,38 +618,96 @@ def before_application_pool_composition(manifest):
     previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
     identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
     if identity not in (APPLICATION_POOL_COMPOSITION_PARENT_SHA256,
-                        APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256):
+                        APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256):
         raise ValueError("application pool composition parent closure differs")
     return previous
 
 
+# Exact adoption of #2007's two-hunk sparse preflight repair on the already
+# qualified APPLICATION admission-repair parent. Historical carrier hashes stay
+# frozen; this inverse is only a validation view of the new actual executor.
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
+SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
+
+
+# Exact published scoped-model successor from APPLICATION d5df6b2. Only the
+# two current dependency members change in this base107 transition. Historical
+# parents stay frozen; normalization never rewrites captured dependency bytes.
+EXACT_SCOPED_MODEL_PREIMAGES = {
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+EXACT_SCOPED_MODEL_DIGESTS = {
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
+
+
+def before_exact_scoped_models(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native scoped-model manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        raise ValueError("native scoped-model cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(EXACT_SCOPED_MODEL_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256,
+                        EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        raise ValueError("native scoped-model parent closure differs")
+    return previous
+
+
+def before_sparse_commit_preflight(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse commit preflight manifest invalid")
+    if manifest.get("ext/remote_sub_exec.py") != SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST:
+        return dict(manifest)
+    previous = dict(manifest)
+    previous["ext/remote_sub_exec.py"] = SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256,
+                        SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        raise ValueError("native sparse commit preflight parent closure differs")
+    return previous
+
+
 def application_carrier_candidate_digests(root):
-    # Every current APPLICATION cohort member must be a regular candidate
-    # file: a symlink to the exact reviewed bytes is not a regular file.
-    # A forward-composition member that is missing, swapped for a symlink,
-    # or carrying bytes outside its accepted carrier/preimage pins fails
-    # its own named forward guard instead of silently re-selecting an
-    # historical base for the remaining cohort.
-    composed = dict(APPLICATION_CARRIER_DIGESTS)
-    composed["support_bundle.py"] = APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]
+    sparse = {**APPLICATION_CARRIER_DIGESTS,
+              "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    publisher = {**APPLICATION_CARRIER_DIGESTS,
+                 "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
+    combined = {**publisher,
+                "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
+    # Observe regular candidate files before selecting a complete reviewed
+    # cohort. A missing, symlinked or foreign forward member must fail its
+    # named guard, never silently reselect an historical base.
     observed = {}
     for name in APPLICATION_CARRIER_DIGESTS:
         source = root / "candidate" / name
-        if source.is_symlink() or not source.is_file():
-            observed[name] = None
-        else:
-            observed[name] = sha(source.read_bytes())
-        if (name in GROK47_CANDIDATE_COMPOSITION_DIGESTS
-                and observed[name] not in (composed[name],
-                                           GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])):
-            raise ValueError("accepted Grok forward composition mismatch: " + name)
-    if observed == composed:
-        return composed
-    present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
-               if observed[name] == expected}
-    if present and observed != APPLICATION_CARRIER_DIGESTS:
+        observed[name] = (None if source.is_symlink() or not source.is_file()
+                          else sha(source.read_bytes()))
+        if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+            accepted = {cohort[name] for cohort in cohorts}
+            accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
+            if observed[name] not in accepted:
+                raise ValueError("accepted Grok forward composition mismatch: " + name)
+    if any(observed == cohort for cohort in cohorts):
+        return observed
+    if any(observed[name] in {cohort[name] for cohort in cohorts}
+           for name in APPLICATION_CARRIER_DIGESTS):
         raise ValueError("application carrier candidate cohort is incomplete")
-    return dict(APPLICATION_CARRIER_DIGESTS) if present else {}
+    return {}
 
 
 def application_carrier_candidate_cohort(root):
@@ -664,7 +724,11 @@ def normalize_application_carrier_base_manifest(manifest):
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
-    manifest = before_application_pool_composition(manifest)
+    if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
+        manifest = before_application_pool_composition(manifest)
+    else:
+        manifest = before_exact_scoped_models(manifest)
+    manifest = before_sparse_commit_preflight(manifest)
     manifest = before_admission_integrity(manifest)
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
                if manifest.get("ext/" + name) == expected}
@@ -709,10 +773,8 @@ def main():
     application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
         if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
-            # The accepted historical overlay member stays authenticated even
-            # when the current APPLICATION carrier cohort supplies the staged
-            # bytes; a tampered or replaced overlay never rides through on
-            # carrier selection.
+            # Carrier successors still authenticate their immutable accepted
+            # overlay. Hash the exact regular candidate bytes being staged.
             if name in GROK47_MERGED_SOURCE_DIGESTS:
                 historical = root.parent / "grok47" / "overlay" / name
                 if (historical.is_symlink() or not historical.is_file()

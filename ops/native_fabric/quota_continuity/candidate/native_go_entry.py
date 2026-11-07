@@ -857,4 +857,3 @@ def main(*, verified_root, verified_metadata, application_services=(), applicati
 
 if __name__ == "__main__":
     raise SystemExit("native Go entry requires the verified original ingress")
-
