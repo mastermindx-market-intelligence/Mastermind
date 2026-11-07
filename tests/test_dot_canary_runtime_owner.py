@@ -83,7 +83,7 @@ class Challenge:
         return VerifiedChallengeHTTP(200,json.dumps({"challenge":value["challenge"]}).encode())
 
 
-def setup(tmp_path):
+def make_case(tmp_path):
     runtime=Runtime.at(tmp_path)
     cipher=ExecutiveReplyCipher("existing-key",b"k"*32)
     store=RuntimeCanarySubscriptionStore(runtime,cipher,clock=lambda:NOW)
@@ -110,7 +110,7 @@ def request():
 
 
 def test_owner_challenges_once_persists_and_refreshes_without_duplicate_effect(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     p=principal()
     assert call(handler.policy_for(p))==state[0]
     a=call(handler.subscribe(p,request()))
@@ -128,7 +128,7 @@ def test_owner_challenges_once_persists_and_refreshes_without_duplicate_effect(t
 
 
 def test_account_owner_and_scope_deny_before_callback_or_write(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     foreign=principal(subject="c"*64)
     assert call(handler.policy_for(foreign)) is None
     with pytest.raises(Exception):
@@ -141,7 +141,7 @@ def test_account_owner_and_scope_deny_before_callback_or_write(tmp_path):
 
 
 def test_wrong_channel_or_policy_change_during_challenge_fails_closed(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     bad=dataclasses.replace(request(),channel_id="C0BRFC9JXK8")
     with pytest.raises(Exception):
         call(handler.subscribe(principal(),bad))
@@ -153,7 +153,7 @@ def test_wrong_channel_or_policy_change_during_challenge_fails_closed(tmp_path):
 
 
 def test_uncertain_challenge_is_not_persisted_or_retried(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     challenge.fail=True
     with pytest.raises(SubscriptionEffectUnknown):
         call(handler.subscribe(principal(),request()))
@@ -162,7 +162,7 @@ def test_uncertain_challenge_is_not_persisted_or_retried(tmp_path):
 
 
 def test_lost_commit_ack_is_fenced_by_canonical_readback(tmp_path,monkeypatch):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     original=store.commit
     async def lost_ack(*args,**kwargs):
         await original(*args,**kwargs)
@@ -175,7 +175,7 @@ def test_lost_commit_ack_is_fenced_by_canonical_readback(tmp_path,monkeypatch):
 
 
 def test_policy_fingerprint_change_refuses_discovery_and_new_subscribe(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     handler.policy_provider=lambda who:None
     assert call(handler.policy_for(principal())) is None
     with pytest.raises(Exception):
@@ -184,7 +184,7 @@ def test_policy_fingerprint_change_refuses_discovery_and_new_subscribe(tmp_path)
 
 
 def test_subscription_lifetime_bounded_by_authenticated_principal(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     long=dataclasses.replace(request(),requested_ttl_ms=8*24*60*60*1000)
     with pytest.raises(Exception):
         call(handler.subscribe(principal(),long))
@@ -193,7 +193,7 @@ def test_subscription_lifetime_bounded_by_authenticated_principal(tmp_path):
 
 
 def test_inert_owner_never_advertises_or_subscribes(tmp_path):
-    runtime,store,state,challenge,handler=setup(tmp_path)
+    runtime,store,state,challenge,handler=make_case(tmp_path)
     handler.enabled=False
     assert call(handler.policy_for(principal())) is None
     with pytest.raises(Exception):
