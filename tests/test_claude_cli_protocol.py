@@ -155,6 +155,14 @@ def _assert_workspace_unchanged(workspace: Path, head: str, status: str) -> None
     assert _git("status", "--porcelain=v1", cwd=workspace) == status == ""
 
 
+def _read_live_fake_state(path: Path) -> dict[str, object] | None:
+    """A pinned state descriptor may be between truncation and a complete write."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def test_compiler_emits_exact_248_command_and_closed_environment(tmp_path: Path) -> None:
     policy, workspace, _, _ = _policy(tmp_path, version="2.1.248")
 
@@ -1360,10 +1368,13 @@ def test_error_terminal_cancellation_wins_after_the_terminal_was_emitted(
         baseline_mtime_ns: int | None = None
         deadline = time.monotonic() + 1.5
         while time.monotonic() < deadline and not stop_canceller.is_set():
+            payload = _read_live_fake_state(state)
+            if payload is None:
+                time.sleep(0.01)
+                continue
             try:
-                payload = json.loads(state.read_text(encoding="utf-8"))
                 current_mtime_ns = state.stat().st_mtime_ns
-            except (FileNotFoundError, json.JSONDecodeError, OSError):
+            except OSError:
                 time.sleep(0.01)
                 continue
             if payload.get("submissions") == 1:
@@ -1576,13 +1587,8 @@ def test_getpgid_failure_still_terminates_the_candidate_group_and_reaps(
     def fail_after_child_started(pid: int) -> int:
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            try:
-                snapshot = json.loads(state.read_text(encoding="utf-8")) if state.exists() else None
-            except (FileNotFoundError, json.JSONDecodeError, OSError):
-                # The fake updates its pinned state descriptor in place. A
-                # partial snapshot is not the getpgid fault this case targets.
-                snapshot = None
-            if snapshot and snapshot["children"]:
+            snapshot = _read_live_fake_state(state)
+            if snapshot is not None and snapshot["children"]:
                 observed_children.extend(snapshot["children"])
                 raise OSError("private locator must not escape")
             time.sleep(0.01)
@@ -1690,7 +1696,10 @@ def test_cancellation_before_spawn_has_no_process_or_submission(tmp_path: Path) 
     _assert_workspace_unchanged(workspace, head, status)
 
 
-def test_cancellation_after_spawn_is_unreconciled_but_contained(tmp_path: Path) -> None:
+@pytest.mark.parametrize("incomplete_first_snapshot", [False, True], ids=["unperturbed", "incomplete-first"])
+def test_cancellation_after_spawn_is_unreconciled_but_contained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, incomplete_first_snapshot: bool
+) -> None:
     policy, workspace, head, status = _policy(
         tmp_path,
         idle_timeout_seconds=2.0,
@@ -1698,30 +1707,47 @@ def test_cancellation_after_spawn_is_unreconciled_but_contained(tmp_path: Path) 
     )
     controls = _fake_controls(tmp_path, "hang_after_tool")
     state = tmp_path / "fake-state.json"
+    command = compile_claude_cli_command(policy)
     cancelled = threading.Event()
+    observed_submission = threading.Event()
+    stop_canceller = threading.Event()
+    original_read_text = Path.read_text
+    incomplete_reads = 0
+
+    def read_with_one_incomplete_snapshot(path: Path, *args: object, **kwargs: object) -> str:
+        nonlocal incomplete_reads
+        if incomplete_first_snapshot and path == state and state.exists() and incomplete_reads == 0:
+            incomplete_reads += 1
+            return ""
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_with_one_incomplete_snapshot)
 
     def cancel_when_started() -> None:
         deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if state.exists() and json.loads(state.read_text(encoding="utf-8"))["submissions"] == 1:
+        while time.monotonic() < deadline and not stop_canceller.is_set():
+            snapshot = _read_live_fake_state(state)
+            if snapshot is not None and snapshot["submissions"] == 1:
+                observed_submission.set()
                 cancelled.set()
                 return
-            time.sleep(0.01)
-        raise AssertionError("fake never recorded its submission")
+            stop_canceller.wait(0.01)
 
     canceller = threading.Thread(target=cancel_when_started, daemon=True)
     canceller.start()
-    with pytest.raises(ClaudeCliProtocolError) as captured:
-        ClaudeCliRunner().run(
-            compile_claude_cli_command(policy),
-            cancel_event=cancelled,
-            fake_controls=controls,
-        )
-    canceller.join(timeout=2)
-    assert captured.value.code == "CANCELLED_AFTER_START"
+    try:
+        with pytest.raises(ClaudeCliProtocolError) as captured:
+            ClaudeCliRunner().run(command, cancel_event=cancelled, fake_controls=controls)
+    finally:
+        stop_canceller.set()
+        canceller.join(timeout=2)
+    assert captured.value.code == "CANCELLED_AFTER_START", captured.value.code
     assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
     assert captured.value.cleanup is not None
     assert captured.value.cleanup.process_group_empty is True
+    assert not canceller.is_alive()
+    assert observed_submission.is_set() and cancelled.is_set()
+    assert incomplete_reads == int(incomplete_first_snapshot)
     _assert_workspace_unchanged(workspace, head, status)
 
 
