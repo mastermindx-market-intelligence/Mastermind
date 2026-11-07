@@ -1,0 +1,43 @@
+{
+  "schema": "mastermind.hermes_primary_original_base_merge/v1",
+  "generated_at": "2026-11-07T20:50:17.963582+00:00",
+  "source_ours": "88a68e32a2fd2343636b122e1c4322ff19e56d30",
+  "source_base": "bf46d822dbce3ac2226df69da7f94e37101df986",
+  "merge_base": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+  "base_only_paths_adopted_intact": 170,
+  "ours_only_paths_preserved_intact": 73,
+  "both_identical_paths": 19,
+  "differing_overlaps": 12,
+  "ours_overlaps_preserved_intact": 10,
+  "composed_paths": 2,
+  "executive_base_recovered_by_removing_two_qualified_hunks": true,
+  "installed_web_observation_hunks_preserved": true,
+  "incumbent_registry_bytes_preserved": true,
+  "qualified_registry_records_overlaid": 8,
+  "all_unselected_effective_registry_records_preserved": true,
+  "bounded_d8_current_guard_blob": "ccacfcbeac3d2d974207520d1eaf78a5d1b73ac3",
+  "bounded_d8_findings": [],
+  "d8_tests_path_exclusion_matches_committed_gate": true,
+  "initial_harness_included_tests_registry": "corrected to actual committed gate scope; no guard/source change",
+  "unreviewed_identity_negative_control_passed": true,
+  "full_committed_d8_gate": false,
+  "natural_resulting_head_ci": "not_yet_run",
+  "source_identities": {
+    "scripts/executive_os_phase1c.py": {
+      "sha256": "2216eecd0b53534f0b211c5bd408ce23cfc3d4108be220144b87db27a92de17e",
+      "git_blob": "5a17ada930bd4edcf6c2fec86e726299f27b8e1d",
+      "bytes": 178019
+    },
+    "tests/executive_fabric_release_identity_review.py": {
+      "sha256": "874d211e856521cd61585f5bca2afba04d45bddcb455801ddf3b9ca6abf1ec61",
+      "git_blob": "1c172e1f57e3a57c9f943e0a7fe31847e0a4c9ae",
+      "bytes": 87823
+    }
+  },
+  "primary_sdk_and_application_client_blobs_unchanged": true,
+  "native_acceptance_tests_inherited_unchanged": 29,
+  "host_enrollment": false,
+  "provider_request": false,
+  "live_acceptance": false,
+  "held_source_bodies_read": false
+}

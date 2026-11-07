@@ -220,6 +220,10 @@
       ]
     }
   },
+  "provenance_representation": {
+    "original_sha256": "9f63b8e5b536801d44b1953306795f5c83bfe8f43c0c8b9992862d0fbc41bfb1",
+    "reason": "Represent evidence references as repository/commit/path and issue-comment metadata; keep executable/config read-transport guard unchanged. Historical observations and verdicts unchanged."
+  },
   "purpose": "Qualify the reconciled original Macro source through the existing Mastermind/Hermes pair.",
   "schema": 1,
   "source_reference_representation": "Two inert GitHub citations use explicit repository/revision/path or PR/comment pointers. Source identities and observation facts are unchanged; no transport or guard exemption is added."

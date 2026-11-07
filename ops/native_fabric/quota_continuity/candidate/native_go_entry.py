@@ -20,8 +20,8 @@ import sys
 GLM_HELPER_SHA256 = "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc"
 MODULES = (
     "native_runtime_bindings", "commission_deadline", "provider_outcome",
-    "quota_circuit", "model_tier", "pool_status", "go_lease_capability",
-    "lease_broker", "go_lease_gateway", "paid_yaml_runtime", "go_application_handler",
+    "quota_remote", "glm_keys", "quota_circuit", "model_tier", "pool_status",
+    "go_lease_capability", "lease_broker", "go_lease_gateway", "paid_yaml_runtime", "go_application_handler",
     "fabric_policy_snapshot", "pool_ledger", "pick",
 )
 HTTP_MEMBERS = frozenset({"ext/application_http_transports.py",

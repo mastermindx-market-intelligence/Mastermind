@@ -104,6 +104,10 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool == "session_web_census":
+        if type(arguments) is not dict or arguments:
+            raise BridgeError("invalid_input", "profile census takes no selectors")
+        return {}
     if tool == "session_summon":
         from .schemas import validate_installed_summon_arguments
         return validate_installed_summon_arguments(arguments)
@@ -146,6 +150,7 @@ class InstalledSessionBridgeProvider:
         summon_handler: Callable[[NeutralPrincipalProjection, Mapping[str, Any]], Any],
         reply_read_handler: Callable | None = None,
         reference_handler: Callable | None = None,
+        web_census_handler: Callable | None = None,
     ) -> None:
         for name, value in (
             ("target_projector", target_projector),
@@ -163,6 +168,9 @@ class InstalledSessionBridgeProvider:
         if reference_handler is not None and not callable(reference_handler):
             raise TypeError("reference handler must be callable")
         self._reference_handler = reference_handler
+        if web_census_handler is not None and not callable(web_census_handler):
+            raise TypeError("profile census handler must be callable")
+        self._web_census_handler = web_census_handler
 
     async def handle_frame(self, frame: Any) -> dict[str, Any]:
         tool, principal, arguments = validate_private_frame(frame)
@@ -188,6 +196,10 @@ class InstalledSessionBridgeProvider:
                 if self._reference_handler is None:
                     raise BridgeError("reply_unavailable", "authorized canonical references unavailable")
                 data = await _maybe(self._reference_handler(principal, dict(arguments)))
+            elif tool == "session_web_census":
+                if self._web_census_handler is None:
+                    raise BridgeError("backend_unavailable", "profile observation is unavailable")
+                data = await _maybe(self._web_census_handler(principal, dict(arguments)))
             elif tool == "session_send":
                 data = await _maybe(self._reply_handler(principal, dict(arguments)))
             else:
@@ -298,7 +310,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  attention_requester: Callable | None = None,
                                  authorized_policies: Any = None,
                                  reference_cursor_key: bytes | None = None,
-                                 hermes_session: Any | None = None):
+                                 hermes_session: Any | None = None,
+                                 web_census_handler: Callable | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
@@ -396,7 +409,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
 
     return private_ingress_owner(InstalledSessionBridgeProvider(
         target_projector=targets, reply_handler=send, reply_read_handler=read_reply,
-        reference_handler=references,
+        reference_handler=references, web_census_handler=web_census_handler,
         summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 
 
@@ -518,6 +531,9 @@ class InstalledSessionBridgeClient:
         self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]
     ) -> Any:
         return await self._call(principal, "session_send", arguments)
+
+    async def web_census(self, principal: VerifiedPrincipal) -> Any:
+        return await self._call(principal, "session_web_census", {})
 
     async def reply_read(self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]) -> Any:
         return await self._call(principal, "session_reply_read", arguments)

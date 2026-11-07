@@ -72,11 +72,18 @@ class SessionGrant:
     generation: str
     manual_pools: tuple[str, ...] = ()
     manual_models: tuple[tuple[str, str], ...] = ()
+    # Native canonical conversation identity across compression segments.
+    # Only the host sets this; session_id remains the actual current caller.
+    origin_session_id: str | None = None
 
     def __post_init__(self) -> None:
         for value in (self.root_id, self.parent_id):
             if type(value) is not str or IDENTITY.fullmatch(value) is None:
                 raise FabricNativeRefusal("GRANT_IDENTITY_INVALID")
+        if self.origin_session_id is not None and (
+                type(self.origin_session_id) is not str
+                or not 0 < len(self.origin_session_id) <= 256):
+            raise FabricNativeRefusal("GRANT_ORIGIN_INVALID")
         for value in (self.profile_id, self.session_id, self.generation):
             if type(value) is not str or not 0 < len(value) <= 256:
                 raise FabricNativeRefusal("GRANT_LINEAGE_INVALID")
@@ -119,8 +126,11 @@ def run_id_for(grant: SessionGrant, task_key: str) -> str:
     """
     if type(task_key) is not str or KEY.fullmatch(task_key) is None:
         raise FabricNativeRefusal("TASK_KEY_INVALID")
-    data = json.dumps([grant.profile_id, grant.session_id,
-                       task_key], separators=(",", ":")).encode("utf-8")
+    identity = ([grant.profile_id, grant.session_id, task_key]
+                if grant.origin_session_id is None else
+                ["native-origin-v1", grant.root_id, grant.profile_id,
+                 grant.origin_session_id, task_key])
+    data = json.dumps(identity, separators=(",", ":")).encode("utf-8")
     return "hermes-native-" + hashlib.sha256(data).hexdigest()[:40]
 
 
