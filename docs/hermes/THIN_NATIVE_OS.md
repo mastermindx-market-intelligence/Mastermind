@@ -556,3 +556,36 @@ current protected CI and normal protected publication. Signed/notarized/updater
 release and broader remote-company orchestration remain separate production holds.
 No duplicate canary, active-service restart, second session owner or automatic
 merge/queue request has been performed by this continuation.
+
+### Canonical creation reconciliation and current authentication control
+
+At07:24:42Z, a bounded read-only query of the original canonical store, with the
+installed identity/receipt source hashes and file owner/mode/inode checked, proved
+that request `9fbc8f4abb944ab1a170b4990e59f729` committed to
+`local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb`.
+The receipt's profile/principal/request/session identities match; the local row
+and requested title match, and it has zero messages. This reconciles the creation
+effect, not the interrupted UI recovery. The incumbent pending pointer was not
+changed; the next signed-in UI action must recover that exact original, never
+create a replacement. Evidence: [original-create-reconciliation.json](evidence/thin-native-os-20261107/original-create-reconciliation.json).
+
+The actual486 Sign out action at07:19:09Z produced the signed-out welcome screen
+with the private workspace hidden. One Sign in action at07:20:54Z entered
+“Finish signing in / Waiting for browser,” observed at07:21:44Z. The Browser
+connector returned “Browser access requires the originating browser context.”
+That attempt later displayed “Sign-in could not complete.” at07:27:04Z;
+its terminal screen exposes the existing Sign in control again. The Mac browser
+flow was not replaced with a cloud browser, token injection or another auth owner.
+The exact next user control is to click Sign in in the current486 Mastermind OS
+app on the Mac and finish its browser flow. This is an observed connector/context
+limitation, not a safety denial or an invented review requirement. No credentials
+were read or requested in chat.
+
+[Durable evidence bundle](evidence/thin-native-os-20261107/README.md) contains
+source-bound actual AX observations, original recovery evidence, package hashes
+and the source-equivalence record. The486 candidate and published8c application
+source differ only by the D8 dictionary formatting; their Python ASTs match.
+The running package retains its actual486 build identity. Current8c hosted
+Hermes harness42350964042 is successful; OS42350964039 and CI42350964044 were
+still running at this checkpoint. Subsequent head/CI readback belongs in the
+existing PR continuation, not an all-green claim here.
