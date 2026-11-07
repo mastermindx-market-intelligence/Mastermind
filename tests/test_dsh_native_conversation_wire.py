@@ -223,6 +223,10 @@ def test_native_owner_types_control_target_is_historical_and_locator_remains_exa
     # Current status may advance. The original control owner must independently
     # join this historical target and receipt to the exact control-request Event.
     assert wire.validate_native_response(response(value, "stop"), request_value, operation="stop")
+    absent_control = copy.deepcopy(value)
+    absent_control.update(state="ABSENT", effect="NONE")
+    with pytest.raises(ValueError, match="absent native control"):
+        wire.validate_native_response(response(absent_control, "stop_status"), request("stop_status"), operation="stop_status")
     wrong = copy.deepcopy(value); wrong["session"]["attempt_id"]="ATT:OTHER"
     with pytest.raises(ValueError, match="session locator"):
         wire.validate_native_response(response(wrong, "stop"), request_value, operation="stop")
@@ -251,7 +255,45 @@ def test_native_resume_preview_binds_the_current_idle_writer():
         target=dict(expected_result_digest=DIGEST, binding_digest="c"*64))
     selected = request("resume_preview")
     assert wire.validate_native_response(response(data, "resume_preview"), selected, operation="resume_preview")
+    reserved = {**data, "operation_id": "ohf-op:original-resume"}
+    with pytest.raises(ValueError, match="preview cannot carry an operation"):
+        wire.validate_native_response(response(reserved, "resume_preview"), selected, operation="resume_preview")
     changed = copy.deepcopy(data)
     changed["target"]["binding_digest"] = "d"*64
     with pytest.raises(ValueError, match="resume target binding"):
         wire.validate_native_response(response(changed, "resume_preview"), selected, operation="resume_preview")
+
+
+@pytest.mark.parametrize("operation", ["turn", "turn_status", "turn_read"])
+def test_native_turn_response_cannot_borrow_consumption_state_or_send_projection(operation):
+    value = dict(schema=wire.NATIVE_TURN_DATA_SCHEMA, **BASE, reference=None, turn_key="t1",
+        state="CONSUMED", effect="NONE", parent_consumed=False, can_send=True,
+        locator=dict(work_ref="WS:ONE", root_job_id="JOB:1", job_id="JOB:2", attempt_id="ATT:1"),
+        initial_consumption=dict(state="CONSUMED", event_id=1, event_sha256=DIGEST, initial_digest=DIGEST),
+        result=None)
+    with pytest.raises(ValueError, match="state differs from operation"):
+        wire.validate_native_response(response(value, operation), request(operation), operation=operation)
+
+
+def test_native_consumption_recovery_cannot_grant_new_send():
+    value = dict(schema=wire.NATIVE_TURN_DATA_SCHEMA, **BASE, reference=None, turn_key=None,
+        state="CONSUMED", effect="NONE", parent_consumed=False, can_send=True,
+        locator=dict(work_ref="WS:ONE", root_job_id="JOB:1", job_id="JOB:2", attempt_id="ATT:1"),
+        initial_consumption=dict(state="CONSUMED", event_id=1, event_sha256=DIGEST, initial_digest=DIGEST),
+        result=None)
+    assert wire.validate_native_response(response(value, "consume"), request("consume"), operation="consume")
+    with pytest.raises(ValueError, match="another Send"):
+        wire.validate_native_response(response(value, "consume_status"), request("consume_status"), operation="consume_status")
+
+
+@pytest.mark.parametrize("field", ["operation_id", "receipt", "session", "active_turn", "target", "head_result", "preview_digest"])
+def test_native_absent_control_cannot_smuggle_attached_evidence(field):
+    value = dict(schema=wire.NATIVE_CONTROL_DATA_SCHEMA, **BASE, reference=None,
+        kind="stop", control_key="s1", state="ABSENT", effect="NONE",
+        locator=dict(work_ref="WS:ONE", root_job_id="JOB:1", job_id="JOB:2", attempt_id="ATT:1"),
+        session=None, active_turn=None, operation_id=None, receipt=None, head_result=None,
+        preview_digest=None, parent_consumed=False, target=None)
+    assert wire.validate_native_response(response(value, "stop_status"), request("stop_status"), operation="stop_status")
+    value[field] = "foreign-attached-evidence"
+    with pytest.raises(ValueError, match="absent native control"):
+        wire.validate_native_response(response(value, "stop_status"), request("stop_status"), operation="stop_status")

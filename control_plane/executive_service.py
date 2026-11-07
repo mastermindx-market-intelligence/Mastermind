@@ -3461,17 +3461,20 @@ class ExecutiveControlService:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
     def _ceo_ingress_stream_ceiling(self):
-        """Allocate the larger frame only for a configured source App owner.
+        """Allocate framing for configured owners; retain each protocol limit.
 
-        Each decoded protocol retains its own old ceiling. UID selection and
-        its exact source schema precede any use of the larger source budget.
+        Kernel-peer and exact schema selection precede use of a larger budget.
         """
         from control_plane import executive_release_ingress as release_ingress
         from common.workspace_source_operation_wire import MAX_REQUEST_BYTES as SOURCE_BYTES
         binding = self._ceo_ingress_app_binding
-        return (max(release_ingress.MAX_FRAME_BYTES, SOURCE_BYTES)
-                if binding is not None and callable(binding.source_operation_provider_factory)
-                else release_ingress.MAX_FRAME_BYTES)
+        ceiling = release_ingress.MAX_FRAME_BYTES
+        if binding is not None and callable(binding.source_operation_provider_factory):
+            ceiling = max(ceiling, SOURCE_BYTES)
+        if binding is not None and callable(binding.fresh_conversation_provider_factory):
+            from common.fresh_conversation_contract import NATIVE_MAX_REQUEST_BYTES
+            ceiling = max(ceiling, NATIVE_MAX_REQUEST_BYTES)
+        return ceiling
 
     def _grant_app_socket_access(self) -> None:
         """One named-user ACL; C1 ownership, modes and groups stay intact.
@@ -5471,7 +5474,12 @@ class ExecutiveControlService:
             from common import project_execution_private_contract as execution_wire
             selected_execution=(isinstance(parsed,dict) and parsed.get('schema')==execution_wire.SCHEMA and app_peer
                 and callable(app_binding.project_execution_provider_factory))
+            from common import fresh_conversation_contract as fresh_wire
+            selected_native_conversation = (type(parsed) is dict
+                and parsed.get("schema") == fresh_wire.NATIVE_SCHEMA and app_peer
+                and callable(app_binding.fresh_conversation_provider_factory))
             request_ceiling = (source_operation_wire.MAX_REQUEST_BYTES if selected_source_operation else
+                fresh_wire.NATIVE_MAX_REQUEST_BYTES if selected_native_conversation else
                 execution_wire.MAX_BYTES if selected_execution else
                 planning_wire.MAX_BYTES if selected_planning else
                 principal_app_protocol.MAX_REQUEST_BYTES if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
@@ -6254,15 +6262,18 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(writer, "ingress_unavailable", "project conversation reader unavailable")
                 return
             from common import fresh_conversation_contract as fresh_wire
-            if isinstance(parsed, Mapping) and parsed.get("schema") == fresh_wire.SCHEMA:
+            if isinstance(parsed, Mapping) and parsed.get("schema") in {fresh_wire.SCHEMA, fresh_wire.NATIVE_SCHEMA}:
                 if not app_peer:
                     await self._send_ceo_ingress_error(writer, "peer_denied", "fresh conversation requires installed App peer")
                     return
                 try:
                     from control_plane.fresh_conversation import FreshConversationOwner
                     frame = fresh_wire.validate_private_frame(parsed)
-                    modifying = frame["operation"] in fresh_wire.MODIFYING
-                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in {"status", "read", "turn_status", "turn_read", "consume_status"} else {"READY"}
+                    native = frame["schema"] == fresh_wire.NATIVE_SCHEMA
+                    modifying = frame["operation"] in fresh_wire.modifying_operations(frame["schema"])
+                    passive = (fresh_wire.NATIVE_PASSIVE if native else
+                        {"status", "read", "turn_status", "turn_read", "consume_status"})
+                    allowed_states = {"READY", "QUARANTINED"} if frame["operation"] in passive else {"READY"}
                     factory = app_binding.fresh_conversation_provider_factory
                     runtime = self._require_runtime()
                     if factory is None:
@@ -6293,7 +6304,10 @@ class ExecutiveControlService:
                     result = await provider.handle_frame(frame, host_current=require_fresh_host_current,
                         reader=reader if modifying else None)
                     require_fresh_host_current()
-                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+                    if native:
+                        fresh_wire.validate_native_response(result, frame["arguments"], operation=frame["operation"])
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result},
+                        response_ceiling=fresh_wire.NATIVE_MAX_RESPONSE_BYTES if native else ceo_ingress.MAX_RESPONSE_BYTES)
                 except Exception:
                     await self._send_ceo_ingress_error(writer, "ingress_unavailable", "fresh conversation owner unavailable")
                 return

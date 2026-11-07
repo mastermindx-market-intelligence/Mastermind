@@ -1,4 +1,4 @@
-"""Four fixed authenticated conversation routes on the existing BFF/carrier.
+"""Fixed versioned conversation routes on the existing BFF/carrier.
 
 This leaf owns no listener, credential, Runtime, profile arm, dispatch retry or
 session registry. The integrator mounts these literal POST paths only. The
@@ -38,7 +38,7 @@ class InstalledFreshConversationClient:
 
     async def request(self, frame):
         frame = wire.validate_private_frame(frame)
-        if frame["operation"] in wire.MODIFYING:
+        if frame["operation"] in wire.modifying_operations(frame["schema"]):
             # Incumbent transport and upstream attendance source; no new
             # framing flag or caller field may request a duplex lifetime.
             return await self.client._send_frame(self.socket_path, frame,
@@ -47,7 +47,7 @@ class InstalledFreshConversationClient:
 
 
 class FreshConversationTransportApp:
-    ROUTES = tuple(wire.ROUTES)
+    ROUTES = (*wire.ROUTES, *wire.NATIVE_ROUTES)
 
     def __init__(self, inner_app, *, executive, workspace_config, workspace_verifier, client):
         if (type(executive) is not OsExecutiveTransportApp
@@ -87,14 +87,19 @@ class FreshConversationTransportApp:
             await self._inner(scope, receive, send)
             return
         path = scope["path"]
-        operation = wire.ROUTES[path]
+        native = path in wire.NATIVE_ROUTES
+        schema = wire.NATIVE_SCHEMA if native else wire.SCHEMA
+        result_schema = wire.NATIVE_RESULT_SCHEMA if native else wire.RESULT_SCHEMA
+        operation = (wire.NATIVE_ROUTES if native else wire.ROUTES)[path]
+        modifying = wire.modifying_operations(schema)
+        dual_resource = wire.dual_resource_operations(schema)
         if (scope.get("method") != "POST" or scope.get("scheme") != "https"
                 or scope.get("query_string") or scope.get("raw_path") != path.encode("ascii")):
             await Response(status_code=404, headers=_OS_HTTP_HEADERS)(scope, receive, send)
             return
 
         def refused(code, status=403):
-            return JSONResponse(dict(schema=wire.RESULT_SCHEMA, operation=operation, ok=False,
+            return JSONResponse(dict(schema=result_schema, operation=operation, ok=False,
                 data=None, error=dict(code=code, message="Reconcile the original conversation operation"
                     if code == "effect_unknown" else "Conversation authority or source unavailable")),
                 status_code=status, headers=_OS_HTTP_HEADERS)
@@ -113,23 +118,25 @@ class FreshConversationTransportApp:
                 response = refused("authentication_required", 401)
             else:
                 workspace = workspace_token = stamp = None
-                if operation in wire.DUAL_RESOURCE:
+                if operation in dual_resource:
                     workspace_token = self._token(scope, b"x-mastermind-workspace-authorization")
                     workspace = await self._workspace_principal(workspace_token)
                     if workspace is None or any(getattr(workspace, key) != getattr(executive, key)
                             for key in ("issuer_digest", "subject_digest", "client_ref")):
                         raise PermissionError("principal mismatch")
                     stamp = permission_stamp(self._workspace.authorize_principal, workspace)
-                raw = await _bounded_receive_body(receive, deadline_seconds=RECEIVE_DEADLINE_SECONDS)
+                body_options = {"max_bytes": wire.NATIVE_MAX_REQUEST_BYTES} if native else {}
+                raw = await _bounded_receive_body(receive, deadline_seconds=RECEIVE_DEADLINE_SECONDS,
+                    **body_options)
                 body = _parse_body(raw)
                 if type(body) is not dict or set(body) != {"arguments"}:
                     raise ValueError("invalid input")
-                arguments = wire.validate_request(body["arguments"], operation=operation)
+                arguments = wire.validate_request(body["arguments"], operation=operation, schema=schema)
                 def projection(principal):
                     value = dataclasses.asdict(principal)
                     value["scopes"] = list(value["scopes"])
                     return value
-                frame = wire.validate_private_frame(dict(schema=wire.SCHEMA, operation=operation,
+                frame = wire.validate_private_frame(dict(schema=schema, operation=operation,
                     principal=projection(executive), workspace_principal=projection(workspace) if workspace else None,
                     arguments=arguments))
                 if not await self._executive._still_current(scope, executive):
@@ -152,33 +159,36 @@ class FreshConversationTransportApp:
                 if result.transport == TRANSPORT_NOT_SENT:
                     response = refused("conversation_unavailable", 503)
                 elif result.transport != TRANSPORT_SENT_OK or result.ok is not True:
-                    response = refused("effect_unknown" if operation in wire.MODIFYING else "conversation_unavailable",
-                        202 if operation in wire.MODIFYING else 503)
+                    response = refused("effect_unknown" if operation in modifying else "conversation_unavailable",
+                        202 if operation in modifying else 503)
                 else:
                     value = result.result
                     if (type(value) is not dict or set(value) != {"schema", "operation", "ok", "data", "error"}
-                            or value["schema"] != wire.RESULT_SCHEMA or value["operation"] != operation
+                            or value["schema"] != result_schema or value["operation"] != operation
                             or type(value["ok"]) is not bool):
                         raise ValueError("foreign result")
+                    if native:
+                        wire.validate_native_response(value, arguments, operation=operation)
                     if value["ok"] is True:
                         if value["error"] is not None:
                             raise ValueError("foreign result")
-                        wire.validate_data(value["data"], arguments)
-                        if ((operation == "preview") != (value["data"]["state"] == "PREVIEW_READY")
-                                or ((operation == "turn_preview") != (value["data"]["state"] == "TURN_READY"))
-                                or (operation in {"preview", "status", "read", "turn_preview"} and value["data"]["effect"] != "NONE")):
-                            raise ValueError("foreign operation result")
+                        if not native:
+                            wire.validate_data(value["data"], arguments)
+                            if ((operation == "preview") != (value["data"]["state"] == "PREVIEW_READY")
+                                    or ((operation == "turn_preview") != (value["data"]["state"] == "TURN_READY"))
+                                    or (operation in {"preview", "status", "read", "turn_preview"} and value["data"]["effect"] != "NONE")):
+                                raise ValueError("foreign operation result")
                         response = JSONResponse(value, headers=_OS_HTTP_HEADERS)
                     else:
                         unknown = type(value["error"]) is dict and value["error"].get("code") == "effect_unknown"
                         response = refused("effect_unknown" if unknown else "refused", 202 if unknown else 403)
         except PermissionError:
-            response = refused("effect_unknown" if entered and operation in wire.MODIFYING else "authentication_required",
-                202 if entered and operation in wire.MODIFYING else 403)
+            response = refused("effect_unknown" if entered and operation in modifying else "authentication_required",
+                202 if entered and operation in modifying else 403)
         except (TypeError, ValueError, _InvalidBody, _ReceiveTimeout):
-            response = refused("effect_unknown" if entered and operation in wire.MODIFYING else "invalid_input",
-                202 if entered and operation in wire.MODIFYING else 400)
+            response = refused("effect_unknown" if entered and operation in modifying else "invalid_input",
+                202 if entered and operation in modifying else 400)
         except Exception:
-            response = refused("effect_unknown" if entered and operation in wire.MODIFYING else "conversation_unavailable",
-                202 if entered and operation in wire.MODIFYING else 503)
+            response = refused("effect_unknown" if entered and operation in modifying else "conversation_unavailable",
+                202 if entered and operation in modifying else 503)
         await response(scope, receive, send)

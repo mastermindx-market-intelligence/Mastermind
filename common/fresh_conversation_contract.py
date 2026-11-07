@@ -551,6 +551,11 @@ def _validate_native_control_data(value, request):
             or value["effect"] not in {"NONE", "COMMITTED", "UNKNOWN"}):
         raise ValueError("invalid native control data")
     _native_selector(value, request)
+    if value["state"] == "ABSENT" and (value["effect"] != "NONE" or any(value[key] is not None
+            for key in ("target", "session", "active_turn", "operation_id", "receipt", "head_result", "preview_digest"))):
+        raise ValueError("absent native control cannot carry an operation or receipt")
+    if value["state"] == "RESUME_READY" and value["operation_id"] is not None:
+        raise ValueError("native resume preview cannot carry an operation")
     target = value["target"]
     # Historical target comes from the original control-request Event. Current
     # session/turn projections may advance; their shape grants no authority.
@@ -635,6 +640,21 @@ def validate_native_response(value, request, *, operation):
             else NATIVE_TURN_DATA_SCHEMA)
         if data["schema"] != expected:
             raise ValueError("native response contract differs from operation")
+        states = {
+            "consume": {"CONSUMED"}, "consume_status": {"ABSENT", "CONSUMED"},
+            "turn": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
+            "turn_status": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
+            "turn_read": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
+            "turn_preview": {"TURN_READY"}, "resume_preview": {"RESUME_READY"},
+            "resume": {"RECONCILIATION_REQUIRED", "INTENT", "APPLIED", "EFFECT_UNKNOWN"},
+            "stop": {"RECONCILIATION_REQUIRED", "INTENT", "APPLIED", "EFFECT_UNKNOWN"},
+            "resume_status": {"ABSENT", "RECONCILIATION_REQUIRED", "INTENT", "APPLIED", "EFFECT_UNKNOWN"},
+            "stop_status": {"ABSENT", "RECONCILIATION_REQUIRED", "INTENT", "APPLIED", "EFFECT_UNKNOWN"},
+        }
+        if operation in states and data["state"] not in states[operation]:
+            raise ValueError("native response state differs from operation")
+        if operation in {"consume_status", "turn", "turn_status", "turn_read"} and data["can_send"]:
+            raise ValueError("native original recovery cannot authorize another Send")
         if ((operation == "preview") != (data["state"] == "PREVIEW_READY")
                 or (operation == "turn_preview") != (data["state"] == "TURN_READY")
                 or (operation == "resume_preview") != (data["state"] == "RESUME_READY")):
