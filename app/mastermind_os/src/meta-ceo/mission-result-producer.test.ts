@@ -24,6 +24,8 @@
  * built-in specifier is declared once below, inside this test file only.
  */
 import { beforeAll, describe, expect, it } from "vitest";
+// @ts-expect-error node:url is resolved by the vitest worker.
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { decodeMissionv3, type Missionv3Document } from "../mission";
 import {
@@ -114,10 +116,15 @@ function resolveFreshGate(env: CallerEnv | undefined): FreshGate {
 }
 
 const GATE = resolveFreshGate(callerEnv);
-const COMMITTED_DIR = new URL(
+function fixtureDirectoryFromUrl(url: URL): string {
+  // URL.pathname keeps spaces and other filename characters percent-encoded.
+  return fileURLToPath(url.href);
+}
+
+const COMMITTED_DIR = fixtureDirectoryFromUrl(new URL(
   "./fixtures/mission-result-producer/",
   import.meta.url,
-).pathname;
+));
 
 async function realFs(): Promise<NodeFs> {
   // @ts-expect-error node:fs/promises is resolved by the vitest worker.
@@ -710,6 +717,32 @@ describe("mission-result producer consumer", () => {
     });
 
     registerConsumer(() => consumed, "replay");
+
+    it("reads pinned producer bytes from a file URL with spaces and encoded characters", async () => {
+      const fs = await realFs();
+      const root = await fs.mkdtemp("/tmp/mission-result-producer-negative-");
+      try {
+        const directory = joinPath(root, "Office fixtures #100% café");
+        await fs.mkdir(directory, { recursive: true });
+        const committed = await readExportBytes(COMMITTED_DIR);
+        for (const name of FILE_NAMES) {
+          await fs.writeFile(joinPath(directory, name), committed[name]);
+        }
+        const url = new URL(pathToFileURL(directory).href);
+        expect(url.href).toContain("%20");
+        const resolved = fixtureDirectoryFromUrl(url);
+        expect(resolved).toBe(directory);
+        const copied = await consumeExport(resolved, "replay");
+        expect(copied.hashes).toEqual(PINNED_SHA256);
+        expect(copied.httpBytes).toBe(consumed.httpBytes);
+        expect(copied.result.source_observation.runtime?.source_identity).toBe(
+          REPLAY_RUNTIME_SOURCE_IDENTITY,
+        );
+        expectAssociated(copied);
+      } finally {
+        await removeAttemptOwnedRoot(fs, root);
+      }
+    });
 
     it("rejects a malformed wrapper even when the nested documents stay valid", async () => {
       const fs = await realFs();
