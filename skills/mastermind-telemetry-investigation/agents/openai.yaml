@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mastermind Telemetry Investigation"
+  short_description: "Connect incidents to bounded, causal operational evidence"

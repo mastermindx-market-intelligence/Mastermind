@@ -1,0 +1,89 @@
+{
+  "structural": {
+    "structural_verification": "PASS_WITH_EXPLICIT_HOLDS",
+    "source_pin": "17b9fa1363db6071d338be3373a4fdb11fc0076d",
+    "verified_source_anchors": 36,
+    "original_handoff_sha256": "07d74eae587c4b7649dcaab87f57222a4274f8759e76ba94225fd36789556dfc",
+    "detailed_packets": [
+      "H1",
+      "H2",
+      "H3",
+      "H4",
+      "H5",
+      "H6"
+    ],
+    "planned_acceptance_cases": 80,
+    "new_acceptance_cases_executed": 0,
+    "dependency_nodes": 16,
+    "topological_order": [
+      "W00",
+      "W01",
+      "W02",
+      "W03",
+      "W04",
+      "W05",
+      "W06",
+      "W07",
+      "W08",
+      "W09",
+      "W10",
+      "W11",
+      "W12",
+      "W13",
+      "W14",
+      "W15"
+    ],
+    "verified_local_links": 13,
+    "design_complete": false,
+    "native_acceptance_proven": false,
+    "held": [
+      "detailed H7 source-file write denied before dispatch",
+      "two-entry source-register extension denied before dispatch"
+    ]
+  },
+  "checker_negative_tests": [
+    {
+      "case": "wrong source pin",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "source pin drift"
+    },
+    {
+      "case": "source byte drift",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "source content drift"
+    },
+    {
+      "case": "planned cases claim execution",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "planned cases cannot claim execution"
+    },
+    {
+      "case": "fabricated case PASS",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "unproven planned result"
+    },
+    {
+      "case": "duplicate case identity",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "case inventory drift"
+    },
+    {
+      "case": "dependency cycle",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "dependency cycle"
+    },
+    {
+      "case": "fictional dispatch authority",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "design cannot authorize dispatch"
+    },
+    {
+      "case": "missing joint proof predecessor",
+      "result": "REJECTED_AS_EXPECTED",
+      "reason": "joint proof needs current admission and dialogue"
+    }
+  ],
+  "negative_tests_passed": 8,
+  "native_tests_executed": 0,
+  "new_runtime_effects": false
+}

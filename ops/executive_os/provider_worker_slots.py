@@ -1,4 +1,4 @@
-"""Reviewed, secret-free Executive Codex worker realm inventory.
+"""Reviewed, secret-free Executive provider worker realm inventory.
 
 Provider account identifiers and Multilogin profile identifiers are private
 host state and are deliberately absent.  ``oauth_seat_ref`` is only the
@@ -12,7 +12,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 _SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
@@ -35,7 +35,14 @@ RUNTIME_WORKER_ROOT = Path("/var/db/mastermind-executive/workers")
 WORKER_GROUP = "_mastermind_worker"
 WORKER_GID = 451
 _SLOT_ID_RE = re.compile(r"^codex(?:-pro)?-[0-9]{2}$")
+_SUBSCRIPTION_SLOT_ID_RE = re.compile(r"^(?:alibaba|minimax)-token-[0-9]{2}$")
 _WORKER_USER_RE = re.compile(r"^_mastermind_[a-z0-9_]+$")
+# Accepted local labels, not enrolled Workers or provider-capacity identities.
+# The legacy label remains compatible; new labels never select a numbered login.
+_NATIVE_CLAUDE_SLOT_IDS = frozenset({
+    "claude8-native-01", "claude-native-01", "claude-native-02",
+    "claude-native-03", "claude-native-04",
+})
 
 
 class SlotCatalogError(ValueError):
@@ -54,9 +61,12 @@ class ProviderWorkerSlot:
     workspace_binding_class: str
     allowed_credential_kinds: tuple[str, ...]
     oauth_seat_ref: str | None
+    provider_family: str = "openai"
 
     @property
     def auth_path(self) -> Path:
+        if self.provider_family == "anthropic":
+            return self.provider_home / ".claude" / ".credentials.json"
         return self.provider_home / "auth.json"
 
     @property
@@ -74,6 +84,39 @@ class ProviderWorkerSlot:
             "workspace_binding_class": self.workspace_binding_class,
             "allowed_credential_kinds": list(self.allowed_credential_kinds),
             "oauth_seat_ref": self.oauth_seat_ref,
+        }
+
+
+@dataclass(frozen=True)
+class SubscriptionWorkerSlot:
+    """Reviewed local principal for a held Codex-backed subscription realm.
+
+    This catalog owns only host identity/config coordinates. Provider account,
+    Capacity capability/generation, readiness, routing and autonomous admission
+    remain with their existing owners.
+    """
+
+    slot_id: str
+    provider: str
+    profile_id: str
+    harness_binding_id: str
+    worker_user: str
+    worker_group: str
+    worker_uid: int
+    worker_gid: int
+    provider_home: Path
+    worker_config: Path
+
+    def public_descriptor(self) -> dict[str, Any]:
+        return {
+            "slot_id": self.slot_id,
+            "provider": self.provider,
+            "profile_id": self.profile_id,
+            "harness_binding_id": self.harness_binding_id,
+            "worker_user": self.worker_user,
+            "worker_uid": self.worker_uid,
+            "worker_gid": self.worker_gid,
+            "admission_state": "HELD_FOR_REAL_CANARY",
         }
 
 
@@ -112,10 +155,39 @@ _SLOTS = (
         )
         for index in range(1, 4)
     ),
+
 )
 
 
-def _unique(rows: Sequence[ProviderWorkerSlot], field: str) -> None:
+_SUBSCRIPTION_SLOTS = (
+    SubscriptionWorkerSlot(
+        slot_id="alibaba-token-01",
+        provider="alibaba",
+        profile_id="alibaba-token-plan-personal",
+        harness_binding_id="alibaba-token-plan-personal.codex-responses",
+        worker_user="_mastermind_alibaba_01",
+        worker_group="_mastermind_alibaba_01",
+        worker_uid=459,
+        worker_gid=459,
+        provider_home=RUNTIME_WORKER_ROOT / "alibaba-token-01" / "provider-home",
+        worker_config=SYSTEM_CONFIG_ROOT / "worker-alibaba-token-01.json",
+    ),
+    SubscriptionWorkerSlot(
+        slot_id="minimax-token-01",
+        provider="minimax",
+        profile_id="minimax-token-plan",
+        harness_binding_id="minimax-token-plan.codex-responses",
+        worker_user="_mastermind_minimax_01",
+        worker_group="_mastermind_minimax_01",
+        worker_uid=460,
+        worker_gid=460,
+        provider_home=RUNTIME_WORKER_ROOT / "minimax-token-01" / "provider-home",
+        worker_config=SYSTEM_CONFIG_ROOT / "worker-minimax-token-01.json",
+    ),
+)
+
+
+def _unique(rows: Sequence[Any], field: str) -> None:
     values = [getattr(row, field) for row in rows]
     if len(values) != len(set(values)):
         raise SlotCatalogError(f"duplicate_{field}")
@@ -185,6 +257,160 @@ def all_slots() -> tuple[ProviderWorkerSlot, ...]:
     return validate_slots(_SLOTS)
 
 
+def validate_subscription_slots(
+    rows: Sequence[SubscriptionWorkerSlot],
+) -> tuple[SubscriptionWorkerSlot, ...]:
+    catalog = tuple(rows)
+    if tuple(row.slot_id for row in catalog) != (
+        "alibaba-token-01",
+        "minimax-token-01",
+    ):
+        raise SlotCatalogError("subscription_slot_inventory_invalid")
+    for row in catalog:
+        if type(row.worker_uid) is not int or type(row.worker_gid) is not int:
+            raise SlotCatalogError("subscription_numeric_identity_invalid")
+    for field in (
+        "slot_id",
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+        "worker_config",
+    ):
+        _unique(catalog, field)
+    expected = (
+        (
+            "alibaba-token-01",
+            "alibaba",
+            "alibaba-token-plan-personal",
+            "alibaba-token-plan-personal.codex-responses",
+            "_mastermind_alibaba_01",
+            459,
+        ),
+        (
+            "minimax-token-01",
+            "minimax",
+            "minimax-token-plan",
+            "minimax-token-plan.codex-responses",
+            "_mastermind_minimax_01",
+            460,
+        ),
+    )
+    legacy = all_slots()
+    legacy_uids = {row.worker_uid for row in legacy}
+    legacy_gids = {row.worker_gid for row in legacy}
+    legacy_homes = {row.provider_home for row in legacy}
+    for row, identity in zip(catalog, expected):
+        slot_id, provider, profile_id, binding_id, worker_user, numeric_id = identity
+        if (
+            _SUBSCRIPTION_SLOT_ID_RE.fullmatch(row.slot_id) is None
+            or row.slot_id != slot_id
+            or row.provider != provider
+            or row.profile_id != profile_id
+            or row.harness_binding_id != binding_id
+            or row.worker_user != worker_user
+            or row.worker_group != worker_user
+            or row.worker_uid != numeric_id
+            or row.worker_gid != numeric_id
+            or row.provider_home
+            != RUNTIME_WORKER_ROOT / row.slot_id / "provider-home"
+            or row.worker_config
+            != SYSTEM_CONFIG_ROOT / f"worker-{row.slot_id}.json"
+        ):
+            raise SlotCatalogError("subscription_slot_invalid")
+        if (
+            row.worker_uid in legacy_uids
+            or row.worker_gid in legacy_gids
+            or row.provider_home in legacy_homes
+        ):
+            raise SlotCatalogError("subscription_slot_collision")
+    return catalog
+
+
+def subscription_slots() -> tuple[SubscriptionWorkerSlot, ...]:
+    return validate_subscription_slots(_SUBSCRIPTION_SLOTS)
+
+
+def get_subscription_slot(slot_id: str) -> SubscriptionWorkerSlot:
+    if not isinstance(slot_id, str) or _SUBSCRIPTION_SLOT_ID_RE.fullmatch(slot_id) is None:
+        raise SlotCatalogError("unknown_subscription_slot")
+    for row in subscription_slots():
+        if row.slot_id == slot_id:
+            return row
+    raise SlotCatalogError("unknown_subscription_slot")
+
+
+def native_slot_from_config(config: Mapping[str, Any]) -> ProviderWorkerSlot:
+    """Project one native slot from the existing root-owned broker config.
+
+    This is structural validation, not authority. The realm owner must read
+    and pin the actual root-owned config before calling it. OS identities are
+    provisioned host state; they are never new source-code defaults.
+    """
+    enrollment = config.get("native_realm_enrollment")
+    slot_id = enrollment.get("slot_id") if isinstance(enrollment, Mapping) else None
+    if config.get("native_provider") == "codex" and slot_id == "codex-pro-04":
+        # An inert fourth Personal Pro definition: all OS principal values
+        # come from the already root-pinned worker config and are verified by
+        # NativeRealmIdentityOwner under its existing UID/GID/HOME/binary gates.
+        # This projection cannot provision a user or make a worker READY.
+        uid, gid = config.get("worker_uid"), config.get("worker_gid")
+        name, control = config.get("worker_user"), config.get("control_uid")
+        existing = all_slots()
+        home = RUNTIME_WORKER_ROOT / slot_id / "provider-home"
+        if (type(uid) is not int or uid <= 0
+                or type(gid) is not int or gid != uid
+                or type(control) is not int or control <= 0 or control == uid
+                or type(name) is not str or _WORKER_USER_RE.fullmatch(name) is None
+                or type(config.get("provider_home")) is not str
+                or config["provider_home"] != str(home)
+                or uid in {s.worker_uid for s in existing}
+                or gid in {s.worker_gid for s in existing}
+                or control in {s.worker_uid for s in existing}
+                or name in {s.worker_user for s in existing}):
+            raise SlotCatalogError("native_codex_additional_principal_invalid")
+        row = ProviderWorkerSlot(
+            slot_id=slot_id, worker_user=name, worker_group=name,
+            worker_uid=uid, worker_gid=gid, provider_home=home,
+            readiness_receipt=SYSTEM_CONFIG_ROOT / (
+                f"provider-readiness-{slot_id}-v2.json"),
+            workspace_binding_class=PERSONAL_PRO_WORKER_BINDING_CLASS,
+            allowed_credential_kinds=("device-auth",),
+            oauth_seat_ref="chatgpt4",
+            provider_family="openai",
+        )
+        for field in ("slot_id", "worker_user", "worker_group", "worker_uid",
+                      "worker_gid", "provider_home", "readiness_receipt"):
+            _unique(existing + (row,), field)
+        return row
+    if (config.get("native_provider") != "claude"
+            or type(slot_id) is not str or slot_id not in _NATIVE_CLAUDE_SLOT_IDS):
+        raise SlotCatalogError("native_slot_inventory_invalid")
+    worker_user = config.get("worker_user")
+    worker_uid, worker_gid = config.get("worker_uid"), config.get("worker_gid")
+    if (not isinstance(worker_user, str) or not _WORKER_USER_RE.fullmatch(worker_user)
+            or type(worker_uid) is not int or worker_uid <= 0
+            or type(worker_gid) is not int or worker_gid <= 0
+            or type(config.get("control_uid")) is not int
+            or worker_uid == config["control_uid"]):
+        raise SlotCatalogError("native_slot_identity_invalid")
+    row = ProviderWorkerSlot(
+        slot_id=enrollment["slot_id"], worker_user=worker_user,
+        worker_group=worker_user, worker_uid=worker_uid, worker_gid=worker_gid,
+        provider_home=RUNTIME_WORKER_ROOT / enrollment["slot_id"] / "provider-home",
+        readiness_receipt=SYSTEM_CONFIG_ROOT / f"provider-readiness-{enrollment['slot_id']}.json",
+        workspace_binding_class="native_claude_subscription",
+        allowed_credential_kinds=("claudeai-subscription",),
+        oauth_seat_ref="claude8" if slot_id == "claude8-native-01" else None,
+        provider_family="anthropic",
+    )
+    for field in ("slot_id", "worker_user", "worker_group", "worker_uid", "worker_gid",
+                  "provider_home", "readiness_receipt"):
+        _unique(all_slots() + (row,), field)
+    return row
+
+
 def get_slot(slot_id: str) -> ProviderWorkerSlot:
     if not isinstance(slot_id, str) or _SLOT_ID_RE.fullmatch(slot_id) is None:
         raise SlotCatalogError("unknown_slot")
@@ -192,6 +418,28 @@ def get_slot(slot_id: str) -> ProviderWorkerSlot:
         if row.slot_id == slot_id:
             return row
     raise SlotCatalogError("unknown_slot")
+
+
+_SUBSCRIPTION_RESOLVABLE_FIELDS = frozenset(
+    {
+        "slot_id",
+        "provider",
+        "profile_id",
+        "harness_binding_id",
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+        "worker_config",
+    }
+)
+
+
+def resolve_subscription_field(slot_id: str, field: str) -> str:
+    if field not in _SUBSCRIPTION_RESOLVABLE_FIELDS:
+        raise SlotCatalogError("unknown_subscription_field")
+    return str(getattr(get_subscription_slot(slot_id), field))
 
 
 _RESOLVABLE_FIELDS = frozenset(
@@ -221,15 +469,21 @@ def resolve_field(slot_id: str, field: str) -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Resolve one reviewed provider worker slot field")
-    parser.add_argument("slot_id", choices=[row.slot_id for row in all_slots()])
-    parser.add_argument("field", choices=sorted(_RESOLVABLE_FIELDS))
+    parser.add_argument("--subscription", action="store_true")
+    # Select and validate only the explicit catalog inside main's refusal boundary.
+    parser.add_argument("slot_id")
+    parser.add_argument("field")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        value = resolve_field(args.slot_id, args.field)
+        value = (
+            resolve_subscription_field(args.slot_id, args.field)
+            if args.subscription
+            else resolve_field(args.slot_id, args.field)
+        )
     except SlotCatalogError:
         return 2
     sys.stdout.write(value + "\n")
@@ -238,6 +492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 __all__ = [
     "ProviderWorkerSlot",
+    "SubscriptionWorkerSlot",
     "RUNTIME_WORKER_ROOT",
     "SYSTEM_CONFIG_ROOT",
     "SlotCatalogError",
@@ -245,9 +500,14 @@ __all__ = [
     "WORKER_GROUP",
     "all_slots",
     "get_slot",
+    "get_subscription_slot",
     "main",
+    "native_slot_from_config",
     "resolve_field",
+    "resolve_subscription_field",
+    "subscription_slots",
     "validate_slots",
+    "validate_subscription_slots",
 ]
 
 

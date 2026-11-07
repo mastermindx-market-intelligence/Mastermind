@@ -1,0 +1,56 @@
+{
+  "schema": "mastermind.workspace_project_plan.v1",
+  "selection": {
+    "work_ref": "WS:ONE"
+  },
+  "availability": "AVAILABLE",
+  "source": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "agentos/workstreams/WS-ONE.md",
+    "content_sha256": "dc584d715fc0cc3691295cb8a58e4464abe241ad67329abd52a9c3d1c05df04e"
+  },
+  "plan": {
+    "title": "An actual authored plan",
+    "objective": "Deliver the real owner content.",
+    "status": "active",
+    "owner": "ceo",
+    "next_action": "Qualify the source.",
+    "waves": [
+      {
+        "id": "first",
+        "title": "Qualify the source",
+        "status": "in_progress",
+        "depends_on": [],
+        "next_action": null,
+        "prs": []
+      },
+      {
+        "id": "second",
+        "title": "Deliver the result",
+        "status": "todo",
+        "depends_on": [
+          "first"
+        ],
+        "next_action": null,
+        "prs": []
+      }
+    ],
+    "adoption": {
+      "state": "UNAVAILABLE",
+      "reason": "NOT_DECLARED"
+    },
+    "version_history": {
+      "state": "AVAILABLE",
+      "kind": "GIT_RECORD_REVISIONS",
+      "revisions": [
+        {
+          "commit": "cccccccccccccccccccccccccccccccccccccccc",
+          "committed_at": "2026-11-03T00:00:00Z",
+          "content_sha256": "dc584d715fc0cc3691295cb8a58e4464abe241ad67329abd52a9c3d1c05df04e"
+        }
+      ]
+    }
+  },
+  "reason_codes": []
+}

@@ -1,0 +1,88 @@
+{
+  "admitted": false,
+  "blocked_network_attempts": 0,
+  "canary_sha256": "9334790c161abec26408c630c5f3e112c0eeb9b753e6fb9e60b3a7cc4d141ab9",
+  "capacity_client": "PluginContext.call_mcp",
+  "capacity_preview": {
+    "host": "ubuntu2",
+    "mode": "minimax",
+    "model": "MiniMax-M3",
+    "pool": "minimax",
+    "proof": "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH",
+    "reason": "minimax_first",
+    "reserved": false,
+    "selection_rechecked_at_request": true,
+    "state": "PREVIEW_ONLY"
+  },
+  "capacity_server": "mastermind-fabric-capacity",
+  "cross_profile": "REFUSED",
+  "dispatched": false,
+  "forced_pool": "REFUSED",
+  "live_command": "mmx-omh",
+  "live_command_advice": "RECOMMENDED_NOT_ADMITTED",
+  "live_command_routing_state": "ROUTE_PREVIEW_NOT_ADMITTED",
+  "live_command_status": "LOCAL_BRIDGE_READY",
+  "model_candidates": [
+    {
+      "model_alias": "glm53-flash-uc",
+      "reasoning_effort": "low"
+    },
+    {
+      "model_alias": "glm-5.3-flash",
+      "reasoning_effort": "low"
+    },
+    {
+      "model_alias": "gpt-6-luna",
+      "reasoning_effort": "low"
+    },
+    {
+      "model_alias": "claude-haiku-5-5",
+      "reasoning_effort": "low"
+    },
+    {
+      "model_alias": "kimi-k3.1-pro",
+      "reasoning_effort": "low"
+    },
+    {
+      "model_alias": "minimax-m3.1-flash",
+      "reasoning_effort": "low"
+    }
+  ],
+  "native_command_dispatch": "invoke_plugin_command",
+  "native_dispatch": "ToolRegistry.dispatch",
+  "native_loader": "PluginManager.discover_and_load",
+  "plan": "PREPARED_NOT_ADMITTED",
+  "plan_sha256": "6e83ce32433558c5a8ee9aa0d34929d6878116ea72ac6d8d51d8a3142d2447f5",
+  "plugin_sha256": "e72da67dfb64314c849c8b44b44c25e7707e3576f003df7a3ccabf3326a2cb70",
+  "production_profile_changed": false,
+  "profile_config_unchanged": true,
+  "provider_called": false,
+  "recommendation": "RECOMMENDED_NOT_ADMITTED",
+  "routing_requirements": {
+    "complexity": "C1_ROUTINE_BOUNDED",
+    "task_class": "census"
+  },
+  "routing_state": "ROUTE_PREVIEW_NOT_ADMITTED",
+  "schema": "mastermind.hermes_omh.native_canary/v1",
+  "skills": [
+    {
+      "category": "command",
+      "phase": "command-task",
+      "skill": "command-operator"
+    },
+    {
+      "category": "verification",
+      "phase": "build-failure-triage",
+      "skill": "build-failure-triage"
+    },
+    {
+      "category": "memory",
+      "phase": "curation-review",
+      "skill": "memory-sync"
+    }
+  ],
+  "source_commit": "27dbfa14ed572da5eecad7fc8d8f6a00747ec94c",
+  "source_files_sha256": "8198c40d815b379537d0655919ac594b4df6159d13156623ec0c192fa4dfa45d",
+  "status": "LOCAL_BRIDGE_READY",
+  "tool_activation": "next_session_by_native_contract"
+}

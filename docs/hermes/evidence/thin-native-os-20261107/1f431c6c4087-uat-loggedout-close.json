@@ -1,0 +1,9 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "verifiedExecutable": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/Mastermind OS.app/Contents/MacOS/mastermind-os",
+  "observation": {
+    "at": "2026-11-07T09:04:26.815Z",
+    "pid": 80261,
+    "action": "Closed signed-out app through normal window close"
+  }
+}
