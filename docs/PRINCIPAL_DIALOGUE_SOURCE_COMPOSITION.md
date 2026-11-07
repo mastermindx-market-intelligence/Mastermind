@@ -20,14 +20,28 @@ the physical message anchor. Attention acknowledgement is not source resolution.
 This helper requires a COO-targeted obligation; it does not turn an existing
 CEO-targeted worker-return obligation into a COO principal route.
 
-`read_principal_source` performs one `status`, `read_bound_parent` and
-`read_thread` operation on the same existing Relay socket. It checks the actual
-workspace/channel, Relay parent attestation, parent identity and exact original
-message key/fingerprint. It refuses thread mutation evidence, including an edit
-or deletion whose original created text the Relay can reconstruct. It never
-chooses the latest message. Its frozen result
-is a detached observation; it asserts neither caller authority nor an unresolved
-decision nor a current worker attempt.
+`read_principal_source` performs one `status` and one
+`read_exact_canonical_thread` operation on the existing Relay socket. The
+authenticated host supplies the already-minted `PhysicalDialogueSourceIdentity`
+from Wake/Executive, never a Slack search result or a model-selected thread.
+The exact read checks the actual workspace/channel, physical thread timestamp,
+Relay-authored unedited V2 parent, complete parent identity, expected parent
+fingerprint, original message key/fingerprint and a bounded mutation-complete
+`conversations.replies` history. It does not require a complete history of
+unrelated `#agent-dispatch` traffic; it does **not** assert that no other channel
+thread can carry a matching parent. The trusted source owner is responsible
+for the authoritative physical anchor, and the original channel-wide discovery
+and thread-creation paths are left unchanged.
+
+The parent and classified thread come from the **same** exact thread read, with
+one sealed response; there is no parent-read/second-thread-read drift window.
+A missing, duplicate, edited, deleted, misattributed, wrongly rooted, partially
+read or fingerprint-inconsistent parent refuses. All mutation evidence in the
+bounded thread refuses, including an edit or deletion whose original created
+text the Relay could reconstruct. The frozen result never chooses the latest
+message and is only detached evidence: it asserts neither caller authority nor
+an unresolved decision nor a current worker attempt. No new Slack scopes,
+credential, writer, retry, lifecycle, source registry or alternate carrier exist.
 
 `read_current_principal_source` first checks the authenticated caller against the
 host's read context before any source I/O. It joins that Relay observation to one

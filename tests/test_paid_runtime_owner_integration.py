@@ -379,9 +379,12 @@ def test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_pa
             raw=canonical_bytes(envelope);Path(ref.result_path).write_bytes(raw)
             return dataclasses.replace(receipt,result=dataclasses.replace(receipt.result,
                 structured_output=envelope),result_sha256=hashlib.sha256(raw).hexdigest())
+    uid,gid=os.geteuid(),os.getegid()
     home=tmp_path/'review-codex-home';home.mkdir(mode=0o700)
+    # Match the fixture's worker group even when temporary directories inherit another group.
+    os.chown(home,-1,gid)
     adapter=ReadonlyReviewAdapter(FakeInspector(),root_job_id=root.job_id,provider_home=home)
-    uid,gid=os.geteuid(),os.getegid();runs=tmp_path/'codex-runs'
+    runs=tmp_path/'codex-runs'
     supervisor=ExecutiveSupervisor(runtime,adapter,runs_root=runs,
         isolation_roots=(Path(root.worktree).parent,runs),worker_user=pwd.getpwuid(uid).pw_name,
         worker_uid=uid,worker_gid=gid,inspector=adapter.inspector,

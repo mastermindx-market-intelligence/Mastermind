@@ -34,21 +34,50 @@ class NativeCredentialTests(unittest.TestCase):
         self.home = self.root / "hermes-home"
         self.home.mkdir(mode=0o700)
 
-    def _runtime(self, role="mmsecretary", extras="", dashboard_password="distinct-dashboard-only-fixture-123456", include_proxy=True):
-        dashboard_line = (
-            "" if dashboard_password is None
-            else "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + dashboard_password + "\n"
-        )
+    def _fixture_extras(self, lines: str) -> str:
+        choices = {
+            "BYTEPLUS_MODELARK_API_KEY": (FAKE_BYTEPLUS,),
+            "ZAI_API_KEY": (FAKE_ZAI,),
+            "HERMES_NATIVE_EGRESS_ROLE": ("mmsecretary", "mmmeta"),
+            "HERMES_SLACK_BOT_TOKEN": (TOKEN, FAKE_BYTEPLUS, FAKE_ZAI,
+                "distinct-dashboard-only-fixture-123456", "slack-token-fake-not-live",
+                "synthetic-slack-bearer-123456"),
+            "HERMES_SLACK_BOT_USER_ID": ("UPROJECTBOT001",),
+            "BYTEPLUS_MODELARK_API_KEY_FILE": (str(self.root / "model-key"),
+                str(self.root / "model-key-reused-as-slack-token")),
+        }
+        canonical = []
+        for line in lines.splitlines():
+            name, sep, value = line.partition("=")
+            if sep != "=" or name not in choices or value not in choices[name]:
+                raise ValueError("not a closed synthetic credential fixture")
+            # Rebuild from the finite fixture catalog, never caller bytes.
+            canonical.append(name + "=" + next(item for item in choices[name] if item == value) + "\n")
+        return "".join(canonical)
+
+    def _runtime(self, role="mmsecretary", extras="", dashboard_case="distinct", include_proxy=True):
+        if role not in {"mmsecretary", "mmmeta"}:
+            raise ValueError("not a synthetic role")
+        examples = {
+            "distinct": "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=distinct-dashboard-only-fixture-123456\n",
+            "missing": "",
+            "model_alias": "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + FAKE_BYTEPLUS + "\n",
+        }
+        if dashboard_case not in examples:
+            raise ValueError("not a synthetic dashboard scenario")
+        if type(include_proxy) is not bool:
+            raise ValueError("invalid synthetic proxy selection")
         egress = (
             f"HERMES_NATIVE_EGRESS_ROLE={role}\n"
-            f"HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:{18651 if role == 'mmsecretary' else 18652}\n"
+            f"HERMES_NATIVE_HTTPS_PROXY=http://{'127.0.0.2' if role == 'mmsecretary' else '127.0.0.3'}:{18651 if role == 'mmsecretary' else 18652}\n"
             if include_proxy else ""
         )
-        self.secret.write_text(
-            "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + dashboard_line + egress + extras,
-            encoding="utf-8",
-        )
-        self.secret.chmod(0o600)
+        content = "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + examples[dashboard_case] + egress + self._fixture_extras(extras)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(self.secret, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(content)
         profile = replace(
             compose_profile(role, state_dir=self.state, secrets_file=self.secret,
                             hermes_home=self.home, gateway_port=0, backend_port=0),
@@ -59,6 +88,13 @@ class NativeCredentialTests(unittest.TestCase):
         cfg.write_text(render_disarmed_native_byok(profile), encoding="utf-8")
         cfg.chmod(0o600)
         return ServiceRuntime(profile, load_secrets(self.secret), STUB)
+
+    def test_fixture_rejects_arbitrary_values_before_file_creation(self) -> None:
+        for kw in ({"extras": "BYTEPLUS_MODELARK_API_KEY=not-in-fixture-catalog\n"},
+                   {"dashboard_case": "not-in-fixture-catalog"}):
+            with self.subTest(kw=kw), self.assertRaises(ValueError):
+                self._runtime(**kw)
+            self.assertFalse(self.secret.exists())
 
     def test_secretary_only_primary_key_and_no_parent_bearer(self) -> None:
         rt = self._runtime(extras=(
@@ -78,7 +114,7 @@ class NativeCredentialTests(unittest.TestCase):
         self.assertNotIn(TOKEN, native.values())
         self.assertNotIn(FAKE_ZAI, native.values())
         self.assertEqual(native["HERMES_SLACK_BOT_USER_ID"], "UPROJECTBOT001")
-        self.assertEqual(native["HTTPS_PROXY"], "http://127.0.0.1:18651")
+        self.assertEqual(native["HTTPS_PROXY"], "http://127.0.0.2:18651")
         self.assertNotIn("HTTP_PROXY", native)
         self.assertNotIn("ALL_PROXY", native)
         self.assertNotIn("HERMES_NATIVE_HTTPS_PROXY", native)
@@ -109,15 +145,11 @@ class NativeCredentialTests(unittest.TestCase):
         self.assertEqual(exc.exception.code, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE")
 
     def test_missing_role_private_proxy_refuses_even_if_shell_has_proxy(self) -> None:
-        rt = self._runtime(
-            extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n"
-                   "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n",
-            include_proxy=False,
-        )
-        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:18651"}):
+        rt = self._runtime(extras='BYTEPLUS_MODELARK_API_KEY=' + FAKE_BYTEPLUS + '\nHERMES_NATIVE_EGRESS_ROLE=mmsecretary\n', include_proxy=False)
+        with mock.patch.dict(os.environ, {'HTTPS_PROXY': 'http://127.0.0.2:18651'}):
             with self.assertRaises(RuntimeRefusal) as exc:
                 rt._model_child_env()
-        self.assertEqual(exc.exception.code, "NATIVE_EGRESS_PROXY_NOT_ENROLLED")
+        self.assertEqual(exc.exception.code, 'NATIVE_EGRESS_PROXY_NOT_ENROLLED')
 
     def test_shell_only_key_cannot_bypass_role_private_secret_file(self) -> None:
         # A systemd unit must not depend on the installing operator's shell.
@@ -142,7 +174,7 @@ class NativeCredentialTests(unittest.TestCase):
     def test_gateway_token_must_not_be_reused_as_dashboard_password(self) -> None:
         rt = self._runtime(
             extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n",
-            dashboard_password=None,
+            dashboard_case="missing",
         )
         self.assertEqual(rt.secrets.dashboard_password, rt.secrets.token)
         with self.assertRaises(RuntimeRefusal) as exc:
@@ -152,7 +184,7 @@ class NativeCredentialTests(unittest.TestCase):
     def test_model_key_must_not_be_reused_as_gateway_or_dashboard_key(self) -> None:
         rt = self._runtime(
             extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n",
-            dashboard_password=FAKE_BYTEPLUS,
+            dashboard_case="model_alias",
         )
         with self.assertRaises(RuntimeRefusal) as exc:
             rt._model_child_env()
@@ -171,6 +203,38 @@ class NativeCredentialTests(unittest.TestCase):
                 with self.assertRaises(RuntimeRefusal) as exc:
                     rt._model_child_env()
                 self.assertEqual(exc.exception.code, "NATIVE_SLACK_BOT_AUTH_ALIAS_REFUSED")
+
+    def test_the_consumer_client_ref_cannot_borrow_the_model_identity(self) -> None:
+        """The Executive connection keeps its own OAuth client reference.
+
+        It never borrows the model's provider, its credential name or its
+        served model: the two identities stay disjoint.
+        """
+        from integrations.hermes_models.contract import native_provider
+        from integrations.hermes_harness.tests.test_native_executive_consumer import (
+            publication_document,
+        )
+
+        rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
+        spec = native_provider(rt.profile.role, rt.profile.native_provider_id)
+        for label, borrowed in (
+            ("credential_env", spec.credential_env),
+            ("provider_id", spec.provider_id),
+            ("hermes_name", spec.hermes_name),
+            ("served_model", spec.served_model),
+        ):
+            with self.subTest(alias=label):
+                document = publication_document()
+                document["mcp"] = dict(document["mcp"], client_id=borrowed)
+                with self.assertRaises(RuntimeRefusal) as exc:
+                    primary_model_env(rt.profile, rt.secrets.values, document)
+                self.assertEqual(exc.exception.code,
+                                 "NATIVE_CONSUMER_MODEL_CREDENTIAL_ALIAS_REFUSED")
+
+    def test_no_consumer_keeps_the_model_credential_unchanged(self) -> None:
+        rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
+        env = primary_model_env(rt.profile, rt.secrets.values)
+        self.assertEqual(env, {"BYTEPLUS_MODELARK_API_KEY": FAKE_BYTEPLUS})
 
     def test_model_key_must_not_alias_slack_bot_token_for_either_role(self) -> None:
         for role, env_name, value in (
@@ -201,7 +265,7 @@ class NativeCredentialTests(unittest.TestCase):
     def test_byok_alias_refusal_happens_before_any_hermes_subprocess(self) -> None:
         rt = self._runtime(
             extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n",
-            dashboard_password=None,
+            dashboard_case="missing",
         )
         with mock.patch(
             "integrations.hermes_runtime.supervisor.subprocess.run",

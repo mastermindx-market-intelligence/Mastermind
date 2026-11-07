@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import test_mastermind_executive_app_asgi as auth_fixture
+from tests.test_session_bridge_runtime_return import setup
 from common.session_bridge_private_contract import private_result
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
@@ -26,6 +27,7 @@ ROOT = "JOB-100"
 WORK = "WS:WORKSPACE-AGENT-PROGRAM"
 KEY = "session-continue-" + "b" * 64
 TARGET = "fabric_attempt:" + "a" * 64
+REQUEST_DIGEST = "1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e"
 SELECTION = {"work_ref": WORK, "root_job_id": ROOT}
 ARGS = {"target_ref": TARGET, "instruction": "Read the existing result.",
         "stop_condition": "Stop after reporting it.", "operation_key": KEY}
@@ -79,6 +81,18 @@ class Peer:
         self.rows = [row()]
         self.send_result = committed()
         self.reply_result = reply()
+        self.references_result = {
+            "schema": "mastermind.session_reply_references.v1",
+            "status": "COMPLETE", "next_cursor": None, "high_water": 12,
+            "references": [{"read_ref": "session-reply-" + REQUEST_DIGEST,
+                            "operation_key": KEY,
+                            "request_ref": "session-bridge-continue:" + REQUEST_DIGEST,
+                            "request_event_id": 12,
+                            "request_revision": "c" * 64,
+                            "requested_at": "2026-10-18T00:00:00Z",
+                            "work_ref": WORK, "root_job_id": ROOT,
+                            "target_ref": TARGET, "reference_only": True}],
+        }
         self.error = None
         self.transport = TRANSPORT_SENT_OK
         self.after = lambda: None
@@ -91,7 +105,8 @@ class Peer:
             result = private_result(tool, code=self.error, message="PRIVATE-BACKEND-DIAGNOSTIC")
         else:
             data = {"session_targets": self.rows, "session_send": self.send_result,
-                    "session_reply_read": self.reply_result}[tool]
+                    "session_reply_read": self.reply_result,
+                    "session_reply_references": self.references_result}[tool]
             result = private_result(tool, data=copy.deepcopy(data))
         return SimpleNamespace(transport=self.transport, ok=True, result=result)
 
@@ -269,6 +284,110 @@ def test_audit_failure_closes_before_private_call(rsa_key, operation):
     status, result = request(app, auth_fixture._submit_token(rsa_key), operation)
     assert status in (401, 403) and not peer.calls
     assert result["effect"] == ("UNKNOWN" if operation == "reply" else "NONE")
+
+
+def test_verified_read_only_token_recovers_submit_policy_request_across_private_bridge(
+    rsa_key, setup, monkeypatch,
+):
+    """Real JWT policy pairs -> private frame -> Runtime provenance -> Dialogue read."""
+    import time
+    from pathlib import Path
+
+    from integrations.business_mcp_auth.principal_projection import principal_projection
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    from common.session_bridge_private_contract import PRIVATE_SCHEMA
+    from integrations.session_bridge.installed import (
+        InstalledSessionBridgeProvider, principal_frame)
+    from integrations.session_bridge.native_read import NativeReplyReader
+    from integrations.session_bridge.runtime_return import RuntimeSessionReturn
+    from tests.test_session_bridge_runtime_return import populate
+
+    s = setup
+    app, peer, clock, _ = make_app(rsa_key)
+    now = int(time.time())
+    monkeypatch.setattr(auth_fixture, "NOW", now)
+    clock[0] = now
+    # The stored request must be admitted under the actual authenticated SEND
+    # policy identity, not a fabricated policy alias.
+    send_token = auth_fixture._submit_token(rsa_key)
+    submit_principal = asyncio.run(
+        app._submit_pair[1].verify_token(send_token, now=now))
+    s.principal = submit_principal
+    s.projection = principal_projection(submit_principal)
+    # This is host-owned policy pairing, not an attribute supplied by the
+    # caller's private principal frame.
+    s.owner = RuntimeSessionReturn(
+        s.runtime, fabric=s.owner.fabric, codex=s.owner.codex,
+        socket_path=s.owner.socket_path, service_call=s.service,
+        authorized_policies=AppPolicies(
+            read=app._read_pair[1].policy,
+            submit=app._submit_pair[1].policy))
+    read_ref = populate(s)
+    before = [e.to_dict() for e in s.runtime.events.list_events(job_id=s.epoch.job_id)]
+    s.enabled[0] = False
+    s.service.calls.clear()
+
+    def no_effect(*_):
+        raise AssertionError("reply recovery cannot submit or rediscover targets")
+
+    reader = NativeReplyReader(s.owner,
+        socket_path=Path("/private/tmp/verified-policy-transition.sock"),
+        service_call=s.service, projected_principal=True)
+    provider = InstalledSessionBridgeProvider(
+        target_projector=no_effect, reply_handler=no_effect,
+        summon_handler=no_effect, reply_read_handler=reader)
+    frames = []
+
+    async def send_frame(_path, frame):
+        frames.append(copy.deepcopy(frame))
+        return SimpleNamespace(transport=TRANSPORT_SENT_OK, ok=True,
+                               result=await provider.handle_frame(frame))
+
+    peer.send_frame = send_frame
+    read_token = auth_fixture._read_token(rsa_key)
+    status, recovered = request(app, read_token, "reply",
+        {"arguments": {"operation_key": s.args["operation_key"]}})
+    assert status == 200 and recovered["ok"]
+    assert recovered["operation_key"] == s.args["operation_key"]
+    assert recovered["data"]["read_ref"] == read_ref
+    assert recovered["data"]["text"] == "The bounded finding is confirmed."
+    assert recovered["data"]["parent_consumed"] is False
+    assert [x["tool"] for x in frames] == ["session_reply_read"]
+    assert frames[0]["principal"]["policy_id"] == "bsc-e1-test-read"
+    assert s.service.calls and all(c["operation"] == "read_thread" for c in s.service.calls)
+
+    # A separately valid, signed READ policy for the same subject/resource
+    # must NOT claim this operation unless it is the approved counterpart.
+    other_policy = auth_fixture._read_policy(policy_id="unpaired-read-policy")
+    other_auth = JwtAuthenticator(
+        policy=other_policy, jwks_cache=auth_fixture._FakeJwksCache(rsa_key))
+    other_principal = asyncio.run(other_auth.verify_token(read_token, now=now))
+    previous_reads = len(s.service.calls)
+    foreign = asyncio.run(provider.handle_frame({
+        "schema": PRIVATE_SCHEMA, "tool": "session_reply_read",
+        "principal": principal_frame(other_principal),
+        "arguments": {"operation_key": s.args["operation_key"]}}))
+    assert foreign["ok"] is False and foreign["error"]["code"] == "reply_unavailable"
+    assert len(s.service.calls) == previous_reads
+
+    denied_status, denied = request(app, read_token, "send")
+    assert denied_status in (401, 403) and not denied["ok"]
+    assert len(frames) == 1
+    revoked = auth_fixture._token(rsa_key, scope="")
+    revoked_status, revoked_result = request(app, revoked, "reply",
+        {"arguments": {"operation_key": s.args["operation_key"]}})
+    assert revoked_status in (401, 403) and not revoked_result["ok"]
+    assert len(frames) == 1
+
+    # A READ credential that expires during the awaited private carrier read
+    # must never release a reply body, even if the backend found the answer.
+    s.service.on_read = lambda: clock.__setitem__(0, now + 400)
+    withheld_status, withheld = request(app, read_token, "reply",
+        {"arguments": {"operation_key": s.args["operation_key"]}})
+    assert withheld_status == 202 and not withheld["ok"]
+    assert withheld["effect"] == "UNKNOWN" and withheld["data"] is None
+    assert len(frames) == 2 and frames[-1]["tool"] == "session_reply_read"
+    assert [e.to_dict() for e in s.runtime.events.list_events(job_id=s.epoch.job_id)] == before
 
 
 def test_read_only_token_cannot_send(rsa_key):
@@ -539,3 +658,392 @@ def test_review_constructor_rejects_same_authenticator_with_split_audited_policy
         kwargs["submit_verifier"]._policy = auth_fixture._submit_policy(policy_id="different-policy")
     with pytest.raises(ValueError, match="one composition"):
         make_app(rsa_key, modify_kwargs=split_policy)
+
+
+
+@pytest.mark.parametrize("submit", [False, True])
+def test_read_only_original_references_authenticated_no_send(rsa_key, submit):
+    app, peer, _, _ = make_app(rsa_key)
+    token = (auth_fixture._submit_token(rsa_key) if submit
+             else auth_fixture._read_token(rsa_key))
+    status, result = request(
+        app, token, "references",
+        {"arguments": {"work_ref": WORK, "root_job_id": ROOT}})
+    assert status == 200 and result["effect"] == "NONE"
+    assert result["operation"] == "references" and result["operation_key"] is None
+    assert result["data"]["references"] == peer.references_result["references"]
+    assert result["data"]["references"][0]["reference_only"] is True
+    assert len(peer.calls) == 1
+    assert peer.calls[0]["tool"] == "session_reply_references"
+    assert peer.calls[0]["arguments"] == {"work_ref": WORK, "root_job_id": ROOT}
+    assert peer.calls[0]["principal"]["policy_id"] == (
+        "bsc-e1-test-submit" if submit else "bsc-e1-test-read")
+
+
+@pytest.mark.parametrize("arguments", [
+    {}, {"work_ref": "bad"}, {"work_ref": WORK, "root_job_id": "bad"},
+    {"work_ref": WORK, "page_size": True},
+    {"work_ref": WORK, "page_size": 33},
+    {"work_ref": WORK, "unknown": "value"},
+])
+def test_original_reference_http_validation_before_private_effect(rsa_key, arguments):
+    app, peer, _, _ = make_app(rsa_key)
+    status, result = request(app, auth_fixture._read_token(rsa_key),
+                             "references", {"arguments": arguments})
+    assert status == 400 and result["effect"] == "NONE"
+    assert result["data"] is None and not peer.calls
+
+
+def test_original_references_foreign_projection_is_withheld(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.references_result["references"][0]["work_ref"] = "WS:FOREIGN"
+    status, result = request(
+        app, auth_fixture._read_token(rsa_key), "references",
+        {"arguments": {"work_ref": WORK}})
+    assert status == 503 and result["effect"] == "NONE"
+    assert result["data"] is None
+    assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_reply_references"
+
+
+@pytest.mark.parametrize("change", [
+    lambda data: data["references"][0].update(private_backend_payload="LEAK"),
+    lambda data: data["references"][0].update(request_revision="not-a-hash"),
+    lambda data: data["references"][0].update(read_ref="session-reply-"+"a"*64),
+    lambda data: data["references"][0].update(request_ref="session-bridge-continue:"+"a"*64),
+    lambda data: data["references"][0].update(target_ref="codex:unbound"),
+    lambda data: data.update(next_cursor="foreign\nraw"),
+    lambda data: data.update(high_water=True),
+])
+def test_original_reference_http_cannot_echo_malformed_private_rows(rsa_key, change):
+    app, peer, _, _ = make_app(rsa_key)
+    change(peer.references_result)
+    status, result = request(
+        app, auth_fixture._read_token(rsa_key), "references",
+        {"arguments": {"work_ref": WORK}})
+    assert status == 503 and result["effect"] == "NONE"
+    assert result["data"] is None
+    assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_reply_references"
+
+
+def test_original_reference_public_digest_matches_runtime_source_formula():
+    from control_plane.native_continuation import _request_key
+    from integrations.mastermind_executive_app.os_session_transport import (
+        _original_request_digest)
+    assert _original_request_digest(KEY) == _request_key(KEY) == REQUEST_DIGEST
+    with pytest.raises(ValueError):
+        _original_request_digest("session-continue-invalid")
+
+
+# ---------------------------------------------------------------------------
+# Hermes Secretary consumer: the closed native target kind and public result.
+#
+# The producer contract is owned by integrations/session_bridge/hermes_native.py.
+# These cases never restate its rules: the transport must call that owner's
+# own validator and must bind the validated result to the exact requested
+# original operation key and SEND target.
+# ---------------------------------------------------------------------------
+
+HERMES_TARGET = "hermes_secretary:" + "a" * 64
+HERMES_OPERATION_SCHEMA = "mastermind.session_bridge.hermes_secretary_operation.v1"
+HERMES_RESULT_SCHEMA = "mastermind.session_bridge.hermes_secretary_result.v1"
+
+
+def _canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("ascii")
+
+
+def hermes_operation_key(target_ref=HERMES_TARGET):
+    return "session-continue-" + hashlib.sha256(_canonical(
+        {"schema": HERMES_OPERATION_SCHEMA, "target_ref": target_ref})).hexdigest()
+
+
+def hermes_request_key(operation_key):
+    return hashlib.sha256(_canonical(
+        {"schema": "mastermind.session_bridge.continue_request.v1",
+         "operation_key": operation_key})).hexdigest()
+
+
+def hermes_row(**updates):
+    value = {"target_ref": HERMES_TARGET, "kind": "hermes_secretary",
+             "generation": "a" * 24, "addressable": True,
+             "continuation_operation_key": hermes_operation_key(),
+             "work_ref": WORK, "root_job_id": ROOT}
+    value.update(updates)
+    return value
+
+
+def hermes_admission(**updates):
+    value = {"admission_id": "admission-1", "sequence": 1, "status": "queued",
+             "outcome": None, "authority_epoch": 1, "execution_generation": 0}
+    value.update(updates)
+    return value
+
+
+def hermes_result(**updates):
+    key = hermes_operation_key()
+    request_key = hermes_request_key(key)
+    value = {
+        "schema": HERMES_RESULT_SCHEMA, "target_ref": HERMES_TARGET,
+        "operation_key": key, "read_ref": "session-reply-" + request_key,
+        "request_ref": "session-bridge-continue:" + request_key,
+        "request_revision": "c" * 64, "native_input_sha256": "d" * 64,
+        "commit_started": True, "native_status": "ADMITTED",
+        "admission": hermes_admission(), "answer": None,
+        "successful": None, "parent_consumed": False,
+    }
+    value.update(updates)
+    return value
+
+
+def hermes_arguments(**updates):
+    arguments = {"target_ref": HERMES_TARGET,
+                 "instruction": "Summarise the retained thread.",
+                 "stop_condition": "Stop after the summary.",
+                 "operation_key": hermes_operation_key()}
+    arguments.update(updates)
+    return arguments
+
+
+@pytest.fixture
+def secretary_target_kind():
+    """Exercise the actual admitted schema; no test-only family admission."""
+    from integrations.session_bridge.schemas import TARGET_KINDS
+    assert "hermes_secretary" in TARGET_KINDS and "hermes_meta" in TARGET_KINDS
+
+
+def test_explicit_secretary_context_reads_one_secretary_target_only(rsa_key, secretary_target_kind):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.rows = [hermes_row()]
+    status, result = request(app, auth_fixture._submit_token(rsa_key), payload={
+        "selection": {**SELECTION, "target_kind": "hermes_secretary"}})
+    assert status == 200 and result["ok"] and result["effect"] == "NONE"
+    data = result["data"]
+    assert data["selection_state"] == "RESOLVED"
+    assert data["target"] == hermes_row()
+    assert data["selection"] == {**SELECTION, "target_kind": "hermes_secretary"}
+    assert data["capabilities"]["send"] is True
+    assert len(peer.calls) == 1
+    assert peer.calls[0]["arguments"] == {"kind": "hermes_secretary"}
+    assert peer.calls[0]["tool"] == "session_targets"
+
+
+def test_secretary_context_never_falls_back_to_fabric(rsa_key, secretary_target_kind):
+    app, peer, _, _ = make_app(rsa_key)
+    # A fabric row is present, but only the Secretary kind was requested.
+    peer.rows = [row(), hermes_row(work_ref="WS:OTHER")]
+    status, result = request(app, auth_fixture._submit_token(rsa_key), payload={
+        "selection": {**SELECTION, "target_kind": "hermes_secretary"}})
+    assert status == 200 and result["data"]["selection_state"] == "UNAVAILABLE"
+    assert result["data"]["target"] is None
+    assert not result["data"]["capabilities"]["send"]
+    assert [c["arguments"]["kind"] for c in peer.calls] == ["hermes_secretary"]
+
+
+@pytest.mark.parametrize("rows,state", [([], "UNAVAILABLE"),
+    ([hermes_row(root_job_id="JOB-foreign")], "UNAVAILABLE"),
+    ([hermes_row(work_ref="WS:OTHER")], "UNAVAILABLE"),
+    ([hermes_row(), hermes_row(target_ref="hermes_secretary:" + "c" * 64,
+                               generation="c" * 24,
+                               continuation_operation_key=hermes_operation_key(
+                                   "hermes_secretary:" + "c" * 64))], "AMBIGUOUS")])
+def test_secretary_selection_never_guesses_from_zero_foreign_or_multiple_rows(
+        rsa_key, secretary_target_kind, rows, state):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.rows = rows
+    status, result = request(app, auth_fixture._submit_token(rsa_key), payload={
+        "selection": {**SELECTION, "target_kind": "hermes_secretary"}})
+    assert status == 200 and result["data"]["selection_state"] == state
+    assert result["data"]["target"] is None and not result["data"]["capabilities"]["send"]
+
+
+@pytest.mark.parametrize("rows", [
+    [hermes_row(kind="fabric_attempt")],
+    [hermes_row(generation="c" * 24)],
+    [hermes_row(continuation_operation_key="session-continue-" + "c" * 64)],
+    [hermes_row(addressable=1)],
+    [hermes_row(extra="private")],
+    [hermes_row(kind="codex")],
+])
+def test_bad_secretary_projection_fails_closed(rsa_key, secretary_target_kind, rows):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.rows = rows
+    status, result = request(app, auth_fixture._read_token(rsa_key), payload={
+        "selection": {**SELECTION, "target_kind": "hermes_secretary"}})
+    assert status == 503 and result["effect"] == "NONE" and result["data"] is None
+
+
+@pytest.mark.parametrize("selection", [
+    {**SELECTION, "target_kind": None},
+    {**SELECTION, "target_kind": "codex"},
+    {**SELECTION, "target_kind": "hermes_secretary", "extra": "private"},
+    {**SELECTION, "target_kind": 1},
+])
+def test_unsupported_or_null_target_kind_has_no_private_call(rsa_key, selection):
+    app, peer, _, _ = make_app(rsa_key)
+    status, result = request(app, auth_fixture._read_token(rsa_key),
+                              payload={"selection": selection})
+    assert status == 400 and result["effect"] == "NONE" and not peer.calls
+
+
+def test_legacy_selection_keeps_the_incumbent_fabric_shape(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.rows = [row()]
+    status, result = request(app, auth_fixture._submit_token(rsa_key))
+    assert status == 200 and result["data"]["selection"] == SELECTION
+    assert peer.calls[0]["arguments"] == {"kind": "fabric_attempt"}
+
+
+def test_secretary_send_with_uncommitted_request_is_evidence_not_refusal(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result(commit_started=False, native_status=None,
+                                      admission=None)
+    status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 200 and result["ok"] and result["effect"] == "NONE"
+    assert result["operation_key"] == hermes_operation_key()
+    assert result["data"] == peer.send_result
+    assert len(peer.calls) == 1 and peer.calls[0]["arguments"] == hermes_arguments()
+
+
+@pytest.mark.parametrize("status_value", ["ADMITTED", "OBSERVED"])
+def test_secretary_send_with_qualified_admission_commits_only_that_admission(rsa_key, status_value):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result(native_status=status_value,
+                                      admission=hermes_admission())
+    status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 200 and result["ok"] and result["effect"] == "CONTINUATION_COMMITTED"
+    assert result["data"] == peer.send_result
+
+
+@pytest.mark.parametrize("status_value", ["NOT_SUBMITTED", "REFUSED", "EFFECT_UNKNOWN",
+                                          "UNAVAILABLE", None])
+def test_committed_secretary_send_without_admission_is_unknown(rsa_key, status_value):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result(native_status=status_value, admission=None)
+    status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 200 and result["ok"] and result["effect"] == "UNKNOWN"
+    assert result["data"] == peer.send_result
+    assert result["operation_key"] == hermes_operation_key()
+
+
+@pytest.mark.parametrize("change", [
+    lambda r: r.update(operation_key="session-continue-" + "f" * 64),
+    lambda r: r.update(target_ref="hermes_secretary:" + "f" * 64),
+    lambda r: r.update(parent_consumed=True),
+    lambda r: r.update(commit_started="yes"),
+    lambda r: r.update(admission=hermes_admission(sequence=0)),
+    lambda r: r.update(admission=hermes_admission(status="finished")),
+    lambda r: r.update(answer="text", successful=True),
+    lambda r: r.update(extra="private"),
+    lambda r: r.update(answer="🧪" * 5000, native_status="OBSERVED",
+                       admission=hermes_admission(status="terminal"), successful=True),
+    lambda r: r.update(answer="x" * 24000, native_status="OBSERVED",
+                       admission=hermes_admission(status="terminal"), successful=True),
+])
+def test_foreign_malformed_or_oversized_secretary_result_is_unknown(rsa_key, change):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result()
+    status, control = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 200 and control["data"] == peer.send_result
+    change(peer.send_result)
+    status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 202 and not result["ok"] and result["effect"] == "UNKNOWN"
+    assert result["data"] is None
+    assert result["operation_key"] == hermes_operation_key()
+
+
+def test_secretary_reply_recovers_the_original_operation_only(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.reply_result = hermes_result(native_status="OBSERVED",
+                                       admission=hermes_admission(status="terminal"),
+                                       answer="The retained answer.",
+                                       successful=True)
+    status, result = request(app, auth_fixture._read_token(rsa_key), "reply",
+                              {"arguments": {"operation_key": hermes_operation_key()}})
+    assert status == 200 and result["ok"]
+    assert result["effect"] == "CONTINUATION_COMMITTED"
+    assert result["data"] == peer.reply_result
+    assert [c["tool"] for c in peer.calls] == ["session_reply_read"]
+    assert peer.calls[0]["arguments"] == {"operation_key": hermes_operation_key()}
+
+
+def test_secretary_reply_of_an_uncommitted_request_is_no_effect_evidence(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.reply_result = hermes_result(commit_started=False, native_status=None,
+                                       admission=None)
+    status, result = request(app, auth_fixture._read_token(rsa_key), "reply",
+                              {"arguments": {"operation_key": hermes_operation_key()}})
+    assert status == 200 and result["ok"] and result["effect"] == "NONE"
+    assert result["data"] == peer.reply_result
+
+
+def test_secretary_reply_with_an_unresolved_phase_is_unknown(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.reply_result = hermes_result(native_status="EFFECT_UNKNOWN", admission=None)
+    status, result = request(app, auth_fixture._read_token(rsa_key), "reply",
+                              {"arguments": {"operation_key": hermes_operation_key()}})
+    assert status == 200 and result["ok"] and result["effect"] == "UNKNOWN"
+    assert result["data"] == peer.reply_result
+
+
+def test_secretary_reply_bound_to_another_operation_is_unknown(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.reply_result = hermes_result(operation_key="session-continue-" + "f" * 64)
+    status, result = request(app, auth_fixture._read_token(rsa_key), "reply",
+                              {"arguments": {"operation_key": hermes_operation_key()}})
+    assert status == 202 and not result["ok"] and result["effect"] == "UNKNOWN"
+    assert result["data"] is None
+    assert result["operation_key"] == hermes_operation_key()
+
+
+def test_original_references_accept_mixed_canonical_pages(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    key = hermes_operation_key()
+    request_key = hermes_request_key(key)
+    peer.references_result["references"].append({
+        "read_ref": "session-reply-" + request_key, "operation_key": key,
+        "request_ref": "session-bridge-continue:" + request_key,
+        "request_event_id": 11, "request_revision": "e" * 64,
+        "requested_at": "2026-10-18T00:00:01Z", "work_ref": WORK,
+        "root_job_id": ROOT, "target_ref": HERMES_TARGET, "reference_only": True})
+    status, result = request(app, auth_fixture._read_token(rsa_key), "references",
+                              {"arguments": {"work_ref": WORK}})
+    assert status == 200 and result["ok"]
+    assert [row["target_ref"] for row in result["data"]["references"]] == [
+        TARGET, HERMES_TARGET]
+
+
+def test_original_references_refuse_an_unbound_target_prefix(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.references_result["references"][0]["target_ref"] = "codex:unbound"
+    status, result = request(app, auth_fixture._read_token(rsa_key), "references",
+                              {"arguments": {"work_ref": WORK}})
+    assert status == 503 and result["effect"] == "NONE" and result["data"] is None
+
+
+def test_secretary_send_uses_the_one_validated_private_call(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result()
+    status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 200 and result["ok"]
+    assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_send"
+    assert peer.calls[0]["arguments"] == hermes_arguments()
+
+
+def test_secretary_send_joins_the_requested_target_even_when_the_return_is_self_consistent(rsa_key):
+    app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result()
+    from integrations.session_bridge.hermes_native import validate_public_result
+    assert validate_public_result(peer.send_result) == peer.send_result
+    arguments = dict(hermes_arguments(), target_ref="hermes_secretary:" + "f" * 64)
+    status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
+                             {"arguments": arguments})
+    assert status == 202 and not result["ok"] and result["effect"] == "UNKNOWN"
+    assert result["data"] is None
+    assert len(peer.calls) == 1 and peer.calls[0]["arguments"] == arguments

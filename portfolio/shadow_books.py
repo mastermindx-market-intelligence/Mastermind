@@ -176,15 +176,26 @@ def _save_account(book_id: str, acct: dict) -> None:
     (d / "account.json").write_text(json.dumps(acct, indent=2, default=str))
 
 
+class ShadowMarkUnavailable(RuntimeError):
+    """A held shadow position has no canonical mark; refuse to fabricate a new NAV."""
+
+
 def _mark_to(prices: dict, positions: dict) -> float:
-    """Mark held positions: a live price if available, else the avg cost (so a missing quote can't
-    swing NAV) — mirrors the prod paper_account convention."""
+    """Value held positions only from canonical marks supplied for this run.
+
+    ``portfolio.marks`` already owns bounded last-good carry. If that layer leaves a held name
+    unpriced, snapping it back to avg_cost manufactures a return and can rewrite forward A/B
+    evidence. Refuse the book valuation instead; the prior dated NAV remains the last truthful mark.
+    """
     inv = 0.0
     for t, p in positions.items():
+        shares = float(p.get("shares") or 0.0)
+        if shares <= 0:
+            continue
         px = prices.get(t)
         if not px or px <= 0:
-            px = p.get("avg_cost") or 0.0
-        inv += (p.get("shares") or 0.0) * px
+            raise ShadowMarkUnavailable(f"no canonical mark for held shadow position {t}")
+        inv += shares * float(px)
     return inv
 
 
@@ -193,6 +204,8 @@ def _rebalance(book_id: str, targets: dict, prices: dict, asof: str) -> None:
     if not acct.get("inception_date"):
         acct["inception_date"] = asof
     positions = acct.setdefault("positions", {})
+    # A rebalance requires a complete pre-trade NAV for every held line. If canonical marks cannot
+    # value one, _mark_to refuses before any cash/position mutation happens.
     nav = acct.get("cash", 0.0) + _mark_to(prices, positions)
     if nav <= 0:
         nav = _STARTING_NAV
@@ -234,6 +247,8 @@ def _append_nav(book_id: str, row: dict, asof: str) -> None:
 def _mark(book_id: str, prices: dict, asof: str) -> dict:
     acct = _load_account(book_id)
     positions = acct.get("positions", {})
+    # Refuse before appending a dated row when any held line is unpriced. Public drivers catch the
+    # typed refusal per book, so one stale/missing symbol cannot sink the build or fabricate NAV.
     invested = _mark_to(prices, positions)
     nav = acct.get("cash", 0.0) + invested
     row = {"date": asof, "nav": round(nav, 2), "cash": round(acct.get("cash", 0.0), 2),
@@ -445,7 +460,9 @@ def _synthetic_carry_targets(book_id: str, inputs: list) -> dict:
     Cold-start: an empty do-nothing book inherits PROD's target weights on the first day prod has a
     non-empty allocation, so it has a real inception snapshot to carry (a do-nothing book that starts
     empty and never trades would carry $0 of positions forever). After that inception it NEVER changes
-    its targets — it just re-marks its held weights each run (held_value / nav)."""
+    its inventory — `run()` skips rebalance for an already-seeded do-nothing book and only re-marks it.
+    The returned weights keep the held symbols in the common price/thesis plumbing; they are not an
+    execution target after inception."""
     acct = _load_account(book_id)
     positions = acct.get("positions") or {}
     if positions:                                          # already seeded → carry current holdings
@@ -453,8 +470,6 @@ def _synthetic_carry_targets(book_id: str, inputs: list) -> dict:
             (p.get("shares") or 0.0) * (p.get("avg_cost") or 0.0) for p in positions.values())
         if nav <= 0:
             return {t: 0.0 for t in positions}
-        # target = current dollar weight at avg_cost (a mark-agnostic snapshot; _rebalance re-solves
-        # shares at live prices but the delta is ~0 since these ARE the held shares).
         return {t: round((p.get("shares") or 0.0) * (p.get("avg_cost") or 0.0) / nav, 4)
                 for t, p in positions.items()}
     # cold-start inception: adopt prod's weights so there is something to freeze
@@ -470,9 +485,11 @@ def run(asof: str, prices: dict | None = None, inputs: list | None = None) -> di
     targets_by_book = {p["id"]: apply_policy(p, inputs)
                        for p in POLICIES if not p.get("synthetic")}
     # ── W-L / L1 synthetic arms — targets are NOT derived from decision inputs ──
-    # do_nothing: carry whatever this arm already holds (targets == current held weights → no trade,
-    #             just a forward mark). On a fresh book with no positions it stays all-cash until it
-    #             inherits prod's inception snapshot on its first non-empty run.
+    # do_nothing: carry whatever this arm already holds. Its target weights are symbol/thesis
+    #             plumbing only — the arm's ONE trade edge is its cold-start inception, after which
+    #             run() bypasses _rebalance entirely and only re-marks forward. On a fresh book with
+    #             no positions it stays all-cash until it inherits prod's inception snapshot on its
+    #             first non-empty run.
     # defensive:  a static equal-weight basket, rebalanced back to EW each run.
     for p in POLICIES:
         syn = p.get("synthetic")
@@ -514,7 +531,18 @@ def run(asof: str, prices: dict | None = None, inputs: list | None = None) -> di
         bid = p["id"]
         targets = targets_by_book[bid]
         try:
-            if targets or _has_inputs:
+            # The do-nothing arm has exactly ONE trade edge: its cold-start inception. Once any
+            # position exists, price drift or new signals must never alter shares or cash; only marks
+            # may change NAV. Previously it rebalanced every run to avg-cost-derived weights, creating
+            # the very churn this counterfactual is supposed to measure against.
+            #
+            # "Seeded" means the book actually HOLDS something — NOT that its account file exists, NOT
+            # inception_date, NOT NAV-history length. An all-cash / non-confirmed run stamps
+            # inception_date while positions stay empty, so such a book must stay ELIGIBLE for the
+            # first usable allocation.
+            frozen_carry = (p.get("synthetic") == "do_nothing"
+                            and bool(_load_account(bid).get("positions")))
+            if not frozen_carry and (targets or _has_inputs):
                 _rebalance(bid, targets, px, asof)
             nav_rows = _nav_rows(bid)
             row = _mark(bid, px, asof)

@@ -14,11 +14,28 @@ COMPLEXITIES = frozenset({
     "C2_COMPLEX_BOUNDED",
 })
 ACTIONS = frozenset({"submit", "status", "cancel"})
+# The closed selected-child production actions. The model may only submit or
+# observe the exact child its authenticated host already froze; it cannot
+# select, create, review, consume, or cancel anything.
+SELECTED_CHILD_ACTIONS = frozenset({"selected_child_submit", "selected_child_status"})
+SELECTED_CHILD_FIELDS = frozenset({"action", "command"})
 # Independent review and original-parent consumption are host-owned operations.
 # Never offer those actions to a model, even before a live review port exists.
+#: The closed private App-to-Control selected-child discriminator and shape.
+#: The Control plane owns the same literal in ``control_plane.executive_service``
+#: because the core never imports this package; the two are held identical by
+#: ``tests/test_hermes_selected_child_ingress.py``.
+SELECTED_CHILD_FRAME_SCHEMA = "mastermind.ceo_ingress.selected_child.v1"
+SELECTED_CHILD_FRAME_KEYS = frozenset({
+    "schema", "request", "target_digest", "principal", "principal_context",
+    "capability_profile_digest",
+})
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{7,127}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+COMMAND_RE = re.compile(
+    r"^coo-cycle:[^:\s]{1,128}:dispatch:[^:\s]{1,128}:attempt:[1-9][0-9]{0,9}$"
+)
 SECRET_RE = re.compile(
     r"(?i)(api[_-]?key\s*[:=]|BEGIN [A-Z ]*PRIVATE KEY|sk-[A-Za-z0-9]|ghp_|xox[baprs]-|bearer\s+[A-Za-z0-9])"
 )
@@ -106,3 +123,27 @@ def parse_submission(raw: Mapping[str, Any]) -> dict[str, Any]:
         "acceptance": acceptance,
         "constraints": merged,
     }
+
+
+def parse_selected_child(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Parse the closed model-facing selected-child request.
+
+    The only permitted argument is the exact canonical command reference the
+    host projected for a frozen child. A model idempotency key is refused
+    here: it never selects, reorders, or replaces a canonical Attempt.
+    """
+
+    if not isinstance(raw, Mapping):
+        raise SubmissionError("ARGUMENTS_NOT_OBJECT")
+    action = raw.get("action")
+    # The scalar type is checked before set membership: an unhashable model
+    # value must refuse normally instead of raising.
+    if not isinstance(action, str) or action not in SELECTED_CHILD_ACTIONS:
+        raise SubmissionError("UNKNOWN_ACTION")
+    unknown = set(raw) - SELECTED_CHILD_FIELDS
+    if unknown:
+        raise SubmissionError("UNKNOWN_FIELD")
+    command = raw.get("command")
+    if not isinstance(command, str) or COMMAND_RE.fullmatch(command) is None:
+        raise SubmissionError("COMMAND_INVALID")
+    return {"action": action, "command": command}

@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from integrations.session_bridge.native_reply import NativeReplyWriter
+from integrations.hermes_runtime.errors import NativeTurnEffectUnknown
 
 ROLES = frozenset(("mmsecretary", "mmmeta"))
 _MAX_PROMPT_BYTES = 8192
@@ -179,8 +180,20 @@ class HermesCanonicalTurnConsumer:
         ):
             raise ConsumerRefusal("ORIGINAL_REQUEST_SUPERSEDED")
         prompt = _message_prompt(request, role=self.role)
+        # The canonical read crossed an awaited boundary. Refuse observed
+        # drift before even calling a possibly synchronous inference function.
+        # These observations are not the host's atomic original-admission
+        # claim; overlap and uncertain-turn recovery still belong to that owner.
+        _, _, pre_inference_identity = await self.reply_writer._resolve(probe)
+        if pre_inference_identity != _identity:
+            raise ConsumerRefusal("BINDING_CHANGED_BEFORE_MODEL_TURN")
+        await self._require_current_role("ROLE_CHANGED_BEFORE_MODEL_TURN")
         try:
             answer = await _await_if_needed(self.infer_text(prompt))
+        except NativeTurnEffectUnknown:
+            # The existing parent must reconcile the possible paid turn;
+            # do not downgrade uncertainty into an ordinary retryable error.
+            raise ConsumerRefusal("MODEL_TURN_EFFECT_UNKNOWN") from None
         except Exception:
             # Provider errors can contain bearer values. Never forward them.
             raise ConsumerRefusal("MODEL_TURN_FAILED") from None
@@ -215,3 +228,19 @@ class HermesCanonicalTurnConsumer:
             "role_bot_slack_delivery_verified": False,
             "source_composition_only": True,
         }
+
+
+def compose_native_text_consumer(*, runtime, native_session_id: str,
+                                 reply_writer: NativeReplyWriter, current_role):
+    """Bind native inference to an ALREADY authenticated current reply writer.
+
+    This factory registers no target and changes no Runtime admission. Current
+    installed native-return ownership remains Codex-only; standalone Hermes
+    identity/Slack ingress must be admitted by that existing owner separately.
+    """
+    from integrations.hermes_harness.native_text import NativeTextInference
+    infer = NativeTextInference(runtime)
+    return HermesCanonicalTurnConsumer(
+        role=runtime.profile.role, native_session_id=native_session_id,
+        reply_writer=reply_writer, current_role=current_role, infer_text=infer,
+    )

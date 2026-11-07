@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
@@ -39,11 +40,9 @@ class InstallLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         os.chmod(STUB, 0o755)
         os.chmod(SCRIPT, 0o755)
-        self.root = Path("/tmp/hermes-runtime-install") / self.id().split(".")[-1]
-        if self.root.exists():
-            shutil.rmtree(self.root)
-        self.root.mkdir(parents=True)
-        self.addCleanup(lambda: shutil.rmtree(self.root, ignore_errors=True))
+        temporary = tempfile.TemporaryDirectory(prefix="hermes-runtime-install-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
         self.state = self.root / "state"
         self.unit_dir = self.root / "config" / "systemd" / "user"
         self.unit_dir.mkdir(parents=True)
@@ -95,15 +94,14 @@ class InstallLifecycleTests(unittest.TestCase):
 
     def test_unpinned_sha_creates_nothing(self) -> None:
         bad = self.root / "bad.yaml"
-        bad.write_text(
-            profile_text(
+        fd = os.open(bad, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(profile_text(
                 state=self.state,
                 secrets=self.secrets,
                 sha="a" * 40,
                 repository=UPSTREAM_REPOSITORY,
-            ),
-            encoding="utf-8",
-        )
+            ))
         result = self._run(
             "install",
             "--profile", str(bad),
@@ -117,6 +115,54 @@ class InstallLifecycleTests(unittest.TestCase):
         self.assertEqual(result.stderr.strip(), "UNPINNED_SHA")
         self.assertFalse(self.state.exists())
         self.assertFalse(any(self.unit_dir.rglob("*.service")))
+
+    def test_unpinned_profile_is_private_before_first_write(self) -> None:
+        real_open = os.open
+        opened = []
+
+        def observe_open(path, flags, mode=0o777, **kwargs):
+            fd = real_open(path, flags, mode, **kwargs)
+            if Path(path) == self.root / "bad.yaml":
+                info = os.fstat(fd)
+                opened.append((stat.S_IMODE(info.st_mode), info.st_size))
+            return fd
+
+        previous_umask = os.umask(0)
+        try:
+            with mock.patch.object(os, "open", side_effect=observe_open):
+                self.test_unpinned_sha_creates_nothing()
+        finally:
+            os.umask(previous_umask)
+        bad = self.root / "bad.yaml"
+        self.assertEqual(opened, [(0o600, 0)])
+        self.assertEqual(stat.S_IMODE(bad.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.root.stat().st_mode), 0o700)
+        text = bad.read_text(encoding="utf-8")
+        self.assertIn(f"secrets_file: {self.secrets}\n", text)
+        self.assertNotIn(TOKEN, text)
+
+    def test_unpinned_profile_refuses_existing_file_and_symlink(self) -> None:
+        target = self.root / "keep"
+        target.write_text("preserve-fixture-target\n", encoding="utf-8")
+        bad = self.root / "bad.yaml"
+        for kind in ("file", "symlink"):
+            with self.subTest(kind=kind):
+                if kind == "symlink":
+                    bad.symlink_to(target)
+                else:
+                    bad.write_text("preserve-existing-profile\n", encoding="utf-8")
+                try:
+                    with self.assertRaises(FileExistsError):
+                        self.test_unpinned_sha_creates_nothing()
+                    self.assertEqual(target.read_text(encoding="utf-8"), "preserve-fixture-target\n")
+                    if kind == "symlink":
+                        self.assertTrue(bad.is_symlink())
+                    else:
+                        self.assertEqual(bad.read_text(encoding="utf-8"), "preserve-existing-profile\n")
+                    self.assertFalse(self.state.exists())
+                    self.assertFalse(any(self.unit_dir.rglob("*.service")))
+                finally:
+                    bad.unlink()
 
     def test_secrets_mode_and_symlink_are_refused_before_state_exists(self) -> None:
         os.chmod(self.secrets, 0o644)
@@ -293,7 +339,9 @@ class InstallLifecycleTests(unittest.TestCase):
         unit = self.unit_dir / "hermes-runtime-mmsecretary.service"
         text = unit.read_text(encoding="utf-8")
         self.assertIn("Restart=on-failure", text)
-        self.assertIn("IPAddressAllow=localhost", text)
+        self.assertIn("IPAddressAllow=127.0.0.1/32", text)
+        self.assertIn("IPAddressAllow=127.0.0.2/32", text)
+        self.assertNotIn("IPAddressAllow=localhost", text)
         self.assertIn("IPAddressDeny=any", text)
         self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET\n", text)
         self.assertNotIn("AF_INET6", text)

@@ -2,6 +2,7 @@
 No worker launch, result publication, lease mutation or terminal acceptance.
 """
 import argparse
+import errno
 from contextvars import ContextVar
 import hashlib
 import json
@@ -401,11 +402,32 @@ def _file(value):
             and all(_integer(v) for v in value.values()) and value['mode']<=0o7777)
 
 
-def _failure(value):
-    if type(value) is not dict:
+def _directory_diagnostic(value):
+    if (type(value) is not dict or set(value) != {'component','kind','uid','mode','errno'}
+            or value['component'] not in ('lanes','lanes/ext','lanes/ext/lanes')
+            or value['kind'] not in ('directory','regular','symlink','other','unknown')
+            or (value['errno'] is not None and
+                (type(value['errno']) is not int or not 0 < value['errno'] <= 65535))):
         return False
+    if value['kind'] == 'unknown':
+        return value['uid'] is None and value['mode'] is None
+    return (_integer(value['uid']) and type(value['mode']) is int
+            and 0 <= value['mode'] < 2**12 and value['errno'] is None)
+
+
+def _failure(value):
+    if type(value) is not dict:return False
+    if 'directory_diagnostic' in value:
+        diagnostic=value['directory_diagnostic']
+        if not _directory_diagnostic(diagnostic):return False
+        if diagnostic['kind']=='unknown':
+            if value.get('status')=='absent':
+                if value.get('reason')!='missing_at_observation' or diagnostic['errno']!=errno.ENOENT or 'errno' in value:return False
+            elif value.get('reason')!='filesystem_error' or diagnostic['errno']!=value.get('errno'):return False
+        elif value.get('reason')!='directory_owner_mode_or_type':return False
+        value={key:item for key,item in value.items() if key!='directory_diagnostic'}
     if value.get('status') == 'absent':
-        return value == {'status': 'absent', 'reason': 'missing_at_observation'}
+        return value == {'status':'absent','reason':'missing_at_observation'}
     return (set(value) <= {'status','reason','errno'}
             and value.get('status') == 'unavailable'
             and type(value.get('reason')) is str
@@ -512,7 +534,7 @@ def validate_response(raw,request):
     if request.get('support_metadata_only') is True:
         return _support_metadata_response(report,request)
     if (type(report) is not dict or not {'schema','run_id','expected_support_digest','status','observations','limits'}<=set(report)
-            or set(report)-{'schema','run_id','expected_support_digest','status','observations','limits','reason','errno','request_stopped','observed_at'}
+            or set(report)-{'schema','run_id','expected_support_digest','status','observations','limits','reason','errno','request_stopped','observed_at','directory_diagnostic'}
             or report['schema']!='mastermind.run_observation.v1' or report['run_id']!=request['run_id']
             or report['expected_support_digest']!=request['support_digest']
             or report['status'] not in ('observed','unavailable') or report['limits']!=LIMITS):
@@ -522,6 +544,17 @@ def validate_response(raw,request):
     if 'errno' in report and not (report['errno'] is None or type(report['errno']) is int and 0<report['errno']<=65535):
         raise ValueError('observation_errno_shape')
     if 'request_stopped' in report and report['request_stopped'] is not True:raise ValueError('observation_stop_shape')
+    if 'directory_diagnostic' in report:
+        diagnostic=report['directory_diagnostic']
+        if not _directory_diagnostic(diagnostic) or report['status']!='unavailable':
+            raise ValueError('observation_directory_shape')
+        if diagnostic['kind']=='unknown':
+            if (report.get('request_stopped') is not True or diagnostic['errno']!=report.get('errno')
+                    or report.get('reason') not in ('os_permission_denied','filesystem_unavailable')):
+                raise ValueError('observation_directory_shape')
+        elif (report.get('reason')!='directory_owner_mode_or_type'
+                or 'errno' in report or 'request_stopped' in report):
+            raise ValueError('observation_directory_shape')
     if 'observed_at' in report:
         from run_observation import timestamp
         timestamp(report['observed_at'])
@@ -585,7 +618,7 @@ def validate_response(raw,request):
             from run_observation import timestamp
             if timestamp(record['ended_at'])<timestamp(record['started_at']):raise ValueError('observation_process_time')
     if report['status']=='observed' and (set(observations)!={'support','marker','returncode','stdout','process_receipt'}
-            or observations['support']['status']!='observed' or any(v['status']=='unavailable' for v in observations.values())
+            or observations['support']['status']!='observed' or any(v['status']=='unavailable' or 'directory_diagnostic' in v for v in observations.values())
             or 'request_stopped' in report):
         raise ValueError('observation_overall_contradiction')
     return report
