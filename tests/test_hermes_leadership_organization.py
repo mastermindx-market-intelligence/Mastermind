@@ -31,7 +31,7 @@ def test_all_charters_have_acyclic_company_path_with_human_root(mission_body):
         view = organization_context(key, summary)
         assert view["schema"] == SCHEMA
         assert view["organization"]["human_root"]["key"] == "chairman"
-        assert view["organization"]["live_roster_joined"] is False
+        assert view["organization"]["live_roster_state"] == "NOT_OBSERVED"
         assert view["state"] == "SOURCE_LINKED_ADVISORY"
         assert view["admitted"] is False and view["dispatched"] is False
         assert view["reporting_lines_are_authoritative"] is False
@@ -61,7 +61,7 @@ def test_goal_path_is_from_one_original_mission_and_never_claims_execution(missi
     assert goal["evidence"]["result_reference_count"] == summary["coverage"]["result_refs"]["returned_count"]
     assert goal["evidence"]["original_parent_consumption"] == "NOT_ESTABLISHED"
     assert goal["evidence"]["acceptance_state"] == summary["acceptance"]["state"]
-    assert goal["evidence"]["product_accepted"] is False
+    assert goal["evidence"]["product_acceptance"] == "NOT_ESTABLISHED"
     assert goal["source"]["mission_fingerprint"] == summary["fingerprint"]
     assert summary == untouched
     view["organization"]["seats"][0]["title"] = "TAMPERED"
