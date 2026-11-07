@@ -707,7 +707,9 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 # complete bounded-path lines; the optional callback shifts them by three lines.
 # The full-source hash and both spans still reject all path/context/byte drift.
 # This source audit supplies no native runtime or release approval.
-REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
+# Accepted S24 composition (4aabd797 custody /578ec12e persistence review):
+# only the same two512 path-length bounds move eight lines; no identity or limit change.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '1bfbec76a4f007d5ab5570eb5080891c896714129d4f0c51d7cfaf56a260b419', 'sites': ((371, 26, 29, 'int', '512'), (487, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
@@ -743,8 +745,15 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
+    "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
+# UID/GID or fleet selection. Full archive/site drift restores ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/tests/fixtures/transport_observation/httpx___client.py.source"] = {
+    "sha256": "c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d",
+    "sites": ((73, 42, 45, "int", "443"),),
 }
 
 # Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
