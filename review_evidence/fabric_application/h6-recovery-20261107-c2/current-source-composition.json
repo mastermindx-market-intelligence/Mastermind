@@ -22,7 +22,18 @@
   "ci": {
     "a884_run": 42380455963,
     "observed": "not consumed as terminal",
-    "current_hermes_natural_run": 42380883495
+    "current_hermes_natural_run": 42380883495,
+    "a884_shard0_job": 128426787642,
+    "a884_component_steps": {
+      "Verify private Fabric HTTP compatibility and incumbent backend lifetime": "SUCCESS",
+      "Verify native application admission and dispatch custody": "SUCCESS",
+      "Verify closed application transport in isolated root fixtures": "SUCCESS"
+    },
+    "a884_full_test_conclusion": "PENDING"
   },
-  "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed"
+  "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed",
+  "qualified_merge_commit": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
+  "qualified_merge_tree": "55a7e822a6a99bacc40db128a268c5af988bc8f0",
+  "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
+  "housekeeping": "Commit applied and read back; automatic Git housekeeping reported a permission refusal against an unrelated worktree index. No housekeeping retry or permission mutation was attempted."
 }

@@ -1,0 +1,159 @@
+{
+  "head": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
+  "results": [
+    {
+      "mode": "baseline",
+      "returncode": 0,
+      "seconds": 4.449,
+      "log_sha256": "1c98d4a265248b09ead0341baff404ebc050901e6e18252bae2ace28b68b7d34",
+      "receipt": {
+        "driver_interceptions": 0,
+        "errors": 0,
+        "failures": 0,
+        "fixture_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d",
+        "implementation_modified": false,
+        "instrumented": false,
+        "mode": "baseline",
+        "observations": [],
+        "production_effects": false,
+        "python": "3.14.7",
+        "release_acceptance": false,
+        "schema": "mastermind.studio_fixture_diagnostic.v1",
+        "skipped": 0,
+        "source_head": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
+        "tests": 1,
+        "unmatched_candidates": 0
+      }
+    },
+    {
+      "mode": "single",
+      "returncode": 0,
+      "seconds": 6.084,
+      "log_sha256": "6a9e710b74be7f604714abb8aafce978e8683104d5f6ae5b30c507e30292ea43",
+      "receipt": {
+        "driver_interceptions": 1,
+        "errors": 0,
+        "failures": 0,
+        "fixture_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d",
+        "implementation_modified": false,
+        "instrumented": true,
+        "mode": "single",
+        "observations": [
+          {
+            "instrumented": true,
+            "observer_complete": true,
+            "observer_error": null,
+            "reports": [
+              {
+                "dropped": 0,
+                "parentPid": 69340,
+                "pid": 69613,
+                "records": [
+                  {
+                    "api": "spawn",
+                    "environment": null,
+                    "executable": "node",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 0,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "ChildProcess.spawn",
+                    "environment": {
+                      "homePresent": true,
+                      "ldLibraryPathPresent": false,
+                      "pythonPathPresent": false
+                    },
+                    "executable": "node",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 0,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "spawn",
+                    "environment": null,
+                    "executable": "python",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 0,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "ChildProcess.spawn",
+                    "environment": {
+                      "homePresent": true,
+                      "ldLibraryPathPresent": false,
+                      "pythonPathPresent": false
+                    },
+                    "executable": "python",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 0,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "spawn",
+                    "environment": null,
+                    "executable": "python",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 0,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "ChildProcess.spawn",
+                    "environment": {
+                      "homePresent": true,
+                      "ldLibraryPathPresent": false,
+                      "pythonPathPresent": false
+                    },
+                    "executable": "python",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 0,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "spawn",
+                    "environment": null,
+                    "executable": "python",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 75,
+                    "thrownCode": null
+                  },
+                  {
+                    "api": "ChildProcess.spawn",
+                    "environment": {
+                      "homePresent": true,
+                      "ldLibraryPathPresent": false,
+                      "pythonPathPresent": false
+                    },
+                    "executable": "python",
+                    "outputClass": null,
+                    "signal": null,
+                    "status": 75,
+                    "thrownCode": null
+                  }
+                ],
+                "schema": "mastermind.disposable_launch_observation.v1",
+                "scope": "standard-exports-and-childprocess-prototype"
+              }
+            ],
+            "returncode": 0
+          }
+        ],
+        "production_effects": false,
+        "python": "3.14.7",
+        "release_acceptance": false,
+        "schema": "mastermind.studio_fixture_diagnostic.v1",
+        "skipped": 0,
+        "source_head": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
+        "tests": 1,
+        "unmatched_candidates": 0
+      }
+    }
+  ]
+}
