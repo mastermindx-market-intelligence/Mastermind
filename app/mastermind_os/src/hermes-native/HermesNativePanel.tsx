@@ -81,7 +81,7 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
         if (request.operation === "send") pollCount.current = 0;
         // A receipt settles only this admission. Refresh history before reusing send eligibility.
         if (request.operation === "recover") setSession(previous => previous && result.receipt &&
-          [previous.id, previous.storedId].includes(result.receipt.sessionId) ? { ...previous, canSend: false } : undefined);
+          [previous.id, previous.storedId].includes(result.receipt.sessionId) ? { ...previous, canSend: false, sendCheckRequired: undefined } : undefined);
         stopAutomatic.current = result.receipt?.status === "terminal";
       }
       if (result.state === "EFFECT_UNKNOWN") {
@@ -143,7 +143,8 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
   const unknownAdmission = receipt?.status === "unknown" || session?.pending.some(row => row.status === "unknown");
   const unresolved = Boolean(held || unknownAdmission);
   const pending = Boolean(session?.running || activeAdmission);
-  const canSend = session?.canSend && !busy && !unresolved && !pending && !session.promptsPending && draft.trim().length > 0 && new TextEncoder().encode(draft).length <= 32768;
+  const sendEligible = Boolean(session?.canSend || session?.sendCheckRequired);
+  const canSend = sendEligible && !busy && !unresolved && !pending && !session?.promptsPending && draft.trim().length > 0 && new TextEncoder().encode(draft).length <= 32768;
 
   if (!port.available()) return <section className="hermes-native-panel" aria-label={t("Native Hermes", "原生 Hermes")}>
     <h3>{t("Native Hermes", "原生 Hermes")}</h3>
@@ -186,9 +187,11 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
         <button type="button" disabled={busy} onClick={() => void readOriginal()}>{t("Read original conversation", "读取原会话")}</button></div>
       <p className="hermes-native-muted">{t("Configured model", "已配置模型")}: {session.requestedModel || t("Not reported", "未提供")} · {
         session.toolAccess === "CAPACITY_READ_ONLY" ? t("Capacity catalog and route preview only", "仅容量目录与路由预览")
-          : session.toolAccess === "NONE" ? t("Text only", "仅文本") : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送")}</p>
+          : session.toolAccess === "NONE" ? t("Text only", "仅文本") : session.sendCheckRequired
+            ? t("Saved history · current send access is checked when you send", "已保存的历史 · 发送时检查当前权限")
+            : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送")}</p>
       <div className="hermes-native-messages" tabIndex={0} role="log" aria-label={t("Native conversation messages", "原生会话消息")} aria-live="polite">
-        {session.historyTruncated && <p>{t("Showing the latest 100 visible messages.", "仅显示最近 100 条可见消息。")}</p>}
+        {session.historyTruncated && <p>{t("Showing the latest available messages, up to 100.", "显示最近可用的消息，最多 100 条。")}</p>}
         {session.messages.length === 0 && <p className="hermes-native-muted">{t("The native conversation is ready. Start with your question or project context.", "原生会话已就绪。请输入问题或项目背景。")}</p>}
         {session.messages.map((message, i) => <article key={`${session.id}:${i}`} data-speaker={message.role}>
           <strong>{message.role === "user" ? t("You", "你") : "Hermes"}</strong><p>{message.text}</p></article>)}
@@ -196,13 +199,13 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       {unknownAdmission && <p role="alert">{t("The original native admission is unknown. Sending stays held until its owner resolves it.", "原生请求状态未知；解决原请求前暂停发送。")}</p>}
       {session.promptsPending && <p role="status">{t("A native prompt needs attention in Hermes. This client does not auto-approve it.", "Hermes 中有待处理提示；此客户端不会自动批准。")}</p>}
       <label className="hermes-native-composer">{t("Message Hermes", "发送给 Hermes")}
-        <textarea value={draft} rows={4} disabled={busy || unresolved || !session.canSend}
+        <textarea value={draft} rows={4} disabled={busy || unresolved || !sendEligible}
           onChange={event => setDraft(event.target.value)} placeholder={t("What should we work through?", "要讨论什么？")} /></label>
       <div className="hermes-native-send-row"><small>{t("The message is sent exactly as written. No automatic resend.", "按原文发送，不自动重试。")}</small>
         <button type="button" disabled={!canSend} onClick={async () => {
           const result = await perform({ operation: "send", sessionId: session.id, requestId: requestId(), text: draft });
           if (result?.state === "ADMITTED" && result.receipt?.status === "terminal") await perform({ operation: "read", sessionId: session.id });
-        }}>{busy ? t("Working…", "处理中…") : t("Send message", "发送消息")}</button></div>
+        }}>{busy ? t("Working…", "处理中…") : session.sendCheckRequired ? t("Check and send message", "检查并发送消息") : t("Send message", "发送消息")}</button></div>
     </div>}
   </section>;
 }

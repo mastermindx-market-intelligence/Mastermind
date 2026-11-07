@@ -222,3 +222,59 @@ describe("thin native Hermes Office", () => {
     expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(1);
   });
 });
+
+describe("existing stored native conversations", () => {
+  const savedSession = () => ({ ...nativeSession(), canSend: false, toolAccess: "UNQUALIFIED",
+    sendCheckRequired: true, running: null, promptsPending: null, messageCount: 1,
+    messages: [{ role: "assistant", text: "The original retained answer." }] });
+  async function openSaved(p = port()) {
+    const base = p.request.getMockImplementation()!;
+    p.request.mockImplementation(async r => r.operation === "list"
+      ? view({ operation: "list", sessions: [{ id: "session-one", title: "Original conversation", running: null, messageCount: 1 }] })
+      : r.operation === "read" ? view({ operation: "read", session: savedSession() }) : base(r));
+    render(<HermesNativePanel port={p} locale="en" />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Hermes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Local history" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Local history" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Original conversation/ }));
+    await screen.findByText("The original retained answer.");
+    return p;
+  }
+  it("opens the original answer without creation and checks only an explicit send", async () => {
+    const p = await openSaved();
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "create" || r.operation === "send")).toHaveLength(0);
+    expect(screen.getByText(/current send access is checked when you send/)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "  original follow-up\n 中文" } });
+    p.request.mockResolvedValueOnce({ ...view({ operation: "send", state: "NOT_SENT", code: "NATIVE_NOT_SENT" }), pendingOperation: null });
+    fireEvent.click(screen.getByRole("button", { name: "Check and send message" }));
+    await screen.findByText(/The request was not sent/);
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+    expect(p.request.mock.calls.find(([r]) => r.operation === "send")?.[0]).toMatchObject({ sessionId: "session-one", text: "  original follow-up\n 中文" });
+    expect((screen.getByRole("textbox", { name: "Message Hermes" }) as HTMLTextAreaElement).value).toBe("  original follow-up\n 中文");
+  });
+  it("keeps a durable unknown admission held when live state is unobserved", async () => {
+    const p = await openSaved();
+    p.request.mockResolvedValueOnce(view({ operation: "read", session: { ...savedSession(),
+      pending: [{ id: "original-admission", status: "unknown" }] } }));
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
+    await screen.findByText(/original native admission is unknown/);
+    expect(screen.getByRole("button", { name: "Check and send message" }).hasAttribute("disabled")).toBe(true);
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(0);
+  });
+  it("holds conditional sending until history refresh succeeds after recovery", async () => {
+    const p = await openSaved();
+    p.request.mockResolvedValueOnce(view({ operation: "send", state: "EFFECT_UNKNOWN" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "original" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check and send message" }));
+    await screen.findByText(/Outcome unknown/);
+    p.request.mockResolvedValueOnce({ ...view({ operation: "recover", state: "ADMITTED", receipt: {
+      id: "original-admission", sessionId: "session-one", status: "terminal", sequence: 1,
+      outcome: "completed", executionGeneration: 1 } }), pendingOperation: null });
+    p.request.mockRejectedValueOnce(new Error("NATIVE_CLIENT_UNAVAILABLE"));
+    fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
+    await screen.findByText(/NATIVE_CLIENT_UNAVAILABLE/);
+    expect(screen.queryByRole("button", { name: "Check and send message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+  });
+});

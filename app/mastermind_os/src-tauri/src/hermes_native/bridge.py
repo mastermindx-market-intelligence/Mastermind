@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 import json
 import os
 from pathlib import Path
@@ -19,8 +19,7 @@ REQUIRED_CAPABILITIES = frozenset({"session-authority-v1", "durable-admission-v1
 PUBLIC_CAPABILITIES = ["native_chat", "native_history", "admission_recovery"]
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z")
-METHODS = {"create": "session.create", "list": "session.list", "read": "session.resume",
-           "send": "prompt.submit", "receipt": "prompt.receipt"}
+METHODS = {"create": "session.create", "send": "prompt.submit", "receipt": "prompt.receipt"}
 FIELDS = {"status": {"operation"}, "list": {"operation"},
           "create": {"operation", "role", "requestId"}, "read": {"operation", "sessionId"},
           "send": {"operation", "sessionId", "requestId", "text"},
@@ -95,7 +94,7 @@ def normalize_request(value):
     if operation == "receipt":
         return operation, {**session, "admission_id": identifier(value["admissionId"])}
     if operation == "list":
-        return operation, {"scope": "stored", "limit": 50, "include_hidden": True}
+        return operation, {}
     return operation, session
 
 
@@ -266,35 +265,46 @@ async def execute_request(request, runtime):
         readonly_capacity = bool(getattr(runtime, "readonly_capacity_qualified", lambda: False)())
         if operation == "status":
             return bound_envelope(request, "READY", operation=operation, runtime=public)
+        if operation == "list":
+            observed = await asyncio.to_thread(runtime.list_history)
+            return bound_envelope(request, "READY", operation=operation, runtime=public, **observed)
+        if operation == "read":
+            observed = await asyncio.to_thread(runtime.read_history, params["session_id"])
+            return bound_envelope(request, "READY", operation=operation, runtime=public, **observed)
+        if operation == "recover_create":
+            # A deterministic name alone does not prove creation. Read the
+            # committed original receipt and history without attaching a viewer.
+            target = await asyncio.to_thread(runtime.resolve_original, operation, params)
+            observed = await asyncio.to_thread(runtime.read_history, target["session_id"],
+                                               expected_request_id=params["request_id"])
+            return bound_envelope(request, "OPENED", operation="recover", runtime=public, **observed)
         original_create = None
         if operation in {"create", "send"}:
-            # A new mutation must have a qualified original-request recovery path.
-            # Source changes fail before modifying RPC; ordinary reads still work.
             await asyncio.to_thread(runtime.require_recovery_source)
             if operation == "create":
-                original_create = await asyncio.to_thread(runtime.resolve_original,
-                    "recover_create", {"request_id": request["requestId"]})
+                original_create = await asyncio.to_thread(runtime.create_identity, request["requestId"])
         async with runtime.connect(endpoint) as client:
-            if operation in {"recover_create", "recover_send"}:
-                # Existing owner lookup only. Absence, pruning and read failure
-                # never prove that an interrupted mutation was not performed.
+            if operation == "recover_send":
+                # Absence, pruning and read failure never prove no effect.
                 target = await asyncio.to_thread(runtime.resolve_original, operation, params)
-                if operation == "recover_create":
-                    original = await client.rpc("session.resume", session_id=target["session_id"])
-                    observed = project_result("read", original, target["session_id"], readonly_capacity=readonly_capacity)
-                    return bound_envelope(request, "OPENED", operation="recover", runtime=public, **observed)
-                # The canonical outcome is independent of transcript readability.
-                # The UI performs an ordinary history read after this receipt.
                 result = await client.rpc("prompt.receipt", session_id=target["session_id"], admission_id=target["admission_id"])
                 projected = project_result("receipt", result, target["session_id"], readonly_capacity=readonly_capacity)
                 if projected["receipt"]["id"] != target["admission_id"]:
                     raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
                 return bound_envelope(request, "ADMITTED", operation="recover", runtime=public, **projected)
             if operation == "send":
-                original = await client.rpc("session.resume", session_id=params["session_id"])
+                # The wire owner requires this connection's subscription before
+                # submission. Attach only for the explicit send, omit transcript
+                # hydration, and recheck current policy and positive live holds.
+                original = await client.rpc("session.resume", session_id=params["session_id"], omit_messages=True)
                 observed = project_result("read", original, params["session_id"], readonly_capacity=readonly_capacity)
-                if not observed["session"]["canSend"]:
+                live = observed["session"]
+                if not live["canSend"]:
                     raise BridgeRefusal("NATIVE_SESSION_POLICY_UNQUALIFIED")
+                if live["running"] or live["pending"]:
+                    raise BridgeRefusal("NATIVE_SESSION_BUSY")
+                if live["promptsPending"] or original.get("pending_connection"):
+                    raise BridgeRefusal("NATIVE_PROMPT_PENDING")
             mutation_sent = operation in {"create", "send"}
             result = await client.rpc(METHODS[operation], **params)
             expected_session = original_create["session_id"] if original_create else params.get("session_id")
@@ -375,35 +385,165 @@ class NativeRuntime:
             if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
                 raise BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
 
-    def resolve_original(self, operation, params):
-        """Read the incumbent native identity/ledger, never replay prompt.submit.
-
-        Use the upstream read-only SessionDB and exact principal/target/request
-        index. No raw SQL, migration, provisioning, credential or new state owner.
-        Qualified source bytes prevent a compatible upgrade silently changing
-        these private lookup semantics. Ordinary history reads remain available.
-        """
-        import stat
+    def require_history_source(self):
         self.require_recovery_source()
-        principal = f"uid:{os.getuid()}"  # incumbent private socket's POSIX peer identity
-        if operation == "recover_create":
-            from hermes_state_keys import local_identity
-            return {"session_id": local_identity(str(self.home), principal, params["request_id"])}
+        root = self.home / "hermes-agent"
+        hashes = {
+            "hermes_state_local.py": "359a03844bab07242c47748e9771fcc5d16a5144d4d099aeff483dc6f0efd1d2",
+            "hermes_state_local_lineage.py": "6e644e387f18a54ef1fd3e63dedbc5523ccddc00faab0c7de0f2432f1dce4bd3",
+            "hermes_state_local_migration.py": "0d4e2e1aa59e0cdafedcb38abe6ca2f82d24a9ad98b3a0629656e2816c3878bb",
+            "hermes_state_sessions.py": "85a4abc342fd0711cd750750d2cbc948f85804af1c433dccc8d2454b1e77c18d",
+            "hermes_state_messages.py": "b81c7d272f768a548daa91642bf8283dfad2f592528fbe95c029038a13e7f574",
+            "hermes_state_compression.py": "be9cc0bdca5fae8d5cbe8a15ca04cb72005228c290fa4e3d0a100e5e30796d7e",
+            "gateway/owner_identity.py": "4cb7810a49a5c3f2ddec645d00ecc90ac7b86edb862e16ea8cf4b039408546be",
+            "gateway/session.py": "ea2e48b1313fcb24054dccbbdc631321c7cad5526097588b65d20ab86346a870",
+        }
+        for name, expected in hashes.items():
+            source = root / name
+            if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+                raise BridgeRefusal("NATIVE_HISTORY_SOURCE_CHANGED")
+
+    @contextmanager
+    def readonly_database(self):
+        """Use the incumbent store in mode=ro; never initialize or migrate it."""
+        import stat
         from hermes_state import SessionDB
-        from hermes_state_runtime import find_session_admission
         path = self.home / "state.db"
         before = path.lstat()
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid() or before.st_mode & 0o022):
             raise BridgeRefusal("NATIVE_RECOVERY_UNAVAILABLE")
         db = SessionDB(path, read_only=True)
         try:
-            row = find_session_admission(db, principal_id=principal,
-                session_id=params["session_id"], request_id=params["request_id"])
+            yield db
         finally:
             db.close()
         after = path.lstat()
-        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        if ((before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or not stat.S_ISREG(after.st_mode) or after.st_uid != os.getuid() or after.st_mode & 0o022):
             raise BridgeRefusal("NATIVE_RECOVERY_UNAVAILABLE")
+
+    def create_identity(self, request_id):
+        """Expected identity for a NEW create; existence is not required yet."""
+        self.require_recovery_source()
+        from hermes_state_keys import local_identity
+        return {"session_id": local_identity(str(self.home), f"uid:{os.getuid()}", request_id)}
+
+    def owned_history(self, db, session_id, *, expected_request_id=None):
+        """Qualify the canonical local receipt, route, origin and physical target."""
+        from gateway.config import Platform
+        from gateway.owner_identity import same_owner
+        from gateway.session import SessionSource, build_session_key
+        from hermes_state_keys import local_identity
+        from hermes_state_local import local_lineage_owner, local_receipt
+        from hermes_state_local_lineage import validate_local_lineage
+        from hermes_state_runtime import RuntimeStoreError
+        try:
+            with db._read_ctx() as conn:
+                owner = local_lineage_owner(conn, session_id)
+            receipt = local_receipt(db, owner)
+            principal = receipt["principal_id"]
+            if (receipt["profile_id"] != str(self.home)
+                    or not same_owner(principal, f"uid:{os.getuid()}")
+                    or receipt["session_id"] != owner
+                    or ("legacy_session_id" in receipt and receipt["legacy_session_id"] != owner)
+                    or ("legacy_session_id" not in receipt and owner !=
+                        local_identity(str(self.home), principal, receipt["request_id"]))
+                    or (expected_request_id is not None and receipt["request_id"] != expected_request_id)):
+                raise ValueError("foreign receipt")
+            # This adapter is fixed to the primary home, whose LOCAL source has no
+            # secondary-profile namespace. Use the incumbent pure key builder.
+            source = SessionSource(platform=Platform.LOCAL, chat_id=owner, user_id=principal, chat_type="dm")
+            route = build_session_key(source)
+            entry = receipt["entry"]
+            if (receipt["route"] != route or entry["session_key"] != route
+                    or entry["origin"] != source.to_dict()):
+                raise ValueError("foreign route or origin")
+            with db._read_ctx() as conn:
+                target = validate_local_lineage(conn, receipt)
+            row, logical = db.get_session(target), db.get_session(owner)
+            if (row is None or logical is None
+                    or (row["session_key"], row["chat_id"], row["user_id"]) != (route, owner, principal)
+                    or json.loads(row["origin_json"]) != source.to_dict()):
+                raise ValueError("foreign target")
+            return owner, receipt, row, logical
+        except (KeyError, TypeError, ValueError, RuntimeStoreError):
+            raise BridgeRefusal("NATIVE_HISTORY_UNAVAILABLE") from None
+
+    def list_history(self):
+        """Bounded enumeration, filtered before projecting any private metadata."""
+        self.require_history_source()
+        result, seen = [], set()
+        with self.readonly_database() as db:
+            for offset in range(0, 1000, 200):
+                rows = db.list_sessions_rich(sources=["tool", "local", "cli", "gui", "desktop", "tui"],
+                    limit=200, offset=offset, order_by_last_active=True, compact_rows=True)
+                for candidate in rows:
+                    try:
+                        owner, receipt, row, _ = self.owned_history(db, candidate["id"])
+                    except BridgeRefusal:
+                        continue
+                    if owner in seen:
+                        continue
+                    seen.add(owner)
+                    count = integer(db.get_resume_message_count(row["id"]))
+                    if self.owned_history(db, owner)[1] != receipt:
+                        raise BridgeRefusal("NATIVE_HISTORY_CHANGED")
+                    result.append({"id": identifier(owner), "title": display(row.get("title") or "", 512),
+                                   "running": None, "messageCount": count})
+                    if len(result) == 50:
+                        break
+                if len(result) == 50 or len(rows) < 200:
+                    break
+        return {"sessions": result}
+
+    def read_history(self, session_id, *, expected_request_id=None):
+        """Display stored history without attaching, refreshing policy or firing hooks."""
+        self.require_history_source()
+        from hermes_state_runtime import list_session_admissions
+        with self.readonly_database() as db:
+            owner, receipt, row, logical = self.owned_history(db, session_id,
+                expected_request_id=expected_request_id)
+            visible, exhausted = [], False
+            for offset in range(0, 1000, 200):
+                page = db.get_messages(row["id"], include_compacted=True, include_ancestors=True,
+                                       limit=200, offset=offset, latest=True)
+                visible = [{"role": item["role"], "text": message_text(item.get("content", ""))}
+                           for item in page if item.get("role") in {"user", "assistant"}] + visible
+                exhausted = len(page) < 200
+                if len(visible) > 100 or exhausted:
+                    break
+            pending = list_session_admissions(db, session_id=owner)
+            if len(pending) > 1000:
+                raise BridgeRefusal("NATIVE_RESPONSE_INVALID")
+            projected = [{"id": identifier(item["admission_id"]), "status": admission_status(item["status"])}
+                         for item in pending]
+            count = integer(db.get_resume_message_count(row["id"]))
+            if count < len(visible[-100:]) or self.owned_history(db, owner)[1] != receipt:
+                raise BridgeRefusal("NATIVE_HISTORY_CHANGED")
+            result = {"id": identifier(owner), "storedId": identifier(row["id"]),
+                "title": display(row.get("title") or "", 512), "requestedModel": display(row.get("model") or "", 160),
+                "canSend": False, "toolAccess": "UNQUALIFIED", "sendCheckRequired": True,
+                "running": None, "executionGeneration": integer(logical.get("runtime_generation")),
+                "messageCount": count, "messages": visible[-100:],
+                "historyTruncated": len(visible) > 100 or not exhausted, "pending": projected,
+                "promptsPending": None}
+        return {"session": result}
+
+    def resolve_original(self, operation, params):
+        """Read the incumbent exact identity/ledger; never replay prompt.submit."""
+        self.require_recovery_source()
+        principal = f"uid:{os.getuid()}"
+        if operation == "recover_create":
+            target = self.create_identity(params["request_id"])
+            self.require_history_source()
+            with self.readonly_database() as db:
+                owner, _, _, _ = self.owned_history(db, target["session_id"],
+                    expected_request_id=params["request_id"])
+            return {"session_id": owner}
+        from hermes_state_runtime import find_session_admission
+        with self.readonly_database() as db:
+            row = find_session_admission(db, principal_id=principal,
+                session_id=params["session_id"], request_id=params["request_id"])
         if not row or row.get("principal_id") != principal or row.get("target_session_id") != params["session_id"] or row.get("request_id") != params["request_id"]:
             raise BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED")
         return {"session_id": params["session_id"], "admission_id": identifier(row.get("admission_id"))}

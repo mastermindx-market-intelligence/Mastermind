@@ -12,9 +12,11 @@ export interface NativeMessage { role: "user" | "assistant"; text: string }
 export interface NativeSession {
   id: string; storedId: string; title: string; requestedModel: string;
   canSend: boolean; toolAccess: "NONE" | "CAPACITY_READ_ONLY" | "UNQUALIFIED";
-  running: boolean; executionGeneration: number; messageCount: number;
+  /** Stored history requires a fresh owner check at the explicit send. */
+  sendCheckRequired?: true;
+  running: boolean | null; executionGeneration: number; messageCount: number;
   messages: NativeMessage[]; historyTruncated: boolean;
-  pending: { id: string; status: AdmissionState }[]; promptsPending: boolean;
+  pending: { id: string; status: AdmissionState }[]; promptsPending: boolean | null;
 }
 export interface NativeReceipt {
   id: string; sessionId: string; status: AdmissionState; sequence: number;
@@ -29,7 +31,7 @@ export interface NativeView {
   /** Produced by the native port from the existing durable pointer store. */
   pendingOperation?: NativePendingOperation | null;
   session?: NativeSession;
-  sessions?: { id: string; title: string; running: boolean; messageCount: number }[];
+  sessions?: { id: string; title: string; running: boolean | null; messageCount: number }[];
   receipt?: NativeReceipt;
 }
 export interface NativeHermesPort { available(): boolean; request(request: NativeOperation): Promise<NativeView> }
@@ -56,11 +58,14 @@ function flag(value: unknown): boolean { return typeof value === "boolean" ? val
 function rows(value: unknown, max: number): unknown[] { return Array.isArray(value) && value.length <= max ? value : invalid(); }
 function admission(value: unknown): AdmissionState { return admissions.has(text(value, 20)) ? value as AdmissionState : invalid(); }
 function session(value: unknown): NativeSession {
-  const v = record(value, ["id", "storedId", "title", "requestedModel", "canSend", "toolAccess", "running", "executionGeneration", "messageCount", "messages", "historyTruncated", "pending", "promptsPending"]);
+  const required = ["id", "storedId", "title", "requestedModel", "canSend", "toolAccess", "running", "executionGeneration", "messageCount", "messages", "historyTruncated", "pending", "promptsPending"];
+  const v = record(value, [...required, "sendCheckRequired"], required);
   const toolAccess = text(v.toolAccess, 32);
   if (!["NONE", "CAPACITY_READ_ONLY", "UNQUALIFIED"].includes(toolAccess)) return invalid();
   const canSend = flag(v.canSend);
   if (canSend && toolAccess === "UNQUALIFIED") return invalid();
+  const sendCheckRequired = v.sendCheckRequired !== undefined;
+  if (sendCheckRequired && (v.sendCheckRequired !== true || canSend || toolAccess !== "UNQUALIFIED" || v.running !== null || v.promptsPending !== null)) return invalid();
   const messages = rows(v.messages, 100).map(row => {
     const m = record(row, ["role", "text"]);
     if (m.role !== "user" && m.role !== "assistant") return invalid();
@@ -71,9 +76,10 @@ function session(value: unknown): NativeSession {
   const messageCount = number(v.messageCount);
   if (messageCount < messages.length) return invalid();
   return { id: id(v.id), storedId: id(v.storedId), title: text(v.title, 512), requestedModel: text(v.requestedModel, 160),
-    canSend, toolAccess: toolAccess as NativeSession["toolAccess"], running: flag(v.running),
+    canSend, toolAccess: toolAccess as NativeSession["toolAccess"],
+    ...(sendCheckRequired ? { sendCheckRequired: true as const } : {}), running: sendCheckRequired ? null : flag(v.running),
     executionGeneration: number(v.executionGeneration), messageCount, messages,
-    historyTruncated: flag(v.historyTruncated), pending, promptsPending: flag(v.promptsPending) };
+    historyTruncated: flag(v.historyTruncated), pending, promptsPending: sendCheckRequired ? null : flag(v.promptsPending) };
 }
 
 export function parseNativeView(value: unknown): NativeView {
@@ -113,7 +119,7 @@ export function parseNativeView(value: unknown): NativeView {
   if (v.session !== undefined) result.session = session(v.session);
   if (v.sessions !== undefined) result.sessions = rows(v.sessions, 50).map(row => {
     const s = record(row, ["id", "title", "running", "messageCount"]);
-    return { id: id(s.id), title: text(s.title, 512), running: flag(s.running), messageCount: number(s.messageCount) };
+    return { id: id(s.id), title: text(s.title, 512), running: s.running === null ? null : flag(s.running), messageCount: number(s.messageCount) };
   });
   if (v.receipt !== undefined) {
     const r = record(v.receipt, ["id", "sessionId", "status", "sequence", "outcome", "executionGeneration"]);

@@ -197,7 +197,7 @@ class OriginalSettlementTests(unittest.TestCase):
         self.create = {"operation": "create", "role": "secretary", "requestId": "b" * 32}
 
     def test_direct_success_qualifies_original_native_identity_before_settlement(self):
-        for request, lookup in [(self.create, ("recover_create", {"request_id": "b" * 32})),
+        for request, lookup in [(self.create, ("create_identity", {"request_id": "b" * 32})),
                                 (self.send, ("recover_send", {"session_id": "session-1", "request_id": "a" * 32}))]:
             runtime = FakeRuntime()
             result = asyncio.run(self.b.execute_request(request, runtime))
@@ -285,7 +285,7 @@ class PreDispatchFailureTests(unittest.TestCase):
                     self.assertEqual(result["operation"], operation)
                     self.assertEqual(result["requestId"], request["requestId"])
                     self.assertEqual(result.get("requestSessionId"), request.get("sessionId"))
-                    self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})] if stage == "history" else [])
+                    self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1", "omit_messages": True})] if stage == "history" else [])
                     self.assertFalse(result["retryAllowed"])
                     self.assertNotIn("private", str(result))
 
@@ -322,6 +322,18 @@ class FakeRuntime:
         self.calls = []
         self.identifies = 0
         self.lookups = []
+        self.reads = []
+
+    def create_identity(self, request_id):
+        self.lookups.append(("create_identity", {"request_id": request_id}))
+        return {"session_id": "session-1"}
+
+    def read_history(self, session_id, *, expected_request_id=None):
+        self.reads.append((session_id, expected_request_id))
+        result = load().project_result("read", getattr(self, "snapshot", snapshot()), session_id)
+        result["session"].update(canSend=False, toolAccess="UNQUALIFIED", sendCheckRequired=True,
+                                 running=None, promptsPending=None)
+        return result
 
     def require_recovery_source(self):
         pass
@@ -397,7 +409,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result["state"], "OPENED")
         self.assertEqual(result["session"]["id"], "session-1")
         self.assertEqual(runtime.lookups, [("recover_create", {"request_id": "b" * 32})])
-        self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})])
+        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.reads, [("session-1", "b" * 32)])
 
     def test_absence_failure_or_changed_source_is_not_permission_to_retry(self):
         errors = [self.b.BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED"),
@@ -418,13 +431,14 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(result["state"], "EFFECT_UNKNOWN")
             self.assertEqual([method for method, _ in runtime.calls], ["prompt.receipt"])
         runtime = RecoveryRuntime()
-        async def missing_original(method, **params):
-            runtime.calls.append((method, params))
+        def missing_original(session_id, **params):
+            runtime.reads.append((session_id, params.get("expected_request_id")))
             raise self.b.OwnerRefusal("session_not_found")
-        runtime.rpc = missing_original
+        runtime.read_history = missing_original
         result = asyncio.run(self.b.execute_request({"operation": "recover_create", "requestId": "a" * 32}, runtime))
         self.assertEqual(result["state"], "EFFECT_UNKNOWN")
-        self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})])
+        self.assertEqual(runtime.calls, [])
+        self.assertEqual(runtime.reads, [("session-1", "a" * 32)])
 
     def test_crossed_receipt_never_settles_the_original(self):
         for change in ({"admission_id": "other-admission"}, {"ref": {"session_id": "other-session"}}):
@@ -471,7 +485,7 @@ class RecoveryTests(unittest.TestCase):
                     runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
                 session_db.assert_not_called()
 
-    def test_native_create_lookup_reuses_upstream_pure_identity(self):
+    def test_new_create_expected_identity_reuses_upstream_pure_identity(self):
         import os
         from types import SimpleNamespace
         from unittest.mock import Mock, patch
@@ -480,7 +494,7 @@ class RecoveryTests(unittest.TestCase):
         runtime.require_recovery_source = Mock()
         identity_fn = Mock(return_value="the-original-created-session")
         with patch.dict("sys.modules", {"hermes_state_keys": SimpleNamespace(local_identity=identity_fn)}):
-            self.assertEqual(runtime.resolve_original("recover_create", {"request_id": "b" * 32}),
+            self.assertEqual(runtime.create_identity("b" * 32),
                              {"session_id": "the-original-created-session"})
         identity_fn.assert_called_once_with("/fixture/hermes", f"uid:{os.getuid()}", "b" * 32)
 
@@ -524,6 +538,34 @@ class RecoveryRuntime(FakeRuntime):
             raise AssertionError("Recovery must never mutate")
         return {"admission_id": "original-admission", "ref": {"session_id": "session-1"}, "status": "terminal",
                 "sequence": 1, "outcome": "completed", "execution_generation": 1, **self.receipt_change}
+
+
+
+class ExplicitSendPreflightTests(unittest.TestCase):
+    def test_explicit_send_attaches_without_hydrating_history_and_refuses_positive_holds(self):
+        b = load()
+        changes = [{"running": True}, {"pending": [{"admission_id": "older", "status": "queued"}]},
+                   {"pending": [{"admission_id": "older", "status": "unknown"}]},
+                   {"prompts": [{"id": "approval"}]}, {"open_requests": [{"id": "clarification"}]},
+                   {"pending_connection": {"server": "existing"}}]
+        for change in changes:
+            runtime = FakeRuntime()
+            async def held(method, **params):
+                runtime.calls.append((method, params))
+                return {**snapshot(), **change}
+            runtime.rpc = held
+            result = asyncio.run(b.execute_request({"operation": "send", "sessionId": "session-1",
+                "requestId": "c" * 32, "text": "original"}, runtime))
+            self.assertEqual(result["state"], "REFUSED")
+            self.assertIn(result["code"], {"NATIVE_SESSION_BUSY", "NATIVE_PROMPT_PENDING"})
+            self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1", "omit_messages": True})])
+            self.assertFalse(result["retryAllowed"])
+        runtime = FakeRuntime()
+        result = asyncio.run(b.execute_request({"operation": "send", "sessionId": "session-1",
+            "requestId": "c" * 32, "text": "original"}, runtime))
+        self.assertEqual(result["state"], "ADMITTED")
+        self.assertEqual(runtime.calls[0], ("session.resume", {"session_id": "session-1", "omit_messages": True}))
+        self.assertEqual(sum(method == "prompt.submit" for method, _ in runtime.calls), 1)
 
 
 if __name__ == "__main__":

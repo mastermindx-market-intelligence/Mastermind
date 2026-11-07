@@ -361,3 +361,78 @@ then native invalid-parameter checks. The concrete repairs selected the incumben
 committed dependency generation, preserved the installed model route rather than a
 safe-mode model-less request, and removed an unsupported surface/unattended flag.
 The accepted original admission above is settled; do not replay earlier requests.
+
+## Packaged history gap repaired in the continuing Pro lane
+
+The signed-in local package at source `2c0386936a49ab214802aee093b714626642acf6`,
+build `hermes-thin-native-2c0386936a49-20261107-pro-01`, connected through the
+actual native host to Hermes 0.23.0. Its Local history UI omitted the original
+OS conversation because the upstream live and stored picker feeds exclude
+`source=tool`. The original canary was not repeated.
+
+The repair continues from `d7d5bfdb4bc656473a7e940dee07d0b437aed40d` and preserves
+7f6c0036's request binding, fcce6cfc's protected composition and the merged
+Paperclip organization view:
+
+- List and transcript reads use the incumbent `SessionDB(read_only=True)`,
+  bounded native paging and display-history APIs. Each row is qualified against
+  the existing profile, POSIX peer principal, canonical creation receipt,
+  deterministic identity, pure native route/origin and validated physical lineage.
+  No transcript mirror, owner, SQL index or migration is introduced.
+- Original-create recovery now requires its committed exact creation receipt.
+  A deterministic name without that receipt remains uncertain. List, read and
+  create recovery do not open a gateway connection or attach a viewer.
+- Stored snapshots expose live running/prompt state as unobserved and no live
+  tool permission. The explicit “Check and send message” action attaches to the
+  same native owner with `session.resume(omit_messages=True)`, checks live
+  policy/busy/prompt holds, and submits once with the original request identity.
+  Source inspection corrected an initial hypothesis: `session.info` alone cannot
+  send because the wire owner requires a connection subscription.
+- The installed wire API always admits to its existing FIFO; `queued:false`
+  does not supply an atomic no-queue guarantee against another writer racing
+  after the snapshot. This client adds no lock/queue owner and makes no stronger
+  claim. Positive busy/unknown/approval holds refuse before submission.
+- Recovered receipts invalidate the prior conditional-send affordance until
+  the original history refresh succeeds. No automatic resend is added.
+
+Actual focused qualification:
+
+| Check | Result | Retained receipt |
+|---|---|---|
+| Bridge, exact settlement, preflight and dedicated read-only history tests | 39 passed | `/tmp/hermes-thin-history-python-20261107-pro-01.log` |
+| Contract, native port and panel | 41 passed across 3 files | `/tmp/hermes-thin-history-web-20261107-pro-01.log` |
+| TypeScript | Passed | `/tmp/hermes-thin-history-typecheck-20261107-pro-01.log` |
+
+An actual read-only execution of this modified bridge (SHA256
+`7f1518b40be7f62add9d1981d810a7fda5e1b30eaecce93de75892774b063a92`,
+Studio process88377) returned seven owned history rows, included the original
+`local-e8fb5ddbfda77657928449650b999e04e92db3e025422c6e3a9b0b662120dd6a`
+conversation, and recovered the exact assistant text
+`MASTERMIND_NATIVE_CANARY_OK`, generation1. Native create/send calls: zero.
+This is source-path proof; the ensuing source-bound package still needs its UI
+journey and must not reuse the 2c package's identity for changed application bytes.
+
+The concurrent composition test edit retains its exact protected blob assertion
+and updates only the expected `codex_provider_realm.py` blob to
+`a51e2bce8d9bb312107f975d503abd6541bd5000`, verified against the composed source.
+It preserves the protected spec-only ModelArk catalog; no provider is enabled.
+
+### Current native artifact custody
+
+The 2c candidate is the sole observed running app, PID83624. The prior
+fca92d5a installed bundle remains on disk; its app was signed out and gracefully
+quit before 2c launch. LaunchServices callback lookup was read back to the 2c
+candidate path, and the actual native Build details confirms the same public
+native-client reference
+`native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423`.
+Its source-bound build and launch/connect records are under
+`/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-2c0386936a49/`.
+This reconciles the earlier pending-login observation for that candidate.
+The other lane's interrupted d7 builder was terminated and never selected;
+the next package is owned by this continuing installed-journey lane.
+
+The successor build preserves the hash-verified original PUBLIC_BUILD_INPUTS,
+including disabled refresh, Executive resource, launch catalogue and the same
+Terminal public-key derivation. Apple Developer ID/notarization/updater and
+broader remote-company acceptance remain separate holds. No active Hermes
+service restart, original-canary replay or fabricated pending record is permitted.

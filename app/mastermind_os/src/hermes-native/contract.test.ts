@@ -60,3 +60,26 @@ describe("native Hermes presentation contract", () => {
     expect(view.retryAllowed).toBe(false);
   });
 });
+
+describe("stored native history eligibility", () => {
+  const stored = () => ({ ...session(), canSend: false, toolAccess: "UNQUALIFIED",
+    sendCheckRequired: true, running: null, promptsPending: null });
+  it("accepts owned stored history without claiming live send scope", () => {
+    const observed = parseNativeView({ ...ready(), operation: "read", session: stored() }).session!;
+    expect(observed.sendCheckRequired).toBe(true);
+    expect(observed.canSend).toBe(false);
+    expect(observed.running).toBeNull();
+    expect(observed.promptsPending).toBeNull();
+    expect(observed.messages).toEqual(session().messages);
+    expect(parseNativeView({ ...ready(), operation: "list",
+      sessions: [{ id: "original", title: "Saved", running: null, messageCount: 2 }] }).sessions?.[0].running).toBeNull();
+  });
+  it("rejects mixing an unobserved snapshot with a claimed live permission", () => {
+    for (const change of [{ canSend: true }, { toolAccess: "NONE" }, { running: false },
+      { promptsPending: false }, { sendCheckRequired: false }]) {
+      expect(() => parseNativeView({ ...ready(), session: { ...stored(), ...change } })).toThrow();
+    }
+    expect(() => parseNativeView({ ...ready(), session: { ...session(), running: null } })).toThrow();
+    expect(() => parseNativeView({ ...ready(), session: { ...session(), promptsPending: null } })).toThrow();
+  });
+});
