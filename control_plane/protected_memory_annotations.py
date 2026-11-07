@@ -259,6 +259,38 @@ def prepare_retained_adjudication(supervisor, *, pair, adjudicator_attempt_lease
     if state['role']!='adjudicator' or state['admission']['actor_key'] in material['actor_keys']:c.fail()
     return prepared
 
+def _final_resolution_authority(supervisor, receipt, pair_material):
+    """Final metadata-only recipient window AFTER the last blocking pair read.
+
+    No body/pair reread or new authority. Fresh purpose admission is followed by
+    local immutable event/revocation checks, including revocation during that
+    source roundtrip. A prior _completed result alone never grants this view.
+    """
+    runtime=supervisor.runtime;material=receipt['assignment'];context=source.installed(runtime)
+    admitted=assignment.current_admission(runtime,'adjudicator')
+    registered=assignment.current_registered_assignment(runtime,material['job_id'])
+    if (registered['event_id']!=material['registered_assignment_event_id']
+            or c.digest(registered['payload'])!=material['registered_assignment_sha256']
+            or c.digest(admitted['payload'])!=material['admission_sha256']
+            or admitted['actor_key']!=material['actor_key']):c.fail()
+    _,retained=assignment.event(runtime,'MEMORY_EVALUATION_COMPLETED',_command(material['attempt_id'],'completed'))
+    if retained!=receipt:c.fail()
+    original=originals.completed_original_reference(runtime,material['subject']['attempt_id'])
+    if originals.current_reference(original)!=material['subject']:c.fail()
+    permission=source.make_request(context[2],'authorize_adjudication_exposure',
+        subject=subject_selector(material['subject']),assignment=c.digest(material),
+        input_sha256=receipt['input_sha256'],pair_sha256=c.digest(pair_material))
+    window=source.exchange(runtime,permission)
+    source.same(runtime,context);assignment._current_mission(runtime,context)
+    # Admissions/assignments are immutable commands; the only later local
+    # authority withdrawal is its explicit retained revocation. No private IO
+    # follows this final native check or the clipped wall-clock window.
+    with runtime.store.read() as con:
+        if con.execute("SELECT 1 FROM events WHERE event_type='MEMORY_EVALUATOR_REVOKED' AND command_id=?",
+                (assignment._admission_command(context[2],'adjudicator')+':revoked',)).fetchone():c.fail()
+    now=runtime.store.now_ms()
+    if not max(context[2]['not_before_ms'],window['not_before_ms'])<=now<min(context[2]['expires_at_ms'],window['expires_at_ms']):c.fail()
+
 def read_retained_resolution(supervisor, *, adjudication_attempt_id, pair):
     material=current_pair(pair)
     _,receipt,raw,packet,_=_completed(supervisor,adjudication_attempt_id)
@@ -267,6 +299,7 @@ def read_retained_resolution(supervisor, *, adjudication_attempt_id, pair):
     resolved=ratings.resolution(raw,material['comparison_items'],packet=packet)
     # Detached protected recipient view, never a generic CLI/HTTP result route.
     current_pair(pair)
+    _final_resolution_authority(supervisor,receipt,material)
     return dict(schema='mastermind.retained_memory_resolution_view.v1', pair=material,
         original_resolution=raw.decode('utf-8'),resolution=resolved,receipt=receipt,
         verification=dict(w.FLAGS),scientific_admission=False,holds_released=False)

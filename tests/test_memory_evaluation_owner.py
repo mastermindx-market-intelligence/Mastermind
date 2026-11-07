@@ -365,6 +365,20 @@ def test_real_issuer_actor_fd_collector_pair_and_distinct_resolution(evaluation)
     e.faults['source']=False;e.faults['access_advance']=True
     assert ann.read_retained_resolution(e.supervisor,adjudication_attempt_id=judge.attempt.attempt_id,pair=pair)['original_resolution']==final['original_resolution']
     assert economic_count(e)==before and len(e.launches)==3
+    # The final pair reread can block after adjudicator _completed returned.
+    # A real authenticated revocation there must withhold the already-read body.
+    previous_pair=ann.current_pair;pair_reads=[]
+    def revoke_during_last_pair(cap):
+        value=previous_pair(cap);pair_reads.append(True)
+        if len(pair_reads)==2:
+            r=asyncio.run(e.admit('adjudicator',decision_override={'decision':'REFUSE'}))
+            assert r.status_code==200,r.text
+        return value
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(ann,'current_pair',revoke_during_last_pair)
+        with pytest.raises(ValueError):ann.read_retained_resolution(e.supervisor,adjudication_attempt_id=judge.attempt.attempt_id,pair=pair)
+    assert len(pair_reads)==2 and path.read_bytes()==raw
+    assert economic_count(e)==before and len(e.launches)==3
 
 
 def economic_count(e):
