@@ -28,12 +28,15 @@ def build_profile():
         def create_client(self, **_):
             return HermesApplicationClient()
 
-    return Profile(name=PROVIDER, api_mode="chat_completions",
+    profile = Profile(name=PROVIDER, api_mode="chat_completions",
                    display_name="Mastermind Fabric", auth_type=AUTH_TYPE,
                    env_vars=(), base_url="", supports_streaming=False,
                    supports_health_check=False, supports_model_listing=False,
                    supports_vision=False, supports_vision_tool_messages=False,
                    default_max_tokens=4096, classify_api_error=classify_error)
+    if "host_bound_runtime" in ProviderProfile.__dataclass_fields__:
+        profile.host_bound_runtime = True
+    return profile
 
 
 def _resolve_native_client(request):

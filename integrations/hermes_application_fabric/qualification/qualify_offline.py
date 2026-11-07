@@ -56,14 +56,15 @@ def main():
         suite = unittest.TestSuite()
         suite.addTests(unittest.TestLoader().discover(str(package / "tests"), pattern="test_*.py"))
         suite.addTests(unittest.TestLoader().discover(str(package / "qualification"), pattern="test_native_schema.py"))
+        expected = suite.countTestCases()
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         print(json.dumps({"mode": "offline-original-client-loopback-fixture",
             "owner": OWNER_COMMIT, "owner_client_sha256": OWNER_SHA256,
             "python": sys.version.split()[0], "jsonschema": validator,
-            "tests_run": result.testsRun, "failures": len(result.failures),
+            "tests_discovered": expected, "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),
             "blocked_external_connections": len(blocked), "live_provider_acceptance": False}, sort_keys=True))
-        return 0 if result.wasSuccessful() and result.testsRun == 41 and not result.skipped and not blocked else 1
+        return 0 if result.wasSuccessful() and expected > 0 and result.testsRun == expected and not result.skipped and not blocked else 1
 
 
 if __name__ == "__main__":
