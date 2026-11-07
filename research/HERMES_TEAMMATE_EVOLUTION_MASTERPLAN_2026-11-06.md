@@ -1104,3 +1104,46 @@ Local source checks so far: 102 legacy provider/consumer tests passed, 20 option
 ### Unchanged boundaries and next action
 
 Complete the actual source-qualified native loader, late first-turn barrier, per-claim guard and capability-specific readback on the existing ConsumerSlot/private Control owner; test against pinned upstream source, including cold start, cache reuse, physical-session rotation, timeout, revocation and restart boundaries. Keep installation/enrollment dormant until actual qualification. Original paid Fabric refusals are unchanged and unretried; native agents supplied principal judgment only. The original C26 Ubuntu1/root permission denial and the separate local AF_UNIX denial remain ended actions, with no alternate-carrier replay. #398 remains held and C69/C70 remain DO_NOT_REDO. No installed memory activation, new credential, provider-dispatch identity, held-out EVAL, fleet/endurance acceptance, Slack transport or durable worker start is claimed.
+
+
+## 27. Authenticated context queued; native memory source published (2026-11-07 06:08 UTC)
+
+**MISSION_COMPLETE=false / BUILT_NOT_PROVEN.** The source implementation has advanced into the actual Hermes memory lifecycle. Installed activation, provider dispatch/model identity, valid held-out EVAL and the original full teammate journeys remain unproved.
+
+### Exact source and original release effects
+
+- **PR2188 authenticated transport**: exact head `d5cebb3f81114c018912f805890d7b77015ea7c6`. Ordinary required CI [42343112652](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343112652) is SUCCESS at that head, including all six shards and the required test check.
+- The previous f7 head's CI failure was an exact-source pin mismatch after the 47-line context insertion. Removing that insertion reproduces the prior source exactly; the incumbent catalogue/status AST operands are unchanged. The one-file repair updates the full executive_service source SHA to `08c71c0e79126c003db57b3c3bb2c77c20858331451edd7436751dd634e4340d` and ingress AST SHA to `597fb0de3f70a6e820946f7b64dd5712a38f66aa14d92d4c3a9482e5ee36d10c`. Focused repair: **113 passed**. No guard exemption or alternate execution owner.
+- PR2188 was marked Ready after receiver PR2178's merge was reconciled. Fresh protection read showed mandatory strict test, zero formal approvals, no CODEOWNERS/last-push approval requirement and the active SQUASH merge queue. Exact-head checks were green; reviews, labels and comments were empty; both autoMergeRequest and mergeQueueEntry were absent.
+- The single original head-leased SQUASH request ran through Studio process66445. Readback process66658 confirms **QUEUED**, entry `MQE_lQDOTotz3c8AAAABNdpVVc4ABAiKzgPMmAQ`, same head, no merge commit. Do not re-arm or substitute another carrier. QUEUED is not merged or installed.
+- **New draft [PR2195](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2195)**: branch `sol/hermes-agentos-native-memory-20261107-c3`, head `29c4376c01c77e6ec7551a67f4e8a3d08842707d`, tree `1412673115e2cfe3177e07d3922f830281ee752f`. Parents are PR2188 d5cebb3 and protected master `5f8c13da926011fb5fdc8cea21287b532ac968db`.
+- The canonical 5f8 tree `31132f5530ed640eed45067c313cea1451a6a9dc` was reconstructed from the previous protected tree plus all 40 changed Git entries and matched exactly before overlaying the 51 publication paths. The GitHub result matches the locally computed combined tree. Unrelated current protected blobs are retained by identity, not overwritten by the older worktree.
+- The new protected exact original-admission equality check is retained. Combined native_session_control SHA is `13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8`; its reviewed byte-bound AST operand is unchanged. Applicable protected laws remain compatible with e37. The new Secretary proposal supplies no runtime/account grant.
+- PR2195 is **unarmed** pending its ordinary required CI and reconciliation of the original PR2188 dependency. No native installation publication or role activation was performed.
+- `docs/hermes/NATIVE_AGENTOS_MEMORY.md` read back at exact commit29c4376 as blob `95f5fabff6d4afb2031885e68c81d8fbeac0dad9`.
+
+### Native memory composition now implemented
+
+The closed v2 consumer publication joins the existing permission receipt and optionally a real selected child; context-only enrollment creates no child Job or delegation proof. The actual SDK decoder validates the closed owner envelope and raw bundle/receipt before returning the exact adopted bytes. The original captured MCP connection checks currentness before admission and return. The context-only caller refuses an occupied lock, existing waiters or unresolved incumbent request without queueing or cancelling it.
+
+The held general plugin import and actual memory loader/collector are source-qualified. The original PluginManager context, registration ledger, deadline and module policy lease remain in force. The real `_init_memory -> load_memory_provider -> _ProviderCollector -> MemoryManager` chain owns provider activation; the generic PluginContext hook is not mistaken for activation.
+
+Each provider instance joins the original admission, execution generation, physical session, process instance and authority epoch. The late barrier runs after native recovery/compaction. Cached-agent rebinding invalidates prior claims. Late callbacks cannot borrow a new claim; readback cannot mix claims. Every bound API-message build verifies the attached instance and current snapshot before and after construction. Expiry, session rotation, replacement or owned-agent scope loss refuses without hidden refresh.
+
+Agent OS remains the sole durable continuity owner: v2 disables Hermes's independent MEMORY.md and USER.md stores; v1 behavior stays exact. Transient readiness, provider return, native-manager delivery and actual current-turn prompt inclusion are separate observations. Historical delivery remains historical. Private capability readback uses the existing Control socket and supervisor; no additional memory, auth, scheduler, retry, queue or lifecycle service was created.
+
+### Executable evidence and limits
+
+- Final native context module plus protected original-admission mismatch: **71 passed, 134 deselected**, 23.98 seconds. This includes all 70 new cases, both Secretary/Meta isolated preparation paths, real upstream source execution, late-worker/readback/lock-waiter edges, publication replacement, claim/session/authority changes, expiry and fixture-audit behavior.
+- Preceding broad focused pass: **235 passed, 81 deselected** across native context, held bootstrap and identity/default gates. Preceding compatibility group: **198 passed, 20 skipped, 30 subtests passed**. These overlap and must not be summed as unique tests.
+- The exact combined control source-pin case separately passes after incorporating the protected equality fix.
+- Fourteen complete unmodified MIT upstream Python fixtures at Hermes `1c0cd667746d3395fe9e1b6c74f8f85952486f18` retain full blob/SHA/byte provenance and license. Python filenames allow the existing AST audit to distinguish docstring HTTP codes from identities; a real added numeric identity still fails. No audit mask was added.
+- Source/D8 and whitespace checks pass. The actual upstream loader/lifecycle source executes in controlled fixtures; fixture enrollment, process custody and backend outcomes are not installed evidence. The local worktree materializes the relevant protected overlap; the exact Git tree preserves all other canonical new-master blobs. Ordinary required CI owns complete integrated-tree qualification.
+- The original local AF_UNIX creation denial remains unretried. No replacement host runner or manual CI dispatch was introduced. Green PR2188 CI is source integration evidence, not installed credential/Control/fleet proof.
+
+### Next material frontier
+
+1. Consume PR2188's original queue receipt and PR2195's ordinary CI. Repair a concrete failed source gate on the same carrier if necessary, then use the normal exact-head protected queue once. Never duplicate the transport carrier.
+2. Prepare the exact installed v2 publication and genuine receiving-owner enrollment through incumbent installation/auth owners. Actual activation waits for the original C26 authorized connection to be restored and its retained effect reconciled.
+3. Complete the remaining existing-owner account/item/origin browser-fill integration, genuine request/dispatch and held-out EVAL evidence, and original recovery/endurance/fleet journeys. Source completion does not close these product outcomes.
+4. Keep the researched source and already accepted PRs DO_NOT_REDO. Original Fabric refusals/failures are unretried; native agents supplied principal judgment only. Outcome Learning #398 remains held; C69/C70 remain accepted. No Slack message, credential collection, account grant, service start or durable background worker is claimed.
