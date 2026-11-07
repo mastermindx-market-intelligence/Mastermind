@@ -851,7 +851,8 @@ def main(argv=None):
                 from integrations.session_bridge.reply_policy_selection import ReplyPolicySelection
                 v3_kwargs["reply_event_rpc"] = build_installed_reply_event_rpc(
                     settings.ceo_ingress_socket_path,ReplyPolicySelection((policies,*additional_policies)),
-                    clock=lambda:int(settings.clock()),enabled=True)
+                    clock=lambda:int(settings.clock()),enabled=True,
+                    canary_enabled=validate_dot_canary_settings(raw) is not None)
             # One installed client instance; the opt-in OS session transport
             # receives this same object only while the transport is enabled.
             os_transport_enabled = raw.get('os_executive_transport', False)
