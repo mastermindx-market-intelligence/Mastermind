@@ -1,0 +1,1696 @@
+{
+  "assertions": {
+    "attempts": 1,
+    "inert_pr_observations": 2,
+    "jobs": 1,
+    "original_source_stale": true,
+    "original_workspace_status_readable": true,
+    "plan_default_commit": "e794b723f49fc02b7e635c426a821b3f03000740"
+  },
+  "capture_state": "COMPLETE",
+  "consumer_inputs": {
+    "create_goal": "Preserve literal 中文 goal\nand clarify the scope.",
+    "create_random_byte_hex": "bb",
+    "identity_rule": "Inputs fixed BEFORE Job; actual TS planningOperationKey/directConsumeIdentity must verify, no response rewriting",
+    "initial_request": "Private first request.",
+    "planning_input": {
+      "grounding": {
+        "macro_sha": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+        "mastermind_sha": "f99015202f065045fa32ec617b43c5b3b71914b7"
+      },
+      "private_request": "Private first request.",
+      "project_source": {
+        "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+        "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+        "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+        "repository": "macro",
+        "request_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2"
+      },
+      "publication": {
+        "event_id": 10,
+        "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+        "receipt_sha256": "f2f26ad9bb2b4199b9573aa65baf6ed062e4a552b1002d495e5faedb919d5021",
+        "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "stage": "plan",
+      "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+    },
+    "planning_stage": "plan",
+    "profile_id": "mastermind-os-delivery"
+  },
+  "identities": {
+    "creation_request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "executive_context": {
+      "principal_scope": "05cd8a23b7e6a4fef84cc2a0cdc0954609c40efa6815874a09c7c8912ea22719",
+      "profile": {
+        "name": "web_ceo_v3",
+        "server_version": "1.5.0"
+      },
+      "schema": "mastermind.os.executive.owner_context.v1",
+      "verified_expiry": 1794006318
+    },
+    "plan_request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+    "planning_operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+    "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+    "workspace_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+  },
+  "limitations": [
+    "Synthetic principals/JWKS, enrollment, Root seal, physical native process and Git/PR identity observations.",
+    "Workspace source action wire uses verified in-process principal/peer fixture seam; not a signed Workspace HTTP proof.",
+    "Executive S19/prepare_proposal use actual JWT→HTTP→AF_UNIX→fixed installed owner; no live credentials/service/provider.",
+    "Replay/render may freeze this fixture timestamp. Original expiry/scopes/response schemas are never rewritten.",
+    "No DEFAULT_COMMIT_WRITTEN schema is invented; actual SOURCE_OBSERVED Event and default Git postimages retained."
+  ],
+  "recorded_at_ms": 1794005718179,
+  "samples": [
+    {
+      "edge": "FIXED_WORKSPACE_CONTEXT",
+      "operation": "context",
+      "request": {
+        "action": "publish_project_proposal",
+        "work_ref": null
+      },
+      "response": {
+        "can_inspect": true,
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "publish_project_proposal",
+          "work_ref": null
+        }
+      },
+      "sequence": 1
+    },
+    {
+      "edge": "FIXED_WORKSPACE_CONTEXT",
+      "operation": "context",
+      "request": {
+        "action": "publish_project_plan_proposal",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "can_inspect": true,
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "publish_project_plan_proposal",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 2
+    },
+    {
+      "edge": "ACTUAL_CANONICAL_PLAN_READER",
+      "generation": "72b3ad45e516aea407423e8f8dfea67acc65005830b1189828ca14a2e8bd7858",
+      "operation": "project_plan",
+      "request": {
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "availability": "AVAILABLE",
+        "continuity": {
+          "adoption": {
+            "reason": "NOT_DECLARED",
+            "state": "UNAVAILABLE"
+          },
+          "proposals": {
+            "coverage": "CAPTURED_ASSOCIATIONS_ONLY",
+            "items": [],
+            "state": "AVAILABLE"
+          },
+          "schema": "mastermind.project_plan_continuity.v1",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "plan": {
+          "adoption": {
+            "reason": "NOT_DECLARED",
+            "state": "UNAVAILABLE"
+          },
+          "next_action": "Clarify scope before execution admission.",
+          "objective": "Preserve literal 中文 goal\nand clarify the scope.",
+          "owner": "astra-meta-ceo",
+          "status": "proposed",
+          "title": "Mastermind OS delivery",
+          "version_history": {
+            "kind": "GIT_RECORD_REVISIONS",
+            "revisions": [
+              {
+                "commit": "3a83caaab26797121ba5e317993561e6972099ed",
+                "committed_at": "2026-11-06T15:54:14-07:00",
+                "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1"
+              }
+            ],
+            "state": "AVAILABLE"
+          },
+          "waves": [
+            {
+              "depends_on": [],
+              "id": "CLARIFY",
+              "next_action": null,
+              "prs": [],
+              "status": "todo",
+              "title": "Clarify goal and plan scope"
+            }
+          ]
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_project_plan.v2",
+        "selection": {
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source": {
+          "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+          "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+          "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+          "repository": "mastermindx-market-intelligence/macro"
+        }
+      },
+      "sequence": 3
+    },
+    {
+      "edge": "INSTALLED_WORKSPACE_OWNER",
+      "operation": "options",
+      "request": {
+        "action": "publish_project_proposal"
+      },
+      "response": {
+        "expected_macro_sha": "3298ad171c1f01a993046b1a1330a059781e5c5a",
+        "grounding": {
+          "macro_sha": "3298ad171c1f01a993046b1a1330a059781e5c5a",
+          "mastermind_sha": "f99015202f065045fa32ec617b43c5b3b71914b7"
+        },
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "profiles": [
+          {
+            "ambiguity": "open",
+            "blastRadius": "reversible",
+            "classification": "research",
+            "id": "mastermind-os-delivery",
+            "label": {
+              "en": "Mastermind OS delivery",
+              "zhCN": "Mastermind OS 交付"
+            },
+            "owner": "astra-meta-ceo",
+            "program": "executive-os",
+            "repos": [
+              "macro",
+              "mastermind"
+            ],
+            "revision": "ac01d592213edc7f3cf3e874c353258cf231d6522df36a85837c110b2d252e76",
+            "summary": {
+              "en": "Clarify the goal and plan its scope before any execution is admitted.",
+              "zhCN": "先澄清目标并确定计划范围，之后才进入执行准入。"
+            }
+          }
+        ],
+        "schema": "mastermind.project_creation_options.v1"
+      },
+      "sequence": 4
+    },
+    {
+      "edge": "INSTALLED_WORKSPACE_OWNER",
+      "operation": "prepare",
+      "request": {
+        "action": "publish_project_proposal",
+        "request": {
+          "expected_macro_sha": "3298ad171c1f01a993046b1a1330a059781e5c5a",
+          "goal": "Preserve literal 中文 goal\nand clarify the scope.",
+          "profile_id": "mastermind-os-delivery",
+          "profile_sha256": "ac01d592213edc7f3cf3e874c353258cf231d6522df36a85837c110b2d252e76",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "schema": "mastermind.project_profile_selection.v1"
+        }
+      },
+      "response": {
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "preview": {
+          "canonical_path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+          "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+          "goal": "Preserve literal 中文 goal\nand clarify the scope.",
+          "profile": {
+            "ambiguity": "open",
+            "blast_radius": "reversible",
+            "classification": "research",
+            "id": "mastermind-os-delivery",
+            "next_action": "Clarify scope before execution admission.",
+            "owner": "astra-meta-ceo",
+            "program": "executive-os",
+            "repos": [
+              "macro",
+              "mastermind"
+            ],
+            "revision": "ac01d592213edc7f3cf3e874c353258cf231d6522df36a85837c110b2d252e76",
+            "title": "Mastermind OS delivery",
+            "waves": [
+              {
+                "id": "CLARIFY",
+                "status": "todo",
+                "title": "Clarify goal and plan scope"
+              }
+            ]
+          },
+          "schema": "mastermind.project_creation_preview.v1",
+          "source_commit": "3298ad171c1f01a993046b1a1330a059781e5c5a",
+          "state": "DRAFT_ONLY",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "preview_witness": {
+          "original_input": {
+            "artifact_sha256": "0816a9b8bcf08ee0ef9c82b2f2525350fe417507e0a7211780d2b356638597c0",
+            "input_ref": "terminal-input:68293b4e9372c12f25900a042cd17de4d6de36145366eba8abf3ce17947ed1ed",
+            "payload_sha256": "6ef176da235c55b8ca0eb1bd7cea9264918b616f26d3548a9474021b366e5fd8",
+            "schema": "mastermind.terminal_original_input_reference.v1"
+          },
+          "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2"
+        },
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.workspace_source_operation_preview.v1",
+        "selection": {
+          "action": "publish_project_proposal",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 5
+    },
+    {
+      "edge": "INSTALLED_WORKSPACE_OWNER",
+      "operation": "submit",
+      "request": {
+        "action": "publish_project_proposal",
+        "preview_witness": {
+          "original_input": {
+            "artifact_sha256": "0816a9b8bcf08ee0ef9c82b2f2525350fe417507e0a7211780d2b356638597c0",
+            "input_ref": "terminal-input:68293b4e9372c12f25900a042cd17de4d6de36145366eba8abf3ce17947ed1ed",
+            "payload_sha256": "6ef176da235c55b8ca0eb1bd7cea9264918b616f26d3548a9474021b366e5fd8",
+            "schema": "mastermind.terminal_original_input_reference.v1"
+          },
+          "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2"
+        },
+        "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "advance": null,
+        "disposition": "unknown",
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "phase": "PUBLICATION",
+        "reason": "IN_PROGRESS",
+        "receipt": {
+          "event_id": 9,
+          "kind": "PROPOSAL_OBSERVED",
+          "proposal": {
+            "head_branch": "mmos/new-project-be4d7edfd808e672a2fbbb8c0f383aff885058d90a17eb6c42a799dce848d43c",
+            "head_commit": "3a83caaab26797121ba5e317993561e6972099ed",
+            "number": 401,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"
+          },
+          "receipt_sha256": "a8c9d952aa0683bbc946840b948b4ed2c280ff2fa5cdbbe33c057b7a3506d4c2",
+          "recorded_at_ms": 1794005655000,
+          "sources": []
+        },
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "publish_project_proposal",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 6
+    },
+    {
+      "edge": "ACTUAL_DEFAULT_GIT_AND_EVENT",
+      "operation": "reconcile",
+      "request": {
+        "action": "publish_project_proposal",
+        "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "schema": "mastermind.workspace_source_operation_lookup.v1",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "advance": null,
+        "disposition": "accepted",
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "phase": "PUBLICATION",
+        "reason": null,
+        "receipt": {
+          "event_id": 10,
+          "kind": "SOURCE_OBSERVED",
+          "proposal": null,
+          "receipt_sha256": "f2f26ad9bb2b4199b9573aa65baf6ed062e4a552b1002d495e5faedb919d5021",
+          "recorded_at_ms": 1794005656000,
+          "sources": [
+            {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "macro"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "publish_project_proposal",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 7
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "context",
+      "request": {},
+      "response": {
+        "principal_scope": "05cd8a23b7e6a4fef84cc2a0cdc0954609c40efa6815874a09c7c8912ea22719",
+        "profile": {
+          "name": "web_ceo_v3",
+          "server_version": "1.5.0"
+        },
+        "schema": "mastermind.os.executive.owner_context.v1",
+        "verified_expiry": 1794006318
+      },
+      "route": "/os/executive/context",
+      "sequence": 8,
+      "status_code": 200
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "submit",
+      "request": {
+        "arguments": {
+          "grounding": {
+            "macro_sha": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "mastermind_sha": "f99015202f065045fa32ec617b43c5b3b71914b7"
+          },
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "private_request": "Private first request.",
+          "project_source": {
+            "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+            "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+            "repository": "macro",
+            "request_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2"
+          },
+          "publication": {
+            "event_id": 10,
+            "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+            "receipt_sha256": "f2f26ad9bb2b4199b9573aa65baf6ed062e4a552b1002d495e5faedb919d5021",
+            "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "stage": "plan",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": {
+          "accepted": true,
+          "authority": {
+            "authority_level": "A0",
+            "policy_sha256": "5c7b10a04044f9d2afc5fd8f97024cdb4fee930d5cebacc9c5f0dda0212cd14f",
+            "requested": [
+              "READ",
+              "RESEARCH"
+            ]
+          },
+          "created_at_ms": 1794005679818,
+          "dispatched": false,
+          "duplicate": true,
+          "fingerprint": "491199b6775e662d0be669301095e1476df7ade15e95402574c5ea3881d6a3f7",
+          "grounding": {
+            "macro_sha": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "mastermind_sha": "f99015202f065045fa32ec617b43c5b3b71914b7"
+          },
+          "intent_id": "ceo-project-planning-3f07bf504d6ecca004af4e2272887ff4e963c6e4",
+          "job_id": "JOB-001",
+          "schema": "mastermind.ceo_direct_native_receipt.v1",
+          "status": "COMPLETED",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "error": null,
+        "ok": true,
+        "operation": "submit",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/submit",
+      "sequence": 9,
+      "status_code": 200
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "status",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": {
+          "accepted": true,
+          "authority": {
+            "authority_level": "A0",
+            "policy_sha256": "5c7b10a04044f9d2afc5fd8f97024cdb4fee930d5cebacc9c5f0dda0212cd14f",
+            "requested": [
+              "READ",
+              "RESEARCH"
+            ]
+          },
+          "created_at_ms": 1794005679818,
+          "dispatched": false,
+          "duplicate": false,
+          "fingerprint": "491199b6775e662d0be669301095e1476df7ade15e95402574c5ea3881d6a3f7",
+          "grounding": {
+            "macro_sha": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "mastermind_sha": "f99015202f065045fa32ec617b43c5b3b71914b7"
+          },
+          "intent_id": "ceo-project-planning-3f07bf504d6ecca004af4e2272887ff4e963c6e4",
+          "job_id": "JOB-001",
+          "schema": "mastermind.ceo_direct_native_receipt.v1",
+          "status": "COMPLETED",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "error": null,
+        "ok": true,
+        "operation": "status",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/status",
+      "sequence": 10,
+      "status_code": 200
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "result",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": {
+          "availability": "AVAILABLE",
+          "consumption": {
+            "receipt_digest": null,
+            "state": "UNCONSUMED"
+          },
+          "reason_codes": [],
+          "result": {
+            "completed_steps": [
+              "Read the immutable admitted commission"
+            ],
+            "current_state": "{\"schema\": \"mastermind.project_plan_candidate.v1\", \"work_ref\": \"WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\", \"base_source\": {\"repository\": \"mastermindx-market-intelligence/macro\", \"commit\": \"5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48\", \"path\": \"agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md\", \"content_sha256\": \"5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1\"}, \"base_adoption\": null, \"plan\": {\"objective\": \"An explicit plan from the consumed result.\", \"waves\": [{\"id\": \"W1\", \"title\": \"Compare the exact proposed source\", \"status\": \"todo\"}], \"next_action\": \"Review this proposal without adoption.\", \"body\": \"Literal proposed body. \\u4e2d\\u6587\\n\"}, \"rationale\": \"The same original returned result explicitly declares this candidate.\", \"evidence\": []}",
+            "next_actions": [
+              "Original parent may explicitly acknowledge this result"
+            ],
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "summary": "Retained direct research findings"
+          },
+          "schema": "mastermind.direct_native_result_response.v1",
+          "selection": {
+            "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+            "job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          }
+        },
+        "error": null,
+        "ok": true,
+        "operation": "result",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/result",
+      "sequence": 11,
+      "status_code": 200
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "prepare_proposal",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "proposal_request": {
+            "base_source": {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "expected_adoption": null,
+            "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "schema": "mastermind.project_plan_proposal_request.v1",
+            "selection": {
+              "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+              "job_id": "JOB-001",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": null,
+        "error": {
+          "code": "effect_unknown",
+          "message": "Reconcile the original project operation"
+        },
+        "ok": false,
+        "operation": "prepare_proposal",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/prepare_proposal",
+      "sequence": 12,
+      "status_code": 202
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "consume",
+      "request": {
+        "arguments": {
+          "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+          "consumption_operation_key": "mmos-consume-90cd391117a5efd2020eda263d75eefa9af9cf0e",
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": {
+          "availability": "AVAILABLE",
+          "consumption": {
+            "receipt_digest": "9fab43c87b3a7d6a9936dab0e0806c651bfd978c313cb81964137ee19a25ccf6",
+            "state": "CONSUMED"
+          },
+          "reason_codes": [],
+          "result": {
+            "completed_steps": [
+              "Read the immutable admitted commission"
+            ],
+            "current_state": "{\"schema\": \"mastermind.project_plan_candidate.v1\", \"work_ref\": \"WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\", \"base_source\": {\"repository\": \"mastermindx-market-intelligence/macro\", \"commit\": \"5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48\", \"path\": \"agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md\", \"content_sha256\": \"5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1\"}, \"base_adoption\": null, \"plan\": {\"objective\": \"An explicit plan from the consumed result.\", \"waves\": [{\"id\": \"W1\", \"title\": \"Compare the exact proposed source\", \"status\": \"todo\"}], \"next_action\": \"Review this proposal without adoption.\", \"body\": \"Literal proposed body. \\u4e2d\\u6587\\n\"}, \"rationale\": \"The same original returned result explicitly declares this candidate.\", \"evidence\": []}",
+            "next_actions": [
+              "Original parent may explicitly acknowledge this result"
+            ],
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "summary": "Retained direct research findings"
+          },
+          "schema": "mastermind.direct_native_result_response.v1",
+          "selection": {
+            "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+            "job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          }
+        },
+        "error": null,
+        "ok": true,
+        "operation": "consume",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/consume",
+      "sequence": 13,
+      "status_code": 200
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "prepare_proposal",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "proposal_request": {
+            "base_source": {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "expected_adoption": null,
+            "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "schema": "mastermind.project_plan_proposal_request.v1",
+            "selection": {
+              "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+              "job_id": "JOB-001",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": null,
+        "error": {
+          "code": "effect_unknown",
+          "message": "Reconcile the original project operation"
+        },
+        "ok": false,
+        "operation": "prepare_proposal",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/prepare_proposal",
+      "sequence": 14,
+      "status_code": 202
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "prepare_proposal",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "proposal_request": {
+            "base_source": {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "expected_adoption": null,
+            "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "schema": "mastermind.project_plan_proposal_request.v1",
+            "selection": {
+              "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+              "job_id": "JOB-001",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": {
+          "owner_context": {
+            "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+          },
+          "preview": {
+            "base_source": {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "candidate_sha256": "befa839753a49c40010fb69940df307a468fcad2a179503d4357f73f5fd4dd3c",
+            "edited_paths": [
+              "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+              "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md"
+            ],
+            "expected_adoption": null,
+            "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "proposal_id": "PLAN-8888888888888888888888888888888888888888",
+            "proposal_path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "schema": "mastermind.project_plan_proposal_preview.v1",
+            "status": "DRAFT_ONLY",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "preview_witness": {
+            "original_input": {
+              "artifact_sha256": "d63218f30d0ecd8fa8a46ee8355d8fa973350ef0a999be5bd266dc72fb123ab9",
+              "input_ref": "terminal-input:3edddd498aad7ce19e0b6eee239d01cfbddf4e99ee24f5ef6802be7b7ce106ba",
+              "payload_sha256": "ac1df16c0498e11de415369f8884c158be4dc19704f753014542c00e8f61e380",
+              "schema": "mastermind.terminal_original_input_reference.v1"
+            },
+            "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511"
+          },
+          "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+          "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+          "schema": "mastermind.workspace_source_operation_preview.v1",
+          "selection": {
+            "action": "publish_project_plan_proposal",
+            "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          }
+        },
+        "error": null,
+        "ok": true,
+        "operation": "prepare_proposal",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/prepare_proposal",
+      "sequence": 15,
+      "status_code": 200
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "prepare_proposal",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "proposal_request": {
+            "base_source": {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "expected_adoption": null,
+            "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "schema": "mastermind.project_plan_proposal_request.v1",
+            "selection": {
+              "attempt_id": "ATT-5e9e3cffdd3b411aa45f27c6b4a52237",
+              "job_id": "JOB-001",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": {
+          "owner_context": {
+            "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+          },
+          "preview": {
+            "base_source": {
+              "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "candidate_sha256": "befa839753a49c40010fb69940df307a468fcad2a179503d4357f73f5fd4dd3c",
+            "edited_paths": [
+              "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+              "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md"
+            ],
+            "expected_adoption": null,
+            "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "proposal_id": "PLAN-8888888888888888888888888888888888888888",
+            "proposal_path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+            "result_digest": "ec4984983a2d0bcb7c55fcc18822f95b6bae5d06ce42e63f19d7a46c92c224fb",
+            "schema": "mastermind.project_plan_proposal_preview.v1",
+            "status": "DRAFT_ONLY",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "preview_witness": {
+            "original_input": {
+              "artifact_sha256": "d63218f30d0ecd8fa8a46ee8355d8fa973350ef0a999be5bd266dc72fb123ab9",
+              "input_ref": "terminal-input:3edddd498aad7ce19e0b6eee239d01cfbddf4e99ee24f5ef6802be7b7ce106ba",
+              "payload_sha256": "ac1df16c0498e11de415369f8884c158be4dc19704f753014542c00e8f61e380",
+              "schema": "mastermind.terminal_original_input_reference.v1"
+            },
+            "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511"
+          },
+          "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+          "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+          "schema": "mastermind.workspace_source_operation_preview.v1",
+          "selection": {
+            "action": "publish_project_plan_proposal",
+            "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          }
+        },
+        "error": null,
+        "ok": true,
+        "operation": "prepare_proposal",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/prepare_proposal",
+      "sequence": 16,
+      "status_code": 200
+    },
+    {
+      "edge": "FIXED_WORKSPACE_PRIVATE_WIRE",
+      "operation": "submit",
+      "request": {
+        "action": "publish_project_plan_proposal",
+        "preview_witness": {
+          "original_input": {
+            "artifact_sha256": "d63218f30d0ecd8fa8a46ee8355d8fa973350ef0a999be5bd266dc72fb123ab9",
+            "input_ref": "terminal-input:3edddd498aad7ce19e0b6eee239d01cfbddf4e99ee24f5ef6802be7b7ce106ba",
+            "payload_sha256": "ac1df16c0498e11de415369f8884c158be4dc19704f753014542c00e8f61e380",
+            "schema": "mastermind.terminal_original_input_reference.v1"
+          },
+          "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511"
+        },
+        "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "advance": null,
+        "disposition": "unknown",
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "phase": "PUBLICATION",
+        "reason": "IN_PROGRESS",
+        "receipt": {
+          "event_id": 25,
+          "kind": "PROPOSAL_OBSERVED",
+          "proposal": {
+            "head_branch": "mmos/plan-proposal-08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b",
+            "head_commit": "f1565c0cab5b5a61ebbfb1cfacd9b1a2664afb5d",
+            "number": 402,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"
+          },
+          "receipt_sha256": "f5070edea427fed51b7a14d2e62b505ceafd577517c0e36f98d667376536fde7",
+          "recorded_at_ms": 1794005842000,
+          "sources": []
+        },
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "publish_project_plan_proposal",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 17
+    },
+    {
+      "edge": "FIXED_WORKSPACE_PRIVATE_WIRE",
+      "operation": "reconcile",
+      "request": {
+        "action": "publish_project_plan_proposal",
+        "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+        "schema": "mastermind.workspace_source_operation_lookup.v1",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "advance": null,
+        "disposition": "accepted",
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "phase": "PUBLICATION",
+        "reason": null,
+        "receipt": {
+          "event_id": 26,
+          "kind": "SOURCE_OBSERVED",
+          "proposal": null,
+          "receipt_sha256": "68faaeb7a405877149e0f985dea4b9ce92a5e5b8a16de895ecf6a0c42656174a",
+          "recorded_at_ms": 1794005843000,
+          "sources": [
+            {
+              "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+              "content_sha256": "7e0032082e008678336b9f43ca8cbb9fdb27329e93159f2c04d30b5eaf809b42",
+              "path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+              "repository": "macro"
+            },
+            {
+              "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+              "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "macro"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "publish_project_plan_proposal",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 18
+    },
+    {
+      "edge": "ACTUAL_CANONICAL_PLAN_READER",
+      "generation": "4e68e7460a4ca69b949e576fa713d90b208ec32cadaf6f1bf75a76217e2573d9",
+      "operation": "project_plan",
+      "request": {
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "availability": "AVAILABLE",
+        "continuity": {
+          "adoption": {
+            "reason": "NOT_DECLARED",
+            "state": "UNAVAILABLE"
+          },
+          "proposals": {
+            "coverage": "CAPTURED_ASSOCIATIONS_ONLY",
+            "items": [
+              {
+                "adoption_relation": "UNASSOCIATED_WITH_CURRENT_DECISION",
+                "base_adoption": null,
+                "base_source": {
+                  "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+                  "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+                  "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                  "repository": "mastermindx-market-intelligence/macro"
+                },
+                "candidate_sha256": "befa839753a49c40010fb69940df307a468fcad2a179503d4357f73f5fd4dd3c",
+                "comparison": {
+                  "added_lines": 7,
+                  "base_source": {
+                    "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+                    "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+                    "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                    "repository": "mastermindx-market-intelligence/macro"
+                  },
+                  "base_text": "---\nkey: PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\ntitle: Mastermind OS delivery\nobjective: 'Preserve literal 中文 goal\n\n  and clarify the scope.'\nstatus: proposed\nprogram: executive-os\nrepos:\n- macro\n- mastermind\nowner: astra-meta-ceo\nclass: research\nblast_radius: reversible\nambiguity: open\nwaves:\n- id: CLARIFY\n  title: Clarify goal and plan scope\n  status: todo\nnext_action: Clarify scope before execution admission.\n---\n\n## What this file is\n\nA DRAFT_ONLY workstream record compiled from an authored project-proposal\nrequest. Compilation happened entirely in memory: no store path was read or\nwritten, no Git operation ran, and no authority was granted by producing this\ntext. The draft reaches the store only if a separate publication step — which\nthis compiler can neither perform nor prove — carries it into\n`agentos/workstreams/` under the commit the request pinned as\n`expected_commit`. That commit value is an obligation recorded for that later\npublisher, not a fact this file asserts.\n\n## What this file does not say\n\nIt carries no `created`/`updated` field (those are derived from git history by\nthe store tooling, never authored), no `claim`, no `runtime_ref`, and no\nsession or conversation identity. Status is `proposed` and every wave is\n`todo`: nothing here asserts that the work started, merged, shipped, or was\nreviewed.\n\n## How to read the frontmatter\n\nThe YAML block above is the whole authored record: exactly the twelve\nworkstream fields, in the compiler's fixed key order, serialized with\n`yaml.safe_dump` so caller text (including YAML-looking text, CJK, LF and TAB)\nsurvives byte-exact through `FRONTMATTER_RE` -> `yaml.safe_load`. Membership\nrules inside it were checked by the canonical `scripts.agentos` checker, not\nre-declared here.\n\n<!--\nagentos-project-proposal provenance (DRAFT_ONLY):\nrequest_id: mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nrequest_sha256: 7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2\nexpected_commit: 3298ad171c1f01a993046b1a1330a059781e5c5a\n-->\n",
+                  "candidate_sha256": "befa839753a49c40010fb69940df307a468fcad2a179503d4357f73f5fd4dd3c",
+                  "candidate_text": "---\nkey: PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\ntitle: Mastermind OS delivery\nobjective: An explicit plan from the consumed result.\nstatus: proposed\nprogram: executive-os\nrepos:\n- macro\n- mastermind\nowner: astra-meta-ceo\nclass: research\nblast_radius: reversible\nambiguity: open\nwaves:\n- id: W1\n  title: Compare the exact proposed source\n  status: todo\nnext_action: Review this proposal without adoption.\nartifacts:\n- research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md\n---\nLiteral proposed body. 中文\n",
+                  "diff": "--- recorded-base\n+++ proposal-candidate\n@@ -1,9 +1,7 @@\n ---\n key: PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\n title: Mastermind OS delivery\n-objective: 'Preserve literal 中文 goal\n-\n-  and clarify the scope.'\n+objective: An explicit plan from the consumed result.\n status: proposed\n program: executive-os\n repos:\n@@ -14,43 +12,11 @@\n blast_radius: reversible\n ambiguity: open\n waves:\n-- id: CLARIFY\n-  title: Clarify goal and plan scope\n+- id: W1\n+  title: Compare the exact proposed source\n   status: todo\n-next_action: Clarify scope before execution admission.\n+next_action: Review this proposal without adoption.\n+artifacts:\n+- research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md\n ---\n-\n-## What this file is\n-\n-A DRAFT_ONLY workstream record compiled from an authored project-proposal\n-request. Compilation happened entirely in memory: no store path was read or\n-written, no Git operation ran, and no authority was granted by producing this\n-text. The draft reaches the store only if a separate publication step — which\n-this compiler can neither perform nor prove — carries it into\n-`agentos/workstreams/` under the commit the request pinned as\n-`expected_commit`. That commit value is an obligation recorded for that later\n-publisher, not a fact this file asserts.\n-\n-## What this file does not say\n-\n-It carries no `created`/`updated` field (those are derived from git history by\n-the store tooling, never authored), no `claim`, no `runtime_ref`, and no\n-session or conversation identity. Status is `proposed` and every wave is\n-`todo`: nothing here asserts that the work started, merged, shipped, or was\n-reviewed.\n-\n-## How to read the frontmatter\n-\n-The YAML block above is the whole authored record: exactly the twelve\n-workstream fields, in the compiler's fixed key order, serialized with\n-`yaml.safe_dump` so caller text (including YAML-looking text, CJK, LF and TAB)\n-survives byte-exact through `FRONTMATTER_RE` -> `yaml.safe_load`. Membership\n-rules inside it were checked by the canonical `scripts.agentos` checker, not\n-re-declared here.\n-\n-<!--\n-agentos-project-proposal provenance (DRAFT_ONLY):\n-request_id: mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n-request_sha256: 7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2\n-expected_commit: 3298ad171c1f01a993046b1a1330a059781e5c5a\n--->\n+Literal proposed body. 中文\n",
+                  "identical": false,
+                  "removed_lines": 41,
+                  "state": "AVAILABLE"
+                },
+                "comparison_basis": "RECORDED_SOURCE",
+                "evidence": [],
+                "proposal_id": "PLAN-8888888888888888888888888888888888888888",
+                "proposal_source": {
+                  "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+                  "content_sha256": "7e0032082e008678336b9f43ca8cbb9fdb27329e93159f2c04d30b5eaf809b42",
+                  "path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+                  "repository": "mastermindx-market-intelligence/macro"
+                },
+                "rationale": "The same original returned result explicitly declares this candidate.",
+                "schema": "agentos.project_plan_proposal.v1",
+                "state": "RECORDED_PROPOSAL",
+                "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+              }
+            ],
+            "state": "AVAILABLE"
+          },
+          "schema": "mastermind.project_plan_continuity.v1",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "plan": {
+          "adoption": {
+            "reason": "NOT_DECLARED",
+            "state": "UNAVAILABLE"
+          },
+          "next_action": "Clarify scope before execution admission.",
+          "objective": "Preserve literal 中文 goal\nand clarify the scope.",
+          "owner": "astra-meta-ceo",
+          "status": "proposed",
+          "title": "Mastermind OS delivery",
+          "version_history": {
+            "kind": "GIT_RECORD_REVISIONS",
+            "revisions": [
+              {
+                "commit": "f1565c0cab5b5a61ebbfb1cfacd9b1a2664afb5d",
+                "committed_at": "2026-11-06T15:57:22-07:00",
+                "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31"
+              },
+              {
+                "commit": "3a83caaab26797121ba5e317993561e6972099ed",
+                "committed_at": "2026-11-06T15:54:14-07:00",
+                "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1"
+              }
+            ],
+            "state": "AVAILABLE"
+          },
+          "waves": [
+            {
+              "depends_on": [],
+              "id": "CLARIFY",
+              "next_action": null,
+              "prs": [],
+              "status": "todo",
+              "title": "Clarify goal and plan scope"
+            }
+          ]
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_project_plan.v2",
+        "selection": {
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source": {
+          "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+          "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31",
+          "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+          "repository": "mastermindx-market-intelligence/macro"
+        }
+      },
+      "sequence": 19
+    },
+    {
+      "edge": "FIXED_WORKSPACE_PRIVATE_WIRE",
+      "operation": "read",
+      "request": {
+        "action": "publish_project_plan_proposal",
+        "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+        "schema": "mastermind.workspace_source_operation_lookup.v1",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "advance": null,
+        "disposition": "accepted",
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "phase": "PUBLICATION",
+        "reason": null,
+        "receipt": {
+          "event_id": 26,
+          "kind": "SOURCE_OBSERVED",
+          "proposal": null,
+          "receipt_sha256": "68faaeb7a405877149e0f985dea4b9ce92a5e5b8a16de895ecf6a0c42656174a",
+          "recorded_at_ms": 1794005843000,
+          "sources": [
+            {
+              "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+              "content_sha256": "7e0032082e008678336b9f43ca8cbb9fdb27329e93159f2c04d30b5eaf809b42",
+              "path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+              "repository": "macro"
+            },
+            {
+              "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+              "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "macro"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "publish_project_plan_proposal",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 20
+    },
+    {
+      "edge": "FIXED_WORKSPACE_PRIVATE_WIRE",
+      "operation": "submit",
+      "request": {
+        "action": "publish_project_plan_proposal",
+        "preview_witness": {
+          "original_input": {
+            "artifact_sha256": "d63218f30d0ecd8fa8a46ee8355d8fa973350ef0a999be5bd266dc72fb123ab9",
+            "input_ref": "terminal-input:3edddd498aad7ce19e0b6eee239d01cfbddf4e99ee24f5ef6802be7b7ce106ba",
+            "payload_sha256": "ac1df16c0498e11de415369f8884c158be4dc19704f753014542c00e8f61e380",
+            "schema": "mastermind.terminal_original_input_reference.v1"
+          },
+          "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511"
+        },
+        "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      },
+      "response": {
+        "advance": null,
+        "disposition": "accepted",
+        "owner_context": {
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9"
+        },
+        "phase": "PUBLICATION",
+        "reason": null,
+        "receipt": {
+          "event_id": 26,
+          "kind": "SOURCE_OBSERVED",
+          "proposal": null,
+          "receipt_sha256": "68faaeb7a405877149e0f985dea4b9ce92a5e5b8a16de895ecf6a0c42656174a",
+          "recorded_at_ms": 1794005843000,
+          "sources": [
+            {
+              "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+              "content_sha256": "7e0032082e008678336b9f43ca8cbb9fdb27329e93159f2c04d30b5eaf809b42",
+              "path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+              "repository": "macro"
+            },
+            {
+              "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+              "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "macro"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "publish_project_plan_proposal",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "sequence": 21
+    },
+    {
+      "edge": "SIGNED_EXECUTIVE_HTTP",
+      "operation": "result",
+      "request": {
+        "arguments": {
+          "operation_key": "mmos-project-planning-5675aa44bf8410721a7714bd228d18db94b55503",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        }
+      },
+      "response": {
+        "data": null,
+        "error": {
+          "code": "effect_unknown",
+          "message": "Reconcile the original project operation"
+        },
+        "ok": false,
+        "operation": "result",
+        "schema": "mastermind.project_initial_planning.private_result.v1"
+      },
+      "route": "/os/executive/project-planning/result",
+      "sequence": 22,
+      "status_code": 202
+    }
+  ],
+  "scope": "DISPOSABLE_SOURCE_ISSUED_CONSUMER_FIXTURE_ONLY",
+  "source_events": [
+    {
+      "actor": "workspace:7777777777777777777777777777777777777777777777777777777777777777",
+      "aggregate_id": "6e752c51ec3e16977e0d51a43e324b721e0b41bde24725325165b81134f0c1e7",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:6e752c51ec3e16977e0d51a43e324b721e0b41bde24725325165b81134f0c1e7:intent",
+      "created_at": "2026-11-06T22:54:07+00:00",
+      "event_id": 1,
+      "event_type": "PROJECT_SOURCE_INTENT",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "7777777777777777777777777777777777777777777777777777777777777777",
+          "request_id": "mmos-project-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "kind": "INTENT",
+        "lookup_binding": null,
+        "original_input": {
+          "artifact_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "input_ref": "terminal-input:4444444444444444444444444444444444444444444444444444444444444444",
+          "payload_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "schema": "mastermind.terminal_original_input_reference.v1"
+        },
+        "permission_binding_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "phase": "PUBLICATION",
+        "publication_binding": {
+          "branch": null,
+          "expected_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "postimages": [
+            {
+              "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "expected_preimage_sha256": null,
+              "path": "agentos/workstreams/WS-NEW-PROJECT.md"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 1,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:7777777777777777777777777777777777777777777777777777777777777777",
+      "aggregate_id": "6e752c51ec3e16977e0d51a43e324b721e0b41bde24725325165b81134f0c1e7",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:6e752c51ec3e16977e0d51a43e324b721e0b41bde24725325165b81134f0c1e7:attempt-publication",
+      "created_at": "2026-11-06T22:54:07+00:00",
+      "event_id": 2,
+      "event_type": "PROJECT_SOURCE_PHASE_ATTEMPTED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "7777777777777777777777777777777777777777777777777777777777777777",
+          "request_id": "mmos-project-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "kind": "PHASE_ATTEMPTED",
+        "phase": "PUBLICATION",
+        "recipe_fingerprint_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 2,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:7777777777777777777777777777777777777777777777777777777777777777",
+      "aggregate_id": "6e752c51ec3e16977e0d51a43e324b721e0b41bde24725325165b81134f0c1e7",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:6e752c51ec3e16977e0d51a43e324b721e0b41bde24725325165b81134f0c1e7:observed-f397e1b8276c6056c9a7db0f9c8ebdd0",
+      "created_at": "2026-11-06T22:54:07+00:00",
+      "event_id": 3,
+      "event_type": "PROJECT_SOURCE_SOURCE_OBSERVED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "7777777777777777777777777777777777777777777777777777777777777777",
+          "request_id": "mmos-project-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "kind": "SOURCE_OBSERVED",
+        "phase": "PUBLICATION",
+        "proposal": null,
+        "recipe_fingerprint_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "schema": "mastermind.project_source_operation_event.v1",
+        "sources": [
+          {
+            "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "path": "agentos/workstreams/WS-NEW-PROJECT.md",
+            "repository": "macro"
+          }
+        ]
+      },
+      "quota_class": null,
+      "sequence": 3,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "58792edfcd0e255f82d6402e519cd523c433c73b6c94334de432bdc13d86ad12",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:58792edfcd0e255f82d6402e519cd523c433c73b6c94334de432bdc13d86ad12:intent",
+      "created_at": "2026-11-06T22:54:07+00:00",
+      "event_id": 4,
+      "event_type": "PROJECT_SOURCE_INTENT",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "kind": "INTENT",
+        "lookup_binding": null,
+        "original_input": {
+          "artifact_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "input_ref": "terminal-input:4444444444444444444444444444444444444444444444444444444444444444",
+          "payload_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "schema": "mastermind.terminal_original_input_reference.v1"
+        },
+        "permission_binding_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "phase": "PUBLICATION",
+        "publication_binding": {
+          "branch": null,
+          "expected_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "postimages": [
+            {
+              "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "expected_preimage_sha256": null,
+              "path": "agentos/workstreams/WS-NEW-PROJECT.md"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 1,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "58792edfcd0e255f82d6402e519cd523c433c73b6c94334de432bdc13d86ad12",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:58792edfcd0e255f82d6402e519cd523c433c73b6c94334de432bdc13d86ad12:attempt-publication",
+      "created_at": "2026-11-06T22:54:07+00:00",
+      "event_id": 5,
+      "event_type": "PROJECT_SOURCE_PHASE_ATTEMPTED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "kind": "PHASE_ATTEMPTED",
+        "phase": "PUBLICATION",
+        "recipe_fingerprint_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 2,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "58792edfcd0e255f82d6402e519cd523c433c73b6c94334de432bdc13d86ad12",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:58792edfcd0e255f82d6402e519cd523c433c73b6c94334de432bdc13d86ad12:observed-c767aebdc43c364c3cf649f01a8f814f",
+      "created_at": "2026-11-06T22:54:07+00:00",
+      "event_id": 6,
+      "event_type": "PROJECT_SOURCE_SOURCE_OBSERVED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:NEW-PROJECT"
+        },
+        "kind": "SOURCE_OBSERVED",
+        "phase": "PUBLICATION",
+        "proposal": null,
+        "recipe_fingerprint_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "schema": "mastermind.project_source_operation_event.v1",
+        "sources": [
+          {
+            "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "path": "agentos/workstreams/WS-NEW-PROJECT.md",
+            "repository": "macro"
+          }
+        ]
+      },
+      "quota_class": null,
+      "sequence": 3,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e:intent",
+      "created_at": "2026-11-06T22:54:10+00:00",
+      "event_id": 7,
+      "event_type": "PROJECT_SOURCE_INTENT",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "INTENT",
+        "lookup_binding": null,
+        "original_input": {
+          "artifact_sha256": "0816a9b8bcf08ee0ef9c82b2f2525350fe417507e0a7211780d2b356638597c0",
+          "input_ref": "terminal-input:68293b4e9372c12f25900a042cd17de4d6de36145366eba8abf3ce17947ed1ed",
+          "payload_sha256": "6ef176da235c55b8ca0eb1bd7cea9264918b616f26d3548a9474021b366e5fd8",
+          "schema": "mastermind.terminal_original_input_reference.v1"
+        },
+        "permission_binding_digest": "2725f1e73b43143fb18fd0796f8781b2c4f59f4c3d157102827e0593b82ca08b",
+        "phase": "PUBLICATION",
+        "publication_binding": {
+          "branch": null,
+          "expected_commit": "3298ad171c1f01a993046b1a1330a059781e5c5a",
+          "postimages": [
+            {
+              "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "expected_preimage_sha256": null,
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 1,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e:attempt-publication",
+      "created_at": "2026-11-06T22:54:10+00:00",
+      "event_id": 8,
+      "event_type": "PROJECT_SOURCE_PHASE_ATTEMPTED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "PHASE_ATTEMPTED",
+        "phase": "PUBLICATION",
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 2,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e:observed-fcb7359464e4d8728559e3b8f9809695",
+      "created_at": "2026-11-06T22:54:15+00:00",
+      "event_id": 9,
+      "event_type": "PROJECT_SOURCE_PROPOSAL_OBSERVED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "PROPOSAL_OBSERVED",
+        "phase": "PUBLICATION",
+        "proposal": {
+          "head_branch": "mmos/new-project-be4d7edfd808e672a2fbbb8c0f383aff885058d90a17eb6c42a799dce848d43c",
+          "head_commit": "3a83caaab26797121ba5e317993561e6972099ed",
+          "number": 401,
+          "url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"
+        },
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.project_source_operation_event.v1",
+        "sources": []
+      },
+      "quota_class": null,
+      "sequence": 3,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:5329463eea9ca4930e21422912dd14c47a7e8547643be8a667485945c5dab00e:observed-1f832dc72be98224f0279987a43a469c",
+      "created_at": "2026-11-06T22:54:16+00:00",
+      "event_id": 10,
+      "event_type": "PROJECT_SOURCE_SOURCE_OBSERVED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "SOURCE_OBSERVED",
+        "phase": "PUBLICATION",
+        "proposal": null,
+        "recipe_fingerprint_sha256": "7487786fd00e1478560d8f963d53b1dd5d15f5d5d658c1a81f3541f462a917f2",
+        "request_sha256": "aabb957c80321f98113ccf0e4f74d7d2268cf61ed83fb33f3f3d6ba8c8aefd3e",
+        "schema": "mastermind.project_source_operation_event.v1",
+        "sources": [
+          {
+            "commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+            "content_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+            "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+            "repository": "macro"
+          }
+        ]
+      },
+      "quota_class": null,
+      "sequence": 4,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b:intent",
+      "created_at": "2026-11-06T22:56:53+00:00",
+      "event_id": 23,
+      "event_type": "PROJECT_SOURCE_INTENT",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_plan_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "INTENT",
+        "lookup_binding": null,
+        "original_input": {
+          "artifact_sha256": "d63218f30d0ecd8fa8a46ee8355d8fa973350ef0a999be5bd266dc72fb123ab9",
+          "input_ref": "terminal-input:3edddd498aad7ce19e0b6eee239d01cfbddf4e99ee24f5ef6802be7b7ce106ba",
+          "payload_sha256": "ac1df16c0498e11de415369f8884c158be4dc19704f753014542c00e8f61e380",
+          "schema": "mastermind.terminal_original_input_reference.v1"
+        },
+        "permission_binding_digest": "f9ffcb21619651ab4caf32d5f44f37baca056e64f9ee7cf2832ab33b9c99a109",
+        "phase": "PUBLICATION",
+        "publication_binding": {
+          "branch": null,
+          "expected_commit": "5a30fc3cc0ef091d86a85e3f1d2a59af2ac76a48",
+          "postimages": [
+            {
+              "content_sha256": "7e0032082e008678336b9f43ca8cbb9fdb27329e93159f2c04d30b5eaf809b42",
+              "expected_preimage_sha256": null,
+              "path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md"
+            },
+            {
+              "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31",
+              "expected_preimage_sha256": "5cd8f088aa99410b3d11902749e49b51caab46e31bdcd4d5074c50ab6abb55d1",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md"
+            }
+          ]
+        },
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 1,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b:attempt-publication",
+      "created_at": "2026-11-06T22:57:21+00:00",
+      "event_id": 24,
+      "event_type": "PROJECT_SOURCE_PHASE_ATTEMPTED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_plan_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "PHASE_ATTEMPTED",
+        "phase": "PUBLICATION",
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.project_source_operation_event.v1"
+      },
+      "quota_class": null,
+      "sequence": 2,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b:observed-26ca4fb7eb7b6b8ade6a6edf98ff2c36",
+      "created_at": "2026-11-06T22:57:22+00:00",
+      "event_id": 25,
+      "event_type": "PROJECT_SOURCE_PROPOSAL_OBSERVED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_plan_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "PROPOSAL_OBSERVED",
+        "phase": "PUBLICATION",
+        "proposal": {
+          "head_branch": "mmos/plan-proposal-08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b",
+          "head_commit": "f1565c0cab5b5a61ebbfb1cfacd9b1a2664afb5d",
+          "number": 402,
+          "url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"
+        },
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.project_source_operation_event.v1",
+        "sources": []
+      },
+      "quota_class": null,
+      "sequence": 3,
+      "worker_id": null
+    },
+    {
+      "actor": "workspace:2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+      "aggregate_id": "08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b",
+      "aggregate_type": "project_source_operation",
+      "attempt_id": null,
+      "command_id": "project-source:08cdc70a8a47b928edf4f5100270469baa1444deb2f0c724cea17792c44af61b:observed-169dbdb36f22b2c960744c319ff25825",
+      "created_at": "2026-11-06T22:57:23+00:00",
+      "event_id": 26,
+      "event_type": "PROJECT_SOURCE_SOURCE_OBSERVED",
+      "job_id": null,
+      "payload": {
+        "identity": {
+          "action": "publish_project_plan_proposal",
+          "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+          "request_id": "mmos-project-plan-proposal-8888888888888888888888888888888888888888",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "kind": "SOURCE_OBSERVED",
+        "phase": "PUBLICATION",
+        "proposal": null,
+        "recipe_fingerprint_sha256": "01902be41fefb1fcd7809b4c3fb97cc15fd020a126981d09164cd19426575511",
+        "request_sha256": "89cb35709055cd26699ce83b9fd16bed2a7204da23d796bcd7d78d537d581cb9",
+        "schema": "mastermind.project_source_operation_event.v1",
+        "sources": [
+          {
+            "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+            "content_sha256": "7e0032082e008678336b9f43ca8cbb9fdb27329e93159f2c04d30b5eaf809b42",
+            "path": "research/project-plans/PLAN-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412-8888888888888888888888888888888888888888.md",
+            "repository": "macro"
+          },
+          {
+            "commit": "e794b723f49fc02b7e635c426a821b3f03000740",
+            "content_sha256": "a0c3ea4995cd4707486f7ace721d87c23559312f9794abee9b8c5293aa1f2a31",
+            "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+            "repository": "macro"
+          }
+        ]
+      },
+      "quota_class": null,
+      "sequence": 4,
+      "worker_id": null
+    }
+  ]
+}
