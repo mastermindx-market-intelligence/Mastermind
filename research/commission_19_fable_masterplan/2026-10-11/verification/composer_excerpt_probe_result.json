@@ -1,0 +1,90 @@
+{
+  "classification": "synthetic_transcribed_source_excerpt_logic_probe",
+  "source_repository": "mastermindx-market-intelligence/macro",
+  "source_commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+  "source_path": "app/integrated_answer.py",
+  "connector_reported_git_blob": "fee6c1876e8d488a60be9e06493ba4b18d63caab",
+  "full_file_hash_verified_locally": false,
+  "full_application_imported": false,
+  "real_producer_or_browser_tested": false,
+  "code_repaired": false,
+  "cases": [
+    {
+      "id": "P01_DATE_ONLY",
+      "observed": "2026-10-10T00:00:00Z",
+      "expected_source_behavior": "2026-10-10T00:00:00Z",
+      "source_behavior_reproduced": true,
+      "interpretation": "Display normalization loses date precision; not valid evidence of intraday availability."
+    },
+    {
+      "id": "P02_INVALID_DATE",
+      "observed": "2026-99-99T00:00:00Z",
+      "expected_source_behavior": "2026-99-99T00:00:00Z",
+      "source_behavior_reproduced": true,
+      "interpretation": "Length/separator branch accepts an invalid calendar date; reachability in actual owner inputs not tested."
+    },
+    {
+      "id": "P03_NAIVE_TIME",
+      "observed": "2026-10-10T10:00:00Z",
+      "expected_source_behavior": "2026-10-10T10:00:00Z",
+      "source_behavior_reproduced": true,
+      "interpretation": "Naive timestamps are assigned UTC without source timezone evidence."
+    },
+    {
+      "id": "P04_OFFSET_CONTROL",
+      "observed": "2026-10-10T14:00:00Z",
+      "expected_source_behavior": "2026-10-10T14:00:00Z",
+      "source_behavior_reproduced": true,
+      "interpretation": "Positive control: explicit offsets convert correctly."
+    },
+    {
+      "id": "P05_ALL_OLD",
+      "observed": [
+        "ok",
+        "ok"
+      ],
+      "expected_source_behavior": [
+        "ok",
+        "ok"
+      ],
+      "source_behavior_reproduced": true,
+      "interpretation": "All equally old legs remain ok because the comparison clock is the newest old source, not request time."
+    },
+    {
+      "id": "P06_FUTURE_CLOCK",
+      "observed": {
+        "as_of": "2026-11-01T00:00:00Z",
+        "status": "ok"
+      },
+      "expected_source_behavior": {
+        "as_of": "2026-11-01T00:00:00Z",
+        "status": "ok"
+      },
+      "source_behavior_reproduced": true,
+      "interpretation": "This composition step does not itself refuse a future source clock; upstream validation not tested."
+    },
+    {
+      "id": "P07_EVENT_EXEMPT",
+      "observed": "ok",
+      "expected_source_behavior": "ok",
+      "source_behavior_reproduced": true,
+      "interpretation": "Event workspace is deliberately exempt from the generic stale pass; current-alias is not freshness evidence."
+    },
+    {
+      "id": "P08_MIXED_AGE_CONTROL",
+      "observed": [
+        "stale",
+        "ok"
+      ],
+      "expected_source_behavior": [
+        "stale",
+        "ok"
+      ],
+      "source_behavior_reproduced": true,
+      "interpretation": "Positive control: relative-age staleness logic works when another source is current."
+    }
+  ],
+  "case_count": 8,
+  "assertions_passed": true,
+  "script_sha256": "c258bc69b1151fd8baa2320acabdcebe6dbc9dc8a1859e7e9ed53f68b4d59f72"
+}

@@ -184,15 +184,39 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
             if peak > 0:
                 max_drawdown_pct = min(max_drawdown_pct, (value / peak - 1.0) * 100.0)
 
+    def _flat_unpriced_pair(prev_row: dict[str, Any], last_row: dict[str, Any]) -> bool:
+        """TR-D(a): a flat pair with no price movement did not record a day change.
+
+        Two consecutive rows with an identical ``nav`` and no price evidence behind
+        them (an absent ``invested`` on either row, or an identical NON-ZERO
+        ``invested``) mean no quotes landed — the flatness is the feed's, not the
+        book's. An all-cash book (``invested == 0`` on both rows) genuinely did not
+        move, so it keeps its true 0.00%.
+        """
+        prev_nav = _number(prev_row.get("nav"))
+        last_nav = _number(last_row.get("nav"))
+        if prev_nav is None or last_nav is None or prev_nav != last_nav:
+            return False
+        prev_invested = _number(prev_row.get("invested"))
+        last_invested = _number(last_row.get("invested"))
+        if prev_invested is None or last_invested is None:
+            return True
+        if prev_invested == 0.0 and last_invested == 0.0:
+            return False
+        return prev_invested == last_invested
+
+    # A starting NAV of zero or absent proves nothing about return, so it is None —
+    # never a fabricated 0.0% that reads as a break-even book.
     total_return_pct = ((current_nav / starting_nav - 1.0) * 100.0
-                        if starting_nav > 0 else 0.0)
-    day_change_pct = 0.0
+                        if starting_nav > 0 else None)
+    day_change_pct = None
     if len(navs) >= 2 and navs[-2] > 0:
-        day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
+        if not _flat_unpriced_pair(history[-2], history[-1]):
+            day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
 
     final_spy_nav = (_number(final.get("spy_nav")) if _benchmark_matches(final) else None)
     vs_benchmark_pct = None
-    if final_spy_nav and starting_nav > 0:
+    if final_spy_nav and starting_nav > 0 and total_return_pct is not None:
         benchmark_return_pct = (final_spy_nav / starting_nav - 1.0) * 100.0
         vs_benchmark_pct = round(total_return_pct - benchmark_return_pct, 4)
 
@@ -206,14 +230,14 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
         "current_nav": round(current_nav, 2),
         "cash": round(cash, 2),
         "invested": round(invested, 2),
-        "total_return_pct": round(total_return_pct, 4),
+        "total_return_pct": round(total_return_pct, 4) if total_return_pct is not None else None,
         "vs_benchmark_pct": vs_benchmark_pct,
         "vs_spy_pct": vs_benchmark_pct,
         "benchmark": benchmark,
         "benchmark_name": _portfolio_registry.benchmark_name(portfolio_id),
         "benchmark_name_zh": _portfolio_registry.benchmark_name_zh(portfolio_id),
         "benchmark_as_of": final.get("date") if final_spy_nav is not None else None,
-        "day_change_pct": round(day_change_pct, 4),
+        "day_change_pct": round(day_change_pct, 4) if day_change_pct is not None else None,
         "max_drawdown_pct": round(max_drawdown_pct, 4),
         "realized_since": history[0].get("date") if history else inception_date,
         "series": series,
@@ -222,6 +246,34 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
         "frozen_as_of": frozen_as_of,
         "note": "Archived portfolio: values are frozen at the final persisted mark.",
     }
+
+
+def _account_state_probe(portfolio: str) -> dict[str, Any] | None:
+    """Display-only D-ACCT-1 probe: ``{"status": "invalid", "quarantine_sha16", "problems"}`` or None.
+
+    ``problems`` are the validator's own problem codes (strings only, at most 20, each at
+    most 120 characters) for the page's evidence tier; nothing is derived or paraphrased.
+
+    Uses only the read-only ``paper_account.account_file_status(path=...)``; never loads,
+    recovers, quarantines or writes. Any failure (including the function not existing on an
+    older tree) returns None, so the caller's existing response is unchanged.
+    """
+    try:
+        from portfolio import paper_account
+
+        path = paper_account._paths(portfolio)["account"]
+        status = paper_account.account_file_status(path=path)
+        if not isinstance(status, dict) or status.get("status") != "INVALID":
+            return None
+        problems = status.get("problems")
+        return {
+            "status": "invalid",
+            "quarantine_sha16": (status.get("sha256") or "")[:16] or None,
+            "problems": [str(code)[:120] for code in (problems if isinstance(problems, list) else [])
+                         if isinstance(code, str) and code][:20],
+        }
+    except Exception:  # noqa: BLE001 — a display probe must never change the response
+        return None
 
 
 def _archived_live_marks(portfolio_id: str) -> dict[str, Any]:
@@ -590,14 +642,7 @@ def _quote_provenance(tickers: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _dashboard_mark_max_age_days() -> int | None:
-    """Canonical dashboard carry horizon from portfolio.marks; None means reject carry."""
-    try:
-        from portfolio import marks
-        value = int(marks._stale_max_days())
-    except Exception:  # noqa: BLE001 -- no local fallback policy
-        return None
-    return value if value >= 0 else None
+_PERSISTED_MARK_MAX_AGE_DAYS = 30
 
 
 def _date_part(value: Any) -> date | None:
@@ -643,9 +688,8 @@ def _persisted_book_quotes(
     """Last valid per-position marks for the dashboard's *display-only* fallback.
 
     This is deliberately separate from every fill/rebalance price path.  It reads only the book's
-    persisted account and published portfolio snapshot, rejects future-dated marks or carries beyond
-    the canonical portfolio.marks horizon, and returns the book's BASE-currency price with explicit
-    provenance.  The published
+    persisted account and published portfolio snapshot, rejects future-dated or >30-calendar-day
+    marks, and returns the book's BASE-currency price with explicit provenance.  The published
     snapshot wins ties because it also records whether the strategy published after the cash market
     had closed.  Legacy account ``current_price`` fields without an as-of are never trusted on their
     own; an existing close snapshot can still attest the same holding during the upgrade cutover.
@@ -654,9 +698,6 @@ def _persisted_book_quotes(
     if not wanted:
         return {}
     target_date = _date_part(asof) or date.today()
-    max_age_days = _dashboard_mark_max_age_days()
-    if max_age_days is None:
-        return {}
     base = _portfolio_dir(portfolio_id)
     snapshot = _read_json_object(base / "latest.json")
     if portfolio_id == "self_directed":
@@ -725,7 +766,7 @@ def _persisted_book_quotes(
         eligible = []
         for mark_date, priority, px, meta in rows:
             age_days = (target_date - mark_date).days
-            if age_days < 0 or age_days > max_age_days:
+            if age_days < 0 or age_days > _PERSISTED_MARK_MAX_AGE_DAYS:
                 continue
             eligible.append((mark_date, priority, px, meta, age_days))
         if not eligible:
@@ -759,16 +800,13 @@ def _select_dashboard_quote(
     """
     if current and current.get("source") == "yahoo_intraday":
         return current
-    max_age_days = _dashboard_mark_max_age_days()
-    if max_age_days is None:
-        return None
     target_date = _date_part(asof) or date.today()
     if current:
         current_date = _date_part(current.get("as_of"))
         current_age = (target_date - current_date).days if current_date is not None else None
         current_is_bounded = (
             current_age is not None
-            and 0 <= current_age <= max_age_days
+            and 0 <= current_age <= _PERSISTED_MARK_MAX_AGE_DAYS
         )
         if not current_is_bounded:
             current = None
@@ -1053,33 +1091,23 @@ def api_performance(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
     if _portfolio_registry.is_archived(portfolio):
         return JSONResponse(_archived_performance(portfolio))
+    from portfolio import paper_account
     try:
-        from portfolio import paper_account
-        payload = paper_account.performance(portfolio_id=portfolio,
-                                            prices=_book_marks(portfolio))
-        return JSONResponse(payload)
-    except Exception as exc:  # noqa: BLE001 — degrade without fabricating portfolio state
-        _log.warning("performance read failed for %s: %s", portfolio, type(exc).__name__)
-        return JSONResponse({
-            "inception_date": None,
-            "starting_nav": None,
-            "current_nav": None,
-            "cash": None,
-            "invested": None,
-            "total_return_pct": None,
-            "vs_benchmark_pct": None,
-            "vs_spy_pct": None,
-            "benchmark": None,
-            "benchmark_name": None,
-            "benchmark_name_zh": None,
-            "benchmark_as_of": None,
-            "day_change_pct": None,
-            "max_drawdown_pct": None,
-            "realized_since": None,
-            "series": [],
-            "note": "Performance unavailable.",
-            "error": "performance_unavailable",
-        })
+        # This read serves persisted performance. Intraday previews have their own
+        # quote/session endpoint; do not warm quotes or recover accounts here.
+        payload = paper_account.performance(portfolio_id=portfolio)
+        # An account file that exists but cannot be read must be distinguishable from
+        # "no account yet": the browser renders one canonical cell, never a zero NAV.
+        invalid_state = _account_state_probe(portfolio)
+        if invalid_state is not None:
+            payload["account_state"] = invalid_state
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    except Exception:
+        unavailable = paper_account.unavailable_performance(portfolio)
+        invalid_state = _account_state_probe(portfolio)
+        if invalid_state is not None:
+            unavailable["account_state"] = invalid_state
+        return JSONResponse(unavailable, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/live_marks")
@@ -1208,11 +1236,16 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                     "inception_date", "starting_nav", "current_nav", "cash", "invested",
                     "total_return_pct", "vs_benchmark_pct", "vs_spy_pct", "benchmark",
                     "benchmark_name", "benchmark_name_zh", "benchmark_as_of", "day_change_pct",
-                    "max_drawdown_pct", "realized_since",
+                    "max_drawdown_pct", "realized_since", "availability", "observed_at",
+                    "day_change_window", "drawdown_window", "return_measure",
+                    "external_flow_adjustment", "benchmark_return_basis",
+                    "benchmark_total_return_status", "benchmark_comparison_scope",
                 )
             }
             current_nav = performance.get("current_nav")
-            if current_nav and current_nav > 0:
+            if (current_nav is not None and current_nav > 0
+                    and (performance.get("availability") or {}).get("valuation_basis")
+                    in {"provided_prices", "cash_only"}):
                 for row in positions:
                     market_value = row.get("market_value")
                     if market_value is not None:
@@ -1235,9 +1268,9 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 },
             }
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
-    except Exception as exc:  # noqa: BLE001 — degrade without claiming the book is empty
-        _log.warning("live marks read failed for %s: %s", pid, type(exc).__name__)
-        return JSONResponse({
+    except Exception:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
+        from portfolio import paper_account
+        degraded = {
             "schema_version": "live_marks.v1",
             "portfolio": pid,
             "currency": registry.currency(pid),
@@ -1245,30 +1278,16 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "session": session,
             "poll_after_seconds": 60 if session["is_open"] else session["poll_after_seconds"],
             "positions": [],
-            "performance": {},
-            "pricing": {"priced_positions": None, "total_positions": None, "complete": False},
+            "performance": paper_account.unavailable_performance(pid),
+            "pricing": {"priced_positions": 0, "total_positions": 0, "complete": False},
             "error": "live_marks_unavailable",
-        }, headers={"Cache-Control": "no-store"})
-
-
-def _risk_unavailable_payload(portfolio: str, *, archived: bool = False) -> dict[str, Any]:
-    """Closed, evidence-unknown risk contract; never claims zero breaches or caveats."""
-    payload: dict[str, Any] = {
-        "portfolio_id": portfolio,
-        "safety_score": None,
-        "grade": "—",
-        "verdict": "Safety report unavailable.",
-        "metrics": None,
-        "subscores": None,
-        "breaches": None,
-        "caveats": None,
-        "report_status": "unavailable",
-        "error": "archived_risk_unavailable" if archived else "risk_unavailable",
-        "note": "Archived safety snapshot unavailable." if archived else "Safety report unavailable.",
-    }
-    if archived:
-        payload.update({"archived": True, "lifecycle": "archived", "snapshot_only": True})
-    return payload
+        }
+        # Same rule as /api/performance: say the state is invalid rather than let the
+        # browser read an empty mark set as an all-cash book.
+        invalid_state = _account_state_probe(pid)
+        if invalid_state is not None:
+            degraded["account_state"] = invalid_state
+        return JSONResponse(degraded, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/risk")
@@ -1285,7 +1304,11 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
         if _portfolio_registry.is_archived(portfolio):
             rep = safety.load_safety(portfolio)
             if rep is None:
-                return JSONResponse(_risk_unavailable_payload(portfolio, archived=True))
+                rep = {
+                    "portfolio_id": portfolio, "safety_score": None, "grade": "—",
+                    "verdict": "Archived safety snapshot unavailable.", "metrics": {},
+                    "subscores": {}, "breaches": [], "caveats": [],
+                }
             rep = {**rep, "portfolio_id": portfolio, "archived": True,
                    "lifecycle": "archived", "snapshot_only": True}
             return JSONResponse(rep)
@@ -1301,13 +1324,48 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
                 pass
         return JSONResponse(rep)
     except Exception as exc:
-        _log.warning("risk report read failed for %s: %s", portfolio, type(exc).__name__)
-        return JSONResponse(_risk_unavailable_payload(portfolio))
+        return JSONResponse({
+            "portfolio_id": portfolio, "safety_score": None, "grade": "—",
+            "verdict": "Safety report unavailable.", "metrics": {}, "subscores": {},
+            "breaches": [], "caveats": [], "note": f"Safety unavailable: {exc}",
+        })
 
 
 @router.get("/api/portfolio")
-def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
+    if view == "decision_availability":
+        from app.decision_availability import read_decision_availability
+        from app.settlement_price_read import read_settlement_price_evidence
+        from app.provider_diagnostic_read import read_provider_diagnostic_evidence
+        from brain import runlog
+        from bot import decision_rows
+        from portfolio import paper_account
+
+        # Resolve strictly through the registry: _portfolio_dir has a legacy fallback to Flagship.
+        # This branch must precede every quote, fresh-account fallback, and recovery-capable read.
+        observed_at = datetime.now(timezone.utc).isoformat()
+        payload = read_decision_availability(
+            portfolio, base_dir=_portfolio_registry.data_dir(portfolio),
+            observed_at=observed_at,
+            verify_receipt=_decision_execution_receipt_verified,
+            validate_pending=paper_account.pending_target_contract_error,
+            inspect_settlement_prices=lambda row: read_settlement_price_evidence(
+                portfolio, row, base_dir=_portfolio_registry.data_dir(portfolio),
+                currency=_portfolio_registry.currency(portfolio),
+                validate_receipt=paper_account.validated_settlement_receipt_prices,
+                # Decision receipt references and transaction IDs have distinct,
+                # established Unicode serialization rules. Reuse the decision owner.
+                fingerprint_receipt=decision_rows._canonical_sha256,
+            ),
+            inspect_provider_diagnostics=lambda attempt: read_provider_diagnostic_evidence(
+                portfolio, attempt, runs_dir=runlog._RUNS_DIR, observed_at=observed_at,
+            ),
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    if view is not None:
+        return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
+                            status_code=400, headers={"Cache-Control": "no-store"})
     path = _portfolio_dir(portfolio) / "latest.json"
     if not path.exists():
         return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
@@ -1421,7 +1479,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                         })
                     payload.setdefault("positions", []).append(account_row)
             except Exception:
-                pass
+                # Keep the swallow: a failed account read must not sink the payload.
+                # But say WHY when the file exists and is unreadable, so the browser
+                # can render the canonical cell instead of an empty positions list.
+                invalid_state = _account_state_probe(portfolio)
+                if invalid_state is not None:
+                    payload["account_state"] = invalid_state
 
         # Every book gets canonical human-readable security names on read. This
         # repairs historical US/China/HK payloads without mutating runtime state.
@@ -1570,21 +1633,36 @@ def _portfolio_status(meta: dict) -> dict:
             })
         except Exception:
             pass
-        # vs_spy and vs_defensive: benchmark_ledger already computes these bogey returns; wire the
-        # read here so the leaderboard row for self_directed carries the same performance columns
-        # as the other books. Best-effort: skip cleanly if the ledger hasn't been built yet.
+        # vs_spy and vs_defensive: the ledger's stored bogey returns are each renormalized on that
+        # BOGEY's own inception, so subtracting them from the book's since-inception return compared
+        # different windows (#1433). Recompute every leg over ONE shared window at READ time via
+        # compare_book_to_ledger, so the Self-Directed row carries the same performance columns as
+        # the other books without the cross-window error. When the window is unsupported the deltas
+        # are WITHHELD: the keys are absent — never 0, never the stale cross-window number.
+        # total_return_pct stays the book's own since-inception return. Best-effort.
         try:
             from brain import benchmark_ledger
+            from portfolio import self_directed
             ledger = benchmark_ledger.latest()
-            bogeys = ledger.get("bogeys") or {}
-            spy_ret = (bogeys.get("spy") or {}).get("return_pct")
-            def_ret = (bogeys.get("defensive") or {}).get("return_pct")
-            own_ret = status.get("total_return_pct")
-            if own_ret is not None and spy_ret is not None:
-                status["vs_spy_pct"] = round(own_ret - spy_ret, 4)
+            cmp = benchmark_ledger.compare_book_to_ledger(
+                "self_directed",
+                benchmark_ledger.read_nav_history(self_directed._NAV_PATH),
+                ledger)
+            status["benchmark_window"] = {
+                "status": cmp.get("status"), "reason": cmp.get("reason"),
+                "start": cmp.get("start"), "end": cmp.get("end"),
+                "common_point_count": cmp.get("common_point_count"),
+                "endpoint_status": cmp.get("endpoint_status")}
+            if cmp.get("status") == "descriptive":
+                for d in cmp.get("deltas_pp") or []:
+                    if d.get("right_id") == "spy":
+                        status["vs_spy_pct"] = round(d.get("delta_pp"), 4)
+                    elif d.get("right_id") == "defensive":
+                        status["vs_defensive_pct"] = round(d.get("delta_pp"), 4)
                 status["vs_benchmark_pct"] = status["vs_spy_pct"]
-            if own_ret is not None and def_ret is not None:
-                status["vs_defensive_pct"] = round(own_ret - def_ret, 4)
+            else:
+                for k in ("vs_spy_pct", "vs_defensive_pct", "vs_benchmark_pct"):
+                    status.pop(k, None)
         except Exception:  # noqa: BLE001
             pass
         return {**{k: meta.get(k) for k in (
@@ -1603,8 +1681,11 @@ def _portfolio_status(meta: dict) -> dict:
             "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
             "vs_spy_pct": perf.get("vs_spy_pct"),
             "day_change_pct": perf.get("day_change_pct"),
-            "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
-            "as_of": perf.get("realized_since"),
+            "cash_pct": (round(perf["cash"] / nav * 100, 1)
+                         if nav > 0 and perf.get("cash") is not None else None),
+            "performance_as_of": (perf.get("availability") or {}).get("as_of"),
+            "performance_status": (perf.get("availability") or {}).get("status"),
+            "as_of": (perf.get("availability") or {}).get("as_of"),
         })
     except Exception:
         pass
@@ -1753,13 +1834,7 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
                              "archived": registry.is_archived(portfolio),
                              "scope": "mastermind_portfolio"})
     except Exception as exc:  # noqa: BLE001
-        _log.warning("decision journal read failed for %s: %s", portfolio, type(exc).__name__)
-        return JSONResponse({
-            "portfolio": portfolio,
-            "decisions": None,
-            "decision_log_status": "unavailable",
-            "error": "decisions_unavailable",
-        })
+        return JSONResponse({"decisions": [], "error": str(exc)})
 
 
 @router.get("/api/posture")
@@ -1784,43 +1859,19 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                              "cash_pct": None, "invested_pct": None, "error": str(exc)})
 
 
-def _enrich_rotation_pairs(view: dict) -> None:
-    """Read-only display enrichment: attach the rotation_tensor's ``top_pairs`` extract to the
-    served view so the E1.2 mirror can render the top rotation pairs. The market_view artifact's
-    rotation_tensor plane carries only ``headline_episode`` in its ``raw``; the pairs live at
-    ``rs_velocity.top_pairs`` of the tensor artifact. This mutates only the SERVED copy (never the
-    on-disk artifact, never any sizing path) and no-ops silently when the organ is absent."""
-    try:
-        planes = view.get("planes")
-        rt = planes.get("rotation_tensor") if isinstance(planes, dict) else None
-        if not isinstance(rt, dict):
-            return
-        raw = rt.get("raw")
-        if not isinstance(raw, dict) or raw.get("present") is False:
-            return
-        tpath = _data() / "market_view" / "rotation_tensor.json"
-        if not tpath.exists():
-            return
-        tensor = json.loads(tpath.read_text())
-        pairs = ((tensor.get("rs_velocity") or {}).get("top_pairs")
-                 if isinstance(tensor, dict) else None)
-        if isinstance(pairs, list):
-            raw["top_pairs"] = pairs
-    except Exception:  # noqa: BLE001 — enrichment is best-effort; never break the response
-        pass
-
-
 @router.get("/api/market_view")
 def api_market_view() -> JSONResponse:
     """The perception artifact (W-E.1 task E1.2) — the one deterministic, freshness+confidence
     stamped market view (schema market_view.v1): planes{}, net_posture_tilt, label_vs_planes,
     disagreements[], coherence, brief, budget_ref, and the rotation_tensor plane's top_pairs.
 
-    Read-only: serves data/market_view/latest.json verbatim. No behavior change — this is the
-    E1.2 HTML mirror's data source, not a sizing path. Degrades to an honest ``available:false``
+    Read-only: reassesses freshness on a copy of data/market_view/latest.json. Publication
+    clocks and historical evidence stay unchanged; expired inferences become unavailable.
+    This is a display consumer, not a producer or sizing path. Degrades to ``available:false``
     stub when the artifact is absent/unreadable (the organ built-but-not-running protects nothing
     but breaks nothing) rather than raising."""
     path = _data() / "market_view" / "latest.json"
+    freshness_headers = {"Cache-Control": "no-store"}
     try:
         if not path.exists():
             return JSONResponse(
@@ -1830,8 +1881,9 @@ def api_market_view() -> JSONResponse:
         view = json.loads(path.read_text())
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
-        _enrich_rotation_pairs(view)
-        return JSONResponse(view, headers=_NOCACHE)
+        from brain import market_view
+        view = market_view.serving_view(view)
+        return JSONResponse(view, headers=freshness_headers)
     except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
         return JSONResponse(
             {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
@@ -2016,16 +2068,10 @@ def api_outcome_ledger() -> JSONResponse:
         weights = outcome_ledger.lens_weights()
         records = outcome_ledger.load()
     except Exception as exc:
-        _log.warning("outcome ledger read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "ledger_status": "unavailable",
-            "error": "outcome_ledger_unavailable",
-            "summary": None,
-            "reliability_curve": None,
-            "lens_edge": None,
-            "lens_weights": None,
-            "records": None,
-        })
+        return JSONResponse({"summary": {"n": 0, "status": "building", "brier": None,
+                                         "hit_rate": None, "calibration_error": None},
+                             "reliability_curve": [], "lens_edge": [], "lens_weights": {},
+                             "records": [], "error": str(exc)})
     records = sorted(records, key=lambda r: r.get("asof_resolved") or "", reverse=True)[:200]
     rec_out = [{
         "thesis_id": r.get("thesis_id"), "subject": r.get("subject"), "sleeve": r.get("sleeve"),
@@ -2034,8 +2080,7 @@ def api_outcome_ledger() -> JSONResponse:
         "outcome": r.get("outcome"), "quad_at_entry": r.get("quad_at_entry"),
         "confluence_at_entry": r.get("confluence_at_entry"), "lens_dirs": r.get("lens_dirs") or {},
     } for r in records]
-    return JSONResponse({"ledger_status": "available", "summary": summary,
-                         "reliability_curve": curve, "lens_edge": edge,
+    return JSONResponse({"summary": summary, "reliability_curve": curve, "lens_edge": edge,
                          "lens_weights": weights, "records": rec_out})
 
 
@@ -2424,17 +2469,8 @@ def api_trades(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "snapshot_status": account_status,
         })
     except Exception as exc:
-        _log.warning("trade history read failed for %s: %s", portfolio, type(exc).__name__)
-        return JSONResponse({
-            "portfolio": portfolio,
-            "open": None,
-            "closed": None,
-            "history": None,
-            "pending": None,
-            "market": None,
-            "snapshot_status": "unavailable",
-            "error": "trades_unavailable",
-        })
+        return JSONResponse({"open": [], "closed": [], "history": [],
+                             "pending": [], "market": {}, "error": str(exc)})
 
 
 # ---------------------------------------------------------------------------
@@ -2471,13 +2507,27 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
-        return JSONResponse({"nav": 1_000_000.0, "cash": 1_000_000.0, "invested": 0.0,
-                             "positions": [], "pending": [],
-                             "allocation": {"cash_pct": 1.0, "gross": 0.0, "n_positions": 0,
-                                            "largest_weight": 0.0, "total_unrealized_pnl": 0.0,
-                                            "total_return_pct": 0.0},
-                             "market": {"is_open": False, "session": "closed"},
-                             "error": str(exc)})
+        # A read we could not perform renders `unavailable` — never a fabricated funded book
+        # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
+        try:
+            from portfolio import self_directed as _sd
+            market = _sd._market_status()
+        except Exception:  # noqa: BLE001 — the clock is independent of the failed account read
+            market = None
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_book_unreadable",
+                   "nav": None, "cash": None, "invested": None,
+                   "starting_nav": None, "positions": [], "pending": [],
+                   "allocation": None, "market": market, "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence instead
+        # of collapsing into the generic unreadable string.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/history")
@@ -2492,18 +2542,20 @@ def api_self_directed_history() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("self-directed history read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "history_status": "unavailable",
-            "error": "self_directed_history_unavailable",
-            "history": None,
-            "pending": None,
-            "realized_total": None,
-            "n_closed": None,
-            "n_buys": None,
-            "win_rate": None,
-            "market": None,
-        })
+        # Unreadable is not empty: a fabricated 0-fill blotter reads as "no trades yet".
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_history_unreadable",
+                   "history": [], "pending": [], "realized_total": None,
+                   "n_closed": None, "n_buys": None, "win_rate": None,
+                   "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/search")
@@ -2534,7 +2586,14 @@ def api_self_directed_order(req: _OrderReq) -> JSONResponse:
         return JSONResponse(self_directed.place_order(
             req.ticker, req.side, req.shares, notional=req.notional))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        payload = {"ok": False, "error": str(exc)}
+        # E13: the typed invalid-account error names itself; any other failure keeps the
+        # historical {ok, error} shape.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+        return JSONResponse(payload, status_code=500)
 
 
 @router.post("/api/self_directed/thesis")
@@ -3304,10 +3363,8 @@ def api_desk_strategist(asof: str = "") -> JSONResponse:
             "rationale": (verdict.get("rationale") or "")[:1600],
             "calibration_multiplier": verdict.get("calibration_multiplier"),
         })
-    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
-        _log.warning("desk strategist read failed: %s", type(exc).__name__)
-        return JSONResponse({"status": "unavailable", "asof": None,
-                             "error": "desk_strategist_unavailable"})
+    except Exception as exc:  # noqa: BLE001 — never raise; degrade to building
+        return JSONResponse({"status": "building", "asof": None, "error": str(exc)})
 
 
 @router.get("/api/desk/decisions")
@@ -3377,9 +3434,7 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
         return JSONResponse({"status": "scoring" if rows else "building",
                              "asof": asof, "decisions": rows})
     except Exception as exc:  # noqa: BLE001
-        _log.warning("desk decisions read failed: %s", type(exc).__name__)
-        return JSONResponse({"status": "unavailable", "asof": None, "decisions": None,
-                             "error": "desk_decisions_unavailable"})
+        return JSONResponse({"status": "building", "asof": None, "decisions": [], "error": str(exc)})
 
 
 @router.get("/api/desk/watchlist")
@@ -3423,9 +3478,7 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
                              "last_review": str(s.get("last_review") or "")[:10] or None})
         return JSONResponse({"book": book, "watchlist": rows[:120]})
     except Exception as exc:  # noqa: BLE001
-        _log.warning("desk watchlist read failed for %s: %s", book, type(exc).__name__)
-        return JSONResponse({"status": "unavailable", "book": book, "watchlist": None,
-                             "error": "desk_watchlist_unavailable"})
+        return JSONResponse({"book": book, "watchlist": [], "error": str(exc)})
 
 
 @router.get("/api/desk/scorecard")
@@ -3558,10 +3611,8 @@ def api_desk_macro_risk(asof: str = "") -> JSONResponse:
             if (_data().parent / "vendor" / "macro" / "data" / "regime" / "latest.json").exists() else {}
         st = macro_risk.risk_state(reg.get("date") or "", reg or None)
         return JSONResponse({"status": "scoring" if st.get("state") else "building", **_shape(st)})
-    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
-        _log.warning("desk macro-risk read failed: %s", type(exc).__name__)
-        return JSONResponse({"status": "unavailable", "state": None,
-                             "error": "desk_macro_risk_unavailable"})
+    except Exception as exc:  # noqa: BLE001 — never raise; degrade to building
+        return JSONResponse({"status": "building", "state": None, "error": str(exc)})
 
 
 @router.get("/api/desk/firm-exposure")
@@ -3569,17 +3620,14 @@ def api_desk_firm_exposure() -> JSONResponse:
     """READ-ONLY firm-level cross-book exposure monitor — where the independent books (flagship,
     heavyweight, US/CN/HK/ETF Brains) have piled into the SAME names / sectors. Surfaces the flagged
     concentrations + the top firm-wide exposures + a sector rollup. A MONITOR only: it never changes
-    any allocation or trades. A real empty firm summary stays empty; read failure is explicitly unavailable. Never 500s."""
+    any allocation or trades. Degrades to an honest empty payload; never 500s."""
     try:
         from portfolio import firm_exposure
         return JSONResponse(firm_exposure.summary())
-    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
-        _log.warning("desk firm exposure read failed: %s", type(exc).__name__)
-        return JSONResponse({"status": "unavailable", "as_of": None, "books": None,
-                             "n_books": None, "top_exposures": None, "flags": None,
-                             "by_sector": None, "by_chain": None, "thresholds": None,
-                             "currency_clean": False,
-                             "error": "desk_firm_exposure_unavailable"})
+    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+        return JSONResponse({"as_of": None, "books": [], "n_books": 0, "top_exposures": [],
+                             "flags": [], "by_sector": {}, "by_chain": {}, "thresholds": {},
+                             "currency_clean": False, "note": f"Firm exposure unavailable: {exc}"})
 
 
 @router.get("/api/firm_allocator")

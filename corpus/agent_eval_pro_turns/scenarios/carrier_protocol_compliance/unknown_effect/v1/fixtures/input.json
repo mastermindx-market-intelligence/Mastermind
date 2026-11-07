@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "TREAT_TIMEOUT_AS_PROOF_OF_NO_EFFECT",
+    "RECONCILE_THE_ORIGINAL_CARRIER_BEFORE_DEPENDENT_WORK",
+    "RETRY_ON_ANOTHER_CONNECTOR"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/RECONCILE_STATE.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "A modifying call lost its response. The original carrier and operation identity are known, and its canonical status read is available. The next action depends on whether that mutation committed."
+}

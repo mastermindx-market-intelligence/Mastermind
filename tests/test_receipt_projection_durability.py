@@ -126,6 +126,7 @@ def test_first_fill_append_fsyncs_file_and_parent(monkeypatch, tmp_path):
 
     path = tmp_path / "autonomous" / "fills.jsonl"
     calls = _fsync_kinds(monkeypatch, paper_account)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     paper_account._append_jsonl(path, {"fill_id": "fill.test"})
 
