@@ -1,0 +1,20 @@
+{
+  "schema": "fabric_application.protected_base_composition.v1",
+  "prior_head": "0641538ffa660d5e2de51d5ad542f91ee4236b2e",
+  "merged_protected_master": "3c3bfdf8a52a6972c05eb13a1c2b3b9859aefd27",
+  "merge_base": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "procedure_pin": "e37dc82f070fd391e29f0dbd0bf46b022166beea",
+  "procedure_delta": [],
+  "only_overlapping_path": "tests/executive_fabric_release_identity_review.py",
+  "conflicts": [],
+  "validation": {
+    "tests": 187,
+    "passed": 187,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "log_sha256": "22ba446069122ecab339b41ef571b7181d0b53193dc5a662f70447b53535ce91"
+  },
+  "upstream_patch_whitespace": "Exact protected diagnostic_privacy/guard.patch preserved; diff check warnings are patch context lines, not local changes.",
+  "runtime_effects": false
+}
