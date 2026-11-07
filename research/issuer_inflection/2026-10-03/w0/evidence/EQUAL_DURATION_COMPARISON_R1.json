@@ -1,0 +1,89 @@
+{
+  "child_carrier": "Mastermind#1195",
+  "comparison_id": "i3devcmp_4c5619238ebb0f8df7b19ce6",
+  "current_file_sha256": {
+    "research/issuer_inflection/2026-10-03/w0/EQUAL_DURATION_COMPARISON_RESULT.md": "f974962d4cf694e16aeab89b1025a4934d8cdbfa8e0ffbf607ed502bb3acff2a",
+    "research/issuer_inflection/2026-10-03/w0/equal_duration_comparison.py": "aec3f94e7e2cadf8800775125661d7a0be3bf8419fe601405b1b5441527d1c15",
+    "research/issuer_inflection/2026-10-03/w0/evidence/equal-duration-comparison/result.json": "47f6dc350d881052cb9afb1fb68ade9a4659b99d0020a86a835946eba4b2fee4",
+    "research/issuer_inflection/2026-10-03/w0/test_equal_duration_comparison.py": "f8fbb7a801065ba9257d263b4d937b5be9ebc5842d0d14860e63d830c3bb3114",
+    "tests/test_i3_baseline_fixture_consumer.py": "1abd027b0b2a76095813b6d60a3bca4aa184138d69eeb0dd0a0b5867ab8704ca"
+  },
+  "current_macro_observed": "94e5865e13fc42063f9c7d1e9b485958ccaee5b1",
+  "current_protected_master_observed": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+  "current_terminal_observed": "4a184c411a27c52f3bb883839fdbe9d951b540ff",
+  "final_verification": {
+    "equal_duration_comparator_tests": "16 passed",
+    "evidence_integrity_tests": "6 passed",
+    "git_diff_check": "PASS",
+    "independent_review_accepted": false,
+    "normal_repository_i3_consumer_entries": "4 passed",
+    "observed_at": "2026-10-04T06:03:21.167101+00:00",
+    "owner_product_admission": false,
+    "package_manifest_file_count": 84,
+    "release_ci_green": false,
+    "verify_evidence": "PASS"
+  },
+  "kind": "i3_equal_duration_comparison_development_receipt",
+  "maturity": {
+    "annual_or_yoy_claim_permitted": false,
+    "comparison_admitted": false,
+    "development_comparison_built": true,
+    "emitted_at": null,
+    "owner_typed_annual": false,
+    "product_publication_admitted": false,
+    "production_proof": false,
+    "trial_registered": false
+  },
+  "method_before_owner_query_sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08",
+  "observed_test_history": [
+    {
+      "observation": "initial test import failed because equal_duration_comparison did not exist",
+      "product_defect": false,
+      "state": "RED"
+    },
+    {
+      "observation": "first implementation run: 14 passed / 2 failed; both failures were test expectations (display labels and overlap mutation also changed length)",
+      "product_defect": false,
+      "state": "TEST_DISCRIMINATOR_REPAIR"
+    },
+    {
+      "observation": "test_equal_duration_comparison.py: 16 passed",
+      "product_defect": false,
+      "state": "GREEN"
+    },
+    {
+      "observation": "normal repository I3 consumer entry exited 0 with four configured offline suites",
+      "product_defect": false,
+      "state": "GREEN"
+    }
+  ],
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "owner_period_law": {
+    "captured_cells_owner_typed_annual": false,
+    "labels_grant_fiscal_semantics": false,
+    "period_kernel_blob": "1c2cdeca33ff986e8f8f0ca7f26a26ea87fb8699",
+    "query_kernel_blob": "7f0300e0b95e245994e5fe02a7c3a7c6196e75f1",
+    "query_service_blob": "7898ee9ca5bdf084126df8472f893aadeed5ae7a",
+    "wire_period_kinds": [
+      "duration",
+      "instant"
+    ]
+  },
+  "owner_response_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+  "parent_carrier": "Mastermind#1183",
+  "recorded_at": "2026-10-04T06:02:36.212329+00:00",
+  "relationship_state": "descriptive_equal_duration_source_intervals",
+  "reported_value_result": {
+    "absolute_change": "25126000000",
+    "current_value": "416161000000",
+    "inferred_week_count": 52,
+    "interval_days": 364,
+    "prior_value": "391035000000",
+    "relative_change_exact": {
+      "denominator": "78207",
+      "numerator": "502520"
+    },
+    "relative_change_percent_display": "6.43"
+  },
+  "source_head_before_increment": "83a8f02256bd1020a5af744c2bf4fef6ade12419"
+}

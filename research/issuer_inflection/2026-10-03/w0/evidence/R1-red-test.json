@@ -1,0 +1,16 @@
+{
+  "kind": "R1_pre_fix_red_test",
+  "parent_return": "Mastermind#1183 issuecomment-5972911613",
+  "candidate_commit": "0d98eef5e54d763ba5dbcf62e2e533fcbdb7104a",
+  "test_sha256": "8c2bdd6a8e4ae6cf11e7b59a2aa96e930b7fd29fba622cb0dcb8cf6f873d9a2b",
+  "comparator_sha256": "44f03fba0eefb87b6426681899849ab7517e7643a432f551d8a6e459ea8b0838",
+  "schema_sha256": "eba8c328e9b2a42e4678c3b4717ff9d3e7e7b374c165fa14b7683fb277e71384",
+  "started_at": "2026-10-03T20:25:52.846593+00:00",
+  "scope": "W0 arithmetic specification tests only; no owner imports, I3 emission, runtime or registry changes.",
+  "completed_at": "2026-10-03T20:25:52.908543+00:00",
+  "exit_code": 1,
+  "output": "..FF............\n======================================================================\nFAIL: test_candidate_freezes_context_independent_exact_policy (__main__.ComparatorPolicyTests.test_candidate_freezes_context_independent_exact_policy)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Volumes/Mastermind/agent-workspaces/web/i3-w0-issuer-inflection-20261003-astra-c4/research/issuer_inflection/2026-10-03/w0/test_comparator_policy.py\", line 96, in test_candidate_freezes_context_independent_exact_policy\n    self.assertEqual(POLICY.get('arithmetic_policy'), REQUIRED_POLICY)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: None != {'representation': 'reduced_exact_rationa[428 chars]ero'}\n\n======================================================================\nFAIL: test_candidate_has_explicit_exact_and_display_representations (__main__.ComparatorPolicyTests.test_candidate_has_explicit_exact_and_display_representations)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Volumes/Mastermind/agent-workspaces/web/i3-w0-issuer-inflection-20261003-astra-c4/research/issuer_inflection/2026-10-03/w0/test_comparator_policy.py\", line 101, in test_candidate_has_explicit_exact_and_display_representations\n    self.assertIn('relative_change_exact', comparison['required'])\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'relative_change_exact' not found in ['state', 'before_ref', 'after_ref', 'admission_ref', 'unit_ref', 'before_value', 'after_value', 'absolute_change', 'relative_change_percent', 'percentage_reason', 'refusal_reason']\n\n----------------------------------------------------------------------\nRan 16 tests in 0.001s\n\nFAILED (failures=2)\n",
+  "output_sha256": "13b833da7a2bfb303f92c444f4d18187a18cfeafb28ec3581227f8cd100af6e4",
+  "i3_acceptance": false,
+  "production_proof": false
+}

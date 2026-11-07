@@ -1,0 +1,82 @@
+{
+  "kind": "bounded_runtime_observation_transcribed_from_tool",
+  "mode": "readonly",
+  "server_version": "1.3.1",
+  "earlier_state_error": {
+    "code": "backend_unavailable",
+    "generated_at": "2026-10-03T19:19:53.307482+00:00"
+  },
+  "roots_read": {
+    "submitted_arguments": {
+      "view": "roots",
+      "limit": 10
+    },
+    "ok": true,
+    "generated_at": "2026-10-03T19:57:13Z",
+    "count": 3,
+    "total": 3,
+    "truncated": false,
+    "roots": [
+      {
+        "job_id": "JOB-001",
+        "status": "COMPLETED"
+      },
+      {
+        "job_id": "JOB-002",
+        "status": "QUEUED"
+      },
+      {
+        "job_id": "JOB-003",
+        "status": "QUEUED"
+      }
+    ],
+    "snapshot_digest": "eb54d17d7ac2147f187325da3a74902f2d9204db7176a90cd1fb0411471660f3",
+    "degraded": [
+      "root enumeration provenance is unjoined; creation provenance requires exact-root acquisition"
+    ]
+  },
+  "exact_root_read": {
+    "submitted_arguments": {
+      "view": "root",
+      "root_job_id": "JOB-003"
+    },
+    "ok": true,
+    "generated_at": "2026-10-03T19:57:22Z",
+    "snapshot_digest": "9c445f068a70645b2cd0dd7345a929dd2497092921e66d7166e04c6bc10f793b",
+    "creation_provenance": "COMPLETE",
+    "attempt_count": 0,
+    "runtime_identity": null,
+    "coo_autonomy_armed": false,
+    "dialogue_bridge_armed": false,
+    "terminal_return_armed": false,
+    "acceptance_state": "NOT_PROJECTED"
+  },
+  "queued_job_details": [
+    {
+      "submitted_arguments": {
+        "job_id": "JOB-003"
+      },
+      "generated_at": "2026-10-03T20:02:01Z",
+      "objective_family": "bounded read-only exact-session interconnect SUMMON review",
+      "i3_assignment": false,
+      "attempt_count": 0,
+      "assigned_worker_id": null
+    },
+    {
+      "submitted_arguments": {
+        "job_id": "JOB-002"
+      },
+      "generated_at": "2026-10-03T20:02:21Z",
+      "objective_family": "Executive OS Phase 1C-A worker proof receipt",
+      "i3_assignment": false,
+      "latest_attempt_status": "LOST",
+      "attempt_id": "ATT-23590905468346d5bb380dca25906836",
+      "assigned_worker_id": null,
+      "warning": "Historical running checkpoint is not current liveness; launch metadata was tool-bounded."
+    }
+  ],
+  "scope_limit": "Completed JOB-001 was not inspected here. No universal job/workstream absence claim. No job/attempt/worker/control/credential/runtime modification performed.",
+  "i3_runtime_binding": null,
+  "dispatch_performed": false,
+  "background_execution_claimed": false
+}

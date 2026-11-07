@@ -1,0 +1,20 @@
+{
+  "kind": "reference_isolation_adversarial_red",
+  "observed_at": "2026-10-04T00:11:09.006063+00:00",
+  "module_sha256": "2f2610328dcae44cc507565cdc6245b2ed3a8a4d4a6b1d1cd7ab0cfa6bd0cec4",
+  "test_driver_sha256": "f1c0c7e7184053a6f09e08d41d1cff8f2424c196ab7fb698ed399437d6485305",
+  "tests_run": 41,
+  "failures": 2,
+  "errors": 3,
+  "test_exit_code": 1,
+  "failure_names": [
+    "test_malformed_accession_yields_typed_refusal",
+    "test_malformed_owner_state_yields_typed_refusal",
+    "test_output_mutation_cannot_change_later_calls",
+    "test_input_request_mutation_cannot_rewrite_returned_evidence",
+    "test_selected_document_id_is_required"
+  ],
+  "output_sha256": "089b69efa4534cb9b8c8a8d8c0879bcdd3caa0247601228d66881ffa09c9e2f3",
+  "scope": "Only synthetic mutations of the local replay result/requests and copied owner responses. Original inputs unchanged.",
+  "i3_acceptance": false
+}

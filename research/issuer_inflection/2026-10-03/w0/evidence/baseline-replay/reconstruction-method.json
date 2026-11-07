@@ -1,0 +1,11 @@
+{
+  "kind": "retained_owner_bytes_reconstruction",
+  "recorded_before_execution_at": "2026-10-04T00:10:01.815025+00:00",
+  "replay_module_sha256": "2f2610328dcae44cc507565cdc6245b2ed3a8a4d4a6b1d1cd7ab0cfa6bd0cec4",
+  "test_driver_sha256": "c54c4bc52b98d447b59dd0183e7ab152d5175801a09c9c09d83389b16f5e7670",
+  "owner_capture_method_sha256": "03bed81b4c1e64cc9a663611e767c6c403f67ba44e1d5a65f8cefe4019d3881f",
+  "owner_source_reexecuted": false,
+  "i3_accepted": false,
+  "production_proof": false,
+  "registered_schema": false
+}

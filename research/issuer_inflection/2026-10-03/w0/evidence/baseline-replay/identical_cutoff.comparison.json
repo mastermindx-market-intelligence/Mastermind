@@ -1,0 +1,426 @@
+{
+  "artifact_sha256": "efeb04d0ef1f53b8eeed2d14c9474492e95e0ab186cb67e3305ba7448bcaba41",
+  "payload": {
+    "authority": {
+      "class": "context_only",
+      "display_only": true
+    },
+    "baseline_coverage": {
+      "missing_cells": 0,
+      "not_evaluable_cells": 3,
+      "requested_cells": 4,
+      "value_cells": 1
+    },
+    "baseline_cutoffs": {
+      "recorded_at": "2026-08-23T12:00:00Z",
+      "selection": "latest_known_as_of",
+      "source_snapshot_at": "2026-08-01T00:00:00Z"
+    },
+    "baseline_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+    "comparison_admitted": false,
+    "counts": {
+      "unchanged_refusal": 3,
+      "unchanged_value": 1
+    },
+    "emitted_at": null,
+    "issuer_ref": {
+      "cik": "0000320193",
+      "entity_id": "ISS:US-XNAS-AAPL",
+      "source_entity_id": "0000320193",
+      "ticker": "AAPL"
+    },
+    "limitations": [
+      "Historical reconstruction with a present method; not a past system emission.",
+      "Only the frozen AAPL owner fixture and four requested variable slots are covered.",
+      "No new financial calculations, inferred source revisions, economic inflection label or product rights."
+    ],
+    "product_publication_admitted": false,
+    "purpose": "development_fixture_baseline_reconstruction",
+    "registered_transition_schema": false,
+    "requested_variable_count": 4,
+    "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+    "target_coverage": {
+      "missing_cells": 0,
+      "not_evaluable_cells": 3,
+      "requested_cells": 4,
+      "value_cells": 1
+    },
+    "target_cutoffs": {
+      "recorded_at": "2026-08-23T12:00:00Z",
+      "selection": "latest_known_as_of",
+      "source_snapshot_at": "2026-08-01T00:00:00Z"
+    },
+    "target_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+    "trial_registered": false,
+    "variables": [
+      {
+        "baseline": {
+          "cell_id": "metric_cell_b4d478d34816e28ae5a855df58b5a97cdb5937fff6d67b5933e59e0dd381fc6c",
+          "definition_refs": {
+            "mapping_digest": "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa",
+            "mapping_rule_id": "mapping.revenue/v1",
+            "mapping_rule_version": "1.0.0",
+            "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+            "metric_rule_id": "metric.revenue/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "revenue",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": 52,
+            "kind": "duration",
+            "label": "FY2025",
+            "semantics": [
+              "duration"
+            ],
+            "start": "2024-09-29",
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": null,
+          "selected_occurrence_ref": {
+            "clocks": {
+              "accepted_at": "2025-10-31T10:01:26.000000Z",
+              "computed_at": null,
+              "mapping_available_at": null,
+              "published_at": null,
+              "recorded_at": "2026-08-23T00:32:31.000000Z"
+            },
+            "occurrence_id": "rawfact_d8da3124993f1d2b789ddb9653678004724292725bc8ad37ff57715bbd1d6b0f",
+            "revision_of": null,
+            "source": {
+              "accession": "0000320193-25-000079",
+              "body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+              "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+              "entity_id": "0000320193",
+              "source": "sec-edgar",
+              "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+            },
+            "source_span": [
+              492891,
+              493092
+            ]
+          },
+          "state": "value",
+          "unit": "USD",
+          "value": "416161000000"
+        },
+        "economic_interpretation": null,
+        "reconstruction_state": "unchanged_value",
+        "target": {
+          "cell_id": "metric_cell_b4d478d34816e28ae5a855df58b5a97cdb5937fff6d67b5933e59e0dd381fc6c",
+          "definition_refs": {
+            "mapping_digest": "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa",
+            "mapping_rule_id": "mapping.revenue/v1",
+            "mapping_rule_version": "1.0.0",
+            "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+            "metric_rule_id": "metric.revenue/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "revenue",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": 52,
+            "kind": "duration",
+            "label": "FY2025",
+            "semantics": [
+              "duration"
+            ],
+            "start": "2024-09-29",
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": null,
+          "selected_occurrence_ref": {
+            "clocks": {
+              "accepted_at": "2025-10-31T10:01:26.000000Z",
+              "computed_at": null,
+              "mapping_available_at": null,
+              "published_at": null,
+              "recorded_at": "2026-08-23T00:32:31.000000Z"
+            },
+            "occurrence_id": "rawfact_d8da3124993f1d2b789ddb9653678004724292725bc8ad37ff57715bbd1d6b0f",
+            "revision_of": null,
+            "source": {
+              "accession": "0000320193-25-000079",
+              "body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+              "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+              "entity_id": "0000320193",
+              "source": "sec-edgar",
+              "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+            },
+            "source_span": [
+              492891,
+              493092
+            ]
+          },
+          "state": "value",
+          "unit": "USD",
+          "value": "416161000000"
+        },
+        "variable": {
+          "metric_id": "revenue",
+          "period": {
+            "end": "2025-09-27",
+            "kind": "duration",
+            "label": "FY2025",
+            "start": "2024-09-29"
+          }
+        }
+      },
+      {
+        "baseline": {
+          "cell_id": "metric_cell_213775d039066d77c072f92db0d0cff40946ece32098f8e1b813a18b75b23fa8",
+          "definition_refs": {
+            "mapping_digest": null,
+            "mapping_rule_id": null,
+            "mapping_rule_version": null,
+            "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+            "metric_rule_id": "metric.revenue/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "revenue",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": null,
+            "kind": "instant",
+            "label": "2025-09-27",
+            "semantics": [
+              "instant"
+            ],
+            "start": null,
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": "outside_period_constraint: metric requires duration, requested instant",
+          "selected_occurrence_ref": null,
+          "state": "not_evaluable",
+          "unit": "USD",
+          "value": null
+        },
+        "economic_interpretation": null,
+        "reconstruction_state": "unchanged_refusal",
+        "target": {
+          "cell_id": "metric_cell_213775d039066d77c072f92db0d0cff40946ece32098f8e1b813a18b75b23fa8",
+          "definition_refs": {
+            "mapping_digest": null,
+            "mapping_rule_id": null,
+            "mapping_rule_version": null,
+            "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+            "metric_rule_id": "metric.revenue/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "revenue",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": null,
+            "kind": "instant",
+            "label": "2025-09-27",
+            "semantics": [
+              "instant"
+            ],
+            "start": null,
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": "outside_period_constraint: metric requires duration, requested instant",
+          "selected_occurrence_ref": null,
+          "state": "not_evaluable",
+          "unit": "USD",
+          "value": null
+        },
+        "variable": {
+          "metric_id": "revenue",
+          "period": {
+            "end": "2025-09-27",
+            "kind": "instant",
+            "label": "2025-09-27",
+            "start": null
+          }
+        }
+      },
+      {
+        "baseline": {
+          "cell_id": "metric_cell_a58b7661209404c0934dc097fd5b5c17041e3a8ee255b32aae869e708a476a2c",
+          "definition_refs": {
+            "mapping_digest": null,
+            "mapping_rule_id": null,
+            "mapping_rule_version": null,
+            "metric_rule_digest": "226ae11695da6185b83632bdf493e147a143c178e116b21254ff2910aff645b1",
+            "metric_rule_id": "metric.total_assets/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "total_assets",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": 52,
+            "kind": "duration",
+            "label": "FY2025",
+            "semantics": [
+              "duration"
+            ],
+            "start": "2024-09-29",
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": "outside_period_constraint: metric requires instant, requested duration",
+          "selected_occurrence_ref": null,
+          "state": "not_evaluable",
+          "unit": "USD",
+          "value": null
+        },
+        "economic_interpretation": null,
+        "reconstruction_state": "unchanged_refusal",
+        "target": {
+          "cell_id": "metric_cell_a58b7661209404c0934dc097fd5b5c17041e3a8ee255b32aae869e708a476a2c",
+          "definition_refs": {
+            "mapping_digest": null,
+            "mapping_rule_id": null,
+            "mapping_rule_version": null,
+            "metric_rule_digest": "226ae11695da6185b83632bdf493e147a143c178e116b21254ff2910aff645b1",
+            "metric_rule_id": "metric.total_assets/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "total_assets",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": 52,
+            "kind": "duration",
+            "label": "FY2025",
+            "semantics": [
+              "duration"
+            ],
+            "start": "2024-09-29",
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": "outside_period_constraint: metric requires instant, requested duration",
+          "selected_occurrence_ref": null,
+          "state": "not_evaluable",
+          "unit": "USD",
+          "value": null
+        },
+        "variable": {
+          "metric_id": "total_assets",
+          "period": {
+            "end": "2025-09-27",
+            "kind": "duration",
+            "label": "FY2025",
+            "start": "2024-09-29"
+          }
+        }
+      },
+      {
+        "baseline": {
+          "cell_id": "metric_cell_230e839775901921d4c86e2c889ab07ca7e4ee02045a2ed111713e6aad14fb4e",
+          "definition_refs": {
+            "mapping_digest": "fce6d4977ad2bc4e45d031aa489319ba7b87adfa21ceaaefa6533ac630934c25",
+            "mapping_rule_id": "mapping.total_assets/v1",
+            "mapping_rule_version": "1.0.0",
+            "metric_rule_digest": "226ae11695da6185b83632bdf493e147a143c178e116b21254ff2910aff645b1",
+            "metric_rule_id": "metric.total_assets/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "total_assets",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": null,
+            "kind": "instant",
+            "label": "2025-09-27",
+            "semantics": [
+              "instant"
+            ],
+            "start": null,
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": "unlinked source vintages require an explicit typed revision lineage",
+          "selected_occurrence_ref": null,
+          "state": "not_evaluable",
+          "unit": "USD",
+          "value": null
+        },
+        "economic_interpretation": null,
+        "reconstruction_state": "unchanged_refusal",
+        "target": {
+          "cell_id": "metric_cell_230e839775901921d4c86e2c889ab07ca7e4ee02045a2ed111713e6aad14fb4e",
+          "definition_refs": {
+            "mapping_digest": "fce6d4977ad2bc4e45d031aa489319ba7b87adfa21ceaaefa6533ac630934c25",
+            "mapping_rule_id": "mapping.total_assets/v1",
+            "mapping_rule_version": "1.0.0",
+            "metric_rule_digest": "226ae11695da6185b83632bdf493e147a143c178e116b21254ff2910aff645b1",
+            "metric_rule_id": "metric.total_assets/v1",
+            "metric_rule_version": "1.0.0"
+          },
+          "metric_id": "total_assets",
+          "owner_response_sha256": "548f16b80ee5bd7cb8610e3a5b72c3e099ac2584f1b6a61564c3e5f70a5929b3",
+          "period": {
+            "calendar_kind": "unknown",
+            "end": "2025-09-27",
+            "fiscal_quarter": null,
+            "fiscal_year": null,
+            "fiscal_year_weeks": null,
+            "inferred_week_count": null,
+            "kind": "instant",
+            "label": "2025-09-27",
+            "semantics": [
+              "instant"
+            ],
+            "start": null,
+            "week_count": null
+          },
+          "query_hash": "54e6370e7bd8dbaff68ee1af848a29afb9bce6029f906e195c5e346e131f5ce7",
+          "reason": "unlinked source vintages require an explicit typed revision lineage",
+          "selected_occurrence_ref": null,
+          "state": "not_evaluable",
+          "unit": "USD",
+          "value": null
+        },
+        "variable": {
+          "metric_id": "total_assets",
+          "period": {
+            "end": "2025-09-27",
+            "kind": "instant",
+            "label": "2025-09-27",
+            "start": null
+          }
+        }
+      }
+    ]
+  }
+}
