@@ -829,6 +829,11 @@ def _build_runtime_roots(account: str) -> dict:
 
 # Exact existing cohort: pin compatibility preserves installed capabilities.
 NATIVE_POOL_PIN_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
+# The already enrolled public seats that may move from their preserved original
+# successor pins to a qualified retained-Go application ingress. This is the
+# same cohort the incumbent native forward-selection proof already admits; it
+# is not a new roster, seat set or enrollment.
+NATIVE_POOL_PIN_FORWARD_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4'))
 NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
                     'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
                     'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
@@ -1170,6 +1175,27 @@ def cmd_native_pool_pin(args):
     return 0
 
 
+def cmd_native_pool_pin_forward(args):
+    """Dispatch the one closed forward Go bridge pin transaction.
+
+    The incumbent original pin owner keeps its own command, plan, receipt and
+    artifact set. This companion adds no second transaction to that record and
+    no new lifecycle, registry or credential path.
+    """
+    pin = _pin_owner_module()
+    try:
+        value = pin.run_forward(sys.modules[__name__], args)
+    except SystemExit as error:
+        allowed = {"NATIVE_POOL_PIN_FORWARD_" + code for code in pin.FORWARD_REFUSAL_CODES}
+        if type(error.code) is str and error.code in allowed:
+            raise
+        raise SystemExit("NATIVE_POOL_PIN_FORWARD_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_PIN_FORWARD_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
 @contextmanager
 def _pin_native_context(args):
     """Use the existing successor verifier and publication lock, never a hash-only claim."""
@@ -1273,6 +1299,139 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
         checked = proof()
         if checked != first:
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_CHANGED")
+        yield checked
+
+
+@contextmanager
+def _pin_forward_native_context(args):
+    """Bind the forward transition to the authentic retained-Go artifact.
+
+    This is the same isolated proof shape as the incumbent successor proof: it
+    imports the actual native owners, authenticates the retained Go artifact
+    with the strict reader and observes the committed phase. It never applies,
+    repairs, retries or relabels a native transition, and it never trusts a
+    caller supplied digest, path or pointer.
+    """
+    import importlib.util
+    context = _INSTALLED_CONTROL_CONTEXT
+    code_root = context["root"] if context is not None else Path(__file__).resolve().parents[2]
+    rollout = code_root / "ops/native_fabric/quota_continuity/rollout"
+    python_flags = ["-I", "-S", "-B"] if context is not None else ["-I", "-B"]
+    for name in ("native_install.py", "native_generation.py"):
+        source = rollout / name
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+    code = r"""
+import json,os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import native_install as i
+import native_generation as g
+bundle=Path(sys.argv[2])
+# The strict reader authenticates the artifact identity exactly once. It is
+# never used as an inspection channel and never falls back to another chain.
+envelope=i._successor_json(bundle/'PLAN.json')
+schema=envelope.get('schema') if type(envelope) is dict else None
+if schema==i.GO_SCHEMA:
+    plan,payloads=i.read_go(bundle)
+    prior_bundle,prior,_,_,_=i._completed_successor(plan['prior_successor_bundle'])
+elif schema==i.GO_RETAINED_SCHEMA:
+    plan,payloads=i.read_retained_go(bundle)
+    historical=i._retained_successor_evidence(plan['prior_successor_bundle'],
+        original_absent=True,current_bridges=False)
+    prior_bundle,prior=historical['bundle'],historical['plan']
+else:
+    raise ValueError('unsupported Go ingress schema')
+if (prior['digest']!=plan['prior_successor_digest'] or
+    Path(prior_bundle).resolve()!=Path(plan['prior_successor_bundle']).resolve()):
+    raise ValueError('Go predecessor differs')
+prior_entry=prior['entries']['pool']
+original_successor={
+ 'successor_bundle':str(prior_bundle),'successor_digest':prior['digest'],
+ 'target_generation':prior['target_generation'],
+ 'expected_selection':prior['expected_selection'],
+ 'pool_target':prior_entry['target'],'pool_previous':prior_entry['previous'],
+ 'pool_bridge':prior_entry['bridge'],
+}
+store=Path(plan['store'])
+entry=plan['entries']['pool']
+previous=plan['expected_selection']
+selected={'schema':g.POINTER_SCHEMA,'generation':plan['target_generation'],
+          'previous':previous['generation'],'sequence':previous['sequence']+1}
+# The completed Go ingress proof is authoritative for the committed phase.
+completed=False
+try:
+    i._completed_go_for_service(bundle)
+    completed=True
+except (ValueError,OSError,KeyError,TypeError):
+    completed=False
+if completed:
+    phase='SELECTED'
+    if g.current(store)!=selected:
+        raise ValueError('selection differs from the completed Go ingress')
+else:
+    # An unresolved or unacknowledged Go transaction is not absence and can
+    # never authorize a new forward preparation.
+    receipts=store/'bootstrap'
+    if os.path.lexists(receipts/'.go-application-ingress-v1.json'):
+        raise ValueError('unresolved Go transaction')
+    if os.path.lexists(receipts/(plan['digest']+'.go.json')):
+        raise ValueError('unacknowledged Go transaction')
+    if g.current(store)!=previous:
+        raise ValueError('selection compare-and-swap refused')
+    # The old Go ingress bytes must still be the exact preimages.
+    i._upgrade_entries(plan)
+    phase='PREVIOUS'
+print(json.dumps({
+ 'original_successor':original_successor,
+ 'go_digest':plan['digest'],'go_schema':plan['schema'],
+ 'go_generation':plan['target_generation'],
+ 'go_expected_selection':plan['expected_selection'],
+ 'go_bootstrap_digest':plan['bootstrap_digest'],
+ 'go_prior_successor_digest':plan['prior_successor_digest'],
+ 'go_component_sha256':plan['component_sha256'],
+ 'go_manifest_sha256':plan['manifest_sha256'],
+ 'pool_target':entry['target'],'pool_previous':entry['previous'],
+ 'pool_bridge':entry['bridge'],'store':plan['store'],'phase':phase,
+},sort_keys=True))
+"""
+    def proof():
+        try:
+            r = subprocess.run([sys.executable, *python_flags, "-c", code, str(rollout),
+                str(args.forward_go_bundle)], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED") from None
+        if r.returncode != 0 or len(r.stdout) > 16384:
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+        value = _pin_owner_module().decode(r.stdout)
+        if set(value) != {
+            "original_successor",
+            "go_digest", "go_schema", "go_generation", "go_expected_selection",
+            "go_bootstrap_digest", "go_prior_successor_digest",
+            "go_component_sha256", "go_manifest_sha256", "pool_target",
+            "pool_previous", "pool_bridge", "store", "phase",
+        }:
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+        if value["phase"] not in ("PREVIOUS", "SELECTED"):
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+        return value
+    first = proof()
+    if context is not None:
+        generation = _installed_control_module(
+            "_studio_pin_forward_native_generation",
+            "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+    else:
+        spec = importlib.util.spec_from_file_location(
+            "_studio_pin_forward_native_generation", rollout / "native_generation.py")
+        generation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generation)
+    from contextlib import nullcontext
+    lock = (generation.publication_lock(Path(first["store"]))
+            if args.operation in ("apply", "reconcile") else nullcontext())
+    with lock:
+        checked = proof()
+        if checked != first:
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_CHANGED")
         yield checked
 
 
@@ -6298,6 +6457,15 @@ def build_parser() -> argparse.ArgumentParser:
     pin.add_argument("--expected-plan-sha256")
     pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
     pin.set_defaults(func=cmd_native_pool_pin)
+
+    forward = sub.add_parser("native-pool-pin-forward")
+    forward.add_argument("--account", required=True)
+    forward.add_argument("--forward-go-bundle", required=True,
+                         help="exact qualified retained Go ingress bundle for this transition")
+    forward.add_argument("--expected-plan-sha256",
+                         help="exact owner preview plan SHA256; required for apply, status and reconcile")
+    forward.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    forward.set_defaults(func=cmd_native_pool_pin_forward)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
     enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
