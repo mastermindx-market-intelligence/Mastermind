@@ -10,7 +10,7 @@ registry of hosts, schedule or gate execution, or persist anything.  Collection
 and command invocation belong to ``ops/executive_os/host_recovery_readiness.py``;
 privileged remediation remains with the reviewed broker owner.
 
-There are exactly two closed profiles, and the caller must name one.  Nothing
+There are exactly three closed profiles, and the caller must name one.  Nothing
 here infers a profile from what happens to be installed: inferring the weaker
 profile from missing daemons would let a broken Executive control host pass.
 
@@ -19,18 +19,24 @@ profile from missing daemons would let a broken Executive control host pass.
     Remote Login, preboot-unlock eligibility, and disk headroom.  It claims
     nothing about worker runtime or Executive control-plane readiness, so no
     Executive daemon predicate is load-bearing under it.
+``fleet-secondary-host-preflight/v1``
+    The physical/local base plus a load-bearing proof that the canonical central
+    Executive control, MCP, and sol-state-relay LaunchDaemons are not installed.
+    This is a pre-enrollment anti-duplication gate only; it claims nothing about
+    Worker/Fabric, provider, MH1 gateway, or Studio Direct readiness.
 ``executive-control-host/v1``
     Everything in the base profile plus the already-installed Studio Executive
     control, MCP, and sol-state-relay LaunchDaemons running.
 
-Both profiles classify the same fixed superset of observations; the profile
+All profiles classify the same fixed superset of observations; the profile
 changes classification requirements only, never what the collector may run.
 
 Requirement semantics are deliberately explicit:
 
-``REQUIRED`` / ``REQUIRED_RUNNING``
+``REQUIRED`` / ``REQUIRED_RUNNING`` / ``REQUIRED_ABSENT``
     Load-bearing.  An unsatisfied or unknown predicate changes the overall
-    recovery state.
+    recovery state. ``REQUIRED_ABSENT`` is used only for fixed system-daemon
+    predicates and accepts only ``NOT_INSTALLED``.
 ``OPTIONAL``
     Reviewed-as-preferable but not load-bearing for unattended recovery.
 ``DISARMED_EXPECTED``
@@ -64,7 +70,15 @@ READINESS_SCHEMA = "mastermind.host_recovery_readiness/v1"
 BASE_RECOVERY_PROFILE = "home-mac-recovery-base/v1"
 # The base profile plus the canonical Studio Executive control plane running.
 EXECUTIVE_CONTROL_PROFILE = "executive-control-host/v1"
-READINESS_PROFILES = (BASE_RECOVERY_PROFILE, EXECUTIVE_CONTROL_PROFILE)
+# Physical readiness plus proof that this secondary host does not contain a
+# duplicate copy of the central Executive control plane.  This is deliberately
+# a pre-enrollment gate, not worker/fabric or Studio Direct acceptance.
+SECONDARY_HOST_PREFLIGHT_PROFILE = "fleet-secondary-host-preflight/v1"
+READINESS_PROFILES = (
+    BASE_RECOVERY_PROFILE,
+    SECONDARY_HOST_PREFLIGHT_PROFILE,
+    EXECUTIVE_CONTROL_PROFILE,
+)
 
 # Reviewed floor: the preboot recovery profile below is only reviewed against
 # macOS 14+ on Apple silicon.  Raise it deliberately, never infer it.
@@ -84,9 +98,18 @@ DISK_FREE_FLOOR_BYTES = 25 * 1024**3
 HOST_REF_RE = re.compile(r"^host-[0-9a-f]{64}$")
 
 REQUIREMENTS = frozenset(
-    {"REQUIRED", "REQUIRED_RUNNING", "OPTIONAL", "DISARMED_EXPECTED", "ADVISORY"}
+    {
+        "REQUIRED",
+        "REQUIRED_RUNNING",
+        "REQUIRED_ABSENT",
+        "OPTIONAL",
+        "DISARMED_EXPECTED",
+        "ADVISORY",
+    }
 )
-LOAD_BEARING_REQUIREMENTS = frozenset({"REQUIRED", "REQUIRED_RUNNING"})
+LOAD_BEARING_REQUIREMENTS = frozenset(
+    {"REQUIRED", "REQUIRED_RUNNING", "REQUIRED_ABSENT"}
+)
 STATUSES = frozenset({"OK", "NOT_READY", "UNKNOWN", "ADVISORY", "NOT_APPLICABLE"})
 RECOVERY_STATES = frozenset({"READY", "NOT_READY", "UNKNOWN"})
 EVIDENCE_CLASSES = frozenset(
@@ -136,7 +159,7 @@ DISARMED_EXPECTED_DAEMON_LABELS = (
     "com.mastermind.executive.worker.codex-pro-02",
     "com.mastermind.executive.worker.codex-pro-03",
 )
-# Both profiles observe the same fixed superset of system labels; only the
+# All profiles observe the same fixed superset of system labels; only the
 # requirement attached to each one differs.
 ALL_DAEMON_LABELS = tuple(
     sorted(REQUIRED_RUNNING_DAEMON_LABELS + DISARMED_EXPECTED_DAEMON_LABELS)
@@ -295,23 +318,36 @@ class _PredicateProfile:
     profile, so only ``requirement`` can differ between two reports.
     """
 
-    def __init__(self, profile: str, *, executive_control_required: bool) -> None:
+    def __init__(
+        self,
+        profile: str,
+        *,
+        required_running_labels: tuple[str, ...] = (),
+        required_absent_labels: tuple[str, ...] = (),
+        disarmed_expected_labels: tuple[str, ...] = (),
+    ) -> None:
         self.profile = profile
-        self.executive_control_required = executive_control_required
-        self.required_running_labels = (
-            REQUIRED_RUNNING_DAEMON_LABELS if executive_control_required else ()
+        self.required_running_labels = tuple(required_running_labels)
+        self.required_absent_labels = tuple(required_absent_labels)
+        self.disarmed_expected_labels = tuple(disarmed_expected_labels)
+        owned = (
+            set(self.required_running_labels)
+            | set(self.required_absent_labels)
+            | set(self.disarmed_expected_labels)
         )
-        self.disarmed_expected_labels = (
-            DISARMED_EXPECTED_DAEMON_LABELS if executive_control_required else ()
-        )
-        # Under the physical base profile every Executive system label is
-        # reported for operator visibility with its truthful observed state and
-        # no load-bearing requirement.  It is deliberately not called
-        # "intentionally disarmed": a worker or capacity host is not a host
-        # where these services were gated off, it is a host they do not belong
-        # to at all.
-        self.advisory_daemon_labels = (
-            () if executive_control_required else ALL_DAEMON_LABELS
+        if (
+            len(owned)
+            != len(self.required_running_labels)
+            + len(self.required_absent_labels)
+            + len(self.disarmed_expected_labels)
+            or not owned.issubset(ALL_DAEMON_LABELS)
+        ):
+            raise RecoveryReadinessContractError("PROFILE_DAEMON_REQUIREMENTS_INVALID")
+        # Daemons not owned by this profile remain visibility-only.  This keeps
+        # pre-enrollment classification from pretending an absent or running
+        # worker/provider service proves the Worker/Fabric is ready.
+        self.advisory_daemon_labels = tuple(
+            label for label in ALL_DAEMON_LABELS if label not in owned
         )
         self.all_daemon_labels = ALL_DAEMON_LABELS
         table: dict[str, str] = {
@@ -324,6 +360,8 @@ class _PredicateProfile:
     def _daemon_requirement(self, label: str) -> str:
         if label in self.required_running_labels:
             return "REQUIRED_RUNNING"
+        if label in self.required_absent_labels:
+            return "REQUIRED_ABSENT"
         if label in self.disarmed_expected_labels:
             return "DISARMED_EXPECTED"
         return "ADVISORY"
@@ -462,11 +500,15 @@ def _check_measurement(predicate_id: str, code: str, measurement: Any) -> None:
 
 
 RECOVERY_PROFILES: dict[str, _PredicateProfile] = {
-    BASE_RECOVERY_PROFILE: _PredicateProfile(
-        BASE_RECOVERY_PROFILE, executive_control_required=False
+    BASE_RECOVERY_PROFILE: _PredicateProfile(BASE_RECOVERY_PROFILE),
+    SECONDARY_HOST_PREFLIGHT_PROFILE: _PredicateProfile(
+        SECONDARY_HOST_PREFLIGHT_PROFILE,
+        required_absent_labels=REQUIRED_RUNNING_DAEMON_LABELS,
     ),
     EXECUTIVE_CONTROL_PROFILE: _PredicateProfile(
-        EXECUTIVE_CONTROL_PROFILE, executive_control_required=True
+        EXECUTIVE_CONTROL_PROFILE,
+        required_running_labels=REQUIRED_RUNNING_DAEMON_LABELS,
+        disarmed_expected_labels=DISARMED_EXPECTED_DAEMON_LABELS,
     ),
 }
 
@@ -516,6 +558,7 @@ OBSERVATION_FIELDS = frozenset(
 _ALLOWED_STATUSES = {
     "REQUIRED": frozenset({"OK", "NOT_READY", "UNKNOWN"}),
     "REQUIRED_RUNNING": frozenset({"OK", "NOT_READY", "UNKNOWN"}),
+    "REQUIRED_ABSENT": frozenset({"OK", "NOT_READY", "UNKNOWN"}),
     "OPTIONAL": frozenset({"OK", "ADVISORY", "UNKNOWN", "NOT_APPLICABLE"}),
     "DISARMED_EXPECTED": frozenset({"OK", "ADVISORY", "UNKNOWN"}),
     "ADVISORY": frozenset({"OK", "ADVISORY", "UNKNOWN"}),
@@ -855,6 +898,13 @@ _REQUIRED_RUNNING_DAEMON_VERDICTS = {
     "NOT_INSTALLED": ("NOT_READY", "DAEMON_NOT_INSTALLED"),
     "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
 }
+_REQUIRED_ABSENT_DAEMON_VERDICTS = {
+    "RUNNING": ("NOT_READY", "DAEMON_UNEXPECTEDLY_RUNNING"),
+    "LOADED_NOT_RUNNING": ("NOT_READY", "DAEMON_LOADED_NOT_RUNNING"),
+    "DISABLED": ("NOT_READY", "DAEMON_DISABLED"),
+    "NOT_INSTALLED": ("OK", "DAEMON_NOT_INSTALLED"),
+    "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
+}
 _DISARMED_EXPECTED_DAEMON_VERDICTS = {
     "RUNNING": ("ADVISORY", "DAEMON_UNEXPECTEDLY_RUNNING"),
     "LOADED_NOT_RUNNING": ("OK", "DAEMON_INTENTIONALLY_DISARMED"),
@@ -873,6 +923,7 @@ _ADVISORY_DAEMON_VERDICTS = {
 }
 _DAEMON_VERDICTS = {
     "REQUIRED_RUNNING": _REQUIRED_RUNNING_DAEMON_VERDICTS,
+    "REQUIRED_ABSENT": _REQUIRED_ABSENT_DAEMON_VERDICTS,
     "DISARMED_EXPECTED": _DISARMED_EXPECTED_DAEMON_VERDICTS,
     "ADVISORY": _ADVISORY_DAEMON_VERDICTS,
 }

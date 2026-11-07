@@ -1,0 +1,13 @@
+{
+  "scope": "source and exact-account prelaunch readiness, no selection or credential provisioning",
+  "preimages": {
+    "glm_keys.py": "fad54fd2c9b14d2cc0f1cc2d1056ef29c73d73a44a5e4e8588c9bf470fdba0e5",
+    "glm_bound_claude.py": "b7d67e1f96149192f8ad9bd135d8337ac4286ecc1a5dd137abf079b2d56c8a1a",
+    "remote_sub.sh": "78b3d386e82b273bbb828671fb011ee8188df30fbe82e30b2817ccd5a8c7320d"
+  },
+  "postimages": {
+    "glm_keys.py": "0d84fe666e8e2c1e29297a31a99ce225a30a832c20e9514a5afcb2816a38d458",
+    "glm_bound_claude.py": "7944854d9a55c38af9f492d574e567a87fae1799c8fa0f8ff6c35cf7e8d33d17",
+    "remote_sub.sh": "5f4df004c2d10be853926299095f8a2699a7c96c5c811565a3b74e06271fab6f"
+  }
+}

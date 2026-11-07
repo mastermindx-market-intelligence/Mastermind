@@ -72,7 +72,9 @@ def _default_alert_state() -> dict:
 
 
 def _load_alert_state() -> dict:
-    if not _ALERT_STATE_PATH.exists():
+    try:
+        _ALERT_STATE_PATH.lstat()
+    except FileNotFoundError:
         return _default_alert_state()
     state = json.loads(_ALERT_STATE_PATH.read_text(encoding="utf-8"))
     if not isinstance(state, dict):
@@ -87,7 +89,9 @@ def _load_alert_state() -> dict:
 
 
 def _load_alert_rows() -> list[dict]:
-    if not _ALERTS_LOG_PATH.exists():
+    try:
+        _ALERTS_LOG_PATH.lstat()
+    except FileNotFoundError:
         return []
     rows: list[dict] = []
     for line in _ALERTS_LOG_PATH.read_text(encoding="utf-8").splitlines():
@@ -102,14 +106,11 @@ def _load_alert_rows() -> list[dict]:
 
 
 def _fsync_parent(path: Path) -> None:
+    fd = os.open(path.parent, os.O_RDONLY)
     try:
-        fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    except OSError:
-        pass
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _atomic_replace_text(path: Path, payload: str) -> None:
@@ -172,8 +173,7 @@ def _append_alert_unlocked(record: dict) -> bool:
     if not isinstance(record, dict):
         raise ValueError("alert record must be a mapping")
     rows = _load_alert_rows()
-    alert_id = record.get("alert_id")
-    if alert_id and any(row.get("alert_id") == alert_id for row in rows):
+    if _recorded_alert_matches(rows, record):
         return False
     payload = "".join(
         json.dumps(row, default=str) + "\n"
@@ -215,6 +215,110 @@ def _send_discord(headline: str) -> None:
 def _make_alert_id(ticker: str, role: str, alert_date: str, lane_names: list[str]) -> str:
     initials = "".join(sorted(n[:2] for n in lane_names)) if lane_names else "xx"
     return f"pfolio:{ticker}:{role}:{alert_date}:{initials}"
+
+
+def _alert_date(value: Any, field: str) -> date:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an ISO date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{field} must be an ISO date") from None
+    if parsed.isoformat() != value:
+        raise ValueError(f"{field} must be an ISO date")
+    return parsed
+
+
+def _recorded_alert_matches(rows: list[dict], record: dict) -> bool:
+    """Only the same complete effect identity may satisfy an existing alert id."""
+    alert_id = record.get("alert_id")
+    matched = False
+    for row in rows:
+        if alert_id and row.get("alert_id") == alert_id:
+            if any(row.get(key) != record.get(key) for key in (
+                "source", "ticker", "type", "position_id", "lanes",
+            )):
+                raise ValueError("alert id has conflicting recorded identity")
+            matched = True
+    return matched
+
+
+def _reconcile_alert_cooldowns(
+    alert_state: dict, rows: list[dict], today_d: date,
+) -> set[str]:
+    """Repair a proven log/state split without replaying a notification.
+
+    The state has one session cursor, not a historical session ledger. An older
+    missing cooldown cannot be reconstructed after that cursor has advanced.
+    """
+    cursor_value = alert_state.get("as_of")
+    cursor = _alert_date(cursor_value, "alert state cursor") if cursor_value is not None else None
+    if cursor is not None and cursor > today_d:
+        raise ValueError("alert state cursor cannot move backwards")
+    cooldown = alert_state.setdefault("cooldown", {})
+    cooldown_dates: dict[str, date] = {}
+    for ticker, cd in cooldown.items():
+        if (not isinstance(cd, dict) or not isinstance(cd.get("role"), str)
+                or cd["role"] not in _COOLDOWNS):
+            raise ValueError("alert cooldown entry must contain a valid role")
+        count = cd.get("sessions_since")
+        if type(count) is not int or count < 0:
+            raise ValueError("alert cooldown sessions must be a nonnegative integer")
+        last = _alert_date(cd.get("last_alert"), "alert cooldown date")
+        if last > today_d:
+            raise ValueError("alert cooldown date is in the future")
+        cooldown_dates[ticker] = last
+
+    events: dict[str, list[tuple[date, int, dict]]] = {}
+    identities: dict[str, dict] = {}
+    for index, row in enumerate(rows):
+        if row.get("source") != "portfolio_desk":
+            continue
+        ticker, role = row.get("ticker"), row.get("type")
+        lanes, position_id, alert_id = row.get("lanes"), row.get("position_id"), row.get("alert_id")
+        if (not isinstance(ticker, str) or not ticker.strip() or ticker != ticker.upper()
+                or not isinstance(role, str) or role not in _COOLDOWNS
+                or not isinstance(position_id, str) or not position_id
+                or not isinstance(lanes, list)
+                or any(not isinstance(lane, str) or not lane.strip() for lane in lanes)
+                or lanes != sorted(set(lanes))
+                or not isinstance(alert_id, str)):
+            raise ValueError("recorded portfolio alert identity is malformed")
+        prefix = f"pfolio:{ticker}:{role}:"
+        if not alert_id.startswith(prefix) or ":" not in alert_id[len(prefix):]:
+            raise ValueError("recorded portfolio alert id is malformed")
+        decision_date = _alert_date(alert_id[len(prefix):].rsplit(":", 1)[0], "recorded alert date")
+        if alert_id != _make_alert_id(ticker, role, decision_date.isoformat(), lanes):
+            raise ValueError("recorded portfolio alert id does not match its evidence")
+        if decision_date > today_d:
+            raise ValueError("recorded alert date is in the future")
+        if alert_id in identities:
+            _recorded_alert_matches([identities[alert_id]], row)
+        identities[alert_id] = row
+        events.setdefault(ticker, []).append((decision_date, index, row))
+
+    recovered: set[str] = set()
+    for ticker, history in events.items():
+        event_date, event_index, event = max(history, key=lambda value: (value[0], value[1]))
+        cd, last = cooldown.get(ticker), cooldown_dates.get(ticker)
+        if last is not None and last > event_date:
+            continue
+        if last == event_date and cd["role"] == event["type"]:
+            continue
+        if last == event_date and not any(
+            day == event_date and index < event_index and row["type"] == cd["role"]
+            for day, index, row in history
+        ):
+            raise ValueError("same-date cooldown ordering is unavailable")
+        if (cursor is not None and cursor > event_date) or (cursor is None and event_date < today_d):
+            raise ValueError("alert cooldown recovery history is unavailable")
+        cooldown[ticker] = {
+            "role": event["type"],
+            "last_alert": event_date.isoformat(),
+            "sessions_since": 0 if event_date == today_d else 1,
+        }
+        recovered.add(ticker)
+    return recovered
 
 
 def _elevated_lanes(pos: dict) -> set[str]:
@@ -264,16 +368,16 @@ def _run_alerts_locked(
 ) -> list[dict]:
     today_str = today_d.isoformat()
     alert_state = _load_alert_state()
-    _load_alert_rows()
+    rows = _load_alert_rows()
+    recovered = _reconcile_alert_cooldowns(alert_state, rows, today_d)
     fired: list[dict] = []
 
     last_as_of = alert_state.get("as_of")
     new_session = last_as_of != today_str
     if new_session:
-        for _, cd in list(alert_state.get("cooldown", {}).items()):
-            if not isinstance(cd, dict):
-                raise ValueError("alert cooldown entry must be a mapping")
-            cd["sessions_since"] = cd.get("sessions_since", 0) + 1
+        for ticker, cd in alert_state.get("cooldown", {}).items():
+            if ticker not in recovered:
+                cd["sessions_since"] += 1
 
     prev_positions: dict[str, dict] = {}
     if prev_state:
@@ -289,6 +393,13 @@ def _run_alerts_locked(
 
         role = pos.get("role", "ok")
         elevated = _elevated_lanes(pos)
+        active_lanes = sorted(elevated)
+        if role not in ("ok", "info"):
+            _recorded_alert_matches(rows, {
+                "alert_id": _make_alert_id(ticker, role, today_str, active_lanes),
+                "source": "portfolio_desk", "ticker": ticker, "type": role,
+                "position_id": str(pos.get("position_id", ticker)), "lanes": active_lanes,
+            })
         prev_pos = prev_positions.get(ticker)
         prev_role = prev_pos.get("role", "ok") if prev_pos else "ok"
         prev_elevated = _elevated_lanes(prev_pos) if prev_pos else set()
@@ -308,7 +419,6 @@ def _run_alerts_locked(
         if not _check_cooldown(ticker, role, alert_state):
             continue
 
-        active_lanes = sorted(elevated)
         reasons = []
         lanes_dict = pos.get("lanes") or {}
         for lane_name in active_lanes[:3]:
@@ -342,12 +452,11 @@ def _run_alerts_locked(
         if newly_written:
             _send_discord(headline)
             fired.append(record)
-
-        alert_state.setdefault("cooldown", {})[ticker] = {
-            "role": role,
-            "last_alert": today_str,
-            "sessions_since": 0,
-        }
+            alert_state.setdefault("cooldown", {})[ticker] = {
+                "role": role,
+                "last_alert": today_str,
+                "sessions_since": 0,
+            }
 
     alert_state["as_of"] = today_str
     alert_state["last_roles"] = {

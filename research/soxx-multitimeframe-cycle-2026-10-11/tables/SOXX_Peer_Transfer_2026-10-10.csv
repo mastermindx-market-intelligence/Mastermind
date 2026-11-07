@@ -1,0 +1,15 @@
+<PARSED TEXT FOR SHEET: 1 / 1 TABS
+TAB NAME: SOXX_Peer_Transfer_2026-10-10.csv>
+index,symbol,plan,phase,n,known,mean,win,cum,mdd
+0,SOXX,slow_p0.25,prior,5,4,1.709936,50.0,,
+1,SOXX,slow_p0.25,year,10,10,3.552323,40.0,39.011758,-6.59616
+2,SOXX,guard_p0.25,prior,5,4,1.709936,50.0,,
+3,SOXX,guard_p0.25,year,10,10,4.184741,70.0,48.189979,-4.664002
+4,SMH,slow_p0.25,prior,5,4,0.040611,25.0,,
+5,SMH,slow_p0.25,year,8,8,2.934198,37.5,24.530127,-6.126956
+6,SMH,guard_p0.25,prior,5,4,0.040611,25.0,,
+7,SMH,guard_p0.25,year,8,8,3.127452,50.0,26.469457,-6.126956
+8,QQQ,slow_p0.25,prior,6,5,1.257439,40.0,,
+9,QQQ,slow_p0.25,year,7,7,0.266032,28.571429,1.552298,-6.641375
+10,QQQ,guard_p0.25,prior,6,5,1.257439,40.0,,
+11,QQQ,guard_p0.25,year,7,7,0.266032,28.571429,1.552298,-6.641375
