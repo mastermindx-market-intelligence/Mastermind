@@ -1,0 +1,55 @@
+NO_BLOCKING_FINDINGS
+
+The source delta is bounded, correct against its stated acceptance contract, and consistent with the held pagination-fixture failures (not addressed per the constraint).
+
+## Acceptance-contract mapping (source vs change #1)
+
+| Contract | Code locus | Verified |
+|---|---|---|
+| Active workflow + missing job → PENDING (identity preserved) | `integrations/github_ci_candidate_reader.py:231-238` — `pending_membership.add(workflow_id); continue`; identity stays in `required_checks`; never appended to `selected`; `assess_candidate_ci_observation` sees missing identity | ✓ |
+| Two-read positive evidence requirement | `integrations/github_ci_candidate_reader.py:264-265` — revalidation re-reads each `workflow` and re-checks `status not in _ACTIVE_WORKFLOW_STATES` for any deferred id | ✓ |
+| Terminal/unknown membership (no positive active) refuses | `integrations/github_ci_candidate_reader.py:238` — fall-through raise when status ∉ `_ACTIVE_WORKFLOW_STATES` | ✓ |
+| Permission/generation failures refuse, no synthetic success | No try/except around `_read` in `_policy`, `_checks`, `_jobs`, workflow fetch, revalidation; `PermissionError` propagates from `_bounded_get`/`_read` through `_object`/`_positive` to `sample()` caller | ✓ |
+| CLI exposes workflow status in fixed GET projection | `scripts/github_ci_candidate.py:39` — `{id,head_sha,check_suite_id,run_attempt,status}` | ✓ |
+
+## Race-specific verification
+
+`_ACTIVE_WORKFLOW_STATES = {"queued","in_progress","waiting","pending","requested"}` at `integrations/github_ci_candidate_reader.py:28` is exactly the five pre-materialization states used by `test_active_attempt_without_materialized_job_stays_pending` (`tests/test_github_ci_candidate_generation.py:99-107`). None of those are terminal — `"completed"` falls outside, matching `test_absent_current_job_without_positive_active_workflow_still_refuses` (`tests/test_github_ci_candidate_generation.py:110-116`).
+
+The deferral path has no false-green surface:
+
+- Identity is preserved in `required_checks` (never dropped — the `continue` only skips the `selected.append` step).
+- No check_run tuple is constructed for deferred ids (line 282-297 loop iterates `selected`, which the deferred entry is not in).
+- The classifier sees required-identity-without-row with COMPLETE coverage → CHECK_MISSING/PENDING, as documented.
+
+The two-read contract holds across three adversarial scenarios:
+
+1. **Workflow flips active → terminal between reads** (`test_workflow_finishing_while_current_job_is_missing_does_not_get_masked`): initial `status="in_progress"` defers; revalidation shows `status="completed"` and triggers line 264 raise.
+2. **Jobs appear but workflow completed before revalidation**: same path — deferred entry plus non-active revalidation status raises. Conservative by design.
+3. **Generation drift during sample**: lines 262-263 raise on id/head_sha/check_suite_id/run_attempt change before the status check, so a rerun-then-finish sequence is caught even if status is still active.
+
+Permission errors are not laundered: `_object`/`_positive` only validate types; `PermissionError` from `_read` propagates through `_jobs`, the workflow fetch, and the revalidation. `test_active_workflow_permission_error_is_not_converted_to_pending` (`tests/test_github_ci_candidate_generation.py:130-139`) confirms this — the assertion `pytest.raises(PermissionError)` is satisfied by direct re-raise, not by conversion.
+
+## CLI surface (change #1)
+
+- `scripts/github_ci_candidate.py:39` adds `status` to the workflow projection. The other five projections are unchanged.
+- `GitHubCLIReader.read` projection whitelist unchanged; closed GET endpoints unaffected (`tests/test_github_ci_candidate_cli.py:68-72` still binds).
+- `observe_candidate` is untouched: it consumes whatever state the reader returns. PENDING with positive active evidence flows through `wait_for_candidate_material` correctly (the waiter suppresses repeated PENDING and wakes only on material/terminal transitions; it returns PENDING on sample exhaustion).
+- `_bounded_get` and HTTP-classification are unchanged; the new `status` field does not alter the response budget materially.
+- `exit_code` mapping unchanged — PENDING still returns 4, not0.
+
+## What I did not flag
+
+- `tests/test_github_ci_candidate_reader::test_complete_check_pagination_uses_all_pages` and `test_checks_changed_during_pagination_refuses` (the two held failures): per the constraint, no replay/repair/waiver/rerouting. Static reading shows they exercise the `_checks` pagination budget/identity checks at `integrations/github_ci_candidate_reader.py:117-136` and are independent of the active-workflow/missing-job delta.
+- The 6 race tests that previously failed are now passing per the manifest; the four new generation tests (`test_active_attempt_without_materialized_job_stays_pending`, `test_absent_current_job_without_positive_active_workflow_still_refuses`, `test_workflow_finishing_while_current_job_is_missing_does_not_get_masked`, `test_active_workflow_permission_error_is_not_converted_to_pending`) plus the native-wait continuation test cover the delta end-to-end.
+- Cross-cutting invariants still hold: `test_cross_repository_workflow_url_is_not_followed` (details_url guard at line 215-218 precedes workflow fetch), `test_workflow_generation_is_verified` (parametrized field/value mismatch at line 262 raises), `test_unqualified_required_producer_is_explicitly_unsupported` (producer guard at line 104-107 prevents transport), `test_permission_failure_propagates_without_alternate_read` (no retry/alternate read on `_read` failure).
+
+## Limitations of this review
+
+- Read-only: I did not run tests, mutate the source, or invoke the harness/MCP. The 317-pass / 2-held fixture-failure state is taken from the manifest, not re-verified.
+- `control_plane.github_release_assessment.assess_candidate_ci_observation` and `control_plane.github_ci_candidate_waiter.wait_for_candidate_material`/`observe_candidate_transition` are not in the supplied source snapshot; the PENDING-on-missing-identity and waiter-suppression behaviors are taken from the existing-classifier-behavior statement, not re-derived from code.
+- No scheduler, queue, credential, identity, or lifecycle owner is introduced; cross-checks against the constraint hold.
+
+## Conclusion
+
+The new code omits the unqualified old check under the precise condition stated — workflow positively active on both reads — and preserves the required identity so the incumbent classifier reports PENDING. Terminal/unknown membership and permission/generation failures still raise. No success is synthesized. The CLI projection now exposes workflow `status` as required. The two pagination fixture failures are pre-existing platform-held effects and are not in scope for this review.

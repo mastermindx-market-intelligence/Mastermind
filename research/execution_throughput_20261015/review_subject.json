@@ -1,0 +1,24 @@
+{
+  "operation": "execution-throughput-20261015-c3-001",
+  "observed_at": "2026-10-15T05:02:51.151825+00:00",
+  "base_sha": "2cc4942e136ad4fb544fd5c72ab1856608a5dac1",
+  "source_sha256": {
+    "integrations/github_ci_candidate_reader.py": "7f0d65b649536c14258278aa4e1185f4714a7d416ffd8784ea464a783d34a24b",
+    "scripts/github_ci_candidate.py": "fe44dded3d5662e7fd4e5c3b4b073e48e98095f84d436c62870c5dc7ab118723",
+    "tests/test_github_ci_candidate_reader.py": "c7959af524575cce60ff25967e7c7d6b8d196fa86d2cbb0718cda64b98da99a3",
+    "tests/test_github_ci_candidate_cli.py": "bef43a033fc071334b4fca682ee54f0487b1f0d8b9a2af7e0806d1a3bc67d37a",
+    "tests/test_github_ci_candidate_generation.py": "ce23322c6ab01a4c74154223e3b809c5e0d4b5f3d32b33852932cc64872806f9"
+  },
+  "tests": {
+    "total": 308,
+    "passed": 306,
+    "failed": [
+      "tests.test_github_ci_candidate_reader::test_complete_check_pagination_uses_all_pages",
+      "tests.test_github_ci_candidate_reader::test_checks_changed_during_pagination_refuses"
+    ],
+    "command": "python3.12 -m pytest tests/test_github_ci_candidate_*.py tests/test_github_release_assessment.py -q --tb=short -o addopts=",
+    "exit_code": 1
+  },
+  "known_hold": "Two preserved pagination fixture errors; the previously safety-refused fixture edit is not retried. No full-suite or release pass.",
+  "live_read_sha256": "946fa48451ea0846b8d6bf4e61a5f9b17a9de207bc4e585f067ee0210f4ece59"
+}

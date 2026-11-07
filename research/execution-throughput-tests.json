@@ -1,0 +1,29 @@
+{
+  "schema": "mastermind.execution_throughput_tests.v1",
+  "tests": 294,
+  "failures": 2,
+  "errors": 0,
+  "skipped": 0,
+  "elapsed_seconds": "3.898",
+  "source_sha256": {
+    "integrations/github_ci_candidate_reader.py": "874d886f31566b4dcf6157c31ac48bde34b8f55501d04c0ca0b04f87292d1b47",
+    "scripts/github_ci_candidate.py": "5854ce58568ce5f1f546669c1b482367d422e2ad77ae352b499dd3014c36d689",
+    "tests/test_github_ci_candidate_reader.py": "a8a725643ef4c1b2a26c68f971fd7a8ee32a61959d971c473c19ea486552557d",
+    "tests/test_github_ci_candidate_cli.py": "94b3561f1efcf918344ce4b187d9bbe1b4841689c49559044dc22ace0356bd65",
+    "tests/test_github_ci_candidate_transport.py": "f43bae3fa5a8ba07c310b51f4469178b5e82d159d02241d6097a63a4e319b997"
+  },
+  "failure_details": [
+    {
+      "class": "tests.test_github_ci_candidate_reader",
+      "test": "test_complete_check_pagination_uses_all_pages",
+      "message": "KeyError: 'repos/mastermindx-market-intelligence/Mastermind/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/check-runs?filter=latest&per_page=100&page=2'"
+    },
+    {
+      "class": "tests.test_github_ci_candidate_reader",
+      "test": "test_checks_changed_during_pagination_refuses",
+      "message": "KeyError: 'repos/mastermindx-market-intelligence/Mastermind/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/check-runs?filter=latest&per_page=100&page=2'"
+    }
+  ],
+  "junit_sha256": "63b5a0ddbf036b0106f4272d3e3b8abf1be1393d8781ace44d87ff6643360702",
+  "release_qualified": false
+}
