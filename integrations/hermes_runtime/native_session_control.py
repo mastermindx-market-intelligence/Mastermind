@@ -195,6 +195,7 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
             # Active-row absence is not proof of nonexecution or permission to resend.
             return _result("EFFECT_UNKNOWN", role=role)
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
+                or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
                 or row.get("request_id") != submission or row.get("intent") != "queue"
                 or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
                 or row["payload"].get("finite") is not True
@@ -218,6 +219,13 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
                 result["successful"] = not any(value.get(key) for key in ("failed", "error", "interrupted"))
             if type(value) is dict:
                 result["terminal_metadata"] = _terminal_metadata(value, answer if valid_answer else None)
+                from .native_request_observation import RESULT_KEY, project_request_observation
+                observation = {"status": "missing"}
+                if RESULT_KEY in saved:
+                    projected = project_request_observation(saved[RESULT_KEY], admission=receipt, role=role)
+                    observation = ({"status": "observed", "document": projected}
+                                   if projected is not None else {"status": "invalid"})
+                result["request_observation"] = observation
         return result
     finally:
         db.close()

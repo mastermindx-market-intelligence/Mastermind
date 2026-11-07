@@ -500,3 +500,60 @@ def test_native_adoption_change_during_hash_is_rechecked_under_original_lock(nat
         thread.join(3)
     assert not thread.is_alive() and not errors
     assert scope.events == [] and scope.errors == {"unbound_or_stale_agent"}
+
+
+def test_actual_native_retention_is_recoverable_by_original_reader_after_restart(native, monkeypatch):
+    """Pinned producer/codec/storage body -> original authenticated read seam."""
+    import sqlite3
+    from integrations.hermes_runtime import native_session_control as control
+    ref, row, _, response = run_admission(native)
+    outer = native.authority.pending_results[row["admission_id"]]
+    expected = json.loads(json.dumps(outer[observation.RESULT_KEY]))
+    outcome, stored = native.results.prepare_result(row, response, "completed", outer)
+    encoded = json.dumps(native.terminal.encode_result(stored))
+    row.update(principal_id="uid:994", target_session_id=ref.session_id,
+               request_id="original-submission", intent="queue", seq=1,
+               status="terminal", outcome=outcome, owner_epoch=2)
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT)")
+    prefix = "session-result:"
+    conn.execute("INSERT INTO state_meta VALUES (?,?)", (prefix + row["admission_id"], encoded))
+    lookups = []
+    @contextlib.contextmanager
+    def read_ctx():
+        yield conn
+    db = SimpleNamespace(_read_ctx=read_ctx, close=lambda: None)
+    monkeypatch.setattr(control, "_db", lambda home: db)
+    def admitted(_db, **kwargs):
+        assert _db is db
+        lookups.append(kwargs)
+        return dict(row)
+    module(monkeypatch, "hermes_state_runtime", find_session_admission=admitted,
+           get_session_admission=admitted)
+    # Execute the original pinned read function against real retained SQLite
+    # bytes. Only the native row resolver/DB context are explicit test doubles.
+    source = (FIXTURES / MANIFEST["files"]["gateway/session_results.py"]["fixture"]).read_bytes()
+    node = next(item for item in ast.parse(source).body if getattr(item, "name", None) == "admission_result")
+    native.results.__dict__.update(
+        _admission=lambda connection, admission: dict(row) if admission == row["admission_id"] else None,
+        _RESULT_PREFIX=prefix, load_result=native.terminal.load_result)
+    exec(compile(ast.Module(body=[node], type_ignores=[]), native.results.__file__, "exec"),
+         vars(native.results))
+    params = dict(operation="read_original", profile_id=str(native.home), session_id=ref.session_id,
+                  submission_id="original-submission", input_sha256=control.input_digest("question"),
+                  admission_id=row["admission_id"])
+    calls_before = list(native.calls)
+    try:
+        first = control._read_original(native.home, params, "uid:994")
+        native.authority.epoch = 99
+        native.authority.instance_id = "successor-instance"
+        native.authority.pending_results.clear()
+        second = control._read_original(native.home, params, "uid:994")
+    finally:
+        conn.close()
+    assert first == second
+    assert first["answer"] == "[redacted]"
+    assert first["request_observation"] == {"status": "observed", "document": expected}
+    assert first["request_observation"]["document"]["scope"]["authority_epoch"] == 2
+    assert lookups == [{"admission_id": row["admission_id"]}] * 2
+    assert native.calls == calls_before  # No handler, assembly, provider or new admission.

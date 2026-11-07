@@ -129,9 +129,41 @@ actual provider request, full host permissions, model identity, held-out
 performance, or learning acceptance. The original C26 host-access issue remains
 separate.
 
-The current authenticated terminal projection from PR2170 does not expose this
-new outer document. A follow-on closed projection must read and validate the
-original retained document through that same authenticated owner, and EVAL must
-join genuine admissions, original outcomes, exact source facts, and real
-held-out judgments. No downstream EVAL record or validity receipt is created
-by this change.
+## Authenticated original-result projection
+
+The existing role-qualified private request `read_original` now returns
+`request_observation` beside the original answer and terminal metadata. Its
+status is `observed`, `missing`, or `invalid`. Only `observed` carries a
+`document`; missing or invalid metadata does not hide a valid native answer,
+alter success/failure, create an admission, or authorize replay. Unsettled
+admissions expose no terminal observation.
+
+The reader takes the document only from the outer saved result. Agent-generated
+same-named inner fields are ignored. It first qualifies the original principal,
+profile, session, submission, input digest and requested admission. It then
+joins the document's role, session, admission, stored authority epoch and
+execution generation to that original receipt. A missing generation cannot be
+manufactured. Historical reads compare historical identities, so a new owner's
+epoch cannot erase a retained observation. The instance label is bounded reported
+metadata: the admission row supplies no independent instance-identity join.
+
+The projection accepts exactly the producer's bounded fields, content digest
+representation, field ordering, error vocabulary and observation counts. Unknown
+fields, malformed identifiers, contradictory coverage, oversized data and true
+provider/model proof flags invalidate only the observation. Raw prompt content,
+unselected error text and arbitrary metadata cannot pass through this projection.
+A returned document is detached from owner storage.
+
+Source qualification includes a test that failed before this change because
+`read_original` dropped the outer evidence. The positive path executes the
+pinned upstream admission/assembly/compaction/codec bodies, retains the result
+in SQLite, and reads it through the original reader before and after a simulated
+owner restart. Native row lookup and environment edges are explicit doubles.
+Separate real AF_UNIX tests cover both Secretary and Meta role contracts and
+ensure a newer admission cannot replace the requested original result. These
+tests prove the composition, not an installed service or actual provider call.
+
+EVAL still must join genuine admissions, original outcomes, exact source facts
+and real held-out judgments. This projection creates no EVAL record, learning
+acceptance or validity receipt. The original C26 access hold and other activation
+boundaries remain separate.

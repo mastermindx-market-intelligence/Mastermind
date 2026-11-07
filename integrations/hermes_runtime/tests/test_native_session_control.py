@@ -437,3 +437,221 @@ def test_admission_fence_uses_same_transaction_and_native_busy_owner(monkeypatch
         guard(conn)
     assert checks == ["lineage", "idle", "lineage", "idle"]
     conn.close()
+
+
+def _original_observation(*, role="mmsecretary"):
+    return {
+        "schema": "mastermind.hermes_request_observation/v1",
+        "stage": "assembled_content_after_pre_request_hooks",
+        "scope": {"role": role, "session_id": "owned-session",
+                  "admission_id": "original-admission", "authority_epoch": 7,
+                  "execution_generation": 3, "instance_id": "original-instance"},
+        "observations": [{
+            "fields": ["messages"], "content_sha256": "a" * 64, "content_bytes": 21,
+            "canonicalization": "json_sorted_keys_utf8_no_spaces_v1",
+            "turn_id": "turn-A", "api_request_id": "request-A",
+            "api_call_count": 1, "retry_count": 0, "agent_session_id": "physical-session",
+        }],
+        "errors": [], "overflow": False, "coverage": "assembly_hooks_only",
+        "provider_dispatch_proven": False, "model_identity_verified": False,
+    }
+
+
+def test_original_outer_request_observation_reaches_authenticated_reader(original_terminal):
+    original_terminal.saved["mastermind_request_observation"] = _original_observation()
+    # Agent-generated inner content must never be promoted into owner metadata.
+    original_terminal.saved["result"]["mastermind_request_observation"] = {
+        "private": "UNTRUSTED-INNER-OBSERVATION",
+    }
+    original = copy.deepcopy(original_terminal.saved)
+    result = original_terminal.read()
+    assert result["request_observation"] == {
+        "status": "observed", "document": original["mastermind_request_observation"],
+    }
+    assert result["answer"] == original["result"]["final_response"]
+    assert "UNTRUSTED-INNER-OBSERVATION" not in json.dumps(result)
+    assert original_terminal.stored_reads == ["original-admission"]
+    assert original_terminal.saved == original
+    result["request_observation"]["document"]["scope"]["session_id"] = "changed-copy"
+    assert original_terminal.saved == original
+
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("role", "mmmeta"), ("session_id", "another-session"),
+    ("admission_id", "another-admission"), ("authority_epoch", 8),
+    ("execution_generation", 4), ("authority_epoch", True),
+    ("execution_generation", True), ("instance_id", "bad\ninstance"),
+])
+def test_request_observation_never_crosses_original_scope(original_terminal, field, bad):
+    doc = _original_observation()
+    doc["scope"][field] = bad
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "invalid"}
+    assert result["answer"] == "  café\n回答\t" and result["successful"] is True
+
+
+def test_explicit_original_admission_mismatch_refuses_before_result_read(original_terminal):
+    original_terminal.params["admission_id"] = "another-admission"
+    with pytest.raises(RuntimeRefusal, match="NATIVE_SECRETARY_ORIGINAL_MISMATCH"):
+        original_terminal.read()
+    assert original_terminal.stored_reads == []
+
+
+def test_missing_empty_invalid_observations_and_agent_spoof_stay_distinct(original_terminal):
+    original_terminal.saved["result"]["mastermind_request_observation"] = _original_observation()
+    assert original_terminal.read()["request_observation"] == {"status": "missing"}
+    doc = _original_observation()
+    doc.update(observations=[], coverage="no_assembly_observation")
+    original_terminal.saved["mastermind_request_observation"] = doc
+    empty = original_terminal.read()["request_observation"]
+    assert empty == {"status": "observed", "document": doc}
+    assert empty["document"]["provider_dispatch_proven"] is False
+    original_terminal.saved["mastermind_request_observation"] = None
+    assert original_terminal.read()["request_observation"] == {"status": "invalid"}
+
+
+@pytest.mark.parametrize("status", ["queued", "started", "unknown"])
+def test_unsettled_original_never_publishes_request_observation(original_terminal, status):
+    original_terminal.row["status"] = status
+    original_terminal.saved["mastermind_request_observation"] = _original_observation()
+    assert "request_observation" not in original_terminal.read()
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("schema", "other"), ("stage", "provider_dispatch"),
+    ("provider_dispatch_proven", True), ("model_identity_verified", True),
+    ("provider_dispatch_proven", 0), ("overflow", 0),
+    ("coverage", "complete"), ("errors", ["PRIVATE_ERROR"]),
+    ("errors", ["content_limit", "content_limit"]),
+    ("errors", {"content_limit": True}), ("observations", {}),
+    ("observations", [_original_observation()["observations"][0]] * 9),
+])
+def test_malformed_observation_never_hides_original_answer(original_terminal, field, bad):
+    doc = _original_observation()
+    doc[field] = bad
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "invalid"}
+    assert result["answer"] == "  café\n回答\t"
+    assert "PRIVATE_ERROR" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("content_sha256", "G" * 64), ("content_sha256", "a" * 63),
+    ("content_bytes", True), ("content_bytes", -1), ("content_bytes", 4 * 1024 * 1024 + 1),
+    ("canonicalization", "wire_payload"), ("fields", ["messages", "messages"]),
+    ("fields", ["system", "messages"]), ("fields", ["private_prompt"]),
+    ("fields", {"messages": True}), ("turn_id", "é" * 129),
+    ("turn_id", "bad\ud800"), ("turn_id", {"private": "secret"}),
+    ("api_call_count", True), ("retry_count", 2**53),
+    ("invalid_fields", ["turn_id"]), ("invalid_fields", ["unknown"]),
+])
+def test_malformed_event_is_not_forwarded(original_terminal, field, bad):
+    doc = _original_observation()
+    doc["observations"][0][field] = bad
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "invalid"}
+    assert result["successful"] is True
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("location", ["top", "scope", "event"])
+def test_observation_projection_rejects_unselected_sensitive_fields(original_terminal, location):
+    doc = _original_observation()
+    selected = {"top": doc, "scope": doc["scope"], "event": doc["observations"][0]}[location]
+    selected["prompt"] = "PRIVATE-PROMPT" * 65536
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "invalid"}
+    assert "PRIVATE-PROMPT" not in json.dumps(result)
+    assert result["answer"] == "  café\n回答\t"
+
+
+def test_observation_size_budget_preserves_answer(original_terminal, monkeypatch):
+    from integrations.hermes_runtime import native_request_observation as observation
+    original_terminal.saved["mastermind_request_observation"] = _original_observation()
+    monkeypatch.setattr(observation, "MAX_METADATA_BYTES", 128)
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "invalid"}
+    assert result["successful"] is True
+
+
+def test_observation_preserves_partial_coverage_and_invalid_identifier_markers(original_terminal):
+    doc = _original_observation()
+    del doc["observations"][0]["turn_id"]
+    doc["observations"][0]["invalid_fields"] = ["turn_id"]
+    doc.update(errors=["content_limit", "observation_failed"], overflow=True)
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "observed", "document": doc}
+    assert result["request_observation"]["document"]["provider_dispatch_proven"] is False
+
+
+@pytest.mark.parametrize("field,bad", [("owner_epoch", True), ("generation", True)])
+def test_observation_cannot_coerce_boolean_admission_identity(original_terminal, field, bad):
+    original_terminal.row[field] = bad
+    original_terminal.saved["mastermind_request_observation"] = _original_observation()
+    with pytest.raises(RuntimeRefusal, match="NATIVE_SECRETARY_RECEIPT_MISMATCH"):
+        original_terminal.read()
+    assert original_terminal.stored_reads == []
+
+
+def test_missing_stored_generation_does_not_manufacture_observation_proof(original_terminal):
+    original_terminal.row["generation"] = None
+    original_terminal.saved["mastermind_request_observation"] = _original_observation()
+    result = original_terminal.read()
+    assert result["request_observation"] == {"status": "invalid"}
+    assert result["answer"] == "  café\n回答\t"
+
+
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_historical_observation_flows_over_one_original_socket_request(
+        original_terminal, monkeypatch, tmp_path, role):
+    doc = _original_observation(role=role)
+    original_terminal.saved["mastermind_request_observation"] = doc
+    second = copy.deepcopy(original_terminal.saved)
+    second["mastermind_request_observation"]["scope"]["admission_id"] = "later-admission"
+    second["mastermind_request_observation"]["observations"][0]["content_sha256"] = "b" * 64
+    results = {"original-admission": original_terminal.saved, "later-admission": second}
+    def stored(_db, admission_id):
+        original_terminal.stored_reads.append(admission_id)
+        return results[admission_id]
+    module(monkeypatch, "gateway.session_results", admission_result=stored)
+    # There is no current authority/runner in this restarted reader. It must
+    # read the historical stored epoch, never observe or submit a new turn.
+    left, right = socket.socketpair()
+    requests = []
+    def serve():
+        with right:
+            raw = bytearray()
+            while b"\n" not in raw:
+                raw.extend(right.recv(65536))
+            request = json.loads(raw)
+            requests.append(request)
+            result = control._read_original(tmp_path, request["params"], "uid:994", role=role)
+            right.sendall(json.dumps(dict(protocol=1, id=1, ok=True, result=result)).encode() + b"\n")
+    worker = threading.Thread(target=serve)
+    worker.start()
+    module(monkeypatch, "hermes_cli.gateway_runtime_discovery", connect_private=lambda *a: left)
+    result = control.NativeSecretaryClient(tmp_path, role=role).read_original(
+        session_id="owned-session", submission_id="original-submission",
+        input_sha256=control.input_digest("question"), admission_id="original-admission")
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert len(requests) == 1 and requests[0]["params"]["operation"] == "read_original"
+    assert requests[0]["verb"] == control.conversation_contract(role).native_verb
+    assert original_terminal.lookups == [{"admission_id": "original-admission"}]
+    assert original_terminal.stored_reads == ["original-admission"]
+    assert result["request_observation"] == {"status": "observed", "document": doc}
+    assert result["request_observation"]["document"]["scope"]["authority_epoch"] == 7
+    assert "b" * 64 not in json.dumps(result)
+
+
+def test_foreign_observation_in_original_storage_is_withheld(original_terminal):
+    doc = _original_observation()
+    doc["scope"]["admission_id"] = "later-admission"
+    original_terminal.saved["mastermind_request_observation"] = doc
+    assert original_terminal.read()["request_observation"] == {"status": "invalid"}

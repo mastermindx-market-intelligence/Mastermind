@@ -298,3 +298,45 @@ The M2 installation refusal and Ubuntu1 C26 journal-access hold are not cleared
 by these source edits. Source publication, merge, installation and real-path
 acceptance remain separate. No 99% availability claim is made without measured
 accepted-task outcomes.
+
+### P3/P7 source qualification for the first continuation slice
+
+The original-result projection is now implemented with exact original-admission
+matching, a closed bounded observation validator, and separate missing/invalid/
+observed states. The regression failed before the repair with a missing
+`request_observation` field. Focused validation now passes **160 tests** on
+Python 3.14.7, including the actual pinned producer/codec/SQLite-read composition,
+historical-owner recovery and one-request AF_UNIX paths for both role contracts.
+No provider was invoked.
+
+A broader M2 runtime/harness run produced 691 passed, 46 skipped, 353 passed
+subtests and 83 failures. The bounded diagnostic identifies Linux-only
+`/proc`/systemd/loopback assumptions and the enrolled workspace volume's space
+in `/Volumes/Mastermind 2` being rejected by existing runtime path guards.
+These are not reported as passing tests; canonical Linux hosted qualification
+is still required. Existing guards were not relaxed and fixture permission
+side effects were restored. Source self-check and `git diff --check` pass.
+The first installed consumer and the original multi-day reliability/learning
+acceptance remain unfinished.
+
+### Next P3/P7 native-owner repairs
+
+Two additional counterexamples are confirmed on the unchanged native owner blobs
+also present at protected `615146aac6a1b0c0933bc9b815517a2fd285ed4a`:
+
+- P3 original-run recovery: exclusive packet persistence can precede request JSON
+  publication. A crash in between currently reads as `NOT_FOUND`, although the
+  request writer correctly refuses to replace that same run. Extend the incumbent
+  inspector's existing unknown/unverified disposition; retain original bytes,
+  expose no unattested identity or content, and permit no new controller.
+- P7 serialized host admission: default live load is sampled before the blocking
+  `.admission.lock`. Sample inside that same existing lock before evaluation;
+  preserve explicit fixture injection, all headroom thresholds and atomic marker
+  ownership. A real lock-contention test must reject a waiter when load rises
+  before the lock becomes available.
+
+The native `candidate/fabric_task.py` and `candidate/lane_runtime.py` paths are
+absent from the current #2175/#2007 changed-path lists. Shared historical release
+manifests remain owned by their original carriers; qualify changes through the
+existing immutable forward-composition builder without rewriting old receipts.
+These fixes do not clear held attempts, re-enroll hosts or claim measured uptime.
