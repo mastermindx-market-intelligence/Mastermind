@@ -17,11 +17,13 @@ else:
 ROOT = Path(__file__).resolve().parent
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 LEGACY_PACKAGES = ("packages/api/remote-access", "packages/api/gateway", "packages/api/remotes")
-PACKAGES = (*LEGACY_PACKAGES, "packages/api/session-controller")
+PACKAGES = (*LEGACY_PACKAGES, "packages/api/session-controller", "packages/client/connection", "packages/client/file-upload")
 PREFIXES = tuple(package + "/src/" for package in PACKAGES)
 CHANGED_V1 = frozenset((PREFIXES[0] + "index.ts", PREFIXES[0] + "types.ts",
                         PREFIXES[1] + "index.ts", PREFIXES[1] + "types.ts", PREFIXES[2] + "index.ts"))
-CHANGED = CHANGED_V1 | {PREFIXES[3] + "index.ts", PREFIXES[3] + "list.ts", PREFIXES[3] + "commands.ts"}
+CHANGED_V2 = CHANGED_V1 | {PREFIXES[3] + "index.ts", PREFIXES[3] + "list.ts", PREFIXES[3] + "commands.ts"}
+CHANGED = CHANGED_V2 | {PREFIXES[4] + "index.ts", PREFIXES[4] + "rpc.ts", PREFIXES[4] + "rpc-host.ts",
+                        PREFIXES[5] + "index.ts", PREFIXES[5] + "http-route.ts"}
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -31,9 +33,11 @@ def validate_manifest(value: dict, patch: bytes) -> dict:
             or type(value.get("base_sha256")) is not dict
             or type(value.get("output_sha256")) is not dict):
         raise ValueError("native access source manifest refused")
-    current = value.get("schema") == "mastermind.dsh_native_access_source.v2"
-    changed = CHANGED if current else CHANGED_V1
-    if (value.get("schema") not in {"mastermind.dsh_native_access_source.v1", "mastermind.dsh_native_access_source.v2"}
+    version = value.get("schema")
+    current = version != "mastermind.dsh_native_access_source.v1"
+    changed = CHANGED if version == "mastermind.dsh_native_access_source.v3" else CHANGED_V2 if current else CHANGED_V1
+    prefixes = PREFIXES if version == "mastermind.dsh_native_access_source.v3" else PREFIXES[:4] if current else PREFIXES[:3]
+    if (version not in {"mastermind.dsh_native_access_source.v1", "mastermind.dsh_native_access_source.v2", "mastermind.dsh_native_access_source.v3"}
             or value.get("donor_sha") != PIN or value.get("production_armed") is not False
             or set(value["output_sha256"]) != changed
             or set(value["base_sha256"]) != set(value["source_sha256"])
@@ -43,7 +47,7 @@ def validate_manifest(value: dict, patch: bytes) -> dict:
     for mapping in ("source_sha256", "base_sha256", "output_sha256"):
         for name, digest in value[mapping].items():
             path = PurePosixPath(name)
-            if (path.is_absolute() or ".." in path.parts or not name.startswith(PREFIXES if current else PREFIXES[:3])
+            if (path.is_absolute() or ".." in path.parts or not name.startswith(prefixes)
                     or path.suffix != ".ts" or type(digest) is not str or len(digest) != 64
                     or any(c not in "0123456789abcdef" for c in digest)):
                 raise ValueError("native access source path or digest refused")
@@ -93,8 +97,9 @@ def host_source(expected: dict):
     return module, host
 
 def prepared_receipt(expected: dict) -> dict:
-    current = expected["schema"] == "mastermind.dsh_native_access_source.v2"
-    return {"schema": "mastermind.dsh_native_access_prepared.v2" if current else "mastermind.dsh_native_access_prepared.v1", "donor_sha": PIN,
+    current = expected["schema"] != "mastermind.dsh_native_access_source.v1"
+    version = expected["schema"].rsplit(".", 1)[1]
+    return {"schema": "mastermind.dsh_native_access_prepared." + version, "donor_sha": PIN,
             **({"session_patch_sha256": expected["session_patch_sha256"]} if current else {}),
             "patch_sha256": expected["patch_sha256"], "host_patch_sha256": expected["host_patch_sha256"],
             "source_files": len(expected["source_sha256"]),
@@ -181,7 +186,7 @@ def prepare(supplied: str) -> dict:
             native_session.apply_to_owned_tree(cache, donor)
         host_module.apply_to_owned_tree(cache, donor)
     receipt = apply_to_owned_tree(cache, donor)
-    packages = PACKAGES if session_source(expected) is not None else LEGACY_PACKAGES
+    packages = PACKAGES if expected["schema"] == "mastermind.dsh_native_access_source.v3" else PACKAGES[:4] if session_source(expected) is not None else LEGACY_PACKAGES
     for package in set(packages) | set(host_module.PACKAGES):
         modules, installed = cache / package / "node_modules", donor / package / "node_modules"
         if modules.is_symlink():

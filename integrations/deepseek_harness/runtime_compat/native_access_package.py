@@ -59,7 +59,7 @@ def _host_record(raw: bytes, patch: bytes, expected: dict, session: dict | None)
 def _inputs(raw: dict[str, bytes]) -> tuple[dict, dict]:
     expected = access.validate_manifest(json.loads(raw["access_source"]), raw["access_patch"])
     session = None
-    if expected["schema"] == "mastermind.dsh_native_access_source.v2":
+    if expected["schema"] != "mastermind.dsh_native_access_source.v1":
         session = access.native_session.validate_manifest(json.loads(raw["session_source"]), raw["session_patch"])
         if (digest(raw["session_source"]) != expected["session_manifest_sha256"]
                 or session["patch_sha256"] != expected["session_patch_sha256"]

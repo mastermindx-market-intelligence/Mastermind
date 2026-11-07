@@ -13,7 +13,7 @@ if(createHash("sha256").update(hostBytes).digest("hex")!==access.host_manifest_s
   throw Error("Owner access requires its exact host composition");
 const host=JSON.parse(hostBytes.toString()),session=JSON.parse(readFileSync(resolve(here,"native-session-source.json"),"utf8"));
 const candidate=resolve(here,".cache/native-access",access.patch_sha256);
-const sessionRoot=access.schema==="mastermind.dsh_native_access_source.v2"?candidate:resolve(here,".cache/native-session");
+const sessionRoot=access.schema!=="mastermind.dsh_native_access_source.v1"?candidate:resolve(here,".cache/native-session");
 for(const [root,files] of [
   [candidate,{...host.source_sha256,...host.output_sha256,...access.base_sha256,...access.output_sha256}],
   [sessionRoot,{...session.source_sha256,...session.output_sha256,...(sessionRoot===candidate?access.output_sha256:{})}],
@@ -26,7 +26,8 @@ const parsed=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFi
 if(parsed.error)throw Error("Native source paths unavailable");
 const roots=["packages/core/agent/src","packages/core/agent-loop/src","apps/cli/src",
   "packages/typert/protocol/src","packages/client/connection/src",
-  "packages/api/remote-access/src","packages/api/gateway/src","packages/api/remotes/src"];
+  "packages/api/remote-access/src","packages/api/gateway/src","packages/api/remotes/src",
+  ...(access.schema==="mastermind.dsh_native_access_source.v3"?["packages/client/file-upload/src"]:[])];
 const sessionSource=resolve(donor,"packages/api/session-controller/src");
 const redirect=(path:string)=>{
   if(path===sessionSource||path.startsWith(sessionSource+"/"))
@@ -50,9 +51,9 @@ export default defineConfig({
     const path=id.startsWith(".")&&importer?resolve(dirname(importer),id):id.startsWith("/")?id:undefined;
     if(path){const mapped=redirect(path);if(mapped!==path)return mapped;}
   }},shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_SEARCH_REGRESSION==="1"?[resolve(donor,"packages/api/session-controller/tests/session-search.host.spec.ts")]:regression?[
+  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_UPLOAD_REGRESSION==="1"?[resolve(donor,"packages/client/file-upload/tests/file-upload-http.host.spec.ts")]:process.env.MMX_NATIVE_ACCESS_SEARCH_REGRESSION==="1"?[resolve(donor,"packages/api/session-controller/tests/session-search.host.spec.ts")]:regression?[
     resolve(donor,"packages/api/remote-access/tests/**/*.host.spec.ts"),
     resolve(donor,"packages/api/gateway/tests/gateway*.host.spec.ts"),
-  ]:["native-owner-access.test.ts","native-owner-hold.test.ts"],
+  ]:["native-owner-access.test.ts","native-owner-hold.test.ts","native-owner-upload.test.ts"],
   maxWorkers:1,fileParallelism:false,testTimeout:15000,hookTimeout:15000,execArgv:shared.vitestExecArgv},
 });

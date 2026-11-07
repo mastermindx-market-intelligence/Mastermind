@@ -793,62 +793,41 @@
            next,
          )
        }) as never)
---- a/packages/api/session-controller/src/commands.ts
-+++ b/packages/api/session-controller/src/commands.ts
-@@ -316,19 +316,25 @@
-    * @param source - the `user-rpc` source recorded on the accepted message.
-    * @returns acknowledgement that the Agent accepted the prompt.
-    */
--  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal): Promise<SessionPromptValue> {
--    signal?.throwIfAborted()
-+  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal,
-+    requireAccess?: () => void): Promise<SessionPromptValue> {
-+    const assertCurrent = (): void => {
-+      signal?.throwIfAborted()
-+      requireAccess?.()
-+      signal?.throwIfAborted()
-+    }
-+    assertCurrent()
-     const agent = await this.resolveAgent(request.sessionId, signal)
--    signal?.throwIfAborted()
-+    assertCurrent()
-     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
-     const hasImage = request.content.some(part => part.type === 'image')
-     const admit = async (): Promise<SessionPromptValue> => {
--      signal?.throwIfAborted()
-+      assertCurrent()
-       try {
-         if (hasImage) {
-           const current = this.agents.selectionFor(agent).current
-           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
--          signal?.throwIfAborted()
-+          assertCurrent()
-           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
-             throw new RemoteError(
-               'session/attachment-invalid',
-@@ -342,7 +348,7 @@
-           receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
-         )
-         const content = await this.ctx.attachments.admitPromptContent(admission.content)
--        signal?.throwIfAborted()
-+        assertCurrent()
-         const message: UserMessage = createUserMessage({ content, source })
-         if (this.ctx.agents.get(agent.id) !== agent) {
-           throw new RemoteError(
-@@ -351,8 +357,8 @@
-             { sessionId: agent.id },
-           )
-         }
--        // No await separates current cancellation from the original durable enqueue.
--        signal?.throwIfAborted()
-+        // No await separates current access/cancellation from the original durable enqueue.
-+        assertCurrent()
-         using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
-         if (request.mode === 'steer') agent.steer(message)
-         else agent.followup(message)
 --- a/packages/api/session-controller/src/index.ts
 +++ b/packages/api/session-controller/src/index.ts
-@@ -279,17 +279,24 @@
+@@ -161,10 +161,29 @@
+     installModelSelectionProjection(ctx)
+     this.agents = new ApiSessionAgentController(ctx)
+     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
+-    ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId) => {
+-      const result = await this.agents.resolveAgent(sessionId)
++    ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId, signal) => {
++      const result = await this.agents.resolveAgent(sessionId, signal)
+       if ('error' in result) throw result.error
+       return result.agent
++    }, (request, peer, signal) => {
++      const access = ctx.remoteAccess.captureOwnerRestriction()
++      if (access === undefined) return undefined
++      const args = { agentId: request.sessionId, request: {
++        ...(request.name === undefined ? {} : { name: request.name }),
++      } }
++      const requireCurrent = (): void => {
++        access.requireCurrent()
++        signal.throwIfAborted()
++        peer.signal.throwIfAborted()
++        const decision = ctx.remoteAccess.decide({ principal: peer.principal,
++          action: 'fileUploads/upload', resources: [{ kind: 'session', id: request.sessionId }], args })
++        if (decision.kind !== 'allow') {
++          throw new RemoteError('remote-access/denied', 'native upload access is unavailable',
++            { action: 'fileUploads/upload', reason: decision.reason })
++        }
++      }
++      requireCurrent()
++      return Object.freeze({ signal: access.signal, requireCurrent })
+     }), 'session-controller: file-upload Agent resolver')
+     this.controlState = new SessionControlController(ctx)
+     // Registered before history so reverse-order teardown closes every
+@@ -279,17 +298,24 @@
    }
 
    /**
@@ -878,7 +857,7 @@
    }
 
    /**
-@@ -482,7 +489,27 @@
+@@ -482,7 +508,27 @@
        ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
        ...(principal === undefined ? {} : { principal }),
      }
@@ -967,3 +946,481 @@
        }
      } catch (error: unknown) {
        signal.throwIfAborted()
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -316,19 +316,25 @@
+    * @param source - the `user-rpc` source recorded on the accepted message.
+    * @returns acknowledgement that the Agent accepted the prompt.
+    */
+-  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal): Promise<SessionPromptValue> {
+-    signal?.throwIfAborted()
++  async prompt(request: SessionPromptRequest, source: MessageSource, signal?: AbortSignal,
++    requireAccess?: () => void): Promise<SessionPromptValue> {
++    const assertCurrent = (): void => {
++      signal?.throwIfAborted()
++      requireAccess?.()
++      signal?.throwIfAborted()
++    }
++    assertCurrent()
+     const agent = await this.resolveAgent(request.sessionId, signal)
+-    signal?.throwIfAborted()
++    assertCurrent()
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+     const hasImage = request.content.some(part => part.type === 'image')
+     const admit = async (): Promise<SessionPromptValue> => {
+-      signal?.throwIfAborted()
++      assertCurrent()
+       try {
+         if (hasImage) {
+           const current = this.agents.selectionFor(agent).current
+           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
+-          signal?.throwIfAborted()
++          assertCurrent()
+           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+             throw new RemoteError(
+               'session/attachment-invalid',
+@@ -342,7 +348,7 @@
+           receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
+         )
+         const content = await this.ctx.attachments.admitPromptContent(admission.content)
+-        signal?.throwIfAborted()
++        assertCurrent()
+         const message: UserMessage = createUserMessage({ content, source })
+         if (this.ctx.agents.get(agent.id) !== agent) {
+           throw new RemoteError(
+@@ -351,8 +357,8 @@
+             { sessionId: agent.id },
+           )
+         }
+-        // No await separates current cancellation from the original durable enqueue.
+-        signal?.throwIfAborted()
++        // No await separates current access/cancellation from the original durable enqueue.
++        assertCurrent()
+         using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
+         if (request.mode === 'steer') agent.steer(message)
+         else agent.followup(message)
+--- a/packages/client/connection/src/index.ts
++++ b/packages/client/connection/src/index.ts
+@@ -20,6 +20,8 @@
+   ConnectionFetchMethod,
+   ConnectionFetchHandler,
+   ConnectionFetchRoute,
++  ConnectionFetchAccess,
++  ConnectionFetchContext,
+   ConnectionIndexRequest,
+   ConnectionIndexResponse,
+   ConnectionRpcEndpointMatcher,
+--- a/packages/client/connection/src/rpc.ts
++++ b/packages/client/connection/src/rpc.ts
+@@ -149,6 +149,17 @@
+ /** How the node:http bridge presents one request body to its Fetch route. */
+ export type ConnectionRequestBodyMode = 'buffered' | 'streaming'
+
++/** The existing owner restriction, retained for one exact native Fetch request. */
++export interface ConnectionFetchAccess {
++  readonly signal: AbortSignal
++  requireCurrent(): void
++}
++
++/** Original authenticated Peer and joined request lifetime; never serialized. */
++export interface ConnectionFetchContext extends ConnectionFetchAccess {
++  readonly peer: PeerScope
++}
++
+ /** One exact, transport-independent Fetch route owned by a Host feature. */
+ export interface ConnectionFetchRoute {
+   /** Absolute path below `/api`; query parameters remain available on the request URL. */
+@@ -162,7 +173,9 @@
+    * authentication policy. Only owner Peers reach an exact route; the shared
+    * handler answers 403 for every other principal.
+    */
+-  readonly fetch: (request: Request) => Promise<Response>
++  readonly fetch: (request: Request, access?: ConnectionFetchContext) => Promise<Response>
++  /** Trusted native route registration; absent routes keep the required-owner hold. */
++  readonly ownerAccess?: (request: Request, peer: PeerScope) => ConnectionFetchAccess
+ }
+
+ /** Host registry for exact Fetch routes that cannot use JSON Remote invocation. */
+--- a/packages/client/connection/src/rpc-host.ts
++++ b/packages/client/connection/src/rpc-host.ts
+@@ -22,6 +22,8 @@
+   ConnectionIndexResponse,
+   ConnectionFetchRoute,
+   ConnectionFetchHandler,
++  ConnectionFetchAccess,
++  ConnectionFetchContext,
+   HostConnectionFetch,
+   ConnectionRpcEndpointMatcher,
+   ConnectionRpcFailure,
+@@ -51,6 +53,8 @@
+   readonly methods: ReadonlySet<string>
+   readonly requestBody: ConnectionFetchRoute['requestBody']
+   readonly fetch: ConnectionFetchRoute['fetch']
++  readonly ownerAccess: ConnectionFetchRoute['ownerAccess']
++  readonly lifetime: AbortController
+ }
+
+ interface ConnectionServerResponse {
+@@ -220,7 +224,8 @@
+         if (route?.methods.has(request.method) === true) {
+           // Exact routes bypass Gateway access checks, so only the owner reaches them.
+           // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))
++          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))
++          if (this.ownerRestricted) return this.fetchRestrictedOwner(route, request, peer, pathname)
+           return route.fetch(request)
+         }
+         const endpoint = endpointFromPath(channel, pathname)
+@@ -233,23 +238,71 @@
+     }
+   }
+
++  private async fetchRestrictedOwner(
++    route: RegisteredFetchRoute, request: Request, peer: PeerScope, pathname: string,
++  ): Promise<Response> {
++    try {
++      request.signal.throwIfAborted()
++      peer.signal.throwIfAborted()
++      if (route.ownerAccess === undefined) throw new Error('required owner route unavailable')
++      const source: ConnectionFetchAccess = route.ownerAccess(request, peer)
++      if (source === null || typeof source !== 'object'
++        || typeof (source as unknown as PromiseLike<unknown>).then === 'function' || !(source.signal instanceof AbortSignal)
++        || typeof source.requireCurrent !== 'function') {
++        // A runtime-cast asynchronous registration must not become an allowance.
++        if (source && typeof (source as unknown as PromiseLike<unknown>).then === 'function') {
++          void Promise.resolve(source).catch(() => undefined)
++        }
++        throw new Error('required owner route source invalid')
++      }
++      const sourceSignal = source.signal, sourceGuard = source.requireCurrent
++      const signal = AbortSignal.any([request.signal, peer.signal, sourceSignal, route.lifetime.signal])
++      const requireCurrent = (): void => {
++        signal.throwIfAborted()
++        if (this.fetchRoutes.get(pathname) !== route || source.signal !== sourceSignal
++          || source.requireCurrent !== sourceGuard) throw new Error('original native route retired')
++        const value: unknown = sourceGuard()
++        if (value !== undefined) {
++          if (value && typeof (value as PromiseLike<unknown>).then === 'function') {
++            void Promise.resolve(value).catch(() => undefined)
++          }
++          throw new Error('native route currentness must be synchronous')
++        }
++        signal.throwIfAborted()
++      }
++      requireCurrent()
++      const access: ConnectionFetchContext = Object.freeze({ peer, signal, requireCurrent })
++      const response = await route.fetch(new Request(request, { signal }), access)
++      requireCurrent()
++      return response
++    } catch {
++      return new Response('forbidden', { status: 403 })
++    }
++  }
++
+   private registerFetchRoute(
+     owner: Context,
+     route: ConnectionFetchRoute,
+   ): () => Promise<void> {
+     assertFetchRoute(route)
++    const path = route.path
+     const registered: RegisteredFetchRoute = {
+       methods: new Set(route.methods),
+       requestBody: route.requestBody,
+       fetch: route.fetch,
++      ownerAccess: route.ownerAccess,
++      lifetime: new AbortController(),
+     }
+     return owner.effect(() => {
+-      if (this.fetchRoutes.has(route.path)) {
+-        throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} is already registered`)
+-      }
+-      this.fetchRoutes.set(route.path, registered)
+-      return () => { this.fetchRoutes.delete(route.path) }
+-    }, `client-connection: ${route.path} Fetch route`)
++      if (this.fetchRoutes.has(path)) {
++        throw new Error(`connection: exact Fetch route ${JSON.stringify(path)} is already registered`)
++      }
++      this.fetchRoutes.set(path, registered)
++      return () => {
++        registered.lifetime.abort()
++        if (this.fetchRoutes.get(path) === registered) this.fetchRoutes.delete(path)
++      }
++    }, `client-connection: ${path} Fetch route`)
+   }
+
+   private register(
+--- a/packages/client/file-upload/src/index.ts
++++ b/packages/client/file-upload/src/index.ts
+@@ -5,6 +5,8 @@
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
+ import type {} from '@deepseek-ai/dsh-client-connection'
++import type { ConnectionFetchAccess, ConnectionFetchContext } from '@deepseek-ai/dsh-client-connection'
++import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+ import type { CommandFileReceiptResolver } from '@deepseek-ai/dsh-commands'
+ import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+@@ -28,7 +30,19 @@
+ }
+
+ /** Resolve or resume the ordinary Agent that owns one Session identity. */
+-export type AgentResolver = (sessionId: SessionId) => Promise<Agent>
++export type AgentResolver = (sessionId: SessionId, signal?: AbortSignal) => Promise<Agent>
++
++/** Same Session resolver owner supplies the original native access decision. */
++export type AgentUploadAccess = (
++  request: { readonly sessionId: SessionId; readonly name?: string },
++  peer: PeerScope, signal: AbortSignal,
++) => ConnectionFetchAccess | undefined
++
++interface AgentResolverEntry {
++  readonly resolve: AgentResolver
++  readonly access: AgentUploadAccess | undefined
++  readonly lifetime: AbortController
++}
+
+ /** Prompt receipt binding that restores its previous owners unless delivery commits it. */
+ export interface PromptFileBinding extends Disposable {
+@@ -57,7 +71,7 @@
+   static inject = ['agents', 'attachments', 'commands', 'connection']
+
+   private readonly stagedFiles = new WeakMap<Session, Map<FileUploadReceiptId, StagedFileUpload>>()
+-  private agentResolver: AgentResolver | undefined
++  private agentResolver: AgentResolverEntry | undefined
+
+   /** @param ctx - Host context carrying Agent, attachment, command, and Connection services. */
+   constructor(ctx: Context) {
+@@ -73,7 +87,8 @@
+         path: FILE_UPLOAD_PATH,
+         methods: ['POST'],
+         requestBody: 'streaming',
+-        fetch: request => handleFileUploadHttp(this, request),
++        fetch: (request, access) => handleFileUploadHttp(this, request, access),
++        ownerAccess: (request, peer) => this.uploadAccess(request, peer),
+       }),
+       'file-upload: streaming route',
+     )
+@@ -81,16 +96,64 @@
+     ctx.on('session/disposed', (session) => { this.stagedFiles.delete(session) })
+   }
+
++  /** Exact native upload route; the Session controller owns its access source. */
++  private uploadAccess(request: Request, peer: PeerScope): ConnectionFetchAccess {
++    const url = new URL(request.url), id = url.searchParams.get('sessionId')
++    if (!id) throw new Error('native upload Session required')
++    const name = url.searchParams.get('name') ?? undefined
++    const access = this.captureUploadAccess({ sessionId: id as SessionId,
++      ...(name === undefined ? {} : { name }) }, peer, request.signal)
++    if (access === undefined) throw new Error('required native upload source unavailable')
++    return access
++  }
++
++  private captureUploadAccess(
++    request: { readonly sessionId: SessionId; readonly name?: string }, peer: PeerScope, signal: AbortSignal,
++  ): ConnectionFetchAccess | undefined {
++    const entry = this.agentResolver
++    const source = entry?.access?.(request, peer, signal)
++    if (source === undefined) return undefined
++    if (source === null || typeof source !== 'object'
++        || typeof (source as unknown as PromiseLike<unknown>).then === 'function' || !(source.signal instanceof AbortSignal)
++      || typeof source.requireCurrent !== 'function') {
++      if (source && typeof (source as unknown as PromiseLike<unknown>).then === 'function') {
++        void Promise.resolve(source).catch(() => undefined)
++      }
++      throw new Error('original upload access source invalid')
++    }
++    const sourceSignal = source.signal, sourceGuard = source.requireCurrent
++    const lifetime = AbortSignal.any([signal, peer.signal, sourceSignal, entry!.lifetime.signal])
++    const requireCurrent = (): void => {
++      lifetime.throwIfAborted()
++      if (this.agentResolver !== entry || source.signal !== sourceSignal
++        || source.requireCurrent !== sourceGuard) throw new Error('original upload resolver retired')
++      const result: unknown = sourceGuard()
++      if (result !== undefined) {
++        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
++          void Promise.resolve(result).catch(() => undefined)
++        }
++        throw new Error('upload currentness must be synchronous')
++      }
++      lifetime.throwIfAborted()
++      if (this.agentResolver !== entry || source.signal !== sourceSignal
++        || source.requireCurrent !== sourceGuard) throw new Error('original upload resolver retired')
++    }
++    requireCurrent()
++    return Object.freeze({ signal: lifetime, requireCurrent })
++  }
++
+   /**
+    * Register the ordinary-Session resolver used when a raw upload addresses a cold Session.
+    * @param resolve - resolver that returns the exact live Agent or throws a Remote error.
+    * @returns disposer removing this resolver.
+    */
+-  registerAgentResolver(resolve: AgentResolver): () => void {
++  registerAgentResolver(resolve: AgentResolver, access?: AgentUploadAccess): () => void {
+     if (this.agentResolver !== undefined) throw new Error('file-upload: Agent resolver is already registered')
+-    this.agentResolver = resolve
++    const entry: AgentResolverEntry = { resolve, access, lifetime: new AbortController() }
++    this.agentResolver = entry
+     return () => {
+-      if (this.agentResolver === resolve) this.agentResolver = undefined
++      entry.lifetime.abort()
++      if (this.agentResolver === entry) this.agentResolver = undefined
+     }
+   }
+
+@@ -104,10 +167,20 @@
+   @Remote('upload')
+   upload(agent: Agent, request: EncodedFileUploadRequest, signal: AbortSignal): Promise<FileUploadValue> {
+     signal.throwIfAborted()
++    const peer = this.ctx.invocation?.peer
++    const access = peer?.principal.kind === 'owner'
++      ? this.captureUploadAccess({ sessionId: agent.session.id,
++        ...(request.name === undefined ? {} : { name: request.name }) }, peer, signal) : undefined
++    const lifetime = access === undefined ? signal : AbortSignal.any([signal, access.signal])
++    const requireCurrent = (): void => {
++      lifetime.throwIfAborted()
++      access?.requireCurrent()
++      lifetime.throwIfAborted()
++    }
+     return this.commit(agent, async () => this.ctx.attachments.admitEncodedFile({
+       data: request.data,
+       ...(request.name === undefined ? {} : { name: request.name }),
+-    }))
++    }), requireCurrent)
+   }
+
+   /**
+@@ -120,13 +193,37 @@
+     readonly data: AsyncIterable<Uint8Array>
+     readonly signal?: AbortSignal
+     readonly name?: string
++    readonly access?: ConnectionFetchContext
+   }): Promise<FileUploadValue> {
+-    const agent = await this.resolveAgent(request.sessionId)
++    const requireCurrent = (): void => {
++      request.signal?.throwIfAborted()
++      request.access?.requireCurrent()
++      request.signal?.throwIfAborted()
++    }
++    requireCurrent()
++    // Company uploads belong to the writer admitted by its original operation.
++    // Opening a cold writer requires the original explicit resume, not upload.
++    if (request.access !== undefined && this.ctx.agents.get(request.sessionId) === undefined) {
++      throw new RemoteError('session/not-found', 'Open the conversation before uploading a file.',
++        { sessionId: request.sessionId })
++    }
++    const agent = await this.resolveAgent(request.sessionId, request.signal)
++    requireCurrent()
++    if (agent.session.id !== request.sessionId) throw new Error('original upload Session differs')
++    async function* chunks(): AsyncIterable<Uint8Array> {
++      requireCurrent()
++      for await (const chunk of request.data) {
++        requireCurrent()
++        yield chunk
++        requireCurrent()
++      }
++      requireCurrent()
++    }
+     return this.commit(agent, async () => this.ctx.attachments.saveFileStream({
+-      data: request.data,
++      data: chunks(),
+       ...(request.signal === undefined ? {} : { signal: request.signal }),
+       ...(request.name === undefined ? {} : { name: request.name }),
+-    }))
++    }), requireCurrent)
+   }
+
+   /**
+@@ -176,7 +273,8 @@
+     this.retire(agent.session, requestId)
+   }
+
+-  private async commit(agent: Agent, save: () => Promise<FileAttachmentRef>): Promise<FileUploadValue> {
++  private async commit(agent: Agent, save: () => Promise<FileAttachmentRef>, requireCurrent?: () => void): Promise<FileUploadValue> {
++    requireCurrent?.()
+     this.assertOrdinaryAgent(agent)
+     let file: FileAttachmentRef
+     try {
+@@ -192,6 +290,7 @@
+         { cause: error },
+       )
+     }
++    requireCurrent?.()
+     if (this.ctx.agents.get(agent.id) !== agent) {
+       throw new RemoteError(
+         'session/not-found',
+@@ -209,14 +308,15 @@
+     return { receiptId, file }
+   }
+
+-  private async resolveAgent(sessionId: SessionId): Promise<Agent> {
++  private async resolveAgent(sessionId: SessionId, signal?: AbortSignal): Promise<Agent> {
++    signal?.throwIfAborted()
+     const live = this.ctx.agents.get(sessionId)
+     if (live !== undefined) return live
+     const resolver = this.agentResolver
+     if (resolver === undefined) {
+       throw new RemoteError('session/not-found', `session "${sessionId}" is not attached`, { sessionId })
+     }
+-    return resolver(sessionId)
++    return resolver.resolve(sessionId, signal)
+   }
+
+   private assertOrdinaryAgent(agent: Agent): void {
+--- a/packages/client/file-upload/src/http-route.ts
++++ b/packages/client/file-upload/src/http-route.ts
+@@ -4,6 +4,7 @@
+ import type { SessionId } from '@deepseek-ai/dsh-session'
+ import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+ import type { FileUploads } from './index.ts'
++import type { ConnectionFetchContext } from '@deepseek-ai/dsh-client-connection'
+ import type { FileUploadValue } from './types.ts'
+
+ type FileUploadHttpResult =
+@@ -19,7 +20,7 @@
+  * @param request - authenticated HTTP request from Connection.
+  * @returns JSON result using HTTP status 200 after request validation.
+  */
+-export async function handleFileUploadHttp(service: FileUploads, request: Request): Promise<Response> {
++export async function handleFileUploadHttp(service: FileUploads, request: Request, access?: ConnectionFetchContext): Promise<Response> {
+   if (request.method !== 'POST') {
+     return new Response(null, { status: 405, headers: { allow: 'POST' } })
+   }
+@@ -39,8 +40,9 @@
+       ok: true,
+       value: await service.uploadStream({
+         sessionId: brandString<SessionId>(sessionId),
+-        data: requestBodyChunks(request.body),
++        data: requestBodyChunks(request.body, request.signal),
+         signal: request.signal,
++        ...(access === undefined ? {} : { access }),
+         ...(name === undefined ? {} : { name }),
+       }),
+     }
+@@ -66,16 +68,24 @@
+   })
+ }
+
+-async function* requestBodyChunks(body: ReadableStream<Uint8Array> | null): AsyncIterable<Uint8Array> {
++async function* requestBodyChunks(body: ReadableStream<Uint8Array> | null, signal: AbortSignal): AsyncIterable<Uint8Array> {
++  signal.throwIfAborted()
+   if (body === null) return
+   const reader = body.getReader()
++  let complete = false
++  const abort = (): void => { void reader.cancel(signal.reason).catch(() => undefined) }
++  signal.addEventListener('abort', abort, { once: true })
+   try {
++    signal.throwIfAborted()
+     while (true) {
+       const chunk = await reader.read()
+-      if (chunk.done) return
++      signal.throwIfAborted()
++      if (chunk.done) { complete = true; return }
+       yield chunk.value
+     }
+   } finally {
++    signal.removeEventListener('abort', abort)
++    if (!complete) void reader.cancel(signal.reason).catch(() => undefined)
+     reader.releaseLock()
+   }
+ }

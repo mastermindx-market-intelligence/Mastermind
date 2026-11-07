@@ -149,6 +149,81 @@ an acknowledgment, not terminal-turn proof. This patch consumes an existing
 trusted operation signal; it does not authenticate the stock browser, establish
 a company session association or authorize a provider.
 
+## Required native host admission and original full-profile lifecycle
+
+The separate `native-host-admission.patch` composes a runtime-only admission
+callback into the original Agent factory before Session preparation and writer
+acquisition. It rechecks the exact caller, bound callback and native abort signal
+after asynchronous setup and before publication. The root requirement survives
+child-scope isolation. The original factory retains rollback and live teardown.
+
+The original `runProfile` accepts a synchronous trusted host initializer before
+plugin/configuration setup. A root-required stock-owner hold closes Gateway
+calls, event delivery and raw upload/file/open routes until trusted composition
+supplies the required authority. The existing cookie, exact-origin, non-owner
+policy and native lifecycle owners remain in place. No serialized configuration
+creates an admission grant.
+
+The native factory/owner suite passed **36 cases** in process60758, exit0.
+The unchanged preimage failed the unauthorized-creation regression before this
+patch. The patch and seven postimages are pinned in `native-host-source.json`;
+the donor checkout is never edited.
+
+`build-company-host-fixture.py` composes the already-qualified native Session
+patch and this host patch into a separate complete original donor application.
+All seven original build gates passed, including host/client compilers and the
+web build (process63073, exit0). Its sealed runtime inventory contains116,133
+file/link entries and325 client artifacts. This is an isolated fixture closure;
+building it does not install or launch an application.
+
+The real-process test then passed **new → original close → exact cold resume**
+(process26485, exit0). Both runs use one original web Context and its private
+stock ACP connection. They observe the same actual Agent/Session objects through
+the existing web controller and company reader, refuse a second new session,
+and await original ACP close and root shutdown. The same native Session ID
+survives the cold process restart. Original compressed `session.v4.jsonl.zstd`
+storage remains the owner; legitimate resume bytes change its digest.
+
+Actual native HTTP checks return401 without authentication,200 for the
+authenticated Mastermind index, and403 for the held file route and foreign
+Origin. The stock owner remains held before ACP readiness. An early root model
+listener counts and refuses model dispatch; both runs report zero. Fresh native
+home/workspace state is isolated, and retiring the company reader does not
+dispose the original Agent.
+
+The complete source, build, process and log identities are retained in
+[evidence/native-company-profile-20261107.json](evidence/native-company-profile-20261107.json).
+Reproduce from the existing sealed fixture closure:
+
+```sh
+MMX_DSH_COMPANY_PROFILE_SUPPLY="$PWD/integrations/deepseek_harness/runtime_compat/.cache/company-host-profile-20261107-c6" \
+  python3 -m pytest -q tests/harness_convergence/test_dsh_fullapp_company_profile.py::test_original_profile_new_close_and_exact_cold_resume
+```
+
+These checks establish original native host/session composition. They do not
+establish a company-authorized OHF writer, live provider account, production
+authentication or public browser acceptance.
+
+## Executive concurrent Stop ownership
+
+The existing Executive broker now permits one interrupt for the exact validated
+collecting TurnRef while the original collection retains its ordinary exclusive
+slot. A wrong turn or another interrupt refuses. All other run operations remain
+exclusive. Original Runtime reservation, deduplication and unknown-effect
+classification remain authoritative.
+
+The same broker retains and shields both physical collection and interrupt tasks
+when a requesting handler is cancelled. Completion releases only that task's
+own fields. If collection finishes first, the pending interrupt still prevents
+a successor operation. Shutdown drains those actual calls before original
+provider cleanup and the final sweep.
+
+The unchanged broker reproduced the legitimate Stop refusal. The repaired
+existing suite passed **58 cases** (process13508, exit0), followed by the
+additional shutdown-race case (process18964, exit0). The native same-prompt
+correlation is now qualified below. The authenticated Executive/ACP writer join
+remains required; a broker interrupt ACK alone is not terminal-turn evidence.
+
 ## Evidence boundary
 
 The native fixture uses a deterministic test model and a synthetic registry
@@ -162,3 +237,79 @@ full app's native persistence implementation.
 
 Source identities are in `source-manifest.json`; generated receipts and bundles
 remain in ignored `.cache/`. Preserve the [upstream license](NOTICE.md).
+
+
+## Native ACP claim, exact Stop and original flush
+
+`native-acp-lifecycle.patch` is an opt-in extension of the original two ACP
+source files. A trusted runtime callback enables the extension; JSON metadata
+provides correlation only. The original `session/prompt` records its actual SDK
+request ID, first native inbox message/turn claim and inclusive observed journal
+watermark. It sends that immutable claim on the original output tail.
+
+Exact Stop accepts only that closed claim while the original Agent, Session,
+in-flight prompt and first native turn are current. It preserves unrelated
+queued input through the donor's `keepInbox:true`. It refuses after the first
+turn closes or is superseded. A cancellation receipt remains distinct from the
+original prompt's terminal response. The original Session owner flushes before
+terminal metadata is returned. A pre-enqueue cancellation can legitimately have
+no claim and a watermark of -1. Default ACP behavior remains unchanged.
+
+The original 150 ACP cases and 16 extension cases pass together (process 2373,
+exit 0), and the original ACP project has zero type diagnostics (process 3037).
+The preimage failures distinguish missing admission and unrelated-inbox loss.
+Exact source and log identities are in
+[evidence/native-acp-lifecycle-20261107.json](evidence/native-acp-lifecycle-20261107.json).
+
+## Retained SDK connection and complete native streaming proof
+
+The physical process resource is extracted beneath the incumbent ACP worker.
+Worker admission, schema, private startup, tool gate and results remain there.
+The named second consumer, `../native_connection.py`, retains one full native
+web process and its exclusive inherited ACP connection. Native stdout remains
+application output. The existing SDK and `StrictFrameReader` remain the only
+protocol decoder and framing boundary. The SDK-generated request ID is bound at
+its message transport before send can yield to a fast native claim.
+
+The connection retains the actual prompt and exact-cancel tasks after a waiter
+times out. A subsequent observation rejoins the original cancel task; it cannot
+send another cancellation while the outcome is unknown. A successor prompt
+requires the original result and any cancel outcome. Generation and per-turn
+frame budgets remain finite. The native result digest covers observed claim,
+terminal and stop-reason facts; the original Session remains the transcript owner.
+Filesystem, terminal, permission and unrelated extension calls deny by default.
+Governed tool observation and authenticated OHF wiring are still separate work.
+
+The focused Python qualification passes **166 cases** (process 47112, exit 0),
+including existing worker/broker/startup/tool observations and the new transport,
+correlation, timeout and settlement cases. The existing source identity guards
+pass **294 cases** (process 55665). The probe digest now commits each accepted
+callback once; frame prevalidation remains pure and the original worker's
+polymorphic tool-validation seam is preserved.
+
+A fresh complete donor copy composes the native Session, host and ACP patches.
+All seven original build gates pass (process 11511), with 325 client artifacts
+and a sealed 116,133-entry runtime inventory. The actual full-profile test passes
+(process 47383, exit 0): new session, original partial assistant stream, exact
+Stop, original interrupted-message/history flush, original close and natural
+process shutdown, exact cold resume, recovered interrupted text, and a normal
+completed native turn. Both generations observe the same native Session ID and
+one original Agent/Session owner each. No external process signal or provider
+call is used. Model stream calls are deterministic fixture adapter calls.
+
+Reproduce the lifecycle scenario from its qualified complete closure:
+
+```sh
+MMX_DSH_COMPANY_PROFILE_SUPPLY="$PWD/integrations/deepseek_harness/runtime_compat/.cache/company-acp-profile-20261107-c8" \
+  python3 -m pytest -q tests/harness_convergence/test_dsh_fullapp_company_profile.py::test_original_profile_claim_stop_flush_and_exact_cold_resume
+```
+
+Full source, build, process, claim, terminal, storage and log evidence is in
+[evidence/native-connection-20261107.json](evidence/native-connection-20261107.json).
+The independently qualified scoped owner-access package is reconciled in
+[evidence/native-owner-access-20261107.json](evidence/native-owner-access-20261107.json).
+That package and this ACP fixture are distinct closures; neither is an installed
+production receipt. The remaining join is the original OHF adapter/result
+consumer, a distinct authenticated native profile and its actual authority/
+attestation producers, eligible governed tools, and the signed-in production
+browser journey. No local build or green CI establishes that acceptance.

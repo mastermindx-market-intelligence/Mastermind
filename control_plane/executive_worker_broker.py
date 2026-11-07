@@ -990,6 +990,11 @@ class _BrokerOperatorRun:
     )
     terminal_error: str | None = None
     busy: bool = False
+    # Transient physical-call ownership; Runtime retains operation authority.
+    collecting_turn: TurnRef | None = None
+    collection_interrupt_operation: OperationId | None = None
+    collection_task: asyncio.Task[dict[str, Any]] | None = None
+    interrupt_task: asyncio.Task[None] | None = None
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -2469,7 +2474,7 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator generation is not active in this worker broker"
                 )
-            if state.busy:
+            if state.busy or state.interrupt_task is not None:
                 raise BrokerStateError("operator generation already has an active operation")
             state.busy = True
             return state
@@ -2889,6 +2894,34 @@ class ExecutiveWorkerBroker:
                 raise BrokerProtocolError(
                     "operator turn cursor is outside the active generation"
                 )
+            async with self._state_lock:
+                state.collecting_turn = turn
+                state.collection_interrupt_operation = None
+                task = asyncio.create_task(
+                    self._operator_collection_transaction(state, turn, cursor, float(timeout)),
+                    name=f"operator-collect-{turn.process_generation_id}-{turn.turn_id}",
+                )
+                state.collection_task = task
+                task.add_done_callback(self._observe_operator_task)
+        except BaseException:
+            # No physical call exists until the owned task is installed.
+            await self._operator_release_busy(state)
+            raise
+        return await asyncio.shield(task)
+
+    @staticmethod
+    def _observe_operator_task(task: asyncio.Task[Any]) -> None:
+        # Retrieve late failures when a socket waiter has gone away. Awaiters
+        # still receive the original exception; this grants no retry authority.
+        if not task.cancelled():
+            task.exception()
+
+    async def _operator_collection_transaction(
+        self, state: _BrokerOperatorRun, turn: TurnRef, cursor: EventCursor,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """Keep the original adapter drain owned after caller cancellation."""
+        try:
             events, next_cursor = await self._operator_call(
                 "read events",
                 state.adapter.read_events,
@@ -2927,7 +2960,12 @@ class ExecutiveWorkerBroker:
                 )
             return response
         finally:
-            await self._operator_release_busy(state)
+            async with self._state_lock:
+                if state.collection_task is asyncio.current_task():
+                    state.collecting_turn = None
+                    state.collection_interrupt_operation = None
+                    state.collection_task = None
+                    state.busy = False
 
     async def _retained_plain_input_evidence(
         self, state: _BrokerOperatorRun, turn: TurnRef
@@ -2972,15 +3010,42 @@ class ExecutiveWorkerBroker:
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError(str(exc)) from exc
         async with self._state_lock:
-            active = self._operator_run
-            if active is None or (
-                active.generation.process_generation_id != turn.process_generation_id
-                or active.epoch.session_epoch_id != turn.session_epoch_id
-                or active.epoch.attempt_id != turn.attempt_id
+            state = self._operator_run
+            if state is None or (
+                state.generation.process_generation_id != turn.process_generation_id
+                or state.epoch.session_epoch_id != turn.session_epoch_id
+                or state.epoch.attempt_id != turn.attempt_id
             ):
                 raise BrokerStateError("operator turn generation is not active")
-            generation = active.generation
-        state = await self._operator_state(generation)
+            if state.interrupt_task is not None:
+                raise BrokerStateError("operator generation already has an active operation")
+            if state.collection_interrupt_operation is not None:
+                raise BrokerStateError(
+                    "operator turn interrupt already attempted during collection"
+                )
+            owns_busy = not state.busy
+            if state.busy:
+                if state.collecting_turn != turn:
+                    raise BrokerStateError("operator generation already has an active operation")
+                state.collection_interrupt_operation = operation
+            else:
+                state.busy = True
+            task = asyncio.create_task(
+                self._operator_interrupt_transaction(
+                    state, turn, operation, owns_busy=owns_busy,
+                ),
+                name=f"operator-interrupt-{turn.process_generation_id}-{turn.turn_id}",
+            )
+            state.interrupt_task = task
+            task.add_done_callback(self._observe_operator_task)
+        await asyncio.shield(task)
+        return {"interrupted": True}
+
+    async def _operator_interrupt_transaction(
+        self, state: _BrokerOperatorRun, turn: TurnRef, operation: OperationId,
+        *, owns_busy: bool,
+    ) -> None:
+        """Retain the actual adapter call, never its cancelled socket waiter."""
         try:
             await self._operator_call(
                 "interrupt turn",
@@ -2988,9 +3053,12 @@ class ExecutiveWorkerBroker:
                 turn,
                 operation_id=operation,
             )
-            return {"interrupted": True}
         finally:
-            await self._operator_release_busy(state)
+            async with self._state_lock:
+                if state.interrupt_task is asyncio.current_task():
+                    state.interrupt_task = None
+                    if owns_busy:
+                        state.busy = False
 
     async def _terminal_operator_sweep(self, reason: str) -> UIDSweepReceipt:
         try:
@@ -3926,7 +3994,18 @@ class ExecutiveWorkerBroker:
                 )
             except WorkerBrokerError:
                 pass
+        operator_settlement_failed = False
         if operator is not None:
+            # These calls run in adapter threads. A disconnected request cannot
+            # release their generation or let the final sweep overtake them.
+            async with self._state_lock:
+                owned_operator = tuple(task for task in (
+                    operator.collection_task, operator.interrupt_task,
+                ) if task is not None)
+            outcomes = await asyncio.gather(
+                *(asyncio.shield(task) for task in owned_operator), return_exceptions=True,
+            )
+            operator_settlement_failed = any(isinstance(value, BaseException) for value in outcomes)
             try:
                 await self._ohf_cancel(
                     {
@@ -3956,6 +4035,8 @@ class ExecutiveWorkerBroker:
             if any(isinstance(value, BaseException) for value in outcomes):
                 raise BrokerStateError("original assignment shutdown settlement failed")
         self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "broker_shutdown")
+        if operator_settlement_failed:
+            raise BrokerStateError("original operator shutdown settlement failed")
 
     async def _write_interrupted_envelope(
         self,

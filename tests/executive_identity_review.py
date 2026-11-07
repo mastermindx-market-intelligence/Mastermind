@@ -322,6 +322,26 @@ def reviewed_literal_spans(path: str, source: str):
             start = anchor.index("0o700")
             spans.append((sites[0], start, start + len("0o700"), "int"))
         return tuple(sorted(spans))
+    # PR #2177: two exact HTTP Forbidden response statuses in the original
+    # native-owner hold patch. Preserve every surrounding condition, source
+    # byte and identity token; no generic HTTP or patch-file exemption.
+    if path == "integrations/deepseek_harness/runtime_compat/native-host-admission.patch":
+        if hashlib.sha256(source.encode()).hexdigest() != (
+                "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637"):
+            return ()
+        anchors = (
+            "-          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))",
+            "+          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))",
+        )
+        lines = source.splitlines()
+        spans = []
+        for anchor in anchors:
+            sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+            if len(sites) != 1 or anchor.count("403") != 1:
+                return ()
+            start = anchor.index("403")
+            spans.append((sites[0], start, start + 3, "int"))
+        return tuple(spans)
     # Independent scoped review of the fixed ten-minute telemetry age, not a UID.
     # The complete production patch is pinned; a changed or duplicated site is
     # fully visible to D8 again. Never derive this digest from current source.

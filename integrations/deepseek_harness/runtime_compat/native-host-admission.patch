@@ -1,0 +1,511 @@
+--- a/packages/core/agent/src/index.ts
++++ b/packages/core/agent/src/index.ts
+@@ -27,7 +27,33 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     agents: AgentRegistry
+-  }
++    /** Runtime-only host requirement, installed before any Agent factory mounts. */
++    agentLifecycleAdmission?: AgentLifecycleAdmission
++  }
++}
++
++/** Runtime-only key; no declarative plugin configuration can install a grant. */
++export const AGENT_LIFECYCLE_ADMISSION_KEY = 'agentLifecycleAdmission'
++
++/**
++ * A permit from the original host operation. Its signal belongs to the original
++ * process generation, not a transient request. The factory adds it to its
++ * existing cancellation and teardown chain; it creates no new lifecycle owner.
++ */
++export interface AgentLifecyclePermit {
++  readonly signal: AbortSignal
++  /** Recheck the original operation and exact caller; only literal true admits. */
++  assertCurrent(): true
++}
++
++/** Programmatic host admission before Session preparation or writer acquisition. */
++export interface AgentLifecycleAdmission {
++  /**
++   * The registry passes the actual caller Context, including its fiber/scope.
++   * Cordis may shadow the Context object; match the original caller fiber, not
++   * object equality with the factory or an untraced plugin Context.
++   */
++  admit(ownerCtx: Context, operation: 'create' | 'resume', sessionId: SessionId): AgentLifecyclePermit
+ }
+ 
+ /**
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -8,6 +8,7 @@
+ 
+ import { Context, FiberState, Service } from '@deepseek-ai/cordis'
+ import { randomUUID } from 'node:crypto'
++import { isPromise } from 'node:util/types'
+ import z from '@deepseek-ai/schemastery'
+ import { z as zod } from 'zod'
+ import { brandString } from '@deepseek-ai/dsh-brand'
+@@ -15,6 +16,8 @@
+   Agent,
+   AgentFactory,
+   AgentHandle,
++  AgentLifecycleAdmission,
++  AgentLifecyclePermit,
+   AgentOptions,
+   AgentSetup,
+   CreateAgentOptions,
+@@ -22,6 +25,7 @@
+   SessionStartSource,
+   TurnBoundaryProjection,
+ } from '@deepseek-ai/dsh-agent'
++import { AGENT_LIFECYCLE_ADMISSION_KEY } from '@deepseek-ai/dsh-agent'
+ import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+ import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
+ import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+@@ -360,7 +364,7 @@
+   readonly config: Config
+   private readonly ownership: FactoryOwnership
+   /** Plain holder prevents Cordis from re-tracing the factory's dependency context through a caller shadow. */
+-  private readonly runtime: { ctx: Context }
++  private readonly runtime: { ctx: Context; admission: AgentLifecycleAdmission | undefined }
+ 
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'agentLoop')
+@@ -373,7 +377,14 @@
+     // Register only after every config validation above has passed, so a
+     // rejected constructor leaves no projection unit behind.
+     const ownership = this.ownership = new FactoryOwnership(ctx.fiber)
+-    this.runtime = { ctx }
++    // Capture the requirement before declarative startup. Removing or replacing
++    // the provided service later must never restore a permissive factory.
++    const admission = ctx.root.get(AGENT_LIFECYCLE_ADMISSION_KEY)
++    if (admission !== undefined && (admission === null || typeof admission.admit !== 'function')) {
++      throw new Error('agent lifecycle admission requirement is invalid')
++    }
++    this.runtime = { ctx, admission: admission === undefined ? undefined
++      : Object.freeze({ admit: admission.admit.bind(admission) }) }
+     ctx.effect(function* () {
+       const unregisterTurnBoundary = ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
+       yield unregisterTurnBoundary
+@@ -421,6 +432,47 @@
+     }
+   }
+ 
++  /** Capture one original operation permit before any native Session effect. */
++  private admitLifecycle(ownerCtx: Context, operation: 'create' | 'resume', id: SessionId): AgentLifecyclePermit | undefined {
++    const required = this.runtime.admission
++    if (required === undefined) return undefined
++    const admitted = required.admit(ownerCtx, operation, id)
++    if (isPromise(admitted)) {
++      void admitted.catch(() => {})
++      throw new Error('agent lifecycle admission must be synchronous')
++    }
++    if (admitted === null || typeof admitted !== 'object'
++      || !(admitted.signal instanceof AbortSignal) || typeof admitted.assertCurrent !== 'function') {
++      throw new Error('agent lifecycle admission permit is invalid')
++    }
++    const signal = admitted.signal
++    const check = admitted.assertCurrent.bind(admitted)
++    const permit: AgentLifecyclePermit = {
++      signal,
++      assertCurrent() {
++        ownerCtx.fiber.assertActive()
++        signal.throwIfAborted()
++        const current: unknown = check()
++        if (current !== true) {
++          if (isPromise(current)) void current.catch(() => {})
++          throw new Error('agent lifecycle admission is no longer current')
++        }
++        // A synchronous authority callback may retire the generation or owner.
++        signal.throwIfAborted()
++        ownerCtx.fiber.assertActive()
++        return true
++      },
++    }
++    permit.assertCurrent()
++    return permit
++  }
++
++  /** Keep the original caller cancellation as well as the host generation. */
++  private admittedSignal(signal: AbortSignal | undefined, permit: AgentLifecyclePermit | undefined): AbortSignal | undefined {
++    return permit === undefined ? signal
++      : signal === undefined ? permit.signal : AbortSignal.any([signal, permit.signal])
++  }
++
+   /** Report a contained declarative-start failure to identity-bound consumers. */
+   private reportConfiguredStartupFailure(
+     configId: string,
+@@ -502,7 +554,9 @@
+     callerSignal?: AbortSignal,
+     handle?: SessionHandle,
+     parentAgent?: Agent,
++    admission?: AgentLifecyclePermit,
+   ): PreparedAgent {
++    admission?.assertCurrent()
+     assertAgentOptions(options)
+     ownerCtx.fiber.assertActive()
+     // Every caller reaches prepare() synchronously from a service method
+@@ -631,6 +685,7 @@
+     /* v8 ignore stop */
+ 
+     const assertLive = (): void => {
++      admission?.assertCurrent()
+       if (!abort.signal.aborted) return
+       // Every fused abort source carries an Error reason: onCallerAbort and
+       // raceAbort wrap non-Error caller reasons, and the factory/lifecycle
+@@ -686,17 +741,21 @@
+    * @returns the published running agent.
+    */
+   async create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Promise<Agent> {
++    const admission = this.admitLifecycle(this.ctx, 'create', id)
+     using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
+-    const stored = await this.createStoredSession(preparation.session)
++    const stored = await this.createStoredSession(preparation.session, admission?.signal)
+     let prepared: PreparedAgent
+     try {
+-      prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle)
++      admission?.assertCurrent()
++      prepared = this.prepare(this.ctx, id, options, preparation.session, admission?.signal, stored?.handle, undefined, admission)
+     } catch (error: unknown) {
+       await stored?.handle.close().catch(() => {})
+       throw error
+     }
+     return (await this.initializeAgent(prepared, async () => {
++      admission?.assertCurrent()
+       await this.appendUnstoredSuffix(stored, preparation.session)
++      admission?.assertCurrent()
+       return await prepared.publish('startup')
+     })).agent
+   }
+@@ -748,6 +807,8 @@
+    * @returns the published handle.
+    */
+   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
++    const admission = this.admitLifecycle(ownerCtx, 'create', options.sessionId)
++    const signal = this.admittedSignal(options.signal, admission)
+     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
+       ...options.seed === undefined ? {} : { seed: options.seed },
+       ...options.meta === undefined ? {} : { meta: options.meta },
+@@ -758,11 +819,11 @@
+       try {
+         // raceAbortCall normalizes a pre-aborted or mid-create abort and
+         // closes a handle that finishes creating after abandonment.
+-        stored = options.signal === undefined
++        stored = signal === undefined
+           ? await this.createStoredSession(preparation.session)
+           : await raceAbortCall(
+-            () => this.createStoredSession(preparation.session, options.signal),
+-            options.signal,
++            () => this.createStoredSession(preparation.session, signal),
++            signal,
+             options.sessionId,
+             (abandoned) => { void abandoned?.handle.close().catch(() => {}) },
+           )
+@@ -776,10 +837,11 @@
+         preparation,
+         options.agentOptions ?? {},
+         options.setup,
+-        options.signal,
++        signal,
+         'startup',
+         stored,
+         options.parentAgent,
++        admission,
+       )
+     })()
+     this.ownership.trackWrapper(published)
+@@ -797,20 +859,25 @@
+     source: SessionStartSource,
+     stored?: StoredSession,
+     parentAgent?: Agent,
++    admission?: AgentLifecyclePermit,
+   ): Promise<AgentHandle> {
+     using ownedPreparation = preparation
+     const session = ownedPreparation.session
+     let prepared: PreparedAgent
+     try {
+-      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent)
++      admission?.assertCurrent()
++      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, admission)
+     } catch (error: unknown) {
+       await stored?.handle.close().catch(() => {})
+       throw error
+     }
+     return await this.initializeAgent(prepared, async () => {
+       const setupCommit = await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id)
++      admission?.assertCurrent()
+       setupCommit?.commit()
++      admission?.assertCurrent()
+       await this.appendUnstoredSuffix(stored, session)
++      admission?.assertCurrent()
+       return await prepared.publish(source)
+     })
+   }
+@@ -855,6 +922,8 @@
+     options: ResumeAgentOptions,
+   ): Promise<AgentHandle> {
+     const id = options.resumeSessionId
++    const admission = this.admitLifecycle(ownerCtx, 'resume', id)
++    const signal = this.admittedSignal(options.signal, admission)
+     const published = (async () => {
+       // The open and read may outlive their owner: race them against caller
+       // cancellation, owner-fiber unload, and factory teardown so a
+@@ -864,7 +933,7 @@
+         ownerAbort.abort(new Error(`agent "${id}" setup aborted: owner disposed during setup`))
+       }, `agentLoop.resume-load(${id})`)
+       const fused = AbortSignal.any([
+-        ...options.signal === undefined ? [] : [options.signal],
++        ...signal === undefined ? [] : [signal],
+         ownerAbort.signal,
+         this.ownership.signal,
+       ])
+@@ -875,6 +944,7 @@
+         try {
+           // Taking write ownership FIRST excludes a concurrent resume of the
+           // same id (in this process, a live agent's handle holds the claim).
++          admission?.assertCurrent()
+           handle = await raceAbortCall(
+             () => persistence.open(id, 'write', { signal: fused }),
+             fused,
+@@ -885,11 +955,14 @@
+           // back the physically valid log; an interrupted final turn receives
+           // synthetic closers (missing tool errors, step/end, turn/end) that
+           // are appended through the same handle as an ordinary batch.
++          admission?.assertCurrent()
+           const coldRead = await handle.read(0, undefined, { signal: fused })
+           fused.throwIfAborted()
++          admission?.assertCurrent()
+           const persisted = coldRead.events
+           const closers = interruptedTurnClosers(persisted)
+           if (closers.length > 0) await handle.append(closers)
++          admission?.assertCurrent()
+           preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
+             seed: [...persisted, ...closers],
+             meta: structuredClone(handle.header),
+@@ -911,10 +984,11 @@
+           preparation,
+           options.agentOptions ?? {},
+           options.setup,
+-          options.signal,
++          signal,
+           'resume',
+           owned,
+           options.parentAgent,
++          admission,
+         )
+       } finally {
+         preparation?.[Symbol.dispose]()
+--- a/apps/cli/src/profile-boot.ts
++++ b/apps/cli/src/profile-boot.ts
+@@ -259,6 +259,12 @@
+   args: readonly string[]
+   /** Application-owned package runtime, scoped to plugin package operations. */
+   packageManager?: ProfileContext['packageManager']
++  /**
++   * Synchronous runtime-only host initialization before any config-tree entry.
++   * Install requirements and deferred hooks here; injected services do not yet
++   * exist. A returned Promise is refused rather than awaited during tree boot.
++   */
++  initializeHost?: (ctx: Context) => void
+ }
+ 
+ /**
+@@ -326,6 +332,12 @@
+       // Before any config-tree entry mounts, so plugins resolve all launch-time
+       // environment values from the same immutable launch snapshot.
+       hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment)
++      const initialized: unknown = options.initializeHost?.(hostCtx)
++      if (initialized !== undefined) {
++        // Contain a mistaken async initializer while the original root unwinds.
++        void Promise.resolve(initialized).catch(() => {})
++        throw new Error('profile host initialization must be synchronous')
++      }
+       await hostCtx.plugin(PluginPackages, {
+         resolution: composed.resolution,
+       })
+--- a/packages/typert/protocol/src/index.ts
++++ b/packages/typert/protocol/src/index.ts
+@@ -20,6 +20,23 @@
+ export { createTypertRemoteInfo, isTypertRemoteMethod } from './remote-info.ts'
+ export { principalOf } from './principal.ts'
+ export type { RemoteAccessResource, RemoteAccessResourceKind, RemoteAccessResourceOf } from './remote-access.ts'
++
++/** Runtime-only host hold: company hosts do not inherit browser-owner privilege. */
++export const OWNER_ACCESS_RESTRICTION_KEY = 'remoteAccessOwnerRestricted'
++
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** Installed on the root before tree boot; never a public or declarative grant. */
++    remoteAccessOwnerRestricted?: true
++  }
++}
++
++/** Read the original host root, ignoring child service-isolation labels. */
++export function readOwnerAccessRestriction(ctx: Context): boolean {
++  const required: unknown = ctx.root.get(OWNER_ACCESS_RESTRICTION_KEY)
++  if (required !== undefined && required !== true) throw new Error('invalid host owner access restriction')
++  return required === true
++}
+ 
+ const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+ 
+--- a/packages/api/remote-access/src/index.ts
++++ b/packages/api/remote-access/src/index.ts
+@@ -12,7 +12,7 @@
+ import {
+   Remote,
+   TypertRemoteService,
+-  principalOf,
++  readOwnerAccessRestriction,
+   type Principal,
+   type PrincipalMap,
+   type RemoteAccessResource,
+@@ -129,15 +129,18 @@
+   private readonly followers = new Set<AccessFollower>()
+   /** Aborted when this instance unloads; every open snapshot generation ends with it. */
+   private readonly lifetime = new AbortController()
++  /** Sticky launch restriction; removing a child consumer cannot restore owner access. */
++  readonly ownerRestricted: boolean
+ 
+   /** @param ctx - owning Host plugin Context. */
+   constructor(ctx: Context) {
+     super(ctx, 'remoteAccess')
++    this.ownerRestricted = readOwnerAccessRestriction(ctx)
+     ctx.effect(() => () => { this.lifetime.abort() }, 'remoteAccess: snapshot generations')
+     // Every index the webServer renders belongs to the owner; snapshotFor documents non-owner pages.
+     ctx.inject(['webServer'], (webCtx) => {
+       webCtx.on('webserver/index-inject', (table) => {
+-        table.push({ kind: 'global', name: REMOTE_ACCESS_SNAPSHOT_KEY, value: OWNER_BASELINE })
++        table.push({ kind: 'global', name: REMOTE_ACCESS_SNAPSHOT_KEY, value: this.snapshotFor(OWNER) })
+       })
+     })
+   }
+@@ -152,6 +155,7 @@
+    */
+   registerPolicy<K extends Exclude<keyof PrincipalMap, 'owner'>>(kind: K, policy: RemoteAccessPolicy<PrincipalMap[K]>): () => void {
+     const policies = this.policies
++    if ((kind as string) === 'owner') throw new Error('remote access: owner policy registration is forbidden')
+     if (policies.has(kind)) throw new Error(`remote access: principal kind ${JSON.stringify(kind)} already has a policy`)
+     const entry: PolicyEntry = { kind, policy }
+     const dispose = this.ctx.effect(() => {
+@@ -199,7 +203,8 @@
+   decide(request: RemoteAccessRequest<Principal>): RemoteAccessDecision {
+     const { principal, action } = request
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (principal.kind === 'owner' || action === FOLLOW_ACTION) return ALLOW
++    if (action === FOLLOW_ACTION) return ALLOW
++    if (principal.kind === 'owner') return this.ownerRestricted ? NO_ALLOW : ALLOW
+     const entry = this.policies.get(principal.kind)
+     if (entry === undefined) return NO_ALLOW
+     const bindings = this.bindingsOf(entry, principal, action)
+@@ -234,8 +239,9 @@
+    */
+   allows(resource: RemoteAccessResource): boolean {
+     const invocation = this.ctx.invocation
+-    const principal = principalOf(invocation)
++    const principal = invocation?.peer.principal
+     if (invocation === undefined || principal === undefined) return true
++    if (principal.kind === 'owner') return !this.ownerRestricted
+     const action: RemoteAccessAction = `${invocation.request.namespace}/${invocation.request.method}`
+     const entry = this.policies.get(principal.kind)
+     if (entry === undefined) return false
+@@ -253,7 +259,8 @@
+    */
+   snapshotFor(principal: Principal): RemoteAccessBaseline {
+     // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-    if (principal.kind === 'owner') return OWNER_BASELINE
++    if (principal.kind === 'owner') return this.ownerRestricted
++      ? { type: 'baseline', owner: false, grants: [] } : OWNER_BASELINE
+     return { type: 'baseline', owner: false, grants: this.grantsFor(principal) }
+   }
+ 
+@@ -271,8 +278,8 @@
+   async *follow(signal: AbortSignal): AsyncIterable<RemoteAccessFrame> {
+     signal.throwIfAborted()
+     const generation = AbortSignal.any([signal, this.lifetime.signal])
+-    const principal = principalOf(this.ctx.invocation)
+-    if (principal === undefined) {
++    const principal = this.ctx.invocation?.peer.principal
++    if (principal === undefined || principal.kind === 'owner') {
+       yield this.snapshotFor(OWNER)
+       await abortion(generation)
+       return
+--- a/packages/api/gateway/src/index.ts
++++ b/packages/api/gateway/src/index.ts
+@@ -471,6 +471,16 @@
+     return cancellableStream(source, prepared.endpoint, prepared.invocation)
+   }
+ 
++  /** Company launch holds stock-owner commands before lookup or event ownership. */
++  private assertOwnerRoute(peer: PeerScope, endpoint: string): void {
++    if (peer.principal.kind === 'owner' && this.ctx.remoteAccess.ownerRestricted
++      && endpoint !== 'remoteAccess/follow') {
++      throw new RemoteError('remote-access/denied', 'native company commands require the admitted company operation', {
++        action: endpoint, reason: 'owner-restricted',
++      })
++    }
++  }
++
+   private async dispatchRpc(
+     endpoint: string,
+     payload: unknown,
+@@ -480,6 +490,7 @@
+     if (endpoint === REMOTE_EVENT_RESULT_ENDPOINT) {
+       try {
+         assertPeerLive(peer, endpoint)
++        this.assertOwnerRoute(peer, endpoint)
+         requireInteractions(peer, endpoint)
+         // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+         if (peer.principal.kind !== 'owner') {
+@@ -518,6 +529,7 @@
+       // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
+       releaseUplink(uplink)
+       assertPeerLive(peer, endpoint)
++      this.assertOwnerRoute(peer, endpoint)
+       requireInteractions(peer, endpoint)
+       return this.openRemoteEvents(payload, signal, peer)
+     }
+@@ -779,6 +791,7 @@
+   ): Promise<PreparedInvocation> {
+     const endpoint = endpointOf(request.namespace, request.method)
+     assertPeerLive(request.peer, endpoint)
++    this.assertOwnerRoute(request.peer, endpoint)
+     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
+     assertExactArguments(request.args, descriptor, endpoint)
+     const validated = validateArguments(descriptor, request.args, endpoint)
+--- a/packages/client/connection/src/rpc-host.ts
++++ b/packages/client/connection/src/rpc-host.ts
+@@ -2,7 +2,7 @@
+ 
+ import { Context, Service } from '@deepseek-ai/cordis'
+ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+-import type { PeerId, PeerScope, Principal } from '@deepseek-ai/dsh-typert-protocol'
++import { readOwnerAccessRestriction, type PeerId, type PeerScope, type Principal } from '@deepseek-ai/dsh-typert-protocol'
+ import type { ConnectionInteractions } from './connect-protocol.ts'
+ import {
+   RpcId,
+@@ -72,6 +72,7 @@
+   readonly browserPeer: PeerScope
+   private readonly peers = new Map<PeerId, PeerRecord>()
+   private readonly owner: Context
++  private readonly ownerRestricted: boolean
+   private disposed = false
+   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
+   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+@@ -91,6 +92,7 @@
+   ) {
+     super(ctx, 'connection')
+     this.owner = ctx
++    this.ownerRestricted = readOwnerAccessRestriction(ctx)
+     this.browserPeer = new Peer(ctx, { principal: { kind: 'owner' } })
+     ctx.effect(() => async () => {
+       this.disposed = true
+@@ -218,7 +220,7 @@
+         if (route?.methods.has(request.method) === true) {
+           // Exact routes bypass Gateway access checks, so only the owner reaches them.
+           // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+-          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))
++          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))
+           return route.fetch(request)
+         }
+         const endpoint = endpointFromPath(channel, pathname)

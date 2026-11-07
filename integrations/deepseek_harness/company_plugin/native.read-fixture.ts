@@ -37,7 +37,7 @@ export function request(association = testAssociation(), extra = {}) {
   const now = Math.floor(Date.now() / 1000);
   return {schema: "mastermind.dsh.native_read.v1", request_id: "4".repeat(64),
     association_sha256: digest(association),
-    principal: {principal_scope: association.owner_principal_scope, issued_at: now - 1, expires_at: now + 600},
+    principal: {principal_scope: association.owner_principal_scope, issued_at: now - 1, expires_at: now + 120},
     read: {kind: "snapshot"}, ...extra};
 }
 export async function disk(root: string): Promise<Record<string,string>> {

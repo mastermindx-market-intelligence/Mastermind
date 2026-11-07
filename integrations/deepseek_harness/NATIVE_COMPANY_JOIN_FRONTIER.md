@@ -93,6 +93,69 @@ identity, durable company writer, live-web adoption or dispatch authority.
 The existing Runtime `provider_session_id`, epoch and generation remain the
 required durable owners.
 
+## Original full-profile composition qualified
+
+The original complete web profile and stock private ACP now pass a real-process
+new/close/exact-cold-resume fixture on one native Context. The actual Agent and
+Session are shared with the existing web controller and company reader. Native
+cookie/origin checks run over HTTP; the root-required stock-owner hold remains
+in force. The original ACP close, registry disposal and root shutdown all settle.
+Both processes refuse/count all model dispatch and report zero.
+
+The original full application passed all seven build gates, then the sealed
+116,133-entry closure passed the lifecycle fixture in process26485, exit0.
+The same Session ID reopens its original compressed journal. Resume legitimately
+changes journal bytes; this proof does not claim immutable storage. Exact source,
+build and process identities are in
+[runtime_compat/evidence/native-company-profile-20261107.json](runtime_compat/evidence/native-company-profile-20261107.json).
+
+The Executive broker's existing collection owner also now admits one concurrent
+interrupt for its exact validated TurnRef, retains physical calls across handler
+cancellation, and drains them before shutdown cleanup. The existing58-case suite
+and additional shutdown-race case pass. Native same-prompt correlation is now
+qualified below; authenticated OHF composition remains required.
+
+## Native claim, Stop, persistence and cold recovery qualified
+
+The opt-in original ACP extension passes 150 original donor cases plus 16 native
+lifecycle cases and the original project type check. Its immutable first native
+claim binds the actual SDK request, operation, Session, message, native turn and
+observed journal prefix. Exact Stop preserves unrelated queued input and refuses
+late, foreign, closed or superseded claims. Original Session flush owns terminal
+evidence. Default ACP semantics remain unchanged.
+
+The retained SDK consumer now uses a neutral extraction of the original physical
+process resource. Worker admission/schema/startup/result owners remain intact.
+One inherited private ACP connection shares the original full web Context; native
+stdout is not a second protocol stream. The SDK-generated ID binds before a
+potentially yielding send. Timed-out prompt and exact-Stop tasks stay owned, and
+another observation rejoins the original Stop task rather than sending again.
+Unproved startup cleanup retains its actual physical resource.
+
+The final complete native journey passed in process 47383, exit 0. It created
+Session `7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c`, observed an original partial
+assistant stream, cancelled exact native turn 1, read its flushed interrupted
+message, closed through original owners without an external signal, cold-resumed
+the identical Session, recovered the interrupted text, and completed native turn
+2. Both model stream calls use the deterministic fixture adapter; provider calls
+remain zero. The full build passed seven gates. Focused Python qualification
+passed 166 cases and the existing source identity guards passed 294 cases.
+
+Exact source, full closure, claim/terminal, storage and process evidence is in
+[runtime_compat/evidence/native-connection-20261107.json](runtime_compat/evidence/native-connection-20261107.json).
+The separate scoped-access writer's final source/package is reconciled in
+[runtime_compat/evidence/native-owner-access-20261107.json](runtime_compat/evidence/native-owner-access-20261107.json).
+Its permission-withdrawal and lazy event-registration races are repaired and
+qualified under that exact patch. These remain distinct qualification closures.
+
+The next engineering join is an original OHF adapter with a native conversation
+result contract, a distinct authenticated profile and actual attestation producer,
+then the installed company association, eligible governed tools and signed-in
+application path. A native candidate is not a planner envelope or Job completion.
+Historical initial-result provenance must remain distinct from the current
+successor generation after cold recovery. No installed source, account access,
+release, deployment or production-browser acceptance is implied by this proof.
+
 ## Missing original-owner producer
 
 At published predecessor `0f01a4e3dfe3bcd1510feda46e1da711bc5d0f4f`:
@@ -116,10 +179,14 @@ own closed operation and cannot be repurposed.
 
 ## Native owner boundary before company command activation
 
-The stock authenticated browser Peer is an owner and bypasses non-owner policy.
-The finite reader does not change that behavior. The next security slice belongs
-in the existing RemoteAccess/Gateway/route owners, with a trusted association
-restriction that cannot disappear merely because a reader port closes.
+The unmodified authenticated browser Peer is an owner and bypasses non-owner
+policy. The qualified host patch adds a root-required stock-owner hold in the
+existing RemoteAccess/Gateway/route owners, installed before traffic and retained
+when a company reader closes. This closes unadmitted owner calls in the full
+profile fixture. Scoped company activation still needs an original trusted
+association and current-authority source across every route below. The separate
+scoped-access composition is retained on the same source carrier; its package
+qualification is not signed-in production acceptance.
 
 | Existing source owner | Required coverage |
 |---|---|
@@ -192,7 +259,8 @@ scope dependency; no app, service or provider was started.
 - Complete check log: `c5737b3e340f6f58a74492b79f9b93387c2cb40c26fa043d45d1c78cd9f6e314`.
 - Host import log: `b2ecd7b89e37af84a35976611a6cf772e42c6e6a621ef7f20c103cade5a71593`.
 
-`attended-build.json` now records these actual new staged bytes and both host
-exports. The older package remains its original snapshot. Protected-source
+This C4 package remains its original snapshot with both host exports. Later
+`attended-build.json` snapshots must be reconciled against their own source and
+complete package receipts; they do not relabel these bytes. Protected-source
 acceptance, publication export, installation and the production journeys above
 remain distinct gates.

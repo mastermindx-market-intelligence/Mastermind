@@ -1595,11 +1595,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # PR #2151: the installed-only retirement config validator changes this
     # full-file pin. The exact installed entry AST and all ten mutation
     # refusals remain unchanged; no additional call is admitted.
+    # PR #2177 composes the exact live DeepSeekNativeReadSource into the
+    # existing SessionBridge factory. JSON/config cannot create that source;
+    # the canonical installed wrapper and its exact AST remain unchanged.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'c2a07369ad481d54b494f766043386f1809fb6f075d4cac53792c792158ac25a'):
+            'f94fba25f5f21058f1ba1cb42b5ea4afe01ed7cbd1aeb51bf75bcd66103213b8'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -3352,3 +3355,62 @@ def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
     # source change still invalidates every frozen site and is rejected by D8.
     assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
     assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+
+_DSH_NATIVE_HOST_PATCH = "integrations/deepseek_harness/runtime_compat/native-host-admission.patch"
+
+
+def _d8_native_host_scan(source, *, path=_DSH_NATIVE_HOST_PATCH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_native_host_masks_only_two_exact_forbidden_status_tokens():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637"
+    )
+    spans = reviewed_literal_spans(_DSH_NATIVE_HOST_PATCH, source)
+    assert len(spans) == 2
+    lines = source.splitlines()
+    assert [lines[line - 1][start:end] for line, start, end, kind in spans] == ["403", "403"]
+    assert all(kind == "int" for line, start, end, kind in spans)
+    assert _d8_native_host_scan(source) == []
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _DSH_NATIVE_HOST_PATCH),
+    (True, "integrations/deepseek_harness/runtime_compat/foreign.patch"),
+])
+def test_d8_native_host_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    assert _d8_native_host_scan(source, path=path, postimage=postimage) == ["403", "403"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("status: 403", "status: 459", ["459", "459"]),
+    (" || this.ownerRestricted", " || false", ["403", "403"]),
+    ("", "\n+peer_uid = 501\n", ["403", "403", "501"]),
+    ("", "\n# source drift\n", ["403", "403"]),
+])
+def test_d8_native_host_drift_keeps_all_identity_checks(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    changed = source.replace(old, new) if old else source + new
+    assert reviewed_literal_spans(_DSH_NATIVE_HOST_PATCH, changed) == ()
+    assert _d8_native_host_scan(changed) == expected
+
+
+def test_d8_native_host_rejects_false_postimage():
+    source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_DSH_NATIVE_HOST_PATCH, source),
+            source_postimages={_DSH_NATIVE_HOST_PATCH: source.replace("status: 403", "status: 459")},
+        )

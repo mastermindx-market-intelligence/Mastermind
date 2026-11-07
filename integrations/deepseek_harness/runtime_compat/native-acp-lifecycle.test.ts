@@ -1,0 +1,284 @@
+/** Same native Agent/Session, original ACP SDK decoder, and original persistence. */
+import {afterEach,expect,it,vi} from "vitest";
+import {Context} from "@deepseek-ai/cordis";
+import {client as createClient,methods,ndJsonStream,PROTOCOL_VERSION,type SendRequestOptions} from "@agentclientprotocol/sdk";
+import {LlmAdapter,createUserMessage,type GenerateOptions,type StreamChunk} from "@deepseek-ai/dsh-llm";
+import AgentLoop from "@deepseek-ai/dsh-agent-loop";
+import {mountAgentLoopTestDependencies} from "@deepseek-ai/dsh-agent-loop-testkit";
+import * as Persistence from "@deepseek-ai/dsh-session-persistence-jsonl";
+import TokenMeter from "@deepseek-ai/dsh-token-meter";
+import {SessionId} from "@deepseek-ai/dsh-session";
+import * as Acp from "mmx-native-acp";
+import {AcpSession} from "mmx-native-acp-session";
+import {mkdtemp,rm} from "node:fs/promises";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+
+const cleanup:(()=>Promise<unknown>)[]=[];
+afterEach(async()=>{while(cleanup.length)await cleanup.pop()!();vi.restoreAllMocks();});
+const text=(value:string):StreamChunk[]=>[
+  {type:"block-start",index:0,blockType:"text"},
+  {type:"text-delta",index:0,text:value},
+  {type:"block-end",index:0,block:{type:"text",text:value}},
+  {type:"finish",reason:{kind:"stop"}},
+];
+class FixtureAdapter extends LlmAdapter{
+  requests:GenerateOptions[]=[];
+  constructor(readonly script:(StreamChunk[]|"hang")[]){super();}
+  providerInfo(){return{id:"fixture",name:"Fixture"};}
+  async listModels(){return[{provider:"fixture",id:"fixture",name:"Fixture",inputModalities:["text"] as const}];}
+  async resolveModel(){return{provider:"fixture",id:"fixture",name:"Fixture",inputModalities:["text"] as const,context:{contextWindow:1024}};}
+  async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{
+    this.requests.push(options);
+    const next=this.script.shift();
+    if(next===undefined)throw Error("native ACP fixture script exhausted");
+    if(next==="hang"){
+      yield{type:"block-start",index:0,blockType:"text"};
+      await new Promise<void>((_resolve,reject)=>{
+        if(options.signal?.aborted){reject(Error("fixture aborted"));return;}
+        options.signal?.addEventListener("abort",()=>reject(Error("fixture aborted")),{once:true});
+      });
+    }else for(const chunk of next){options.signal?.throwIfAborted();yield chunk;}
+  }
+}
+async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean){
+  const ctx=new Context(),root=await mkdtemp(join(tmpdir(),"mmx-native-acp-"));
+  cleanup.push(async()=>{await ctx.fiber.dispose();await rm(root,{recursive:true,force:true});});
+  await mountAgentLoopTestDependencies(ctx,{systemPrompt:{personaPrefix:""}});
+  await ctx.plugin(Persistence,{root,compression:"none"});
+  await ctx.plugin(TokenMeter);await ctx.plugin(AgentLoop,{agents:[]});
+  const adapter=new FixtureAdapter(script);ctx.llm.registerAdapter(["fixture"],adapter);
+  const a=new TransformStream<Uint8Array,Uint8Array>(),b=new TransformStream<Uint8Array,Uint8Array>();
+  const claims:any[]=[],updates:any[]=[];
+  const config:any={provider:"fixture",model:"fixture",stream:ndJsonStream(a.writable,b.readable)};
+  if(opted)config.nativePromptAdmission=guard??(()=>true);
+  await ctx.plugin({name:"native-acp-fixture",inject:[...Acp.inject],apply(inner:Context){Acp.apply(inner,config);}});
+  const app=createClient({name:"original-native-acp-client"})
+    .onNotification(methods.client.session.update,({params})=>{updates.push(params);})
+    .onRequest(methods.client.session.requestPermission,()=>({outcome:{outcome:"cancelled" as const}}))
+    .onNotification("_mastermind/native_claim",(value:any)=>value,({params})=>{claims.push(params);});
+  const connection=app.connect(ndJsonStream(b.writable,a.readable)),client=connection.agent;
+  const initialized=await client.request(methods.agent.initialize,{protocolVersion:PROTOCOL_VERSION,clientCapabilities:{}});
+  const selected=await client.request(methods.agent.session.new,{cwd:process.cwd(),mcpServers:[]});
+  const sessionId=selected.sessionId,agent=ctx.agents.get(SessionId(sessionId))!;
+  expect(agent).toBeDefined();expect(agent.session).toBe(ctx.sessions.get(SessionId(sessionId)));
+  const prompt=(operationId:string,options?:SendRequestOptions)=>client.request(methods.agent.session.prompt,{
+    sessionId,prompt:[{type:"text" as const,text:"original question"}],_meta:{mastermindNative:{operationId}},
+  },options);
+  const cancel=(claim:any)=>client.request("_mastermind/native_cancel",claim);
+  const claimed=async(count=1)=>{await vi.waitFor(()=>expect(claims.length).toBe(count));return claims[count-1];};
+  return{ctx,root,config,adapter,client,connection,initialized,sessionId,agent,claims,updates,prompt,cancel,claimed};
+}
+
+it("observes one actual first inbox claim and flushes the original native result",async()=>{
+  const h=await host([text("original answer")]);
+  expect(h.initialized._meta).toMatchObject({mastermindNative:{schema:"mastermind.dsh.native_prompt_extension.v1"}});
+  const flush=vi.spyOn(h.ctx.sessions,"flush");
+  const result=await h.prompt("operation-one"),claim=await h.claimed();
+  const user=h.agent.session.snapshotEvents().find(event=>event.type==="user/message")!;
+  expect(claim).toEqual({schema:"mastermind.dsh.native_prompt_claim.v1",operationId:"operation-one",
+    requestId:expect.any(Number),sessionId:h.sessionId,messageId:(user.data as any).id,
+    nativeTurn:expect.any(Number),throughSeq:expect.any(Number)});
+  expect(claim.throughSeq).toBeLessThan(h.agent.session.seq);
+  expect(result).toMatchObject({stopReason:"end_turn",_meta:{mastermindNative:{
+    schema:"mastermind.dsh.native_prompt_terminal.v1",operationId:"operation-one",claim,
+    observedLastTurn:claim.nativeTurn,observedTurnCount:1,throughSeq:expect.any(Number),
+  }}});
+  expect(flush).toHaveBeenCalledWith(h.agent.session);
+  expect((result._meta as any).mastermindNative.throughSeq).toBe(h.agent.session.seq-1);
+  expect(h.updates.filter(x=>x.update.sessionUpdate==="agent_message_chunk").map(x=>x.update.content.text).join("")).toBe("original answer");
+  expect(h.adapter.requests).toHaveLength(1);
+});
+
+it("requests one exact Stop while collection remains owned and keeps ACK separate from terminal",async()=>{
+  const h=await host(["hang"]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const original=h.ctx.sessions.flush.bind(h.ctx.sessions);
+  vi.spyOn(h.ctx.sessions,"flush").mockImplementation(async(...args)=>{entered.resolve();await release.promise;await original(...args);});
+  const pending=h.prompt("exact-stop");
+  const claim=await h.claimed();
+  await expect(h.cancel(claim)).resolves.toEqual({status:"requested"});
+  await entered.promise;
+  await expect(h.cancel(claim)).resolves.toEqual({status:"already_requested"});
+  expect(nativeCancel).toHaveBeenCalledTimes(1);
+  let settled=false;void pending.then(()=>{settled=true;});
+  await Promise.resolve();expect(settled).toBe(false);
+  release.resolve();
+  await expect(pending).resolves.toMatchObject({stopReason:"cancelled",_meta:{mastermindNative:{claim}}});
+  await expect(h.cancel(claim)).resolves.toEqual({status:"not_current"});
+  expect(nativeCancel).toHaveBeenCalledTimes(1);
+});
+
+it("refuses every foreign claim field before native cancellation",async()=>{
+  const h=await host(["hang"]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const pending=h.prompt("exact-original"),claim=await h.claimed();
+  for(const changed of [
+    {operationId:"other"},{requestId:typeof claim.requestId==="number"?claim.requestId+1:"other"},
+    {sessionId:"foreign"},{messageId:"foreign"},{nativeTurn:claim.nativeTurn+1},{throughSeq:claim.throughSeq+1},
+  ])await expect(h.cancel({...claim,...changed})).resolves.toEqual({status:"not_current"});
+  await expect(h.cancel({...claim,extra:true})).rejects.toThrow();
+  expect(nativeCancel).not.toHaveBeenCalled();
+  await h.cancel(claim);await pending;
+});
+
+it("a closed first turn cannot be cancelled while original persistence is pending",async()=>{
+  const h=await host([text("complete")]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const original=h.ctx.sessions.flush.bind(h.ctx.sessions);
+  vi.spyOn(h.ctx.sessions,"flush").mockImplementation(async(...args)=>{entered.resolve();await release.promise;await original(...args);});
+  const pending=h.prompt("closed-first"),claim=await h.claimed();
+  await entered.promise;
+  await expect(h.cancel(claim)).resolves.toEqual({status:"native_turn_closed_or_superseded"});
+  expect(nativeCancel).not.toHaveBeenCalled();
+  release.resolve();await pending;
+});
+
+it("a later autonomous native turn is not owned by a pending earlier ACP prompt",async()=>{
+  const h=await host([text("first"),"hang"]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const original=h.ctx.sessions.flush.bind(h.ctx.sessions);
+  vi.spyOn(h.ctx.sessions,"flush").mockImplementation(async(...args)=>{entered.resolve();await release.promise;await original(...args);});
+  const pending=h.prompt("first-root"),claim=await h.claimed();
+  await entered.promise;
+  h.agent.followup(createUserMessage({content:[{type:"text",text:"independent later work"}],source:{kind:"user"}}));
+  await vi.waitFor(()=>expect(h.adapter.requests).toHaveLength(2));
+  await expect(h.cancel(claim)).resolves.toEqual({status:"native_turn_closed_or_superseded"});
+  expect(nativeCancel).not.toHaveBeenCalled();
+  h.agent.cancel({kind:"user"}); // explicit original-owner fixture cleanup only
+  release.resolve();
+  const result=await pending;
+  expect((result._meta as any).mastermindNative).toMatchObject({claim,observedTurnCount:2});
+});
+
+it("an old tuple cannot cancel the next ACP prompt",async()=>{
+  const h=await host([text("first"),"hang"]);
+  await h.prompt("first");const old=await h.claimed();
+  const nativeCancel=vi.spyOn(h.agent,"cancel"),next=h.prompt("second"),current=await h.claimed(2);
+  await expect(h.cancel(old)).resolves.toEqual({status:"not_current"});
+  expect(nativeCancel).not.toHaveBeenCalled();
+  await expect(h.cancel(current)).resolves.toEqual({status:"requested"});
+  await next;expect(nativeCancel).toHaveBeenCalledTimes(1);
+});
+
+it("checks runtime authority again after prompt admission and before native enqueue",async()=>{
+  let admissions=0;
+  const h=await host([text("must never run")],true,facts=>facts.action!=="admit"||++admissions<2);
+  const followup=vi.spyOn(h.agent,"followup");
+  await expect(h.prompt("retired-before-enqueue")).rejects.toThrow();
+  expect(admissions).toBe(2);expect(followup).not.toHaveBeenCalled();
+  expect(h.adapter.requests).toHaveLength(0);expect(h.claims).toEqual([]);
+});
+
+it("rejects runtime check replacement without borrowing its new grant",async()=>{
+  let h:Awaited<ReturnType<typeof host>>;
+  h=await host([text("must never run")],true,()=>{h.config.nativePromptAdmission=()=>true;return true;});
+  await expect(h.prompt("replaced-check")).rejects.toThrow();
+  expect(h.adapter.requests).toHaveLength(0);expect(h.claims).toEqual([]);
+});
+
+it("does not turn a native flush failure into a successful terminal result or retry",async()=>{
+  const h=await host([text("committed first")]);
+  const flush=vi.spyOn(h.ctx.sessions,"flush").mockRejectedValue(Error("original flush failed"));
+  await expect(h.prompt("flush-failure")).rejects.toThrow("prompt settlement failed");
+  expect(h.adapter.requests).toHaveLength(1);
+  flush.mockRestore();
+});
+
+it("requires closed correlation metadata for opted-in prompts",async()=>{
+  const h=await host([text("must never run")]);
+  for(const meta of [undefined,{}, {mastermindNative:{operationId:"op",extra:true}}, {mastermindNative:{operationId:""}}]){
+    await expect(h.client.request(methods.agent.session.prompt,{
+      sessionId:h.sessionId,prompt:[{type:"text",text:"no valid correlation"}],...(meta===undefined?{}:{_meta:meta}),
+    })).rejects.toThrow();
+  }
+  expect(h.adapter.requests).toHaveLength(0);
+});
+
+it("a late SDK request abort cannot cancel a successor native turn",async()=>{
+  const h=await host([text("first"),"hang"]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>(),abort=new AbortController();
+  const original=h.ctx.sessions.flush.bind(h.ctx.sessions);
+  vi.spyOn(h.ctx.sessions,"flush").mockImplementation(async(...args)=>{entered.resolve();await release.promise;await original(...args);});
+  const pending=h.prompt("transport-waiter",{cancellationSignal:abort.signal});
+  const observed=pending.then(value=>({value}),error=>({error}));
+  try{
+    const claim=await h.claimed();await entered.promise;
+    h.agent.followup(createUserMessage({content:[{type:"text",text:"later autonomous work"}],source:{kind:"user"}}));
+    await vi.waitFor(()=>expect(h.adapter.requests).toHaveLength(2));
+    abort.abort();
+    // The maintained SDK sends cancellation but retains the original response
+    // promise. The next ordered request observes that notification's delivery.
+    await expect(h.cancel(claim)).resolves.toEqual({status:"native_turn_closed_or_superseded"});
+    expect(nativeCancel).not.toHaveBeenCalled();
+  }finally{
+    h.agent.cancel({kind:"user"});release.resolve();
+    await h.agent.whenIdle();await observed;
+  }
+});
+
+it("preserves default standard prompt, cancellation and notification behavior",async()=>{
+  const h=await host([text("ordinary"),"hang"],false);
+  expect(h.initialized._meta).toBeUndefined();
+  const ordinary=()=>h.client.request(methods.agent.session.prompt,{sessionId:h.sessionId,prompt:[{type:"text",text:"ordinary"}]});
+  await expect(ordinary()).resolves.toEqual({stopReason:"end_turn"});
+  const pending=ordinary();await vi.waitFor(()=>expect(h.adapter.requests).toHaveLength(2));
+  await h.client.notify(methods.agent.session.cancel,{sessionId:h.sessionId});
+  await expect(pending).resolves.toEqual({stopReason:"cancelled"});
+  expect(h.claims).toEqual([]);
+  await expect(h.cancel({})).rejects.toThrow();
+});
+
+
+it("a trusted callback abort cannot enqueue after the original admission signal retires",async()=>{
+  const h=await host([text("must never run")],false),controller=new AbortController();
+  const record=await AcpSession.create(h.ctx,{
+    sessionId:SessionId("callback-abort-native-session"),cwd:process.cwd(),mcpServers:[],
+    agentOptions:{},fallbackSelection:{provider:"fixture",model:"fixture"},
+    signal:new AbortController().signal,notify:async()=>{},
+  });
+  const followup=vi.spyOn(record.agent,"followup");let admissions=0;
+  try{
+    await expect(record.prompt({sessionId:record.agent.session.id,prompt:[{type:"text",text:"must not enqueue"}]},
+      false,controller.signal,{
+        operationId:"callback-abort",requestId:"actual-direct-native-request",
+        requireCurrent(action:any){if(action==="admit"&&++admissions===2)controller.abort();},
+        notifyClaim:async()=>{},
+      })).resolves.toMatchObject({stopReason:"cancelled"});
+    expect(admissions).toBe(2);expect(followup).not.toHaveBeenCalled();
+    expect(h.adapter.requests).toHaveLength(0);
+  }finally{await record.close("original direct fixture cleanup");}
+});
+
+it("a retired guard at the actual first claim reaches no model work",async()=>{
+  let current=true;
+  const h=await host([text("must never run")],true,facts=>{
+    if(facts.action==="claim")current=false;
+    return current;
+  });
+  await expect(h.prompt("retired-at-claim")).rejects.toThrow();
+  expect(h.claims).toEqual([]);expect(h.adapter.requests).toHaveLength(0);
+});
+
+it("opted-in uncorrelated standard cancellation cannot act on the native Agent",async()=>{
+  const h=await host(["hang"]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const pending=h.prompt("correlated-only"),claim=await h.claimed();
+  await h.client.notify(methods.agent.session.cancel,{sessionId:h.sessionId});
+  await expect(h.cancel({...claim,messageId:"foreign"})).resolves.toEqual({status:"not_current"});
+  expect(nativeCancel).not.toHaveBeenCalled();
+  await h.cancel(claim);await pending;
+});
+
+
+it("exact current-turn Stop preserves unrelated pending native inbox work",async()=>{
+  const h=await host(["hang"]),nativeCancel=vi.spyOn(h.agent,"cancel");
+  const pending=h.prompt("current-turn-only"),claim=await h.claimed();
+  await vi.waitFor(()=>expect(h.adapter.requests).toHaveLength(1));
+  const later=createUserMessage({content:[{type:"text",text:"preserved native next turn"}],source:{kind:"user"}});
+  h.agent.followup(later);
+  expect(h.agent.inbox.nextTurn.map((item:any)=>item.id)).toContain(later.id);
+  await expect(h.cancel(claim)).resolves.toEqual({status:"requested"});
+  await expect(pending).resolves.toMatchObject({stopReason:"cancelled"});
+  expect(h.agent.inbox.nextTurn.map((item:any)=>item.id)).toContain(later.id);
+  expect(nativeCancel).toHaveBeenCalledExactlyOnceWith({kind:"user"},{keepInbox:true});
+  expect(h.adapter.requests).toHaveLength(1);
+});

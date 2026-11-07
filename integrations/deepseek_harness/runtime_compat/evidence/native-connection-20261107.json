@@ -1,0 +1,219 @@
+{
+  "schema": "mastermind.dsh_native_connection_qualification.v1",
+  "source_base": "8b56f227e5e1256c0da9c0d2ff395064dcfd61dd",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "source_sha256": {
+    "integrations/acp_worker/native.py": "38b1a471c17f3dd8d441611ad49fadb223f8fd8a818aea47bacaa120b77c013f",
+    "integrations/acp_worker/process_resource.py": "14fb6477e70d4fe38c5a820868ae899a2f4e55b1bd981a4acb9c803e9186a30a",
+    "integrations/deepseek_harness/native_connection.py": "81deec4c682aea26f18e0a105f9a6493621ae63e2765911b77968b0d9b8ce8e5",
+    "integrations/deepseek_harness/native_protocol.py": "5fa551591226b7539efb07eb1fc3f28170921f4d51ea8f06c1cf7ab80604376c",
+    "scripts/ohf/acp_probe_boundary.py": "eeca20202819a312c86b0681b858d3856d9cc81f8050e89526215bf3f166f6ba",
+    "tests/test_acp_native_startup.py": "e9fcaa8ba7314636e8731de6c73a1547dfc104744ed83bb66e3f375cce52d7ff",
+    "tests/test_dsh_native_protocol.py": "badcc34a1aaab02aa0a12a8eab18cf4b80de6443a9cca5271d3e45d2a1fa21f9",
+    "tests/harness_convergence/test_dsh_fullapp_company_profile.py": "b37c6410bc979d44bf4338481aa475f82d33be94edb75844d71d991d79f398c6",
+    "integrations/deepseek_harness/runtime_compat/native-company-profile-fixture.mjs": "803e49cf08756d867b33542e6edc139642a905d9af784b0c47f262e413cf3702",
+    "integrations/deepseek_harness/runtime_compat/build-company-host-fixture.py": "356a4dc602c97806f2948fc81bfe589e49df225e6faeffce8e0f2543d8aba2a9"
+  },
+  "native_acp_patch_sha256": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
+  "build_manifest_sha256": "144b86a3a944fede551a93251b49bcfa0b703559722c1eb5ee3edae43c91eb44",
+  "runtime_inventory": {
+    "file": "runtime-inventory.json",
+    "sha256": "1f0f0e9f165ebdef557c7da107ec64f22f32f8f1832646455a3c9b559905e34c",
+    "entries": 116133
+  },
+  "build": {
+    "pid": 11511,
+    "exit_code": 0,
+    "gates": 7,
+    "client_artifacts": 325,
+    "log_sha256": "2dea8a8fb1c938f15cae454d1d125136c2d0d64db6049e7b18c3260a60695b16"
+  },
+  "focused": {
+    "pid": 47112,
+    "exit_code": 0,
+    "tests": 166,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "log": "mmx-dsh-c9-qualified-20261107.log",
+    "log_sha256": "563066c57c6f67a0b503df04ba62e0863cb8915c71290e2600656db58746db8b",
+    "junit_sha256": "1a8e3812a5c984373db89f55a83bdd4ebb848caec816b30585e6c861960b8382"
+  },
+  "source_guard": {
+    "pid": 55665,
+    "exit_code": 0,
+    "tests": 294,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "log": "mmx-dsh-c9-source-guard-20261107.log",
+    "log_sha256": "c8d5ae7ad5beefa04e4ec55e6cf04d6c682be678c8048ed3688cd372904d43eb",
+    "junit_sha256": "bc08e46148a18e1910e1ab26963f8247403a85cb015e1a3b49f20afc926f95ec"
+  },
+  "full_native": {
+    "pid": 47383,
+    "exit_code": 0,
+    "tests": 1,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "log": "mmx-dsh-native-claim-profile-c8-20261107-final.log",
+    "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+    "junit_sha256": "c38f513960f3048221576a3f054f8c22ffe46271eb2a73bbe3a2c96d314f45ff"
+  },
+  "proof": {
+    "schema": "mastermind.dsh_native_claim_profile_proof.v1",
+    "new": {
+      "schema": "mastermind.dsh_native_company_profile_proof.v1",
+      "production_armed": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "mode": "new",
+      "actual_session_id": "7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c",
+      "shared_agent": true,
+      "shared_session": true,
+      "pre_ready_owner_denied": true,
+      "company_page_observed": true,
+      "reader_retirement_keeps_owner": true,
+      "pre_admission_absent": true,
+      "native_start_source": "startup",
+      "isolated_native_home": true,
+      "native_close_settled": true,
+      "root_teardown_settled": true,
+      "model_calls": 1,
+      "agent_creates": 1,
+      "lifecycle": true,
+      "stream_partial": true,
+      "native_signal_aborted": true,
+      "model_stream_settled": true,
+      "interrupted_seq": 14,
+      "interrupted_history": true,
+      "recovered_interrupted": false,
+      "http": {
+        "unauthenticated": 401,
+        "index": 200,
+        "held_file": 403,
+        "foreign_origin": 403,
+        "title": true,
+        "owner_baseline_held": true
+      },
+      "native_claim": {
+        "schema": "mastermind.dsh.native_prompt_claim.v1",
+        "operationId": "fixture-native-turn-new",
+        "requestId": 2,
+        "sessionId": "7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c",
+        "messageId": "fd09c839-c338-4e45-af33-2f2426a51d53",
+        "nativeTurn": 1,
+        "throughSeq": 5
+      },
+      "native_result": {
+        "stopReason": "cancelled",
+        "_meta": {
+          "mastermindNative": {
+            "schema": "mastermind.dsh.native_prompt_terminal.v1",
+            "operationId": "fixture-native-turn-new",
+            "requestId": 2,
+            "claim": {
+              "schema": "mastermind.dsh.native_prompt_claim.v1",
+              "operationId": "fixture-native-turn-new",
+              "requestId": 2,
+              "sessionId": "7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c",
+              "messageId": "fd09c839-c338-4e45-af33-2f2426a51d53",
+              "nativeTurn": 1,
+              "throughSeq": 5
+            },
+            "throughSeq": 16,
+            "observedLastTurn": 1,
+            "observedTurnCount": 1
+          }
+        }
+      },
+      "native_result_digest": "2eab0df64dfb902a003f06b6bcd8b56d5c4b4b293c7421161c4a4f5d83488300",
+      "provider_calls": 0,
+      "sdk_frame_guard": "original StrictFrameReader",
+      "physical_signal_sent": false,
+      "native_storage_sha256": "68d6bec2d42eed9a9db734a48bb534b3c5128057e0006ec4473d58f94411a880"
+    },
+    "resume": {
+      "schema": "mastermind.dsh_native_company_profile_proof.v1",
+      "production_armed": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "mode": "resume",
+      "actual_session_id": "7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c",
+      "shared_agent": true,
+      "shared_session": true,
+      "pre_ready_owner_denied": true,
+      "company_page_observed": true,
+      "reader_retirement_keeps_owner": true,
+      "pre_admission_absent": true,
+      "native_start_source": "resume",
+      "isolated_native_home": true,
+      "native_close_settled": true,
+      "root_teardown_settled": true,
+      "model_calls": 1,
+      "agent_creates": 1,
+      "lifecycle": true,
+      "stream_partial": true,
+      "native_signal_aborted": false,
+      "model_stream_settled": true,
+      "interrupted_seq": null,
+      "interrupted_history": false,
+      "recovered_interrupted": true,
+      "http": {
+        "unauthenticated": 401,
+        "index": 200,
+        "held_file": 403,
+        "foreign_origin": 403,
+        "title": true,
+        "owner_baseline_held": true
+      },
+      "native_claim": {
+        "schema": "mastermind.dsh.native_prompt_claim.v1",
+        "operationId": "fixture-native-turn-resume",
+        "requestId": 2,
+        "sessionId": "7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c",
+        "messageId": "ee6ee3c9-0187-4608-9bf5-255fd0fcac7e",
+        "nativeTurn": 2,
+        "throughSeq": 20
+      },
+      "native_result": {
+        "stopReason": "end_turn",
+        "_meta": {
+          "mastermindNative": {
+            "schema": "mastermind.dsh.native_prompt_terminal.v1",
+            "operationId": "fixture-native-turn-resume",
+            "requestId": 2,
+            "claim": {
+              "schema": "mastermind.dsh.native_prompt_claim.v1",
+              "operationId": "fixture-native-turn-resume",
+              "requestId": 2,
+              "sessionId": "7a9e2dcd-d6c0-4f83-b0f5-6e5b81610d7c",
+              "messageId": "ee6ee3c9-0187-4608-9bf5-255fd0fcac7e",
+              "nativeTurn": 2,
+              "throughSeq": 20
+            },
+            "throughSeq": 27,
+            "observedLastTurn": 2,
+            "observedTurnCount": 1
+          }
+        }
+      },
+      "native_result_digest": "9fee8e4486d71f4814f0845e5410d9788fa2480a4edfbd862b2a55fb6748b74d",
+      "provider_calls": 0,
+      "sdk_frame_guard": "original StrictFrameReader",
+      "physical_signal_sent": false,
+      "native_storage_sha256": "67d903294db6c9b6b2a07e0cdc3bc19f34a32e4a4a1e71c2d22502ae1d2d86ae"
+    },
+    "production_armed": false,
+    "provider_calls": 0
+  },
+  "installed": false,
+  "production_armed": false,
+  "provider_calls": 0,
+  "remaining": [
+    "OHF adapter and original broker native result contract",
+    "distinct authenticated native profile and actual attestation producer",
+    "original installed company association and generation grants",
+    "governed native tool observation",
+    "production authenticated Send/resume/Stop and browser proof"
+  ]
+}

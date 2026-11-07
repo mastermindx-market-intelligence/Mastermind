@@ -62,7 +62,7 @@ def source(tmp_path, monkeypatch):
     base = lambda name: session_text if name in session.CHANGED else host_text if name in host.CHANGED else old
     access_inputs = access.CHANGED | session_inputs
     access_patch = "".join(diff(name, base(name), access_text) for name in sorted(access.CHANGED)).encode()
-    expected = {"schema": "mastermind.dsh_native_access_source.v2", "donor_sha": pin,
+    expected = {"schema": "mastermind.dsh_native_access_source.v3", "donor_sha": pin,
         "donor_lock_sha256": access.sha(donor / "pnpm-lock.yaml"),
         "source_sha256": {name: package.digest(old) for name in sorted(access_inputs)},
         "base_sha256": {name: package.digest(base(name)) for name in sorted(access_inputs)},
