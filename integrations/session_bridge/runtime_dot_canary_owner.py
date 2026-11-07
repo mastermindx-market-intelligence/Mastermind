@@ -18,7 +18,7 @@ from .dot_canary_mcp_route import (
     CANARY_SCOPE, CanarySubscribeRequest, CanaryUnsubscribeRequest,
     CanarySubscriptionReceipt, CanaryUnsubscribeReceipt,
 )
-from .reply_policy_selection import ReplyPolicySelection
+from .reply_policy_selection import ReplyPolicySelection, ReplyPolicyDenied
 from .runtime_dot_canary_subscriptions import (
     CanaryRecord, RuntimeCanarySubscriptionStore, subscription_id, _digest,
 )
@@ -64,7 +64,10 @@ class RuntimeCanarySubscriptionOwner:
         if (not self.enabled or not _validated_principal(principal, now)
                 or CANARY_SCOPE not in principal.scopes):
             raise SubscriptionUnavailable("canary principal not admitted")
-        source = self.policies.select(principal)
+        try:
+            source = self.policies.select(principal)
+        except ReplyPolicyDenied:
+            raise SubscriptionUnavailable("original account policy denied") from None
         selected = self.policy_provider(principal)
         if selected is None:
             raise SubscriptionUnavailable("Chris account not enrolled")
