@@ -27,6 +27,25 @@ _text_helpers = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_text_helpers)
 _fixed = _text_helpers._helpers
 
+# The seven read objects the cognition owner already publishes, under the
+# cognition owner's own namespace. The AUTO route joins them to the incumbent
+# bot roster; it does not create a second authority.
+COGNITION_NAMES = [
+    "mcp__cognition__get_market_packet",
+    "mcp__cognition__get_prophet_board",
+    "mcp__cognition__get_sector_rotation",
+    "mcp__cognition__get_technical_lab",
+    "mcp__cognition__get_context_catalog",
+    "mcp__cognition__get_surface_packet",
+    "mcp__cognition__get_neural_web_packet",
+]
+
+
+def cognition_call(ident="cognition-1", name="get_context_catalog", args=None):
+    return {"id": ident, "type": "function", "function": {
+        "name": "mcp__cognition__" + name,
+        "arguments": json.dumps({} if args is None else args)}}
+
 
 class AutoAdvisorApplicationTests(unittest.TestCase):
     @classmethod
@@ -146,6 +165,68 @@ class AutoAdvisorApplicationTests(unittest.TestCase):
         self.assertEqual((replay[-1]["provider"], replay[-1]["model"]), ("go", _fixed.MODEL))
         self.assertEqual(len(self.native.posts), 1)
         self.assertEqual(len(self.costs()), 1)
+
+    def test_cognition_read_round_freezes_the_actual_auto_route_and_closes_before_publication(self):
+        from brain import portfolio_intelligence
+
+        catalog = {"schema": "mastermind.portfolio_intelligence.catalog/v1",
+                   "surfaces": [{"id": "radar", "status": "fresh"}]}
+        plans = [_fixed.packet("Reading the catalog.", calls=[cognition_call()]),
+                 _fixed.packet("Catalog read; it carries no trade authority.")]
+        self.native.on_upstream = lambda: setattr(self.native, "response", plans.pop(0))
+        observed = []
+        original_tool = bot_mcp.invoke_inference_tool
+        async def invoke(call, *, provenance):
+            observed.append(copy.deepcopy(provenance))
+            return await original_tool(call, provenance=provenance)
+        with patch.object(bot_mcp, "invoke_inference_tool", side_effect=invoke), \
+                patch.object(portfolio_intelligence, "context_catalog", lambda: catalog):
+            events = self.events()
+        self.assertEqual(events[-1]["type"], "done", events)
+        self.assertEqual([e["text"] for e in events if e["type"] == "text"],
+                         ["Reading the catalog.Catalog read; it carries no trade authority."])
+        done = events[-1]
+        self.assertEqual((done["provider"], done["model"]), ("go", _fixed.MODEL))
+        turn = self.document()["turns"][0]
+        self.assertEqual(turn["schema"], "mastermind.advisor.fabric_turn.v2")
+        self.assertEqual(turn["close"], {"disposition": "closed", "closed": True,
+                                         "effect_unknown": False, "attempted": True})
+        # The cognition read ran once, under the same frozen original route.
+        self.assertEqual(observed, [{"provider": "go", "model": _fixed.MODEL, "turn_id": "turn-1"}])
+        self.assertEqual(turn["tool_effects"][0]["name"], "mcp__cognition__get_context_catalog")
+        self.assertEqual(turn["tool_effects"][0]["state"], "complete")
+        self.assertEqual(len(self.native.posts), 2)
+        self.assertEqual(self.native.dispatches, [])
+        self.assertEqual(len(self.native.rows("leases")), 1)
+        sent = [json.loads(post[1]) for post in self.native.posts]
+        self.assertEqual(sent[1]["messages"][-1]["role"], "tool")
+        self.assertEqual(len(sent[0]["tools"]), 32)
+        sent_names = set()
+        for tool in sent[0]["tools"]:
+            sent_names.add(tool.get("name") or tool.get("function", {}).get("name"))
+        self.assertIn("mcp__cognition__get_context_catalog", sent_names)
+        self.assertEqual(len(self.closes), 1)
+        self.assertEqual(len(self.costs()), 2)
+        self.assertEqual([event["type"] for event in events if event["type"] == "paper"], [])
+
+    def test_late_invalid_cognition_call_prevents_the_earlier_business_handler(self):
+        from brain import portfolio_intelligence
+
+        self.native.response = _fixed.packet("Reading the catalog.", calls=[
+            _fixed.tool(),
+            cognition_call("bad-2", args={"source": "forged"}),
+        ])
+        with patch.object(portfolio_intelligence, "context_catalog",
+                          lambda: {"surfaces": []}):
+            events = self.events()
+        self.assertEqual(events[-1]["type"], "error", events)
+        self.assertEqual(events[-1]["error"], "fabric_tool_arguments_invalid")
+        # The whole completed batch is refused before any handler side effect.
+        self.assertFalse(bot_mcp._PROPOSALS.exists())
+        self.assertEqual(self.document()["turns"][0]["tool_effects"], [])
+        self.assertEqual(len(self.native.posts), 1)
+        self.assertEqual(len(self.costs()), 1)
+        self.assertEqual(len(self.closes), 1)
 
     def test_rich_chat_cannot_be_flattened_into_plaintext_native_harness(self):
         self.configure_chat(["codex-native"])
