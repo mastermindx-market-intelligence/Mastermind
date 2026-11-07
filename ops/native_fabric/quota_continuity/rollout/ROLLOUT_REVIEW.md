@@ -634,3 +634,31 @@ composition. Source qualification and a protected merge do not authorize an
 installed generation, CURRENT change, launchctl action, H1 admission, provider
 or worker start. Existing APPLICATION #2175 composition and enrollment
 constraints remain separate; no installed generation was replaced or selected.
+
+
+## Sparse-index advice compatibility successor (source only)
+
+The actual Git2.50.1 observation returned0 and optional sparse-index expansion
+advice; the strict stderr fence correctly refused. The prospective executor
+adds ONLY the command-scoped tuple `advice.sparseIndexExpanded=false` to the
+existing trusted settings. Direct argv and the sanitized pinned-helper environment
+share it. No stderr is filtered or accepted; unknown local config, nonzero status,
+config identity drift and uncertain owned-process cleanup retain their refusals.
+Git config is never written. Sparse-index=True andFalse positives remain covered.
+
+The new fixture appends an exact forward/reverse delta from executor710115e0
+to4a3ec239; earlier patches/maps/digests remain immutable. The canonical producer
+emits107 files, changing only executor bytes/hash. Public inverse
+`before_sparse_index_advice` binds the complete72 parent manifest45a90565 before
+the unchanged H/Q inverses. Captured current dependencies stay separate from
+historical validation. The historical executor guard still accepts its original
+710 endpoint, not the newly updated candidate pin in historical source epochs.
+Historical fixture views explicitly remove this new delta; they are not emitted
+or presented as current source captures. No install/enrollment/host effect occurs.
+
+The retained32 composed-security failures now all match GREEN case identities,
+within67 composed checks. The affected cohort/Go/host-pull/boundary group produced
+135PASS and one historical-fixture mismatch; that fixture was restored to its
+original710 source meaning and its affected case then passed. Two portability
+checks additionally avoid depending on an unmerged branch's historical Git object.
+These scopes are retained separately; do not claim one combined all-green run.
