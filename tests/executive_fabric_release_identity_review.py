@@ -17,7 +17,7 @@ REVIEWED_FILES = {
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
-        "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
+        "sha256": '8abf77434627687cfde819dd8096d0ada754c3c42ff5ec195d36ff5343d43388',
         "sites": (
             (624, 44, 47, 'int', '400'),
             (661, 44, 47, 'int', '400'),
@@ -740,7 +740,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "44eef790fb1af899e2ddd24df561c7e6a909550f6e030d6b3494df8070587593",
+    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -775,6 +775,10 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
+
+# Native Agent OS v2 adds private readback and projects an optional real child.
+# Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
+# the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
 
 
 # Original #852 held subscription principals, source-qualified at exact sites.
