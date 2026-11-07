@@ -1,0 +1,100 @@
+--- a/app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx
++++ b/app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx
+@@ -12,9 +12,9 @@
+ import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
+ import type { ResultSelection } from "../result";
+ import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
+-import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
+ import type { PlanSelection } from "../planning/admitted-plan";
+ import type { ActivitySelection } from "../planning/retained-activity";
++import { OrganizationWorkspace, type OrganizationObservation } from "../organization/OrganizationWorkspace";
+
+ // Stable presentation callbacks: parent render churn cannot invalidate an acquired plan.
+ // Each call resolves the *current* installed host; neither reference conveys authorization.
+@@ -32,8 +32,12 @@
+ export interface OfficeDraft { text: string; context: ProjectionContext }
+ export interface MetaCeoOfficeProps {
+   projection: OfficeProjection;
++  /** Actual pending state supplied by the incumbent Mission acquisition. */
++  missionLoading?: boolean;
+   /** Current presentation from the existing authenticated BYOK read owner. */
+   byokObservation?: ByokRoleView;
++  /** Optional owner-qualified observation; no new lookup or enrollment. */
++  organizationObservation?: OrganizationObservation;
+   canRefreshByok?: boolean;
+   onRefreshByok?: () => void;
+   /** Existing canonical Agent OS reader; authored objectives never confer adoption. */
+@@ -203,8 +207,8 @@
+ }
+
+ export function MetaCeoOffice({
+-  projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
+-  selectedProject, onOpenProjects, acceptedDirection, workRead, onInspectWork, projectJournal,
++  projection, missionLoading = false, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
++  selectedProject, onOpenProjects, acceptedDirection, organizationObservation, workRead, onInspectWork, projectJournal,
+   onOpenProject, onStartNewWork, byokObservation = { state: "SOURCE_UNBOUND" },
+   canRefreshByok = false, onRefreshByok, locale = "en",
+ }: MetaCeoOfficeProps) {
+@@ -379,6 +383,22 @@
+       <p className="office-muted">{t("Read the accepted direction for this project. Its authored objective is a separate source record.")}</p>
+       {acceptedDirection}
+     </details> : null}
++    <details className="office-disclosure office-organization" open={projection.mission.source.state === "CURRENT"}>
++      <summary>{locale === "zh-CN" ? "组织架构与目标关联" : "Organization and goal lineage"}</summary>
++      <OrganizationWorkspace binding={projection.context} missionState={projection.mission.source.state}
++        observation={organizationObservation} missionProjection={projection} loading={missionLoading}
++        onOpenProjects={onOpenProjects} onOpenProject={onOpenProject} onInspectWorkerResult={onInspectWorkerResult}
++        planReader={{
++          read: typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
++            ? readOfficePlan : undefined,
++          readActivity: typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
++            ? readOfficeActivity : undefined,
++          sourceGeneration: typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
++            ? officePlanGeneration : undefined,
++          canRead: typeof window !== "undefined" && window.MastermindMissionHost?.auth
++            ? officePlanPermission : undefined,
++        }} locale={locale} />
++    </details>
+     <details className="office-disclosure office-objective">
+       <summary>{t("Authored project objective")}</summary>
+       <p className="office-muted">{t("This is the authored objective of the selected project from the existing Agent OS reader. It is project source, not accepted company direction. Reading it adopts nothing.")}</p>
+@@ -400,23 +420,6 @@
+
+     <details className="fi-disclosure">
+       <summary>{locale === "zh-CN" ? "子代理 Fabric · 查看执行内部状态" : "Subagent Fabric · inspect execution"}</summary>
+-    <AdmittedPlanInspector
+-      key={`plan:${projection.context.authGeneration}`}
+-      selection={mission?.program?.work_ref && mission?.mission?.root_job_id
+-        ? { work_ref: mission.program.work_ref, root_job_id: mission.mission.root_job_id } : null}
+-      read={typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
+-        ? readOfficePlan : undefined}
+-      readActivity={typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
+-        ? readOfficeActivity : undefined}
+-      sourceGeneration={typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
+-        ? officePlanGeneration : undefined}
+-      canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth
+-        ? officePlanPermission : undefined}
+-      locale={locale}
+-      mission={mission}
+-      missionSourceState={projection.mission.source.state}
+-      missionObservedAt={projection.mission.source.observed_at}
+-    />
+     <FabricMissionInspector
+       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
+       mission={mission} locale={locale}
+--- a/app/mastermind_os/src/App.tsx
++++ b/app/mastermind_os/src/App.tsx
+@@ -5362,6 +5362,13 @@
+           key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
+           locale={locale}
+           projection={office.projection}
++          missionLoading={"kind" in mission && mission.kind === "LOCAL_UNAVAILABLE" && mission.reason === "SOURCE_READ_PENDING"}
++          onOpenProject={(target) => {
++            if (projectReaders.canRead() && selection?.workRef === target.workRef && selection?.rootJobId === target.rootJobId) {
++              setProjectTab("Conversation");
++              setActive("Projects");
++            }
++          }}
+           byokObservation={byokRoleView(byokRoles)}
+           canRefreshByok={byokRoles.canRefresh}
+           onRefreshByok={byokRoles.refresh}

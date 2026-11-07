@@ -1,0 +1,681 @@
+{
+  "schema": "mastermind.organization_s6_qualification.v1",
+  "recorded_at": "2026-11-07T06:29:21.500964+00:00",
+  "operation": "organization-live-experience-20261107-c3",
+  "pr": 2193,
+  "source_baseline": "6f367bc43cad6a4a7e9c85fc3282a1178ed2308c",
+  "protected_source_pin": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "capability_state": "BUILT_NOT_PROVEN",
+  "mission_complete": false,
+  "checks": [
+    {
+      "check": "organization-tests",
+      "command": "npm exec vitest -- run src/organization --maxWorkers=1 --reporter=dot",
+      "exit": 0,
+      "tests": 86,
+      "files": 4,
+      "vitest_seconds": 5.43,
+      "process_seconds": 6.71,
+      "raw_log_sha256": "06afe66559604165c2271168878f513331eaf9c4159b2003d662b7fb5c4ba782"
+    },
+    {
+      "check": "typecheck",
+      "command": "npm run typecheck",
+      "exit": 0,
+      "process_seconds": 1.52,
+      "raw_log_sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c"
+    },
+    {
+      "check": "build",
+      "command": "npm run build",
+      "exit": 0,
+      "process_seconds": 1.93,
+      "warnings": [
+        "chunk larger than 500 kB",
+        "ineffective dynamic import: Tauri core and SourceMarkdown"
+      ],
+      "raw_log_sha256": "1fe2b88d12a32e0e502964b6daf3755962a461bea3966926cff2426099342781"
+    }
+  ],
+  "regression_discrimination": [
+    {
+      "phase": "initial navigation regressions before fixes",
+      "failed": 6,
+      "passed": 1,
+      "process_pid": 69105,
+      "log": "/tmp/o3-navigation-red-20261107-c3.log"
+    },
+    {
+      "phase": "selected-row and review regressions before fixes",
+      "failed": 7,
+      "passed": 1,
+      "skipped": 19,
+      "process_pid": 99995,
+      "log": "/tmp/o3-navigation-review-red-20261107-c3.log"
+    },
+    {
+      "phase": "after fixes, ambiguous Chinese test query corrected",
+      "failed": 1,
+      "passed": 85,
+      "failure": "TestingLibrary found multiple text matches for 审查; query scoped to Operation progress"
+    },
+    {
+      "phase": "final",
+      "failed": 0,
+      "passed": 86,
+      "process_pid": 7698
+    }
+  ],
+  "mounts": [
+    {
+      "patch": "app/mastermind_os/src/organization/incumbent-office-mount.patch",
+      "target": "d7d5bfdb4bc656473a7e940dee07d0b437aed40d",
+      "patch_sha256": "bca089c940eed0e0c9b387d9b2459f7d17695d2babac2b0ab3c1b8111f9e4110",
+      "lines": 92,
+      "files": {
+        "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx": {
+          "before_blob": "c5f35c4fbfe38b7aa84a8cbd0ef0d5882e65f557",
+          "after_sha256": "d5f10a43a24ead912f2b740e582593880342632cf28488684290940f6190044c"
+        },
+        "app/mastermind_os/src/App.tsx": {
+          "before_blob": "060c29378b1d4cdbcfa7d171dc8578ef5a245984",
+          "after_sha256": "e8c396163af7c89909544cb7063ff3f28b35fd386eaeda27bb79bf2ff837274b"
+        }
+      }
+    },
+    {
+      "patch": "app/mastermind_os/src/organization/s0-appintegration-mount.patch",
+      "target": "26604f550b42505808ea1b7ca2816be771aee5f5",
+      "patch_sha256": "7c091b578128d6e0c0579b75e229ecd015cc52f30c11548cb92778f62bc1eec3",
+      "lines": 100,
+      "files": {
+        "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx": {
+          "before_blob": "bf61d2f6b8c6514999ccb4bfec87fb0d2bf5edd9",
+          "after_sha256": "feaf3495c3e8478df98f2fca994471c3ada6885e5dbe52ee3a69d7f976add2da"
+        },
+        "app/mastermind_os/src/App.tsx": {
+          "before_blob": "3fbca43ee542e2f7c90f869e6b820a306a880ec4",
+          "after_sha256": "4a59d91e1f971fd1fb7718add2c5ca9eb840901a03788a3449b4d45e445ac158"
+        }
+      }
+    }
+  ],
+  "mount_typecheck": [
+    {
+      "target": "d7d5bfdb4bc656473a7e940dee07d0b437aed40d",
+      "patch": "app/mastermind_os/src/organization/incumbent-office-mount.patch",
+      "root_files": 286,
+      "source_files": 460,
+      "diagnostics": 0,
+      "seconds": 3.29,
+      "source_sha256": "05976a2dbc074d20701d4cec60830fdf266ffef7537f17dc5154d08088631c44",
+      "package_lock_identical": true,
+      "patch_apply_check": "PASS"
+    },
+    {
+      "target": "26604f550b42505808ea1b7ca2816be771aee5f5",
+      "patch": "app/mastermind_os/src/organization/s0-appintegration-mount.patch",
+      "root_files": 290,
+      "source_files": 465,
+      "diagnostics": 0,
+      "seconds": 13.14,
+      "source_sha256": "42fc178e12566954a23d6cf1e166e976edc1ec2f3e3a05b9ee51593acf544aea",
+      "package_lock_identical": true,
+      "patch_apply_check": "PASS"
+    }
+  ],
+  "installed_native_metadata": {
+    "observed_only": "Info.plist; no new launch/auth/provider turn",
+    "build_identity": "mmos-project-teams-fca92d5a-20261106-sol-002",
+    "source_revision": "fca92d5a3cef710932b46082eef98a258079f806",
+    "bundle_id": "com.mastermind.os",
+    "version": "0.1.0",
+    "o3_installed": false
+  },
+  "browser": {
+    "state": "AUTOMATIC_APPROVAL_DENIED_BEFORE_NAVIGATION",
+    "attempted_origin": "https://mcp.mastermind-x.com",
+    "reason": "Origin approval cited the absent originating browser connection and previously closed Chrome recovery/credential access. No alternate surface or credential recovery was attempted.",
+    "authenticated_path": "NOT_PROVEN",
+    "load_ms": null,
+    "navigation_ms": null,
+    "page_errors": "NOT_OBSERVED_NO_PAGE_LOADED"
+  },
+  "provider_paths": {
+    "deepseek_head": "0506ed5165931fe7a4ad38aa3bb47b7cbc4e2845",
+    "deepseek_live_route": "NOT_QUALIFIED",
+    "hermes_head": "d7d5bfdb4bc656473a7e940dee07d0b437aed40d",
+    "hermes_new_installed_path": "NOT_PROVEN",
+    "new_provider_turns": 0
+  },
+  "s0_visual_reuse": {
+    "source_directory": "/Volumes/Mastermind/evidence/mmos-commission-01a15741/product-parity/affected-view-dda7-01a1a4bf",
+    "matrix_sha256": "9e6f5eb41fb9b22a44d608d3299203b1d6755ea2e85c84a2a9bcc8094ce81602",
+    "inspected_appintegration_head": "26604f550b42505808ea1b7ca2816be771aee5f5",
+    "source_note": "Retained producer matrix and screenshots. The directory identifies the dda7 affected-view wave; this read does not establish a new authenticated run or a screenshot of O3.",
+    "rows": [
+      {
+        "theme": "dark",
+        "locale": "en",
+        "width": 1440,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "Goal",
+            "box": {
+              "x": 297,
+              "y": 322,
+              "width": 1077.984375,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "Acceptance criteria (optional, one per line)",
+            "box": {
+              "x": 297,
+              "y": 439,
+              "width": 1077.984375,
+              "height": 181.796875
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "Project",
+            "box": {
+              "x": 297,
+              "y": 636.796875,
+              "width": 348.65625,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "Profile",
+            "box": {
+              "x": 661.65625,
+              "y": 636.796875,
+              "width": 348.671875,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 1440,
+          "document": 1440
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "dark",
+        "locale": "en",
+        "width": 390,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "Goal",
+            "box": {
+              "x": 45,
+              "y": 311,
+              "width": 300,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "Acceptance criteria (optional, one per line)",
+            "box": {
+              "x": 45,
+              "y": 428,
+              "width": 300,
+              "height": 231.390625
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "Project",
+            "box": {
+              "x": 45,
+              "y": 675.390625,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "Profile",
+            "box": {
+              "x": 45,
+              "y": 764.390625,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 390,
+          "document": 390
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "dark",
+        "locale": "zh-CN",
+        "width": 1440,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "目标",
+            "box": {
+              "x": 297,
+              "y": 322,
+              "width": 1077.984375,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "验收条件（可选，每行一项）",
+            "box": {
+              "x": 297,
+              "y": 439,
+              "width": 1077.984375,
+              "height": 181.796875
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "项目",
+            "box": {
+              "x": 297,
+              "y": 636.796875,
+              "width": 348.65625,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "执行方式",
+            "box": {
+              "x": 661.65625,
+              "y": 636.796875,
+              "width": 348.671875,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 1440,
+          "document": 1440
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "dark",
+        "locale": "zh-CN",
+        "width": 390,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "目标",
+            "box": {
+              "x": 45,
+              "y": 287,
+              "width": 300,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "验收条件（可选，每行一项）",
+            "box": {
+              "x": 45,
+              "y": 404,
+              "width": 300,
+              "height": 206.59375
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "项目",
+            "box": {
+              "x": 45,
+              "y": 626.59375,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "执行方式",
+            "box": {
+              "x": 45,
+              "y": 715.59375,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 390,
+          "document": 390
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "light",
+        "locale": "en",
+        "width": 1440,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "Goal",
+            "box": {
+              "x": 297,
+              "y": 322,
+              "width": 1077.984375,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "Acceptance criteria (optional, one per line)",
+            "box": {
+              "x": 297,
+              "y": 439,
+              "width": 1077.984375,
+              "height": 181.796875
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "Project",
+            "box": {
+              "x": 297,
+              "y": 636.796875,
+              "width": 348.65625,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "Profile",
+            "box": {
+              "x": 661.65625,
+              "y": 636.796875,
+              "width": 348.671875,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 1440,
+          "document": 1440
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "light",
+        "locale": "en",
+        "width": 390,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "Goal",
+            "box": {
+              "x": 45,
+              "y": 311,
+              "width": 300,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "Acceptance criteria (optional, one per line)",
+            "box": {
+              "x": 45,
+              "y": 428,
+              "width": 300,
+              "height": 231.390625
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "Project",
+            "box": {
+              "x": 45,
+              "y": 675.390625,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "Profile",
+            "box": {
+              "x": 45,
+              "y": 764.390625,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 390,
+          "document": 390
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "light",
+        "locale": "zh-CN",
+        "width": 1440,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "目标",
+            "box": {
+              "x": 297,
+              "y": 322,
+              "width": 1077.984375,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "验收条件（可选，每行一项）",
+            "box": {
+              "x": 297,
+              "y": 439,
+              "width": 1077.984375,
+              "height": 181.796875
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "项目",
+            "box": {
+              "x": 297,
+              "y": 636.796875,
+              "width": 348.65625,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "执行方式",
+            "box": {
+              "x": 661.65625,
+              "y": 636.796875,
+              "width": 348.671875,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 1440,
+          "document": 1440
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      },
+      {
+        "theme": "light",
+        "locale": "zh-CN",
+        "width": 390,
+        "status": "FUNCTIONAL_PASS",
+        "fieldGeometry": [
+          {
+            "label": "目标",
+            "box": {
+              "x": 45,
+              "y": 287,
+              "width": 300,
+              "height": 101
+            },
+            "controlHeight": 72
+          },
+          {
+            "label": "验收条件（可选，每行一项）",
+            "box": {
+              "x": 45,
+              "y": 404,
+              "width": 300,
+              "height": 206.59375
+            },
+            "controlHeight": 120
+          },
+          {
+            "label": "项目",
+            "box": {
+              "x": 45,
+              "y": 626.59375,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          },
+          {
+            "label": "执行方式",
+            "box": {
+              "x": 45,
+              "y": 715.59375,
+              "width": 300,
+              "height": 73
+            },
+            "controlHeight": 44
+          }
+        ],
+        "undersizedTargets": [],
+        "rawAcceptanceMarkerVisible": false,
+        "geometry": {
+          "viewport": 390,
+          "document": 390
+        },
+        "errors": [],
+        "blocked": [],
+        "unsentDraftRetained": true,
+        "keyboardGoalCriteriaPreview": true,
+        "submitControlReachable": true
+      }
+    ],
+    "artifacts": [
+      {
+        "file": "s0-existing-criteria-light-zh-CN-390-fields.png",
+        "original_path": "/Volumes/Mastermind/evidence/mmos-commission-01a15741/product-parity/affected-view-dda7-01a1a4bf/criteria-light-zh-CN-390-fields.png",
+        "sha256": "2183a535d786cec9290d7602d9e6eb11f5bf8dd4ba13fe5498cc995c507a205e",
+        "bytes": 111611,
+        "evidence_class": "EXISTING_S0_COMPOSER_FIXTURE_NOT_O3"
+      },
+      {
+        "file": "s0-existing-criteria-dark-en-1440-preview.png",
+        "original_path": "/Volumes/Mastermind/evidence/mmos-commission-01a15741/product-parity/affected-view-dda7-01a1a4bf/criteria-dark-en-1440-preview.png",
+        "sha256": "72bf28645b2a9b25e7ad7cd86ef55f8196b590f475d96dca11084742de98231f",
+        "bytes": 239631,
+        "evidence_class": "EXISTING_S0_COMPOSER_FIXTURE_NOT_O3"
+      }
+    ]
+  },
+  "not_performed": [
+    "shared App/Office/native source write",
+    "new Mission acquisition or auth store",
+    "runtime worker admission",
+    "original09b protected result retry",
+    "provider canary send",
+    "install or backend restart",
+    "deployment",
+    "merge"
+  ],
+  "remaining_acceptance": [
+    "S0 single shared composition",
+    "external Result Back preserving project/search/work/focus",
+    "qualified enrolled-session leadership observation delivery",
+    "authenticated DeepSeek and Hermes draft/history/reopen paths",
+    "changed O3 keyboard and 390px/desktop visual path in EN/ZH and light/dark",
+    "real retained result read and return",
+    "actual load/navigation timings and page errors",
+    "S2/S3 real assignment and worker execution proof"
+  ],
+  "adviser": {
+    "role": "native read-only architectural judgment",
+    "disposition": "ACCEPTED / STOP",
+    "formal_github_approval": false,
+    "watcher": "NOT_APPLICABLE"
+  },
+  "hosted_ci_repair": {
+    "initial_head": "18167126468567ddbfc31caa807d606aedf92e5b",
+    "run_id": 42347539779,
+    "job_id": 128328496014,
+    "result": "PR fast checks failed on one extra blank line at EOF in s6-checks.log",
+    "repair": "Removed trailing empty log line on the same branch; production code, tests and mount bytes unchanged",
+    "qualification_limit": "The earlier local diff check excluded then-untracked files; complete PR-range whitespace check is used for the repair"
+  }
+}
