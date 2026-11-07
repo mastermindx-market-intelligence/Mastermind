@@ -1,0 +1,93 @@
+{
+  "api": {
+    "coverage": {
+      "context_rows_n": 0,
+      "coverage_rate": 0.0,
+      "open_theses_n": 0,
+      "resolved_recent_n": 11,
+      "state": "context_absent",
+      "with_context_row_n": 0
+    },
+    "flags": {
+      "llm_review": true,
+      "loop": true
+    },
+    "generated_at": "2026-09-24T06:20:47Z",
+    "last_loops": [
+      {
+        "asof": "2026-09-17",
+        "loop_n": 45,
+        "ok": true,
+        "trigger": "cron",
+        "ts": "2026-09-17T23:54:55Z"
+      },
+      {
+        "asof": "2026-09-18",
+        "loop_n": 46,
+        "ok": true,
+        "trigger": "cron",
+        "ts": "2026-09-18T23:54:58Z"
+      },
+      {
+        "asof": "2026-09-21",
+        "loop_n": 47,
+        "ok": true,
+        "trigger": "cron",
+        "ts": "2026-09-21T23:55:05Z"
+      },
+      {
+        "asof": "2026-09-22",
+        "loop_n": 48,
+        "ok": true,
+        "trigger": "cron",
+        "ts": "2026-09-22T23:56:06Z"
+      },
+      {
+        "asof": "2026-09-23",
+        "loop_n": 49,
+        "ok": true,
+        "trigger": "cron",
+        "ts": "2026-09-23T23:55:33Z"
+      }
+    ],
+    "loop_n": 49,
+    "reflection_asof": "2026-09-23"
+  },
+  "candidates": [
+    {
+      "asof": "2026-07-27",
+      "coverage": {
+        "context_rows_n": 0,
+        "coverage_rate": 0.0,
+        "open_theses_n": 3,
+        "resolved_recent_n": 0,
+        "state": "context_absent",
+        "with_context_row_n": 0
+      },
+      "generated_at": "2026-07-27T23:01:02Z",
+      "matches_api": false,
+      "root": "/opt/mastermind/data",
+      "schema": "nw_reflection.v1",
+      "sha256": "53866649f195e2f1df848a05cc7c3f70c1863059d985555ef8b3bc5ab860150f"
+    },
+    {
+      "asof": "2026-09-23",
+      "coverage": {
+        "context_rows_n": 0,
+        "coverage_rate": 0.0,
+        "open_theses_n": 0,
+        "resolved_recent_n": 11,
+        "state": "context_absent",
+        "with_context_row_n": 0
+      },
+      "generated_at": "2026-09-23T23:55:07Z",
+      "matches_api": true,
+      "root": "/opt/mastermind-live-data",
+      "schema": "nw_reflection.v1",
+      "sha256": "b41eadcaecf1645b7c0f6c2f23f0e3deba9791e866c4e1715e452d858660bf81"
+    }
+  ],
+  "observed_at": "2026-09-24T06:20:47.194516+00:00",
+  "scope": "READ_ONLY_OWNER_PATH_RECONCILIATION",
+  "service": "MainPID=2535056\nWorkingDirectory=/opt/mastermind\nFragmentPath=/etc/systemd/system/mastermind.service"
+}

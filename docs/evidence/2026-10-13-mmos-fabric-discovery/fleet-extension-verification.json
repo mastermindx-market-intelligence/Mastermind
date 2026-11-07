@@ -1,0 +1,50 @@
+{
+  "schema": "mastermind.os_fabric_fleet_continuation.v1",
+  "observed_at": "2026-10-14T01:05:03.926956+00:00",
+  "source_base": "a3c1c8f37ec46d1df0105dbea59898c4eec4d0fd",
+  "source_head": "aefc304c1e42361b4568acd0cac4d0a738d2a87c",
+  "procedure_pin": "d837e04bf60a9fb60b7c530d287115a298fc1af0",
+  "source_sha256": {
+    "app/mastermind_os/src/App.tsx": "d147449e5bf07f866a74a86fadba59aba5251a8dd18120027df58107748d6156",
+    "app/mastermind_os/src/App.fabric-fleet.test.tsx": "eb95649d6a7209f32877005d772539103f68f4a271a097ed1c684824e38e408c",
+    "app/mastermind_os/src/fabric/FabricMissionInspector.tsx": "d2ba8971066d311f594748baac97b4e360b1c83d761fc24c3dbf98f22b2cfc4a",
+    "app/mastermind_os/src/fabric/FabricMissionInspector.test.tsx": "24753cd82fd9359bd4f3a0b65a0a2ef02575d5fbb28b1cbcbaa02028c898ee42"
+  },
+  "verification": {
+    "full_suite": {
+      "files": 64,
+      "passed": 1473,
+      "skipped": 1,
+      "failed": 0,
+      "rc": 0
+    },
+    "typecheck": {
+      "rc": 0
+    },
+    "build": {
+      "rc": 0,
+      "nonblocking_warnings": [
+        "large chunk",
+        "mixed Tauri static/dynamic import"
+      ]
+    },
+    "browser_new": {
+      "state": "NOT_RUN",
+      "reason": "preserved prior platform refusal; no alternate carrier"
+    },
+    "production": {
+      "state": "NOT_PROVEN"
+    }
+  },
+  "logs": {
+    "fleet-frozen-full-suite.log": "debee7ee9d07d606e4b182e4e00e9dd3234158a31a0c7e699883e7debab7ea09",
+    "fleet-frozen-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fleet-frozen-build.log": "8f2d05700dfd4bd167c6e2726fd64d8ca1227e42f04abda180693c137bc6d9b9"
+  },
+  "effects": {
+    "new_workers": 0,
+    "runtime_changes": 0,
+    "Paper_edits": 0,
+    "source_broker_changes": 0
+  }
+}

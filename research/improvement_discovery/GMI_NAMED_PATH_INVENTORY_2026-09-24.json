@@ -1,0 +1,14 @@
+{
+  "complete_for_exact_named_paths": true,
+  "interpretation": "Only exact source-path existence; no semantic, alternative-capability or production claim.",
+  "required_paths": [
+    "contracts/theme_graph/curation_assertion.v1.schema.json",
+    "engine/theme_graph/curation_assertion.py",
+    "app/theme_research.py",
+    "site/assets/js/theme-research.js",
+    "site/assets/css/theme-research.css",
+    "contracts/sector_intelligence/sector_dossier_read_model.v1.schema.json"
+  ],
+  "returned_entries": [],
+  "revision": "33c73dd9f5e65936f0052cb28f4ece4880b51a43"
+}

@@ -1,0 +1,606 @@
+{
+  "purpose": "Research bibliography only; no production schema or data contract.",
+  "research_date_utc": "2026-10-04",
+  "sources": [
+    {
+      "id": "M01",
+      "title": "Mastermind current bootstrap/source-law index",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/INDEX.md",
+      "kind": "pinned_repository_source",
+      "path": "docs/sol_skills/INDEX.md"
+    },
+    {
+      "id": "M02",
+      "title": "Mastermind Macro repository linkage",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/.gitmodules",
+      "kind": "pinned_repository_source",
+      "path": ".gitmodules"
+    },
+    {
+      "id": "M03",
+      "title": "Held-risk earnings and interest proxy",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/held_risk.py",
+      "kind": "pinned_repository_source",
+      "path": "portfolio/held_risk.py"
+    },
+    {
+      "id": "M04",
+      "title": "Lens synthesis and confluence",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/lenses.py",
+      "kind": "pinned_repository_source",
+      "path": "portfolio/lenses.py"
+    },
+    {
+      "id": "M05",
+      "title": "Portfolio V3 risk-first design",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+      "kind": "pinned_repository_source",
+      "path": "docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md"
+    },
+    {
+      "id": "M06",
+      "title": "Generated census, July 16 2026",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/data/census/CENSUS.md",
+      "kind": "pinned_repository_source",
+      "path": "data/census/CENSUS.md"
+    },
+    {
+      "id": "M07",
+      "title": "PIT fundamental loader",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/fundamentals.py",
+      "kind": "pinned_repository_source",
+      "path": "loop/fundamentals.py"
+    },
+    {
+      "id": "M08",
+      "title": "Single-name panel",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/single_name_panel.py",
+      "kind": "pinned_repository_source",
+      "path": "loop/single_name_panel.py"
+    },
+    {
+      "id": "M09",
+      "title": "Research desk",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/research_desk.py",
+      "kind": "pinned_repository_source",
+      "path": "brain/research_desk.py"
+    },
+    {
+      "id": "M10",
+      "title": "Bottleneck owner",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/bottleneck.py",
+      "kind": "pinned_repository_source",
+      "path": "brain/bottleneck.py"
+    },
+    {
+      "id": "M11",
+      "title": "Trend persistence protocol",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/research/TREND_PERSISTENCE_PROTOCOL.md",
+      "kind": "pinned_repository_source",
+      "path": "research/TREND_PERSISTENCE_PROTOCOL.md"
+    },
+    {
+      "id": "M12",
+      "title": "Thematic rotation framework",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/source_thematic_rotation_framework.md",
+      "kind": "pinned_repository_source",
+      "path": "docs/source_thematic_rotation_framework.md"
+    },
+    {
+      "id": "X01",
+      "title": "Macro research revision",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/config/mastermind_programs.yml",
+      "kind": "pinned_repository_source",
+      "path": "config/mastermind_programs.yml"
+    },
+    {
+      "id": "X02",
+      "title": "Canonical capital-structure-intelligence and ccw alias",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/config/mastermind_programs.yml",
+      "kind": "pinned_repository_source",
+      "path": "config/mastermind_programs.yml"
+    },
+    {
+      "id": "X03",
+      "title": "Capital Structure V2 workstream and gates",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/agentos/workstreams/WS-CAPITAL-STRUCTURE-INTELLIGENCE-V2.md",
+      "kind": "pinned_repository_source",
+      "path": "agentos/workstreams/WS-CAPITAL-STRUCTURE-INTELLIGENCE-V2.md"
+    },
+    {
+      "id": "X04",
+      "title": "Capital Structure V2 masterplan",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CAPITAL_STRUCTURE_INTELLIGENCE_V2_MASTERPLAN_2026-08-18.md",
+      "kind": "pinned_repository_source",
+      "path": "research/CAPITAL_STRUCTURE_INTELLIGENCE_V2_MASTERPLAN_2026-08-18.md"
+    },
+    {
+      "id": "X05",
+      "title": "Capital Structure contract",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/docs/CAPITAL_STRUCTURE_INTELLIGENCE_CONTRACT.md",
+      "kind": "pinned_repository_source",
+      "path": "docs/CAPITAL_STRUCTURE_INTELLIGENCE_CONTRACT.md"
+    },
+    {
+      "id": "X06",
+      "title": "W3 issuer-state build docket",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/CAPITAL_STRUCTURE_ISSUER_STATE_W3_BUILD_DOCKET.md",
+      "kind": "pinned_repository_source",
+      "path": "research/CAPITAL_STRUCTURE_ISSUER_STATE_W3_BUILD_DOCKET.md"
+    },
+    {
+      "id": "X07",
+      "title": "Retained source manifest schema",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_source_manifest.schema.json",
+      "kind": "pinned_repository_source",
+      "path": "contracts/capital_structure_source_manifest.schema.json"
+    },
+    {
+      "id": "X08",
+      "title": "Document term observation schema",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_document_term_observation.schema.json",
+      "kind": "pinned_repository_source",
+      "path": "contracts/capital_structure_document_term_observation.schema.json"
+    },
+    {
+      "id": "X09",
+      "title": "Instrument candidate term schema",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/contracts/capital_structure_instrument_candidate_term.schema.json",
+      "kind": "pinned_repository_source",
+      "path": "contracts/capital_structure_instrument_candidate_term.schema.json"
+    },
+    {
+      "id": "X10",
+      "title": "Debt maturity extractor",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/debt_maturity.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/debt_maturity.py"
+    },
+    {
+      "id": "X11",
+      "title": "Capital need read model",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/capital_need.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/capital_need.py"
+    },
+    {
+      "id": "X12",
+      "title": "Cash runway read model",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/cash_runway.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/cash_runway.py"
+    },
+    {
+      "id": "X13",
+      "title": "Debt maturity builder/cache",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/scripts/build_debt_maturity.py",
+      "kind": "pinned_repository_source",
+      "path": "scripts/build_debt_maturity.py"
+    },
+    {
+      "id": "X14",
+      "title": "Corporate Credit Watch engine",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/corp_credit.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/corp_credit.py"
+    },
+    {
+      "id": "X15",
+      "title": "Sponsor bond holdings collector",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/collectors/corp_bond_holdings.py",
+      "kind": "pinned_repository_source",
+      "path": "collectors/corp_bond_holdings.py"
+    },
+    {
+      "id": "X16",
+      "title": "Credit momentum engine",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/credit_momentum.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/credit_momentum.py"
+    },
+    {
+      "id": "X17",
+      "title": "Aggregate credit-window context",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/credit_window.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/credit_window.py"
+    },
+    {
+      "id": "X18",
+      "title": "Covenant headroom view model",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/covenant_headroom.py",
+      "kind": "pinned_repository_source",
+      "path": "engine/covenant_headroom.py"
+    },
+    {
+      "id": "X19",
+      "title": "Committed Capital Structure health",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/capital_structure/health.json",
+      "kind": "pinned_repository_source",
+      "path": "data/capital_structure/health.json"
+    },
+    {
+      "id": "X20",
+      "title": "Canonical identity seams",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/config/identity_seams.yml",
+      "kind": "pinned_repository_source",
+      "path": "config/identity_seams.yml"
+    },
+    {
+      "id": "X21",
+      "title": "FIF accounting and identity reuse map",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/financial_intelligence_fabric/FIF_3A1_REUSE_MAP.md",
+      "kind": "pinned_repository_source",
+      "path": "research/financial_intelligence_fabric/FIF_3A1_REUSE_MAP.md"
+    },
+    {
+      "id": "X22",
+      "title": "Research Vault masterplan",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/research/RESEARCH_VAULT_MASTERPLAN.md",
+      "kind": "pinned_repository_source",
+      "path": "research/RESEARCH_VAULT_MASTERPLAN.md"
+    },
+    {
+      "id": "X23",
+      "title": "Committed CCW latest output",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/latest.json",
+      "kind": "pinned_repository_source",
+      "path": "data/corp_bonds/latest.json"
+    },
+    {
+      "id": "X24",
+      "title": "Committed credit momentum output",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/credit_momentum.json",
+      "kind": "pinned_repository_source",
+      "path": "data/corp_bonds/credit_momentum.json"
+    },
+    {
+      "id": "X25",
+      "title": "Committed CCW validation",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/data/corp_bonds/validation.json",
+      "kind": "pinned_repository_source",
+      "path": "data/corp_bonds/validation.json"
+    },
+    {
+      "id": "X26",
+      "title": "Canonical first_known_at retention decision",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/agentos/decisions/DEC-CS-V2-FIRST-KNOWN-AT-IS-CANONICAL-RETENTION-CLOCK.md",
+      "kind": "pinned_repository_source",
+      "path": "agentos/decisions/DEC-CS-V2-FIRST-KNOWN-AT-IS-CANONICAL-RETENTION-CLOCK.md"
+    },
+    {
+      "id": "T01",
+      "title": "Terminal overview",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/1c708450187755160e1a5889b69598a2fcb1f0d1/terminal/components/fin/OverviewPage.tsx",
+      "kind": "pinned_repository_source",
+      "path": "terminal/components/fin/OverviewPage.tsx"
+    },
+    {
+      "id": "S01",
+      "title": "Norden and Weber (2009), institutional publication record",
+      "url": "https://pure.eur.nl/en/publications/the-co-movement-of-credit-default-swap-bond-and-stock-markets-an-/",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S02",
+      "title": "Kapadia and Pu, author-hosted 2010 manuscript",
+      "url": "https://people.umass.edu/nkapadia/docs/kp_04302010.pdf",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S03",
+      "title": "Hameed, Titman, Wei and Zhang, July 2026 working-paper abstract",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4728568",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S04",
+      "title": "OFR WP 24-04: Do Credit Default Swaps Still Lead?",
+      "url": "https://www.financialresearch.gov/working-papers/2024/07/17/do-credit-default-swaps-still-lead/",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S05",
+      "title": "NY Fed Staff Report 1094: The Global Credit Cycle",
+      "url": "https://www.newyorkfed.org/research/staff_reports/sr1094",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S06",
+      "title": "NY Fed Corporate Bond Market Distress Index",
+      "url": "https://www.newyorkfed.org/research/policy/cmdi",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S07",
+      "title": "Federal Reserve: Recession Risk and the Excess Bond Premium",
+      "url": "https://www.federalreserve.gov/econresdata/notes/feds-notes/2016/recession-risk-and-the-excess-bond-premium-20160408.html",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S08",
+      "title": "SEC EDGAR application programming interfaces",
+      "url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S09",
+      "title": "FINRA Regulatory Notice 25-17",
+      "url": "https://www.finra.org/rules-guidance/notices/25-17",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S10",
+      "title": "FINRA Rule 6730 reporting requirements",
+      "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/6730",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S11",
+      "title": "FINRA Rule 6750 dissemination",
+      "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/6750",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S12",
+      "title": "FINRA Enhanced Historic corporate bond layout",
+      "url": "https://www.finra.org/sites/default/files/AppSupportDoc/p353157.pdf",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S13",
+      "title": "FINRA historic and academic data information",
+      "url": "https://www.finra.org/filing-reporting/trace/historic-academic-data",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S14",
+      "title": "FINRA Rule 7730 products and fees",
+      "url": "https://www.finra.org/rules-guidance/rulebooks/finra-rules/7730",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S15",
+      "title": "FINRA Fixed Income API specific terms",
+      "url": "https://developer.finra.org/specific-terms-fixed-income-data",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S16",
+      "title": "US Treasury yield curve methodology",
+      "url": "https://home.treasury.gov/policy-issues/financing-the-government/interest-rate-statistics/treasury-yield-curve-methodology",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S17",
+      "title": "NY Fed reference rate publication and revision information",
+      "url": "https://www.newyorkfed.org/markets/reference-rates/additional-information-about-reference-rates",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S18",
+      "title": "FRED ICE BofA US High Yield OAS",
+      "url": "https://fred.stlouisfed.org/series/BAMLH0A0HYM2",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S19",
+      "title": "FRED ICE BofA US Corporate OAS and rights notes",
+      "url": "https://fred.stlouisfed.org/series/BAMLC0A0CM",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S20",
+      "title": "SEC staff Regulation SBSR FAQ",
+      "url": "https://www.sec.gov/rules-regulations/staff-guidance/trading-markets-frequently-asked-questions/frequently-asked-questions-regulation-sbsr",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S21",
+      "title": "SEC 2021 SDR registration and initial reporting compliance",
+      "url": "https://www.sec.gov/newsroom/press-releases/2021-80",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S22",
+      "title": "SEC 2026 reporting consultation docket, not enacted rule",
+      "url": "https://www.sec.gov/rules-regulations/public-comments/s7-2026-22",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S23",
+      "title": "OpenFIGI API documentation",
+      "url": "https://www.openfigi.com/api/documentation",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S24",
+      "title": "CGS licensing requirements statement",
+      "url": "https://www.cusip.com/services/license-fees.html",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S25",
+      "title": "Verizon Q1 2026 Form 10-Q",
+      "url": "https://www.sec.gov/Archives/edgar/data/732712/000073271226000023/vz-20260331.htm",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S26",
+      "title": "Verizon May 2026 junior subordinated note prospectus",
+      "url": "https://www.sec.gov/Archives/edgar/data/732712/000119312526221003/d148236d424b2.htm",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S27",
+      "title": "Avery Dennison June 2024 credit agreement disclosure",
+      "url": "https://www.sec.gov/Archives/edgar/data/8818/000119312524170372/d844816d8k.htm",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S28",
+      "title": "IRS current Form 8990 instructions",
+      "url": "https://www.irs.gov/instructions/i8990",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S29",
+      "title": "Chernozhukov et al., double/debiased machine learning",
+      "url": "https://www.nber.org/papers/w23564",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S30",
+      "title": "Petersen, standard errors in finance panel data",
+      "url": "https://www.kellogg.northwestern.edu/faculty/petersen/htm/papers/standarderror.html",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "S31",
+      "title": "Clark and West, nested forecast model comparison",
+      "url": "https://www.nber.org/papers/t0326",
+      "kind": "primary_public_source"
+    },
+    {
+      "id": "V01",
+      "title": "ICE evaluated pricing and transparency",
+      "url": "https://www.ice.com/fixed-income-data-services/data-and-analytics/pricing/evaluated-pricing",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V02",
+      "title": "Bloomberg BVAL evaluated pricing",
+      "url": "https://professional.bloomberg.com/products/data/enterprise-catalog/pricing/evaluated-pricing/",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V03",
+      "title": "LSEG evaluated pricing",
+      "url": "https://www.lseg.com/en/data-analytics/market-data/data-analytics-pricing/evaluated-pricing-data",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V04",
+      "title": "LSEG and Yield Book historical analytics brochure",
+      "url": "https://www.lseg.com/content/dam/data-analytics/en_us/documents/brochures/lseg-pricing-service-and-yield-book-historical-analytics-brochure.pdf",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V05",
+      "title": "S&P Credit Ratings catalog with PIT metadata",
+      "url": "https://www.marketplace.spglobal.com/en/datasets/ratingsxpress-s-p-credit-ratings-%2833%29",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V06",
+      "title": "S&P Agency Ratings API",
+      "url": "https://xpressapi.marketplace.spglobal.com/swagger/",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V07",
+      "title": "Moody's DataHub",
+      "url": "https://www.moodys.com/web/en/us/capabilities/company-reference-data/datahub.html",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V08",
+      "title": "Fitch Ratings PRO",
+      "url": "https://www.fitchratings.com/research-and-data/fitch-ratings-pro",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V09",
+      "title": "S&P corporate and sovereign bond pricing",
+      "url": "https://www.spglobal.com/market-intelligence/en/solutions/products/pricing-data-bonds-corporate-sovereign",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V10",
+      "title": "S&P single-name CDS pricing, including bond-implied evaluated curves",
+      "url": "https://www.spglobal.com/market-intelligence/en/solutions/products/single-name-pricing-data",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V11",
+      "title": "FactSet MarketAxess CP+ integration announcement",
+      "url": "https://investor.factset.com/news-releases/news-release-details/factset-brings-ai-powered-fixed-income-data-investors-first-add",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "P01",
+      "title": "Prophet funding recovery draft",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8308",
+      "kind": "mutable_pr_metadata"
+    },
+    {
+      "id": "P02",
+      "title": "Bonds mechanism explanation draft",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8397",
+      "kind": "mutable_pr_metadata"
+    },
+    {
+      "id": "P03",
+      "title": "Historical maturity persistence carrier",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7119",
+      "kind": "mutable_pr_metadata"
+    },
+    {
+      "id": "P04",
+      "title": "Merged credit yield-momentum consumer",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8051",
+      "kind": "mutable_pr_metadata"
+    },
+    {
+      "id": "X27",
+      "title": "Candidate compiler availability clocks",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/engine/capital_structure/instrument_candidates.py",
+      "path": "engine/capital_structure/instrument_candidates.py",
+      "kind": "pinned_repository_source"
+    },
+    {
+      "id": "V12",
+      "title": "ICE Enhanced Evaluation Transparency",
+      "url": "https://www.ice.com/fixed-income-data-services/data-and-analytics/pricing/enhanced-evaluation-transparency",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "V13",
+      "title": "Bloomberg IBVAL Front Office",
+      "url": "https://professional.bloomberg.com/products/data/enterprise-catalog/pricing/ibval-front-office/",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "X28",
+      "title": "Existing EDGAR dilution/refinancing filing-occurrence detector",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3/collectors/edgar_dilution.py",
+      "path": "collectors/edgar_dilution.py",
+      "kind": "pinned_repository_source"
+    },
+    {
+      "id": "V14",
+      "title": "Fitch products and delivery channels",
+      "url": "https://www.fitchratings.com/products",
+      "kind": "vendor_public_documentation"
+    },
+    {
+      "id": "M13",
+      "title": "Final-head Trend Persistence C1 preregistration; section0 and initial125lines reviewed",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/521720b09be2921e996d9396b522b1c4ca62041c/research/TREND_PERSISTENCE_PREREG_C1.md",
+      "path": "research/TREND_PERSISTENCE_PREREG_C1.md",
+      "kind": "pinned_repository_source"
+    },
+    {
+      "id": "R01",
+      "title": "Final protected revision drift comparison: mastermindx-market-intelligence/Mastermind",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/compare/a2646f458f9ff41ddcedd89b338be4a4349e6cd6...521720b09be2921e996d9396b522b1c4ca62041c",
+      "kind": "exact_revision_comparison"
+    },
+    {
+      "id": "R02",
+      "title": "Final protected revision drift comparison: mastermindx-market-intelligence/macro",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/compare/d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3...59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+      "kind": "exact_revision_comparison"
+    }
+  ]
+}
