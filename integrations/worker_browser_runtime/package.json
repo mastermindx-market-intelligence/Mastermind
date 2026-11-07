@@ -4,6 +4,7 @@
   "private": true,
   "description": "Pinned official Playwright MCP runtime for the bounded local Worker Browser B1 vertical.",
   "dependencies": {
-    "@playwright/mcp": "0.0.79"
+    "@playwright/mcp": "0.0.79",
+    "fernet": "0.3.3"
   }
 }

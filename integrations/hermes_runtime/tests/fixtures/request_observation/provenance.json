@@ -1,0 +1,60 @@
+{
+  "repository": "NousResearch/hermes-agent",
+  "commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+  "license": "MIT",
+  "files": {
+    "gateway/session_ingress.py": {
+      "fixture": "gateway__session_ingress.py.source",
+      "sha256": "e8b038cbaff9eaced033051b14cf6973395b16106c23c1af1034d281bae467b8"
+    },
+    "agent/turn_api_request.py": {
+      "fixture": "agent__turn_api_request.py.source",
+      "sha256": "fae43abf285e6f2b82d1820b7bd62ee10214676a48d6af552b8d62530e59dd15"
+    },
+    "gateway/session_results.py": {
+      "fixture": "gateway__session_results.py.source",
+      "sha256": "ca926bccfa9d5345b8ec3a2d773462535afa24c82ca4d79e6d6ef490b92e94d2"
+    },
+    "gateway/session_authority.py": {
+      "fixture": "gateway__session_authority.py.source",
+      "sha256": "f6eba4d4e17f35e9bcaaf664d1dece93bca8ceccddba3d6d2ad99aa7983bb15f"
+    },
+    "hermes_state_terminal.py": {
+      "fixture": "hermes_state_terminal.py.source",
+      "sha256": "8aa9e944badb01960d2c754821acd0734088f08a263ed1baac00cacc33c8e7d2"
+    },
+    "gateway/session_finite.py": {
+      "fixture": "gateway__session_finite.py.source",
+      "sha256": "65b9ddd09dfabf23cc96efc2cffa32d8d5c1ce808589a2271e1fc8b6e7ec6db4"
+    },
+    "agent/tool_executor.py": {
+      "fixture": "agent__tool_executor.py.source",
+      "sha256": "1b1b67d4b88f73c51dc147d0e0383b36c561d921d278d801326de5ba24b29702",
+      "blob": "cb58137a2aced3a76da570c0eb9f3a0aab625bf7",
+      "bytes": 98355,
+      "url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/tool_executor.py"
+    },
+    "tools/registry.py": {
+      "fixture": "tools__registry.py.source",
+      "sha256": "0dd8939f3e102679a8236ab688653a906f3914ce9921000df13ef7a9b240d36c",
+      "blob": "f272b26bc09766b2d1cb84060f6ac2a14abe166a",
+      "bytes": 53070,
+      "url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/tools/registry.py"
+    },
+    "agent/session_persistence.py": {
+      "fixture": "agent__session_persistence.py.source",
+      "sha256": "b1a0a29ad4089c77dd6c7ee7551c92d4b103ccd2ecdd1e05fd8f9af5bc11b119",
+      "blob": "9fc8a0207c31f7213ed01cd4da66c098a07c20fc",
+      "bytes": 31806,
+      "url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/session_persistence.py"
+    }
+  },
+  "executor_excerpt": {
+    "path": "gateway/run.py",
+    "blob": "3b79fcb8d754fb52ae812ecb5967039ddaab08a2",
+    "first_line": 4021,
+    "last_line": 4025,
+    "fixture": "gateway__run_executor.py.source",
+    "sha256": "98390693e0e4f541efafab1b1b006f6cc8135eaea17558918dfad2a793cf1216"
+  }
+}
