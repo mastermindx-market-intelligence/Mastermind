@@ -906,3 +906,11 @@ REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-jo
     "sites": (),
     "utf8_sites": ((61, 13, 16, "int", "501"),),
 }
+
+# Installed-consumer qualification maps disposable Control metadata to the
+# incumbent Control UID. These two exact fixture operands register no account,
+# grant or service; source/token drift restores the ordinary identity guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py"] = {
+    "sha256": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
+    "sites": ((105, 39, 42, "int", "450"), (132, 27, 30, "int", "450")),
+}
