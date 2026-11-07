@@ -1,0 +1,74 @@
+{
+  "candidate_only": true,
+  "command": [
+    "/private/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "--basetemp=/private/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/deepseek-pytest-v16b",
+    "--junitxml=/private/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/deepseek-component-qualification-v16b.xml",
+    "ops/native_fabric/quota_continuity/tests/test_application_deepseek_http.py",
+    "ops/native_fabric/quota_continuity/tests/test_application_http_transports.py",
+    "tests/test_codex_provider_realm.py"
+  ],
+  "exit": 0,
+  "failure_cases": [],
+  "log_sha256": "a32a3a0b22c4e757141ed1236cb3f2e314168ac1c65b80eb427b53ed2c8e62b3",
+  "native_startup_joined": false,
+  "parent_release_carrier": 2175,
+  "primary_contract_sources": [
+    "https://api-docs.deepseek.com/api/create-response/",
+    "https://api-docs.deepseek.com/guides/responses_api/"
+  ],
+  "provider_called": false,
+  "reviewed_registry_promoted": false,
+  "runtime_mutated": false,
+  "schema": "mastermind.fabric_application.deepseek_candidate_component.v1",
+  "scope": "Inactive source candidate and synthetic component proof only. Existing application admission, codec, sealed projection, startup, credential enrollment, grants and real canary remain unjoined. No REVIEWED promotion.",
+  "seconds": 1.88,
+  "self_review": {
+    "all_existing_http_top_level_classes_and_functions_ast_unchanged": true,
+    "diff_check_exit": 0,
+    "new_driver_only_in_H": true
+  },
+  "skipped_cases": [
+    {
+      "class": "tests.test_codex_provider_realm",
+      "name": "test_current_codex_native_config_rejects_chat_and_loads_responses",
+      "reason": "Codex package binary is unavailable (hosted CI)"
+    }
+  ],
+  "source_assignment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6713656019",
+  "source_base": "52cb239df9c058031875ecc52393d7978f50d2a3",
+  "source_files": [
+    {
+      "bytes": 51595,
+      "path": "control_plane/codex_provider_realm.py",
+      "sha256": "3e9e405d0ca483540f1429b30b1e8cca175caf885e356b11546e2fb91f6e1ad8"
+    },
+    {
+      "bytes": 58067,
+      "path": "ops/native_fabric/quota_continuity/candidate/application_http_transports.py",
+      "sha256": "5ade206feb98aff62f68af2ed9e580c44f4c605858edfae69af5aa7e4f16b44d"
+    },
+    {
+      "bytes": 15549,
+      "path": "tests/test_codex_provider_realm.py",
+      "sha256": "d9e6490938cc93c92e669c428a25e7f664cb75c97cc9eaed9d9f531b356ae6cf"
+    },
+    {
+      "bytes": 18144,
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_deepseek_http.py",
+      "sha256": "fb48d9526795d0485ee862d9810e22a5728b9f6bf7f9db6ddaf5348b33384420"
+    }
+  ],
+  "totals": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 1,
+    "tests": 156
+  },
+  "xml_sha256": "bc26f7d6ce2698c48c2755946a5d7089b3c3b4abcb1b5d2f15fb47cf7c2a4df3"
+}

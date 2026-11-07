@@ -103,8 +103,8 @@ class CodexProviderRealm:
             value = getattr(self, field_name)
             if type(value) is not int or value != 0:
                 raise ProviderRealmError(f"{field_name} must remain zero")
-        # A separately licensed ModelArk commercial API route never shares
-        # the Personal Coding Plan's endpoint, identity or credential.
+        # Closed commercial API routes never share a subscription plan's
+        # endpoint, identity or credential.
         if type(self.commercial_api_only) is not bool or type(self.interactive_subscription_only) is not bool:
             raise ProviderRealmError("provider use-policy flags must be bool")
         if self.interactive_subscription_only:
@@ -112,10 +112,12 @@ class CodexProviderRealm:
                 raise ProviderRealmError("commercial API realm cannot be a subscription realm")
         elif not (
             self.commercial_api_only
-            and self.realm_id == "byteplus-modelark-commercial"
-            and self.provider_alias == "byteplus-modelark"
-            and self.base_url == "https://ark.ap-southeast.bytepluses.com/api/v3"
-            and self.env_key == "BYTEPLUS_MODELARK_API_KEY"
+            and (self.realm_id, self.provider_alias, self.base_url, self.env_key) in {
+                ("byteplus-modelark-commercial", "byteplus-modelark",
+                 "https://ark.ap-southeast.bytepluses.com/api/v3", "BYTEPLUS_MODELARK_API_KEY"),
+                ("deepseek-commercial-api", "deepseek",
+                 "https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+            }
             and self.wire_api == "responses"
             and not self.requires_codex_auth_file
         ):
@@ -338,12 +340,25 @@ BYTEPLUS_MODELARK_COMMERCIAL = CodexProviderRealm(
     commercial_api_only=True,
 )
 
+DEEPSEEK_COMMERCIAL_API = CodexProviderRealm(
+    realm_id="deepseek-commercial-api",
+    provider_alias="deepseek",
+    display_name="DeepSeek Commercial API",
+    base_url="https://api.deepseek.com",
+    env_key="DEEPSEEK_API_KEY",
+    wire_api="responses",
+    interactive_subscription_only=False,
+    commercial_api_only=True,
+)
+
 REVIEWED_CODEX_PROVIDER_REALMS = {
     realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN,)
 }
 
 CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
-    realm.realm_id: realm for realm in (OPENCODE_GO_TOKEN_PLAN, BYTEPLUS_MODELARK_COMMERCIAL,)
+    realm.realm_id: realm for realm in (
+        OPENCODE_GO_TOKEN_PLAN, BYTEPLUS_MODELARK_COMMERCIAL, DEEPSEEK_COMMERCIAL_API,
+    )
 }
 
 # MiniMax Token Plan was promoted out of quarantine by the exact-head native
@@ -361,6 +376,10 @@ CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
 # promotion. The binding it enables (minimax-token-plan.codex-responses) stays
 # BUILT_NOT_PROVEN with autonomous_allowed false, and a live lane still requires
 # every per-binding enrollment, capacity, canary and usage-policy gate.
+#
+# The DeepSeek commercial API realm is also SPEC-ONLY: its fixed endpoint
+# and API contract are source declarations, not a real transport receipt or
+# an application grant. It must not enter REVIEWED before exact-source proof.
 #
 # The OpenCode Go realm remains SPEC-ONLY and quarantined: kit-side Responses
 # transport was proven only for some upstream models (see kit GO_PROOF_LEDGER)

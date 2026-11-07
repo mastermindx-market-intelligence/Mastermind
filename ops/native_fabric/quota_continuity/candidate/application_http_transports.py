@@ -1140,11 +1140,119 @@ class BailianResponsesDriver(_FixedResponsesDriver):
         return {"temperature": logical["temperature"], "reasoning": {"effort": "none"}}
 
 
+class DeepSeekResponsesDriver(_FixedResponsesDriver):
+    """Closed commercial DeepSeek Responses compiler and one-shot transport.
+
+    This candidate remains unavailable through the production realm resolver
+    until its exact source has a real transport receipt and is promoted by the
+    existing realm owner. Component tests do not enroll an account, authorize a
+    workload, or make the candidate selectable.
+
+    The initial contract is buffered text history and function tools. Thinking
+    is explicitly disabled; unsupported or silently ignored provider controls
+    are refused before the compiled request can become an admitted intent.
+    """
+
+    driver_id = "deepseek-commercial-api.responses"
+    realm_id = "deepseek-commercial-api"
+    pool = "deepseek"
+    allowed_models = frozenset({"deepseek-flash", "deepseek-v4-pro"})
+    default_model = None
+
+    def _logical_fields(self, parsed: Mapping[str, Any]):
+        if "reasoning_effort" in parsed and parsed["reasoning_effort"] != "none":
+            raise TransportRefused("deepseek_reasoning_unsupported")
+        if "temperature" in parsed:
+            value = parsed["temperature"]
+            if type(value) not in (int, float) or not 0 <= value <= 2:
+                raise TransportRefused("invalid_temperature")
+        # DeepSeek's Responses function schema does not document strict.
+        # Preserve the caller's requirement by refusing it, including false
+        # and null, rather than sending a field the provider silently ignores.
+        tools = parsed.get("tools")
+        if isinstance(tools, list):
+            for tool in tools:
+                function = tool.get("function") if isinstance(tool, dict) else None
+                if isinstance(function, dict) and "strict" in function:
+                    raise TransportRefused("deepseek_strict_tools_unsupported")
+        return _LOGICAL_FIELDS | {"temperature", "reasoning_effort"}
+
+    def _output_controls(self, logical: Mapping[str, Any]) -> Dict[str, Any]:
+        controls: Dict[str, Any] = {"reasoning": {"effort": "none"}}
+        if "temperature" in logical:
+            controls["temperature"] = logical["temperature"]
+        return controls
+
+    @staticmethod
+    def _max_output_tokens(logical: Mapping[str, Any]) -> Optional[int]:
+        # Never inherit an upstream default that can grow independently of
+        # this source contract. Explicit caller limits retain the common cap.
+        if "max_tokens" not in logical:
+            return 4096
+        return _FixedResponsesDriver._max_output_tokens(logical)
+
+    def prepare_request(self, logical_request: Any) -> CompiledCall:
+        compiled = super().prepare_request(logical_request)
+        body = json.loads(compiled.wire_body)
+        declared = {item["call_id"] for item in body["input"]
+                    if item.get("type") == "function_call"}
+        answered = {item["call_id"] for item in body["input"]
+                    if item.get("type") == "function_call_output"}
+        if declared != answered:
+            raise TransportRefused("deepseek_tool_history_unpaired")
+        # The common compiler accepts dots in function names; DeepSeek does
+        # not. Retain the incumbent 64-character, alphanumeric-leading subset.
+        # Check declarations and historical calls without renaming them.
+        named = list(body.get("tools", ()))
+        named.extend(item for item in body["input"]
+                     if item.get("type") == "function_call")
+        for item in named:
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", item["name"]) is None:
+                raise TransportRefused("deepseek_tool_name_unsupported")
+        return compiled
+
+    def _complete(self, compiled: CompiledCall, permit: DispatchPermit, status: int,
+                  digest: str, result_status: str,
+                  normalized: Optional[Dict[str, Any]], document: Any = None,
+                  parsed: bool = False) -> TransportObservation:
+        if result_status == "ok" and normalized is not None:
+            valid = (normalized.get("served_model_known") is True
+                     and normalized.get("served_model") == compiled.model)
+            calls = normalized.get("tool_calls", [])
+            wire = json.loads(compiled.wire_body)
+            names = {tool["name"] for tool in wire.get("tools", ())}
+            try:
+                _tool_calls({"tool_calls": calls}, 0, set())
+            except TransportRefused:
+                valid = False
+            if any(call["function"]["name"] not in names for call in calls):
+                valid = False
+            choice = wire.get("tool_choice")
+            if choice == "none" and calls:
+                valid = False
+            if choice == "required" and not calls:
+                valid = False
+            if isinstance(choice, dict) and (
+                    not calls or any(call["function"]["name"] != choice["name"]
+                                     for call in calls)):
+                valid = False
+            if not normalized.get("text") and not calls:
+                valid = False
+            if not valid:
+                # Preserve observed usage and serving identity through the
+                # common completion path, but never turn them into an answer.
+                result_status = "upstream_protocol_error"
+                normalized = None
+        return super()._complete(compiled, permit, status, digest, result_status,
+                                 normalized, document, parsed)
+
+
 __all__ = [
     "SCHEMA",
     "AccountBinding",
     "BailianResponsesDriver",
     "CompiledCall",
+    "DeepSeekResponsesDriver",
     "DispatchPermit",
     "DriverIdentity",
     "MiniMaxResponsesDriver",
