@@ -51,7 +51,7 @@ class FakeSlack:
               "response_metadata":{"next_cursor":"cursor1" if not self.complete else ""}}
         return SlackHttpResponse(
             status_code=200, final_url=_request_url(path,query),
-            headers={}, body=json.dumps(body).encode(),
+            headers={"Content-Type":"application/json"}, body=json.dumps(body).encode(),
         )
 
 
