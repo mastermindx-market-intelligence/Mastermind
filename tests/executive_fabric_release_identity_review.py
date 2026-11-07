@@ -752,7 +752,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'd81df61
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "e9cb6e19a5bccd42a30366ddc2fddf8bfb8566f0d938fa70d05542b73dbf82c3",
+    "sha256": "c037a6e2d3359a853b520607836c31fa92f32144d7ba4575c956a607861a1ee2",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -760,8 +760,8 @@ REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
 # Exact historical root_identity["mode"] comparison, not a selected UID/GID.
 # Whole-source drift and any neighboring identity literal restore ordinary D8.
 REVIEWED_FILES["integrations/hermes_runtime/native_eval_inputs.py"] = {
-    "sha256": "b272e9c567dccbeefe5222df25216a89c4d3f999b92208ab6487ce8386380137",
-    "sites": ((90, 61, 66, "int", "0o700"),),
+    "sha256": "16351afb482bc0b2551a5e5ad0ac73898881d8a4192df9e4cf8ce3a92aa1ca67",
+    "sites": ((91, 61, 66, "int", "0o700"),),
 }
 
 # HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,

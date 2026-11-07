@@ -183,10 +183,31 @@ def comparison_binding_reason_codes(run_scenario_ref: dict, configuration_ref: d
     return reasons
 
 
+def source_policy_reason_codes(scenario: dict, observed_sources: list[dict]) -> set[str]:
+    """Pure frozen source-policy decision, shared by finalization and dispatch.
+
+    Inputs are already shape-validated by their owners. Every reference is
+    examined independently, including aliases with identical content bytes.
+    """
+    reasons: set[str] = set()
+    allowlisted = {item["artifact_ref"]: item["digest"] for item in scenario["source_policy"]["allowlist_artifacts"]}
+    denylisted = set(scenario["source_policy"]["denylist_refs"])
+    hidden = set(scenario["source_policy"]["solution_refs_hidden"])
+    for source in observed_sources:
+        ref = source["artifact_ref"]
+        if ref in hidden:
+            reasons.add("HIDDEN_SOLUTION_SOURCE")
+        if ref in denylisted or ref not in allowlisted:
+            reasons.add("UNAUTHORIZED_SOURCE")
+        elif allowlisted[ref] != source["digest"]:
+            reasons.add("SOURCE_DIGEST_MISMATCH")
+    return reasons
+
+
 def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_like: dict) -> set[str]:
     reasons: set[str] = set()
     unavailable: set[str] = set()
-    if run_like["schema"] in {contracts.RUN_DRAFT_SCHEMA_V2, contracts.RUN_SCHEMA_V2}:
+    if run_like["schema"] in contracts.RUN_AVAILABILITY_SCHEMAS:
         availability = run_like["observation_availability"]
         unavailable = {item["path"] for item in availability["unavailable"]}
         if unavailable:
@@ -247,17 +268,7 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
     if observed_caps & forbidden_caps:
         reasons.add("FORBIDDEN_CAPABILITY")
 
-    allowlisted = {item["artifact_ref"]: item["digest"] for item in scenario["source_policy"]["allowlist_artifacts"]}
-    denylisted = set(scenario["source_policy"]["denylist_refs"])
-    hidden = set(scenario["source_policy"]["solution_refs_hidden"])
-    for source in run_like["observations"]["observed_sources"]:
-        ref = source["artifact_ref"]
-        if ref in hidden:
-            reasons.add("HIDDEN_SOLUTION_SOURCE")
-        if ref in denylisted or ref not in allowlisted:
-            reasons.add("UNAUTHORIZED_SOURCE")
-        elif allowlisted[ref] != source["digest"]:
-            reasons.add("SOURCE_DIGEST_MISMATCH")
+    reasons.update(source_policy_reason_codes(scenario, run_like["observations"]["observed_sources"]))
 
     authorized_digests = {digest_value(v) for v in scenario["execution_policy"]["network_allowlist"]}
     for destination in run_like["observations"]["observed_network_destinations"]:
@@ -388,8 +399,9 @@ def finalize_run_receipt(
     validity = evaluate_validity(scenario, configuration, experiment_or_none, draft)
 
     run_document = {key: value for key, value in draft.items() if key != "schema"}
-    run_document["schema"] = (contracts.RUN_SCHEMA_V2 if draft["schema"] == contracts.RUN_DRAFT_SCHEMA_V2
-                              else contracts.RUN_SCHEMA)
+    run_document["schema"] = {contracts.RUN_DRAFT_SCHEMA: contracts.RUN_SCHEMA,
+        contracts.RUN_DRAFT_SCHEMA_V2: contracts.RUN_SCHEMA_V2,
+        contracts.RUN_DRAFT_SCHEMA_V3: contracts.RUN_SCHEMA_V3}[draft["schema"]]
     run_document["validity"] = {
         "status": validity["status"],
         "reason_codes": list(validity["reason_codes"]),

@@ -202,7 +202,10 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         matched[key] = indexed[key]
     if set(matched) != set(indexed):
         return
-    content_fields = ("turn_id", "api_request_id", "content_sha256")
+    from .native_eval_inputs import RESULT_SCHEMA as CURRENT_INPUT_OBSERVATION
+    content_fields = (("agent_session_id", "turn_id", "api_request_id", "api_call_count", "retry_count", "content_sha256")
+                      if selected_inputs["schema"] == CURRENT_INPUT_OBSERVATION
+                      else ("turn_id", "api_request_id", "content_sha256"))
     if Counter(tuple(row[key] for key in content_fields) for row in selected_inputs["assemblies"]) != Counter(
             tuple(row[key] for key in content_fields) for row in indexed.values()):
         return
@@ -252,6 +255,7 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
 
 
 def _build_run(marker, receipt, projected, *, finalizer_ref, now, missing_reason):
+    from .native_eval_inputs import RESULT_SCHEMA as CURRENT_INPUT_OBSERVATION, observed_record_sources
     scenario, config = marker["scenario"], marker["configuration"]
     completion, reason = _TERMINAL[receipt["outcome"]]
     if (receipt["outcome"] == "completed"
@@ -261,7 +265,7 @@ def _build_run(marker, receipt, projected, *, finalizer_ref, now, missing_reason
     coverage = {key: {"status": "UNOBSERVED", "reason": missing_reason}
                 for key in contracts.RUN_OBSERVATION_COVERAGE_KEYS}
     draft = {
-        "schema": contracts.RUN_DRAFT_SCHEMA_V2, "run_id": marker["run_id"],
+        "schema": contracts.RUN_DRAFT_SCHEMA_V3, "run_id": marker["run_id"],
         "scenario": _scenario_ref(marker), "configuration": _configuration_ref(marker),
         "comparison": copy.deepcopy(marker["comparison"]),
         "execution": {**copy.deepcopy(marker["producer"]),
@@ -313,6 +317,9 @@ def _build_run(marker, receipt, projected, *, finalizer_ref, now, missing_reason
         draft["observations"]["observed_tool_schema_digests"] = digests
         if selected["assemblies"]:
             coverage["observed_tool_schema_digests"] = {"status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
+            if selected["schema"] == CURRENT_INPUT_OBSERVATION:
+                draft["observations"]["observed_sources"] = observed_record_sources(selected)
+                coverage["observed_sources"] = {"status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
     timing = draft["timing"]
     wall_conflict = any(timing[key] is not None and timing[key] > now for key in ("started_at", "completed_at"))
     wall_conflict = wall_conflict or (timing["started_at"] is not None and timing["completed_at"] is not None
@@ -349,7 +356,7 @@ def _validate_record(value, marker, receipt):
         _refuse("PUBLICATION_RECORD_MISMATCH")
     run, config = value["run"], marker["configuration"]
     contracts.validate_run_shape(run)
-    if (run["schema"] != contracts.RUN_SCHEMA_V2 or run["run_id"] != marker["run_id"]
+    if (run["schema"] not in {contracts.RUN_SCHEMA_V2, contracts.RUN_SCHEMA_V3} or run["run_id"] != marker["run_id"]
             or run["run_digest"] != value["run_digest"] or run["scenario"] != _scenario_ref(marker)
             or run["configuration"] != _configuration_ref(marker) or run["comparison"] != marker["comparison"]
             or run["procedure"] != config["procedure"] or run["context"] != _context(marker)

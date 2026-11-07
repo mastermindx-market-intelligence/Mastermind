@@ -1235,7 +1235,7 @@ def install_private_control(runner, home: Path, role: str, *,
                     "producer": dict(evaluation_owner.producer),
                     "profile_id": evaluation_owner.profile_id,
                     "profile_digest": evaluation_owner.profile_digest,
-                    "run_schema": "mastermind.agent_evaluation_run.v2",
+                    "run_schema": "mastermind.agent_evaluation_run.v3",
                     "complete_evaluation": False})
             if operation in {"consumer_extension", "consumer_capabilities"}:
                 # A finite read-only qualification of the serving process. The

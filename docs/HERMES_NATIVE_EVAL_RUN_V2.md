@@ -96,6 +96,25 @@ claiming a successful answer.
 
 ## Producer and acceptance boundary
 
+### Source-reference extension
+
+Run/draft v3 retains every v2 availability and validity rule. It changes only
+`observations.observed_sources`: the list is sorted and unique by immutable
+artifact reference, and two different references may have identical content
+digests. Scenario v2 applies the same rule to its source-policy allowlist.
+This preserves both identities when two selected records contain the same bytes;
+digest-based deduplication must not hide an unauthorized alias. The native source
+contribution is explicitly partial and does not declare complete context delivery.
+
+Scenario v1 and run/draft v1/v2 retain their exact validation. Unrelated artifact
+lists retain their existing uniqueness rules. The original ArtifactStore paths,
+IDs, graph verification and finalizer support all three run versions without
+rewriting historical receipts. The native producer emits v3 for new publications,
+while frozen v2 publications replay unchanged. Harness2 reconstructs the matching
+draft version and keeps its existing validity, output and effect gates.
+
+### Original producer
+
 The native producer must authenticate original admission, source/profile/session,
 selected artifacts and terminal record, use the original retained artifact root,
 and preserve every retained attempt. It must not invoke inference during receipt

@@ -35,7 +35,8 @@ LEGACY_MARKER_SCHEMA = "mastermind.hermes_native_eval_admission/v1"
 MARKER_SCHEMA = "mastermind.hermes_native_eval_admission/v2"
 MARKER_KEY = "mastermind_eval_inputs_v1"
 RESULT_KEY = "mastermind_eval_inputs"
-RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v1"
+LEGACY_RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v1"
+RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v2"
 RENDERER = "mastermind.harness_instruction_text/v1"
 MAX_MARKER_BYTES = 192 * 1024
 MAX_CANDIDATE_BYTES = 16 * 1024
@@ -568,16 +569,71 @@ def validate_delivery(value, *, admission_id, generation, messages_digest, turn_
     return value
 
 
+def record_source_pairs(inventory, *, bundle_sha256):
+    """Project exact DATA refs, retaining distinct paths with identical bytes.
+
+    The original context owner validates the inventory. Full file hashes bind
+    selected record contributions; they do not claim full-file prompt delivery.
+    """
+    from control_plane.agentos_context_bundle import validate_retained_record_sources
+    try:
+        checked = validate_retained_record_sources(inventory, bundle_sha256=bundle_sha256,
+                                                   data_commit=inventory["data_commit"])
+        prefix = "git:" + checked["repository"] + "@" + checked["data_commit"] + "#"
+        pairs = [{"artifact_ref": prefix + row["path"], "digest": "sha256:" + row["sha256"]}
+                 for row in checked["entries"]]
+        return contracts.v_source_artifact_list(pairs, "$.selected_record_sources")
+    except Exception:
+        _refuse("NATIVE_EVAL_SOURCE_INVENTORY_UNQUALIFIED")
+
+
+def _require_record_policy(marker, inventory, *, bundle_sha256):
+    pairs = record_source_pairs(inventory, bundle_sha256=bundle_sha256)
+    if inventory["retention"] != "COMPLETE" or inventory["omitted_items"]:
+        _refuse("NATIVE_EVAL_SOURCE_INVENTORY_INCOMPLETE")
+    reasons = validity.source_policy_reason_codes(marker["scenario"], pairs)
+    if reasons:
+        _refuse("NATIVE_EVAL_" + sorted(reasons)[0])
+    visible = set(marker["scenario"]["privacy"]["model_visible_artifact_refs"])
+    if any(pair["artifact_ref"] not in visible for pair in pairs):
+        _refuse("NATIVE_EVAL_SOURCE_NOT_MODEL_VISIBLE")
+    return pairs
+
+
+def _request_identity(row):
+    return tuple(row.get(key) for key in ("agent_session_id", "turn_id", "api_request_id",
+                                         "api_call_count", "retry_count", "content_sha256"))
+
+
+def observed_record_sources(value):
+    """Only original validated delivery-to-assembly joins contribute sources."""
+    if value["schema"] != RESULT_SCHEMA:
+        return []
+    snapshots = {row["inventory_sha256"]: row for row in value["source_snapshots"]}
+    deliveries = {row["sequence"]: row for row in value["deliveries"]}
+    pairs = {}
+    for assembly in value["assemblies"]:
+        delivery = deliveries[assembly["delivery_sequence"]]
+        inventory = snapshots[delivery["source_inventory_sha256"]]
+        for pair in record_source_pairs(inventory, bundle_sha256=delivery["agentos"]["bundle_sha256"]):
+            previous = pairs.setdefault(pair["artifact_ref"], pair["digest"])
+            if previous != pair["digest"]:
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+    return [{"artifact_ref": ref, "digest": pairs[ref]} for ref in sorted(pairs)]
+
+
 def validate_observation(value, *, marker, receipt, request_observation):
     """Historical projection from the original row/result, never today's owner."""
     from .native_request_observation import MAX_METADATA_BYTES, _text, _integer
     value = _detach(value, maximum=MAX_METADATA_BYTES)
-    expected = {"schema": RESULT_SCHEMA, "run_id": marker["run_id"],
+    version2 = type(value) is dict and value.get("schema") == RESULT_SCHEMA
+    expected = {"schema": RESULT_SCHEMA if version2 else LEGACY_RESULT_SCHEMA, "run_id": marker["run_id"],
         "binding_sha256": marker["binding_sha256"], "admission_id": receipt["admission_id"],
         "execution_generation": receipt["execution_generation"], "authority_epoch": receipt["authority_epoch"],
         "candidate_digest": marker["configuration"]["procedure"]["instruction_bundle"]["digest"],
         "rendered_sha256": marker["rendered_sha256"], "complete_evaluation": False}
-    if (type(value) is not dict or set(value) != set(expected) | {"instance_id", "deliveries", "assemblies", "errors"}
+    extra_fields = {"source_snapshots"} if version2 else set()
+    if (type(value) is not dict or set(value) != set(expected) | {"instance_id", "deliveries", "assemblies", "errors"} | extra_fields
             or any(type(value[key]) is not type(item) or value[key] != item for key, item in expected.items())
             or not _text(value["instance_id"]) or not _integer(value["execution_generation"])
             or not _integer(value["authority_epoch"]) or value["authority_epoch"] < 1
@@ -595,18 +651,58 @@ def validate_observation(value, *, marker, receipt, request_observation):
         _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     available = Counter((row.get("turn_id"), row.get("api_request_id"), row.get("content_sha256"))
                         for row in sibling["observations"])
+    snapshots, deliveries = {}, {}
+    if version2:
+        rows = value["source_snapshots"]
+        if type(rows) is not list or len(rows) > MAX_EVENTS:
+            _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+        for row in rows:
+            if type(row) is not dict:
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+            record_source_pairs(row, bundle_sha256=row.get("bundle_sha256"))
+            digest = row["inventory_sha256"]
+            if digest in snapshots:
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+            snapshots[digest] = row
+        if list(snapshots) != sorted(snapshots):
+            _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+        available = Counter(_request_identity(row) for row in sibling["observations"])
+        # A duplicate identity cannot prove which original retry was joined.
+        if any(count != 1 for count in available.values()):
+            _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     for kind in ("deliveries", "assemblies"):
         if type(value[kind]) is not list or len(value[kind]) > MAX_EVENTS:
             _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
-    for row in value["deliveries"]:
-        if (type(row) is not dict or set(row) != {"rendered_sha256", "messages_sha256", "turn_id", "agentos"}
+    for ordinal, row in enumerate(value["deliveries"], 1):
+        fields = {"rendered_sha256", "messages_sha256", "turn_id", "agentos"}
+        if version2:
+            fields |= {"sequence", "source_inventory_sha256", "current_user"}
+        if (type(row) is not dict or set(row) != fields
                 or row["rendered_sha256"] != marker["rendered_sha256"] or not _text(row["turn_id"])):
             _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
         _digest_text(row["messages_sha256"])
         validate_delivery(row["agentos"], admission_id=receipt["admission_id"],
             generation=receipt["execution_generation"], messages_digest=row["messages_sha256"], turn_id=row["turn_id"])
+        if version2:
+            anchor = row["current_user"]
+            if (type(row["sequence"]) is not int or row["sequence"] != ordinal
+                    or row["source_inventory_sha256"] not in snapshots
+                    or type(anchor) is not dict or set(anchor) != {"row_index", "row_count", "text_sha256"}
+                    or not _integer(anchor["row_index"]) or not _integer(anchor["row_count"])
+                    or not 0 <= anchor["row_index"] < anchor["row_count"] <= 65536):
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+            _digest_text(anchor["text_sha256"])
+            inventory = snapshots[row["source_inventory_sha256"]]
+            record_source_pairs(inventory, bundle_sha256=row["agentos"]["bundle_sha256"])
+            deliveries[ordinal] = row
+    if version2 and set(snapshots) != {row["source_inventory_sha256"] for row in deliveries.values()}:
+        _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
     for row in value["assemblies"]:
-        if (type(row) is not dict or set(row) != {"content_sha256", "turn_id", "api_request_id", "tool_schema_digests"}
+        fields = {"content_sha256", "turn_id", "api_request_id", "tool_schema_digests"}
+        if version2:
+            fields |= {"agent_session_id", "api_call_count", "retry_count", "messages_sha256",
+                       "delivery_sequence", "delivery_sha256"}
+        if (type(row) is not dict or set(row) != fields
                 or not _text(row["turn_id"]) or not _text(row["api_request_id"])
                 or type(row["tool_schema_digests"]) is not list or len(row["tool_schema_digests"]) > 128):
             _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
@@ -618,6 +714,23 @@ def validate_observation(value, *, marker, receipt, request_observation):
         if row["tool_schema_digests"] != sorted(set(row["tool_schema_digests"])):
             _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
         identity = (row["turn_id"], row["api_request_id"], row["content_sha256"])
+        if version2:
+            if (not _text(row["agent_session_id"]) or not _integer(row["api_call_count"])
+                    or not _integer(row["retry_count"]) or type(row["delivery_sequence"]) is not int
+                    or row["delivery_sequence"] not in deliveries
+                    or row["messages_sha256"] != row["content_sha256"]):
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+            delivery = deliveries[row["delivery_sequence"]]
+            if (delivery["turn_id"] != row["turn_id"]
+                    or delivery["agentos"]["agent_session_id"] != row["agent_session_id"]
+                    or row["delivery_sha256"] != _sha(canonical_json_bytes(delivery))):
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
+            inventory = snapshots[delivery["source_inventory_sha256"]]
+            _require_record_policy(marker, inventory, bundle_sha256=delivery["agentos"]["bundle_sha256"])
+            identity = _request_identity(row)
+            original = [event for event in sibling["observations"] if _request_identity(event) == identity]
+            if len(original) != 1 or original[0].get("invalid_fields") or original[0].get("fields") != ["messages"]:
+                _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
         available[identity] -= 1
         if available[identity] < 0:
             _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
@@ -632,6 +745,8 @@ class EvalInputClaim:
         self.rendered = render_inputs(marker["candidate_files"], marker["context_text"])
         self.resolved_route = self.resolved_ephemeral = None
         self.deliveries, self.assemblies = [], []
+        self.source_snapshots = {}
+        self.delivery_proof = None  # One current original claim; never a history lookup.
         self.errors = set()
 
     def current(self):
@@ -759,12 +874,26 @@ class EvalInputClaim:
         # This uses the original attachment and durable generation owner; an
         # in-memory stamp alone cannot qualify a retired execution.
         factory.require_snapshot(claim, agent)
+        proof = self.delivery_proof
+        if (proof is None or proof["claim"] is not claim
+                or proof["instance"] is not claim.instance
+                or proof["provider"] is not claim.instance.provider
+                or proof["snapshot"] is not claim.instance.provider._snapshot
+                or proof["anchor"] is not claim.prompt_anchor
+                or proof["delivery"] != claim.returned
+                or proof["delivery"]["prompt"]["turn_id"] != getattr(agent, "_current_turn_id", None)):
+            _refuse("NATIVE_EVAL_DELIVERY_UNAVAILABLE")
         expected = self.marker["configuration"]["execution"]
+        if type(api_kwargs) is not dict:
+            _refuse("NATIVE_EVAL_ASSEMBLED_INPUTS_CHANGED")
         extra = api_kwargs.get("extra_body")
         # The OpenAI serializer merges extra_body over typed request fields.
         # Do not admit a second, contradictory input through that merge seam.
-        if (extra is not None and (type(extra) is not dict or set(extra) & {
-                "model", "messages", "seed", "reasoning_effort", "reasoning", "thinking", "stream"})):
+        # The selected named custom profile emits no extra-body fields. Keep
+        # that finite qualified route closed instead of guessing which future
+        # provider extension might override a typed field or carry content.
+        if (extra is not None and (type(extra) is not dict or extra)
+                or set(api_kwargs) & {"input", "system", "instructions", "prompt", "input_messages"}):
             _refuse("NATIVE_EVAL_ASSEMBLED_INPUTS_CHANGED")
         messages = api_kwargs.get("messages")
         if (type(messages) is not list or not messages or type(messages[0]) is not dict
@@ -776,9 +905,24 @@ class EvalInputClaim:
                 or api_kwargs.get("reasoning_effort") != expected["reasoning_effort"]
                 or api_kwargs.get("stream", False) is not False):
             _refuse("NATIVE_EVAL_ASSEMBLED_INPUTS_CHANGED")
+        anchor = proof["anchor"]
+        if (len(messages) != anchor["row_count"] or any(type(row) is not dict for row in messages)
+                or tuple(row.get("role") for row in messages) != anchor["roles"]):
+            _refuse("NATIVE_EVAL_AGENTOS_DELIVERY_CHANGED")
+        content = messages[anchor["row_index"]].get("content")
+        pieces = ([content] if type(content) is str else [item.get("text") for item in content
+            if type(item) is dict and item.get("type") == "text"] if type(content) is list else [])
+        if sum(type(piece) is str and piece == anchor["text"] for piece in pieces) != 1:
+            _refuse("NATIVE_EVAL_AGENTOS_DELIVERY_CHANGED")
+        _require_record_policy(self.marker, proof["inventory"],
+                               bundle_sha256=proof["delivery"]["bundle_sha256"])
         factory.require_snapshot(claim, agent)
+        if claim.instance.provider._snapshot is not proof["snapshot"]:
+            _refuse("NATIVE_EVAL_DELIVERY_UNAVAILABLE")
+        return proof
 
     def note_messages(self, agent, result, delivery):
+        self.delivery_proof = None
         self.require_messages(agent, result)
         messages, _ = result
         from .native_request_observation import _content_digest
@@ -788,14 +932,69 @@ class EvalInputClaim:
             turn_id=getattr(agent, "_current_turn_id", None))
         if delivery["agent_session_id"] != agent.session_id:
             _refuse("NATIVE_EVAL_DELIVERY_UNAVAILABLE")
+        factory = self.owner.binding.memory_factory
+        claim = factory.current_claim()
+        factory.require_snapshot(claim, agent)
+        instance, anchor = claim.instance, claim.prompt_anchor
+        provider = instance.provider
+        snapshot = provider._snapshot
+        current = provider.context_observation()
+        if (claim.scope is not self.scope or claim.agent is not agent or not claim.barrier_entered
+                or current is None or anchor is None or claim.returned != delivery
+                or any(current[key] != delivery[target] for key, target in (
+                    ("bundle_sha256", "bundle_sha256"), ("receipt_sha256", "receipt_sha256"),
+                    ("rendered_context_sha256", "prefetch_context_sha256"),
+                    ("rendered_context_bytes", "prefetch_context_bytes")))):
+            _refuse("NATIVE_EVAL_DELIVERY_UNAVAILABLE")
+        inventory = provider._record_sources_observation(
+            rendered_context_sha256=delivery["prefetch_context_sha256"])
+        record_source_pairs(inventory, bundle_sha256=delivery["bundle_sha256"])
+        factory.require_snapshot(claim, agent)
+        if provider._snapshot is not snapshot or claim.prompt_anchor is not anchor:
+            _refuse("NATIVE_EVAL_DELIVERY_UNAVAILABLE")
         observed = {"rendered_sha256": self.marker["rendered_sha256"],
             "messages_sha256": messages_digest,
-            "turn_id": getattr(agent, "_current_turn_id", None), "agentos": delivery}
-        self._append(agent, self.deliveries, observed, "delivery_overflow")
+            "turn_id": getattr(agent, "_current_turn_id", None), "agentos": delivery,
+            "sequence": len(self.deliveries) + 1,
+            "source_inventory_sha256": inventory["inventory_sha256"],
+            "current_user": {key: anchor[key] for key in ("row_index", "row_count", "text_sha256")}}
+        # Retain one inventory per digest within the original shared budget.
+        # Live policy still uses this original snapshot if later retention is
+        # exhausted; lost historical evidence never becomes complete coverage.
+        sequence = None
+        with self.scope.live.event_stream.lock, self.scope.lock:
+            if (self.scope.closed or not self.scope.current()
+                    or self.scope.evaluation is not self or not self.scope.adopted(agent)):
+                _refuse("NATIVE_EVAL_ORIGINAL_BINDING_CHANGED")
+            previous = self.source_snapshots.get(inventory["inventory_sha256"])
+            reservation = {"delivery": observed, "source_snapshot": inventory if previous is None else None}
+            if len(self.deliveries) >= MAX_EVENTS:
+                self.errors.add("delivery_overflow")
+            elif self.scope._reserve(reservation):
+                self.source_snapshots.setdefault(inventory["inventory_sha256"], copy.deepcopy(inventory))
+                self.deliveries.append(observed)
+                sequence = observed["sequence"]
+            else:
+                self.errors.add("metadata_overflow")
+        self.delivery_proof = {"claim": claim, "instance": instance, "provider": provider,
+            "snapshot": snapshot, "anchor": anchor, "delivery": delivery,
+            "inventory": inventory, "sequence": sequence,
+            "delivery_sha256": _sha(canonical_json_bytes(observed))}
 
     def record_assembly(self, agent, api_kwargs, event):
-        self.require_agent(agent)
-        from .native_request_observation import _json_digest
+        proof = self.require_request(agent, api_kwargs)
+        from .native_request_observation import _json_digest, _content_digest, _text, _integer
+        if proof["sequence"] is None:
+            self.fail("delivery_unavailable")
+            return
+        messages_digest = _content_digest({"messages": api_kwargs["messages"]})["content_sha256"]
+        if (event.get("fields") != ["messages"] or event.get("invalid_fields")
+                or event.get("content_sha256") != messages_digest
+                or event.get("agent_session_id") != agent.session_id
+                or any(not _text(event.get(key)) for key in ("turn_id", "api_request_id"))
+                or event["turn_id"] != proof["delivery"]["prompt"]["turn_id"]
+                or any(not _integer(event.get(key)) for key in ("api_call_count", "retry_count"))):
+            _refuse("NATIVE_EVAL_OBSERVATION_INVALID")
         tools = api_kwargs.get("tools", [])
         if (type(tools) is not list or len(tools) > 128
                 or any(type(tool) is not dict for tool in tools)):
@@ -804,6 +1003,10 @@ class EvalInputClaim:
         _json_digest(tools)  # Bound total bytes/depth/nodes before individual schemas.
         row = {"content_sha256": event["content_sha256"],
             "turn_id": event.get("turn_id"), "api_request_id": event.get("api_request_id"),
+            "agent_session_id": event["agent_session_id"], "api_call_count": event["api_call_count"],
+            "retry_count": event["retry_count"], "messages_sha256": messages_digest,
+            "delivery_sequence": proof["sequence"],
+            "delivery_sha256": proof["delivery_sha256"],
             "tool_schema_digests": sorted({"sha256:" + _json_digest(tool)[0] for tool in tools})}
         self._append(agent, self.assemblies, row, "assembly_overflow")
 
@@ -816,5 +1019,7 @@ class EvalInputClaim:
             "rendered_sha256": self.marker["rendered_sha256"],
             "deliveries": [] if force_empty else copy.deepcopy(self.deliveries),
             "assemblies": [] if force_empty else copy.deepcopy(self.assemblies),
+            "source_snapshots": [] if force_empty else [copy.deepcopy(self.source_snapshots[key])
+                                                        for key in sorted(self.source_snapshots)],
             "errors": sorted(self.errors | ({"retention_overflow"} if force_empty else set())),
             "complete_evaluation": False}

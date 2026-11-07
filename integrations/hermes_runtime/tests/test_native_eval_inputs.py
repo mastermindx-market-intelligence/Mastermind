@@ -30,7 +30,10 @@ import httpx
 from integrations.hermes_runtime import native_eval_inputs as inputs
 from integrations.hermes_runtime import native_request_observation as observation
 from integrations.hermes_runtime.errors import RuntimeRefusal
-from integrations.hermes_runtime.tests.test_native_agentos_memory import lifecycle, decoded_fixture, actual_result
+from integrations.hermes_runtime.tests.test_native_agentos_memory import decoded_fixture, actual_result
+from integrations.hermes_harness.tests.test_native_current_agentos_context import (
+    lifecycle, current_result, signed, rsa_key, joined, owner, env, isolated_git_env, identity,
+)
 from integrations.hermes_runtime.tests.test_native_request_observation import native
 from integrations.hermes_runtime.tests.test_native_transport_observation import engine, success
 from integrations.hermes_models.contract import native_provider
@@ -45,7 +48,7 @@ from tests.agent_eval_factories import (
 )
 
 
-def documents(profile_id, *, context="Known fixture facts.\n", files=None):
+def documents(profile_id, *, context="Known fixture facts.\n", files=None, record_sources=None):
     files = files or {"AGENTS.md": "Use the original source and preserve uncertainty.\n"}
     text = "Identify the canonical owner for this synthetic fixture."
     fields = build_baseline_scenario_fields()
@@ -64,16 +67,20 @@ def documents(profile_id, *, context="Known fixture facts.\n", files=None):
     config["procedure"]["instruction_bundle"]["digest"] = harness_digest({k: v.encode() for k, v in files.items()})
     config["context"]["context_packet"]["digest"] = "sha256:" + hashlib.sha256(context.encode()).hexdigest()
     fields["source_policy"]["allowlist_artifacts"] = sorted(
-        [fields["input_fixture"], config["context"]["context_packet"]], key=lambda row: row["artifact_ref"])
+        [fields["input_fixture"], config["context"]["context_packet"], *(record_sources or [])],
+        key=lambda row: row["artifact_ref"])
     fields["privacy"]["model_visible_artifact_refs"] = sorted(
         row["artifact_ref"] for row in fields["source_policy"]["allowlist_artifacts"])
-    scenario = contracts.build_scenario(fields)
+    scenario = contracts.build_scenario(fields, schema=(contracts.SCENARIO_SCHEMA_V2
+        if record_sources is not None else contracts.SCENARIO_SCHEMA))
     config["capabilities"]["network_policy_digest"] = contracts.compute_scenario_network_policy_digest(scenario)
     return scenario, contracts.build_configuration(config), text, files, context
 
 
-def source_owner(root, profile_id, *, scenario=None, configuration=None, context="Known fixture facts.\n", files=None):
-    scenario0, configuration0, text, files, context = documents(profile_id, context=context, files=files)
+def source_owner(root, profile_id, *, scenario=None, configuration=None, context="Known fixture facts.\n", files=None,
+                 record_sources=None):
+    scenario0, configuration0, text, files, context = documents(
+        profile_id, context=context, files=files, record_sources=record_sources)
     scenario, configuration = scenario or scenario0, configuration or configuration0
     store = ArtifactStore(root)
     store.create(scenario)
@@ -343,7 +350,9 @@ def provider_route():
 
 def native_trial(lifecycle, tmp_path, *, context="Known fixture facts.\n", files=None):
     l, n = lifecycle, lifecycle.native
-    t = source_owner(tmp_path / "eval-store", str(n.home), context=context, files=files)
+    receipt = json.loads(l.sdk.content[0].text)["data"]["receipt"]
+    sources = inputs.record_source_pairs(receipt["selected_record_sources"], bundle_sha256=receipt["bundle_sha256"])
+    t = source_owner(tmp_path / "eval-store", str(n.home), context=context, files=files, record_sources=sources)
     t.principal = l.factory.publication.session.principal_id
     t.owner.binding = n.binding
     n.binding.memory_factory = l.factory
@@ -352,7 +361,8 @@ def native_trial(lifecycle, tmp_path, *, context="Known fixture facts.\n", files
     return t
 
 
-def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, before_request=None, after_request=None):
+def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, before_request=None,
+                  after_request=None, history=None, before_builder=None):
     l, n = lifecycle, lifecycle.native
     selected = marker(t)
     ref, row, _ = n.claim(admission=admission, generation=generation)
@@ -367,14 +377,18 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
         def create(**kwargs):
             agent = original(**kwargs)
             agent._disable_streaming = True  # Native config selection is checked separately.
+            agent._current_turn_id = "turn-A"  # Same logical turn used by the original worker fixture.
             return agent
         turn._ctx.AIAgent = create
         agent, reused = turn._resolve_turn_agent(route, "api", "original ephemeral", 3, None, {})
         turn._wire_turn_agent_callbacks(agent, route, None, None, None, False)
         out.update(agent=agent, reused=reused, scope=observation._current.get())
+        if before_builder:
+            before_builder(out)
         context = l.turn_context._memory_turn_start_and_prefetch(agent, t.text)
-        messages, system = l.turn_context.build_api_messages(agent, [{"role": "user", "content": t.text}],
-            current_turn_user_idx=0, ext_prefetch_cache=context, plugin_user_context="", moa_config=None,
+        history = copy.deepcopy(history_rows)
+        messages, system = l.turn_context.build_api_messages(agent, [*history, {"role": "user", "content": t.text}],
+            current_turn_user_idx=len(history), ext_prefetch_cache=context, plugin_user_context="", moa_config=None,
             active_system_prompt="original system")
         kwargs = {"model": agent.model, "messages": messages, "seed": agent.request_overrides["seed"],
                   "reasoning_effort": agent.reasoning_config["effort"], "tools": [], "stream": False}
@@ -390,6 +404,7 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
         return "component result"
     async def handle(event):
         return await n.runner._run_in_executor_with_context(execute)
+    history_rows = history or []
     n.runner._handle_message = handle
     out["response"] = asyncio.run(n.finite.execute_finite_admission(n.authority, ref, row))
     out["saved"] = n.authority.pending_results[admission]
@@ -480,6 +495,235 @@ def selected_recipe(role="mmmeta"):
         patch_sha256=EVAL_INPUTS_DERIVATION_PATCH, source_root="/opt/hermes/pristine")
     native["evaluation_inputs"] = dict(schema=inputs.RECIPE_SCHEMA, artifact_root="/var/lib/mastermind/eval")
     return installation, native, document
+
+
+@pytest.mark.parametrize("change", ["removed", "replaced", "historical-copy", "snapshot-copy", "expired",
+    "input", "system", "instructions", "extra-input", "extra-system", "extra-instructions", "new-builder-failed"])
+def test_source_delivery_requires_original_current_user_and_snapshot(lifecycle, tmp_path, monkeypatch, change):
+    from dataclasses import replace
+    t = native_trial(lifecycle, tmp_path)
+    seen = {}
+    def mutate(out):
+        seen["scope"] = out["scope"]
+        evaluation = out["scope"].evaluation
+        proof = evaluation.delivery_proof
+        assert proof is not None
+        index = proof["anchor"]["row_index"]
+        if change in {"removed", "replaced", "historical-copy"}:
+            original = copy.deepcopy(out["kwargs"]["messages"][index]["content"])
+            out["kwargs"]["messages"][index]["content"] = t.text if change != "replaced" else "another memory body"
+            if change == "historical-copy":
+                out["kwargs"]["messages"][index - 1]["content"] = original
+        elif change == "snapshot-copy":
+            proof["provider"]._snapshot = replace(proof["snapshot"])
+        elif change == "expired":
+            monkeypatch.setattr(proof["provider"], "_clock", lambda: proof["snapshot"].expires_at + 1)
+        elif change == "new-builder-failed":
+            # A fresh construction fails before note_prompt can run. The old
+            # exact request must not borrow its surviving prior anchor.
+            with pytest.raises(TypeError):
+                lifecycle.turn_context.build_api_messages(out["agent"], [])
+        elif change.startswith("extra-"):
+            out["kwargs"]["extra_body"] = {change.removeprefix("extra-"): None}
+        else:
+            out["kwargs"][change] = None
+    with pytest.raises(RuntimeRefusal):
+        execute_trial(lifecycle, t, before_request=mutate,
+            history=[{"role": "user", "content": "An earlier user turn"}])
+    # Native ingress creates a pending result only after a returned execution.
+    # A required-input refusal must not invent a terminal result or assembly.
+    assert "eval-admission" not in lifecycle.native.authority.pending_results
+    assert seen["scope"].closed and seen["scope"].events == []
+    assert seen["scope"].evaluation.assemblies == []
+
+
+def test_legitimate_message_metadata_changes_preserve_anchor_and_separate_digests(lifecycle, tmp_path):
+    t = native_trial(lifecycle, tmp_path)
+    def sanitize(out):
+        # Same native current-user text/position, different harmless metadata.
+        row = out["kwargs"]["messages"][-1]
+        row["content"] = [{"type": "text", "text": row["content"], "cache_control": {"type": "ephemeral"}}]
+    out = execute_trial(lifecycle, t, before_request=sanitize)
+    value = out["saved"][inputs.RESULT_KEY]
+    assert value["schema"] == inputs.RESULT_SCHEMA and len(value["source_snapshots"]) == 1
+    delivery, assembly = value["deliveries"][0], value["assemblies"][0]
+    assert delivery["messages_sha256"] != assembly["messages_sha256"]
+    assert assembly["messages_sha256"] == assembly["content_sha256"]
+    assert assembly["delivery_sha256"] == hashlib.sha256(canonical_json_bytes(delivery)).hexdigest()
+    original = inputs.validate_observation(value, marker=out["marker"],
+        receipt={"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2},
+        request_observation=out["saved"][observation.RESULT_KEY])
+    sources = inputs.observed_record_sources(original)
+    assert sources and all("git:mastermindx-market-intelligence/macro@" in row["artifact_ref"] for row in sources)
+    assert all("#agentos/" in row["artifact_ref"] for row in sources)
+    assert t.text.encode() not in canonical_json_bytes(value)
+
+
+def test_actual_record_capture_overflow_refuses_before_request_assembly(lifecycle, tmp_path, monkeypatch):
+    from control_plane import agentos_context_bundle as contract
+    t = native_trial(lifecycle, tmp_path)
+    # The next actual installed capture overflows while preserving its full
+    # original bundle. No injected inventory replaces the native provider.
+    monkeypatch.setattr(contract, "MAX_RECORD_SOURCE_BYTES", 1)
+    seen = {}
+    with pytest.raises(RuntimeRefusal, match="SOURCE_INVENTORY_INCOMPLETE"):
+        execute_trial(lifecycle, t, before_builder=lambda out: seen.update(scope=out["scope"]))
+    assert "eval-admission" not in lifecycle.native.authority.pending_results
+    assert seen["scope"].closed and seen["scope"].events == []
+    value = seen["scope"].evaluation.document()
+    assert value["source_snapshots"][0]["retention"] == "OVERFLOW"
+    assert value["source_snapshots"][0]["omitted_items"] > 0
+    assert value["assemblies"] == []
+
+
+def test_old_current_receipt_cannot_invent_new_source_delivery(lifecycle, tmp_path, monkeypatch):
+    from control_plane import agentos_context_bundle as contract
+    from mcp import types
+    t = native_trial(lifecycle, tmp_path)
+    original = lifecycle.session.call_tool
+    async def legacy(*args, **kwargs):
+        response = await original(*args, **kwargs)
+        body = json.loads(response.content[0].text)
+        receipt = body["data"]["receipt"]
+        receipt["schema"] = contract.CURRENT_RECEIPT_SCHEMA
+        receipt.pop("selected_record_sources")
+        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(body))], isError=False)
+    monkeypatch.setattr(lifecycle.session, "call_tool", legacy)
+    seen = {}
+    with pytest.raises(RuntimeRefusal, match="DELIVERY_UNAVAILABLE"):
+        execute_trial(lifecycle, t, before_builder=lambda out: seen.update(scope=out["scope"]))
+    assert "eval-admission" not in lifecycle.native.authority.pending_results
+    assert seen["scope"].closed and seen["scope"].events == []
+    value = seen["scope"].evaluation.document()
+    assert value["deliveries"] == value["assemblies"] == value["source_snapshots"] == []
+
+
+def test_observation_budget_loss_does_not_invent_sources_or_an_execution_failure(lifecycle, tmp_path):
+    t = native_trial(lifecycle, tmp_path)
+    def fill(out):
+        out["scope"].metadata_bytes = observation.MAX_METADATA_BYTES - 2
+    def inspect(out):
+        proof = out["scope"].evaluation.require_request(out["agent"], out["kwargs"])
+        assert proof["sequence"] is None and proof["inventory"]["retention"] == "COMPLETE"
+    out = execute_trial(lifecycle, t, before_builder=fill, after_request=inspect)
+    assert out["response"] == "component result"
+    value = out["saved"][inputs.RESULT_KEY]
+    assert "metadata_overflow" in value["errors"]
+    assert value["deliveries"] == value["assemblies"] == value["source_snapshots"] == []
+    assert inputs.observed_record_sources(value) == []
+
+
+def test_unscoped_late_prefetch_cannot_erase_current_admission_anchor(lifecycle, tmp_path):
+    t = native_trial(lifecycle, tmp_path)
+    def late(out):
+        proof = out["scope"].evaluation.delivery_proof
+        token = observation._current.set(None)
+        try:
+            assert proof["provider"].prefetch("late other request", session_id=out["agent"].session_id) == ""
+        finally:
+            observation._current.reset(token)
+        assert proof["claim"].prompt_anchor is proof["anchor"]
+        assert proof["claim"].returned == proof["delivery"]
+    out = execute_trial(lifecycle, t, before_request=late)
+    assert len(out["saved"][inputs.RESULT_KEY]["assemblies"]) == 1
+
+
+@pytest.mark.parametrize("change", ["delivery-sequence", "delivery-digest", "retry", "request-duplicate",
+                                     "inventory-data", "inventory-use", "anchor", "unknown-field"])
+def test_historical_source_join_cannot_substitute_original_evidence(lifecycle, tmp_path, change):
+    from control_plane import agentos_context_bundle as contract
+    t = native_trial(lifecycle, tmp_path)
+    out = execute_trial(lifecycle, t)
+    value = copy.deepcopy(out["saved"][inputs.RESULT_KEY])
+    sibling = copy.deepcopy(out["saved"][observation.RESULT_KEY])
+    if change == "delivery-sequence":
+        other = copy.deepcopy(value["deliveries"][0])
+        other["sequence"] = 2
+        other["current_user"]["text_sha256"] = "d" * 64
+        value["deliveries"].append(other)
+        value["assemblies"][0]["delivery_sequence"] = 2
+    elif change == "delivery-digest":
+        value["assemblies"][0]["delivery_sha256"] = "d" * 64
+    elif change == "retry":
+        value["assemblies"][0]["retry_count"] += 1
+    elif change == "request-duplicate":
+        sibling["observations"].append(copy.deepcopy(sibling["observations"][0]))
+    elif change.startswith("inventory-"):
+        inventory = value["source_snapshots"][0]
+        if change == "inventory-data":
+            inventory["data_commit"] = "d" * 40
+        else:
+            inventory["entries"][0]["uses"].append(inventory["entries"][0]["uses"][0])
+        inventory["inventory_sha256"] = contract.canonical_digest(
+            {key: item for key, item in inventory.items() if key != "inventory_sha256"})
+        value["deliveries"][0]["source_inventory_sha256"] = inventory["inventory_sha256"]
+    elif change == "anchor":
+        value["deliveries"][0]["current_user"]["row_index"] = True
+    else:
+        value["assemblies"][0]["complete_sources"] = True
+    with pytest.raises(RuntimeRefusal):
+        inputs.validate_observation(value, marker=out["marker"],
+            receipt={"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2},
+            request_observation=sibling)
+
+
+def test_historical_v1_observation_stays_exact_and_source_unobserved(lifecycle, tmp_path):
+    t = native_trial(lifecycle, tmp_path)
+    out = execute_trial(lifecycle, t)
+    old = copy.deepcopy(out["saved"][inputs.RESULT_KEY])
+    # Historical structural contract: explicitly remove every new v2 field;
+    # no newer inventory is inferred into old evidence at readback.
+    old["schema"] = inputs.LEGACY_RESULT_SCHEMA
+    old.pop("source_snapshots")
+    for row in old["deliveries"]:
+        for key in ("sequence", "source_inventory_sha256", "current_user"):
+            row.pop(key)
+    for row in old["assemblies"]:
+        for key in ("agent_session_id", "api_call_count", "retry_count", "messages_sha256", "delivery_sequence", "delivery_sha256"):
+            row.pop(key)
+    receipt = {"admission_id": "eval-admission", "execution_generation": 3, "authority_epoch": 2}
+    assert inputs.validate_observation(old, marker=out["marker"], receipt=receipt,
+        request_observation=out["saved"][observation.RESULT_KEY]) == old
+    assert inputs.observed_record_sources(old) == []
+    old["source_snapshots"] = []
+    with pytest.raises(RuntimeRefusal):
+        inputs.validate_observation(old, marker=out["marker"], receipt=receipt,
+            request_observation=out["saved"][observation.RESULT_KEY])
+
+
+@pytest.mark.parametrize("change,reason", [("allowed", None), ("alias", "UNAUTHORIZED_SOURCE"),
+    ("digest", "SOURCE_DIGEST_MISMATCH"), ("hidden", "HIDDEN_SOLUTION_SOURCE"),
+    ("denied", "UNAUTHORIZED_SOURCE"), ("private", "SOURCE_NOT_MODEL_VISIBLE")])
+def test_native_policy_keeps_each_equal_byte_record_reference(trial, change, reason):
+    from control_plane import agentos_context_bundle as contract
+    raw = b"Identical PUBLIC_SAFE fixture content\n"
+    entries = [{"path": "agentos/workstreams/WS-" + name + ".md", "mode": "100644",
+        "git_blob": hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest(),
+        "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw), "uses": [[0, index]]}
+        for index, name in enumerate(("ONE", "TWO"))]
+    inventory = contract.record_source_inventory(bundle_sha256="b" * 64, data_commit="c" * 40,
+        selected_items=2, entries=entries)
+    pairs = inputs.record_source_pairs(inventory, bundle_sha256="b" * 64)
+    assert len(pairs) == 2 and pairs[0]["digest"] == pairs[1]["digest"]
+    assert pairs[0]["artifact_ref"] != pairs[1]["artifact_ref"]
+    value = marker(trial)
+    policy = value["scenario"]["source_policy"]
+    policy["allowlist_artifacts"] += copy.deepcopy(pairs)
+    visible = value["scenario"]["privacy"]["model_visible_artifact_refs"]
+    visible.extend(pair["artifact_ref"] for pair in pairs)
+    if change == "alias":
+        policy["allowlist_artifacts"].pop()
+    elif change == "digest":
+        policy["allowlist_artifacts"][-1]["digest"] = "sha256:" + "d" * 64
+    elif change == "private":
+        visible.pop()
+    elif change in {"hidden", "denied"}:
+        policy["solution_refs_hidden" if change == "hidden" else "denylist_refs"] = [pairs[1]["artifact_ref"]]
+    if reason is None:
+        assert inputs._require_record_policy(value, inventory, bundle_sha256="b" * 64) == pairs
+    else:
+        with pytest.raises(RuntimeRefusal, match=reason):
+            inputs._require_record_policy(value, inventory, bundle_sha256="b" * 64)
 
 
 def test_selected_recipe_and_config_refuse_unsupported_role_and_streaming_downgrade(tmp_path):
@@ -835,7 +1079,7 @@ def test_evaluation_records_share_original_budget_and_seal(lifecycle, tmp_path):
         canonical_json_bytes(out["saved"][observation.RESULT_KEY])) <= observation.MAX_METADATA_BYTES
 
 
-@pytest.mark.parametrize("change", ["seed", "extra_body", "generation"])
+@pytest.mark.parametrize("change", ["seed", "extra_body", "generation", "memory", "extra_input"])
 def test_execution_middleware_drift_refuses_before_original_client(lifecycle, engine, tmp_path, monkeypatch, change):
     t = native_trial(lifecycle, tmp_path)
     factories = []
@@ -845,6 +1089,10 @@ def test_execution_middleware_drift_refuses_before_original_client(lifecycle, en
                 engine.rows["session-1"]["generation"] += 1
             elif change == "extra_body":
                 payload["extra_body"] = {"seed": 2}
+            elif change == "extra_input":
+                payload["extra_body"] = {"input": None}
+            elif change == "memory":
+                payload["messages"][-1]["content"] = "memory was removed after the hook"
             else:
                 payload["seed"] = 2
             return next_call(payload)
@@ -888,7 +1136,7 @@ def test_actual_sdk_serialization_and_original_worker_receive_trial_inputs(lifec
         out["kwargs"].update(top)
         response = engine.invoke(out["agent"], out["kwargs"], lambda: openai.OpenAI(
             api_key="synthetic-fixture", base_url="https://api.z.ai/api/paas/v4/", max_retries=0,
-            http_client=httpx.Client(transport=httpx.MockTransport(handler))))
+            http_client=httpx.Client(transport=httpx.MockTransport(handler))), request_id="eval-request")
         assert response.model == "glm-5.3"  # Reported response label, not model identity proof.
     out = execute_trial(lifecycle, t, after_request=downstream)
     assert len(bodies) == 1 and bodies[0]["seed"] == 0 and bodies[0]["reasoning_effort"] == "low"

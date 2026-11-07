@@ -72,7 +72,7 @@ def command(enrollment_command, monkeypatch, capsys):
             value = {"producer": inputs.producer_descriptor(SHA, DERIVATION_BASE, EVAL_INPUTS_DERIVATION_PATCH),
                 "profile_id": world.target["profile_id"],
                 "profile_digest": "sha256:" + profile_sha256(dump_profile(world.profile)),
-                "run_schema": "mastermind.agent_evaluation_run.v2", "complete_evaluation": False}
+                "run_schema": "mastermind.agent_evaluation_run.v3", "complete_evaluation": False}
             if state.capability == "withdrawn":
                 return control._result("UNAVAILABLE", role="mmmeta")
             if state.capability == "producer":
