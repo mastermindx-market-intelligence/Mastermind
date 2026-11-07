@@ -1,0 +1,228 @@
+{
+  "schema": "mastermind.fabric_application.protected_provider_realm_join.v1",
+  "observed_at": "2026-11-07T17:55:54.487493+00:00",
+  "parents": {
+    "previous_application": "0d8174951141b1790e6121e13202e4036d1bdc20",
+    "protected_master": "d62d93d4aae0f7faae242a4bc41ec7ca2c147ea4"
+  },
+  "conflicts": 0,
+  "failure": {
+    "main_run": 42395923837,
+    "main_job": 128473486336,
+    "paired_run": 42395923853,
+    "paired_job": 128473147053,
+    "tested_merge": "0ba3aa04e4957fdfd91b542cfa2392fca9e39103",
+    "protected_merge_base": "8b7c0ce33a20f9012a5cb976b2b64543a128dcc5",
+    "reason": "Both actual jobs stopped at the same exact Codex realm source guard before the translation composition class executed."
+  },
+  "repair": {
+    "path": "tests/integration/test_fabric_translation_composition.py",
+    "old_realm_blob": "a51e2bce8d9bb312107f975d503abd6541bd5000",
+    "current_realm_blob": "b200d7c24f5de2d656cdfcfcec9714e1c679f78a",
+    "change": "The protected realm adds only a guarded package/flat fs_security import fallback. Update that one REALM_PINS entry and its two-line epoch comment.",
+    "native_pins_preserved": 15,
+    "other_realm_pins_preserved": 2,
+    "source_hash_refusal_preserved": true,
+    "mandatory_composition_and_zero_skip_gates_preserved": true
+  },
+  "qualification": {
+    "source_head": "0d8174951141b1790e6121e13202e4036d1bdc20",
+    "protected_merge": "d62d93d4aae0f7faae242a4bc41ec7ca2c147ea4",
+    "macro_ref": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+    "fixture_files_verified": 2531,
+    "rows": [
+      {
+        "kind": "translation",
+        "selectors": [
+          "tests/integration/test_fabric_translation_composition.py"
+        ],
+        "returncode": 0,
+        "seconds": 4.266,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-realm-translation-v11.log",
+        "sha256": "a640eb13c7bf257c1bc25cf7b0463d40c16ca28040438dcb91216bee1035623d",
+        "cases": {
+          "total": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "failures": []
+      },
+      {
+        "kind": "inference",
+        "selectors": [
+          "tests/integration/test_fabric_inference_composition.py"
+        ],
+        "returncode": 0,
+        "seconds": 1.44,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-realm-inference-v11.log",
+        "sha256": "6098fa21fa30d3bc2c39b3bf219caff3334ddac76e3ba972b69eb925ff4a9128",
+        "cases": {
+          "total": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "failures": []
+      },
+      {
+        "kind": "protected",
+        "selectors": [
+          "tests/test_byteplus_coding_plan_preflight.py",
+          "tests/test_byteplus_native_coding_plan.py",
+          "tests/test_claude_subscription_worker.py",
+          "tests/test_direct_read_evidence_truth.py",
+          "tests/test_experiential_harness_endpoint.py",
+          "tests/test_experiential_native_plan.py",
+          "tests/test_experiential_plan_policy.py",
+          "tests/test_fabric_attended_claude.py",
+          "tests/test_lens_mcp_evidence_truth.py",
+          "tests/test_subscription_catalog_byteplus_readback.py",
+          "tests/test_subscription_harness_bindings.py",
+          "tests/test_subscription_provider_profiles.py"
+        ],
+        "returncode": 0,
+        "seconds": 33.999,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-realm-protected-v11.log",
+        "sha256": "057304f44e47a8340d2365274b408d4c67970812ab2e8bc6e5681a5567b3f9fb",
+        "cases": {
+          "total": 472,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 6
+        },
+        "failures": [
+          {
+            "name": "test_real_openai_sdk_client_completes_a_chat_stream_through_the_attempt_endpoint",
+            "message": "OpenAI SDK unavailable in this test environment"
+          },
+          {
+            "name": "test_the_gateway_sees_only_the_local_proxy_token_and_never_the_attempt_capability",
+            "message": "OpenAI SDK unavailable in this test environment"
+          },
+          {
+            "name": "test_the_model_slug_is_never_substituted_by_the_consumer",
+            "message": "OpenAI SDK unavailable in this test environment"
+          },
+          {
+            "name": "test_an_owner_supplied_idempotency_key_reaches_the_gateway_as_a_header",
+            "message": "OpenAI SDK unavailable in this test environment"
+          },
+          {
+            "name": "test_a_real_openai_sdk_client_surfaces_the_provider_error_and_never_sends_twice",
+            "message": "OpenAI SDK unavailable in this test environment"
+          },
+          {
+            "name": "test_sdk_helper_pins_policy_and_disables_retries",
+            "message": "could not import 'openai': No module named 'openai'"
+          }
+        ]
+      },
+      {
+        "kind": "identity",
+        "selectors": [
+          "tests/test_executive_fabric_release_identity_review.py"
+        ],
+        "returncode": 0,
+        "seconds": 13.744,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-realm-identity-v11.log",
+        "sha256": "38b80f9adf06621e56eac9aa7e24e5d2ffbd24080e7ca702bc0de16943e3a1cf",
+        "cases": {
+          "total": 205,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "failures": []
+      }
+    ],
+    "vendor_restored": true,
+    "fixture_config_restored": true
+  },
+  "sdk_gap_closure": {
+    "proof": {
+      "targets": [
+        "tests/test_experiential_harness_endpoint.py::test_real_openai_sdk_client_completes_a_chat_stream_through_the_attempt_endpoint",
+        "tests/test_experiential_harness_endpoint.py::test_the_gateway_sees_only_the_local_proxy_token_and_never_the_attempt_capability",
+        "tests/test_experiential_harness_endpoint.py::test_the_model_slug_is_never_substituted_by_the_consumer",
+        "tests/test_experiential_harness_endpoint.py::test_an_owner_supplied_idempotency_key_reaches_the_gateway_as_a_header",
+        "tests/test_experiential_harness_endpoint.py::test_a_real_openai_sdk_client_surfaces_the_provider_error_and_never_sends_twice",
+        "tests/test_experiential_plan_policy.py::test_sdk_helper_pins_policy_and_disables_retries"
+      ],
+      "returncode": 0,
+      "seconds": 4.326,
+      "sdk": "openai2.54.0",
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-sdk-gap-v11.log",
+      "sha256": "700bc0322b00f8e8db3ce495047983b54ab27ab59ed1fedac05f3aeba47dae24",
+      "install_log_sha256": "75a19d1538d51b8eb593d454f8f94f49c8e660519ed89e3be6cb2efec255551a",
+      "cases": {
+        "total": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "failures": []
+    },
+    "all_six_original_skips_executed_successfully": true,
+    "initial_skip_count_retained": 6
+  },
+  "native_builds": {
+    "rows": [
+      {
+        "cohort": "107",
+        "returncode": 0,
+        "seconds": 0.09021941665560007,
+        "stdout": "{\"native_files\": 107, \"total_bytes\": 3240763, \"manifest_sha256\": \"59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a\", \"source_inventory_sha256\": \"d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47\"}\n",
+        "stderr": "",
+        "native-manifest.json": {
+          "sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+          "bytes": 10669
+        },
+        "native-source-inventory.json": {
+          "sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47",
+          "bytes": 35834
+        }
+      },
+      {
+        "cohort": "109",
+        "returncode": 0,
+        "seconds": 0.07627495797351003,
+        "stdout": "{\"native_files\": 109, \"total_bytes\": 3483962, \"manifest_sha256\": \"f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2\", \"source_inventory_sha256\": \"b614541ff709ec062b9fead189cc413fb3ccb7beb912841e95aadc912e4586cf\"}\n",
+        "stderr": "",
+        "native-manifest.json": {
+          "sha256": "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2",
+          "bytes": 10868
+        },
+        "native-source-inventory.json": {
+          "sha256": "b614541ff709ec062b9fead189cc413fb3ccb7beb912841e95aadc912e4586cf",
+          "bytes": 36359
+        }
+      },
+      {
+        "cohort": "112",
+        "returncode": 0,
+        "seconds": 0.09004012495279312,
+        "stdout": "{\"native_files\": 112, \"total_bytes\": 3567137, \"manifest_sha256\": \"38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44\", \"source_inventory_sha256\": \"eb0c8984da72c40d044a36f2cbd069ef19194198c079a9cbf8c84e392cb9a76b\"}\n",
+        "stderr": "",
+        "native-manifest.json": {
+          "sha256": "38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44",
+          "bytes": 11199
+        },
+        "native-source-inventory.json": {
+          "sha256": "eb0c8984da72c40d044a36f2cbd069ef19194198c079a9cbf8c84e392cb9a76b",
+          "bytes": 37275
+        }
+      }
+    ],
+    "source_builder_sha256": "3f8e74a955f4973efcee0f795b2b4926694762cfa9cf1be4e039fa2ca316701f",
+    "candidate_only": true
+  },
+  "production_claims": {
+    "deployed": false,
+    "native_selected": false,
+    "j_collected": false,
+    "provider_called": false,
+    "grants_issued": false,
+    "accepted": false
+  }
+}

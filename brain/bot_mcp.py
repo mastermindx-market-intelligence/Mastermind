@@ -328,16 +328,62 @@ async def get_portfolio(args):
 @tool("get_decision_matrix", "The MULTI-SIDED decision matrix for a name or theme — every lens (valuation, quality, growth, narrative, leadership, asymmetry, risk, policy/admin tilt, Fed, institutional flows, options, rate sensitivity, cross-asset, conviction) with its read + honest status, plus the confluence/divergence synthesis. ALWAYS call this before any verdict.",
       {"type": "object", "properties": {"subject": {"type": "string"}, "kind": {"type": "string", "enum": ["name", "theme"]}}, "required": ["subject"]})
 async def get_decision_matrix(args):
-    from portfolio import lenses
-    return _json(lenses.full(args["subject"], args.get("kind", "name")))
+    subject = str(args["subject"])
+    try:
+        from portfolio import lenses
+        payload = lenses.full(subject, args.get("kind", "name"))
+        if (not isinstance(payload, dict)
+                or not isinstance(payload.get("rows"), list)
+                or not isinstance(payload.get("synthesis"), dict)):
+            raise TypeError("decision matrix payload is malformed")
+        return _json(payload)
+    except Exception:  # noqa: BLE001
+        return _json({
+            "subject": subject,
+            "read_status": "unavailable",
+            "error": "decision_matrix_unavailable",
+            "failed_sources": ["decision_matrix"],
+        })
 
 
 @tool("get_divergences", "Just the divergence patterns for a subject — where the lenses DISAGREE (the edge or the trap): distribution, early_edge, high_confluence_buy, crowded_top, policy_early.",
       {"type": "object", "properties": {"subject": {"type": "string"}, "kind": {"type": "string", "enum": ["name", "theme"]}}, "required": ["subject"]})
 async def get_divergences(args):
-    from portfolio import lenses
-    s = lenses.synthesize(lenses.decision_matrix(args["subject"], args.get("kind", "name")))
-    return _json({"divergences": s["divergences"], "confluence": s["confluence"], "vetoes": s["vetoes"]})
+    subject = str(args["subject"])
+    try:
+        from portfolio import lenses
+        matrix = lenses.decision_matrix(subject, args.get("kind", "name"))
+        if not isinstance(matrix, dict) or not isinstance(matrix.get("rows"), list):
+            raise TypeError("decision matrix payload is malformed")
+    except Exception:  # noqa: BLE001
+        return _json({
+            "subject": subject,
+            "read_status": "unavailable",
+            "error": "divergence_synthesis_unavailable",
+            "failed_sources": ["decision_matrix"],
+        })
+    try:
+        synthesis = lenses.synthesize(matrix)
+        if not isinstance(synthesis, dict):
+            raise TypeError("lens synthesis is not a mapping")
+        divergences = synthesis["divergences"]
+        confluence = synthesis["confluence"]
+        vetoes = synthesis["vetoes"]
+        if (
+            not isinstance(confluence, (int, float)) or isinstance(confluence, bool)
+            or (isinstance(confluence, float) and not math.isfinite(confluence))
+        ):
+            raise TypeError("lens synthesis confluence is malformed")
+        if not isinstance(divergences, list) or not isinstance(vetoes, list):
+            raise TypeError("lens synthesis lists are malformed")
+        return _json({"divergences": divergences, "confluence": confluence, "vetoes": vetoes})
+    except Exception:  # noqa: BLE001
+        return _json({
+            "subject": subject,
+            "read_status": "unavailable",
+            "error": "divergence_synthesis_unavailable",
+            "failed_sources": ["divergence_synthesis"],
+        })
 
 
 @tool("get_altdata", "Alternative-data flow + Trump-family/administration linkage for a NAME — cross-signal convergence across congress/insider/government-contract/lobbying/Trump-trade channels, plus whether the name sits in the latent-stake entity graph (e.g. American Bitcoin -> Hut 8, branded crypto but the value accrues to an AI-power-infra parent). A QUALITATIVE research signal: politically-linked smart-money flow. Public-record + CONTEXT-ONLY (never a scored axis) — informs narrative/conviction, never sizes alone.",
@@ -426,13 +472,26 @@ async def get_intelligence(args):
       {"type": "object", "properties": {"tickers": {"type": "array", "items": {"type": "string"}}},
        "required": ["tickers"]})
 async def get_quote(args):
-    from data_layer import polygon
     tks = [str(t) for t in (args.get("tickers") or []) if t]
-    px = polygon.quotes(tks)
-    if not any(v is not None for v in px.values()):
-        return _ok("no live quotes available — Polygon layer offline or unkeyed (set POLYGON_API_KEY).")
-    return _json({"quotes": px,
-                  "note": "Live 15-min delayed prices (Polygon). For marks/entry checks — not a signal."})
+    try:
+        from data_layer import polygon
+
+        px = polygon.quotes(tks)
+        if not isinstance(px, dict):
+            raise TypeError("live quote result is not a mapping")
+        if not any(v is not None for v in px.values()):
+            return _ok("no live quotes returned for the requested tickers.")
+        return _json({
+            "quotes": px,
+            "note": "Live 15-min delayed prices (Polygon). For marks/entry checks — not a signal.",
+        })
+    except Exception:  # noqa: BLE001 - setup, read and serialization share one evidence boundary
+        return _json({
+            "read_status": "unavailable",
+            "error": "live_quotes_unavailable",
+            "failed_sources": ["quotes"],
+            "quotes": None,
+        })
 
 
 @tool("get_daily_briefing",
@@ -619,16 +678,54 @@ async def get_anticipation(args):
 @tool("read_signal", "Read a published signal/data JSON by path (allowlisted to the dashboard + bot data roots).",
       {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]})
 async def read_signal(args):
-    p = (Path(args["path"]) if Path(args["path"]).is_absolute() else _ROOT / args["path"]).resolve()
-    roots = [r.resolve() for r in _READ_ROOTS]
+    def unavailable():
+        return _json({
+            "read_status": "unavailable",
+            "error": "signal_read_unavailable",
+            "failed_sources": ["signal"],
+        })
+
+    try:
+        requested = Path(args["path"])
+        if not requested.is_absolute():
+            requested = _ROOT / requested
+        # Retain the requested entry for absence proof; use the resolved,
+        # authorized target for the content read.
+        p = requested.resolve()
+        roots = [r.resolve() for r in _READ_ROOTS]
+    except Exception:  # noqa: BLE001 - resolution failure does not authorize a read
+        return unavailable()
     if not any(p == root or root in p.parents for root in roots):
         return _ok("DENIED: path outside the allowed data roots.")
     if any(p == r or r in p.parents for r in _DENY_ROOTS):
         _audit_denied_book_read(p)
         return _ok("DENIED: portfolio book state (positions/ledger/research) is not readable "
                    "via read_signal — read your OWN book through your desk tool.")
-    d = _read_json(p)
-    return _json(d) if d is not None else _ok(f"not found: {p}")
+    try:
+        # JSON null is valid content. An exists() preflight cannot prove readable absence.
+        return _json(json.loads(p.read_text()))
+    except FileNotFoundError:
+        try:
+            import stat
+
+            candidate = requested
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        break
+                    candidate = candidate.parent
+                    continue
+                if candidate != requested and stat.S_ISDIR(info.st_mode):
+                    return _ok("not found: requested signal path")
+                # A dangling entry or an entry that appeared after the read is not absence.
+                break
+        except Exception:
+            pass
+    except Exception:  # noqa: BLE001 - never disclose file/parser/serialization exceptions
+        pass
+    return unavailable()
 
 
 def _audit_denied_book_read(p: Path) -> None:

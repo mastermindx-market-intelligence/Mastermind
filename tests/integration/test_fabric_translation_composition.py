@@ -43,10 +43,10 @@ PINS = {
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
     "tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
 }
-# Protected 5f8c13d realm consumed through original carrier 3ec62ff.
-# Complete source pin; the candidate commercial realm is not enrolled here.
+# Protected package/flat-import realm successor consumed through d62d93d.
+# Exact source pin; admission, credentials and realm call semantics are unchanged.
 REALM_PINS = {
-    "control_plane/codex_provider_realm.py": "a51e2bce8d9bb312107f975d503abd6541bd5000",
+    "control_plane/codex_provider_realm.py": "b200d7c24f5de2d656cdfcfcec9714e1c679f78a",
     "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
     "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918",
 }
