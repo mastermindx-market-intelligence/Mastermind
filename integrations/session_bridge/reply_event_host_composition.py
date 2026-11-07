@@ -72,4 +72,22 @@ def build_installed_reply_event_host(runtime, value, *, release_sha, peer_uid,
     codex = RuntimeCodexTargetProjector(fabric,owner_configured=native_owner_configured)
     kwargs = {} if service_call is None else {"service_call":service_call}
     returns = RuntimeSessionReturn(runtime,fabric=fabric,codex=codex,socket_path=Path(dialogue_socket_path),**kwargs)
-    return RuntimeReplyEventHost(returns,cipher,policies,clock=lambda:int(time.time()),enabled=True)
+    # The original installed document is the only canary enrollment surface.
+    # An absent/disabled field consumes no second key, host, or callback owner.
+    import json
+    from ops.executive_os.executive_mcp_entry import require_sealed_path, validate_document
+    from .dot_canary_policy_selection import (
+        InstalledDotCanaryPolicyProvider, validate_dot_canary_settings,
+    )
+    document=Path(config["mcp_config_path"])
+    require_sealed_path(document)
+    installed=validate_document(json.loads(document.read_text(encoding="utf-8")))
+    if installed["release_sha"] != release_sha or installed["service_uid"] != peer_uid:
+        raise ValueError("Executive MCP canary release binding unavailable")
+    canary_provider=(InstalledDotCanaryPolicyProvider(
+        document,release_sha=release_sha,peer_uid=peer_uid)
+        if validate_dot_canary_settings(installed) is not None else None)
+    return RuntimeReplyEventHost(
+        returns,cipher,policies,clock=lambda:int(time.time()),enabled=True,
+        canary_policy_provider=canary_provider,
+    )
