@@ -116,3 +116,23 @@ def test_unsubscribe_prevents_new_delivery(tmp_path):
     result=run(consumer.deliver_one(reader,thread_ts=ROOT,message_ts=MESSAGE))
     assert result[0].state=="NO_SUBSCRIPTION" and not result[0].fresh_send
     assert len(connection.calls)==0
+
+
+
+def test_A2_service_peer_read_to_existing_executive_runtime_single_callback(tmp_path):
+    from test_dot_canary_existing_a2_service import create
+    runtime,store,state,challenge,handler=setup(tmp_path)
+    subscribe(handler)
+    reader,slack,service=create(tmp_path,selected_policy=state[0])
+    conn=FakeConnection(status=200,body=b"")
+    consumer=RuntimeCanaryDeliveryConsumer(
+        handler,resolver=resolver,connector=lambda *a:conn,
+    )
+    accepted=run(consumer.deliver_one(reader,thread_ts=ROOT,message_ts=MESSAGE))
+    assert accepted[0].state=="RECEIVED"
+    assert accepted[0].fresh_send
+    assert len(conn.calls)==1 and conn.closed
+    assert len(slack.calls)==1 and slack.calls[0][1]=="conversations.replies"
+    again=run(consumer.deliver_one(reader,thread_ts=ROOT,message_ts=MESSAGE))
+    assert again[0].fresh_send is False and again[0].state=="RECEIVED"
+    assert len(conn.calls)==1
