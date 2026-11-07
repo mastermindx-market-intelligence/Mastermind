@@ -38,8 +38,14 @@ def _hex(value):
 
 
 def _scope(home, uid, platform, account, hostname):
-    home = Path.home() if home is None else Path(home)
     uid = os.getuid() if uid is None else uid
+    if home is None:
+        # HOME is caller environment, not the enrolled account's target owner.
+        home = Path(pwd.getpwuid(uid).pw_dir)
+        if home != Path('/home/ubuntu4'):
+            raise storage.InstallHeld('fixed_account_home')
+    else:
+        home = Path(home)  # Local hermetic API only; closed transport exposes no override.
     platform = sys.platform if platform is None else platform
     account = pwd.getpwuid(uid).pw_name if account is None else account
     hostname = socket.gethostname() if hostname is None else hostname

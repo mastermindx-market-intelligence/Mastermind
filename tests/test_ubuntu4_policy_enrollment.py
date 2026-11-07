@@ -186,6 +186,18 @@ class PolicyEnrollment(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), b'other owner')
         self.assertTrue((self.state/policy.RECORD).exists())
 
+    def test_remote_default_ignores_home_environment_and_requires_passwd_home(self):
+        import types
+        row = types.SimpleNamespace(pw_name='ubuntu4', pw_dir='/home/ubuntu4')
+        with mock.patch.object(policy.pwd, 'getpwuid', return_value=row), \
+             mock.patch.dict(os.environ, {'HOME': str(self.home)}):
+            observed, _ = policy._scope(None, os.getuid(), 'linux', 'ubuntu4', 'ubuntu4-MS-7E61')
+            self.assertEqual(observed, Path('/home/ubuntu4'))
+        row.pw_dir = str(self.home)
+        with mock.patch.object(policy.pwd, 'getpwuid', return_value=row):
+            with self.assertRaisesRegex(ValueError, 'fixed_account_home'):
+                policy._scope(None, os.getuid(), 'linux', 'ubuntu4', 'ubuntu4-MS-7E61')
+
     def test_plan_has_no_dispatch_and_rejects_pin_drift(self):
         class Driver:
             SSH = ['existing-ssh-owner']

@@ -17,7 +17,9 @@ owner's transport and public enrolled-binding parser. It never dispatches.
 `kind="inspect"` returns only a fixed policy SHA/ABSENT and presence of prior
 installation history, with no writes. The only accepted semantic host is Ubuntu4,
 resolved from public config to its literal SSH alias; the remote account must be
-`ubuntu4`, machine `ubuntu4-MS-7E61`, Linux and non-root. No guessed alias is used.
+`ubuntu4`, machine `ubuntu4-MS-7E61`, Linux and non-root. The default home
+is derived from that account's passwd entry and must be exactly `/home/ubuntu4`;
+inherited HOME cannot select an alternate owned lanes tree. No guessed alias is used.
 
 Before a real operation, Root must qualify this exact module and its unchanged
 protected `preview_install.py` dependency. Pass their independently reviewed SHA256
