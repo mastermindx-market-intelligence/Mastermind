@@ -23,6 +23,8 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.calls, self.mode, self.closed, self.allow = [], "text", 0, True
         self.structured_value = {"answer": 42}
         self.tool_name, self.tool_arguments = "read", {"path": "/tmp/x"}
+        self.auto_inspection = None
+        self.serving_model = "model-1"
         self.response_release, self.response_finished = threading.Event(), threading.Event()
         parent = self
 
@@ -70,12 +72,26 @@ class OwnerLoopbackTests(unittest.TestCase):
                         msg["tool_calls"].append({"id": "structured-second", "type": "function", "function": {
                             "name": "mmx_hermes_structured_result", "arguments": json.dumps(parent.structured_value)}})
                     finish = "tool_calls"
-                self.reply(200, {"id": "provider-result", "model": "model-1",
+                self.reply(200, {"id": "provider-result", "model": parent.serving_model,
                     "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
                     "usage": {"prompt_tokens": 11, "completion_tokens": 7}}, "terminal", turn, req)
                 parent.response_finished.set()
 
             def reply(self, status, payload, state, turn, req):
+                if parent.auto_inspection is not None and req is not None and status == 200:
+                    from engine.fabric_inference_client import _auto_request_digest, AUTO_SCHEMA
+                    original = parent.calls[-1]["payload"]
+                    scope = parent.auto_inspection
+                    routing = dict(schema="mastermind.fabric_application_route.v1", requested_model=None,
+                        route_scope=scope["route_scope"], route_scope_digest=scope["route_scope_digest"],
+                        selection_digest="a" * 64, request_digest=_auto_request_digest(original),
+                        routed_request_digest=_auto_request_digest(dict(original, model=parent.serving_model)),
+                        pool="go", selected_model=parent.serving_model, mode="fixture-mode", protocol="chat",
+                        driver="fixture-driver", profile="fixture-profile", source="fixture-source", recipe_digest=None,
+                        output_contract={"mode": "hard_maximum", "max_tokens": original["max_tokens"]})
+                    payload["application"] = dict(schema=AUTO_SCHEMA, disposition=state, turn_id=turn,
+                        request_id=req, dispatch_permitted=False, effect_unknown=False, routing=routing,
+                        serving_model=parent.serving_model, usage={"input_tokens": 11, "output_tokens": 7})
                 body = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -101,6 +117,7 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.binding.model, self.binding.requested_model = "model-1", "host-selection"
         self.binding._authorized = lambda _: self.allow
         self.binding._max_output_tokens = 4096
+        self.binding.automatic = False
         self.call = NativeCall("session-1", "task-1", "turn-1", "api-1")
 
     def tearDown(self):

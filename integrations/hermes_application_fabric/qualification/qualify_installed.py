@@ -24,9 +24,12 @@ def main():
     parser.add_argument("--hermes-root", required=True)
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--manifest", required=True)
+    parser.add_argument("--hermes-sha", choices=("2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+        "1c0cd667746d3395fe9e1b6c74f8f85952486f18"),
+        default="2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19")
     args = parser.parse_args()
     root, owner, hermes = (Path(p).resolve() for p in (args.adapter_root, args.owner_root, args.hermes_root))
-    expected_hermes = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+    expected_hermes = args.hermes_sha
     actual = subprocess.run(["git", "-C", str(hermes), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     if actual != expected_hermes:
@@ -41,7 +44,7 @@ def main():
         if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise RuntimeError("Candidate source checksum mismatch")
     owner_bytes = (owner / "engine/fabric_inference_client.py").read_bytes()
-    if hashlib.sha256(owner_bytes).hexdigest() != "3250f2ea9b56b4762619a960c23dd5cc57ae05c273fe8e2b63c89a0f868d0ce0":
+    if hashlib.sha256(owner_bytes).hexdigest() != "1a9cebd2269ff489815823f762fdcbe791f3b308aa339c41cb70bb3aa0833569":
         raise RuntimeError("APPLICATION owner source checksum mismatch")
     package = root / "integrations/hermes_application_fabric"
     sys.path[:0] = [str(root), str(owner), str(package / "tests"), str(package / "qualification")]
@@ -73,7 +76,7 @@ def main():
 
     openai.OpenAI, openai.AsyncOpenAI = ForbiddenOpenAI, ForbiddenAsyncOpenAI
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "2ef828e569b683b9dfaa94f81116da3ac55f6186", "owner_source_verified": True,
+        "owner": "94682b90624c17c111e9982f9fa36980bf45e3d3", "owner_source_verified": True,
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
@@ -84,7 +87,7 @@ def main():
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 58 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":

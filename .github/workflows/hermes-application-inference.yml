@@ -23,6 +23,55 @@ permissions:
   contents: read
 
 jobs:
+  pinned-native-contract:
+    name: Hermes pinned v0.23 primary and tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+          path: .ci-hermes-native
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 94682b90624c17c111e9982f9fa36980bf45e3d3
+          path: .ci-hermes-application-owner
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /engine/fabric_inference_client.py
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install exact native dependency declarations
+        run: python -m pip install --disable-pip-version-check -e .ci-hermes-native 'jsonschema==4.26.0'
+      - name: Qualify current native ABI without an external provider
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-primary-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          root = Path.cwd()
+          files = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                   for path in (root / 'integrations/hermes_application_fabric').rglob('*')
+                   if path.is_file() and '__pycache__' not in path.parts}
+          (Path(os.environ['RUNNER_TEMP']) / 'hermes-primary-manifest.json').write_text(
+              json.dumps({'candidate': os.environ['GITHUB_SHA'], 'files': files}))
+          PY
+          python -B integrations/hermes_application_fabric/qualification/qualify_installed.py \
+            --adapter-root . --owner-root .ci-hermes-application-owner --hermes-root .ci-hermes-native \
+            --candidate "$GITHUB_SHA" --manifest "$RUNNER_TEMP/hermes-primary-manifest.json" \
+            --hermes-sha 1c0cd667746d3395fe9e1b6c74f8f85952486f18
   native-host-contract:
     name: Hermes primary native host composition
     runs-on: ubuntu-latest
@@ -58,7 +107,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 2ef828e569b683b9dfaa94f81116da3ac55f6186
+          ref: 94682b90624c17c111e9982f9fa36980bf45e3d3
           path: .ci-hermes-application-owner
           sparse-checkout-cone-mode: false
           sparse-checkout: |

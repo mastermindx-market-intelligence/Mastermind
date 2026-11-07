@@ -32,6 +32,18 @@ def document(role="mmsecretary"):
         package_sha256="b" * 64)
 
 
+def test_auto_publication_is_explicit_and_not_a_fixed_model_reinterpretation():
+    raw = document()
+    assert pub.publication_from_document(raw).automatic is False
+    raw.update(schema=pub.AUTO_SCHEMA, model=pub.AUTO_MODEL,
+               routing={"mode": "auto", "strict_pool": "go"})
+    selected = pub.publication_from_document(raw)
+    assert selected.automatic is True and selected.strict_pool == "go"
+    for changed in ({"model": "deepseek-v4.1-flash"}, {"schema": pub.SCHEMA},
+                    {"routing": {"mode": "auto", "strict_pool": "go", "api_key": "foreign"}}):
+        with pytest.raises(HermesFabricError): pub.publication_from_document({**raw, **changed})
+
+
 def profile(tmp_path, role="mmsecretary"):
     base = compose_profile(role, state_dir=tmp_path / role,
         hermes_home=tmp_path / role / "current/hermes-home", secrets_file=tmp_path / (role + ".env"))

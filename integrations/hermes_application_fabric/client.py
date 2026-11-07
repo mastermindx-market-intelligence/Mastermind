@@ -16,7 +16,7 @@ import math
 from types import SimpleNamespace
 from typing import Callable
 
-from .codec import ID, json_bytes, to_hermes_response, to_owner_request, MAX_REQUEST_BYTES
+from .codec import ID, json_bytes, to_hermes_response, to_owner_request, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES
 from .errors import HermesFabricError
 from .structured import prepare_structured_request
 
@@ -101,7 +101,7 @@ class ApplicationBinding:
                      authorized: Callable[[NativeCall], bool],
                      prior_admission_possible: bool,
                      strict_model: str | None = None, strict_pool: str | None = None,
-                     max_output_tokens: int = 4096):
+                     max_output_tokens: int = 4096, automatic: bool = False):
         """Existing authenticated role host only; no environment/key bootstrap.
 
         Role-specific factories must be enrolled by the APPLICATION owner. A
@@ -114,7 +114,11 @@ class ApplicationBinding:
             raise HermesFabricError("hermes_fabric_original_recovery_required")
         if type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 32768:
             raise HermesFabricError("hermes_fabric_output_bound_invalid")
-        if strict_pool is not None:
+        if type(automatic) is not bool:
+            raise HermesFabricError("hermes_fabric_host_selection_invalid")
+        if automatic and strict_model is not None:
+            raise HermesFabricError("hermes_fabric_scoped_exact_owner_extension_required")
+        if strict_pool is not None and not automatic:
             # cap_id/provider_id is not a physical-account or pool selection
             # receipt. The incumbent owner must expose that qualified constraint.
             raise HermesFabricError("hermes_fabric_strict_pool_owner_extension_required")
@@ -137,7 +141,12 @@ class ApplicationBinding:
         bind_error = None
         try:
             inspected = factory.inspect()
-            if strict_model is not None and inspected["model"] != strict_model:
+            if automatic:
+                from engine.fabric_inference_client import validate_auto_inspection
+                inspected = validate_auto_inspection(inspected)
+                if strict_pool is not None and inspected["route_scope"]["pools"] != [strict_pool]:
+                    raise HermesFabricError("hermes_fabric_strict_pool_unavailable")
+            elif "schema" in inspected or strict_model is not None and inspected["model"] != strict_model:
                 raise HermesFabricError("hermes_fabric_strict_model_unavailable")
             # Preserve the exact inspected owner recipe; this is selection
             # narrowing, not an entitlement or an alternate selection policy.
@@ -150,16 +159,27 @@ class ApplicationBinding:
         if bind_error is not None:
             raise bind_error
         from engine.fabric_inference_client import FabricInferenceClient
+        if type(bound) is not dict or type(bound.get("client")) is not FabricInferenceClient:
+            raise HermesFabricError("hermes_fabric_application_owner_required", effect_unknown=True)
         owner = bound["client"]
+        if automatic:
+            from engine.fabric_inference_client import AUTO_BINDING_SCHEMA
+            qualified_shape = (set(bound) == {"schema", "client", "inspection"}
+                and bound["schema"] == AUTO_BINDING_SCHEMA and bound["inspection"] == inspected
+                and owner.model is None and owner.auto_inspection == inspected)
+        else:
+            qualified_shape = (set(bound) == {"client", "model", "provider", "cost_basis", "cap_id"}
+                               and owner.model == bound["model"])
         if (type(owner) is not FabricInferenceClient or owner._native is not True
-                or owner.operation_id != operation_id or owner.model != bound["model"]):
+                or owner.operation_id != operation_id or not qualified_shape):
             # Do not replace, close, or reconstruct an unexpected original owner.
             raise HermesFabricError("hermes_fabric_application_owner_required",
                                     effect_unknown=True)
         instance = object.__new__(cls)
         instance._owner = owner
         instance.operation_id, instance.session_id, instance.turn_id = operation_id, session_id, turn_id
-        instance.model, instance.requested_model = bound["model"], requested_model
+        instance.model, instance.requested_model = owner.model, requested_model
+        instance.automatic = automatic
         instance._authorized = authorized
         instance._max_output_tokens = max_output_tokens
         return instance
@@ -246,9 +266,13 @@ class HermesApplicationClient:
                     or not math.isfinite(consumer_timeout) or consumer_timeout <= 0
                     or binding._owner._timeout > consumer_timeout):
                 raise HermesFabricError("hermes_fabric_owner_deadline_not_bound")
-        request["model"] = binding.model
+        # The AUTO native label remains a label. The original owner alone
+        # changes the null wire model into a qualified physical route.
+        label = binding.requested_model if binding.automatic else binding.model
+        request["model"] = label
         request, structured = prepare_structured_request(request)
-        owner_request = to_owner_request(request, binding.model)
+        owner_request = to_owner_request(request, label)
+        owner_request["model"] = binding.model
         # Validate the final emitted request, after native request overrides and
         # structured-output conversion. Agent constructor defaults are not a
         # bound on subsequent native kwargs.
@@ -271,8 +295,26 @@ class HermesApplicationClient:
         binding.check(call)  # Revoked/late results must not execute native tools.
         result_error = None
         try:
+            selected_model = binding.model
+            observation = None
+            if binding.automatic:
+                from engine.fabric_inference_client import ApplicationObservation
+                observed = getattr(response, "application_observation", None)
+                if type(observed) is not ApplicationObservation:
+                    raise HermesFabricError("hermes_fabric_route_observation_missing")
+                # The incumbent client has already verified the original/routed
+                # digests, frozen route, serving model and token observations.
+                # Never substitute the owner's possibly stale last observation.
+                observation = observed.document
+                if (observation["turn_id"] != binding.operation_id
+                        or observation["request_id"] != request_id
+                        or observation["effect_unknown"] is not False
+                        or observation["disposition"] != "terminal"
+                        or observation["serving_model"] != response.model):
+                    raise HermesFabricError("hermes_fabric_route_observation_mismatch")
+                selected_model = response.model
             payload = to_hermes_response(response, request_id=request_id,
-                                         selected_model=binding.model)
+                                         selected_model=selected_model)
             permitted_tools = {t["name"] for t in owner_request.get("tools", [])}
             returned_tools = payload["choices"][0]["message"].get("tool_calls", [])
             if any(t["function"]["name"] not in permitted_tools for t in returned_tools):
@@ -287,6 +329,9 @@ class HermesApplicationClient:
                 raise HermesFabricError("hermes_fabric_tool_choice_violated")
             if structured is not None:
                 payload = structured.consume(payload)
+            if observation is not None:
+                payload["application_observation"] = observation
+            json_bytes(payload, MAX_RESPONSE_BYTES)
         except HermesFabricError:
             # The provider may have completed even when its output is unusable.
             # The original owner still holds the real usage/terminal evidence.

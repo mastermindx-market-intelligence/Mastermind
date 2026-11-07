@@ -15,6 +15,8 @@ import re
 from .errors import HermesFabricError
 
 SCHEMA = "mastermind.hermes_primary_application/v1"
+AUTO_SCHEMA = "mastermind.hermes_primary_application/v2"
+AUTO_MODEL = "mastermind-fabric/auto"
 PROVIDER = "mastermind-fabric"
 ROLE_RELATIONS = {
     "mmsecretary": ("hermes-secretary", "hermes_secretary_fabric",
@@ -56,12 +58,17 @@ class PrimaryPublication:
     model: str
     max_tokens: int
     package_sha256: str
+    automatic: bool = False
+    strict_pool: str | None = None
 
 
 def publication_from_document(document) -> PrimaryPublication:
     keys = {"schema", "role", "enrollment_request_id", "principal_id", "macro_root",
             "macro_commit_sha", "model", "max_tokens", "package_sha256"}
-    if (type(document) is not dict or set(document) != keys or document["schema"] != SCHEMA
+    automatic = type(document) is dict and document.get("schema") == AUTO_SCHEMA
+    fields = keys | {"routing"} if automatic else keys
+    if (type(document) is not dict or set(document) != fields
+            or document["schema"] != (AUTO_SCHEMA if automatic else SCHEMA)
             or type(document["role"]) is not str or document["role"] not in ROLE_RELATIONS
             or type(document["macro_commit_sha"]) is not str
             or re.fullmatch(r"[0-9a-f]{40}", document["macro_commit_sha"]) is None
@@ -69,6 +76,15 @@ def publication_from_document(document) -> PrimaryPublication:
             or re.fullmatch(r"[0-9a-f]{64}", document["package_sha256"]) is None
             or type(document["max_tokens"]) is not int or not 1 <= document["max_tokens"] <= 4096):
         _refuse()
+    strict_pool = None
+    if automatic:
+        routing = document["routing"]
+        if (document["model"] != AUTO_MODEL or type(routing) is not dict
+                or set(routing) != {"mode", "strict_pool"} or routing["mode"] != "auto"):
+            _refuse()
+        strict_pool = routing["strict_pool"]
+        if strict_pool is not None:
+            _identity(strict_pool, 128)
     for key in ("enrollment_request_id", "principal_id", "model"):
         _identity(document[key])
     if re.fullmatch(r"uid:[1-9][0-9]{0,9}", document["principal_id"]) is None:
@@ -79,7 +95,8 @@ def publication_from_document(document) -> PrimaryPublication:
             or str(Path(root)) != root or ".." in Path(root).parts
             or Path(root).name != document["macro_commit_sha"]):
         _refuse()
-    return PrimaryPublication(**{key: document[key] for key in keys - {"schema"}})
+    return PrimaryPublication(**{key: document[key] for key in keys - {"schema"}},
+                              automatic=automatic, strict_pool=strict_pool)
 
 
 def validate_publication(document):

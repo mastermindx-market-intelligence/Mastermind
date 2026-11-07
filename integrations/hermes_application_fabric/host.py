@@ -88,7 +88,9 @@ class _OriginalCapability:
                 self.binding = ApplicationBinding.from_factory(self.factory,
                     profile_id=self.host.publication.role, operation_id=self.admission_id,
                     session_id=call.session_id, turn_id=call.turn_id,
-                    requested_model=self.host.publication.model, strict_model=self.host.publication.model,
+                    requested_model=self.host.publication.model,
+                    strict_model=None if self.host.publication.automatic else self.host.publication.model,
+                    automatic=self.host.publication.automatic, strict_pool=self.host.publication.strict_pool,
                     prior_admission_possible=False, authorized=self.authorized,
                     max_output_tokens=self.host.publication.max_tokens)
             return self.binding

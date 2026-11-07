@@ -7,6 +7,12 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
+    # Exact reviewed preview source/site only; any byte drift re-exposes it.
+    'ops/fleet_storage_cleanup/linux_cache_preview.py': {
+        'sha256': '1fc025101f08a052223a79f494fa28c489f48a85590bc9b37e8ef1af0ea3796d',
+        'sites': ((204, 43, 46, 'int', '512'),),
+    },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
@@ -734,7 +740,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "bc444a613891eb84a484f12a253b371d91dadfabeda71bfe9ef0959d2bf8a0ed",
+    "sha256": "71e8349094649945a018ce10f236e22e9e5a52eaba57258e3dd9b45eea20d20f",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -766,8 +772,8 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
-    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+    "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
+    "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
 
 # Hermes primary APPLICATION codec: fixed input-byte and conversation-count
@@ -778,4 +784,5 @@ REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
     "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
     "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
 }
+
 
