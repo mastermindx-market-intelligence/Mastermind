@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +22,12 @@ from scripts import ci_pytest
 
 _REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
 _REQUIRED_PR_FAST_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
+
+# Exact extraction of the nine incumbent shard-zero qualifications plus their
+# source/runtime bootstrap. The digest covers every field, command and order;
+# the old matrix.index == 0 placement predicates are removed. The native
+# rollout pytest invocation uses guarded four-process case scheduling.
+_QUALIFICATION_STEPS_SHA256 = "a43e71956f27d34917cddcc94863e0948bb1907f15afbf612fbac6f5666a5738"
 
 _EXPECTED_SHARD_SOURCE_STEPS = [
     {"name": "Acquire immutable corpus fixture anchor", "uses": "actions/checkout@v4",
@@ -204,13 +212,13 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '  fi\n'
  '  case "$PR_SCOPE_MODE" in\n'
  '    full)\n'
- '      if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then\n'
- '        echo "critical/unqualified source must pass all six pytest shards"\n'
+ '      if [ "$SHARDS_STATUS" != success ] || [ "$QUALIFICATION_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then\n'
+ '        echo "critical/unqualified source must pass all six pytest shards and source qualification"\n'
  '        exit 1\n'
  '      fi\n'
  '      ;;\n'
  '    fast|smoke)\n'
- '      if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then\n'
+ '      if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUALIFICATION_STATUS" != skipped ]; then\n'
  '        echo "eligible source must pass its exact fast/smoke check"\n'
  '        exit 1\n'
  '      fi\n'
@@ -222,9 +230,9 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '  esac\n'
  'else\n'
  '  # Protected pushes and deliberate manual CI always run all shards.\n'
- '  if [ "$SHARDS_STATUS" != success ] ||\n'
+ '  if [ "$SHARDS_STATUS" != success ] || [ "$QUALIFICATION_STATUS" != success ] ||\n'
  '     [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then\n'
- '    echo "integration/release CI must pass the full matrix"\n'
+ '    echo "integration/release CI must pass the full matrix and source qualification"\n'
  '    exit 1\n'
  '  fi\n'
  'fi\n'
@@ -243,14 +251,27 @@ def validate_parallel_workflow(text: str) -> None:
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
     jobs = payload.get("jobs")
-    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pytest_shards", "test"}:
-        raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, shards, and test gate")
+    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pytest_shards", "source_qualification", "test"}:
+        raise ci_pytest.PolicyError("parallel CI requires trusted scope, fast check, shards, source qualification, and test gate")
     _validate_pr_fast_lane(jobs)
     shards, gate = jobs["pytest_shards"], jobs["test"]
+    qualification = jobs["source_qualification"]
     if not isinstance(shards, dict) or not isinstance(gate, dict):
         raise ci_pytest.PolicyError("parallel CI job configuration is invalid")
     if shards.get("permissions") != {"contents": "read", "actions": "read"} or gate.get("permissions") is not None:
         raise ci_pytest.PolicyError("Actions proof permission must be scoped to pytest shard jobs only")
+    if (
+        not isinstance(qualification, dict)
+        or set(qualification) != {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes", "steps"}
+        or qualification.get("name") != "Source qualification"
+        or qualification.get("needs") != ["pr_scope"]
+        or qualification.get("if") != _REQUIRED_SHARDS_IF
+        or qualification.get("permissions") != {"contents": "read"}
+        or qualification.get("runs-on") != "ubuntu-latest"
+        or type(qualification.get("timeout-minutes")) is not int
+        or not 1 <= qualification["timeout-minutes"] <= 30
+    ):
+        raise ci_pytest.PolicyError("source qualification must run independently for every full source with read-only authority")
     strategy = shards.get("strategy")
     matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
     indices = matrix.get("index") if isinstance(matrix, dict) else None
@@ -271,15 +292,15 @@ def validate_parallel_workflow(text: str) -> None:
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
     if (
         gate.get("name") != "test"
-        or gate.get("needs") != ["pr_scope", "pr_fast", "pytest_shards"]
+        or gate.get("needs") != ["pr_scope", "pr_fast", "pytest_shards", "source_qualification"]
         or gate.get("if") != "${{ always() }}"
         or gate.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
 
     # Guard each hosted job's total wall-clock budget, not just pytest time.
-    # The merge queue gives all required checks 100 minutes. Shard zero uses
-    # additional Paper/Fabric qualifications and previously hit 45m at cleanup.
+    # Retain the established shard/gate budget during the DAG canary. Source
+    # qualification overlaps shards and has its own smaller finite budget.
     shard_timeout = shards.get("timeout-minutes")
     gate_timeout = gate.get("timeout-minutes")
     if (
@@ -296,15 +317,16 @@ def validate_parallel_workflow(text: str) -> None:
 
     shard_steps = shards.get("steps", [])
     gate_steps = gate.get("steps", [])
-    if not isinstance(shard_steps, list) or not isinstance(gate_steps, list):
+    qualification_steps = qualification.get("steps", [])
+    if not all(isinstance(steps, list) for steps in (shard_steps, gate_steps, qualification_steps)):
         raise ci_pytest.PolicyError("parallel CI steps are missing")
     # GitHub step expressions address IDs rather than displayed names. A later
     # duplicate, including one with different casing, could shadow the pinned
     # previous_ci producer and falsely report reuse=true to skip pytest. Require
-    # global uniqueness across both CI jobs rather than depending on runner
+    # global uniqueness across all CI jobs rather than depending on runner
     # behavior for duplicate IDs.
     seen_step_ids: set[str] = set()
-    for step in (*jobs["pr_scope"]["steps"], *jobs["pr_fast"]["steps"], *shard_steps, *gate_steps):
+    for step in (*jobs["pr_scope"]["steps"], *jobs["pr_fast"]["steps"], *shard_steps, *qualification_steps, *gate_steps):
         if not isinstance(step, dict):
             raise ci_pytest.PolicyError("parallel CI steps must be mappings")
         if "id" not in step:
@@ -316,6 +338,17 @@ def validate_parallel_workflow(text: str) -> None:
         if canonical_id in seen_step_ids:
             raise ci_pytest.PolicyError("parallel CI step IDs must be globally unique")
         seen_step_ids.add(canonical_id)
+    try:
+        qualification_bytes = json.dumps(
+            qualification_steps, sort_keys=True, separators=(",", ":")
+        ).encode()
+    except (TypeError, ValueError):
+        raise ci_pytest.PolicyError("source qualification steps must preserve the exact extracted commands") from None
+    if hashlib.sha256(qualification_bytes).hexdigest() != _QUALIFICATION_STEPS_SHA256:
+        raise ci_pytest.PolicyError("source qualification steps must preserve the exact extracted commands")
+    qualification_names = {step.get("name") for step in qualification_steps[9:]}
+    if any(step.get("name") in qualification_names for step in shard_steps):
+        raise ci_pytest.PolicyError("singleton qualifications must not be repeated in pytest shards")
     # Job permissions apply to every step; prevent checkout from retaining the
     # expanded Actions-read token in repository Git configuration for later code.
     primary_checkouts = [
@@ -338,8 +371,8 @@ def validate_parallel_workflow(text: str) -> None:
             "fixed fixture acquisition must precede full-history event checkout and source proof"
         )
     # A checkout with an explicit repository also defaults to the root path.
-    # Only the two incumbent Macro fixtures may follow the event checkout;
-    # their dedicated paths cannot replace the selected repository source.
+    # Only the ordinary Macro fixture remains in each shard. The separately
+    # pinned Brain fixture belongs to the exact qualification steps above.
     external_checkouts = [
         step for step in shard_steps
         if str(step.get("uses", "")).startswith("actions/checkout@")
@@ -347,16 +380,15 @@ def validate_parallel_workflow(text: str) -> None:
     ]
     fixture_paths = {
         "Checkout pinned Macro engine": "vendor/macro_src",
-        "Checkout paired Brain production owner fixture": ".ci-production-macro",
     }
-    if (len(external_checkouts) != 2
+    if (len(external_checkouts) != 1
             or {step.get("name") for step in external_checkouts} != set(fixture_paths)
             or any(step.get("uses") != "actions/checkout@v4"
                    or step["with"].get("repository") != "mastermindx-market-intelligence/macro"
                    or step["with"].get("path") != fixture_paths.get(step.get("name"))
                    or step["with"].get("persist-credentials") is not False
                    for step in external_checkouts)):
-        raise ci_pytest.PolicyError("later checkouts must retain the two isolated Macro fixture paths")
+        raise ci_pytest.PolicyError("later shard checkouts must retain the isolated Macro fixture path")
     # The single prior-CI probe is read-only and executes before the shard.
     # The final shard step can be conditional ONLY on the verified output of
     # this pinned producer. No skipping whole jobs or trusted non-pytest gates.
@@ -380,35 +412,48 @@ def validate_parallel_workflow(text: str) -> None:
         or set(runner) != {"name", "if", "run", "timeout-minutes"}
         or type(runner.get("timeout-minutes")) is not int
         or runner.get("timeout-minutes") != 45
-        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}"
+        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4"
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
+    diagnostics = [step for step in shard_steps
+                   if step.get("name") == "Upload fixed test diagnostics"]
+    expected_paths = "\n".join(
+        "${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-" + str(index) + "/" + leaf
+        for leaf in ("ci-fixed-diagnostics.json",)
+        for index in range(ci_pytest.MAX_PRECOLLECTION_PROCESSES)
+    ) + "\n"
+    expected_diagnostics = dict(name="Upload fixed test diagnostics", **{
+        "if": "always()", "timeout-minutes": 2, "uses": "actions/upload-artifact@v4",
+        "with": {"name": "ci-fixed-diagnostics-${{ matrix.index }}",
+                 "path": expected_paths, "if-no-files-found": "warn", "retention-days": 3,
+                 "compression-level": 0},
+    })
+    if diagnostics != [expected_diagnostics]:
+        raise ci_pytest.PolicyError("child diagnostics must retain exactly the finite public leaves")
     for name in (
         "Verify Paper direct pinned MCP SDK",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source", "Validate shell scripts",
     ):
         matches = [
-            step for step in shard_steps
+            step for step in qualification_steps
             if isinstance(step, dict) and step.get("name") == name
         ]
-        if len(matches) != 1 or matches[0].get("if") != "matrix.index == 0":
-            raise ci_pytest.PolicyError("non-pytest CI gates must run in shard zero")
+        if len(matches) != 1 or matches[0].get("if") is not None:
+            raise ci_pytest.PolicyError("non-pytest CI gates must run unconditionally in source qualification")
     # Preserve the released non-pytest Paper gate in both ordinary and reuse
     # executions. A green job alone does not prove its command actually ran.
-    paper = [step for step in shard_steps
+    paper = [step for step in qualification_steps
              if step.get("name") == "Verify Paper Studio prepare guard"]
     expected_paper = {
         "name": "Verify Paper Studio prepare guard",
-        "if": "matrix.index == 0",
         "working-directory": "integrations/studio_direct_mcp",
         "run": "node --test paper-design.test.mjs",
     }
-    if (len(paper) != 1 or paper[0] != expected_paper
-            or shard_steps.index(paper[0]) >= shard_steps.index(proof)):
+    if len(paper) != 1 or paper[0] != expected_paper:
         raise ci_pytest.PolicyError(
-            "released Paper prepare guard must run unchanged before reuse proof"
+            "released Paper prepare guard must run unchanged in required source qualification"
         )
     # Reuse may omit only the full pytest step, never the released fast
     # preflight or either real Linux initializer qualification.
@@ -427,7 +472,7 @@ def validate_parallel_workflow(text: str) -> None:
     # false-green gate if its Node or private-service tests are silently cut.
     fabric_name = "Verify private Fabric HTTP compatibility and incumbent backend lifetime"
     fabric_step = next(
-        step for step in shard_steps
+        step for step in qualification_steps
         if isinstance(step, dict) and step.get("name") == fabric_name
     )
     fabric_commands = [
@@ -438,7 +483,7 @@ def validate_parallel_workflow(text: str) -> None:
     ]
     actual_commands = fabric_step.get("run")
     if (
-        set(fabric_step) != {"name", "if", "working-directory", "run"}
+        set(fabric_step) != {"name", "working-directory", "run"}
         or fabric_step.get("working-directory") != "integrations/studio_direct_mcp"
         or not isinstance(actual_commands, str)
         or [line.strip() for line in actual_commands.splitlines() if line.strip()]
@@ -465,6 +510,7 @@ def validate_parallel_workflow(text: str) -> None:
             "PR_SCOPE_MODE": "${{ needs.pr_scope.outputs.mode }}",
             "PR_FAST_STATUS": "${{ needs.pr_fast.result }}",
             "SHARDS_STATUS": "${{ needs.pytest_shards.result }}",
+            "QUALIFICATION_STATUS": "${{ needs.source_qualification.result }}",
         }
         or code != _REQUIRED_GATE_RUN
         or final.get("shell") not in (None, "bash")
@@ -475,7 +521,7 @@ def validate_parallel_workflow(text: str) -> None:
         )
     if any(
         isinstance(step, dict) and step.get("continue-on-error") is not None
-        for step in (*shard_steps, *gate_steps)
+        for step in (*shard_steps, *qualification_steps, *gate_steps)
     ):
         raise ci_pytest.PolicyError("parallel CI may not continue on test errors")
 
@@ -502,6 +548,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--index", type=int, required=True)
     parser.add_argument("--root", default=None)
     parser.add_argument("--plan-only", action="store_true")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="pytest-xdist workers inside this shard (0 = one serial interpreter)",
+    )
+    parser.add_argument(
+        "--processes", type=int, default=0,
+        help="independent serial pytest children, partitioned before collection",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else ci_pytest.repo_root()
 
@@ -512,6 +568,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         gate, selected, digest = shard_plan(
             root, jobs=args.jobs, index=args.index
         )
+        if args.processes and args.workers:
+            raise ci_pytest.PolicyError("independent processes and xdist workers are mutually exclusive")
+        if not 0 <= args.processes <= ci_pytest.MAX_PRECOLLECTION_PROCESSES:
+            raise ci_pytest.PolicyError("independent process count is outside the worker budget")
+        children = (ci_pytest.partition_modules(selected, jobs=args.processes, inner=True)
+                    if args.processes else None)
+        shard_argv = ci_pytest.pytest_argv(selected, progress=True, workers=args.workers)
     except ci_pytest.PolicyError as error:
         print(f"ci_parallel_shard policy error: {error}", file=sys.stderr)
         return 2
@@ -519,17 +582,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(ci_pytest.format_plan(gate["plan"]), flush=True)
     print(
         f"parallel_shard={args.index + 1}/{args.jobs} "
-        f"modules={len(selected)} included_sha256={digest}",
+        f"modules={len(selected)} included_sha256={digest} workers={args.workers}"
+        + (f" processes={args.processes}" if args.processes else ""),
         flush=True,
     )
     if args.plan_only:
+        if children is not None:
+            print("child_modules=" + ",".join(str(len(child)) for child in children), flush=True)
         return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.
-    completed = subprocess.run(
-        ci_pytest.pytest_argv(selected, progress=True),
-        cwd=root,
-        check=False,
-    )
+    if children is not None:
+        try:
+            return ci_pytest.run_shards(children, root=root, completion_proof=True)
+        except ci_pytest.PolicyError as error:
+            print(f"ci_parallel_shard policy error: {error}", file=sys.stderr)
+            return 2
+    if args.workers:
+        # Every xdist worker must collect the identical item list; a
+        # parametrize over a set/dict iterates in hash order, which differs
+        # per interpreter unless the seed is pinned. Workers inherit this.
+        env = dict(os.environ)
+        env.setdefault("PYTHONHASHSEED", "0")
+        completed = subprocess.run(shard_argv, cwd=root, check=False, env=env)
+    else:
+        completed = subprocess.run(
+            shard_argv,
+            cwd=root,
+            check=False,
+        )
     return int(completed.returncode)
 
 

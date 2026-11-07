@@ -110,6 +110,7 @@ RECORD = "parallel_shard=3/6 modules=1 included_sha256=" + "a" * 64
 @pytest.mark.parametrize("record", [
     "", RECORD.replace("3/6", "2/6"), RECORD.replace("3/6", "3/5"),
     RECORD + "\n" + RECORD, RECORD.replace("a" * 64, "bad"),
+    RECORD + " workers=4", RECORD + " workers=0 extra",
     RECORD.replace("modules=1", "modules=0"), RECORD.replace("modules=1", "modules=7"),
 ])
 def test_zero_child_exit_without_one_matching_plan_cannot_qualify(tmp_path, monkeypatch, record):
@@ -125,11 +126,12 @@ def test_zero_child_exit_without_one_matching_plan_cannot_qualify(tmp_path, monk
     assert proof["shard"]["included_sha256"] is None
 
 
+@pytest.mark.parametrize("record", [RECORD, RECORD + " workers=0"])
 @pytest.mark.parametrize("exit_code", [0, 7])
-def test_completed_shard_preserves_exit_and_never_becomes_full_gate(tmp_path, monkeypatch, exit_code):
+def test_completed_shard_preserves_exit_and_never_becomes_full_gate(tmp_path, monkeypatch, exit_code, record):
     args, env_dir = _arguments(tmp_path, monkeypatch)
     monkeypatch.setattr(rwe, "_stream_gate", lambda argv, **kw: subprocess.CompletedProcess(
-        argv, exit_code, "discovered=6 excluded=0 running=6\n" + RECORD + "\n", "",
+        argv, exit_code, "discovered=6 excluded=0 running=6\n" + record + "\n", "",
     ))
     assert rwe.cmd_gate(args) == exit_code
     proof = json.loads((env_dir / rwe.RECEIPT_FILENAME).read_text())["proof"]
@@ -175,7 +177,16 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     runners = [s for s in shards["steps"] if "--shard-index" in s.get("run", "")]
     assert len(runners) == 1
     assert runners[0]["run"] == (
-        "python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}"
+        'python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }} '
+        '--processes "$RWE_PROCESSES"'
+    )
+    assert runners[0]["env"] == {"RWE_PROCESSES": "${{ inputs.processes || '0' }}"}
+    assert document["on"]["workflow_dispatch"]["inputs"]["processes"] == {
+        "description": "Existing precollection children per shard (0 keeps the serial control)",
+        "type": "choice", "options": ["0", "4"], "default": "0", "required": True,
+    }
+    assert {"scripts/ci_xdist_guard.py", "tests/test_ci_prepartition.py"}.issubset(
+        document["on"]["pull_request"]["paths"]
     )
     receipts = [s for s in shards["steps"] if s.get("uses") == "actions/upload-artifact@v4"]
     assert len(receipts) == 1

@@ -196,6 +196,24 @@ def identity(info: os.stat_result):
             info.st_ctime_ns, info.st_mode, info.st_uid, info.st_nlink)
 
 
+def chain_identity(info: os.stat_result):
+    """Recheck a directory edge without mistaking unrelated shared /tmp churn
+    for an in-custody mutation.
+
+    The ONLY exception is a root-owned, world-writable, sticky ancestor:
+    children can appear/disappear without changing this directory's binding.
+    Its device, inode, owner, group and mode remain pinned, and every walk
+    remains O_NOFOLLOW. All other ancestors, every custody terminal directory,
+    and every regular pointer/source leaf keep their strict identity().
+    """
+    if (stat.S_ISDIR(info.st_mode) and info.st_uid == 0
+            and (info.st_mode & stat.S_ISVTX)
+            and (info.st_mode & stat.S_IWOTH)):
+        return ("root-sticky", info.st_dev, info.st_ino, info.st_uid,
+                info.st_gid, info.st_mode)
+    return identity(info)
+
+
 def _is_str(value, pattern) -> bool:
     return type(value) is str and pattern.fullmatch(value) is not None
 
@@ -624,10 +642,10 @@ class Reader:
 
     def _reverify_chain(self, fds, edges):
         for index, (part, info) in enumerate(edges):
-            if identity(info) != identity(os.fstat(fds[index + 1])):
+            if chain_identity(info) != chain_identity(os.fstat(fds[index + 1])):
                 raise CurrentSourceError("changed_during_read")
-            if identity(info) != identity(os.stat(part, dir_fd=fds[index],
-                                                follow_symlinks=False)):
+            if chain_identity(info) != chain_identity(os.stat(part, dir_fd=fds[index],
+                                                             follow_symlinks=False)):
                 raise CurrentSourceError("changed_during_read")
 
     def read_leaf(self, fds, name, cap: int) -> bytes:
@@ -891,7 +909,7 @@ def _chain_snapshot(reader: Reader, parts):
     fds, edges = reader.walk_chain(parts)
     try:
         return (identity(os.fstat(fds[-1])),
-                tuple(identity(info) for _part, info in edges))
+                tuple(chain_identity(info) for _part, info in edges))
     finally:
         for fd in reversed(fds):
             os.close(fd)
@@ -1005,7 +1023,7 @@ class CustodyGraphGuard:
                                                            self._graph["edges"])):
             fds, edges = chain
             self._reader._reverify_chain(fds, edges)
-            if (tuple(identity(info) for _part, info in edges) != initial_edges
+            if (tuple(chain_identity(info) for _part, info in edges) != initial_edges
                     or identity(os.fstat(fds[-1])) != self._graph["dirs"][index]):
                 raise CurrentSourceError("changed_during_read")
         for chain_index, name, fd in self._leaf_fds:
@@ -2208,7 +2226,7 @@ REMOTE_CONSTANTS = ("SCHEMA_REQUEST", "SCHEMA_OBSERVATION", "SCHEMA_RECEIPT",
                     "LIMIT_CAPS", "DEFAULT_LIMITS", "NO_CLAIMS")
 
 REMOTE_SOURCE = ("CurrentSourceError", "canonical", "strict_json", "digest_of",
-                 "identity", "_is_str", "validate_absolute_custody",
+                 "identity", "chain_identity", "_is_str", "validate_absolute_custody",
                  "validate_relative_path", "_validate_source_entries",
                  "validate_custody_variant", "require_boundary_contains",
                  "validate_request", "Reader", "read_pointer", "_pointer_text",

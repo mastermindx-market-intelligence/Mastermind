@@ -763,8 +763,11 @@ def test_authority_retains_its_captured_peer_until_finalization(world,monkeypatc
     assert refs[0]() is None
 
 
-@pytest.mark.parametrize('stamp',[now_stamp(-90000),now_stamp(3600)])
-def test_existing_inflight_timestamp_has_no_invented_expiry(world,stamp):
+# The offsets identify the cases deterministically across xdist workers;
+# compute relative wall-clock timestamps only when each case executes.
+@pytest.mark.parametrize('offset_seconds',[-90000,3600])
+def test_existing_inflight_timestamp_has_no_invented_expiry(world,offset_seconds):
+    stamp=now_stamp(offset_seconds)
     world.receipt.content=marker_for(world.intent,started=stamp)
     authority=world.qualify()
     assert psa.require_stop_authority(authority,stop_intent=world.intent).stop_intent==world.intent

@@ -9,7 +9,7 @@
   "ext/codex_usage.py": "8f06f5f7195917db02e5a2bc406ca5f28c8f8fb1c5432ccc7bc12921e1db3b7a",
   "ext/commission_deadline.py": "76d6523f94d9d8a7323766eb957b93bdd37240c7b4c13a4b097555ed53e8829a",
   "ext/current_failed_artifact_evidence.py": "d37e0ad11f116e630b825fde62e28c6bc441d102bc534666b9fff248537cb02f",
-  "ext/current_source_observation.py": "42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18",
+  "ext/current_source_observation.py": "c969cfc5dc5fc179b9a6eed28605017c22a30a4ef17550ec5e84b524f48c5d5a",
   "ext/fabric_client_projection.py": "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6",
   "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
   "ext/fabric_cpu_scope.py": "15891591aba64e7d5658b7c92fd5ff90a89f6c57df952f8e5673c2a638fc0c63",
