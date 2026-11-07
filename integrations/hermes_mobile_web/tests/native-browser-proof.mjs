@@ -124,20 +124,29 @@ try {
   assert.equal(provider.completions.find(row => row.marker === marker)?.finished, false)
   report.steps.push('native renderer displays the heading before the provider finishes streaming')
   holding.open()
-  await page.getByText('MOBILE_STREAM_OK', { exact: false }).last().waitFor({ timeout: 45000 })
+  const bold = page.getByText('formatted reply', { exact: true }).last()
+  await bold.waitFor({ timeout: 45000 })
+  report.bold = await bold.evaluate(node => ({ tag: node.tagName, weight: getComputedStyle(node).fontWeight }))
+  assert.ok(Number.parseInt(report.bold.weight, 10) >= 600, 'Markdown emphasis must render with a bold text weight')
+  const code = page.getByText('print("MOBILE_STREAM_OK")', { exact: true }).last()
+  await code.waitFor({ timeout: 45000 })
+  report.code = await code.evaluate(node => ({ tag: node.tagName, font: getComputedStyle(node).fontFamily }))
+  assert.match(report.code.font, /mono|courier|consolas/i, 'the code sample must use a code font')
   await page.waitForFunction(() => document.querySelectorAll('table').length > 0)
-  assert.ok(await page.locator('strong').filter({ hasText: 'formatted reply' }).count())
-  assert.ok(await page.locator('code').filter({ hasText: 'MOBILE_STREAM_OK' }).count())
   const sessionHash = new URL(page.url()).hash
   assert.ok(sessionHash && sessionHash !== '#/mastermind')
-  await page.screenshot({ path: join(output, 'native-mobile-stream.png'), fullPage: true })
+  // Wait on the actual provider finish rather than taking DOM availability as completion.
+  const completedDeadline = Date.now() + 30000
+  while (!provider.completions.some(row => row.marker === marker && row.finished) && Date.now() < completedDeadline) await new Promise(resolveWait => setTimeout(resolveWait, 50))
   const completed = provider.completions.filter(row => row.marker === marker)
   assert.equal(completed.length, 1, 'the uniquely marked turn was dispatched more than once')
+  assert.equal(completed[0].finished, true)
+  await page.screenshot({ path: join(output, 'native-mobile-stream.png'), fullPage: true })
   await page.reload()
-  await page.getByText('MOBILE_STREAM_OK', { exact: false }).last().waitFor({ timeout: 45000 })
+  await page.getByText('print("MOBILE_STREAM_OK")', { exact: true }).last().waitFor({ timeout: 45000 })
   assert.equal(new URL(page.url()).hash, sessionHash)
   assert.equal(provider.completions.filter(row => row.marker === marker).length, 1)
-  report.steps.push('native Markdown, strong text, code block and table render; reload retains the original session without redispatch')
+  report.steps.push('native Markdown, bold text, monospace code and table render; reload retains the original session without redispatch')
   report.sessionHash = sessionHash
   report.streamFrames = frames.length
   report.providerCallsForMarker = completed.length
