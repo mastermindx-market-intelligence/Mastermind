@@ -115,3 +115,10 @@ def test_snapshot_refuses_non_asset_drift_during_capture(native_package, monkeyp
     with pytest.raises(ValueError, match="changed during qualification"):
         package.export_publication(**native_package)
     assert not native_package["out"].exists()
+
+
+def test_old_attended_build_cannot_qualify_native_worker(native_package):
+    args={key:native_package[key] for key in ("release","source_repo","source_sha")}
+    with pytest.raises(ValueError,match="complete original owner patch closure"):
+        package.qualify_native_worker_package(**args)
+    assert not native_package["out"].exists()

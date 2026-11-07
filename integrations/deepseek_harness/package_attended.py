@@ -347,25 +347,10 @@ PUBLICATION_SCHEMA = "mastermind.dsh_attended_publication_bundle.v1"
 PUBLICATION_CUSTODY = "root-qualified package snapshot; not a remote signature"
 
 
-def export_publication(*, release, source_repo, source_sha, out):
-    """Verify the complete staged app and capture bounded public asset evidence.
-
-    The existing root publisher owns publication. This export neither starts the
-    user app nor installs a service, credential, tunnel, Caddy route or DNS record.
-    """
-    import sys
-    root = HERE.parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from ops.executive_os import os_public_edge_publication as publication
+def _qualified_release_source(*, release, source_repo, source_sha):
+    """The existing root qualification, shared by asset export and native custody."""
     from ops.executive_os.install_source_policy import validate_acceptance_source
-    publication._root()
-    source_repo = exact_path(source_repo)
     source_tree = validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha)
-    release = exact_path(release)
-    out = exact_path(out, exists=False)
-    if out.exists() or out.is_relative_to(release):
-        raise ValueError("Use a fresh publication export outside the immutable package")
     manifest_path = release / "package-manifest.json"
     if manifest_path.is_symlink() or not 0 < manifest_path.stat().st_size <= 64 * 1024 * 1024:
         raise ValueError("Package manifest custody or budget refused")
@@ -432,6 +417,82 @@ def export_publication(*, release, source_repo, source_sha, out):
             or sha(release / "app/.dsh-build/client-build-environment.json")
                != config["native_client_build_sha256"]):
         raise ValueError("Native company overlay or client build differs")
+    if (manifest_path.read_bytes() != manifest_raw or inventory_identity(release) != identity
+            or validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha) != source_tree):
+        raise ValueError("Package or protected source changed during qualification")
+    return (source_tree, manifest_path, manifest_raw, identity, accepted_build,
+            build_raw, manifest, config, build)
+
+
+def qualify_native_worker_package(*, release, source_repo, source_sha):
+    """Root source qualification; no publication and no worker/provider execution."""
+    from ops.executive_os import os_public_edge_publication as publication
+    from control_plane.native_provider_attestation import (
+        DSH_ENTRYPOINT, DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, DSH_MODEL_PROVIDER)
+    publication._root()
+    release, source_repo = exact_path(release), exact_path(source_repo)
+    (tree, manifest_path, raw, identity, accepted, build_raw, manifest,
+     config, build) = _qualified_release_source(
+        release=release, source_repo=source_repo, source_sha=source_sha)
+    if (any(key not in config or config[key] != accepted.get(key)
+            for key in ("native_session_patch", "native_owner_access", "native_acp_patch"))
+            or type(config.get("company_host_exports")) is not dict
+            or not {"./executive-read-port", "./company-peer"} <= set(config["company_host_exports"])):
+        raise ValueError("Native worker requires the complete original owner patch closure")
+    if (type(config.get("node")) is not str or not Path(config["node"]).is_absolute()
+            or type(config.get("node_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", config["node_sha256"]) is None):
+        raise ValueError("Native worker Node binding is absent")
+    worker = config.get("native_worker")
+    if (type(worker) is not dict
+            or set(worker) != {"schema", "entry", "sha256", "agent_name", "agent_version", "model_provider"}
+            or worker["schema"] != "mastermind.dsh_native_worker_entry/v1"
+            or worker["entry"] != DSH_ENTRYPOINT
+            or worker["agent_name"] != DSH_PROTOCOL_NAME
+            or worker["agent_version"] != DSH_PROTOCOL_VERSION
+            or worker["model_provider"] != DSH_MODEL_PROVIDER
+            or worker != accepted.get("native_worker")):
+        raise ValueError("Fixed native worker entry is not source-qualified")
+    entry = release / DSH_ENTRYPOINT
+    expected = subprocess.check_output(["git", "-C", str(source_repo), "show",
+        source_sha + ":integrations/deepseek_harness/" + DSH_ENTRYPOINT])
+    if (entry.is_symlink() or entry.read_bytes() != expected
+            or sha(entry) != worker["sha256"]
+            or manifest_path.read_bytes() != raw or inventory_identity(release) != identity):
+        raise ValueError("Fixed native worker entry or package changed")
+    from ops.executive_os.install_source_policy import validate_acceptance_source
+    if validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha) != tree:
+        raise ValueError("Protected native worker source changed during qualification")
+    return {"schema": "mastermind.dsh_native_worker_qualification/v1",
+            "source_sha": source_sha, "source_tree": tree,
+            "build_sha256": hashlib.sha256(build_raw).hexdigest(),
+            "package_manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            "entrypoint_sha256": worker["sha256"], "native_worker": worker,
+            "node": {"path": config["node"], "sha256": config["node_sha256"]}}
+
+
+def export_publication(*, release, source_repo, source_sha, out):
+    """Verify the complete staged app and capture bounded public asset evidence.
+
+    The existing root publisher owns publication. This export neither starts the
+    user app nor installs a service, credential, tunnel, Caddy route or DNS record.
+    """
+    import sys
+    root = HERE.parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from ops.executive_os import os_public_edge_publication as publication
+    from ops.executive_os.install_source_policy import validate_acceptance_source
+    publication._root()
+    source_repo = exact_path(source_repo)
+    source_tree = validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha)
+    release = exact_path(release)
+    out = exact_path(out, exists=False)
+    if out.exists() or out.is_relative_to(release):
+        raise ValueError("Use a fresh publication export outside the immutable package")
+    (source_tree, manifest_path, manifest_raw, identity, accepted_build,
+     build_raw, manifest, config, build) = _qualified_release_source(
+        release=release, source_repo=source_repo, source_sha=source_sha)
     dist = release / "app/apps/web/dist"
     index = (dist / "index.html").read_text()
     captures, rows = {}, []

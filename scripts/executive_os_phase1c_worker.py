@@ -122,6 +122,11 @@ _NATIVE_CLAUDE_CONFIG_FIELDS = (_NATIVE_CONFIG_FIELDS - frozenset({
     "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
     "required_team_identifier",
 })) | frozenset({"claude_binary", "claude_attestation_receipt", "allowed_claude_versions"})
+_NATIVE_DSH_CONFIG_FIELDS = (_NATIVE_CONFIG_FIELDS - frozenset({
+    "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
+    "required_team_identifier",
+})) | frozenset({"deepseek_node_binary", "deepseek_attestation_receipt",
+                "allowed_node_versions", "deepseek_release"})
 _CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
     {
         "schema_version",
@@ -196,8 +201,10 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             if 'native_capacity_enrollment' in value:
                 expected_fields |= {'native_capacity_enrollment'}
     elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
-        expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
-                           else _NATIVE_CONFIG_FIELDS)
+        expected_fields = {
+            "claude": _NATIVE_CLAUDE_CONFIG_FIELDS,
+            "deepseek": _NATIVE_DSH_CONFIG_FIELDS,
+        }.get(value.get("native_provider"), _NATIVE_CONFIG_FIELDS)
         if value.get("native_provider") == "claude" and "claude_sdk_python" in value:
             expected_fields = expected_fields | frozenset({"claude_sdk_python"})
     else:
@@ -205,13 +212,16 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     if set(value) != expected_fields:
         raise WorkerConfigError("worker config fields do not match the schema")
     if schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
-        if value.get("native_provider") not in {"codex", "claude"}:
+        if value.get("native_provider") not in {"codex", "claude", "deepseek"}:
             raise WorkerConfigError("native provider is not supported")
         if not isinstance(value.get("native_realm_enrollment"), dict):
             raise WorkerConfigError("native realm enrollment must be an object")
     finite = (schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION
               and value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING)
-    provider = "claude" if value.get("native_provider") == "claude" or finite else "codex"
+    provider = ("claude" if value.get("native_provider") == "claude" or finite
+                else "deepseek" if value.get("native_provider") == "deepseek" else "codex")
+    binary_field = "deepseek_node_binary" if provider == "deepseek" else f"{provider}_binary"
+    versions_field = "allowed_node_versions" if provider == "deepseek" else f"allowed_{provider}_versions"
     if finite:
         if 'native_capacity_enrollment' in value:
             from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
@@ -232,7 +242,7 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
                 or ("attended_secret_canary" in value
                     and value["attended_secret_canary"] != _FINITE_ATTENDED_PROBE)):
             raise WorkerConfigError("finite attended definition differs from its fixed probe contract")
-    versions = value.get(f"allowed_{provider}_versions")
+    versions = value.get(versions_field)
     if (
         not isinstance(versions, list)
         or not versions
@@ -240,17 +250,22 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         or any(not isinstance(item, str) or not item for item in versions)
         or len(versions) != len(set(versions))
     ):
-        raise WorkerConfigError("allowed_codex_versions must be a small non-empty set")
+        raise WorkerConfigError(f"{versions_field} must be a small non-empty set")
     for field in (
         "workspace_root",
         "run_root",
         "provider_home",
-        f"{provider}_binary",
+        binary_field,
         f"{provider}_attestation_receipt",
         "uid_sweep_receipt",
     ):
         if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
             raise WorkerConfigError(f"{field} must be an absolute path")
+    if provider == "deepseek" and (
+            type(value.get("deepseek_release")) is not str
+            or not Path(value["deepseek_release"]).is_absolute()
+            or any(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", version) is None for version in versions)):
+        raise WorkerConfigError("native DeepSeek requires an exact release and Node versions")
     if "claude_sdk_python" in value and (
             not isinstance(value["claude_sdk_python"], str)
             or not Path(value["claude_sdk_python"]).is_absolute()):
@@ -702,6 +717,118 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
     )
 
 
+
+def _load_native_deepseek_installation(config: Mapping[str, Any]):
+    """Read the original root source capability; no provider/startup attestation."""
+    from control_plane.native_provider_attestation import (
+        NativeDeepSeekInstallation, load_native_deepseek_attestation)
+    try:
+        installed = load_native_deepseek_attestation(
+            Path(config["deepseek_attestation_receipt"]),
+            expected_binary_path=Path(config["deepseek_node_binary"]),
+            expected_release=Path(config["deepseek_release"]),
+            expected_owner_gid=int(config["worker_gid"]),
+            allowed_versions=frozenset(config["allowed_node_versions"]),
+        )
+        if (not isinstance(installed, NativeDeepSeekInstallation)
+                or installed.source_sha != _ROOT.name
+                or installed.binary.path != config["deepseek_node_binary"]
+                or installed.binary.version not in config["allowed_node_versions"]
+                or installed.binary.sha256 != config["native_realm_enrollment"].get("provider_binary_sha256")):
+            raise WorkerConfigError("native DeepSeek source differs from its enrollment")
+        return installed
+    except Exception:
+        raise WorkerConfigError("native DeepSeek Node/package attestation refused") from None
+
+
+def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
+    _assert_service_activation_allowed(config)
+    policy = _broker_policy(config)
+    installed = _load_native_deepseek_installation(config)
+    from control_plane.native_provider_attestation import (
+        DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, DSH_MODEL_PROVIDER)
+    from control_plane.native_conversation_result import DSH_NATIVE_HARNESS_KIND
+    from integrations.acp_worker.turn import AcpProfile
+    from integrations.deepseek_harness.operator_adapter import NativeLaunchBinding, NativeOperatorAdapter
+    try:
+        registry = ExecutionCapabilityRegistry.load()
+    except CapabilityPolicyError:
+        raise WorkerConfigError("native DeepSeek capability policy is invalid") from None
+    broker = None
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        if (requested.worker_id != policy.worker_id or requested.provider != "acp"
+                or requested.harness_kind != DSH_NATIVE_HARNESS_KIND
+                or requested.harness_binary_digest != installed.binary.sha256
+                or requested.harness_version != installed.binary.version
+                or requested.allowed_write_paths):
+            raise WorkerConfigError("native DeepSeek request differs from its original worker/source")
+        matches = []
+        for profile in registry.profiles.values():
+            if not profile.enabled or profile.execution_surface != DSH_NATIVE_HARNESS_KIND:
+                continue
+            try:
+                manifest = profile.capability_manifest(
+                    harness_binary_digest=installed.binary.sha256)
+            except CapabilityPolicyError:
+                continue
+            if (manifest == requested.capabilities
+                    and profile.sandbox_policy == requested.sandbox_policy
+                    and profile.approval_policy == requested.approval_policy
+                    and profile.network_policy == requested.network_policy
+                    and profile.write_capable == requested.write_capable
+                    and profile.native_helper_policy == requested.native_helper_policy
+                    and profile.expected_config_digest == requested.expected_config_digest):
+                matches.append(profile)
+        if len(matches) != 1:
+            raise WorkerConfigError("native DeepSeek request does not resolve to one reviewed policy")
+        installed.require_current()
+        adapter = None
+
+        def require_effect(operation, epoch, generation, method, session_id):
+            if broker is None or adapter is None:
+                raise WorkerConfigError("native DeepSeek original broker binding is absent")
+            return broker.require_native_operator_effect(
+                adapter, operation, epoch, generation, method, session_id)
+
+        async def observe(native):
+            # Read the actual retained Context/Agent owners. Requested policy
+            # fields never become an observed attestation.
+            return await native.observe()
+
+        home = os.environ.get("HOME")
+        if not home or not Path(home).is_absolute():
+            raise WorkerConfigError("native DeepSeek original process home is absent")
+        binding = NativeLaunchBinding(
+            binary=installed.binary,
+            argv=(installed.binary.path, str(installed.entrypoint)),
+            environment={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": home,
+                         "DSH_HOME": str(policy.provider_home), "LANG": "C.UTF-8"},
+            provider_home=policy.provider_home,
+            capture_root=policy.run_root,
+            protocol_profile=AcpProfile(
+                DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, auth_method=None,
+                model_option_provider=DSH_MODEL_PROVIDER),
+            verify_source=installed.require_current, observe_attestation=observe,
+            require_current_effect=require_effect,
+        )
+        # This callback is invoked by the existing broker event loop. The
+        # adapter uses that loop and the broker's original synchronous threads.
+        adapter = NativeOperatorAdapter(workspace, turn_input_loader, requested, binding)
+        return adapter
+
+    broker = ExecutiveWorkerBroker(
+        None, policy,
+        DedicatedUIDSweeper(policy.worker_uid, receipt_path=Path(config["uid_sweep_receipt"]),
+                            ambient_classifier=DarwinDistnotedClassifier()),
+        adapter_id=None, operator_binary_attestation=installed.binary,
+        operator_adapter_factory=operator_adapter_factory, operator_harness_armed=True,
+        autonomy_guard=autonomy_guard,
+        autonomy_canary_factory=_build_autonomy_canary_factory(config),
+    )
+    return broker
+
+
 def _build_subscription_realm_owner(
     config: Mapping[str, Any], config_path: Path,
 ) -> Any:
@@ -751,6 +878,10 @@ def _build_broker(
     autonomy_guard=None,
     native_account: CodexAccountEnvironment | None = None,
 ) -> ExecutiveWorkerBroker:
+    if config.get("native_provider") == "deepseek":
+        if native_account is not None:
+            raise WorkerConfigError("native DeepSeek cannot borrow a Codex account scope")
+        return _build_native_deepseek_broker(config, autonomy_guard=autonomy_guard)
     if config.get("native_provider") == "claude":
         if native_account is not None:
             raise WorkerConfigError("native Claude cannot borrow a Codex account scope")
@@ -898,7 +1029,7 @@ async def _serve(config: dict[str, Any], *, config_path: Path | None = None,
     if (os.geteuid() != config["worker_uid"] or os.getegid() != config["worker_gid"]
             or config["control_uid"] == config["worker_uid"]):
         raise WorkerConfigError("native scope requires the configured distinct worker principal")
-    if config.get("native_provider") == "claude":
+    if config.get("native_provider") in {"claude", "deepseek"}:
         broker = _build_broker(config, config_path=config_path,
                                autonomy_guard=autonomy_guard)
         await _serve_broker(broker, str(config["launchd_socket_name"]))
@@ -1011,7 +1142,9 @@ def main(argv: list[str] | None = None) -> int:
             # too, so a broken or unreadable receipt fails installation
             # loudly and up front, not only later and silently when
             # launchd first starts the daemon.
-            if value.get("native_provider") == "claude":
+            if value.get("native_provider") == "deepseek":
+                _load_native_deepseek_installation(value)
+            elif value.get("native_provider") == "claude":
                 _load_native_claude_binary(value)
                 _native_claude_adapter_types()
             else:

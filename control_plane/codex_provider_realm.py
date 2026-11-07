@@ -773,7 +773,7 @@ def _native_enrollment(config: Mapping[str, Any]):
         # pinned config projection. All legacy static Codex and native Claude
         # slots retain their previous resolved identities and refusal gates.
         config_bound = (
-            config.get("native_provider") == "claude"
+            config.get("native_provider") in {"claude", "deepseek"}
             or (config.get("native_provider") == "codex"
                 and enrollment["slot_id"] == "codex-pro-04")
         )
@@ -816,11 +816,12 @@ class NativeRealmIdentityOwner:
             principal = pwd.getpwuid(os.geteuid())
         except KeyError:
             _native_refuse()
+        principal_home = _native_canonical_home(_native_path(principal.pw_dir))
         if (os.geteuid() != slot.worker_uid or os.getuid() != slot.worker_uid
                 or os.getegid() != slot.worker_gid or os.getgid() != slot.worker_gid
                 or principal.pw_name != slot.worker_user
                 or principal.pw_gid != slot.worker_gid
-                or _native_canonical_home(_native_path(principal.pw_dir)) != home):
+                or (slot.provider_family != "deepseek" and principal_home != home)):
             _native_refuse()
         allowed_groups = config.get("allowed_supplementary_gids")
         if (type(allowed_groups) is not list
@@ -828,19 +829,24 @@ class NativeRealmIdentityOwner:
                 or not set(os.getgroups()).issubset(set(allowed_groups) | {slot.worker_gid})):
             _native_refuse()
         config_dir = home / ".claude" if slot.provider_family == "anthropic" else home
-        if _native_canonical_home(_native_path(os.environ.get("HOME"))) != home:
+        # DSH_HOME is the provider-owned account/store. HOME remains the original
+        # directory-service home; neither this reader nor a request may move it.
+        effective_home = principal_home if slot.provider_family == "deepseek" else home
+        if _native_canonical_home(_native_path(os.environ.get("HOME"))) != effective_home:
             _native_refuse()
-        environment_key = "CLAUDE_CONFIG_DIR" if slot.provider_family == "anthropic" else "CODEX_HOME"
+        environment_key = {"anthropic": "CLAUDE_CONFIG_DIR", "deepseek": "DSH_HOME"}.get(
+            slot.provider_family, "CODEX_HOME")
         if _native_canonical_home(_native_path(os.environ.get(environment_key))) != config_dir:
             _native_refuse()
-        for path in (home, config_dir):
+        for path in {home, config_dir, effective_home}:
             with _native_open(path, directory=True, private_uid=slot.worker_uid) as (_, info):
                 if (info.st_uid != slot.worker_uid or info.st_gid != slot.worker_gid
                         or stat.S_IMODE(info.st_mode) != 0o700):
                     _native_refuse()
         # The factory owns provider selection and signature/version attestation;
         # the identity join independently pins the exact current executable bytes.
-        binary_key = "claude_binary" if slot.provider_family == "anthropic" else "codex_binary"
+        binary_key = {"anthropic": "claude_binary", "deepseek": "deepseek_node_binary"}.get(
+            slot.provider_family, "codex_binary")
         binary = _native_path(config.get(binary_key))
         with _native_open(binary) as (descriptor, before):
             if not 0 < before.st_size <= 512 * 1024 * 1024 or not before.st_mode & 0o111:

@@ -550,3 +550,87 @@ unchanged. Source tests do not resolve those installed holds. The signed-in
 packaged DeepSeek journey, actual eligible tool settlement and release/routing
 evidence remain owed. Hermes #2180 and accepted native physical canaries were
 preserved without rerunning them; no service was restarted.
+
+
+## C25 — original native Worker and installation source (2026-11-07)
+
+Parent source: e768c5d528c0f7522ff17bffa8d82fe87a6a1ef4.
+Evidence: [native Worker source qualification](../../research/evidence/deepseek-native-worker-source-20261107.json).
+
+The v6 Worker now has an explicit DeepSeek branch, with a closed configuration
+for the actual Node executable, immutable package and original root attestation.
+It composes the existing operator-only broker, UID sweeper, canary factory and
+autonomy guard. Adapter construction uses the original broker loop. The physical
+write callback rejoins that same broker/adapter/operation/epoch/generation/Session;
+the attestation callback reads the retained native Context, never requested
+values. It selects the actual account-backed donor registration deepseek-account.
+
+The existing realm owner projects the root-enrolled DeepSeek principal and pins
+its current Node bytes. HOME remains the original directory-service home;
+DSH_HOME remains the original provider store. Both require the actual enrolled
+UID/GID and private modes. There is no numbered account default, credential copy,
+invented auth.json format, borrowed Codex account scope, or new Worker identity.
+
+The root producer qualifies the fixed native_worker.mjs, complete original
+host/access/session/ACP closure, protected source and exact protected Node path/
+hash. Its closed receipt is capped at 64 KiB. The pnpm package has a separate
+held-descriptor walker, preserving the existing Claude no-symlink contract.
+Contained links are resolved from the observed graph; external/dangling/cyclic
+links, hardlinks, unsafe permissions/ACLs, replaced identities, oversized input
+and changed receipt/source all refuse. Bounds are 200000 entries, 16 GiB of
+regular files, depth 64, 4096-byte paths/targets and 40 link expansions. The
+64 MiB manifest is qualified against actual package bytes.
+
+Worker startup and final source checks call no Git, Node, provider, SDK import or
+subprocess. They revalidate original receipt/executable/entry/package identities.
+The nominal binding joins all public fields to that original receipt. The factory
+also requires its exact installed Mastermind release SHA to match the package's
+protected source SHA. Historical attended receipts cannot authorize this entry.
+
+The existing root package qualifier is shared with the existing public exporter;
+it does not publish, create a service or start a provider. Final protected source
+and package observations follow the additional work. **The new entrypoint is not
+yet built or installed at C25.** This source slice refuses until C26 supplies the
+qualified executable and original owner observations.
+
+Qualification: **348 passed, 2 subtests passed**, all 1424 recorded inputs
+unchanged. This includes real in-process factory/adapter construction, new
+attestation/realm faults and the original Codex/Claude, subscription, package
+export, broker and source-policy checks. The original tests and assertions were
+preserved. macOS /tmp fixtures inherited GID 0 while the caller was 501:20; the
+final wrapper establishes one private 501:20 temporary directory. Earlier
+diagnostic receipts and their exact input maps remain in the evidence.
+
+### Next active C26: same-process entry and installed dependency closure
+
+Use the full original runProfile({profile:'web'}), its synchronous initializeHost
+seam and programmatic ACP plugin on the already owned inherited FD. Do not use
+the attended child-spawning launcher or a second Context/Session. ACP creates/
+resumes without joining the Web standard preset; preserve that fact and the full
+browser roster. Compose native setup inside the original unpublished Agent
+setup/commit boundary.
+
+Original enforcing owners still need a scoped tool/presentation ceiling,
+read-only sandbox ceiling, effective approval-never ceiling, no native MCP mount,
+complete Agent-scoped skill/preset/inventory observation, unchanged actual model/
+account registration, and current authority below ReactLoopAgent.send so goal/
+schedule followup cannot bypass ACP admission. The donor's file sandbox does not
+disable network. Define and prove the Agent-capability network boundary while
+retaining the original model/Web infrastructure; do not claim OS-wide isolation.
+Do not derive account/plan facts from requested policy or expose credentials.
+
+The installed Worker uses the qualified PSF Python 3.12.10 with -I -S -B.
+requirements/acp-worker.txt pins ACP 0.12.1 but has no transitive wheel hashes.
+A source-qualified ACP wheel/import closure must use the existing installer's
+sealed dependency-profile pattern without modifying that Python framework,
+enabling ambient site-packages or adding a publisher. Control AEAD's closed
+contract must remain unchanged. The current stage-only installer does not
+materialize those dependencies; extend its original unselected staging seam,
+with no service/configuration/selection mutation. Ordinary Control component
+activation includes restart and is not a no-restart substitute.
+
+The original installed Worker/quota/host/account/source registration, enabled
+canonical profile/router join and signed-in packaged DeepSeek journey remain
+production holds. The last installed read remains backend_unavailable; it was not
+replayed. No provider/session was started, no service restarted, no protected
+source merge claimed, and no Hermes or accepted native canary repeated.

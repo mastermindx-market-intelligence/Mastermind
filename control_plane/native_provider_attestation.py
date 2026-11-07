@@ -296,3 +296,410 @@ def load_native_claude_attestation(receipt_path: Path, *, expected_binary_path: 
             **{key: runtime_identity[key] for key in ("size", "device", "inode", "mode", "uid", "gid", "mtime_ns")})
     except (OSError, ProviderRealmError, FilesystemSecurityError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise NativeAttestationError("native attestation is unavailable or invalid") from exc
+
+
+# DeepSeek uses a complete pnpm closure. It is intentionally separate from the
+# Claude SDK's no-symlink contract above.
+DSH_SCHEMA = "mastermind.native_deepseek_attestation/v1"
+DSH_ENTRYPOINT = "native_worker.mjs"
+DSH_DONOR_SHA = "687f282e8625c6b8d11ff58211a90524be2e4317"
+DSH_PROTOCOL_NAME = "deepseek-harness-acp"
+DSH_PROTOCOL_VERSION = "0.0.1"
+DSH_MODEL_PROVIDER = "deepseek-account"
+_DSH_ENTRIES = 200000
+_DSH_BYTES = 16 * 1024**3
+_DSH_DEPTH = 64
+_DSH_PATH_BYTES = 4096
+_DSH_MANIFEST_BYTES = 64 * 1024**2
+_DSH_INSTALLATION_SEAL = object()
+
+
+def _deepseek_path(value):
+    if (type(value) is not str or not value or len(value.encode()) > _DSH_PATH_BYTES
+            or not Path(value).is_absolute() or str(Path(value)) != value
+            or ".." in Path(value).parts):
+        _fail("native DeepSeek path is not canonical")
+    return Path(value)
+
+
+def _deepseek_links(entries, root):
+    """Resolve the observed graph, never follow a live named dependency link."""
+    for name, row in entries.items():
+        if row["kind"] != "symlink":
+            continue
+        pending, resolved, hops = list(Path(name).parts), [], 0
+        while pending:
+            part = pending.pop(0)
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not resolved:
+                    _fail("native DeepSeek link escapes package")
+                resolved.pop()
+                continue
+            relative = "/".join(resolved + [part])
+            current = entries.get(relative)
+            if current is None:
+                _fail("native DeepSeek link is dangling")
+            if current["kind"] == "symlink":
+                hops += 1
+                if hops > 40:
+                    _fail("native DeepSeek link expansion exceeds bound")
+                target = Path(current["target"])
+                if target.is_absolute():
+                    try:
+                        target = target.relative_to(root)
+                    except ValueError:
+                        _fail("native DeepSeek link escapes package")
+                    resolved = []
+                pending = list(target.parts) + pending
+            else:
+                if pending and current["kind"] != "directory":
+                    _fail("native DeepSeek link crosses a non-directory")
+                resolved.append(part)
+
+
+def _deepseek_tree(root, *, content=False):
+    """Observe the whole bounded package via held ancestors, without imports."""
+    root = _deepseek_path(str(root))
+    identities, contents, entries = [], {}, {}
+    total_bytes, entry_count = 0, 0
+
+    def add(relative, kind, info, target=None):
+        nonlocal entry_count
+        entry_count += 1
+        if entry_count > _DSH_ENTRIES or len(relative.encode()) > _DSH_PATH_BYTES:
+            _fail("native DeepSeek package exceeds entry/path bound")
+        row = [relative, kind, _durable_identity(info), info.st_nlink]
+        if target is not None:
+            row.append(target)
+        identities.append(row)
+        entries[relative] = {"kind": kind, **({"target": target} if target is not None else {})}
+
+    def visit(fd, path, relative, depth):
+        nonlocal total_bytes
+        if depth > _DSH_DEPTH:
+            _fail("native DeepSeek package exceeds depth bound")
+        before = os.fstat(fd)
+        _check_entry(path, fd, before, directory=True)
+        add(relative, "directory", before)
+        names = []
+        with os.scandir(fd) as stream:
+            for entry in stream:
+                if len(names) + entry_count >= _DSH_ENTRIES:
+                    _fail("native DeepSeek package exceeds entry bound")
+                names.append(entry.name)
+        for name in sorted(names):
+            rel = name if relative == "." else relative + "/" + name
+            if len(rel.encode()) > _DSH_PATH_BYTES:
+                _fail("native DeepSeek package exceeds path bound")
+            child_path = path / name
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                # Symlink mode is normally 0777; it is the link/target custody,
+                # not that synthetic writable mode, which this branch admits.
+                if (info.st_uid != _ROOT_UID or info.st_nlink != 1
+                        or has_macos_acl(child_path, expected_identity=info, allow_symlink=True)):
+                    _fail("native DeepSeek link custody is unsafe")
+                target = os.readlink(name, dir_fd=fd)
+                if not target or len(target.encode()) > _DSH_PATH_BYTES or "\x00" in target:
+                    _fail("native DeepSeek link target exceeds bound")
+                if _identity(os.stat(name, dir_fd=fd, follow_symlinks=False)) != _identity(info):
+                    _fail("native DeepSeek link changed during observation")
+                add(rel, "symlink", info, target)
+                if content:
+                    contents[rel] = {"symlink": target}
+                continue
+            directory = stat.S_ISDIR(info.st_mode)
+            if not directory and not stat.S_ISREG(info.st_mode):
+                _fail("native DeepSeek package contains a special object")
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+            if directory:
+                flags |= os.O_DIRECTORY
+            child = os.open(name, flags, dir_fd=fd)
+            try:
+                current = os.fstat(child)
+                if _identity(current) != _identity(info):
+                    _fail("native DeepSeek entry changed while opening")
+                _check_entry(child_path, child, current, directory=directory)
+                if directory:
+                    visit(child, child_path, rel, depth + 1)
+                else:
+                    add(rel, "file", current)
+                    total_bytes += current.st_size
+                    if total_bytes > _DSH_BYTES:
+                        _fail("native DeepSeek package exceeds byte bound")
+                    if content:
+                        digest, consumed = hashlib.sha256(), 0
+                        while block := os.read(child, min(1024**2, current.st_size + 1 - consumed)):
+                            consumed += len(block)
+                            if consumed > current.st_size:
+                                _fail("native DeepSeek file grew during observation")
+                            digest.update(block)
+                        if consumed != current.st_size:
+                            _fail("native DeepSeek file changed during observation")
+                        contents[rel] = {"sha256": digest.hexdigest(),
+                                         "mode": stat.S_IMODE(current.st_mode)}
+                if (_identity(os.fstat(child)) != _identity(current)
+                        or _identity(os.stat(name, dir_fd=fd, follow_symlinks=False)) != _identity(current)):
+                    _fail("native DeepSeek entry changed during observation")
+            finally:
+                os.close(child)
+        if _identity(os.fstat(fd)) != _identity(before):
+            _fail("native DeepSeek directory changed during observation")
+
+    with _native_open(root, directory=True) as (fd, _):
+        readable = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           dir_fd=fd)
+        try:
+            visit(readable, root, ".", 0)
+        finally:
+            os.close(readable)
+    _deepseek_links(entries, root)
+    return {"entries": entry_count, "total_bytes": total_bytes,
+            "identity_sha256": hashlib.sha256(_canonical(identities)).hexdigest(),
+            "content_sha256": hashlib.sha256(_canonical(contents)).hexdigest() if content else None,
+            **({"files": contents} if content else {})}
+
+
+def _deepseek_manifest(release):
+    path = release / "package-manifest.json"
+    with _native_open(path) as (fd, info):
+        _check_entry(path, fd, info)
+        if not 0 < info.st_size <= _DSH_MANIFEST_BYTES:
+            _fail("native DeepSeek manifest size is invalid")
+        raw = _read(fd, _DSH_MANIFEST_BYTES)
+        if len(raw) != info.st_size:
+            _fail("native DeepSeek manifest changed")
+        document = json.loads(raw, object_pairs_hook=_pairs,
+                              parse_constant=lambda _: _fail("non-finite manifest value"))
+    if (type(document) is not dict
+            or set(document) != {"schema", "donor_sha", "files", "installed"}
+            or document["schema"] != "mastermind.dsh_attended_package_closure.v1"
+            or document["donor_sha"] != DSH_DONOR_SHA or document["installed"] is not False
+            or type(document["files"]) is not dict):
+        _fail("native DeepSeek manifest differs")
+    return raw, document
+
+
+def build_native_deepseek_attestation(*, binary_path: Path, release: Path,
+                                      source_repo: Path, source_sha: str) -> dict:
+    """Root qualification only; no service/account/session creation or publication."""
+    if os.geteuid() != _ROOT_UID:
+        _fail("native attestation producer requires root")
+    from integrations.deepseek_harness.package_attended import qualify_native_worker_package
+    binary_path, release = _deepseek_path(str(binary_path)), _deepseek_path(str(release))
+    # Bound and establish root custody before the existing package qualifier
+    # enumerates/hashes its manifest. Its publication inventories predate these
+    # worker-side package budgets and cannot be the first admission check.
+    initial = _deepseek_tree(release)
+    qualified = qualify_native_worker_package(
+        release=release, source_repo=source_repo, source_sha=source_sha)
+    binary = _file_observation(binary_path, content=True)
+    runtime = binary["identity"]
+    if qualified.get("node") != {"path": str(binary_path), "sha256": binary["sha256"]}:
+        _fail("native DeepSeek Node differs from protected build")
+    if not runtime["mode"] & 0o111:
+        _fail("native DeepSeek Node is not executable")
+    # Only the root installation producer executes the already root-custodied
+    # Node --version. Worker startup and final write guards never execute it.
+    result = subprocess.run([str(binary_path), "--version"], check=True, capture_output=True,
+        timeout=30, env={"PATH": "/usr/bin:/bin", "HOME": "/var/empty", "LANG": "C"})
+    version = result.stdout.decode("ascii").strip()
+    if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", version) is None or result.stderr:
+        _fail("native DeepSeek Node version is invalid")
+    raw, manifest = _deepseek_manifest(release)
+    tree = _deepseek_tree(release, content=True)
+    files = tree.pop("files")
+    files.pop("package-manifest.json", None)
+    if (files != manifest["files"]
+            or hashlib.sha256(raw).hexdigest() != qualified["package_manifest_sha256"]):
+        _fail("native DeepSeek package differs from protected qualification")
+    entry = _file_observation(release / DSH_ENTRYPOINT, content=True)
+    if entry["sha256"] != qualified["entrypoint_sha256"]:
+        _fail("native DeepSeek entry differs from protected qualification")
+    after = _deepseek_tree(release)
+    if (any(after[k] != tree[k] or after[k] != initial[k]
+            for k in ("entries", "total_bytes", "identity_sha256"))
+            or _runtime_identity(binary_path) != runtime
+            or _runtime_identity(release / DSH_ENTRYPOINT) != entry["identity"]
+            or _deepseek_manifest(release)[0] != raw):
+        _fail("native DeepSeek installation changed during qualification")
+    from ops.executive_os.install_source_policy import validate_acceptance_source
+    if validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha) != qualified["source_tree"]:
+        _fail("native DeepSeek protected source changed during qualification")
+    binary.update(version=version, team_identifier=None)
+    binary["identity"] = {k: runtime[k] for k in _DURABLE_IDENTITY}
+    entry["identity"] = {k: entry["identity"][k] for k in _DURABLE_IDENTITY}
+    return {"schema_version": DSH_SCHEMA, "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "node": binary, "package": {"root": str(release), "donor_sha": DSH_DONOR_SHA,
+                "entry": entry, **tree}, "qualification": qualified}
+
+
+def _deepseek_digest(value):
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _deepseek_shape(doc):
+    if (type(doc) is not dict
+            or set(doc) != {"schema_version", "recorded_at", "node", "package", "qualification"}
+            or doc["schema_version"] != DSH_SCHEMA):
+        _fail("native DeepSeek attestation schema differs")
+    node, package, qualified = doc["node"], doc["package"], doc["qualification"]
+    if (type(node) is not dict
+            or set(node) != {"path", "identity", "sha256", "version", "team_identifier"}
+            or type(package) is not dict
+            or set(package) != {"root", "donor_sha", "entry", "entries", "total_bytes",
+                                "identity_sha256", "content_sha256"}
+            or type(package["entry"]) is not dict
+            or set(package["entry"]) != {"path", "identity", "sha256"}
+            or type(qualified) is not dict
+            or set(qualified) != {"schema", "source_sha", "source_tree", "build_sha256",
+                "package_manifest_sha256", "entrypoint_sha256", "native_worker", "node"}
+            or qualified["schema"] != "mastermind.dsh_native_worker_qualification/v1"):
+        _fail("native DeepSeek attestation fields differ")
+    if (type(qualified["node"]) is not dict or set(qualified["node"]) != {"path", "sha256"}
+            or qualified["node"] != {"path": node["path"], "sha256": node["sha256"]}):
+        _fail("native DeepSeek Node is not the protected executable")
+    worker = qualified["native_worker"]
+    if (type(worker) is not dict
+            or set(worker) != {"schema", "entry", "sha256", "agent_name", "agent_version", "model_provider"}
+            or worker["schema"] != "mastermind.dsh_native_worker_entry/v1"
+            or worker["entry"] != DSH_ENTRYPOINT
+            or worker["agent_name"] != DSH_PROTOCOL_NAME
+            or worker["agent_version"] != DSH_PROTOCOL_VERSION
+            or worker["model_provider"] != DSH_MODEL_PROVIDER
+            or worker["sha256"] != qualified["entrypoint_sha256"]):
+        _fail("native DeepSeek fixed entry qualification differs")
+    for item in (node, package["entry"]):
+        _deepseek_path(item["path"])
+        identity = item["identity"]
+        if (type(identity) is not dict or set(identity) != set(_DURABLE_IDENTITY)
+                or any(type(v) is not int or v < 0 for v in identity.values())
+                or identity["uid"] != _ROOT_UID or identity["mode"] & 0o022
+                or not _deepseek_digest(item["sha256"])):
+            _fail("native DeepSeek executable identity is malformed")
+    root = _deepseek_path(package["root"])
+    if (package["donor_sha"] != DSH_DONOR_SHA
+            or package["entry"]["path"] != str(root / DSH_ENTRYPOINT)
+            or package["entry"]["sha256"] != qualified["entrypoint_sha256"]
+            or node["team_identifier"] is not None or not node["identity"]["mode"] & 0o111
+            or type(node["version"]) is not str
+            or re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", node["version"]) is None
+            or type(package["entries"]) is not int or not 1 <= package["entries"] <= _DSH_ENTRIES
+            or type(package["total_bytes"]) is not int or not 1 <= package["total_bytes"] <= _DSH_BYTES):
+        _fail("native DeepSeek installation identity is invalid")
+    for key in ("source_sha", "source_tree"):
+        if type(qualified[key]) is not str or re.fullmatch(r"[0-9a-f]{40}", qualified[key]) is None:
+            _fail("native DeepSeek protected source is invalid")
+    for value in (package["identity_sha256"], package["content_sha256"],
+                  qualified["build_sha256"], qualified["package_manifest_sha256"],
+                  qualified["entrypoint_sha256"]):
+        if not _deepseek_digest(value):
+            _fail("native DeepSeek digest is malformed")
+    try:
+        recorded = datetime.fromisoformat(doc["recorded_at"])
+        if recorded.utcoffset() != timezone.utc.utcoffset(recorded):
+            _fail("native DeepSeek attestation timestamp is not UTC")
+    except (TypeError, ValueError):
+        _fail("native DeepSeek attestation timestamp is invalid")
+
+
+def _deepseek_receipt_observation(path):
+    with _native_open(path) as (fd, info):
+        _check_entry(path, fd, info)
+        if not 0 < info.st_size <= _LIMIT:
+            _fail("native DeepSeek receipt exceeds its bound")
+        raw = _read(fd, _LIMIT)
+        if len(raw) != info.st_size:
+            _fail("native DeepSeek receipt changed during read")
+        return {"path": str(path), "identity": _identity(info),
+                "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def _observe_deepseek(receipt_path, binary_path, release, gid, versions, *,
+                      expected_receipt=None, expected_binary=None):
+    receipt = _deepseek_receipt_observation(receipt_path)
+    if expected_receipt is not None and receipt != expected_receipt:
+        _fail("native DeepSeek receipt changed since binding")
+    doc = _json_receipt(receipt_path, mode=0o440, gid=gid, digest=receipt["sha256"])
+    _deepseek_shape(doc)
+    node, package = doc["node"], doc["package"]
+    if (node["path"] != str(binary_path) or package["root"] != str(release)
+            or node["version"] not in versions):
+        _fail("native DeepSeek receipt differs from configured installation")
+    current = {}
+    for item in (node, package["entry"]):
+        observation = _file_observation(Path(item["path"]))["identity"]
+        if {k: observation[k] for k in _DURABLE_IDENTITY} != item["identity"]:
+            _fail("native DeepSeek executable changed since attestation")
+        current[item["path"]] = observation
+    tree = _deepseek_tree(release)
+    if any(tree[k] != package[k] for k in ("entries", "total_bytes", "identity_sha256")):
+        _fail("native DeepSeek package changed since attestation")
+    if _deepseek_receipt_observation(receipt_path) != receipt:
+        _fail("native DeepSeek receipt changed during observation")
+    for path, identity in current.items():
+        if _runtime_identity(Path(path)) != identity:
+            _fail("native DeepSeek executable changed during package observation")
+    runtime = current[node["path"]]
+    binary = BinaryAttestation(path=node["path"], real_path=node["path"], version=node["version"],
+        sha256=node["sha256"], team_identifier=None,
+        **{k: runtime[k] for k in ("size", "device", "inode", "mode", "uid", "gid", "mtime_ns")})
+    if expected_binary is not None and binary != expected_binary:
+        _fail("native DeepSeek Node changed since binding")
+    return doc, binary, receipt
+
+
+# A nominal, revalidating source capability; a JSON blob cannot construct it.
+import dataclasses as _dataclasses
+
+
+@_dataclasses.dataclass(frozen=True, repr=False)
+class NativeDeepSeekInstallation:
+    binary: BinaryAttestation
+    release: Path
+    entrypoint: Path
+    source_digest: str
+    source_sha: str
+    _receipt_path: Path
+    _receipt: object = _dataclasses.field(repr=False, compare=False)
+    _gid: int = _dataclasses.field(repr=False)
+    _versions: frozenset[str] = _dataclasses.field(repr=False)
+    _seal: object = _dataclasses.field(repr=False, compare=False)
+
+    def require_current(self):
+        if self._seal is not _DSH_INSTALLATION_SEAL:
+            _fail("native DeepSeek installation capability is absent")
+        receipt = json.loads(self._receipt)
+        if (self.entrypoint != self.release / DSH_ENTRYPOINT
+                or self.source_digest != receipt["sha256"]):
+            _fail("native DeepSeek public binding differs from its original receipt")
+        document, _, _ = _observe_deepseek(
+            self._receipt_path, Path(self.binary.path), self.release,
+            self._gid, self._versions, expected_receipt=receipt, expected_binary=self.binary)
+        if self.source_sha != document["qualification"]["source_sha"]:
+            _fail("native DeepSeek source identity differs from its original receipt")
+
+
+def load_native_deepseek_attestation(receipt_path: Path, *, expected_binary_path: Path,
+        expected_release: Path, expected_owner_gid: int,
+        allowed_versions: frozenset[str]) -> NativeDeepSeekInstallation:
+    """No Git, Node, SDK/provider import, credentials, or subprocess on this path."""
+    try:
+        receipt_path, binary_path, release = map(_deepseek_path,
+            map(str, (receipt_path, expected_binary_path, expected_release)))
+        if (type(expected_owner_gid) is not int or expected_owner_gid <= 0
+                or type(allowed_versions) is not frozenset or not 1 <= len(allowed_versions) <= 4
+                or any(type(v) is not str or re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", v) is None
+                       for v in allowed_versions)):
+            _fail("native DeepSeek loader configuration is invalid")
+        document, binary, receipt = _observe_deepseek(receipt_path, binary_path, release,
+                                               expected_owner_gid, allowed_versions)
+        return NativeDeepSeekInstallation(binary, release, release / DSH_ENTRYPOINT,
+            receipt["sha256"], document["qualification"]["source_sha"], receipt_path,
+            _canonical(receipt), expected_owner_gid,
+            allowed_versions, _DSH_INSTALLATION_SEAL)
+    except (OSError, ProviderRealmError, FilesystemSecurityError, KeyError, TypeError,
+            UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise NativeAttestationError("native DeepSeek attestation is unavailable or invalid") from exc

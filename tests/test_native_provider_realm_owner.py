@@ -267,3 +267,40 @@ def test_root_walk_does_not_require_listing_permission(tmp_path, monkeypatch):
     with realm._native_open(path.resolve()) as (descriptor, _):
         assert os.read(descriptor, 2) == b"{}"
     assert path.name in seen
+
+
+def _deepseek_original(enrolled, monkeypatch):
+    value=enrolled.config
+    value["native_provider"]="deepseek"
+    value["deepseek_node_binary"]=value.pop("claude_binary")
+    value["native_realm_enrollment"]["slot_id"]="deepseek-native-original"
+    principal_home=enrolled.home.parent/"original-os-home"
+    principal_home.mkdir(mode=0o700)
+    enrolled.principal.pw_dir=str(principal_home)
+    monkeypatch.setenv("HOME",str(principal_home))
+    monkeypatch.setenv("DSH_HOME",str(enrolled.home))
+    return principal_home
+
+
+def test_deepseek_uses_original_split_os_and_provider_homes(enrolled,monkeypatch):
+    principal_home=_deepseek_original(enrolled,monkeypatch)
+    owner=enrolled.load();observed=owner.observe()
+    assert observed.slot_id=="deepseek-native-original"
+    assert owner.require_current_identity(observed.host_ref,observed.os_principal_ref) is None
+    assert principal_home != enrolled.home
+    slot=slots.native_slot_from_config(enrolled.config)
+    assert slot.oauth_seat_ref is None and slot.provider_family=="deepseek"
+    with pytest.raises(slots.SlotCatalogError,match="provider_owns_credential_storage"):
+        _=slot.auth_path
+
+
+@pytest.mark.parametrize("change",["home","provider-home","principal","binary","group"])
+def test_deepseek_cannot_borrow_another_original_principal_or_binary(enrolled,monkeypatch,change):
+    _deepseek_original(enrolled,monkeypatch)
+    owner=enrolled.load()
+    if change=="home":monkeypatch.setenv("HOME",str(enrolled.home))
+    elif change=="provider-home":monkeypatch.setenv("DSH_HOME",str(enrolled.principal.pw_dir))
+    elif change=="principal":enrolled.principal.pw_name="_mastermind_other"
+    elif change=="binary":enrolled.binary.chmod(0o755);enrolled.binary.write_bytes(b"replacement")
+    else:monkeypatch.setattr(realm.os,"getgroups",lambda:[80])
+    with pytest.raises(realm.ProviderRealmError):owner.observe()
