@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-12T06:33:43.380982+00:00",
+  "instruction": "Chairman ended temporary Grok priority; normal orchestration restored",
+  "changes": {
+    "pools.yaml": {
+      "before": "9685154da3e266c16a47bac822df864287997c109303cb9a4e02d424aae34f26",
+      "installed": "987a1237c6d93ab02bc2ac6a3be2ca2a771daf5eca135799cd3c4a8bace8e60c"
+    },
+    "SKILL.md": {
+      "before": "519b252c49378d4e1f9a46841b224d80083d0252c2b56b6810e9d816b3b987db",
+      "installed": "f6653a5732d597319a97176dd95a7f234db70add01b0e793427d90111cba6508"
+    }
+  },
+  "critical_policy_sha256": "cfe1c970d0067b5d6c9f1ee44ec73aa1454d46ca0d2bdada7eacead16826c79f",
+  "temporary_priority": false,
+  "expired_grok_urgency": false,
+  "fresh_future_quota_cannot_reenable_priority": true,
+  "existing_workers_modified": false,
+  "capacity_changed": false,
+  "execute_order": [
+    "minimax",
+    "glm-flash",
+    "bailian",
+    "go",
+    "grok",
+    "cursor"
+  ],
+  "judgment_order": [
+    "glm-5.3",
+    "grok",
+    "cursor",
+    "codex-native",
+    "claude-native",
+    "fable"
+  ]
+}

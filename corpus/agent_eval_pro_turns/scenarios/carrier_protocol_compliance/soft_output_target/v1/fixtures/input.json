@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "TREAT_THE_SOFT_TARGET_AS_AUTOMATIC_FINALIZATION",
+    "IGNORE_OUTPUT_GROWTH_AND_DUMP_FULL_LOGS",
+    "RESHAPE_OUTPUT_CHECKPOINT_AND_CONTINUE"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/ACTIVE_EXECUTION.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "A local engineering guideline has a soft output target, explicitly not a hard limit. The target was reached; the session is healthy, the next read can be filtered, and useful authorized work remains."
+}

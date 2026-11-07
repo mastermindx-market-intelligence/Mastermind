@@ -1,0 +1,130 @@
+{
+  "schema": "mastermind.source_qualification/v1",
+  "operation_id": "persistent-sector-leadership-publisher-20261107-c4",
+  "parent_head": "92b84a0d2a893defd1f91cd98d33b3f939961417",
+  "law_pin": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "generation": "c4-publisher-recovery-20261107-v4",
+  "input_candidates": [
+    "8d2eec28341c2b9f1d3cda5a97891f62c8093521",
+    "641a37b324c3ecf32377a3ba377084191a132eba"
+  ],
+  "unaccepted_paid_correction": {
+    "run": "psl-index-recovery-settlement-fix-20261107-c4",
+    "state": "REQUEST_REFUSED_BEFORE_LAUNCH",
+    "reason": "UNCLASSIFIED_PRELAUNCH_REFUSAL",
+    "launch_attempted": false,
+    "retry": false
+  },
+  "direct_parent_correction": true,
+  "source": [
+    {
+      "path": "integrations/studio_direct_mcp/git-publish.mjs",
+      "bytes": 145076,
+      "sha256": "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/git-publish.test.mjs",
+      "bytes": 154718,
+      "sha256": "e7ed3233caf5953c930a2a0c074618248be7511776f17a070d3cf9998753418a"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/workspace-access.mjs",
+      "bytes": 16703,
+      "sha256": "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/workspace-access.test.mjs",
+      "bytes": 45424,
+      "sha256": "ecbf95c7f32b8cc7b322eabf75e37b0d312dd35f5441a59b702c91f9ee420719"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/private_service_pin_enrollment.py",
+      "bytes": 42941,
+      "sha256": "926b6a687799a8b225ea74c73c50efab48d42eb118e5c2a5f93d946ec1c76372"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/private_service_pin_enrollment_test.py",
+      "bytes": 40495,
+      "sha256": "6db598b03d586deddc712540961b7ae34bbaedfae2f6ca5ffb4afb4d8f4cc661"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/private_service.py",
+      "bytes": 270112,
+      "sha256": "1f0389dc50a1e6c16f652e0eea625e5aaf6124183da5e417cb5b894f1dd98706"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/private_service_test.py",
+      "bytes": 272871,
+      "sha256": "f6bff2a97ab096a95458cb3fd515f4877d09ec054b50dff4cc8cf96039674baa"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/fixtures/git-publish.fleet-v10-merge.mjs",
+      "bytes": 73214,
+      "sha256": "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc"
+    }
+  ],
+  "verification": [
+    {
+      "log": "parent-second-correction-fail-before.log",
+      "retained_path": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/index-recovery-corrected/parent-second-correction-fail-before.log",
+      "sha256": "5c56f0941672aaee0e37b868e99804e783b871bcb926389062b9027145e45089",
+      "tests": 11,
+      "passed": 0,
+      "failed": 11,
+      "skipped": 0
+    },
+    {
+      "log": "parent-second-correction-focused-after.log",
+      "retained_path": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/index-recovery-corrected/parent-second-correction-focused-after.log",
+      "sha256": "9cd49661e1ad2dde8969b6c1ed31432f9a777a54b5543fa97b5c09fdea6f5915",
+      "tests": 11,
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "log": "parent-second-correction-full-node.log",
+      "retained_path": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/index-recovery-corrected/parent-second-correction-full-node.log",
+      "sha256": "0360a90be343c847aeb80b7bdc57cbe750b2fa2f16239693411131a48cfe5bfe",
+      "tests": 206,
+      "passed": 206,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "log": "parent-c4-v4-private-service.log",
+      "retained_path": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/index-recovery-corrected/parent-c4-v4-private-service.log",
+      "sha256": "6976daee1f0e38864e1860ab02692ea7ad625bf56c3451523bd68479d987dd17",
+      "tests": 590,
+      "passed": 590,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "log": "parent-c4-v4-control-bundle.log",
+      "retained_path": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/index-recovery-corrected/parent-c4-v4-control-bundle.log",
+      "sha256": "b16e3059274350d970d7631e6d55da14e02f78a367e5c2b872d2e83694143a04",
+      "tests": 18,
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "commands": [
+    "node --test --test-name-pattern=<11 focused recovery cases> git-publish.test.mjs",
+    "node --test git-publish.test.mjs workspace-access.test.mjs",
+    "TMPDIR=/private/tmp python3 -m unittest discover -s . -p private_service*test.py",
+    "TMPDIR=/private/tmp python3 -m unittest control_bundle_test"
+  ],
+  "runtime_effects": false,
+  "original_macro_actions_reconciled": false,
+  "installed": false,
+  "ci_qualified": false,
+  "known_ci_dependency": "APPLICATION2175/2194 original Brain composition source/pin closure",
+  "limitations": [
+    "Owner directory check/use is not atomic inode CAS.",
+    "Writer exclusion remains caller-declared maintenance custody.",
+    "Generic fleet maps and historical pins unchanged.",
+    "The adapter test differs from frozen641 only by removal of two trailing empty lines."
+  ]
+}
