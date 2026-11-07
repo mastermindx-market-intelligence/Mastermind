@@ -11,6 +11,10 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Reuse-first engineering
+
+For substantive systems, agent/autonomy infrastructure, charts, UI or tool implementation, apply [Reuse First](docs/REUSE_FIRST_ENGINEERING.md): inspect the incumbent and maintained open-source options before custom-building commodity machinery. Prefer small adapters/composition over duplicate systems; spend bespoke engineering on differentiated quant logic and scientifically validated behavior. Check license, security, compatibility, maintenance and actual consumer proof. Keep the scan proportionate; this adds no mandatory research or approval ceremony.
+
 ## Human-first product work
 
 For any user-facing design, mockup, build or review, read the existing shared content

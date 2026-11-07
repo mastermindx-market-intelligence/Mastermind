@@ -99,6 +99,12 @@ Do not bounce mature Sol Pro to Extra High and back merely for tools. A genuine 
 
 Execute the next material action in the phase, however many necessary tool operations it takes. Seek a working user/machine capability, removed blocker, real-path proof, genuinely closed authority/review/release gate, lawful durable START, or resolved uncertainty unlocking the next action. Use its canonical tool/owner and preserve INDEX admission, source custody and one-carrier reconciliation. Do not fragment useful depth merely to shorten a turn.
 
+**Reuse-first implementation.** For substantial new components, apply same-pin
+`docs/REUSE_FIRST_ENGINEERING.md`: inspect existing owner/interfaces and qualified
+maintained OSS before rebuilding common machinery. Prefer thin adaptation/composition;
+protect unique quant/scientific logic, licensing, security and consumer proof.
+Keep the search proportional and proceed without a new approval stage.
+
 ## Step 2A — Decide execution ownership before routine labor
 
 Prefer paid Fabric for independently executable bounded outcomes when eligible. Commission outcome/question, exact source, scope, acceptance proof, non-goals and escalation; an investigation need not prescribe its answer. The admitted worker investigates, implements, tests and repairs within its grant without command-by-command parent approval.

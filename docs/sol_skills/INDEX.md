@@ -92,6 +92,12 @@ task tree; Executive owns Jobs/Attempts. Verify initial/milestone saves and reco
 without transcripts. No new registry/admission/install permission. Tiny one-phase
 tasks need no new plan.
 
+### `docs/REUSE_FIRST_ENGINEERING.md`
+Read for substantial new implementation or system architecture (including harnesses,
+UI, charting, fleet automation and Fabric); check incumbents and maintained open source
+before custom commodity builds. Lightweight fixes need no broad donor survey. This
+is an engineering decision rule, not a new admission/review/release gate.
+
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO principal-duty,
 economics, packets, capacity routing or evidence/continuity work. No provider/account/credential/host/model-setting/reasoning-mode selection or lifecycle/admission/retry/transfer/effect/production authority.
