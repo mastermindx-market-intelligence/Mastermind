@@ -724,7 +724,9 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 # complete bounded-path lines; the optional callback shifts them by three lines.
 # The full-source hash and both spans still reject all path/context/byte drift.
 # This source audit supplies no native runtime or release approval.
-REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
+# Accepted S24 composition (4aabd797 custody /578ec12e persistence review):
+# only the same two512 path-length bounds move eight lines; no identity or limit change.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '1bfbec76a4f007d5ab5570eb5080891c896714129d4f0c51d7cfaf56a260b419', 'sites': ((371, 26, 29, 'int', '512'), (487, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
@@ -741,7 +743,9 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
+# Accepted Office READ adds only one module declaration; all prior bytes and
+# three HTTP-status operands are exact Root6a. Source-only pin, no runtime grant.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ddbeb7e61ad3112edd798bddc47c35a3bd2deeea41d426e0bec1555f0475499e', 'sites': ((3614, 68, 71, 'int', '503'), (3619, 69, 72, 'int', '503'), (3623, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -760,8 +764,15 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
+    "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
+# UID/GID or fleet selection. Full archive/site drift restores ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/tests/fixtures/transport_observation/httpx___client.py.source"] = {
+    "sha256": "c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d",
+    "sites": ((73, 42, 45, "int", "443"),),
 }
 
 # Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
@@ -834,39 +845,9 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da', 'sites': ((354, 37, 40, 'int', '409'),)}
-
-# Original H4 f008 receipts record the existing Darwin host's ownership.
-# These are observed identities, not runtime defaults, service enrollment or
-# authorization. Preserve the receipts byte-for-byte. Only these fifteen
-# typed integer tokens in the two exact files are reviewed; any byte or path
-# drift restores the original identity guard for the complete receipt.
-REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
-    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
-    "sites": (),
-    "utf8_sites": (
-        (20, 20, 23, "int", "501"),
-        (47, 20, 23, "int", "501"),
-        (70, 20, 23, "int", "501"),
-    ),
-}
-REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
-    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
-    "sites": (),
-    "utf8_sites": (
-        (29, 18, 21, "int", "501"),
-        (42, 18, 21, "int", "501"),
-        (55, 18, 21, "int", "501"),
-        (68, 18, 21, "int", "501"),
-        (85, 18, 21, "int", "501"),
-        (98, 18, 21, "int", "501"),
-        (111, 18, 21, "int", "501"),
-        (128, 18, 21, "int", "501"),
-        (141, 18, 21, "int", "501"),
-        (154, 18, 21, "int", "501"),
-        (167, 18, 21, "int", "501"),
-        (180, 18, 21, "int", "501"),
-    ),
+] = {
+    "sha256": "af7c54df3f34329ff7c02cfa6ad283d6bfa28ab21e1b5d1f809616eef71fd67b",
+    "sites": ((346, 37, 40, 'int', '409'),),
 }
 
 # Exact HTTPS port excluded by the disposable Chisel fixture.
@@ -877,3 +858,44 @@ REVIEWED_FILES[
     "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
     "sites": ((27, 26, 29, "int", "443"),),
 }
+
+# Preserve the qualified Hermes contribution while composing the current original owner.
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/qualify_application_owner.py'] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da',
+ 'sites': ((354, 37, 40, 'int', '409'),)}
+REVIEWED_FILES['review_evidence/hermes_h4/profile-mapping-20261107.json'] = {'sha256': '6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53',
+ 'sites': (),
+ 'utf8_sites': ((20, 20, 23, 'int', '501'), (47, 20, 23, 'int', '501'), (70, 20, 23, 'int', '501'))}
+REVIEWED_FILES['review_evidence/hermes_h4/native-preimage-qualification-20261107.json'] = {'sha256': 'eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee',
+ 'sites': (),
+ 'utf8_sites': ((29, 18, 21, 'int', '501'),
+                (42, 18, 21, 'int', '501'),
+                (55, 18, 21, 'int', '501'),
+                (68, 18, 21, 'int', '501'),
+                (85, 18, 21, 'int', '501'),
+                (98, 18, 21, 'int', '501'),
+                (111, 18, 21, 'int', '501'),
+                (128, 18, 21, 'int', '501'),
+                (141, 18, 21, 'int', '501'),
+                (154, 18, 21, 'int', '501'),
+                (167, 18, 21, 'int', '501'),
+                (180, 18, 21, 'int', '501'))}
+
+# Retained proposal bounds, synthetic latency and HTTP status assertions only.
+# Exact path, complete postimage and individual ASCII tokens remain mandatory.
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/application_latency/application-owner-latency.patch'] = {'sha256': 'bccdbeaafd5535f399b3c1c60ed6dee897ce31924f648d883009de3b61e16010',
+ 'sites': ((174, 81, 84, 'int', '512'),
+           (598, 80, 83, 'int', '500'),
+           (723, 48, 51, 'int', '500'),
+           (856, 56, 59, 'int', '401'),
+           (945, 85, 88, 'int', '400'),
+           (953, 68, 71, 'int', '409'),
+           (963, 49, 52, 'int', '409'),
+           (1026, 49, 52, 'int', '503'),
+           (1031, 45, 48, 'int', '409'),
+           (1048, 34, 37, 'int', '409'))}
+
+# Consume the exact completed H6 readiness-evidence record.
+# Observed host identity is evidence, never a new runtime default or grant.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+ 'sites': (),
+ 'utf8_sites': ((61, 13, 16, 'int', '501'),)}

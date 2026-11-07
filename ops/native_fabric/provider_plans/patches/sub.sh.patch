@@ -1,0 +1,42 @@
+--- a/ext/sub.sh
++++ b/ext/sub.sh
+@@ -25,7 +25,7 @@
+ POOL="${1:?pool}"; PROMPT="${2:?prompt}"; CWD="${3:-$PWD}"; MODEL="${4:-}"
+ if [ "$_SUB_PROMPT_FILE_MODE" = "1" ]; then
+   case "$POOL" in
+-    glm|minimax|qwen) ;;
++    glm|minimax|qwen|byteplus|experiential) ;;
+     *) echo "SUB_PROMPT_FILE_REFUSED unsupported_pool" >&2; exit 78 ;;
+   esac
+   case "$PROMPT" in
+@@ -299,7 +299,7 @@
+   DENY_FILE=""
+   DENIED=0
+   case "$pool" in
+-    minimax|glm|go-claude) : ;;
++    minimax|glm|go-claude|byteplus) : ;;
+     *) return 0 ;;
+   esac
+   local top=""
+@@ -955,5 +955,20 @@
+     python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" || exit 2; if [ -n "$3" ]; then exec cursor-agent -p --trust --force --sandbox disabled --output-format text --model "$3" "$2" </dev/null; else exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null; fi' _ "$CWD" "$PROMPT" "$MODEL" || _rc=$?
+     python3 "$HERE/pool_ledger.py" append --pool cursor --task-class cursor --rc "$_rc" --signal ok 2>/dev/null || true
+     exit "$_rc" ;;
+-  *) echo "pool must be grok, qwen, minimax, glm, minimax-codex, glm-codex, go-codex, go-claude, oc-free or cursor" >&2; exit 2 ;;
++  byteplus|experiential)
++    [ -n "${POOL_RUN_ID:-}" ] || { echo "PLAN_RUN_ID_REQUIRED" >&2; exit 78; }
++    export POOL_SELECTED_MODEL="$MODEL"
++    _plan_prompt="$(mktemp "${TMPDIR:-/tmp}/sub_plan.XXXXXX")" || exit 78
++    if [ "$_SUB_PROMPT_FILE_MODE" = "1" ]; then
++      cat "$PROMPT" > "$_plan_prompt" || exit 78
++    else
++      printf '%s' "$PROMPT" > "$_plan_prompt" || exit 78
++    fi
++    chmod 600 "$_plan_prompt"
++    _rc=0
++    python3 "$HERE/slot.py" "$POOL" --wait 60 -- \
++      python3 "$HERE/native_plan_worker.py" "$POOL" "$MODEL" "$LAUNCH_CWD" "$_plan_prompt" || _rc=$?
++    rm -f "$_plan_prompt"
++    exit "$_rc" ;;
++  *) echo "pool must be grok, qwen, minimax, glm, minimax-codex, glm-codex, go-codex, go-claude, oc-free cursor or experiential" >&2; exit 2 ;;
+ esac

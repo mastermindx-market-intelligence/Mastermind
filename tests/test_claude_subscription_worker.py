@@ -441,8 +441,8 @@ def test_turn_refuses_catalog_canary_and_autonomous_blockers(tmp_path: Path):
         )
 
 
-def test_byteplus_canary_rejects_even_hermetic_owner_sealed_positive_facts():
-    """Test-only HMAC facts do not override actual BytePlus SPEC_ONLY policy.
+def test_byteplus_built_canary_requires_hermetic_owner_sealed_facts():
+    """A built binding admits only the existing owner-proved interactive canary.
 
     Keys/enrollment are test-injected by the existing fixture; no provider
     account, worker principal or live Capacity source is touched.
@@ -458,9 +458,23 @@ def test_byteplus_canary_rejects_even_hermetic_owner_sealed_positive_facts():
     )
     assert receipt.binding_id == byteplus_id
     assert receipt.enrollment_state == "enrolled"  # fixture only, not runtime
-    with pytest.raises(CanaryAdmissionError, match="SPEC_ONLY"):
+    admission = seal_subscription_canary_admission(
+        capacity_fact=_capacity_fact(),
+        realm_receipt=receipt,
+        bindings_document=bindings,
+        profiles_document=profiles,
+    )
+    assert admission.binding_id == byteplus_id
+    assert admission.implementation_state == "BUILT_NOT_PROVEN"
+    assert admission.execution_mode == "interactive_canary"
+    assert get_binding(byteplus_id, document=bindings, profiles_document=profiles).autonomous_allowed is False
+    assert verify_subscription_canary_admission(
+        admission, adapter_id=admission.adapter_id,
+        bindings_document=bindings, profiles_document=profiles,
+    ) is admission
+    with pytest.raises(CanaryAdmissionError, match="typed capacity fact"):
         seal_subscription_canary_admission(
-            capacity_fact=_capacity_fact(),
+            capacity_fact=None,
             realm_receipt=receipt,
             bindings_document=bindings,
             profiles_document=profiles,
