@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from test_hermes_primary_application_enrollment import PROFILES, select_role
+from test_hermes_primary_application_enrollment import PROFILES, select_role, isolated_native_service_imports
 from test_go_native_stage import builds, native_stage, g, installer
 from test_go_native_install import retained_go_owner
 from test_native_launcher_successor_transition import source_owners, owner

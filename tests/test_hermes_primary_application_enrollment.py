@@ -13,11 +13,29 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops/native_fabric/quota_continuity/tests"))
-from test_go_native_stage import builds, native_stage, g, installer, loaded_entry
+from test_go_native_stage import builds, native_stage, g, installer, loaded_entry, native_module_namespace
 from test_go_native_install import go_owner
 from test_native_launcher_successor_transition import source_owners, owner
 from test_go_service_enrollment import service_owner, prepare, selected_purpose, unchanged_ingress
 from test_go_service_startup import environment, boot
+
+
+@pytest.fixture(autouse=True)
+def isolated_native_service_imports(native_stage):
+    manifest = json.loads((native_stage / "native-manifest.json").read_bytes())
+    with native_module_namespace(manifest, clean_yaml=True):
+        yield
+
+
+def test_service_enrollment_keeps_foreign_module_refusal(service_owner, monkeypatch):
+    from types import ModuleType
+    case = service_owner
+    foreign = ModuleType("a04_terminal_reconcile")
+    foreign.__file__ = str(case.root / "foreign-a04.py")
+    monkeypatch.setitem(sys.modules, "a04_terminal_reconcile", foreign)
+    with pytest.raises(ValueError, match="native Go module conflict: a04_terminal_reconcile"):
+        prepare(case)
+    assert not any(path.exists() for path in (case.intent, case.binding, case.service_receipt))
 
 
 PROFILES = {
