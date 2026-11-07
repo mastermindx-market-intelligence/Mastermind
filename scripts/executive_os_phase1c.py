@@ -2703,6 +2703,7 @@ def _service_from_config(
             # cross-policy reply downgrade dark, without disabling existing
             # exact-policy Session Bridge reads.
             session_read_policy_loader = None
+            session_web_observation_owner = None
             # Control constructs a fresh per-frame provider. Keep one private
             # HMAC cursor key for this one installed service composition so
             # READ pagination works across frames but not across restarts.
@@ -2710,7 +2711,7 @@ def _service_from_config(
             session_reference_cursor_key = _session_cursor_random_bytes(32)
             if installed_profile == WEB_CEO_V3_PROFILE:
                 from ops.executive_os.executive_mcp_entry import (
-                    installed_os_session_policy_source)
+                    installed_os_session_policy_source, installed_web_observation_owner)
                 gateway_policy_path = DEFAULT_INSTALL_PATH
                 if gateway_policy_path.exists() or gateway_policy_path.is_symlink():
                     try:
@@ -2719,6 +2720,13 @@ def _service_from_config(
                             expected_uid=int(raw["control_uid"]))
                     except (OSError, ValueError):
                         session_read_policy_loader = None
+                    try:
+                        session_web_observation_owner = installed_web_observation_owner(
+                            gateway_policy_path, Path(__file__).resolve().parents[1],
+                            expected_uid=int(raw["control_uid"]))
+                    except (OSError, ValueError):
+                        # This optional read cannot widen or take down existing owners.
+                        session_web_observation_owner = None
 
             def session_bridge_factory(runtime):
                 # Validate the supplied live Runtime through the incumbent
@@ -2888,13 +2896,27 @@ def _service_from_config(
                         secretary_binding_source, read_guard=require_secretary_read,
                         submit_guard=require_secretary_submit)
 
+                web_census_handler = None
+                if session_web_observation_owner is not None:
+                    from integrations.session_bridge.installed_web_observation import InstalledProfileCensus
+
+                    def require_web_observation_read():
+                        require_session_admission()
+                        service._namespace_custody.bound_runtime(runtime)
+                        if service._require_runtime() is not runtime:
+                            raise BridgeError("ingress_unavailable", "Executive Runtime changed")
+                        return True
+
+                    web_census_handler = InstalledProfileCensus(
+                        session_web_observation_owner, current_guard=require_web_observation_read)
+
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
                     attention_requester=attention,
                     authorized_policies=trusted_policies,
                     reference_cursor_key=session_reference_cursor_key,
-                    hermes_session=hermes_session)
+                    hermes_session=hermes_session, web_census_handler=web_census_handler)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
             if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
                 def project_conversation_read_factory(runtime):
