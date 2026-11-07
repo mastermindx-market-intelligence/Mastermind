@@ -77,3 +77,17 @@ Upstream semantics were inspected at Hermes
 `agent/turn_finalizer.py`, `agent/turn_api_request.py` and
 `agent/turn_response_intake.py`. The current native runtime and original Ubuntu1
 C26 administrator-connection gate remain with their existing owner.
+
+## Tool-observation v2 contribution
+
+The same original outer result now retains post-hook aggregate tool-schema
+digests, actual native callback entry/return/raise, and separate original tool
+commit return facts. Correlation requires a unique complete native identity,
+valid observer ordering and no relevant coverage gap; it never substitutes for
+selected-child effect evidence. The reader preserves historical v1 unchanged.
+
+These observations still do not supply actual provider dispatch, response-model
+facts, process/workspace/policy fingerprints, complete timing or model weights.
+They therefore do not themselves create an EVAL run draft. Missing seed,
+effective sampling or other required facts must remain missing until their
+original native execution owner supplies them.

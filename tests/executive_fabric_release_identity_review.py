@@ -747,7 +747,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
+    "sha256": "7531a99e59e878aecc1df9d0bf0b6a388a8b1af3dfd5f8d3035a9beb5c91edf6",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -787,6 +787,11 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
 
+# Test-owned frozen source data, merged into this same finite review table.
+from tests.test_hermes_workspace_oauth_identity_review import (
+    REVIEWED_FILES as HERMES_WORKSPACE_OAUTH_REVIEWED_FILES,
+)
+REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
 
 # Original #852 held subscription principals, source-qualified at exact sites.
 # This fixed source evidence grants no installed identity, credential or capacity.
