@@ -1,0 +1,147 @@
+{
+  "diagnostic": {
+    "causality_limit": "No specific pre-begin production defect established by that timeout.",
+    "change": "Wait now also watches original owning task and reports early failures, with a bounded 30-second harness deadline. Focused 3 cases and frozen 54 then pass.",
+    "observed": "53 of 54 passed; first inert acknowledgement phase exceeded its test wait before observer execution.",
+    "superseded_log": "/private/tmp/mmx-dsh-c13-withdraw-final-20261107.log",
+    "superseded_log_sha256": "9b45df198c362c34ec6ec614a517e2890f70c1b8abcbb393375695078339fadb"
+  },
+  "installed": false,
+  "law_pin": "23c9b011e30a4acc6892a59d67a629f74b07a491",
+  "production_accepted": false,
+  "provider_calls": 0,
+  "qualification": {
+    "initial_message_and_tx5_snapshot": {
+      "changed_inputs": [],
+      "installed": false,
+      "log": "/private/tmp/mmx-dsh-c13-native-initial-final-20261107.log",
+      "log_sha256": "1948901049cbdc0660115e15441d10348458a9dad278ca6d3f5cccc80a3639cf",
+      "provider_calls": 0,
+      "returncode": 0,
+      "schema": "mastermind.source_qualification.v1",
+      "seconds": 248.85,
+      "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+      "source_sha256": {
+        "control_plane/executive_operator_harness_port.py": "895a4622487bce5d1f3c7673af75de2ed3d38b1da2a171492bc2cec13d89f8ae",
+        "control_plane/executive_operator_supervisor.py": "f6183668df997afa1cc563ed0a9baddf04f294ecfac71c7c715d581515ee3814",
+        "control_plane/executive_runtime.py": "3cc71ca0478e07f9d7473463f11cd21f579c6ecd721bcc078c447ff4efc7d44b",
+        "control_plane/executive_service.py": "fc552a0f962aeeb4b1a3fbc9e165e96bd2f840df82587df93e87aeafdfa60a61",
+        "control_plane/foreground_operation.py": "ca6e2aa0b465b8170028e0c6baae50383a5edc5f5e7edeb506eac6bffbc890a4",
+        "control_plane/fresh_conversation.py": "1feec704f8797cc13126fcc9340c0ecccee81e35a7658abed55e0a55585e5f4d",
+        "control_plane/fresh_conversation_admission.py": "985e34e8a7b109fe49ae90782bf4e099762f8385bdc6d53e5b5871d82be42c6d",
+        "control_plane/fresh_conversation_turn.py": "47f2851282a4ba4ff6b7b8b119d9c0b20bfd4125e3d18506912887fe7785b345",
+        "control_plane/native_conversation_result.py": "e2a119124d9b0147cd3704aaf80909fa916f7750759857a8ec83b355c6ef92b9",
+        "control_plane/operator_harness_orchestrator.py": "9286831aa6064a2ba7694de02a90d41035b326f372dc57b1fccef3c8fcd1c4e5",
+        "control_plane/remote_operator_harness_adapter.py": "b948f1423ae65a54009adc0515e24d17de901cd78aed0f8dcbf3634419b83ee0",
+        "tests/test_dsh_native_initial_input.py": "46bc9950ee77dc3c7cebe5ce7dcf5adf7bd10018e1cef15d14c0bac24ed2a5cf",
+        "tests/test_dsh_native_runtime_binding.py": "eaec42c3deafcb5c9c1e99da25456f3f6597455ec5ce739e283084464251cbd4",
+        "tests/test_dsh_native_runtime_result.py": "f47c7783e2d634c011bd786062c8e3ce4a45c77a9cfe18954e89409d0c84eaf6",
+        "tests/test_dsh_native_runtime_resume.py": "c5b07335f89994e2e3b720447871235c74f80757cfce799543009ad64769fb15",
+        "tests/test_dsh_native_supervisor_binding.py": "26bc46b97c3ab0f75dfd5e8f3734b9d268c3156e292d6c6997d479913c899fb7",
+        "tests/test_executive_operator_supervisor.py": "ff72353e5b15a1155fccaff1ad042a223bbf3ef523358615fa900d877cd9ebe4",
+        "tests/test_fresh_conversation.py": "541d16522cf17c1ca95f1854a285e5eb3d04603899b9748f606d393c80334049",
+        "tests/test_fresh_conversation_admission.py": "1c776149c621b7fe60cfa9548bd6c84ef002ad94d483f5058f7bb0a4b37c4da9",
+        "tests/test_fresh_conversation_turn.py": "9210a04a9d7e5d8379259a52fd19007c2afc78510fa57125df365cd3f21dbaf1",
+        "tests/test_interactive_tx5_runtime.py": "1857ed664b625df33a228255f39de91b8fe8515e7473026ac1d521fa36c6ad69",
+        "tests/test_native_initial_active_turn.py": "80c98c41346a57241559263a74ab4816832e2f11cf871d53603b28c02ae5ff55",
+        "tests/test_ohf_p1b_orchestrator.py": "cfa7cf42bd3f1433235c1a68d8c397ed0f58ea9fc7d7a29459c428a9d9fb1529",
+        "tests/test_ohf_p1b_runtime.py": "7c8d21ee4b58fe60255138f833b99af0b201844603bbdcfdae47438ef1c7e837",
+        "tests/test_ohf_p1b_runtime_orchestrator.py": "82609fbc34d99bfbea663094b91fde0fd13ec99415f676c501ed743365dd870b",
+        "tests/test_session_bridge_reply_delivery_terminal_nonblocking.py": "db9edfe9418cc990cc0be735a80a7b5f227b141c409c1eccb5374b78c4c276ce"
+      },
+      "source_unchanged": true,
+      "summary": {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "230",
+        "time": "246.087",
+        "timestamp": "2026-11-07T03:54:36.801571-07:00"
+      },
+      "tests": [
+        "tests/test_native_initial_active_turn.py",
+        "tests/test_dsh_native_initial_input.py",
+        "tests/test_fresh_conversation.py",
+        "tests/test_fresh_conversation_admission.py",
+        "tests/test_fresh_conversation_turn.py",
+        "tests/test_dsh_native_runtime_binding.py",
+        "tests/test_dsh_native_runtime_result.py",
+        "tests/test_dsh_native_runtime_resume.py",
+        "tests/test_dsh_native_supervisor_binding.py",
+        "tests/test_session_bridge_reply_delivery_terminal_nonblocking.py",
+        "tests/test_executive_operator_supervisor.py",
+        "tests/test_ohf_p1b_runtime.py",
+        "tests/test_interactive_tx5_runtime.py",
+        "tests/test_ohf_p1b_runtime_orchestrator.py",
+        "tests/test_ohf_p1b_orchestrator.py"
+      ],
+      "xml": "/private/tmp/mmx-dsh-c13-native-initial-final-20261107.xml"
+    },
+    "withdrawal_current_snapshot": {
+      "changed_inputs": [],
+      "installed": false,
+      "log": "/private/tmp/mmx-dsh-c13-withdraw-qualified-20261107.log",
+      "log_sha256": "3a105b429c566a6ab228658f80ae3094d2be8b3cd71c1dc02ddbcc5dceba360f",
+      "provider_calls": 0,
+      "returncode": 0,
+      "schema": "mastermind.source_qualification.v1",
+      "seconds": 94.38,
+      "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+      "source_sha256": {
+        "control_plane/executive_operator_supervisor.py": "656e7988d5de03dabdaf78c8b151ee779cd0df9ec94042671c5624de1fefdb06",
+        "control_plane/executive_runtime.py": "3cc71ca0478e07f9d7473463f11cd21f579c6ecd721bcc078c447ff4efc7d44b",
+        "control_plane/executive_service.py": "3c024cbad9ab4c5c4fb983939341dcd378454585d71cebf78c43aa924ec93a16",
+        "control_plane/fresh_conversation_admission.py": "985e34e8a7b109fe49ae90782bf4e099762f8385bdc6d53e5b5871d82be42c6d",
+        "control_plane/operator_harness_orchestrator.py": "9286831aa6064a2ba7694de02a90d41035b326f372dc57b1fccef3c8fcd1c4e5",
+        "tests/test_fresh_conversation.py": "541d16522cf17c1ca95f1854a285e5eb3d04603899b9748f606d393c80334049",
+        "tests/test_native_initial_active_turn.py": "fc35198e8adb6b3c2d92df885ac50512ff08333c44c43d13af3f054131c24319",
+        "tests/test_native_retained_runtime.py": "1ae8f6275f95b4a073bab33e9d8eafe8592ad338edf457a225e6c82fdf6c7185",
+        "tests/test_session_bridge_reply_delivery_terminal_nonblocking.py": "db9edfe9418cc990cc0be735a80a7b5f227b141c409c1eccb5374b78c4c276ce"
+      },
+      "source_unchanged": true,
+      "summary": {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "54",
+        "time": "90.088",
+        "timestamp": "2026-11-07T04:04:52.254622-07:00"
+      },
+      "tests": [
+        "tests/test_native_initial_active_turn.py",
+        "tests/test_fresh_conversation.py",
+        "tests/test_session_bridge_reply_delivery_terminal_nonblocking.py",
+        "tests/test_native_retained_runtime.py"
+      ],
+      "xml": "/private/tmp/mmx-dsh-c13-withdraw-qualified-20261107.xml"
+    }
+  },
+  "qualification_note": "230 and 54 are overlapping suites at their recorded hashes; not a combined unique-test count. The latter qualifies the current service/supervisor withdrawal repair.",
+  "remaining": [
+    "Native Supervisor initial prompt/result-reference consumer",
+    "Explicit original Runtime idle-close/resume custody",
+    "Authenticated native Send/resume/Stop and closed result/reference wire",
+    "Original company-frame delegation and installed native authority/attestation/tool producer",
+    "Signed-in production journey and actual eligible governed-tool proof"
+  ],
+  "schema": "mastermind.deepseek.native_initial_custody_evidence.v1",
+  "scope": [
+    "Exact original FreshConversation message custody helper and native fresh-claim fence",
+    "Original dispatch active-turn observation after acknowledged TX5 and before collection",
+    "Same-object synchronous withdrawal rejects delayed event-loop publication before cleanup",
+    "Original initial cleanup handle transfers only after result retention",
+    "Runtime native seal selects the exact BEGIN_TURN INTENT despite a legitimate interrupt sharing the TurnRef"
+  ],
+  "source_base": "7e569e0afbf0fb416e7daa79fd2b6b28da06104a",
+  "source_fences": {
+    "os_assets_py": "PR2175 untouched",
+    "publication": "No root commit/push/install; preserve incumbent package writer commits",
+    "smoke_repair_pr1870": "separate handoff untouched"
+  },
+  "source_pr": 2177,
+  "status": "SOURCE_QUALIFIED_NOT_INSTALLED"
+}

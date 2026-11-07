@@ -317,11 +317,11 @@ class RuntimeSessionReturn:
             raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
         return value["schema"]
 
-    async def deepseek_history(self, principal, arguments):
+    async def deepseek_history(self, principal, arguments, *, read_guard=None):
         """One cold read, bound to the actual Runtime root and installed owner."""
         from control_plane.executive_runtime import _admission_root_workstream
         from .deepseek_native import (
-            RESULT_SCHEMA, bounded_native_result, principal_namespace, validate_native_read_arguments,
+            RESULT_SCHEMA, bounded_native_result, principal_namespace, validate_native_read_arguments, _guard,
         )
         args = validate_native_read_arguments(arguments)
         identity = _principal(principal)
@@ -335,6 +335,8 @@ class RuntimeSessionReturn:
             raise BridgeError("reply_unavailable", "authorized native history is unavailable")
 
         def evidence():
+            if read_guard is not None:
+                _guard(read_guard)
             if self.deepseek is not native or _principal(principal) != identity:
                 raise BridgeError("binding_unavailable", "original native read owner changed")
             native.require_binding(binding)
@@ -344,15 +346,45 @@ class RuntimeSessionReturn:
             if work != binding.work_ref:
                 raise BridgeError("binding_unavailable", "native history root responsibility differs")
             # Existing Runtime provenance, not a native cwd/project-name guess.
-            return root.event_id, _digest(root.to_dict())
+            request = args["read"]
+            resolved_digest = None
+            if request["kind"] == "result":
+                from control_plane.native_conversation_result import (
+                    NativeConversationResultRef, NativeConversationResultObservation,
+                )
+                child_event = self.runtime.events.get_event_by_command_id(
+                    f"coo-cycle:{binding.root_job_id}:create-interactive:0")
+                child = self.runtime.jobs.get_job(child_event.job_id) if child_event else None
+                if (child is None or child.root_job_id != binding.root_job_id
+                        or child.parent_job_id != binding.root_job_id or not child.current_attempt_id):
+                    raise BridgeError("reply_unavailable", "original native result is unavailable")
+                self.runtime.jobs.assert_native_conversation_execution(child.job_id)
+                attempt = self.runtime.attempts.get_attempt(child.current_attempt_id)
+                if attempt is None or attempt.job_id != child.job_id:
+                    raise BridgeError("reply_unavailable", "original native result is unavailable")
+                reference = NativeConversationResultRef.from_wire(request["native_ref"])
+                resolved = self.runtime.operator_harness.native_conversation_result(
+                    attempt_id=attempt.attempt_id, reference=reference)
+                observed = NativeConversationResultObservation.from_wire(resolved["observation"])
+                if (resolved["job_id"] != child.job_id or resolved["worker_id"] != attempt.worker_id
+                        or observed.attempt_id != attempt.attempt_id
+                        or observed.provider_session_id != binding.native_session_id):
+                    raise BridgeError("binding_unavailable", "native result belongs to another original owner")
+                # Historical G1 evidence remains readable on the original G2
+                # Session. No current-writer/generation grant comes from a seal.
+                resolved_digest = _digest(resolved)
+                request = dict(kind="result", claim=observed.native_claim.to_wire(),
+                    terminal=observed.native_terminal.to_wire(), offset_bytes=request["offset_bytes"],
+                    expected_sha256=request["expected_sha256"])
+            return root.event_id, _digest(root.to_dict()), request, resolved_digest
 
         original = evidence()
 
         def before_read():
             if evidence() != original:
-                raise BridgeError("binding_unavailable", "original native history root changed")
+                raise BridgeError("binding_unavailable", "original native history root or result changed")
 
-        data = await native.read_history(binding, principal, args["read"], before_read=before_read)
+        data = await native.read_history(binding, principal, original[2], before_read=before_read)
         before_read()
         return bounded_native_result({
             "schema": RESULT_SCHEMA, "selection": selection, "read": args["read"],

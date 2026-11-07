@@ -19,7 +19,8 @@ if(manifest.schema!=="mastermind.dsh_native_company_fixture.v1"||manifest.produc
   manifest.donor_sha!=="687f282e8625c6b8d11ff58211a90524be2e4317")throw Error("Full native fixture identity refused");
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 const app=join(supply,"app");
-const lifecycle=process.env.MMX_NATIVE_ACP_EXERCISE==="claim-stop-resume";
+const ohfLifecycle=process.env.MMX_NATIVE_ACP_EXERCISE==="ohf-claim-stop-resume";
+const lifecycle=ohfLifecycle||process.env.MMX_NATIVE_ACP_EXERCISE==="claim-stop-resume";
 if(process.env.MMX_NATIVE_ACP_EXERCISE!==undefined&&!lifecycle)throw Error("Unknown native fixture scenario");
 if(lifecycle){
   const expected=JSON.parse(await readFile(new URL("./native-acp-source.json",import.meta.url),"utf8"));
@@ -237,7 +238,7 @@ try{
         ...lifecycle?{nativePromptAdmission(facts){
           generation.signal.throwIfAborted();ctx.fiber.assertActive();
           return facts.agent.id===selected&&root.agents.get(selected)===facts.agent&&
-            root.sessions.get(selected)===facts.agent.session&&facts.operationId==="fixture-native-turn-"+mode;
+            root.sessions.get(selected)===facts.agent.session&&facts.operationId===(ohfLifecycle?"ohf-op:":"")+"fixture-native-turn-"+mode;
         }}:{},
       });
     }});

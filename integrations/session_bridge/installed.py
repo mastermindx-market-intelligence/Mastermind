@@ -171,7 +171,7 @@ class InstalledSessionBridgeProvider:
             raise TypeError("native read handler must be callable")
         self._native_read_handler = native_read_handler
 
-    async def handle_frame(self, frame: Any) -> dict[str, Any]:
+    async def handle_frame(self, frame: Any, *, native_read_guard=None) -> dict[str, Any]:
         tool, principal, arguments = validate_private_frame(frame)
         modifying = tool in MODIFYING_TOOLS
         try:
@@ -190,7 +190,10 @@ class InstalledSessionBridgeProvider:
             if tool == "session_native_read":
                 if self._native_read_handler is None:
                     raise BridgeError("backend_unavailable", "installed native history is unavailable")
-                data = await _maybe(self._native_read_handler(principal, dict(arguments)))
+                if native_read_guard is not None:
+                    data = await _maybe(self._native_read_handler(principal, dict(arguments), read_guard=native_read_guard))
+                else:
+                    data = await _maybe(self._native_read_handler(principal, dict(arguments)))
             elif tool == "session_reply_read":
                 if self._reply_read_handler is None:
                     raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")

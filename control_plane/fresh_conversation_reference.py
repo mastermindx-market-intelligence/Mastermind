@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 from common import fresh_conversation_contract as wire
-from control_plane.fresh_conversation_admission import read_creation_restriction
+from control_plane.fresh_conversation_admission import read_creation_restriction, NATIVE_SCHEMA
 from control_plane.principal_projection import NeutralPrincipalProjection
 
 _SCHEMA = "mastermind.fresh_conversation_reference.v1"
@@ -85,22 +85,40 @@ def project_references(owner, principal, selection):
             raise ValueError("CONVERSATION_REFERENCE_CHANGED")
         event=owner._runtime.store.unique_root_created_event(root.job_id)
         if event.event_id!=row["event_id"]:raise ValueError("CONVERSATION_REFERENCE_CHANGED")
+        if material["schema"] == NATIVE_SCHEMA:
+            from control_plane.fresh_conversation_native_reference import initial_message, input_descriptor
+            entries.append(dict(kind="fresh_native", reference=_reference(root,event,material),
+                root_state=root.status.value, result_contract=wire.NATIVE_RESULT_CONTRACT,
+                initial_input=input_descriptor(initial_message(material), event)))
+            continue
         objective=json.loads(root.objective)
         if type(objective) is not dict or objective.get("mode")!="fresh_conversation" or type(objective.get("message")) is not str:
             raise ValueError("CONVERSATION_INITIAL_MESSAGE_UNAVAILABLE")
         entries.append(dict(kind="fresh_native",reference=_reference(root,event,material),
             initial_message=objective["message"],root_state=root.status.value))
     origin_identity(owner,principal)
-    return _bounded(dict(schema="mastermind.fresh_conversation_references.v1",work_ref=selection["work_ref"],
+    catalogue_schema = ("mastermind.fresh_conversation_references.v2"
+        if any("initial_input" in row for row in entries) else "mastermind.fresh_conversation_references.v1")
+    return _bounded(dict(schema=catalogue_schema,work_ref=selection["work_ref"],
         state="AVAILABLE",coverage=dict(state="PARTIAL" if len(rows)>_LIMIT else "COMPLETE",limit=_LIMIT,returned=len(entries)),entries=entries))
 
 
-def read_reference(owner, principal, selection):
+def read_reference(owner, principal, selection, *, guard=None):
     from common.project_conversation_read_contract import arguments
     selected=arguments(selection,"fresh_read")
     before=selected.get("before_event_id")
-    reference={key:value for key,value in selected.items() if key!="before_event_id"}
+    reference={key:value for key,value in selected.items() if key not in {"before_event_id", "fragment", "content"}}
     root,material,origin=_original(owner,principal,reference)
+    if material["schema"] == NATIVE_SCHEMA:
+        if "content" in selected:
+            from control_plane.fresh_conversation_native_reference import read_native_content
+            return read_native_content(owner, principal, reference, root, material, origin,
+                selected["content"], guard=guard)
+        from control_plane.fresh_conversation_native_reference import read_native_reference
+        return read_native_reference(owner,principal,reference,root,material,origin,
+            before=before,fragment=selected.get("fragment"))
+    if "fragment" in selected or "content" in selected:
+        raise ValueError("CONVERSATION_NATIVE_CONTRACT_REQUIRED")
     objective=json.loads(root.objective)
     if type(objective) is not dict or objective.get("mode")!="fresh_conversation" or type(objective.get("message")) is not str:
         raise ValueError("CONVERSATION_INITIAL_MESSAGE_UNAVAILABLE")

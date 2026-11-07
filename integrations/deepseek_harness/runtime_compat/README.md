@@ -313,3 +313,21 @@ production receipt. The remaining join is the original OHF adapter/result
 consumer, a distinct authenticated native profile and its actual authority/
 attestation producers, eligible governed tools, and the signed-in production
 browser journey. No local build or green CI establishes that acceptance.
+
+### Retained OHF adapter / native result qualification
+
+The composed 502-case source-frozen receipt is
+[`evidence/native-operator-20261107.json`](evidence/native-operator-20261107.json).
+It includes the original full application through the retained Python OHF
+adapter, exact native Stop, clean close and same-Session cold resume. The
+fixture uses explicitly supplied laboratory authority, not installed Executive
+or provider-account admission. The result wire is a closed native observation;
+it never manufactures a planner envelope or Job completion.
+
+The original v3 access/upload/package receipt is
+[`evidence/native-owner-access-v3-20261107.json`](evidence/native-owner-access-v3-20261107.json).
+Its full package composes the qualified native ACP patch, preserves the full
+encoded-upload authorization arguments and remains uninstalled. See
+[`../NATIVE_COMPANY_JOIN_FRONTIER.md`](../NATIVE_COMPANY_JOIN_FRONTIER.md)
+for the exact Runtime, authenticated consumer, governed-tool and production
+work still owed.

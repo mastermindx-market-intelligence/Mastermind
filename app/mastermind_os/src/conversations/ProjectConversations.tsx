@@ -3,7 +3,9 @@ import type {ProjectConversationCatalogue,ProjectConversationRead} from './proje
 import type {ProjectConversationCatalogueOwner} from './project-conversation-catalogue-owner';
 import {SourceMarkdown} from './SourceMarkdown';
 import {FreshConversationInitialResponse} from './new-conversation/NewConversationOutcome';
-import {freshConversationNextPage,type FreshConversationCatalogue,type FreshConversationWindow,type FreshConversationReference} from './fresh-conversation-reference';
+import {freshConversationNextPage,freshConversationInput,type FreshConversationHistoryCatalogue as FreshConversationCatalogue,
+  type FreshConversationHistoryWindow as FreshConversationWindow,type FreshConversationReference} from './fresh-conversation-reference';
+import {NativeConversationRecord} from './NativeConversationRecord';
 import './conversations-list.css';
 
 export interface ProjectConversationsProps {
@@ -164,8 +166,12 @@ export function ProjectConversations(props:ProjectConversationsProps){
       </article>)}
     </>:visible&&freshWindow?<>
       <button type="button" onClick={back}>{t('Back to conversations','返回对话列表')}</button>
-      <FreshConversationInitialResponse locale={props.locale??'en'} result={freshWindow.initial_result} originalMessage={freshWindow.initial_message}
-        caption={t('Opening this recorded conversation does not send or acknowledge a message.','打开此对话记录不会发送消息或确认接收。')}/>
+      {freshWindow.schema==='mastermind.fresh_conversation_window.v3'?<NativeConversationRecord
+        input={freshWindow.initial_input} result={freshWindow.initial_result} locale={props.locale}
+        current={()=>!!freshSource?.current()} readInput={signal=>visible.owner.readFreshInput(freshWindow,freshWindow.initial_input,undefined,signal)}
+        readResult={signal=>visible.owner.readFreshResult(freshWindow,freshWindow.initial_result!,signal)}/>:
+        <FreshConversationInitialResponse locale={props.locale??'en'} result={freshWindow.initial_result} originalMessage={freshWindow.initial_message}
+          caption={t('Opening this recorded conversation does not send or acknowledge a message.','打开此对话记录不会发送消息或确认接收。')}/>}
       <div className="conversations-list__history-actions">
         <button type="button" disabled={phase==='reading'||shownHistory?.busy} onClick={()=>{if(snapshot)void refreshFresh(snapshot,freshWindow);}}>
           {shownHistory?.older?t('Return to latest messages','返回最新消息'):t('Refresh conversation','刷新对话')}
@@ -177,18 +183,21 @@ export function ProjectConversations(props:ProjectConversationsProps){
       {shownHistory?.older?<p>{t('Showing one page of earlier messages.','当前显示一页更早的消息。')}</p>:null}
       {shownHistory?.unavailable?<p role="status">{t('Earlier messages could not be loaded. Try again.','暂时无法加载更早的消息，请重试。')}</p>:null}
       {shownTurns.map(turn=><article className="conversations-list__section" key={turn.turn_key}>
-        <FreshConversationInitialResponse locale={props.locale??'en'} result={turn.result} originalMessage={turn.message}
-          responseKind="followup" headingLevel={3}/>
+        {'input' in turn?<NativeConversationRecord input={turn.input} result={turn.result} locale={props.locale}
+          current={()=>!!freshSource?.current()} readInput={signal=>visible.owner.readFreshInput(freshWindow,turn.input,turn.turn_key,signal)}
+          readResult={signal=>visible.owner.readFreshResult(freshWindow,turn.result!,signal)}/>:
+          <FreshConversationInitialResponse locale={props.locale??'en'} result={turn.result} originalMessage={turn.message}
+            responseKind="followup" headingLevel={3}/>}
       </article>)}
       {freshSource?props.renderFreshContinuation?.(freshSource):null}
     </>:visible?<>
       <div className="conversations-list__filter"><label htmlFor={filterId}>{t('Find in these conversations','查找这些对话')}</label>
         <input id={filterId} value={query} onChange={event=>setQuery(event.target.value)}/></div>
       {!visible.page?.conversations.length&&!visible.fresh?.entries.length?<p>{t('No conversations were returned for this page.','本页未返回对话。')}</p>:null}
-      {visible.fresh?.entries.filter(row=>`${props.projectTitle??''} ${row.initial_message}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(row=>{
+      {visible.fresh?.entries.filter(row=>`${props.projectTitle??''} ${typeof freshConversationInput(row)==='string'?freshConversationInput(row):'initial_input' in row?row.initial_input.preview:''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(row=>{
         const key='fresh:'+row.reference.root_job_id;
         return <article className="conversations-list__row" key={key}>
-          <div className="conversations-list__row-copy"><h3>{t('Conversation','对话')}</h3><p>{row.initial_message}</p></div>
+          <div className="conversations-list__row-copy"><h3>{t('Conversation','对话')}</h3><p>{'initial_input' in row?row.initial_input.preview:row.initial_message}</p></div>
           <button type="button" ref={node=>{if(node)rowButtons.current.set(key,node);else rowButtons.current.delete(key);}} disabled={phase==='reading'} onClick={event=>{void openFresh(row,event.currentTarget);}}>{t('Open','打开')}</button>
         </article>;
       })}

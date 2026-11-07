@@ -45,6 +45,57 @@ def _invalid_number(_):
     raise ValueError("non-JSON native number")
 
 
+def _result_data(value, request):
+    """Validate bounded bytes from the original native result content owner."""
+    import base64
+    import hashlib
+    from integrations.deepseek_harness.native_protocol import NativeClaim, NativeTerminal
+    keys = {"kind", "state", "claim", "terminal", "turn_start_seq", "turn_end_seq",
+            "user_message_seq", "assistant_message_seqs", "content"}
+    if type(value) is not dict or set(value) != keys or value["kind"] != "result":
+        raise NativeReadUnavailable()
+    claim, terminal = NativeClaim.parse(value["claim"]), NativeTerminal.parse(value["terminal"])
+    if (value["claim"] != request["claim"] or value["terminal"] != request["terminal"]
+            or terminal.claim != claim):
+        raise NativeReadUnavailable()
+    start, end, user, assistants = (value[k] for k in (
+        "turn_start_seq", "turn_end_seq", "user_message_seq", "assistant_message_seqs"))
+    if (type(start) is not int or type(end) is not int
+            or not 0 <= start <= claim.through_seq <= end <= terminal.through_seq
+            or user is not None and (type(user) is not int or not claim.through_seq < user < end)
+            or type(assistants) is not list or len(assistants) > 4096
+            or any(type(seq) is not int or not start < seq < end for seq in assistants)
+            or assistants != sorted(set(assistants))):
+        raise NativeReadUnavailable()
+    if value["state"] == "NO_ANSWER":
+        if (assistants or value["content"] is not None or request["offset_bytes"] != 0
+                or request["expected_sha256"] is not None):
+            raise NativeReadUnavailable()
+        return
+    if value["state"] != "CONTENT" or user is None or not assistants or assistants[0] <= user:
+        raise NativeReadUnavailable()
+    part = value["content"]
+    if (type(part) is not dict or set(part) != {
+            "encoding", "format", "sha256", "total_bytes", "offset_bytes", "next_offset_bytes", "data"}
+            or part["encoding"] != "base64" or part["format"] != "dsh-session-history-records-json"
+            or type(part["sha256"]) is not str or _SHA.fullmatch(part["sha256"]) is None
+            or type(part["total_bytes"]) is not int or not 1 <= part["total_bytes"] <= 4*1024*1024
+            or type(part["offset_bytes"]) is not int or part["offset_bytes"] != request["offset_bytes"]
+            or not 0 <= part["offset_bytes"] < part["total_bytes"]
+            or type(part["data"]) is not str or not 1 <= len(part["data"]) <= 5464
+            or request["expected_sha256"] is not None and part["sha256"] != request["expected_sha256"]):
+        raise NativeReadUnavailable()
+    raw = base64.b64decode(part["data"], validate=True)
+    after = part["offset_bytes"] + len(raw)
+    expected = None if after == part["total_bytes"] else after
+    if (not 1 <= len(raw) <= 4096 or after > part["total_bytes"]
+            or base64.b64encode(raw).decode("ascii") != part["data"]
+            or part["next_offset_bytes"] != expected
+            or expected is not None and type(part["next_offset_bytes"]) is not int
+            or part["offset_bytes"] == 0 and expected is None and hashlib.sha256(raw).hexdigest() != part["sha256"]):
+        raise NativeReadUnavailable()
+
+
 class OwnedNativeReadPort:
     """Nominal capability for one anonymous endpoint, under its original owner."""
 
@@ -141,10 +192,12 @@ class OwnedNativeReadPort:
                         or value["schema"] != RESPONSE_SCHEMA or value["request_id"] != request_id
                         or value["association_sha256"] != self._association_sha256
                         or value["status"] not in ("READ", "PAGE_TOO_LARGE", "UNAVAILABLE")
-                        or (value["status"] == "READ" and (
+                        or (value["status"] == "READ" and request.get("kind") != "result" and (
                             type(value["data"]) is not dict or set(value["data"]) != {"projections", "page"}))
                         or (value["status"] != "READ" and value["data"] is not None)):
                     raise NativeReadUnavailable()
+                if value["status"] == "READ" and request.get("kind") == "result":
+                    _result_data(value["data"], request)
                 self.require_current()
                 return value
         except BaseException:

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Protocol, Sequence
 
 from control_plane.operator_harness_contract import (
@@ -48,6 +48,11 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import (
     RawRoleResultAdapter,
     RawRoleResultObservation,
+)
+
+from control_plane.native_conversation_result import (
+    DSH_NATIVE_RESULT_CONTRACT, ROLE_RESULT_CONTRACT, NativeConversationResultAdapter,
+    NativeConversationResultObservation, NativeConversationResultRef,
 )
 
 
@@ -154,6 +159,9 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         operation_kind: str,
+        *,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> None: ...
 
     def begin_operator_checkpoint(
@@ -177,6 +185,9 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         observation: ReconcileObservation,
+        *,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> None: ...
 
     def cancel_operator_generation(
@@ -265,6 +276,7 @@ class OperatorTurnReceipt:
     events: tuple[NormalizedEvent, ...]
     cursor: EventCursor
     candidate: CandidateResult
+    native_result: NativeConversationResultRef | None = None
 
 
 class OperatorHarnessOrchestrator:
@@ -505,12 +517,15 @@ class OperatorHarnessOrchestrator:
         _before_role_seal: Callable[
             [OperatorTurnReceipt, RawRoleResultObservation], None
         ] | None = None,
+        _on_turn_applied: Callable[[TurnRef], None] | None = None,
     ) -> OperatorTurnReceipt:
         """Issue one turn and persist only a candidate result, never Job completion."""
 
         self._assert_replayable(operation_id)
         if _before_role_seal is not None and not callable(_before_role_seal):
             raise OperatorHarnessOrchestrationError("trusted turn consumer is invalid")
+        if _on_turn_applied is not None and not callable(_on_turn_applied):
+            raise OperatorHarnessOrchestrationError("active turn observer is invalid")
         bounded_timeout = float(timeout_seconds)
         if (
             not math.isfinite(bounded_timeout)
@@ -525,6 +540,20 @@ class OperatorHarnessOrchestrator:
                 "work turn refused by observed launch comparison: "
                 + session.launch.decision.value
             )
+        contract_reader = getattr(self.runtime, "operator_result_contract", None)
+        if contract_reader is not None and not callable(contract_reader):
+            raise OperatorHarnessOrchestrationError("result contract reader is invalid")
+        contract = contract_reader(session.attempt_id) if contract_reader is not None else ROLE_RESULT_CONTRACT
+        if contract not in {ROLE_RESULT_CONTRACT, DSH_NATIVE_RESULT_CONTRACT}:
+            raise OperatorHarnessOrchestrationError("unknown immutable result contract")
+        declared_contract = getattr(self.adapter, "result_contract", ROLE_RESULT_CONTRACT)
+        if declared_contract != contract:
+            raise OperatorHarnessOrchestrationError("adapter differs from original result contract")
+        native = contract == DSH_NATIVE_RESULT_CONTRACT
+        native_sealer = getattr(self.runtime, "seal_operator_native_result", None)
+        if native and (not isinstance(self.adapter, NativeConversationResultAdapter)
+                       or not callable(native_sealer) or _before_role_seal is not None):
+            raise OperatorHarnessOrchestrationError("native result requires its original typed consumer")
         # The optional owner read keeps ordinary RuntimePort implementations
         # on their original role-sealing path. Models cannot select this policy.
         plan_reader = getattr(self.runtime, "existing_interactive_plan_seal", None)
@@ -532,7 +561,7 @@ class OperatorHarnessOrchestrator:
             raise OperatorHarnessOrchestrationError("interactive plan reader is invalid")
         initial_plan = (
             plan_reader(session.attempt_id, session.generation)
-            if plan_reader is not None else None
+            if plan_reader is not None and not native else None
         )
         if initial_plan is not None and (
             type(initial_plan) is not str or len(initial_plan) != 64
@@ -595,6 +624,17 @@ class OperatorHarnessOrchestrator:
             )
             raise OperatorEffectUnknown("turn result could not be bound") from exc
 
+        if _on_turn_applied is not None:
+            try:
+                if _on_turn_applied(turn) is not None:
+                    raise ValueError("active turn observer must return no authority")
+            except Exception as exc:
+                # TX5 is already APPLIED. Keep that receipt and let the same
+                # caller own reconciliation/cleanup; do not relabel it unsent.
+                raise OperatorHarnessOrchestrationError(
+                    "acknowledged turn could not be exposed to its existing owner"
+                ) from exc
+
         current = cursor or EventCursor(
             attempt_id=session.attempt_id,
             session_epoch_id=session.epoch.session_epoch_id,
@@ -632,7 +672,20 @@ class OperatorHarnessOrchestrator:
             cursor=next_cursor,
             candidate=candidate,
         )
-        if initial_plan is not None:
+        if native:
+            try:
+                observation = self.adapter.observe_native_conversation_result(turn)
+                if type(observation) is not NativeConversationResultObservation:
+                    raise ValueError("closed native observation required")
+                observation.require_turn(turn)
+                reference = native_sealer(session.attempt_id, turn, observation)
+                if (type(reference) is not NativeConversationResultRef
+                        or reference.command_id != f"ohf-native-result:{turn.turn_id}"):
+                    raise ValueError("original native result reference required")
+                receipt = replace(receipt, native_result=reference)
+            except Exception as exc:
+                raise OperatorHarnessOrchestrationError("native conversation result could not be sealed") from exc
+        elif initial_plan is not None:
             # The follow-up candidate is already recorded by Runtime. It is
             # not a new plan and must not replace the initial accepted seal.
             if plan_reader(session.attempt_id, session.generation) != initial_plan:
@@ -667,13 +720,21 @@ class OperatorHarnessOrchestrator:
         session: OperatorSessionReceipt | OperatorStartHandle,
         *,
         operation_id: OperationId,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> ReconcileObservation:
         self._assert_replayable(operation_id)
+        closure_options = {}
+        if native_idle_result is not None:
+            closure_options["native_idle_result"] = native_idle_result
+        if native_terminal_result is not None:
+            closure_options["native_terminal_result"] = native_terminal_result
         self.runtime.begin_operator_generation_operation(
             session.attempt_id,
             session.generation,
             operation_id,
             "graceful_stop",
+            **closure_options,
         )
         self.runtime.extend_operator_lease(session.attempt_id, 60)
         try:
@@ -685,7 +746,13 @@ class OperatorHarnessOrchestrator:
                 session.generation,
                 operation_id,
                 observed,
+                **closure_options,
             )
+            if native_idle_result is not None or native_terminal_result is not None:
+                # Same physical stop observation, persisted by the incumbent
+                # reconcile owner for TX-10; no synthetic writer release.
+                self.runtime.observe_operator_reconcile(
+                    session.attempt_id, session.generation, observed)
             return observed
         except Exception as exc:
             self._mark_effect_unknown(

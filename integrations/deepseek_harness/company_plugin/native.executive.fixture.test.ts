@@ -5,15 +5,18 @@ import {expect,it,vi} from "vitest";
 import {Socket} from "node:net";
 import {readFile,writeFile} from "node:fs/promises";
 import {attachExecutiveReadPort,type InstalledNativeReadAssociation} from "./src/executive-read-port";
-import {attachNativeTestPort,disk,nativeFixture} from "./native.read-fixture";
+import {attachNativeTestPort,disk,nativeFixture,digest} from "./native.read-fixture";
 
 const specPath=process.env.MMX_DSH_NATIVE_READ_FIXTURE;
 it.skipIf(!specPath)("serves the original native history to the actual Python Runtime/private bridge",async()=>{
   const spec=JSON.parse(await readFile(specPath!,"utf8")) as {
     fd:number;association:InstalledNativeReadAssociation;ready:string;report:string;
+    answer?:string;question?:string;laterAnswer?:string;runtimeContext?:boolean;
   };
   expect(Number.isSafeInteger(spec.fd)&&spec.fd>=3).toBe(true);
-  const h=await nativeFixture(),port=new Socket({fd:spec.fd,readable:true,writable:true});
+  const h=await nativeFixture(spec.answer,{sessionId:spec.association.native_session_id,
+    question:spec.question,laterAnswer:spec.laterAnswer,runtimeContext:spec.runtimeContext}),
+    port=new Socket({fd:spec.fd,readable:true,writable:true});
   const ownerLife=new AbortController();
   const create=vi.spyOn(h.ctx.agents,"create"),resume=vi.spyOn(h.ctx.agents,"resume");
   const open=vi.spyOn(h.ctx.sessionPersistence,"open");
@@ -23,7 +26,9 @@ it.skipIf(!specPath)("serves the original native history to the actual Python Ru
     association:spec.association,signal:ownerLife.signal,requireCurrent:()=>{},
   });
   try {
-    await writeFile(spec.ready,JSON.stringify({ready:true,donor:spec.association.donor_sha})+"\n");
+    await writeFile(spec.ready,JSON.stringify({ready:true,donor:spec.association.donor_sha,
+      session_id:h.id,message_id:h.originalMessage.id,through_seq:h.originalRecords.at(-1)!.seq,
+      records_sha256:digest({records:h.originalRecords})})+"\n");
     await closed;await owner.dispose();
     const after=await disk(h.root);
     expect(after).toEqual(h.before);expect(create).not.toHaveBeenCalled();expect(resume).not.toHaveBeenCalled();

@@ -74,6 +74,18 @@ def validate_native_read_arguments(value: Any) -> dict[str, Any]:
                 or type(count) is not int or not 1 <= count <= 8):
             raise BridgeError("invalid_input", "native history cursor is invalid")
         normalized = {"kind": "page", "through_seq": through, "before_seq": before, "max_messages": count}
+    elif set(request) == {"kind", "native_ref", "offset_bytes", "expected_sha256"} and request["kind"] == "result":
+        from control_plane.native_conversation_result import NativeConversationResultRef
+        try:
+            reference = NativeConversationResultRef.from_wire(request["native_ref"])
+        except (ValueError, TypeError):
+            raise BridgeError("invalid_input", "native history result reference is invalid") from None
+        offset, digest = request["offset_bytes"], request["expected_sha256"]
+        if (type(offset) is not int or not 0 <= offset < 4*1024*1024
+                or digest is not None and (type(digest) is not str or _SHA.fullmatch(digest) is None)
+                or offset > 0 and digest is None):
+            raise BridgeError("invalid_input", "native history result cursor is invalid")
+        normalized = dict(kind="result", native_ref=reference.to_wire(), offset_bytes=offset, expected_sha256=digest)
     else:
         raise BridgeError("invalid_input", "native history read is invalid")
     return {"selection": {"work_ref": work, "root_job_id": selected["root_job_id"]}, "read": normalized}

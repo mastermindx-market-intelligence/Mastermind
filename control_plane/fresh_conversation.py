@@ -42,17 +42,17 @@ def scoped_operation_key(principal, operation_key):
     })
 
 
-def admission_arguments(principal, request):
+def admission_arguments(principal, request, *, schema=wire.SCHEMA):
     request = wire.validate_request({key: request[key] for key in
-        ("work_ref", "operation_key", "message")}, operation="preview")
-    args = wire.admission_arguments(request, scoped_operation_key(principal, request["operation_key"]))
-    # Canonical JSON preserves leading/trailing user whitespace through the
-    # existing objective normalizer. A changed message with the same key must
-    # conflict at the existing sink, including whitespace-only differences.
-    args["objective"] = json.dumps({"mode": "fresh_conversation", "message": request["message"],
-        "response": "Answer this user's message in the sealed result summary within the existing read-only grant. "
-            "Retain the native session for separately authenticated continuation; do not dispatch child work."},
-        ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        ("work_ref", "operation_key", "message")}, operation="preview", schema=schema)
+    args = wire.admission_arguments(request, scoped_operation_key(principal, request["operation_key"]), schema=schema)
+    # V2 keeps exact native text in the original immutable creation material.
+    # Its short objective binds that text by UTF-8 identity; it is not a prompt.
+    if schema == wire.SCHEMA:
+        args["objective"] = json.dumps({"mode": "fresh_conversation", "message": request["message"],
+            "response": "Answer this user's message in the sealed result summary within the existing read-only grant. "
+                "Retain the native session for separately authenticated continuation; do not dispatch child work."},
+            ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     return ceo_request.normalize_app_request(args)
 
 
@@ -104,16 +104,20 @@ class FreshConversationOwner:
         from control_plane.fresh_conversation_reference import project_references
         return project_references(self, principal, selection)
 
-    def read_reference(self, principal, reference):
+    def read_reference(self, principal, reference, *, guard=None):
         from control_plane.fresh_conversation_reference import read_reference
-        return read_reference(self, principal, reference)
+        return read_reference(self, principal, reference, guard=guard)
 
-    def _fresh(self, principal):
+    def _fresh(self, principal, *, schema=wire.SCHEMA):
         """Current company admission and registered worker are separate facts.
 
         The actual provider account/process/capability attestation is still owed
         by Runtime/OHF at materialization. Preview never claims that attestation.
         """
+        if schema == wire.NATIVE_SCHEMA:
+            return self._fresh_native(principal)
+        if schema != wire.SCHEMA:
+            raise ConversationRefusal("invalid_input")
         self._current(principal)
         service = self._service
         service._require_ceo_submit_admission()
@@ -135,6 +139,26 @@ class FreshConversationOwner:
         source = host.native_continuation_source()
         if not isinstance(source, NativeContinuationSource) or source.runtime is not self._runtime:
             raise ConversationRefusal()
+        self._current(principal)
+        return binding
+
+    def _fresh_native(self, principal):
+        """Select the original installed native binding; browser input grants nothing."""
+        self._current(principal)
+        service = self._service
+        service._require_ceo_submit_admission()
+        service._require_current_autonomy()
+        service._require_coo_worker_composed()
+        binding = service._require_native_conversation_admission_binding()
+        from control_plane.executive_agent_capabilities import DSH_NATIVE_CONVERSATION_PROFILE_ID
+        if (not service.config.coo_autonomy_armed
+                or binding["operator_harness_armed"] is not True
+                or binding["operator_execution_profile_id"] != DSH_NATIVE_CONVERSATION_PROFILE_ID
+                or binding["operator_provider"] != "acp"
+                or not callable(self._app.session_bridge_provider_factory)
+                or not callable(service._ceo_ingress_dialogue_source_provider)):
+            raise ConversationRefusal()
+        service._require_company_answer_attention()
         self._current(principal)
         return binding
 
@@ -193,9 +217,9 @@ class FreshConversationOwner:
             result["canonical_membership"] = canonical
         return result
 
-    async def _preview(self, principal, request, workspace_principal):
-        args = admission_arguments(principal, request)
-        binding = self._fresh(principal)
+    async def _preview(self, principal, request, workspace_principal, *, schema=wire.SCHEMA):
+        args = admission_arguments(principal, request, schema=schema)
+        binding = self._fresh(principal, schema=schema)
         project = self._project(principal, workspace_principal, request["work_ref"])
         grounding = await ingress._observe_trusted_grounding(self._app.grounding_provider)
         intent_id = ceo_request.automated_intent_id(ceo_request.app_request_ref(args["operation_key"]))
@@ -204,7 +228,7 @@ class FreshConversationOwner:
         if (await ingress._observe_trusted_grounding(self._app.grounding_provider) != grounding
                 or await ingress._observe_dialogue_source(provider, intent_id=intent_id,
                     work_ref=request["work_ref"]) != source
-                or self._fresh(principal) != binding
+                or self._fresh(principal, schema=schema) != binding
                 or self._project(principal, workspace_principal, request["work_ref"]) != project):
             raise ConversationRefusal("context_changed")
         material = {"arguments": args, "binding": binding,
@@ -215,18 +239,25 @@ class FreshConversationOwner:
             "grounding": grounding, "attempt_limit": 1,
             "worker_account": "REGISTERED_NOT_SESSION_ATTESTED"}, material
 
-    def _response(self, request, state, *, effect="NONE", **extra):
+    def _response(self, request, state, *, effect="NONE", _schema=wire.SCHEMA, **extra):
+        if _schema == wire.NATIVE_SCHEMA:
+            value = dict(schema=wire.NATIVE_DATA_SCHEMA, operation_key=request.get("operation_key"),
+                reference=request.get("reference"), work_ref=request["work_ref"], state=state, effect=effect,
+                parent_consumed=False, preview=None, locator=None, session=None, active_turn=None,
+                result=None, head_result=None, can_send=False, can_resume=False, can_stop=False)
+            value.update(extra)
+            return wire.validate_native_data(value, request)
         value = dict(schema=wire.DATA_SCHEMA, operation_key=request["operation_key"],
             work_ref=request["work_ref"], state=state, effect=effect,
             parent_consumed=False, preview=None, locator=None, session=None, result=None, can_send=False)
         value.update(extra)
         return wire.validate_data(value, request)
 
-    async def preview(self, principal, request, *, workspace_principal):
-        request = wire.validate_request(request, operation="preview")
-        preview, _ = await self._preview(principal, request, workspace_principal)
+    async def preview(self, principal, request, *, workspace_principal, _schema=wire.SCHEMA):
+        request = wire.validate_request(request, operation="preview", schema=_schema)
+        preview, _ = await self._preview(principal, request, workspace_principal, schema=_schema)
         self._current(principal)
-        return self._response(request, "PREVIEW_READY", preview=preview)
+        return self._response(request, "PREVIEW_READY", preview=preview, _schema=_schema)
 
     async def _prepare_workspace(self, root, current):
         """One fresh root's existing credentialless allocator; no adoption/retry."""
@@ -253,7 +284,7 @@ class FreshConversationOwner:
             service._require_initial_coo_workspace(root)
             current()
 
-    def _require_fresh_original(self, root, principal, request, command):
+    def _require_fresh_original(self, root, principal, request, command, *, schema=wire.SCHEMA):
         from control_plane.fresh_conversation_admission import read_creation_restriction
         if root is None:
             raise ConversationRefusal("original_operation_mismatch")
@@ -261,17 +292,20 @@ class FreshConversationOwner:
             material = read_creation_restriction(self._runtime, root)
         except Exception:
             raise ConversationRefusal("original_operation_mismatch") from None
-        if (material is None or material["command_id"] != command
+        from control_plane.fresh_conversation_admission import SCHEMA, NATIVE_SCHEMA
+        expected = NATIVE_SCHEMA if schema == wire.NATIVE_SCHEMA else SCHEMA
+        if (schema not in {wire.SCHEMA, wire.NATIVE_SCHEMA}
+                or material is None or material["schema"] != expected or material["command_id"] != command
                 or material["work_ref"] != request["work_ref"]
                 or material["principal_scope_sha256"] != wire.canonical_digest(
                     {key: getattr(principal, key) for key in _IDENTITY})):
             raise ConversationRefusal("original_operation_mismatch")
         return material
 
-    async def create(self, principal, request, *, workspace_principal):
-        request = wire.validate_request(request, operation="create")
+    async def create(self, principal, request, *, workspace_principal, _schema=wire.SCHEMA):
+        request = wire.validate_request(request, operation="create", schema=_schema)
         self._current(principal)
-        args = admission_arguments(principal, request)
+        args = admission_arguments(principal, request, schema=_schema)
         operation = current_foreground_operation()
         operation.require_arguments(args)
         if (operation._runtime is not self._runtime
@@ -286,9 +320,9 @@ class FreshConversationOwner:
         material = None
         if existing is not None:
             self._require_fresh_original(self._runtime.jobs.get_job(existing["job_id"]),
-                principal, request, command)
+                principal, request, command, schema=_schema)
         if existing is None:
-            preview, material = await self._preview(principal, request, workspace_principal)
+            preview, material = await self._preview(principal, request, workspace_principal, schema=_schema)
             if preview["digest"] != request["preview_digest"]:
                 raise ConversationRefusal("context_changed")
 
@@ -303,7 +337,7 @@ class FreshConversationOwner:
             with scope:
                 operation.require_arguments(args)
                 self._current(principal)
-                if material is not None and self._fresh(principal) != material["binding"]:
+                if material is not None and self._fresh(principal, schema=_schema) != material["binding"]:
                     raise ConversationRefusal("context_changed")
                 if material is not None and self._project(principal, workspace_principal,
                         request["work_ref"]) != material["project"]:
@@ -320,7 +354,7 @@ class FreshConversationOwner:
             envelope = ingress._build_envelope({key: value for key, value in args.items() if key != "operation_key"},
                 intent_id=intent_id, workspace_root=self._service.config.proof_workspace_root,
                 grounding=material["grounding"], strict_v2=True)
-            creation_source = _issue_creation_source(self, operation, dict(schema=SCHEMA,
+            creation_material = dict(schema=SCHEMA,
                 intent_id=intent_id, command_id=command, work_ref=request["work_ref"],
                 intent_fingerprint=ceo_intent.intent_fingerprint(envelope),
                 arguments_sha256=operation._arguments_sha256,
@@ -329,7 +363,11 @@ class FreshConversationOwner:
                 project_sha256=wire.canonical_digest(material["project"]),
                 dialogue_source_sha256=wire.canonical_digest(material["source"]),
                 host_binding_sha256=wire.canonical_digest(material["binding"]),
-                principal_expires_at=principal.expires_at), current,
+                principal_expires_at=principal.expires_at)
+            if _schema == wire.NATIVE_SCHEMA:
+                from control_plane.fresh_conversation_admission import native_input_material
+                creation_material.update(native_input_material(request["message"]))
+            creation_source = _issue_creation_source(self, operation, creation_material, current,
                 public_operation_key=request["operation_key"],
                 project_principal=principal if "canonical_membership" in material["project"] else None,
                 workspace_principal=workspace_principal if "canonical_membership" in material["project"] else None)
@@ -349,18 +387,22 @@ class FreshConversationOwner:
                     workspace_root=self._service.config.proof_workspace_root,
                     service_state=self._service._service_state, ceo_ingress_armed=self._app.armed,
                     strict_v2_admission=True,
-                    execution_binding_provider=lambda: (current(), self._fresh(principal))[1],
+                    execution_binding_provider=lambda: (current(), self._fresh(principal, schema=_schema))[1],
                     dialogue_source_provider=self._service._ceo_ingress_dialogue_source_provider,
                     admission_guard=current, fresh_admission_observer=admitted,
                     fresh_conversation_source=creation_source)
                 self._require_fresh_original(self._runtime.jobs.get_job(receipt["job_id"]),
-                    principal, request, command)
+                    principal, request, command, schema=_schema)
                 if receipt.get("duplicate") is False:
                     root_id = receipt["job_id"]
                     operation.require_root(root_id)
                     current()
                     root = self._runtime.jobs.get_job(root_id)
-                    self._service._native_return_source(root)
+                    if _schema == wire.SCHEMA:
+                        self._service._native_return_source(root)
+                    else:
+                        from control_plane.fresh_conversation_admission import require_original_creation_request
+                        require_original_creation_request(self._runtime, root, operation)
                     await self._prepare_workspace(root, current)
                     # Exactly two existing transitions, never the paid-work
                     # foreground loop and never a retry/continuation scheduler.
@@ -372,7 +414,7 @@ class FreshConversationOwner:
                     current()
             return await self.status(principal,
                 {key: request[key] for key in ("work_ref", "operation_key")},
-                _effect="ADMITTED" if receipt.get("duplicate") is False else "NONE")
+                _effect="ADMITTED" if receipt.get("duplicate") is False else "NONE", _schema=_schema)
         except ingress.CeoIngressError as exc:
             # Only the existing canonical owner may establish its pre-effect
             # classification; an entered sink/dispatch uncertainty stays unknown.
@@ -384,8 +426,11 @@ class FreshConversationOwner:
             raise ConversationRefusal("effect_unknown" if entered else "conversation_unavailable",
                 effect="UNKNOWN" if entered else "NONE") from None
 
-    async def status(self, principal, request, *, _effect="NONE", include_result=False):
-        request = wire.validate_request(request, operation="read" if include_result else "status")
+    async def status(self, principal, request, *, _effect="NONE", include_result=False, _schema=wire.SCHEMA):
+        request = wire.validate_request(request, operation="read" if include_result else "status", schema=_schema)
+        if _schema == wire.NATIVE_SCHEMA:
+            from control_plane.fresh_conversation_native import read_native_status
+            return await read_native_status(self, principal, request, effect=_effect)
         self._current(principal, read_only=True)
         key = scoped_operation_key(principal, request["operation_key"])
         intent_id = ceo_request.automated_intent_id(ceo_request.app_request_ref(key))
@@ -448,8 +493,8 @@ class FreshConversationOwner:
         return self._response(request, state, effect=_effect, locator=locator,
             session=session, result=result, can_send=False)
 
-    async def read(self, principal, request):
-        return await self.status(principal, request, include_result=True)
+    async def read(self, principal, request, *, _schema=wire.SCHEMA):
+        return await self.status(principal, request, include_result=True, _schema=_schema)
 
     async def handle_frame(self, frame, *, host_current, reader=None):
         """Fixed installed App-peer entry on the incumbent private listener.
@@ -460,6 +505,9 @@ class FreshConversationOwner:
         as existing foreground admission; a one-shot/EOF caller cannot create.
         """
         operation, entered = None, False
+        schema = wire.NATIVE_SCHEMA if type(frame) is dict and frame.get("schema") == wire.NATIVE_SCHEMA else wire.SCHEMA
+        result_schema = wire.NATIVE_RESULT_SCHEMA if schema == wire.NATIVE_SCHEMA else wire.RESULT_SCHEMA
+        passive = wire.NATIVE_PASSIVE if schema == wire.NATIVE_SCHEMA else {"status", "read", "turn_status", "turn_read", "consume_status"}
         try:
             frame = wire.validate_private_frame(frame)
             operation = frame["operation"]
@@ -469,7 +517,7 @@ class FreshConversationOwner:
             workspace = projection(frame["workspace_principal"]) if frame["workspace_principal"] is not None else None
             if not callable(host_current) or host_current() is not None:
                 raise ConversationRefusal()
-            self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read", "consume_status"})
+            self._current(principal, read_only=operation in passive)
             if operation == "create":
                 if reader is None:
                     raise ConversationRefusal()
@@ -478,23 +526,28 @@ class FreshConversationOwner:
                     _session_bridge_foreground_dispatch, _observe_private_request_end,
                 )
                 original = dict(schema=PRIVATE_SCHEMA, tool="session_summon",
-                    principal=frame["principal"], arguments=admission_arguments(principal, frame["arguments"]))
+                    principal=frame["principal"], arguments=admission_arguments(principal, frame["arguments"], schema=schema))
                 command = ceo_intent.command_id_for(ceo_request.automated_intent_id(
                     ceo_request.app_request_ref(original["arguments"]["operation_key"])))
                 fresh = self._runtime.store.find_event_by_command_id(command) is None
-                binding = self._fresh(principal) if fresh else None
+                binding = self._fresh(principal, schema=schema) if fresh else None
                 project = self._project(principal, workspace, frame["arguments"]["work_ref"]) if fresh else None
                 def creation_current():
                     if host_current() is not None:
                         raise ConversationRefusal()
                     self._current(principal)
-                    if fresh and (self._fresh(principal) != binding
+                    if fresh and (self._fresh(principal, schema=schema) != binding
                             or self._project(principal, workspace, frame["arguments"]["work_ref"]) != project):
                         raise ConversationRefusal("context_changed")
                 async with _session_bridge_foreground_dispatch(self._runtime, original, creation_current) as live:
                     async with _observe_private_request_end(live, reader):
                         entered = True
-                        value = await self.create(principal, frame["arguments"], workspace_principal=workspace)
+                        value = await self.create(principal, frame["arguments"], workspace_principal=workspace, _schema=schema)
+            elif schema == wire.NATIVE_SCHEMA and operation not in {"preview", "status", "read"}:
+                from control_plane.fresh_conversation_native import handle_native_followup
+                entered = operation in wire.NATIVE_MODIFYING
+                value = await handle_native_followup(self, principal, workspace, frame["arguments"],
+                    operation=operation, host_current=host_current, reader=reader)
             elif operation == "consume_status":
                 from control_plane.fresh_conversation_consumption import read_consumption
                 value = read_consumption(self, principal, frame["arguments"])
@@ -525,25 +578,28 @@ class FreshConversationOwner:
                     value = {**value, "operation_key": None, "reference": reference}
                 value = wire.validate_data(value, frame["arguments"])
             elif operation == "preview":
-                value = await self.preview(principal, frame["arguments"], workspace_principal=workspace)
+                value = await self.preview(principal, frame["arguments"], workspace_principal=workspace, _schema=schema)
             elif operation == "status":
-                value = await self.status(principal, frame["arguments"])
+                value = await self.status(principal, frame["arguments"], _schema=schema)
             else:
-                value = await self.read(principal, frame["arguments"])
+                value = await self.read(principal, frame["arguments"], _schema=schema)
             try:
                 if host_current() is not None:
                     raise ConversationRefusal()
-                self._current(principal, read_only=operation in {"status", "read", "turn_status", "turn_read", "consume_status"})
+                self._current(principal, read_only=operation in passive)
             except Exception:
                 raise ConversationRefusal("effect_unknown" if entered else "conversation_unavailable",
                     effect="UNKNOWN" if entered else "NONE") from None
-            return dict(schema=wire.RESULT_SCHEMA, operation=operation, ok=True, data=value, error=None)
+            result = dict(schema=result_schema, operation=operation, ok=True, data=value, error=None)
+            if schema == wire.NATIVE_SCHEMA:
+                wire.validate_native_response(result, frame["arguments"], operation=operation)
+            return result
         except ConversationRefusal as exc:
             code = "effect_unknown" if exc.effect == "UNKNOWN" else exc.code
         except (ValueError, TypeError):
             code = "effect_unknown" if entered else "invalid_input"
         except Exception:
             code = "effect_unknown" if entered else "conversation_unavailable"
-        return dict(schema=wire.RESULT_SCHEMA, operation=operation, ok=False, data=None,
+        return dict(schema=result_schema, operation=operation, ok=False, data=None,
             error=dict(code=code, message="Reconcile the original conversation operation" if code == "effect_unknown"
                 else "Conversation authority or source unavailable"))

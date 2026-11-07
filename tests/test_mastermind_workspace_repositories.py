@@ -939,3 +939,53 @@ def test_reinstall_refuses_changed_payload_without_overwrite(tmp_path, fleet):
     assert "PAYLOAD_MISMATCH" in second.stderr
     assert launcher.read_bytes() == before
     assert changed.read_bytes() == b"# different generation bytes\n"
+
+
+@pytest.mark.parametrize("change,dirty", [
+    ("clean", False), ("tracked", True), ("untracked", True),
+    ("ignored_nested", True), ("empty", False),
+])
+def test_status_presence_matches_full_inventory_without_expanding_ignored_trees(fleet, change, dirty):
+    """Actual Git presence is equivalent; release inventories still contain files."""
+    from control_plane import executive_workspace as workspace
+
+    repos, _, root, _ = fleet
+    operation = "status-presence-" + change
+    code, created = acquire(fleet, "macro", operation)
+    assert code == 0, created
+    destination = Path(created["receipt"]["workspace_path"])
+    if change == "tracked":
+        (destination / "README.md").write_text("changed\n")
+    elif change == "untracked":
+        path = destination / "untracked directory" / "nested" / "source.txt"
+        path.parent.mkdir(parents=True)
+        path.write_text("retain exact source\n")
+    elif change == "ignored_nested":
+        common = Path(git(repos["macro"][0], "rev-parse", "--git-common-dir"))
+        if not common.is_absolute():
+            common = repos["macro"][0] / common
+        (common / "info" / "exclude").write_text("ignored dependency/\n")
+        for index in range(20):
+            path = destination / "ignored dependency" / "nested" / (str(index) + ".js")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("ignored still means dirty\n")
+        assert git(destination, "status", "--porcelain") == ""
+    elif change == "empty":
+        (destination / "empty ignored directory" / "nested").mkdir(parents=True)
+
+    full = git(destination, "ls-files", "--others", "-z")
+    compact = git(destination, "ls-files", "--others", "--directory", "--no-empty-directory", "-z")
+    assert bool(full) == bool(compact)
+    if change == "ignored_nested":
+        assert "nested/0.js" in full
+        assert compact == "ignored dependency/\0"
+        assert workspace.LAUNCH_CLEAN_UNTRACKED_ARGS == ("ls-files", "--others", "-z")
+    for direct in (False, True):
+        result = workspace.inspect_linked_worktree(
+            repos["macro"][0], root / "macro", destination,
+            expected_operation_id=operation, status_direct_registration=direct,
+        )
+        assert result.dirty is dirty
+        assert result.removed is False
+        assert result.head_sha == repos["macro"][1]
+        assert result.branch == "sol/web-" + operation

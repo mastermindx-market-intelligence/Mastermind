@@ -56,7 +56,7 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending(tm
         assert read_creation_restriction(runtime, job) is None
 
         class Supervisor:
-            async def start_retained_native_job(self, job, *, command_id):
+            async def start_retained_native_job(self, job, *, command_id, _active_turn_observer=None):
                 calls.append("start")
                 return retained
 
@@ -83,6 +83,7 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending(tm
                 return _canonical_reply()
 
         class DummyService:
+            _native_initial_turn_observer = ExecutiveControlService._native_initial_turn_observer
             _service_state = "READY"
             _closing = False
             _dispatch_errors = {}

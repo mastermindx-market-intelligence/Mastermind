@@ -16,8 +16,8 @@ function pair() {
   host.on("error",()=>{});client.on("error",()=>{});
   return {host,client};
 }
-async function harness(answer?:string) {
-  const h = await nativeFixture(answer); cleanup.push(h.close);
+async function harness(answer?:string, options?: Parameters<typeof nativeFixture>[1]) {
+  const h = await nativeFixture(answer, options); cleanup.push(h.close);
   const ports = pair(), generation = new AbortController();
   let current = true;
   const source: InstalledNativeReadSource = {association:testAssociation(),signal:generation.signal,
@@ -148,5 +148,121 @@ it("preserves the original native before-first-event history cursor",async()=>{
   });
   const response=await send(h,value);
   expect(response.status).toBe("READ");expect(response.data.page.records).toEqual([]);
+  expect(await disk(h.root)).toEqual(h.before);
+});
+
+
+function resultRead(h: Awaited<ReturnType<typeof harness>>) {
+  const claim = {schema:"mastermind.dsh.native_prompt_claim.v1",
+    operationId:"original-result",requestId:7,sessionId:h.id,messageId:h.originalMessage.id,
+    nativeTurn:1,throughSeq:0};
+  const last = h.originalRecords[h.originalRecords.length - 1];
+  const terminal = {schema:"mastermind.dsh.native_prompt_terminal.v1",
+    operationId:claim.operationId,requestId:claim.requestId,claim,
+    throughSeq:last.seq,observedLastTurn:(last.data as any).turn,
+    observedTurnCount:h.originalRecords.filter(row=>row.type==="turn/start").length};
+  return {kind:"result",claim,terminal,offset_bytes:0,expected_sha256:null as string|null};
+}
+
+it("reconstructs an oversized original answer through the real cold owner without substituting a later turn",async()=>{
+  const answer=" \n"+"界🪐".repeat(20000)+"  \n",h=await harness(answer,{laterAnswer:"THIS IS A DIFFERENT TURN"});
+  const create=vi.spyOn(h.ctx.agents,"create"),resume=vi.spyOn(h.ctx.agents,"resume");
+  const selected=resultRead(h),chunks:Buffer[]=[];
+  let nativeReadFailure:unknown;
+  const invoke=h.ctx.typertGateway.invoke.bind(h.ctx.typertGateway);
+  vi.spyOn(h.ctx.typertGateway,"invoke").mockImplementation(async args=>{
+    try {return await invoke(args);}
+    catch(error){nativeReadFailure=error;throw error;}
+  });
+  let originalDigest:string|undefined, metadata:any;
+  for(let count=0;count<256;count++){
+    const value=await send(h,request(h.source.association,{read:selected}));
+    if(value.status!=="READ" && nativeReadFailure)throw nativeReadFailure;
+    expect(value.status).toBe("READ");
+    expect(Buffer.byteLength(JSON.stringify(value)+"\n")).toBeLessThan(32768);
+    const data=value.data,part=data.content;
+    expect(data.state).toBe("CONTENT");
+    expect(data.claim).toEqual(selected.claim);expect(data.terminal).toEqual(selected.terminal);
+    expect(data.user_message_seq).toBeGreaterThan(selected.claim.throughSeq);
+    expect(data.turn_start_seq).toBe(0);expect(data.turn_end_seq).toBe(5);
+    expect(data.assistant_message_seqs).toEqual([3]);
+    expect(part.offset_bytes).toBe(selected.offset_bytes);
+    expect(part.encoding).toBe("base64");
+    const chunk=Buffer.from(part.data,"base64");expect(chunk.byteLength).toBeGreaterThan(0);
+    expect(chunk.byteLength).toBeLessThanOrEqual(4096);chunks.push(chunk);
+    if(originalDigest===undefined){originalDigest=part.sha256;metadata=part;}
+    expect(part.sha256).toBe(originalDigest);
+    if(part.next_offset_bytes===null)break;
+    selected.offset_bytes=part.next_offset_bytes;selected.expected_sha256=part.sha256;
+  }
+  const bytes=Buffer.concat(chunks);
+  expect(bytes.byteLength).toBe(metadata.total_bytes);
+  expect(bytes.byteLength).toBeGreaterThan(131072);
+  const {createHash}=await import("node:crypto");
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(originalDigest);
+  const content=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));
+  expect(content.records.map((row:any)=>row.event.seq)).toEqual([0,1,2,3,4,5]);
+  expect(content.records[3].event.data.message.content[0].text).toBe(answer);
+  expect(content.records[3].event.data.stream[0].texts).toEqual(["Native answer"," retained"," — 原样保留"]);
+  expect(bytes.toString("utf8")).not.toContain("THIS IS A DIFFERENT TURN");
+  expect(create).not.toHaveBeenCalled();expect(resume).not.toHaveBeenCalled();
+  expect(h.ctx.sessions.get(h.id)).toBeUndefined();expect(h.ctx.agents.get(h.id)).toBeUndefined();
+  expect(await disk(h.root)).toEqual(h.before);
+});
+
+it("returns explicit no-answer for the original blocked pre-step claim",async()=>{
+  const h=await harness(undefined,{blocked:true}),selected=resultRead(h);
+  const value=await send(h,request(h.source.association,{read:selected}));
+  expect(value).toMatchObject({status:"READ",data:{kind:"result",state:"NO_ANSWER",
+    turn_start_seq:0,turn_end_seq:1,user_message_seq:null,assistant_message_seqs:[],content:null}});
+  expect(await disk(h.root)).toEqual(h.before);
+});
+
+it.each(["message","session","digest","offset"] as const)(
+  "withholds original result bytes after %s substitution",async(fault)=>{
+    const h=await harness(),selected=resultRead(h);
+    if(fault==="message"){selected.claim.messageId="foreign-message";}
+    if(fault==="session"){selected.claim.sessionId="foreign-session";}
+    if(fault==="digest"){selected.expected_sha256="0".repeat(64);}
+    if(fault==="offset"){selected.offset_bytes=4000000;selected.expected_sha256="0".repeat(64);}
+    const value=await send(h,request(h.source.association,{read:selected}));
+    expect(value).toMatchObject({status:"UNAVAILABLE",data:null});
+    expect(await disk(h.root)).toEqual(h.before);
+  });
+
+it("withdraws result content when the original read authority changes during the cold page",async()=>{
+  const h=await harness(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const invoke=h.ctx.typertGateway.invoke.bind(h.ctx.typertGateway);
+  vi.spyOn(h.ctx.typertGateway,"invoke").mockImplementation(async args=>{
+    const result=await invoke(args);entered.resolve();await release.promise;return result;
+  });
+  const response=send(h,request(h.source.association,{read:resultRead(h)})).then(value=>({value}),error=>({error}));
+  await entered.promise;h.setCurrent(false);release.resolve();
+  expect(await response).toHaveProperty("error");
+  expect(h.host.destroyed).toBe(true);expect(await disk(h.root)).toEqual(h.before);
+});
+
+
+it("retains native runtime-context records without confusing them with the claimed user message",async()=>{
+  const h=await harness(undefined,{runtimeContext:true}),selected=resultRead(h);
+  const value=await send(h,request(h.source.association,{read:selected}));
+  expect(value.status).toBe("READ");expect(value.data.state).toBe("CONTENT");
+  expect(value.data.user_message_seq).toBe(2);expect(value.data.assistant_message_seqs).toEqual([4]);
+  expect(value.data.content.next_offset_bytes).toBeNull();
+  const records=JSON.parse(Buffer.from(value.data.content.data,"base64").toString("utf8")).records;
+  const users=records.filter((row:any)=>row.event.type==="user/message");
+  expect(users).toHaveLength(2);
+  expect(users[0].event.data.id).toBe(selected.claim.messageId);
+  expect(users[1].event.data.source.kind).toBe("runtime-context");
+  expect(users[1].event.data.content[0].text).toBe("Actual native runtime context");
+  expect(await disk(h.root)).toEqual(h.before);
+});
+
+it.each(["completed","aborted"] as const)("reports the exact closed empty %s original turn without inventing text",async emptyReason=>{
+  const h=await harness(undefined,{emptyReason}),selected=resultRead(h);
+  const value=await send(h,request(h.source.association,{read:selected}));
+  expect(value).toMatchObject({status:"READ",data:{kind:"result",state:"NO_ANSWER",
+    turn_start_seq:0,turn_end_seq:emptyReason==="aborted"?3:1,
+    user_message_seq:null,assistant_message_seqs:[],content:null}});
   expect(await disk(h.root)).toEqual(h.before);
 });

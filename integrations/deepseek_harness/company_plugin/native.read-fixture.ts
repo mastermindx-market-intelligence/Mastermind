@@ -52,25 +52,50 @@ export async function disk(root: string): Promise<Record<string,string>> {
   }
   await walk(root); return files;
 }
-export async function nativeFixture(answer = "Native answer retained — 原样保留") {
+export async function nativeFixture(answer = "Native answer retained — 原样保留", options: {blocked?: boolean; laterAnswer?: string; runtimeContext?: boolean; sessionId?: string; question?: string; emptyReason?: 'completed'|'aborted'} = {}) {
   const root = await mkdtemp(join(tmpdir(), "mmx-executive-native-read-"));
   const ctx = new Context();
-  const id = SessionId("company-bound-original");
+  const id = SessionId(options.sessionId ?? "company-bound-original");
   try {
     await ctx.plugin(SessionStore); await ctx.plugin(AgentRegistry); await ctx.plugin(TypertRegistry);
     await ctx.plugin(JsonlPersistence, {root});
     const seed = Session.create(id);
-    seed.append("turn/start", {turn:1}); seed.append("step/start", {turn:1, step:1});
-    seed.append("user/message", createUserMessage({
-      content:[{type:"text", text:"Original question — 原始问题"}], source:{kind:"user"},
-    }), {surfaceOp:"append"});
-    seed.append("assistant/message", {turn:1, step:1, message:createMessage({
-      role:"assistant", content:[{type:"text", text:answer}],
-      source:{kind:"model", provider:"fixture", model:"fixture"},
-    }), stream:[{type:"text-chunks", time0:1, index:0, dt:[1,1],
-      texts:["Native answer", " retained", " — 原样保留"]}]}, {surfaceOp:"append"});
-    seed.append("step/end", {turn:1, step:1});
-    seed.append("turn/end", {turn:1, reason:{kind:"completed"}});
+    seed.append("turn/start", {turn:1});
+    const originalMessage = createUserMessage({
+      content:[{type:"text", text:options.question ?? "Original question — 原始问题"}], source:{kind:"user"},
+    });
+    if (!options.blocked && !options.emptyReason) {
+      seed.append("step/start", {turn:1, step:1});
+      seed.append("user/message", originalMessage, {surfaceOp:"append"});
+      if (options.runtimeContext) seed.append("user/message", createUserMessage({
+        content:[{type:"text",text:"Actual native runtime context"}], source:{kind:"runtime-context"},
+      }), {surfaceOp:"append"});
+      seed.append("assistant/message", {turn:1, step:1, message:createMessage({
+        role:"assistant", content:[{type:"text", text:answer}],
+        source:{kind:"model", provider:"fixture", model:"fixture"},
+      }), stream:[{type:"text-chunks", time0:1, index:0, dt:[1,1],
+        texts:["Native answer", " retained", " — 原样保留"]}]}, {surfaceOp:"append"});
+      seed.append("step/end", {turn:1, step:1});
+    }
+    if (options.emptyReason === "aborted") {
+      seed.append("step/start", {turn:1, step:1}); seed.append("step/end", {turn:1, step:1});
+    }
+    seed.append("turn/end", {turn:1, reason:options.emptyReason === "aborted" ?
+      {kind:"aborted",reason:{kind:"user"}} : {kind:options.blocked ? "blocked" : "completed"}});
+    if (options.laterAnswer !== undefined) {
+      seed.append("turn/start", {turn:2}); seed.append("step/start", {turn:2, step:1});
+      seed.append("user/message", createUserMessage({
+        content:[{type:"text", text:"Later question"}], source:{kind:"user"},
+      }), {surfaceOp:"append"});
+      seed.append("assistant/message", {turn:2, step:1, message:createMessage({
+        role:"assistant", content:[{type:"text", text:options.laterAnswer}],
+        source:{kind:"model", provider:"fixture", model:"fixture"},
+      }), stream:[{type:"text-chunks", time0:1, index:0, dt:[], texts:[options.laterAnswer]}]}, {surfaceOp:"append"});
+      seed.append("step/end", {turn:2, step:1});
+      seed.append("turn/end", {turn:2, reason:{kind:"completed"}});
+    }
+    const originalRecords = seed.snapshotEvents();
+
     const writer = await ctx.sessionPersistence.create({...seed.header, cwd:"/fixture/company-workspace"});
     try { await writer.append(seed.snapshotEvents()); await writer.flush(); }
     finally { await writer.close(); }
@@ -84,7 +109,7 @@ export async function nativeFixture(answer = "Native answer retained — 原样�
     provideBrowserCredentials(ctx); await ctx.plugin(Connection); await ctx.plugin(TypertGatewayService);
     // This original native writer stays held during every company cold read.
     const held = await ctx.sessionPersistence.open(id, "write");
-    return {ctx, root, id, before:await disk(root), async close() {
+    return {ctx, root, id, originalMessage, originalRecords, before:await disk(root), async close() {
       await held.close(); await ctx.fiber.dispose(); await rm(root, {recursive:true, force:true});
     }};
   } catch (error) {

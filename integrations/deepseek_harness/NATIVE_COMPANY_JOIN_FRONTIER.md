@@ -264,3 +264,61 @@ This C4 package remains its original snapshot with both host exports. Later
 complete package receipts; they do not relabel these bytes. Protected-source
 acceptance, publication export, installation and the production journeys above
 remain distinct gates.
+
+## Retained native OHF adapter and result transport — 2026-11-07
+
+The source-frozen composed qualification in
+`runtime_compat/evidence/native-operator-20261107.json` passed **502 cases,
+zero failures/errors/skips**. It includes the original full application through
+`NativeOperatorAdapter`: Session
+`cfc47265-8ade-40e4-948d-a3950b4f557e`, native turn 1, partial stream,
+exact Stop, persisted terminal, original close/flush and natural process/group
+exit, then exact cold resume and native turn 2. Authority/attestation callbacks
+in this fixture are explicit laboratory inputs, not installed Executive,
+account, capability or confinement proof.
+
+The adapter runs on the incumbent broker's event loop through its existing
+`to_thread` calls. The original process and SDK request/Stop/close tasks remain
+owned after timeouts. The SDK sender queues messages, so current authority is
+checked again immediately before its original socket write. Closing never
+replaces a queued prompt's guard with a weaker cleanup permission. Provider
+reachability remains unknown without a current protocol observation; writer
+release requires original clean close, protocol/physical settlement, zero exit,
+no forced signal, and positive absence of the original private process group.
+
+The existing candidate type is unchanged. A closed native result observation
+carries the original claim, flushed terminal prefix, stop reason and their
+actual digest. Broker and remote transport accept exactly their selected native
+or role result variant. Native results cannot be decoded as planner output.
+The original Runtime TX5 receipt validator was extracted without changing its
+checks; native Runtime sealing and retained/foreground consumers are still open.
+
+The separate `config/executive_dsh_native_conversation_capabilities.json`
+declares a **disabled** candidate. It retains the account realm and original
+`mastermind-company` plugin identity. It is absent from the default registry
+and adapter admission map; `resolve()` refuses it, including an attempted
+config-only enablement. It grants no tools and does not attest an installed
+bundle. Existing capability policy identities remain covered by the incumbent
+exact-digest tests.
+
+The incumbent v3 access/package qualification is separately recorded in
+`runtime_compat/evidence/native-owner-access-v3-20261107.json`, source commit
+`618a775edc7d3d96ef6b15d39f270f0ff57acf13`. The encoded upload's retained
+authorization question now preserves `request.data`; the paused-storage
+withdrawal test observes zero staged receipts. Its original full package build
+completed with unchanged inputs and includes the native ACP lifecycle patch.
+The package is not installed and this is not signed-in production acceptance.
+
+### Next required consumer work
+
+1. Seal native per-turn results in the original Runtime Events owner, joined to
+   the exact immutable interactive creator/profile, TX5 and candidate evidence.
+2. Preserve the historical initial result separately from the current successor
+   writer during cold recovery, then join authenticated foreground Send/resume/
+   Stop to those original owners.
+3. Supply actual installed company/current-generation, account, capabilities and
+   confinement observations; qualify eligible governed tools through their
+   incumbent admission contracts.
+4. Execute the signed-in production journey and reconcile current CI, source
+   release and installed revision. Local native or browser success alone
+   cannot close this frontier.

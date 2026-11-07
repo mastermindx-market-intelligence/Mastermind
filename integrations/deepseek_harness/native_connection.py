@@ -44,11 +44,14 @@ class _Prompt:
 class NativeClient(ProbeClient):
     """Finite native observations; permissions and unrelated extensions deny."""
 
-    def __init__(self, on_update: Callable[[dict[str, Any]], None] | None = None):
+    def __init__(self, on_update: Callable[[dict[str, Any]], None] | None = None, *,
+                 before_send: Callable[[str], None] | None = None,
+                 before_write: Callable[[], None] | None = None):
         super().__init__(ProbeLimits(frames=4096, text_bytes=1024*1024, updates=4096))
         self.current: _Prompt | None = None
         self.turns = 0
         self.on_update = on_update
+        self.before_send, self.before_write = before_send, before_write
         self.advertised = False
 
     def begin_native_prompt(self, operation_id: str) -> _Prompt:
@@ -170,6 +173,8 @@ class NativeTransport:
 
     async def send(self, message: dict[str, Any]) -> None:
         self.client.bind_outgoing(message)
+        if self.client.before_send is not None:
+            self.client.before_send(message.get("method", ""))
         await self.transport.send(message)
 
     async def receive(self) -> dict[str, Any] | None:
@@ -177,6 +182,27 @@ class NativeTransport:
 
     async def close(self) -> None:
         await self.transport.close()
+
+
+class NativeWriteGuard:
+    """Recheck the retained owner at the SDK sender's actual synchronous write.
+
+    MessageSender owns its existing queue and payloads. No bytes are parsed here.
+    The callback must cover all queued writes; there is no cleanup bypass.
+    """
+    def __init__(self, writer: Any, require_current: Callable[[], None]):
+        self.writer, self.require_current = writer, require_current
+
+    def write(self, data: bytes) -> None:
+        outcome = self.require_current()
+        if outcome is not None:
+            if asyncio.iscoroutine(outcome):
+                outcome.close()
+            raise NativeProtocolError("NATIVE_WRITE_GUARD_MUST_BE_SYNCHRONOUS")
+        self.writer.write(data)  # no await between currentness and physical write
+
+    def __getattr__(self, name):
+        return getattr(self.writer, name)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -248,7 +274,9 @@ class NativeAcpProcess:
             self.sender_tasks = TaskSupervisor(source="mastermind-native-acp")
             transport = NdjsonTransport(
                 StrictFrameReader(reader, self.client, extension_policy=self.client),
-                MessageSender(self.writer, self.sender_tasks), receive_timeout=None,
+                MessageSender(NativeWriteGuard(self.writer, self.client.before_write)
+                              if self.client.before_write is not None else self.writer,
+                              self.sender_tasks), receive_timeout=None,
             )
             self.connection = connect_to_agent(self.client, NativeTransport(transport, self.client),
                                                observers=[self.client.observe_wire])

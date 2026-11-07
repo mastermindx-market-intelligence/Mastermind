@@ -20,6 +20,9 @@ from control_plane.executive_runtime import (
 )
 from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.native_conversation_result import (
+    NativeConversationResultObservation, NativeConversationResultRef, result_contract_for_profile,
+)
 from control_plane.operator_harness_contract import (
     CandidateResult,
     CheckpointObservation,
@@ -202,7 +205,7 @@ class ExecutiveOperatorHarnessPort:
             ).fetchone()
             if job is None:
                 raise StateConflict("interactive seal lost its Job")
-            if not _interactive_tx5_admitted(job):
+            if not _interactive_tx5_admitted(job, connection=connection):
                 return None
             registry._owned_generation(
                 connection, leased=row, epoch=epoch, generation=generation,
@@ -301,6 +304,28 @@ class ExecutiveOperatorHarnessPort:
             lease_token=self.lease_token,
         )
 
+    def operator_result_contract(self, attempt_id: str) -> str:
+        self._require_attempt(attempt_id)
+        attempt = self.runtime.attempts.get_attempt(attempt_id)
+        if attempt is None or attempt.job_id != self.lease.attempt.job_id:
+            raise StateConflict("operator result Attempt identity differs")
+        contract = self.runtime.jobs.operator_result_contract(attempt.job_id)
+        from control_plane.operator_harness_wire import requested_execution_profile
+        if result_contract_for_profile(requested_execution_profile(
+                attempt.requested_execution_profile)) != contract:
+            raise StateConflict("sealed profile differs from original result contract")
+        return contract
+
+    def seal_operator_native_result(
+        self, attempt_id: str, turn: TurnRef, observation: NativeConversationResultObservation,
+    ) -> NativeConversationResultRef:
+        self._require_attempt(attempt_id)
+        if turn.attempt_id != attempt_id:
+            raise StateConflict("native result turn is outside the bound Attempt")
+        return self.runtime.operator_harness.seal_native_conversation_result(
+            turn=turn, observation=observation,
+            fence_generation=self.fence_generation, lease_token=self.lease_token)
+
     def seal_operator_role_result(
         self,
         attempt_id: str,
@@ -321,6 +346,9 @@ class ExecutiveOperatorHarnessPort:
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         operation_kind: str,
+        *,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> None:
         self._require_attempt(attempt_id)
         self.runtime.operator_harness.reserve_generation_operation(
@@ -329,6 +357,8 @@ class ExecutiveOperatorHarnessPort:
             operation_kind=operation_kind,
             fence_generation=self.fence_generation,
             lease_token=self.lease_token,
+            native_idle_result=native_idle_result,
+            native_terminal_result=native_terminal_result,
         )
 
     def begin_operator_checkpoint(
@@ -367,6 +397,9 @@ class ExecutiveOperatorHarnessPort:
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         observation: ReconcileObservation,
+        *,
+        native_idle_result: NativeConversationResultRef | None = None,
+        native_terminal_result: NativeConversationResultRef | None = None,
     ) -> None:
         self._require_attempt(attempt_id)
         self.runtime.operator_harness.apply_generation_operation(
@@ -376,6 +409,8 @@ class ExecutiveOperatorHarnessPort:
             observation=observation,
             fence_generation=self.fence_generation,
             lease_token=self.lease_token,
+            native_idle_result=native_idle_result,
+            native_terminal_result=native_terminal_result,
         )
 
     def cancel_operator_generation(

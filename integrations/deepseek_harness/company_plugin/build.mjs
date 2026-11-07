@@ -42,7 +42,7 @@ await build({
 });
 const host=await readFile(join(outDir,"company-peer.js"));
 const port=await readFile(join(outDir,"executive-read-port.js"));
-const sources=["protocol.ts","index.ts","company-peer.ts","executive-read-port.ts","client/connection.ts","client/index.ts","client/styles.ts"];
+const sources=["protocol.ts","index.ts","company-peer.ts","executive-read-port.ts","native-result-content.ts","client/connection.ts","client/index.ts","client/styles.ts"];
 const sourceDigests={};
 for(const path of sources)sourceDigests["src/"+path]=sha(await readFile(join(packageDir,"src",path)));
 const manifest={

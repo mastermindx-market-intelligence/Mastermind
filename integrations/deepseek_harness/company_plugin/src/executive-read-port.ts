@@ -9,6 +9,7 @@ import {createScope} from "@deepseek-ai/dsh-scope";
 import type {SessionId} from "@deepseek-ai/dsh-session";
 import {createCompanySessionReadBridge, type CompanySessionReader} from "./company-peer";
 import {DONOR_SHA} from "./protocol";
+import {isNativeResultRead, readNativeResultContent, type NativeResultRead} from "./native-result-content";
 
 /** The caller mounts this leaf inside its original Cordis composition. */
 export const inject = ["connection", "remoteAccess", "typertGateway"] as const;
@@ -64,7 +65,7 @@ function association(value: InstalledNativeReadAssociation): void {
     throw new TypeError("Exact installed native read association required");
   }
 }
-type Read = {kind: "snapshot"} | {kind: "page"; through_seq: number; before_seq: number | null; max_messages: number};
+type Read = {kind: "snapshot"} | {kind: "page"; through_seq: number; before_seq: number | null; max_messages: number} | NativeResultRead;
 type Frame = {
   schema: typeof REQUEST; request_id: string; association_sha256: string;
   principal: {principal_scope: string; issued_at: number; expires_at: number};
@@ -80,6 +81,7 @@ function frame(value: unknown): value is Frame {
       value.principal.issued_at >= value.principal.expires_at) return false;
   const read = value.read;
   if (keys(read, ["kind"]) && read.kind === "snapshot") return true;
+  if (isNativeResultRead(read)) return true;
   return keys(read, ["kind", "through_seq", "before_seq", "max_messages"]) && read.kind === "page" &&
     (safe(read.through_seq) || read.through_seq === -1) && (read.before_seq === null || safe(read.before_seq) && read.before_seq <= read.through_seq + 1) &&
     safe(read.max_messages) && read.max_messages >= 1 && read.max_messages <= 8;
@@ -149,7 +151,7 @@ export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: Inst
         throw new Error("Native read invocation is unavailable");
     };
     let status: "READ" | "UNAVAILABLE" | "PAGE_TOO_LARGE" = "UNAVAILABLE";
-    let data: {projections: unknown; page: unknown} | null = null;
+    let data: {projections: unknown; page: unknown} | Awaited<ReturnType<typeof readNativeResultContent>> | null = null;
     try {
       requireRead();
       reader = bridge.open({
@@ -164,6 +166,8 @@ export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: Inst
         const page = projections?.kind === "sequenced"
           ? await reader.page({throughSeq: projections.asOfSeq, maxMessages: 8}, signal) : null;
         data = {projections, page};
+      } else if (request.read.kind === "result") {
+        data = await readNativeResultContent(reader, request.read, selected.native_session_id, signal, requireRead);
       } else {
         const read = request.read;
         data = {projections: null, page: await reader.page({

@@ -1,0 +1,29 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v3",
+  "policy_version": "2026-11-07.dsh-native-conversation-candidate",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "mcp_servers": {},
+  "resources": {},
+  "plugins": {},
+  "profiles": {
+    "operator.dsh.native-conversation.v1": {
+      "enabled": false,
+      "execution_surface": "dsh-native-web-acp",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "DISABLED",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [
+        "mastermind-company"
+      ],
+      "forbidden": []
+    }
+  }
+}

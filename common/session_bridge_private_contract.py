@@ -55,8 +55,13 @@ class SessionBridgeIngressOwner:
             raise BridgeError("invalid_input", "installed Session Bridge tool is invalid")
         return tool
 
-    async def handle_frame(self, frame: Any) -> Mapping[str, Any]:
-        result = await self.handler(frame)
+    async def handle_frame(self, frame: Any, *, native_read_guard=None) -> Mapping[str, Any]:
+        if native_read_guard is not None:
+            if self.validate_frame(frame) != "session_native_read" or not callable(native_read_guard):
+                raise ValueError("native read guard requires the fixed native read operation")
+            result = await self.handler(frame, native_read_guard=native_read_guard)
+        else:
+            result = await self.handler(frame)
         if not isinstance(result, Mapping):
             raise ValueError("installed Session Bridge result is invalid")
         return result

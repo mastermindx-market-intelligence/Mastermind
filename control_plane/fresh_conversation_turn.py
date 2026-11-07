@@ -59,9 +59,9 @@ def _parent(owner, principal, request):
     return selected
 
 
-async def _initial(owner, principal, request):
+async def _initial(owner, principal, request, *, schema=wire.SCHEMA):
     selected = _parent(owner, principal, request)
-    data = await owner.read(principal, selected)
+    data = await owner.read(principal, selected, **({"_schema": schema} if schema == wire.NATIVE_SCHEMA else {}))
     if data["locator"] is None or data["result"] is None:
         raise ValueError("CONVERSATION_INITIAL_RESULT_UNAVAILABLE")
     if "initial_digest" in request and request["initial_digest"] != data["result"]["digest"]:
@@ -86,11 +86,11 @@ def _consumption(owner, identity):
         event_sha256=wire.canonical_digest(event.to_dict()), initial_digest=identity["initial_digest"])
 
 
-def _live(owner, principal, workspace, request, host_current, identity):
+def _context(owner, principal, workspace, request, host_current, identity, *, schema=wire.SCHEMA):
     if not callable(host_current) or host_current() is not None:
         raise ValueError("CONVERSATION_REQUEST_CLOSED")
     owner._current(principal)
-    binding = owner._fresh(principal)
+    binding = owner._fresh(principal, **({"schema": schema} if schema == wire.NATIVE_SCHEMA else {}))
     project = owner._project(principal, workspace, request["work_ref"])
     from control_plane.fresh_conversation_admission import read_creation_restriction
     from control_plane.executive_runtime import normalize_executive_dialogue_source
@@ -100,10 +100,19 @@ def _live(owner, principal, workspace, request, host_current, identity):
     source = normalize_executive_dialogue_source(raw, work_ref=request["work_ref"])
     if wire.canonical_digest(source.to_dict()) != material["dialogue_source_sha256"]:
         raise ValueError("CONVERSATION_SOURCE_CHANGED")
+    return binding, project
+
+
+def _live(owner, principal, workspace, request, host_current, identity, *, schema=wire.SCHEMA):
+    binding, project = _context(owner, principal, workspace, request, host_current, identity, schema=schema)
     dispatch = owner._service._native_operator_dispatch
     if (dispatch is None or dispatch.retained is None
             or dispatch.retained.job.root_job_id != identity["root_job_id"]
             or dispatch.retained.job.job_id != identity["locator"]["job_id"]):
+        raise ValueError("CONVERSATION_WRITER_UNAVAILABLE")
+    if schema == wire.NATIVE_SCHEMA and (getattr(dispatch, "native_phase", "READY") != "READY"
+            or getattr(dispatch, "_fresh_control_source", None) is not None
+            or getattr(dispatch, "_fresh_interrupt_source", None) is not None):
         raise ValueError("CONVERSATION_WRITER_UNAVAILABLE")
     supervisor = owner._service._require_operator_supervisor()
     facts = supervisor._require_retained_native(dispatch.retained)
@@ -112,19 +121,40 @@ def _live(owner, principal, workspace, request, host_current, identity):
     return dispatch, wire.canonical_digest(dataclasses.asdict(facts)), binding, project
 
 
-def _response(request, state, *, consumption, locator, effect="NONE", result=None, can_send=False):
-    return dict(schema="mastermind.executive.fresh_conversation_turn_data.v1",
+def _response(request, state, *, consumption, locator, effect="NONE", result=None, can_send=False,
+              schema=wire.SCHEMA):
+    return dict(schema=(wire.NATIVE_TURN_DATA_SCHEMA if schema == wire.NATIVE_SCHEMA
+                       else "mastermind.executive.fresh_conversation_turn_data.v1"),
         work_ref=request["work_ref"], operation_key=request["operation_key"],
         turn_key=request.get("turn_key"), state=state, effect=effect,
         initial_consumption=consumption, locator=locator, result=result,
         parent_consumed=False, can_send=can_send, reference=None)
 
 
-async def consume_initial(owner, principal, workspace, request, *, host_current):
+async def consume_initial(owner, principal, workspace, request, *, host_current, schema=wire.SCHEMA):
     owner._current(principal)
     owner._project(principal, workspace, request["work_ref"])
-    initial, root, identity = await _initial(owner, principal, request)
+    initial, root, identity = await _initial(owner, principal, request, schema=schema)
     existing = _consumption(owner, identity)
+    if schema == wire.NATIVE_SCHEMA:
+        # Consumption records the original parent's read, not a provider effect.
+        # It remains possible after idle/terminal cleanup; Send has its own live fence.
+        captured_context = _context(owner, principal, workspace, request, host_current, identity, schema=schema)
+        def check_context():
+            if _context(owner, principal, workspace, request, host_current, identity, schema=schema) != captured_context:
+                raise ValueError("CONVERSATION_CONTEXT_CHANGED")
+        if existing is None:
+            with owner._runtime.store.transaction() as connection:
+                check_context()
+                _append(owner._runtime, connection,
+                    command=_command("consume", identity["principal"], root.job_id), kind=_CONSUME,
+                    root_id=root.job_id, attempt_id=identity["locator"]["attempt_id"],
+                    payload=dict(schema="mastermind.fresh_conversation_initial_consumption.v1", **identity))
+                check_context()
+        data = await owner.read(principal, _parent(owner, principal, request), _schema=schema)
+        return _response(request, "CONSUMED", consumption=_consumption(owner, identity),
+            locator=identity["locator"], effect="COMMITTED" if existing is None else "NONE",
+            can_send=data["can_send"], schema=schema)
     if existing is not None:
         captured = _live(owner, principal, workspace, request, host_current, identity)
         return _response(request, "CONSUMED", consumption=existing, locator=identity["locator"],
@@ -145,6 +175,21 @@ async def consume_initial(owner, principal, workspace, request, *, host_current)
         locator=identity["locator"], effect="COMMITTED", can_send=True)
 
 
+async def read_initial_consumption(owner, principal, request, *, schema=wire.SCHEMA):
+    root = _original_root(owner, principal, request, schema=schema)
+    selected = _parent(owner, principal, request)
+    data = await owner.read(principal, selected, **({"_schema": schema} if schema == wire.NATIVE_SCHEMA else {}))
+    if data["locator"] is None or data["result"] is None:
+        return _response(request, "ABSENT", consumption=None, locator=data["locator"], schema=schema)
+    _data, same_root, identity = await _initial(owner, principal, request, schema=schema)
+    if same_root != root:
+        raise ValueError("CONVERSATION_ORIGINAL_CHANGED")
+    consumed = _consumption(owner, identity)
+    owner._current(principal, read_only=True)
+    return _response(request, "ABSENT" if consumed is None else "CONSUMED", consumption=consumed,
+        locator=identity["locator"], schema=schema)
+
+
 @dataclass(frozen=True, slots=True)
 class FreshConversationTurnSource:
     _seal: object
@@ -157,13 +202,19 @@ class FreshConversationTurnSource:
     _deadline: float
 
     def check(self):
+        self.check_record()
+        if not callable(self._guard) or time.monotonic() >= self._deadline:
+            raise ValueError("CONVERSATION_TURN_SOURCE_REQUIRED")
+        self._guard()
+        return self.check_record()
+
+    def check_record(self):
+        """Existing-effect custody only; never authorizes a provider write."""
         from control_plane.fresh_conversation import FreshConversationOwner
         if (self._seal is not _SEAL or type(self._owner) is not FreshConversationOwner
                 or getattr(self._dispatch, "_fresh_turn_source", None) is not self
-                or self._owner._service._native_operator_dispatch is not self._dispatch
-                or not callable(self._guard) or time.monotonic() >= self._deadline):
+                or self._owner._service._native_operator_dispatch is not self._dispatch):
             raise ValueError("CONVERSATION_TURN_SOURCE_REQUIRED")
-        self._guard()
         payload = json.loads(self._payload)
         event = _event(self._owner._runtime, self._command, _REQUEST, payload["root_job_id"])
         if event is None or event.payload != payload:
@@ -175,6 +226,9 @@ def _recorded_reply(owner, requested):
     """Rejoin a reply to its exact native candidate; UNKNOWN never grants a turn."""
     runtime = owner._runtime
     payload, root_id = requested.payload, requested.payload["root_job_id"]
+    if payload.get("result_contract") == wire.NATIVE_RESULT_CONTRACT:
+        resolved = _native_recorded_result(owner, requested)
+        return None if resolved is None else _event(runtime, requested.command_id + ":reply", _REPLY, root_id)
     unknown = _event(runtime, requested.command_id + ":unknown", _UNKNOWN, root_id)
     if unknown is not None:
         if unknown.payload.get("request_event_id") != requested.event_id:
@@ -200,6 +254,59 @@ def _recorded_reply(owner, requested):
     return replied
 
 
+def _native_recorded_result(owner, requested):
+    """Read the original TX5/native seal even if HTTP or the reply projection was lost.
+
+    A request/UNKNOWN Event never proves an answer. Only the existing Runtime's
+    exact native result can settle it; this reader creates no receipt or effect.
+    """
+    from control_plane.fresh_conversation_native import result_projection
+    runtime, payload = owner._runtime, requested.payload
+    if payload.get("result_contract") != wire.NATIVE_RESULT_CONTRACT:
+        raise ValueError("CONVERSATION_NATIVE_CONTRACT_CHANGED")
+    identity = payload["identity"]
+    root_id, locator = payload["root_job_id"], identity["locator"]
+    expected_command = _command("turn", identity["principal"], identity["root_job_id"], payload["turn_key"])
+    expected_operation = "ohf-op:native-continuation:" + wire.canonical_digest(
+        dict(command=expected_command, initial_digest=identity["initial_digest"]))
+    if (requested.command_id != expected_command or payload["operation_id"] != expected_operation
+            or root_id != identity["root_job_id"] or locator["root_job_id"] != root_id
+            or requested.attempt_id != locator["attempt_id"]):
+        raise ValueError("CONVERSATION_TURN_SOURCE_CHANGED")
+    unknown = _event(runtime, requested.command_id + ":unknown", _UNKNOWN, root_id)
+    if unknown is not None and unknown.payload.get("request_event_id") != requested.event_id:
+        raise ValueError("CONVERSATION_TURN_SOURCE_CHANGED")
+    replied = _event(runtime, requested.command_id + ":reply", _REPLY, root_id)
+    matches = []
+    for ref in runtime.operator_harness.native_conversation_results(attempt_id=locator["attempt_id"]):
+        value = runtime.operator_harness.native_conversation_result(attempt_id=locator["attempt_id"], reference=ref)
+        if value["tx5_intent_command_id"] == payload["operation_id"]:
+            matches.append((ref, value))
+    if not matches and replied is None:
+        return None
+    if len(matches) != 1:
+        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    ref, value = matches[0]
+    result = result_projection(ref)
+    candidate = runtime.events.get_event_by_command_id(value["candidate_command_id"])
+    seal = runtime.events.get_event_by_command_id(ref.command_id)
+    if (value["job_id"] != locator["job_id"] or value["attempt_id"] != locator["attempt_id"]
+            or value["observation"]["native_claim"]["operationId"] != payload["operation_id"]
+            or candidate is None or candidate.job_id != locator["job_id"]
+            or candidate.attempt_id != locator["attempt_id"] or seal is None
+            or seal.event_id != ref.event_id):
+        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    if replied is not None:
+        expected = dict(schema="mastermind.fresh_conversation_turn_reply.v1",
+            request_event_id=requested.event_id, request_event_sha256=wire.canonical_digest(requested.to_dict()),
+            operation_id=payload["operation_id"], turn_id=value["turn"]["turn_id"],
+            candidate_event_id=candidate.event_id, candidate_event_sha256=wire.canonical_digest(candidate.to_dict()),
+            native_acknowledged=True, result=result, parent_consumed=False)
+        if replied.payload != expected or replied.attempt_id != locator["attempt_id"]:
+            raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    return result, replied if replied is not None else seal
+
+
 def _settled_history_head(owner, identity, consumption, connection=None):
     """Bound previews/reservations to the latest settled immutable request."""
     if connection is None:
@@ -215,7 +322,11 @@ def _settled_history_head(owner, identity, consumption, connection=None):
     if (payload.get("identity") != identity or payload.get("consumption") != consumption
             or requested.command_id != _command("turn", identity["principal"], identity["root_job_id"], payload["turn_key"])):
         raise ValueError("CONVERSATION_TURN_HISTORY_CHANGED")
-    replied = _recorded_reply(owner, requested)
+    if payload.get("result_contract") == wire.NATIVE_RESULT_CONTRACT:
+        resolved = _native_recorded_result(owner, requested)
+        replied = None if resolved is None else resolved[1]
+    else:
+        replied = _recorded_reply(owner, requested)
     if replied is None:
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
     return dict(request_event_id=requested.event_id, request_event_sha256=wire.canonical_digest(requested.to_dict()),
@@ -232,22 +343,23 @@ def _preview_digest(request, identity, consumption, captured, history_head):
         project_digest=wire.canonical_digest(captured[3])))
 
 
-async def preview_turn(owner, principal, workspace, request, *, host_current):
+async def preview_turn(owner, principal, workspace, request, *, host_current, schema=wire.SCHEMA):
     owner._current(principal)
-    initial, root, identity = await _initial(owner, principal, request)
+    initial, root, identity = await _initial(owner, principal, request, schema=schema)
     consumption = _consumption(owner, identity)
     if consumption is None:
         raise ValueError("CONVERSATION_INITIAL_NOT_CONSUMED")
-    captured = _live(owner, principal, workspace, request, host_current, identity)
+    captured = _live(owner, principal, workspace, request, host_current, identity, schema=schema)
     if (captured[0].continuation.done() or _event(owner._runtime,
             _command("turn", identity["principal"], root.job_id, request["turn_key"]), _REQUEST, root.job_id) is not None):
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
     history_head = _settled_history_head(owner, identity, consumption)
-    if (_live(owner, principal, workspace, request, host_current, identity) != captured
+    if (_live(owner, principal, workspace, request, host_current, identity, schema=schema) != captured
             or _consumption(owner, identity) != consumption
             or _settled_history_head(owner, identity, consumption) != history_head):
         raise ValueError("CONVERSATION_CONTEXT_CHANGED")
-    return dict(schema="mastermind.executive.fresh_conversation_turn_preview.v1",
+    return dict(schema=(wire.NATIVE_TURN_PREVIEW_SCHEMA if schema == wire.NATIVE_SCHEMA
+                        else "mastermind.executive.fresh_conversation_turn_preview.v1"),
         work_ref=request["work_ref"], operation_key=request["operation_key"], reference=None,
         turn_key=request["turn_key"], state="TURN_READY", effect="NONE",
         initial_consumption=consumption, locator=identity["locator"],
@@ -255,17 +367,17 @@ async def preview_turn(owner, principal, workspace, request, *, host_current):
         parent_consumed=False, can_send=True)
 
 
-async def submit_turn(owner, principal, workspace, request, *, host_current):
+async def submit_turn(owner, principal, workspace, request, *, host_current, schema=wire.SCHEMA):
     owner._current(principal)
     owner._project(principal, workspace, request["work_ref"])
-    root = _original_root(owner, principal, request)
+    root = _original_root(owner, principal, request, schema=schema)
     prior_command = _command("turn", _scope(principal), root.job_id, request["turn_key"])
     original = _event(owner._runtime, prior_command, _REQUEST, root.job_id)
     if original is not None:
         if original.payload.get("request_sha256") != wire.canonical_digest(request):
             raise ValueError("CONVERSATION_TURN_CONFLICT")
-        return await read_turn(owner, principal, request)
-    initial, root, identity = await _initial(owner, principal, request)
+        return await read_turn(owner, principal, request, schema=schema)
+    initial, root, identity = await _initial(owner, principal, request, schema=schema)
     consumption = _consumption(owner, identity)
     if consumption is None:
         raise ValueError("CONVERSATION_INITIAL_NOT_CONSUMED")
@@ -275,9 +387,11 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
     if prior is not None:
         if prior.payload.get("request_sha256") != request_sha or prior.payload.get("identity") != identity:
             raise ValueError("CONVERSATION_TURN_CONFLICT")
-        return await read_turn(owner, principal, request)
-    captured = _live(owner, principal, workspace, request, host_current, identity)
+        return await read_turn(owner, principal, request, schema=schema)
+    captured = _live(owner, principal, workspace, request, host_current, identity, schema=schema)
     history_head = _settled_history_head(owner, identity, consumption)
+    if schema == wire.NATIVE_SCHEMA and "preview_digest" not in request:
+        raise ValueError("CONVERSATION_TURN_PREVIEW_REQUIRED")
     if ("preview_digest" in request
             and request["preview_digest"] != _preview_digest(request, identity, consumption, captured, history_head)):
         raise ValueError("CONVERSATION_TURN_PREVIEW_CHANGED")
@@ -285,7 +399,7 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
     if dispatch.continuation.done():
         raise ValueError("CONVERSATION_TURN_ALREADY_RESERVED")
     def guard():
-        if (_live(owner, principal, workspace, request, host_current, identity) != captured
+        if (_live(owner, principal, workspace, request, host_current, identity, schema=schema) != captured
                 or _consumption(owner, identity) != consumption):
             raise ValueError("CONVERSATION_CONTEXT_CHANGED")
     guard()
@@ -296,6 +410,8 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
         turn_key=request["turn_key"], message=request["message"], operation_id=operation.command_id,
         previous_turn=history_head, writer_digest=captured[1], profile_digest=wire.canonical_digest(captured[2]),
         project_digest=wire.canonical_digest(captured[3]))
+    if schema == wire.NATIVE_SCHEMA:
+        payload["result_contract"] = wire.NATIVE_RESULT_CONTRACT
     with owner._runtime.store.transaction() as connection:
         guard()
         if (dispatch.continuation.done()
@@ -314,7 +430,7 @@ async def submit_turn(owner, principal, workspace, request, *, host_current):
     # requests never signal it again or re-enter a provider operation.
     dispatch.continuation.set_result(source)
     await asyncio.shield(source._completion)
-    return await read_turn(owner, principal, request)
+    return await read_turn(owner, principal, request, schema=schema)
 
 
 async def execute_attended_turn(service, dispatch, source):
@@ -337,6 +453,9 @@ async def execute_attended_turn(service, dispatch, source):
         # Attempt owner. Idle waiting never renews a lease or retries a turn.
         supervisor.retain_native_wait_window(retained)
         source.check()
+        if payload.get("result_contract") == wire.NATIVE_RESULT_CONTRACT:
+            await _execute_native_turn(service, dispatch, source, supervisor, retained, event, payload, operation)
+            return
         from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
         if isinstance(retained.adapter, RemoteOperatorHarnessAdapter):
             retained.adapter.bind_native_continuation_guard(source.check,
@@ -404,7 +523,78 @@ async def execute_attended_turn(service, dispatch, source):
         raise
 
 
-def _original_root(owner, principal, request):
+async def _execute_native_turn(service, dispatch, source, supervisor, retained, event, payload, operation):
+    """Use the same waiter/TX5 collector with exact input and a typed native seal."""
+    from control_plane.executive_operator_supervisor import ActiveNativeOperatorTurn
+    from control_plane.native_conversation_result import NativeConversationResultRef
+    from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+    owner = source._owner
+    if type(retained.native_result) is not NativeConversationResultRef:
+        raise ValueError("CONVERSATION_NATIVE_CONTRACT_CHANGED")
+    if not isinstance(retained.adapter, RemoteOperatorHarnessAdapter):
+        raise ValueError("CONVERSATION_NATIVE_TRANSPORT_REQUIRED")
+    retained.adapter.bind_native_continuation_guard(source.check,
+        attempt_id=retained.session.attempt_id, operation_id=operation, expected_input=payload["message"])
+    def load_turn(_turn):
+        source.check()
+        return payload["message"]
+    retained.adapter.turn_input_loader = load_turn
+    observer = service._native_initial_turn_observer(dispatch, supervisor, continuation_source=source)
+    active = None
+    def expose_active(turn):
+        nonlocal active
+        source.check_record()
+        active = ActiveNativeOperatorTurn(supervisor, retained.job, retained.lease,
+            retained.session, retained.adapter, turn, operation)
+        supervisor._require_active_native_turn(active)
+        if observer(active, True) is not None:
+            raise ValueError("CONVERSATION_ACTIVE_OBSERVER_CHANGED")
+    try:
+        receipt = await asyncio.to_thread(supervisor._orchestrator(retained.lease, retained.adapter).run_turn,
+            retained.session, operation_id=operation,
+            timeout_seconds=min(300.0, source._deadline - time.monotonic()), _on_turn_applied=expose_active)
+    finally:
+        if active is not None:
+            active.withdraw()
+            observer(active, False)
+    # After the physical write, recovery is based on its immutable Runtime
+    # receipts. A closed reader must not discard an already sealed answer.
+    if receipt.start.acknowledged is not True or type(receipt.native_result) is not NativeConversationResultRef:
+        raise ValueError("CONVERSATION_TURN_RESULT_UNAVAILABLE")
+    value = owner._runtime.operator_harness.native_conversation_result(
+        attempt_id=retained.session.attempt_id, reference=receipt.native_result)
+    if (value["job_id"] != retained.job.job_id or value["turn"] != dataclasses.asdict(receipt.turn)
+            or value["tx5_intent_command_id"] != operation.command_id
+            or value["observation"]["provider_session_id"] != retained.session.observation.provider_session_id):
+        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    resolved = _native_recorded_result(owner, event)
+    if resolved is None or resolved[0]["digest"] != receipt.native_result.seal_digest:
+        raise ValueError("CONVERSATION_TURN_RESULT_CHANGED")
+    # Retain the canonical sealed head before writing the optional application
+    # projection. If that projection fails, original cleanup must close this
+    # exact latest result rather than the predecessor.
+    dispatch.retained = dataclasses.replace(retained, native_result=receipt.native_result)
+    candidate = owner._runtime.events.get_event_by_command_id(value["candidate_command_id"])
+    reply = dict(schema="mastermind.fresh_conversation_turn_reply.v1",
+        request_event_id=event.event_id, request_event_sha256=wire.canonical_digest(event.to_dict()),
+        operation_id=operation.command_id, turn_id=receipt.turn.turn_id,
+        candidate_event_id=candidate.event_id, candidate_event_sha256=wire.canonical_digest(candidate.to_dict()),
+        native_acknowledged=True, result=resolved[0], parent_consumed=False)
+    with owner._runtime.store.transaction() as connection:
+        current = _event(owner._runtime, source._command, _REQUEST, payload["root_job_id"])
+        if current != event or current.payload != payload:
+            raise ValueError("CONVERSATION_TURN_SOURCE_CHANGED")
+        _append(owner._runtime, connection, command=source._command + ":reply", kind=_REPLY,
+            root_id=payload["root_job_id"], payload=reply, attempt_id=retained.session.attempt_id)
+
+
+def _original_root(owner, principal, request, *, schema=wire.SCHEMA):
+    if schema == wire.NATIVE_SCHEMA:
+        from control_plane.fresh_conversation_native import select_original
+        root, _original, _material = select_original(owner, principal, request)
+        if root is None:
+            raise ValueError("CONVERSATION_ORIGINAL_UNAVAILABLE")
+        return root
     from control_plane.fresh_conversation import scoped_operation_key
     from control_plane import ceo_intent, ceo_request
     owner._current(principal, read_only=True)
@@ -417,7 +607,7 @@ def _original_root(owner, principal, request):
     return root
 
 
-def _retained_identity(owner, principal, request, root, requested):
+def _retained_identity(owner, principal, request, root, requested, *, schema=wire.SCHEMA):
     # Original READ is independent of the live provider writer during/after
     # ordinary cleanup. Rejoin immutable root, child and first role seal.
     identity = requested.payload["identity"]
@@ -435,6 +625,17 @@ def _retained_identity(owner, principal, request, root, requested):
             or attempt is None or attempt.job_id != child.job_id
             or child.current_attempt_id != attempt.attempt_id):
         raise ValueError("CONVERSATION_ORIGINAL_CHANGED")
+    if schema == wire.NATIVE_SCHEMA:
+        if requested.payload.get("result_contract") != wire.NATIVE_RESULT_CONTRACT:
+            raise ValueError("CONVERSATION_NATIVE_CONTRACT_CHANGED")
+        owner._runtime.jobs.assert_native_conversation_execution(child.job_id)
+        refs = owner._runtime.operator_harness.native_conversation_results(attempt_id=attempt.attempt_id)
+        if not refs or refs[0].seal_digest != identity["initial_digest"]:
+            raise ValueError("CONVERSATION_INITIAL_RESULT_CHANGED")
+        first = owner._runtime.operator_harness.native_conversation_result(attempt_id=attempt.attempt_id, reference=refs[0])
+        if first["job_id"] != child.job_id or first["worker_id"] != attempt.worker_id:
+            raise ValueError("CONVERSATION_INITIAL_RESULT_CHANGED")
+        return identity
     from control_plane.executive_runtime import _sealed_role_result_payload
     with owner._runtime.store.read() as connection:
         seal = _sealed_role_result_payload(connection, attempt_id=attempt.attempt_id, expected_role="plan")
@@ -445,21 +646,27 @@ def _retained_identity(owner, principal, request, root, requested):
     return identity
 
 
-async def read_turn(owner, principal, request):
-    root = _original_root(owner, principal, request)
+async def read_turn(owner, principal, request, *, schema=wire.SCHEMA):
+    root = _original_root(owner, principal, request, schema=schema)
     command = _command("turn", _scope(principal), root.job_id, request["turn_key"])
     requested = _event(owner._runtime, command, _REQUEST, root.job_id)
     if requested is None:
         # An absent turn says nothing about permission to create/resend it.
         selected = {key: request[key] for key in ("work_ref", "operation_key")}
-        data = await owner.status(principal, selected)
-        return _response(request, "ABSENT", consumption=None, locator=data["locator"])
-    identity = _retained_identity(owner, principal, request, root, requested)
+        data = await owner.status(principal, selected, **({"_schema": schema} if schema == wire.NATIVE_SCHEMA else {}))
+        return _response(request, "ABSENT", consumption=None, locator=data["locator"], schema=schema)
+    identity = _retained_identity(owner, principal, request, root, requested, schema=schema)
     consumption = _consumption(owner, identity)
     if consumption is None or consumption != requested.payload["consumption"]:
         raise ValueError("CONVERSATION_CONSUMPTION_CHANGED")
     if requested.payload.get("identity") != identity or requested.payload.get("turn_key") != request["turn_key"]:
         raise ValueError("CONVERSATION_TURN_SOURCE_CHANGED")
+    if schema == wire.NATIVE_SCHEMA:
+        resolved = _native_recorded_result(owner, requested)
+        owner._current(principal, read_only=True)
+        return _response(request, "RECONCILIATION_REQUIRED" if resolved is None else "RECORDED",
+            consumption=consumption, locator=identity["locator"], effect="NONE", schema=schema,
+            result=None if resolved is None else resolved[0])
     replied = _recorded_reply(owner, requested)
     if replied is None:
         return _response(request, "RECONCILIATION_REQUIRED", consumption=consumption,

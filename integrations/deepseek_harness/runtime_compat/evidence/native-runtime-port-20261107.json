@@ -1,0 +1,96 @@
+{
+  "schema": "mastermind.dsh_native_runtime_port_evidence.v1",
+  "qualification": {
+    "schema": "mastermind.dsh_native_runtime_port_qualification.v1",
+    "state": "TERMINAL",
+    "source_sha256": {
+      "control_plane/native_conversation_result.py": "e2a119124d9b0147cd3704aaf80909fa916f7750759857a8ec83b355c6ef92b9",
+      "integrations/deepseek_harness/operator_adapter.py": "dc79cdd92756533be340630d7c64c626270444b59ccf8433ed67ecd4a8fc8c19",
+      "integrations/deepseek_harness/native_connection.py": "89106293992784976c8563d50817423a7bad7e7f9ec7a1057e32866ca20a3685",
+      "control_plane/executive_runtime.py": "5d21ced2a08365dc8ab8f998d9f1e6dd10e131fb8f8673ec7c2a1cf8932d111f",
+      "control_plane/executive_worker_broker.py": "3fb018d33e1f483421388998324f38aea4fd7b0653cc63e0159cebb6d9965033",
+      "control_plane/operator_harness_wire.py": "65c58bc3ec991ce5db24eaa5f96129854c8daa9df7f84ea2b5cbfcd64e3c9e93",
+      "control_plane/remote_operator_harness_adapter.py": "b948f1423ae65a54009adc0515e24d17de901cd78aed0f8dcbf3634419b83ee0",
+      "control_plane/executive_agent_capabilities.py": "57f65be34637d23b400b331dc0b0b4f82ed7cdae3a5460f788a053840167d9da",
+      "control_plane/executive_operator_harness_port.py": "895a4622487bce5d1f3c7673af75de2ed3d38b1da2a171492bc2cec13d89f8ae",
+      "control_plane/operator_harness_orchestrator.py": "7e5f3632d6339dfc441334ee06ca9e17587a299ce856209d13572a88dd2969fa",
+      "config/executive_dsh_native_conversation_capabilities.json": "b2a04c939683afdb36ea0a2c4bbfcdbdcb5141150772853dc1ee28ab4fb50612",
+      "config/executive_agent_capabilities.json": "c6056f682376d8b248f8f6dfc6832968a675f95801d49fc49e3f02a28652f9af",
+      "tests/test_dsh_native_operator.py": "5004f7c8838f185783a883cf7f6c5c8e180149301b70faf43b4d2f9a1100d89f",
+      "tests/test_dsh_native_result.py": "9c6678c84b8aac45db32f5f013e535b88a96353afe824410bc2949a870172a71",
+      "tests/test_dsh_native_result_transport.py": "d8671d24782659664e8be30f0c5f54120ebe4847081715e9ff9c5c8a65e9a30a",
+      "tests/test_dsh_native_capability_profile.py": "65b6b73bc71962dbea42b4e0ae85eeab7dc8b02c2f734ee2216970c73a1dc886",
+      "tests/test_dsh_native_runtime_binding.py": "cb413094427d3cda6ab2f165297b9f7fc57c172de0c11842b628cfcea522cc0e",
+      "tests/test_dsh_native_runtime_result.py": "e256b826643460bd9b7d172160acbb708dae73056052dc6b3f7a8927e357d9f0"
+    },
+    "base_commit": "988b6890d26bebc211ca3d01949ca161ff414d32",
+    "command": [
+      "/private/tmp/mmx-deepseek-chat-test-20261106-c2/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_dsh_native_operator.py",
+      "tests/test_dsh_native_result.py",
+      "tests/test_dsh_native_protocol.py",
+      "tests/test_dsh_native_result_transport.py",
+      "tests/test_operator_harness_wire.py",
+      "tests/test_remote_operator_harness_adapter.py",
+      "tests/test_executive_operator_broker.py",
+      "tests/test_dsh_native_capability_profile.py",
+      "tests/test_executive_agent_capabilities.py",
+      "tests/test_executive_claude_principal_capabilities.py",
+      "tests/test_ohf_p1b_runtime.py",
+      "tests/test_interactive_tx5_runtime.py",
+      "tests/test_executive_os_phase1fc.py",
+      "tests/test_executive_finite_guards.py",
+      "tests/test_frontier_planner_binding.py",
+      "tests/test_planner_producer_binding.py",
+      "tests/test_ohf_p1b_runtime_orchestrator.py",
+      "tests/test_ohf_p1b_orchestrator.py",
+      "tests/test_dsh_native_runtime_binding.py",
+      "tests/test_dsh_native_runtime_result.py",
+      "--basetemp=/private/tmp/mmx-dsh-c10-runtime-port-final-20261107",
+      "--junitxml=/private/tmp/mmx-dsh-c10-runtime-port-final-20261107.xml"
+    ],
+    "provider_calls": 0,
+    "installed_authority": false,
+    "positive_runtime_policy": "explicit inert test-only registry at existing load seam; production profile disabled",
+    "return_code": 0,
+    "seconds": 77.35,
+    "source_unchanged": true,
+    "log_sha256": "af785514f0e0b578654e74646bd408483a3bb27fb928bc7de1381e2f3c79a7fe",
+    "tests": {
+      "tests": 645,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "production_acceptance": false,
+  "installed_authority": false,
+  "preserved_owners": [
+    "Runtime Events/Jobs/Attempts/generations",
+    "original SDK sender and Session",
+    "original Executive port/orchestrator"
+  ],
+  "qualified": [
+    "immutable original JOB_CREATED native result binding",
+    "normalized private creator reservation",
+    "original TX1/TX5/candidate/work-admission/native claim joins",
+    "per-turn sealed Runtime reference",
+    "historical result distinct from current lease/writer",
+    "successor requires sealed advancing persisted prefix",
+    "separate native result consumption in original port/orchestrator"
+  ],
+  "remaining": [
+    "original Runtime G1/G2 native resume treatment",
+    "supervisor/factory and foreground v2",
+    "installed native account/current-authority/capability producer",
+    "eligible governed tools",
+    "signed-in production journey"
+  ],
+  "prior_failed_run": {
+    "receipt": "/private/tmp/mmx-dsh-c10-runtime-port-20261107.json",
+    "failures": "four negative fixture corruptions stopped at FK constraints; corrected to existing wrong Job or absent quota; final645 pass"
+  }
+}

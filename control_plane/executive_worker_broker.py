@@ -66,6 +66,10 @@ from control_plane.executive_orchestration_principal import (
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
+from control_plane.native_conversation_result import (
+    DSH_NATIVE_RESULT_CONTRACT, NativeConversationResultAdapter,
+    NativeConversationResultError, NativeConversationResultObservation, result_contract_for_profile,
+)
 from control_plane.operator_harness_contract import (
     CHATGPT_GUI_RESOURCE_ID,
     ATTENTION_TURN_INSTRUCTION,
@@ -2931,25 +2935,40 @@ class ExecutiveWorkerBroker:
             candidate = await self._operator_call(
                 "collect candidate", state.adapter.collect_candidate_result, turn
             )
-            raw = await self._operator_call(
-                "observe raw role result", state.adapter.observe_raw_role_result, turn
-            )
+            native_contract = result_contract_for_profile(state.requested) == DSH_NATIVE_RESULT_CONTRACT
+            if native_contract:
+                if not isinstance(state.adapter, NativeConversationResultAdapter):
+                    raise BrokerStateError("native result observer is unavailable")
+                raw = await self._operator_call(
+                    "observe native conversation result", state.adapter.observe_native_conversation_result, turn)
+            else:
+                raw = await self._operator_call(
+                    "observe raw role result", state.adapter.observe_raw_role_result, turn)
             events = tuple(events)
             if (
                 len(events) > 4096
                 or any(not isinstance(item, NormalizedEvent) for item in events)
                 or not isinstance(next_cursor, EventCursor)
                 or not isinstance(candidate, CandidateResult)
-                or not isinstance(raw, RawRoleResultObservation)
+                or not isinstance(raw, NativeConversationResultObservation if native_contract else RawRoleResultObservation)
             ):
                 raise BrokerStateError(
                     "operator collection returned untyped or oversized evidence"
                 )
+            if native_contract:
+                try:
+                    raw.require_turn(turn)
+                except NativeConversationResultError as exc:
+                    raise BrokerStateError("native result is outside the original turn") from exc
+                if ((candidate.attempt_id, candidate.session_epoch_id, candidate.process_generation_id)
+                        != (turn.attempt_id, turn.session_epoch_id, turn.process_generation_id)
+                        or candidate.artifact_digest != raw.provider_turn_artifact_digest):
+                    raise BrokerStateError("native result and candidate differ")
             response = {
                 "events": operator_to_wire(events),
                 "cursor": operator_to_wire(next_cursor),
                 "candidate": operator_to_wire(candidate),
-                "raw_role_result": operator_to_wire(raw),
+                ("native_conversation_result" if native_contract else "raw_role_result"): operator_to_wire(raw),
             }
             if state.retained_plain_turns.get(turn) == state.generation:
                 # The accepted collector runs only for a turn marked at
