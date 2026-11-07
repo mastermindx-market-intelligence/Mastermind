@@ -22,6 +22,7 @@ from integrations.business_mcp_auth.contracts import (
     _CONTROL_RE,
     _SCOPE_RE,
     _exact_subject,
+    client_ref_digest,
     subject_digest,
     validate_resource_policy,
 )
@@ -107,9 +108,7 @@ def _client_ref(claims: Mapping[str, Any], issuer: str) -> str:
         client_value = azp_value
     if client_value is None:  # pragma: no cover - guarded by the branches above
         _refuse(AuthErrorCode.TOKEN_CLAIMS_REFUSED)
-    return hashlib.sha256(
-        (issuer + "\nclient\n" + client_value).encode("utf-8")
-    ).hexdigest()
+    return client_ref_digest(issuer=issuer, client_id=client_value)
 
 
 def validate_jwt_header(header: Mapping[str, object], policy: ResourcePolicy) -> str:

@@ -1127,6 +1127,7 @@ export async function createNativeClient(
       | "executive_auth_status"
       | "read_programs"
       | "read_byok_roles"
+      | "read_control_room_state"
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
@@ -1266,6 +1267,11 @@ export async function createNativeClient(
   ),
     readPrograms: ({ signal }) => read("read_programs", signal),
     readByokRoles: ({ signal }) => read("read_byok_roles", signal),
+    readControlRoomState: ({ signal }) => {
+      if (current.status !== "signed_in" || !current.acquisition)
+        return Promise.reject(new Error("CONTROL_ROOM_READ_UNAUTHORIZED"));
+      return read("read_control_room_state", signal);
+    },
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
     readAttendedFabric: ({ rootId, runId, signal }) => {

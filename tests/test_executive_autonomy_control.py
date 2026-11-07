@@ -158,6 +158,8 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "a2-restored-readside-preflight",
         "finite-control-stage",
         "finite-control-stage-reconcile",
+        "finite-control-retire",
+        "finite-control-retire-reconcile",
         "paid-control-stage",
         "paid-control-stage-reconcile",
         "publish-os-gateway",
@@ -236,10 +238,11 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         with pytest.raises(SystemExit):
             parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
 
-    for command in ("finite-control-stage", "finite-control-stage-reconcile"):
+    for command in ("finite-control-stage", "finite-control-stage-reconcile",
+                    "finite-control-retire", "finite-control-retire-reconcile"):
         argv = [command, "--expected-sha", SHA]
         expected = {"command": command, "expected_sha": SHA}
-        if command == "finite-control-stage":
+        if command in {"finite-control-stage", "finite-control-retire"}:
             with pytest.raises(SystemExit):
                 parser.parse_args(argv)
             argv += ["--expected-control-sha256", "a" * 64]
