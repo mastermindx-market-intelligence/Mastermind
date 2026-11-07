@@ -1,0 +1,275 @@
+/**
+ * ProjectKnowledgeEditor — neutral action-required editor panel.
+ *
+ * Same quiet material as the Knowledge Library panels: the existing alias
+ * tokens only (--panel/--raised/--border/--text/--muted/--brass/--focus), a
+ * derived minimum 20px padding and 16px radius, no palette of its own, no new
+ * root scope, no edge accents and no runtime injection. The parent shell owns
+ * the outer gutters; the component imports this scoped sheet.
+ */
+
+.knowledge-editor {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor *,
+.knowledge-editor *::before,
+.knowledge-editor *::after {
+  box-sizing: border-box;
+}
+
+/* --- Heading ----------------------------------------------------------- */
+
+.knowledge-editor-heading {
+  color: var(--text);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.3;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Field: label + input ---------------------------------------------- */
+
+.knowledge-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.knowledge-editor-label {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-file {
+  min-height: 44px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-textarea {
+  min-height: 44px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-file:focus-visible,
+.knowledge-editor-textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.knowledge-editor-hint {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Selected file (chosen, not saved) ---------------------------------- */
+
+.knowledge-editor-selected {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.knowledge-editor-selected-name {
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-selected-meta {
+  color: var(--brass);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-selected-note {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Plain status and unavailable copy ---------------------------------- */
+
+.knowledge-editor-status {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-unavailable {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Actions ------------------------------------------------------------ */
+
+.knowledge-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.knowledge-editor-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding-inline: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-button--primary {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.knowledge-editor-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.knowledge-editor-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* --- Closed source details ---------------------------------------------- */
+
+.knowledge-editor-details {
+  margin: 0;
+  min-width: 0;
+}
+
+.knowledge-editor-details summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-editor-details summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.knowledge-editor-details pre {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* --- One column at mobile widths (390 shell) ----------------------------- */
+
+@media (max-width: 760px) {
+  .knowledge-editor {
+    padding: 20px;
+  }
+
+  .knowledge-editor-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .knowledge-editor-actions .knowledge-editor-button {
+    width: 100%;
+  }
+
+  .knowledge-editor-file,
+  .knowledge-editor-textarea {
+    width: 100%;
+  }
+}
+
+.knowledge-editor--zh,
+.knowledge-editor--zh :is(h2, label, button, summary, p, span) {
+  letter-spacing: normal;
+  text-transform: none;
+}

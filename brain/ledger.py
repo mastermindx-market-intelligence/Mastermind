@@ -32,7 +32,8 @@ def _ledger_lock():
     """Serialize ledger mutations across both threads and processes."""
     with _LOCAL_LOCK:
         _LEDGER.parent.mkdir(parents=True, exist_ok=True)
-        with _lock_path().open("a+", encoding="utf-8") as lock:
+        lock = _lock_path().open("a+", encoding="utf-8")
+        try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -40,17 +41,27 @@ def _ledger_lock():
                 try:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
                 except OSError:
-                    # The data effect, if any, was already decided by atomic os.replace below;
-                    # lock cleanup must not turn a known committed effect into an apparent failure.
+                    # The data effect, if any, was already decided by atomic os.replace below.
                     pass
+        finally:
+            try:
+                lock.close()
+            except OSError:
+                # Cleanup must preserve the committed result or the original operation error.
+                pass
 
 
 def _read_unlocked() -> list[dict]:
-    if not _LEDGER.exists():
+    try:
+        _LEDGER.lstat()
+    except FileNotFoundError:
         return []
     # Deliberately fail closed on malformed historical evidence. This owner does not silently
     # discard or quarantine accountability rows; callers must repair corrupt evidence explicitly.
-    return [json.loads(l) for l in _LEDGER.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(line) for line in _LEDGER.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("thesis ledger rows must be mappings")
+    return rows
 
 
 def _read() -> list[dict]:
@@ -91,33 +102,44 @@ def open_subjects() -> set[str]:
     return {t["subject"] for t in _read() if t.get("status", "open") == "open"}
 
 
-def append_receipt(doc: dict) -> dict:
-    """Atomically append or identify the existing open thesis for this subject.
+def _require_thesis_id(row: dict) -> str:
+    """Require an exact canonical identity without coercion, trimming or fallback."""
+    thesis_id = row.get("id")
+    if not isinstance(thesis_id, str) or not thesis_id.strip():
+        raise ValueError("thesis id must be a nonblank string")
+    return thesis_id
 
-    The receipt lets effect-aware callers distinguish a real new ledger effect from the
-    dedup invariant without inventing an ID for a thesis that was never appended.
+
+def append_receipt(doc: dict) -> dict:
+    """Append once or identify the single canonical open thesis for this subject.
+
+    Invalid or ambiguous identity is an error, not a deduplication receipt.
     """
+    record = dict(doc)
+    thesis_id = _require_thesis_id(record)
+    subject = record["subject"]
     with _ledger_lock():
         rows = _read_unlocked()
-        subject = doc["subject"]
-        existing = next(
-            (t for t in rows if t.get("subject") == subject and t.get("status", "open") == "open"),
-            None,
-        )
-        if existing is not None:
+        matching = [
+            row for row in rows
+            if row.get("status", "open") == "open" and row["subject"] == subject
+        ]
+        if len(matching) > 1:
+            raise ValueError("multiple open theses for subject")
+        if matching:
             return {
                 "appended": False,
-                "thesis_id": existing.get("id"),
+                "thesis_id": _require_thesis_id(matching[0]),
                 "reason": "open_subject_exists",
             }
-        rows.append({**doc, "status": "open"})
+        rows.append({**record, "status": "open"})
         _atomic_write(rows)
-        return {"appended": True, "thesis_id": doc.get("id"), "reason": None}
+        return {"appended": True, "thesis_id": thesis_id, "reason": None}
 
 
 def append(doc: dict) -> bool:
     """Compatibility API: append unless an open thesis exists; return appended?"""
-    return bool(append_receipt(doc)["appended"])
+    return append_receipt(doc)["appended"]
 
 
 def close(subject: str, resolution: str = "closed", *, outcome: int | None = None,

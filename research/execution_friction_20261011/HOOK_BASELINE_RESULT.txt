@@ -1,0 +1,6 @@
+Installed and inert snapshot SHA256: bb6299ee580cf8a80d4cf5ef3f8e7ada8c93efc1b1e502666c171f44ec46ba0c
+Original run: python3 -m unittest discover -s tests -p test_execution_friction_hooks.py -v
+Result: 16 tests, 8 failed, 8 passed.
+The attempted source repair was blocked by an explicit platform safety check.
+Source and installed hook readback both matched the original hash. No retry or hook installation performed.
+The reproducer was moved out of default release test discovery because these are open defects, not delivered fixes.
