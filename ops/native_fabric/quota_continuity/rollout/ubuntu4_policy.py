@@ -214,6 +214,87 @@ def operate(*, kind, payload=None, expected_after=None, expected_before=None,
 
 
 
+def inspect_custody(*, home=None, uid=None, platform=None, account=None, hostname=None):
+    """Distinct fixed metadata action. Never open policy or prior receipt bodies.
+
+    Caller still needs the SAME live broker guard and separately admitted action.
+    No policy preimage, install eligibility or historical facts are supplied.
+    """
+    home, uid = _scope(home, uid, platform, account, hostname)
+    paths = [(home, 'HOME'), (home/'lanes', 'LANES'),
+             (home/'lanes/ext', 'EXT'), (home/'lanes/ext/active', 'ACTIVE'),
+             (home/'lanes/ext/state', 'STATE'), (home/'lanes/orch', 'ORCH'),
+             (home/'lanes/orch/fabric', 'POLICY_DIRECTORY')]
+    held, files, result = [], [], []
+    lock = None
+    try:
+        for path, component in paths:
+            fd = _custody_call(component, storage._directory, path, uid)
+            held.append((path, component, fd, os.fstat(fd)))
+            result.append(dict(component=component, state='QUALIFIED',
+                               owner_matches=True, group_writable=False, other_writable=False))
+        active, state, target = held[3][2], held[4][2], held[6][2]
+        lock = os.open('.admission.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                       dir_fd=active)
+        lock_stat = os.fstat(lock)
+        if (not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_uid != uid
+                or lock_stat.st_nlink != 1 or stat.S_IMODE(lock_stat.st_mode) != 0o600):
+            raise storage.InstallHeld('admission_lock_identity')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise storage.InstallHeld('admission_lock_busy') from None
+
+        def current():
+            for path, component, fd, original in held:
+                reopened = _custody_call(component, storage._directory, path, uid)
+                try:
+                    if ((os.fstat(reopened).st_dev, os.fstat(reopened).st_ino)
+                            != (original.st_dev, original.st_ino)
+                            or (os.fstat(fd).st_dev, os.fstat(fd).st_ino)
+                            != (original.st_dev, original.st_ino)):
+                        raise storage.InstallHeld('directory_changed')
+                finally:
+                    os.close(reopened)
+            if storage._identity(os.stat('.admission.lock', dir_fd=active, follow_symlinks=False)) != storage._identity(lock_stat):
+                raise storage.InstallHeld('admission_lock_changed')
+            if _entries(active) != {'.admission.lock'}:
+                raise storage.InstallHeld('active_or_unknown_marker')
+            for fd, name, component, original in files:
+                try:
+                    now = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    now = None
+                if (None if now is None else storage._identity(now)) != original:
+                    raise storage.InstallHeld('file_changed')
+
+        current()
+        for fd, name, component in [(target, 'pools.yaml', 'POLICY_FILE'),
+                                    (state, RECORD, 'PRIOR_INSTALL_RECORD')]:
+            # lstat-equivalent only: no content descriptor, read, digest or parse.
+            try:
+                item = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                files.append((fd, name, component, None))
+                result.append(dict(component=component, state='ABSENT'))
+                continue
+            _custody_call(component, storage._owned, item, uid)
+            if (not stat.S_ISREG(item.st_mode) or item.st_nlink != 1
+                    or item.st_size > storage.LIMIT):
+                raise storage.InstallHeld('file_identity')
+            files.append((fd, name, component, storage._identity(item)))
+            result.append(dict(component=component, state='QUALIFIED',
+                               owner_matches=True, group_writable=False, other_writable=False))
+        current()
+        return dict(schema='mastermind.ubuntu4_custody.v1', kind='inspect-custody',
+                    components=result, maintenance_authorized=False, replay=False)
+    finally:
+        if lock is not None:
+            os.close(lock)
+        for _, _, fd, _ in reversed(held):
+            os.close(fd)
+
+
 def public_reason(exc):
     """Closed diagnostic labels only; never expose exception prose or paths."""
     if type(exc) is storage.InstallHeld and len(exc.args) == 1:
@@ -272,7 +353,7 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
     binding = storage.enrolled_binding('ubuntu4', registry_bytes, ssh_config_bytes)
     if binding['binding'] != {'account': ACCOUNT, 'hostnames': [HOSTNAME]}:
         raise storage.InstallHeld('fixed_host_account')
-    if kind not in {'inspect', 'install'}:
+    if kind not in {'inspect', 'install', 'inspect-custody'}:
         raise storage.InstallHeld('operation_kind')
     if not _hex(expected_module_sha) or not _hex(expected_storage_sha):
         raise storage.InstallHeld('installer_source_pin')
@@ -309,7 +390,7 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
             'exec(compile(raw,"ubuntu4_policy.py","exec"),p)\n'
             'r=json.loads(' + repr(json.dumps(request)) + ')\n'
             'if "payload" in r:r["payload"]=base64.b64decode(r["payload"])\n'
-            'try: print(json.dumps(p["operate"](**r),sort_keys=True))\n'
+            'try: print(json.dumps(p["inspect_custody"]() if r["kind"]=="inspect-custody" else p["operate"](**r),sort_keys=True))\n'
             'except (OSError,ValueError) as e: print(json.dumps(dict({"state":"HELD_OR_UNKNOWN","replay":False},**p["public_refusal"](e))));raise SystemExit(78)\n')
     command = shlex.join(['python3', '-c', code])
     return {'kind': kind, 'target': binding, 'argv': driver.SSH + [binding['alias'], command],
