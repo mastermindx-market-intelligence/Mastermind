@@ -597,8 +597,8 @@ Qualification: **348 passed, 2 subtests passed**, all 1424 recorded inputs
 unchanged. This includes real in-process factory/adapter construction, new
 attestation/realm faults and the original Codex/Claude, subscription, package
 export, broker and source-policy checks. The original tests and assertions were
-preserved. macOS /tmp fixtures inherited GID 0 while the caller was 501:20; the
-final wrapper establishes one private 501:20 temporary directory. Earlier
+preserved. macOS /tmp fixtures inherited a different group from the caller; the
+final wrapper establishes one private temporary directory owned by that process. Earlier
 diagnostic receipts and their exact input maps remain in the evidence.
 
 ### Next active C26: same-process entry and installed dependency closure
@@ -634,3 +634,8 @@ canonical profile/router join and signed-in packaged DeepSeek journey remain
 production holds. The last installed read remains backend_unavailable; it was not
 replayed. No provider/session was started, no service restarted, no protected
 source merge claimed, and no Hermes or accepted native canary repeated.
+
+C25 committed-source guard first refused numeric host UID literals in the evidence
+projection. The source projection now omits those numeric identities and names
+the exact SHA-bound original raw receipts; the guard and production checks remain
+unchanged. Its diagnostic receipt is preserved in the evidence above.

@@ -9,7 +9,7 @@
     "Initial focused attestation run passed before later source joins.",
     "Worker pro1: new config fixture had unreviewed empty supplementary groups; corrected to original reviewed set.",
     "Worker pro2-pro4: original temporary fixtures inherited GID0, caller GID20; group checks correctly refused.",
-    "Restored all original subscription/Codex test source; final tests use one owned private TMPDIR501:20.",
+    "Restored all original subscription/Codex test source; final tests use one owned private TMPDIR owned by the original test process.",
     "Worker pro5 passed before exact deepseek-account selector correction.",
     "Worker pro6 is final source qualification with identical recorded inputs."
   ],
@@ -29,6 +29,11 @@
       "files": 1120,
       "path": "research/evidence/deepseek-native-worker-inputs-3b0fa4ceadfa2423943a693459c70b1ae4fe3e9e30241d6c4800d33fc833b2a0.json",
       "sha256": "18aa95b35ec5c8810ba17532636a5d8c83d3ee3ae4d7f71f0c0f70e6d71d91fb"
+    },
+    "844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b": {
+      "files": 1623,
+      "path": "research/evidence/deepseek-native-worker-inputs-844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b.json",
+      "sha256": "494433c882e81cddfea26ce7e5d3aa160c732b84583b502abb011bb07c0eae84"
     },
     "863eec33c440eedd6361138a4fcd432c5e64337b1c184d16a4a1d4493c908844": {
       "files": 1424,
@@ -53,6 +58,31 @@
   },
   "operation": "deepseek-mastermind-chat-20261106-c2",
   "parent_source": "e768c5d528c0f7522ff17bffa8d82fe87a6a1ef4",
+  "post_commit_guard_diagnostics": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "tests/test_ceo_submit_armed_composition.py",
+        "--junitxml=/private/tmp/mmx-dsh-c25-committed-guard-20261107-pro1.xml"
+      ],
+      "correction": "Omit numeric host UID/GID from source projection; preserve exact original receipts and their hashes; original guard unchanged",
+      "finished": "2026-11-07T21:39:52.701122+00:00",
+      "inputs_after": "844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b",
+      "inputs_before": "844cb13b8f6c851e322ebdbee327036e1908c75c544d61a978e80644bc62e24b",
+      "inputs_unchanged": true,
+      "log_sha256": "9361d572366e909929656b3a511037691f991e9fd35eddff526204bb8a826c35",
+      "prefix": "/private/tmp/mmx-dsh-c25-committed-guard-20261107-pro1",
+      "receipt_sha256": "302e8e3b2e41733fbfec45f5a95cc8e298ee13a8aa7e639dfd3aee19cd79e6c6",
+      "result": "121 passed; evidence projection exposed two numeric host UID literals forbidden by original protected source guard",
+      "returncode": 1,
+      "source_sha": "6010962b3a1a8c5771171c53c4ed2fdf03fcaa16",
+      "started": "2026-11-07T21:39:16.617087+00:00"
+    }
+  ],
   "pr": 2177,
   "production": {
     "hermes_or_accepted_canary_repeated": false,
@@ -69,6 +99,7 @@
     "subtests_passed": 2,
     "unchanged_inputs": 1424
   },
+  "receipt_projection_policy": "Raw test receipts remain exact at their original M2 paths and SHA-256. Committed projections omit numeric host UID/GID; no configured principal is implied.",
   "recorded_at": "2026-11-07T21:38:41.891997+00:00",
   "remaining": [
     "Build/qualify fixed same-process native_worker.mjs through full original Web/ACP/Agent/Session composition.",
@@ -298,14 +329,17 @@
       "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro5",
       "pytest_summary": "348 passed, 2 subtests passed in 7.32s",
       "qualification": false,
+      "receipt_projection_omissions": [
+        "temporary_directory.uid",
+        "temporary_directory.gid"
+      ],
       "receipt_sha256": "96d91527cc911f4c4de12f97b1932101a01d4f2861776a649b2e2e6893872960",
       "returncode": 0,
       "started": "2026-11-07T21:35:13.664525+00:00",
       "status": "passed",
       "temporary_directory": {
-        "gid": 20,
-        "path": "/private/tmp/mmx-dsh-c25-worker-20261107-pro5-fixtures",
-        "uid": 501
+        "ownership": "original test process UID/GID; exact numeric observation retained in the SHA-bound raw receipt",
+        "path": "/private/tmp/mmx-dsh-c25-worker-20261107-pro5-fixtures"
       }
     },
     {
@@ -339,14 +373,17 @@
       "prefix": "/private/tmp/mmx-dsh-c25-worker-20261107-pro6",
       "pytest_summary": "348 passed, 2 subtests passed in 7.30s",
       "qualification": true,
+      "receipt_projection_omissions": [
+        "temporary_directory.uid",
+        "temporary_directory.gid"
+      ],
       "receipt_sha256": "f92b84184f83953422ba9850b3ce254841a056cfc31a035ab56d1e68ccf113c2",
       "returncode": 0,
       "started": "2026-11-07T21:36:14.542376+00:00",
       "status": "passed",
       "temporary_directory": {
-        "gid": 20,
-        "path": "/private/tmp/mmx-dsh-c25-worker-20261107-pro6-fixtures",
-        "uid": 501
+        "ownership": "original test process UID/GID; exact numeric observation retained in the SHA-bound raw receipt",
+        "path": "/private/tmp/mmx-dsh-c25-worker-20261107-pro6-fixtures"
       }
     }
   ]
