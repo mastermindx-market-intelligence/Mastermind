@@ -72,7 +72,8 @@ def _render_unit_text(*, role: str, service_name: str, runtime_user: str,
                       runtime_group: str, python_executable: str, release_root: str,
                       state_dir: str, restart_sec: float | int,
                       start_limit_burst: int, start_limit_interval_sec: int,
-                      role_ip: str, implementation_sha: str | None) -> str:
+                      role_ip: str, implementation_sha: str | None,
+                      secretary_enrollment: bool = False, meta_enrollment: bool = False) -> str:
     """The one shared pure unit formatter.
 
     Every value must already be qualified by its caller. The text, the
@@ -82,6 +83,17 @@ def _render_unit_text(*, role: str, service_name: str, runtime_user: str,
     """
     implementation_line = ("" if implementation_sha is None else
                            f"Environment=MM_HERMES_IMPLEMENTATION_SHA={implementation_sha}\n")
+    if (type(secretary_enrollment) is not bool or type(meta_enrollment) is not bool
+            or (secretary_enrollment and role != "mmsecretary")
+            or (meta_enrollment and role != "mmmeta") or (secretary_enrollment and meta_enrollment)):
+        raise RuntimeRefusal("ROOT_UNIT_ENROLLMENT_ROLE_INVALID")
+    reload_command = ("enroll-secretary-session" if secretary_enrollment else
+                      "enroll-meta-session" if meta_enrollment else "canary")
+    reload_comment = ("# Operator-only original Secretary session enrollment; no provider prompt."
+                      if secretary_enrollment else
+                      "# Operator-only original Meta-CEO session enrollment; no provider prompt."
+                      if meta_enrollment else
+                      "# Operator-only provider-charged canary: requires separate authorization.")
     seconds = int(restart_sec) if float(restart_sec).is_integer() else restart_sec
     unit = f"""# ROOT-OWNED /etc/systemd/system/{service_name}.service
 # Enforcing IPAddressDeny requires PID1's system manager; NEVER systemd --user.
@@ -103,8 +115,8 @@ User={runtime_user}
 Group={runtime_group}
 WorkingDirectory={state_dir}
 ExecStart={python_executable} -I -S -B {release_root}/ops/executive_os/release_manifest.py hermes-runtime supervise --profile {state_dir}/current/profile.yaml --hermes-bin {state_dir}/current/bin/hermes
-# Operator-only provider-charged canary: requires separate authorization.
-ExecReload={python_executable} -I -S -B {release_root}/ops/executive_os/release_manifest.py hermes-runtime canary --profile {state_dir}/current/profile.yaml --hermes-bin {state_dir}/current/bin/hermes
+{reload_comment}
+ExecReload={python_executable} -I -S -B {release_root}/ops/executive_os/release_manifest.py hermes-runtime {reload_command} --profile {state_dir}/current/profile.yaml --hermes-bin {state_dir}/current/bin/hermes
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONNOUSERSITE=1
 {implementation_line}Restart=on-failure
@@ -232,6 +244,8 @@ def render_role_units_from_installation(installation, *, release_commit: str) ->
             start_limit_burst=row["start_limit_burst"],
             start_limit_interval_sec=row["start_limit_interval_sec"],
             role_ip=ROLE_PROXY_HOST[role], implementation_sha=release_commit,
+            secretary_enrollment=(role == "mmsecretary" and "session_enrollment" in row.get("native_gateway", {})),
+            meta_enrollment=(role == "mmmeta" and "session_enrollment" in row.get("native_gateway", {})),
         )
     return rendered
 

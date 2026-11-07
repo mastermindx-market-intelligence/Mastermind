@@ -347,6 +347,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bridge_armed",
         "canonical_paid_fabric",
         "fabric_attended_probe",
+        "retired_finite_composition",
         "native_capacity_v2",
     }
 )
@@ -390,6 +391,12 @@ def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
 
 
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
+    if 'retired_finite_composition' in raw:
+        from control_plane.fabric_attended_routing import retired_finite_selection
+        try:
+            retired_finite_selection(raw)
+        except ValueError as exc:
+            raise ServiceError(str(exc)) from None
     armed = raw.get("fabric_bridge_armed", False)
     if type(armed) is not bool:
         raise ServiceError("fabric_bridge_armed must be boolean")
@@ -1844,6 +1851,7 @@ def _service_from_config(
     remote_worker_binding_source: Callable[..., Any] | None = None,
     plan_schema_version: str | None = None,
     fabric_worker_binding_source: Any | None = None,
+    secretary_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
@@ -2624,6 +2632,16 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+            # The SAME frozen selected-child publication the installed App
+            # reads, loaded through the installed source's fixed currentness
+            # reader. A changed, replaced or withdrawn publication refuses
+            # here instead of retargeting the running Control.
+            selected_child_target = coo_source.selected_child_target()
+            if selected_child_target is not None:
+                if "selected_child_target" not in {
+                        field.name for field in dataclasses.fields(CeoIngressAppBinding)}:
+                    raise ServiceError("installed selected child target has no composed binding owner")
+                coo_factories["selected_child_target"] = selected_child_target
             if raw.get("coo_principal_dialogue_armed", False) is True:
                 from integrations.mastermind_company_principal_app_receiver import PrincipalDialogueAppReceiver
                 from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
@@ -2822,12 +2840,31 @@ def _service_from_config(
                         # File/policy drift disables only the independent
                         # cross-policy read, never grants a substitute identity.
                         trusted_policies = None
+                hermes_session = None
+                if secretary_binding_source is not None:
+                    from integrations.session_bridge.hermes_native import HermesNativeSession
+
+                    def require_secretary_read():
+                        require_session_admission()
+                        service._namespace_custody.bound_runtime(runtime)
+                        if service._require_runtime() is not runtime:
+                            raise BridgeError("ingress_unavailable", "Executive Runtime changed")
+
+                    def require_secretary_submit():
+                        require_secretary_read()
+                        service._require_ceo_submit_admission()
+
+                    hermes_session = HermesNativeSession(
+                        secretary_binding_source, read_guard=require_secretary_read,
+                        submit_guard=require_secretary_submit)
+
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
                     attention_requester=attention,
                     authorized_policies=trusted_policies,
-                    reference_cursor_key=session_reference_cursor_key)
+                    reference_cursor_key=session_reference_cursor_key,
+                    hermes_session=hermes_session)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
             if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
                 def project_conversation_read_factory(runtime):
@@ -3331,6 +3368,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        secretary_binding_source=physical_source,
         byok_roles_reader=physical_source.hermes_roles_reader() if physical_source is not None else None,
         paid_worker_binding_source=paid_source,
         attended_work_placements=attended_work_placements,

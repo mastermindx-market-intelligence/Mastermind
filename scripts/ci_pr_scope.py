@@ -17,7 +17,7 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from control_plane.github_review_risk_policy import (
@@ -41,6 +41,8 @@ class ScopeDecision:
     reason: str
     file_count: int = 0
     needs_node: bool = False
+    source_base: str = field(default="", compare=False)
+    source_head: str = field(default="", compare=False)
 
     @property
     def full(self) -> bool:
@@ -133,6 +135,16 @@ def classify(repo_path: Path, payload: dict, *, expected_repository: str) -> Sco
             or _SHA.fullmatch(head) is None
             or base_repo != repo or head_repo != repo):
         raise CIScopeUnqualified("SIGNED_REPOSITORY_OR_HEAD_UNQUALIFIED")
+    return _classify_verified_change(repo_path, base, head, number, expected_repository=expected_repository)
+
+
+def _classify_verified_change(
+    repo_path: Path, base: str, head: str, number: int, *,
+    expected_repository: str,
+) -> ScopeDecision:
+    # The shared canonical risk assessor sees the complete verified source
+    # diff, not event labels, user-authored text, or PR-only shortcuts.
+    repo = expected_repository
     # The caller chooses the checkout directory, but never a remote, URL,
     # executable, ref, optional pipeline authority, or a shell command.
     root = repo_path.resolve(strict=True)
@@ -194,16 +206,72 @@ def classify(repo_path: Path, payload: dict, *, expected_repository: str) -> Sco
     else:
         mode = "full"
     needs_node = any(path.startswith("app/mastermind_os/") for path in changed)
-    return ScopeDecision(mode, assessment.tier.value, "SOURCE_VERIFIED", len(changed), needs_node)
+    return ScopeDecision(mode, assessment.tier.value, "SOURCE_VERIFIED", len(changed), needs_node,
+                         source_base=ancestor, source_head=head)
 
 
-def select_scope(repo_path: Path, event_path: Path, *, expected_repository: str) -> ScopeDecision:
+
+def classify_merge_group(
+    repo_path: Path, payload: dict, *,
+    expected_repository: str, protected_base_sha: str,
+) -> ScopeDecision:
+    """Risk-scope the entire actual integrated candidate, not its latest PR only.
+
+    The trusted code is loaded from the protected branch; the candidate must
+    be a descendant of that exact protected head. A moving/non-ancestor
+    base or ambiguous GitHub queue identity means full CI, not an escape.
+    """
+    try:
+        group = payload["merge_group"]
+        repo = payload["repository"]["full_name"]
+        event_base, event_head = group["base_sha"], group["head_sha"]
+        base_ref, head_ref = group["base_ref"], group["head_ref"]
+    except (KeyError, TypeError):
+        raise CIScopeUnqualified("SIGNED_MERGE_GROUP_INCOMPLETE") from None
+    if (repo != expected_repository or type(event_base) is not str
+            or type(event_head) is not str
+            or _SHA.fullmatch(event_base) is None
+            or _SHA.fullmatch(event_head) is None
+            or type(protected_base_sha) is not str
+            or _SHA.fullmatch(protected_base_sha) is None
+            or base_ref != "refs/heads/master"
+            or type(head_ref) is not str
+            or not head_ref.startswith("refs/heads/gh-readonly-queue/master/")):
+        raise CIScopeUnqualified("SIGNED_MERGE_GROUP_IDENTITY_UNQUALIFIED")
+    root = repo_path.resolve(strict=True)
+    if not (root / ".git").exists():
+        raise CIScopeUnqualified("SOURCE_REPOSITORY_UNAVAILABLE")
+    if (_git(root, "rev-parse", "HEAD").decode("ascii").strip() != event_head
+            or _git(root, "rev-parse", "refs/remotes/origin/master").decode("ascii").strip()
+            != protected_base_sha):
+        raise CIScopeUnqualified("MERGE_GROUP_CHECKOUT_OR_PROTECTED_BASE_CHANGED")
+    _git(root, "cat-file", "-e", f"{event_base}^{{commit}}")
+    _git(root, "cat-file", "-e", f"{event_head}^{{commit}}")
+    _git(root, "merge-base", "--is-ancestor", event_base, event_head)
+    _git(root, "merge-base", "--is-ancestor", protected_base_sha, event_head)
+    # The assessment identity is internal (not a PR, reviewer, merge command,
+    # or GitHub receipt); release authority remains with the native queue.
+    return _classify_verified_change(
+        repo_path, protected_base_sha, event_head, 1,
+        expected_repository=expected_repository,
+    )
+
+def select_scope(repo_path: Path, event_path: Path, *, expected_repository: str,
+                 event_type: str = 'pull_request',
+                 protected_base_sha: str = '') -> ScopeDecision:
     try:
         if event_path.stat().st_size > _MAX_EVENT_BYTES:
             raise CIScopeUnqualified("EVENT_OVER_BOUND")
         payload = json.loads(event_path.read_text(encoding="utf-8"))
         if type(payload) is not dict:
             raise CIScopeUnqualified("EVENT_MALFORMED")
+        if event_type == "merge_group":
+            return classify_merge_group(
+                repo_path, payload, expected_repository=expected_repository,
+                protected_base_sha=protected_base_sha,
+            )
+        if event_type != "pull_request":
+            raise CIScopeUnqualified("EVENT_TYPE_NOT_SCOPED")
         return classify(repo_path, payload, expected_repository=expected_repository)
     except CIScopeUnqualified as exc:
         return ScopeDecision("full", "HOLD", str(exc))
@@ -217,11 +285,18 @@ def main() -> int:
     parser.add_argument("--event", type=Path, required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--event-type", choices=("pull_request", "merge_group"),
+                        default="pull_request")
+    parser.add_argument("--protected-base", default="")
     args = parser.parse_args()
-    decision = select_scope(args.repo, args.event, expected_repository=args.repository)
+    decision = select_scope(
+        args.repo, args.event, expected_repository=args.repository,
+        event_type=args.event_type, protected_base_sha=args.protected_base,
+    )
     # Output is closed vocabulary; no author-controlled path or text emitted.
     output = (f"mode={decision.mode}\ntier={decision.tier}\n"
-              f"needs_node={str(decision.needs_node).lower()}\n")
+              f"needs_node={str(decision.needs_node).lower()}\n"
+              f"source_base={decision.source_base}\nsource_head={decision.source_head}\n")
     with args.output.open("a", encoding="ascii") as target:
         target.write(output)
     print(f"CI_SCOPE mode={decision.mode} tier={decision.tier} "

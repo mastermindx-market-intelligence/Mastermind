@@ -119,6 +119,12 @@ import {
   type MountedExecutiveSessionBinding,
 } from "./orchestration/os-executive-session-host";
 import {
+  EXECUTIVE_SESSION_TARGET_KINDS,
+  type ExecutiveSessionTargetKind,
+  type HermesNativePublicResult,
+  type QualifiedSessionAnswerValue,
+} from "./orchestration/executive-session-command-port";
+import {
   allEvidence,
   decodeMission,
   decodeMissionv3,
@@ -246,8 +252,8 @@ function NavigationIcon({ view }: { view: View }) {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={navigationPaths[view]} /></svg>;
 }
 function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
-  if (locale === "en") return view;
-  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  if (locale === "en") return view === "Fleet & Capacity" ? "Resources & systems" : view;
+  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "资源与系统", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
   return labels[view];
 }
 
@@ -319,6 +325,38 @@ function isRetainedSessionOperation(value: unknown): value is OperationPointer {
     typeof pointer.operationKey === "string" && SESSION_OPERATION_KEY.test(pointer.operationKey) &&
     pointer.kind === "message" &&
     typeof pointer.targetKey === "string" && SESSION_TARGET_REF.test(pointer.targetKey);
+}
+/**
+ * The ordinary URL parameter that carries the closed session target kind.
+ * There is no new persistence owner: the parameter is the whole retention.
+ */
+const SESSION_TARGET_KIND_PARAM = "session_target_kind";
+function readSessionTargetKind(search = window.location.search): ExecutiveSessionTargetKind {
+  try {
+    const raw = search.startsWith("?") ? search.slice(1) : search;
+    for (const pair of raw.split("&")) {
+      const at = pair.indexOf("=");
+      if (at === -1) continue;
+      if (decodeURIComponent(pair.slice(0, at)) !== SESSION_TARGET_KIND_PARAM) continue;
+      const value = decodeURIComponent(pair.slice(at + 1));
+      return EXECUTIVE_SESSION_TARGET_KINDS.includes(value as ExecutiveSessionTargetKind)
+        ? (value as ExecutiveSessionTargetKind)
+        : "fabric_attempt";
+    }
+  } catch {
+    return "fabric_attempt";
+  }
+  return "fabric_attempt";
+}
+function writeSessionTargetKind(kind: ExecutiveSessionTargetKind): void {
+  try {
+    const url = new URL(window.location.href);
+    if (kind === "fabric_attempt") url.searchParams.delete(SESSION_TARGET_KIND_PARAM);
+    else url.searchParams.set(SESSION_TARGET_KIND_PARAM, kind);
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch {
+    /* The ordinary URL parameter is best-effort; the choice still applies. */
+  }
 }
 type ReopenedOperation = {
   binding: OrchestratorCommandBinding;
@@ -1677,6 +1715,35 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     ) => void;
   } | null>(null);
   const [sessionStatus, setSessionStatus] = useState<OperationState | null>(null);
+  // The explicit session target kind. It is an ordinary URL parameter and an
+  // ordinary local choice; it is never inferred from a title, a provider or a
+  // capability advertisement.
+  const [sessionTargetKind, setSessionTargetKind] = useState<ExecutiveSessionTargetKind>(
+    () => readSessionTargetKind(),
+  );
+  // Ephemeral presentation state for one validated native public result. It
+  // is fenced by the existing owner, auth and selection identity and is never
+  // a durable answer, a pointer or a consumption record.
+  const [sessionNative, setSessionNative] = useState<{
+    binding: MountedExecutiveSessionBinding;
+    principalScope: string;
+    generation: string;
+    selectionSeq: number;
+    targetKind: ExecutiveSessionTargetKind;
+    result: HermesNativePublicResult;
+  } | null>(null);
+  // The session selection the host is asked to qualify. The closed target
+  // kind travels with it; a kind change is a different selection.
+  const sessionSelection = useMemo(
+    () => (selection
+      ? {
+        workRef: selection.workRef,
+        rootJobId: selection.rootJobId,
+        targetKind: sessionTargetKind,
+      }
+      : null),
+    [selection, sessionTargetKind],
+  );
   const [sessionRefusal, setSessionRefusal] = useState<{
     binding: MountedExecutiveSessionBinding;
     principalScope: string;
@@ -1926,16 +1993,71 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // The real mounted host supplies the existing native qualified reader.
     // An older unqualified fixture is fail-dark: it cannot clear an original
     // hint by promoting a receipt without a validated answer.
-    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswer>({
-      port: binding.port,
-      readAnswer: (pointer, signal) => typeof binding.port.readQualifiedAnswer === "function"
-        ? binding.port.readQualifiedAnswer(pointer, signal)
-        : Promise.resolve({ receipt: { ...pointer, disposition: "unknown", reason: "UNKNOWN_RECEIPT" }, answer: null }),
+    // The validated native public result is captured as ephemeral presentation
+    // state under the existing owner, auth and selection fences. It is never
+    // a durable answer, a pointer or a consumption record.
+    const captureNative = (result: HermesNativePublicResult | null) => {
+      if (!result || !ownsSession(binding, ctx, sequence) ||
+          !answerView.isCurrent(identity)) return;
+      // A late phase belongs only to the controller that requested it.
+      // Replacing the live host must not retag an old result to its new owner.
+      setSessionNative({
+        binding, principalScope: ctx.principalScope,
+        generation: ctx.generation, selectionSeq: sequence,
+        targetKind: sessionTargetKind, result,
+      });
+    };
+    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswerValue>({
+      // The same single SEND. The qualified entry only adds the validated
+      // native public result of that one send; it never sends twice.
+      port: {
+        context: () => binding.port.context(),
+        prepare: (intent) => binding.port.prepare(intent),
+        submit: async (pointer, intent, signal) => {
+          const qualified = binding.port.submitQualified;
+          if (!qualified) return binding.port.submit(pointer, intent, signal);
+          const dispatch = await qualified(pointer, intent, signal);
+          captureNative(dispatch.nativeResult);
+          return dispatch.receipt;
+        },
+        readOperation: (pointer, signal) => binding.port.readOperation(pointer, signal),
+      },
+      readAnswer: async (pointer, signal) => {
+        const read = typeof binding.port.readQualifiedAnswer === "function"
+          ? await binding.port.readQualifiedAnswer(pointer, signal)
+          : {
+            receipt: {
+              ...pointer, disposition: "unknown" as const, reason: "UNKNOWN_RECEIPT",
+            },
+            answer: null,
+            nativeResult: null,
+          };
+        captureNative(read.nativeResult ?? null);
+        return read;
+      },
       isCurrent: () => ownsSession(binding, ctx, sequence) && answerView.isCurrent(identity),
       onAdmission: () => { if (ownsSession(binding, ctx, sequence)) answerView.invalidate(); },
       onAnswer: (pointer, answer) => answerView.stage(identity, pointer, answer),
     });
     return new OperationController(wrapper, binding.store);
+  };
+  // An explicit kind change re-qualifies the host before any capability
+  // evidence is used.  The kind is never inferred from a title, a provider
+  // or a capability advertisement, and it may not change underneath an
+  // unresolved original operation.
+  const changeSessionTargetKind = (kind: ExecutiveSessionTargetKind) => {
+    if (!EXECUTIVE_SESSION_TARGET_KINDS.includes(kind)) return;
+    if (kind === sessionTargetKind) return;
+    if (sessionPending.current !== null || sessionPointer !== null ||
+        sessionPointerError || sessionRecovering) return;
+    writeSessionTargetKind(kind);
+    setSessionTargetKind(kind);
+    invalidateSessionPresentation();
+    void sessionControl?.refresh(
+      selection
+        ? { workRef: selection.workRef, rootJobId: selection.rootJobId, targetKind: kind }
+        : null,
+    );
   };
   const invalidateSessionPresentation = () => {
     answerView.invalidate();
@@ -1947,6 +2069,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     sessionRecoveryFlight.current++;
     setSessionStatus(null); setSessionPointer(null); setSessionRefusal(null);
     setSessionPointerError(false); setSessionReading(true); setSessionRecovering(false);
+    // The native phase is presentation state of one qualified result; a
+    // route, selection, auth or kind transition withdraws it.
+    setSessionNative(null);
   };
   const commandReady = !!commandBinding && signedIn && !!ownerContext;
   const commandSelectionRevision = selectionSeq.current;
@@ -2022,7 +2147,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (!sessionBinding || !sessionControl || sessionMounted.current === sessionBinding) return;
     sessionMounted.current = sessionBinding;
     sessionControl.setStopCondition(() => undefined);
-    void sessionControl.refresh(selection);
+    void sessionControl.refresh(sessionSelection);
   }, [sessionBinding, sessionControl]);
   useEffect(() => {
     if (!commandBinding || !ownerContext) {
@@ -2201,6 +2326,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     resultController.current?.abort();
   }, []);
   const projectHeading = useRef<HTMLHeadingElement>(null);
+  const resourcesView = useRef<HTMLDivElement>(null), resourcesWorkView = useRef<HTMLElement>(null);
+  const pendingResourcesFocus = useRef<{kind:"work"|"resources";root:string;auth:number;host:typeof window.MastermindMissionHost;epoch:number|undefined}|null>(null);
+  useLayoutEffect(() => {
+    const intent = pendingResourcesFocus.current;
+    if (!intent) return;
+    pendingResourcesFocus.current = null;
+    if (intent.auth !== authRevisionRef.current || intent.host !== window.MastermindMissionHost ||
+        intent.epoch !== intent.host?.invalidationGeneration?.() || selection?.rootJobId !== intent.root) return;
+    const row = Array.from(resourcesView.current?.querySelectorAll<HTMLElement>("[data-root-job-id]") ?? [])
+      .find(node => node.dataset.rootJobId === intent.root);
+    const target = intent.kind === "work" ? resourcesWorkView.current :
+      row?.querySelector<HTMLButtonElement>("button") ?? resourcesView.current?.querySelector<HTMLHeadingElement>("h1");
+    target?.focus(); target?.scrollIntoView?.({block:"start"});
+  });
+  const [resourcesWorkOrigin, setResourcesWorkOrigin] = useState<{auth:number;workRef:string;rootJobId:string} | null>(null);
   const legacyProjectTabs = useRef<HTMLDivElement>(null);
   const pendingLegacyTabFocus = useRef<ProjectTab | null>(null);
   const pendingProjectHeadingFocus = useRef<HTMLElement | null>(null);
@@ -2731,11 +2871,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         return;
       }
       const next = directLocationInput().selection;
+      const nextKind = readSessionTargetKind();
       office.clearSelection(next);
       observedConversation.clear();
       selectionSeq.current += 1;
       invalidateSessionPresentation();
-      void window.MastermindMissionHost?.session?.refresh(next);
+      setSessionTargetKind(nextKind);
+      void window.MastermindMissionHost?.session?.refresh(
+        next ? { workRef: next.workRef, rootJobId: next.rootJobId, targetKind: nextKind } : null,
+      );
       commandSlot.current?.controller.invalidate();
       bumpInvalidation();
       setWindowDocument(null);
@@ -3047,6 +3191,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           work_ref: next.workRef,
           root_job_id: next.rootJobId,
         }).toString();
+        // The ordinary session target kind parameter is retained across a
+        // mission change; it is the whole retention of that choice.
+        if (sessionTargetKind !== "fabric_attempt") {
+          location.searchParams.set(SESSION_TARGET_KIND_PARAM, sessionTargetKind);
+        }
         // Read-selection hint only; the authenticated direct endpoint still
         // proves the Job, original principal, receiver and terminal identity.
         if(direct)location.searchParams.set("direct_native_job",r);
@@ -3058,7 +3207,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         setMission(unavailableMission(next, "SOURCE_READ_PENDING"));
         setNotice("Reading the exact selected mission pair…");
         setSelection(next);
-        void window.MastermindMissionHost?.session?.refresh(next);
+        void window.MastermindMissionHost?.session?.refresh(
+          { workRef: next.workRef, rootJobId: next.rootJobId, targetKind: sessionTargetKind },
+        );
         setProjectTab(direct ? "Overview" : "Conversation");
         setActive("Projects");
       }
@@ -3673,8 +3824,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const retainedLaunchDetails = retainedComposerDrafts.launchDetails;
   const changeHeldLaunchDetails = (change: Partial<LaunchDetailsDraft>) => {
     const held = retainedComposerRef.current.launchDetails;
-    if (!signedIn && passiveExpiryHold.current && held)
-      updateRetainedComposer("launchDetails", { ...held, ...change });
+    if (!signedIn && passiveExpiryHold.current && held) {
+      const next = { ...held, ...change };
+      const hasDetails = next.acceptanceCriteria || next.handoffText || next.writePathsText ||
+        next.testTargetsText || !next.diffCheck || next.projectRef || next.profileRef;
+      updateRetainedComposer("launchDetails", hasDetails ? next : null);
+    }
   };
   const commandPanel =
     !signedIn && passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails) ? (
@@ -3685,7 +3840,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
           onChange={event => updateRetainedComposer("launch", event.target.value)}
           rows={4} />
-        {retainedLaunchDetails ? <fieldset className="project-execution-scope">
+        {retainedLaunchDetails?.acceptanceCriteria ? <div className="form-field">
+          <label htmlFor="retained-launch-criteria">{locale === "zh-CN" ? "验收条件（可选，每行一项）" : "Acceptance criteria (optional, one per line)"}</label>
+          <textarea id="retained-launch-criteria" value={retainedLaunchDetails.acceptanceCriteria} rows={3}
+            onChange={event => changeHeldLaunchDetails({ acceptanceCriteria: event.target.value })}/>
+        </div> : null}
+        {retainedLaunchDetails && (launchHandoff?.kind === "project" || retainedLaunchDetails.handoffText ||
+          retainedLaunchDetails.writePathsText || retainedLaunchDetails.testTargetsText || retainedLaunchDetails.profileRef) ? <fieldset className="project-execution-scope">
           <legend>{locale === "zh-CN" ? "未发送的交接与范围" : "Unsent handoff and scope"}</legend>
           <div className="form-field">
             <label htmlFor="retained-launch-handoff">{locale === "zh-CN" ? "交接说明（可选）" : "Handoff (optional)"}</label>
@@ -3766,17 +3927,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           profiles={launchView.profiles}
           frontierModels={launchView.frontierModels}
           initialDraft={presentedComposerDrafts.launch}
-          initialDetails={launchHandoff?.kind === "project" ? presentedComposerDrafts.launchDetails : null}
+          initialDetails={presentedComposerDrafts.launchDetails}
           onDetailsChange={details => {
             const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
             const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
-            if (launchHandoff?.kind === "project" && authRevisionRef.current === authRevision &&
+            if (authRevisionRef.current === authRevision &&
                 window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
                 liveBinding === commandBinding &&
                 liveOwner?.principalScope === ownerContext?.principalScope &&
                 liveOwner?.generation === ownerContext?.generation) {
               retainedComposerScope.current = liveComposerScope;
               updateRetainedComposer("launchDetails", details);
+              if (details && !retainedComposerRef.current.launchWorkstream && launchView.defaultWorkstream)
+                updateRetainedComposer("launchWorkstream", launchView.defaultWorkstream);
             }
           }}
           onDraftChange={text => {
@@ -3985,6 +4148,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       key={JSON.stringify([sessionOwner?.principalScope, sessionOwner?.generation])}
       sessionKey={sessionTargetKey}
       unavailableReason={sessionContinuationUnavailable}
+      targetKind={sessionTargetKind}
+      onTargetKindChange={changeSessionTargetKind}
+      targetKindLocked={
+        sessionPending.current !== null || sessionPointer !== null ||
+        sessionPointerError || sessionRecovering
+      }
+      nativeResult={sessionNative && sessionNative.binding === sessionBinding &&
+        sessionNative.principalScope === sessionOwner?.principalScope &&
+        sessionNative.generation === sessionOwner?.generation &&
+        sessionNative.selectionSeq === selectionSeq.current &&
+        sessionNative.targetKind === sessionTargetKind
+        ? sessionNative.result
+        : null}
       status={sessionStatus}
       retainedPointer={sessionPointer}
       reading={!!sessionOwner && sessionReading}
@@ -4003,7 +4179,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       onRecover={checkSessionStatus}
       onRequalify={signedIn && !sessionOwner && sessionControl ? () => {
         invalidateSessionPresentation();
-        void sessionControl.refresh(selection);
+        void sessionControl.refresh(sessionSelection);
       } : undefined}
     />
   ) : null;
@@ -4788,7 +4964,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       />
     ) : null;
   const newProjectRoute = active === "Projects" && (projectJourney.shown || projectJourney.invalidLink);
-  const quietHeader = active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const independentProjectRead =
@@ -4867,6 +5043,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     setProjectTab("More"); setActive("Projects");
     finish(true);
   });
+  // Presentation-only navigation. Existing read owners still qualify all data;
+  // no selection/Attempt, draft, operation or admission is created or changed.
+  const resourcesHost = window.MastermindMissionHost;
+  const resourcesOwnerCurrent = () => window.MastermindMissionHost === resourcesHost &&
+    authRevisionRef.current === authRevision && office.projection.programs.source.state === "CURRENT" &&
+    conversationListSnapshot.current.index === index && conversationListSnapshot.current.epoch === programIndexEpoch;
+  const resourcesCanOpenWork = (root: string) => resourcesOwnerCurrent() && projectReaders.canRead() &&
+    Boolean(selection && projectWorkRef === selection.workRef && selection.rootJobId === root &&
+      d?.mission.root_job_id === root && d.mission.root_job_ambiguous === false &&
+      currentProjectCards[0]?.rootState === "RESOLVED" && currentProjectCards[0]?.rootCandidates.length === 1 &&
+      currentProjectCards[0]?.rootJobId === root);
+  const resourcesWorkReturn = resourcesWorkOrigin?.auth === authRevision &&
+    resourcesWorkOrigin.workRef === selection?.workRef && resourcesWorkOrigin.rootJobId === selection?.rootJobId;
   // Fresh choices consume the SAME acquired index, including qualified N.
   // Global saved-conversation locators remain owned by the C projection.
   const freshIndexCurrent = currentProgramsRead();
@@ -5084,7 +5273,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authenticationCue={todayAuthenticationCue}
       retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
       onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
-      onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+      onOpenProjects={() => { setProjectTab(null); setCatalogueProject(null); setActive("Projects"); }}
       onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
     />;
   else if (active === "Meta-CEO")
@@ -5099,6 +5288,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           onRefreshByok={byokRoles.refresh}
           programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
             read: projectReaders.plan, sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead}}
+          acceptedDirection={recordedDirection}
+          onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+          selectedProject={projectWorkRef && currentProjectCards.length === 1 ? {
+            title: currentProjectCards[0].title || projectWorkRef,
+            nextAction: currentProjectCards[0].nextAction,
+            onOpen: () => { if (projectReaders.canRead()) { setProjectTab("Conversation"); setActive("Projects"); } },
+          } : null}
           draft={office.draft}
           onDraftChange={office.changeDraft}
           onInspectWorkerResult={workerResultHost?.readResult ? openOfficeWorkerResult : undefined}
@@ -5115,7 +5311,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             It is the same commandPanel element the other routes use, so only
             one LaunchOrchestrator owner exists at a time. */}
         {launchHandoff?.kind === "office" ? commandPanel : null}
-        <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
+        <details className="office-operations"><summary>{locale === "zh-CN" ? "公司工具" : "Company tools"}</summary>
+          <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
+        </details>
       </>
     );
   else if (active === "Inbox")
@@ -5273,7 +5471,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 {id:"direction", content:recordedDirection},
                 {id:"plan", content:<>{panel}{retainedResultHost ? <PlanAdoptionWorkflow workRef={projectWorkRef} inspection={inspection}
                   host={retainedResultHost} isHostCurrent={planAdoptionHostCurrent} locale={locale}/> : null}</>},
-                {id:"work", content:<>{projectAdmissionPanel}
+                {id:"work", content:<><button type="button" onClick={() => {
+                  if (!resourcesOwnerCurrent()) return;
+                  setProjectTab(null); setActive("Fleet & Capacity");
+                }}>{locale === "zh-CN" ? "查看资源与系统" : "Inspect resources & systems"}</button>{projectAdmissionPanel}
                   {projectConversationActive ? <>
                     <AutonomyPanel selection={selection} read={projectReaders.autonomy}
                       canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
@@ -5352,13 +5553,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             <ProjectPlan d={d} />
           ) : projectTab === "Work" ? (
             <>
+              <section ref={resourcesWorkView} tabIndex={-1} aria-label={locale === "zh-CN" ? "所选工作详情" : "Selected work inspection"}>
+              {resourcesWorkReturn ? <button type="button" onClick={() => {
+                pendingResourcesFocus.current={kind:"resources",root:selection.rootJobId,auth:authRevision,host:resourcesHost,epoch:resourcesHost?.invalidationGeneration?.()};
+                setProjectTab(null);setActive("Fleet & Capacity");}}>{locale === "zh-CN" ? "返回资源与系统" : "Back to resources & systems"}</button> : null}
               <ProjectWorkDetail key={projectReadGeneration} document={d} selection={selection}
                 generation={projectReadGeneration} locale={locale}
                 resultPanel={<>{resultRefs}<ResultCard locale={locale} state={resultState}/></>}
                 activityPanel={<Activity d={d} selection={selection} readActivity={projectReaders.activity} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}/>}
                 actionPanel={<>{commandPanel}{workRefreshControl}</>}
                 onOpenEvidence={() => setProjectTab("Evidence")}
-                onOpenJournal={() => setProjectTab("Journal")} />
+                onOpenJournal={() => setProjectTab("Journal")} /></section>
               <details className="mm-work-journey__details"><summary>{locale === "zh-CN" ? "相关工作状态" : "Related work status"}</summary><WorkQueue state={workState} rootJobId={selection.rootJobId} /></details>
             </>
           ) : projectTab === "Evidence" ? (
@@ -5528,8 +5733,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Fleet & Capacity")
     content = (
       <>
-      <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale}
-        onReviewSources={() => setActive("Sources")}/>
+      {projectWorkRef && resourcesOwnerCurrent() ? <div className="resources-project-context">
+        <p className="muted">{locale === "zh-CN" ? "所选项目" : "Selected project"} · {currentProjectCards[0].title || projectWorkRef}</p>
+        <button type="button" onClick={() => {if (!resourcesOwnerCurrent()) return;setProjectTab("Conversation");setActive("Projects");}}>{locale === "zh-CN" ? "返回项目" : "Back to project"}</button>
+      </div> : null}
+      <div ref={resourcesView}><ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale} headingLevel={1}
+        onOpenWork={root => {if (!resourcesCanOpenWork(root) || !selection) return;
+          pendingResourcesFocus.current={kind:"work",root:selection.rootJobId,auth:authRevision,host:resourcesHost,epoch:resourcesHost?.invalidationGeneration?.()};
+          setResourcesWorkOrigin({auth:authRevision,workRef:selection.workRef,rootJobId:selection.rootJobId});
+          setProjectTab("Work");setActive("Projects");}}
+        canOpenWork={resourcesCanOpenWork}
+        onReviewSources={() => setActive("Sources")}/></div>
+      <details className="reason-details"><summary>{locale === "zh-CN" ? "原始容量凭据与运行记录" : "Original capacity receipts and run records"}</summary>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,
           resultState.kind === "READY" ? resultState.selection : null, authRevision)}/>
@@ -5538,6 +5753,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         host={window.MastermindMissionHost}
         locale={locale}
       />
+      </details>
       </>
     );
   else if (active === "Conversation")
@@ -5775,7 +5991,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {active === "Tools" ? <details className="workspace-qualification"><summary>{locale === "zh-CN" ? "工具上下文" : "Tool context"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
         {nativeGoalNotice}
@@ -5797,8 +6013,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Today" && active !== "Conversations" && active !== "Activity" && !directRoute &&
-          !((active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
+        {active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && !directRoute &&
+          !((active === "Meta-CEO" || active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice &&
           !(active === "Projects" && (projectJourney.shown || projectJourney.invalidLink) && reading.readinessDiagnostic !== null) ? (
           <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."

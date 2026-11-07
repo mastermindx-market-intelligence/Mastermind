@@ -7,6 +7,12 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
+    # Exact reviewed preview source/site only; any byte drift re-exposes it.
+    'ops/fleet_storage_cleanup/linux_cache_preview.py': {
+        'sha256': '1fc025101f08a052223a79f494fa28c489f48a85590bc9b37e8ef1af0ea3796d',
+        'sites': ((204, 43, 46, 'int', '512'),),
+    },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
@@ -158,7 +164,7 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': '7a99d1029197cbb877cb968f0f9cbcb3abc257fb10d75406a20f8da884069b94',
+ 'ops/executive_os/acceptance.py': {'sha256': '2a2956df8847ec625f4a94bac36e494797644e75540ccc5b51bb7162d032ace0',
                                     # Re-pinned for argv redaction + newline flattening in the
                                     # failure artifact: _redact_failure_text extracted from
                                     # _redact_failure_stream, argv_text now redacted and
@@ -174,27 +180,30 @@ REVIEWED_FILES = {
                                     # PR2010 phase timing: Root-reviewed postimage; the same
                                     # 21 whole-token sites and enclosing function ASTs are
                                     # unchanged, shifted +10 lines. Full-file drift still refuses.
-                                    'sites': ((897, 59, 62, 'int', '454'),
-                                              (897, 64, 67, 'int', '455'),
-                                              (897, 69, 72, 'int', '456'),
-                                              (898, 23, 26, 'int', '450'),
-                                              (898, 45, 48, 'int', '450'),
-                                              (899, 49, 52, 'int', '400'),
-                                              (899, 64, 67, 'int', '500'),
-                                              (906, 28, 53, 'str', 'r"_mastermind_[a-z0-9_]+"'),
-                                              (914, 39, 64, 'str', 'r"_mastermind_[a-z0-9_]+"'),
-                                              (975, 44, 47, 'int', '454'),
-                                              (975, 49, 52, 'int', '455'),
-                                              (975, 54, 57, 'int', '456'),
-                                              (976, 44, 47, 'int', '454'),
-                                              (976, 49, 52, 'int', '455'),
-                                              (976, 54, 57, 'int', '456'),
-                                              (1097, 56, 59, 'int', '400'),
-                                              (1097, 85, 88, 'int', '500'),
-                                              (1098, 85, 88, 'int', '453'),
-                                              (1098, 90, 93, 'int', '454'),
-                                              (1098, 95, 98, 'int', '455'),
-                                              (1098, 100, 103, 'int', '456'))},
+                                    # PR #2151: retained-selection validation adds six lines.
+                                    # The same 21 complete tokens and columns remain; only
+                                    # this reviewed file digest and line coordinates change.
+                                    'sites': ((903, 59, 62, 'int', '454'),
+                                              (903, 64, 67, 'int', '455'),
+                                              (903, 69, 72, 'int', '456'),
+                                              (904, 23, 26, 'int', '450'),
+                                              (904, 45, 48, 'int', '450'),
+                                              (905, 49, 52, 'int', '400'),
+                                              (905, 64, 67, 'int', '500'),
+                                              (912, 28, 53, 'str', 'r"_mastermind_[a-z0-9_]+"'),
+                                              (920, 39, 64, 'str', 'r"_mastermind_[a-z0-9_]+"'),
+                                              (981, 44, 47, 'int', '454'),
+                                              (981, 49, 52, 'int', '455'),
+                                              (981, 54, 57, 'int', '456'),
+                                              (982, 44, 47, 'int', '454'),
+                                              (982, 49, 52, 'int', '455'),
+                                              (982, 54, 57, 'int', '456'),
+                                              (1103, 56, 59, 'int', '400'),
+                                              (1103, 85, 88, 'int', '500'),
+                                              (1104, 85, 88, 'int', '453'),
+                                              (1104, 90, 93, 'int', '454'),
+                                              (1104, 95, 98, 'int', '455'),
+                                              (1104, 100, 103, 'int', '456'))},
  'ops/executive_os/attended_worker_definition.py': {'sha256': '267ca3fceea48d2c3a1e8a4aaefbf8a90bd595d0c324f1a503826e9604ead92d',
  'sites': ((255, 31, 51, 'str', "'_mastermind_worker'"), (351, 95, 100, 'int', '0o660'))},
  'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
@@ -551,15 +560,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'c3d96bf994aea0969161b25405db9e3623eb7d5047ebd81e7a06b68757e11e7f',
-    'sites': ((342, 24, 27, 'int', '501'),
-              (6847, 35, 37, 'int', '80'),
-              (6848, 50, 55, 'int', '0o755'),
-              (7385, 41, 46, 'int', '0o644'),
-              (8122, 64, 69, 'int', '0o644'),
-              (9524, 41, 46, 'int', '0o644')),
-}
+# Integrated protected finite-retirement source is inspected with the same
+# exact studio UID, group and root-file permission AST token contexts; the
+# full postimage and all six source sites must remain an exact match.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '64af8405aa7981c9868e14ffe7f1912d2c326bb37c976ec223e14c42ec49b61b',
+ 'sites': ((349, 24, 27, 'int', '501'),
+           (6961, 35, 37, 'int', '80'),
+           (6962, 50, 55, 'int', '0o755'),
+           (7825, 41, 46, 'int', '0o644'),
+           (8593, 64, 69, 'int', '0o644'),
+           (10005, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -665,9 +675,9 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-# BYOK/Instructions composition preserves the complete permission handler AST;
-# only its enclosing source and four HTTP denial token positions change.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'b5e717931de280e792c47d9fccba49963f7aec55bb0702d07c2bdb0c43a70790', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+# Selected-child capture changes the enclosing source only; the permission
+# handler AST and all four HTTP denial token positions remain unchanged.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4f6aa75978f73afcdd72cc568f54062b4560f9bedc3dc5bd65bb8a81b0ae7e8e', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -711,34 +721,57 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-# Composed BYOK + qualified Session SEND source audit: the complete Programs
-# observation test body remains byte-identical; this pin supplies no release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '14632b8bbcd42edf5d4e56a0e3f67b077a5777b4548ccb0d57ca8961401d288e', 'sites': ((3469, 68, 71, 'int', '503'), (3474, 69, 72, 'int', '503'), (3478, 67, 70, 'int', '503'))}
-# 2026-11-06 composed-source check against protected c571acc9 + owned dfb94fb4:
-# control_room_action (635 AST nodes) and instruction-permission handler (194)
-# are exactly protected postimages; the native diagnostic test body is unchanged
-# from dfb94fb4. Reviewed host-observation/project READ/BYOK composition displaces
-# only these fixed HTTP status sites. These new complete-source pins record this
-# source audit; they do not inherit a release approval or release native SEND holds.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
 
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
-# C20 attended-parent review: archive closure and inert gateway replacement.
-# ensure_directories has the identical AST; its one whole permission token moved
-# by 15 lines. New unit publication consumes the existing canonical identities.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f693a9ed10fe110d69469b5cc9155243905890f3a039ac19a2bbbdbed1', 'sites': ((675, 71, 76, 'int', '0o750'),)}
+# C21 attended-parent source review combines native composition with the
+# accepted archive closure and inert gateway replacement. ensure_directories
+# retains its exact AST and whole permission token at the accepted moved site.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9b6349152277e6e5823169c4e3819388434a87102f468f608dbb6ea6f1',
+                                                              'sites': ((677, 71, 76, 'int', '0o750'),)}
 
-# Historical d3f21fc6 composition audit: native compound Mission/Result READ
-# retained the complete existing Programs diagnostic body; the three exact HTTP
-# operands moved together. The compound READ uses its fixed route/schema,
-# Acquisition generation, bounded body and null-only typed unavailable result.
-# No new numeric exception or native release approval was introduced. At that
-# audit, protected autonomy/initializer/qualification/enrollment sources matched
-# d3f bytes; their sites were read in their owning call context. The current C20
-# enrollment source is bound by its protected exact-postimage review above.
+# Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
+# One exact multiplication operand; full-source drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
+    "sha256": "bc444a613891eb84a484f12a253b371d91dadfabeda71bfe9ef0959d2bf8a0ed",
+    "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
+# NUMBER token is the left operand of MAX_SECRETARY_RESPONSE_BYTES = 512 * 1024.
+REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
+    "sha256": "c0d8d30ec2789d56c609c5f245b530c5765a2bb774f647cb7bd8cc2a86b05c31",
+    "sites": ((34, 31, 34, "int", "512"),),
+}
+
+# C46 native-control composition changes the enclosing source. The byte-ceiling
+# declaration, both consumers and the single reviewed operand remain exact.
+
+# The installer exclusively creates the gateway audit parent with this private
+# initial mode, under its held trusted root, before qualified final0755 mode.
+# Only this new token is reviewed; existing source identities remain visible.
+REVIEWED_FILES['ops/executive_os/install.sh'] = {
+    'sha256': '2bf7475cfc2b133459cbf914b9a9cd7b327121cd40b8f6e3c9ab3428f4ea9860',
+    'sites': ((1668, 26, 31, 'int', '0o700'),),
+}
+
+
+# Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
+REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e40d488bd0c18f6cc422aeb15ce853cba330a8d5c9559cc7a7612b1ce119a3ed', 'sites': ((22, 12, 15, 'int', '458'), (23, 7, 12, 'int', '0o700'), (125, 49, 54, 'int', '0o755'), (128, 60, 65, 'int', '0o755'))}
+
+# Hermes native Fabric: two bounded escalation-reason length limits, not
+# principals, account selections, permissions or process identities. Only the
+# exact reviewed source postimage and these complete typed numeric AST tokens
+# are exempt; any source drift exposes both to the ordinary D8 scanner again.
+# This does not confer trusted session grants or Fabric execution authority.
+REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
+    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
+    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+}

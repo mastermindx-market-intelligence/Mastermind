@@ -25,8 +25,8 @@ import sys
 import time
 
 from common.hermes_role_status_contract import (
-    ROLES, STATUS_SCHEMA, STATUS_SCHEMA_V2, RoleStatusError, encode_status_text,
-    encode_status_v2_text, validate_custody,
+    ROLES, STATUS_SCHEMA, STATUS_SCHEMA_V2, STATUS_SCHEMA_V3, RoleStatusError, encode_status_text,
+    encode_status_v2_text, encode_status_v3_text, validate_custody, validate_gateway_listener,
 )
 from integrations.hermes_harness.metadata import role_metadata
 
@@ -78,6 +78,7 @@ class RoleStatusPublisher:
     process_pid: int
     notify_socket: str
     custody_observer: Callable[[], Mapping[str, object]] | None = None
+    listener_observer: Callable[[], Mapping[str, object]] | None = None
 
     def __post_init__(self):
         if (self.role not in ROLES or not isinstance(self.state_dir, Path)
@@ -90,6 +91,9 @@ class RoleStatusPublisher:
             raise _context_refusal()
         _notification_address(self.notify_socket)
         if self.custody_observer is not None and not callable(self.custody_observer):
+            raise _context_refusal()
+        if self.listener_observer is not None and (
+                self.custody_observer is None or not callable(self.listener_observer)):
             raise _context_refusal()
 
     def _custody_status_text(self, wall_ms: int, monotonic_ms: int) -> str:
@@ -110,18 +114,27 @@ class RoleStatusPublisher:
         first = validate_custody(observer())
         if first["pid"] != self.process_pid:
             raise RoleStatusError()
+        listener = (None if self.listener_observer is None
+                    else validate_gateway_listener(self.listener_observer(), role=self.role))
         metadata = role_metadata(self.state_dir, self.role)
+        if (self.listener_observer is not None
+                and listener != validate_gateway_listener(self.listener_observer(), role=self.role)):
+            raise RoleStatusError()
         second = validate_custody(observer())
         if first != second or second["pid"] != self.process_pid:
             raise RoleStatusError()
-        return encode_status_v2_text({
+        document = {
             "schema": STATUS_SCHEMA_V2, "role": self.role,
             "host_boot_id": self.host_boot_id, "invocation_id": self.invocation_id,
             "implementation_sha": self.implementation_sha,
             "observed_at_ms": wall_ms, "observed_monotonic_ms": monotonic_ms,
             "metadata": metadata,
             "custody": first,
-        })
+        }
+        if listener is not None:
+            document.update(schema=STATUS_SCHEMA_V3, gateway_listener=listener)
+            return encode_status_v3_text(document)
+        return encode_status_v2_text(document)
 
     def publish(self) -> bool:
         """One new read and bounded datagram; local send is not PID1 acceptance."""

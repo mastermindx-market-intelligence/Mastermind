@@ -8,7 +8,10 @@ import { normalizeResultSelection, type ResultSelection } from "../result";
 import type { DraftInsertion, DraftSource } from "./drafts";
 import { ResultSourceReader } from "./ResultSourceReader";
 import type { OperationPointer } from "../orchestration/operation-controller";
-import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
+import {
+  qualifiedAnswerVariant,
+  type QualifiedSessionAnswerValue,
+} from "../orchestration/executive-session-command-port";
 import "./conversation.css";
 
 type ConversationLocale = "en" | "zh-CN";
@@ -89,6 +92,8 @@ Object.assign(STATIC_ZH, {
   "This result cannot be opened here.": "此处无法打开该结果。",
   "Original reply": "原始回复", "Suggested next step": "建议的下一步",
   "Original read reference": "原始读取引用",
+  "Reply available.": "回复可查看。",
+  "Unsuccessful native result available.": "原生任务未成功，结果可查看。",
   "Original-parent acceptance is not established by this local display.": "此处显示回复并不表示原请求已确认接收。",
 });
 function ui(locale: ConversationLocale, text: string) { return locale === "zh-CN" ? STATIC_ZH[text] ?? text : text; }
@@ -103,7 +108,7 @@ function unavailableCopy(state: string) {
  * A browser-local render is NOT a canonical parent-consumed acknowledgement. */
 export interface QualifiedConversationReply {
   readonly pointer: OperationPointer;
-  readonly answer: QualifiedSessionAnswer;
+  readonly answer: QualifiedSessionAnswerValue;
 }
 
 function QualifiedReplyCard({ value, onCommitted, locale }: {
@@ -120,12 +125,22 @@ function QualifiedReplyCard({ value, onCommitted, locale }: {
       onCommitted?.(value);
     }
   }, [value, onCommitted]);
+  const native = qualifiedAnswerVariant(value.answer) !== "fabric_attempt";
+  const nextStep = native ? null : value.answer.nextStep;
+  const successful = native
+    ? (value.answer as { readonly successful: boolean }).successful
+    : null;
   return <section ref={mounted} className="conversation-result"
       aria-label={ui(locale, "Original reply")} data-operation-key={value.pointer.operationKey} lang={locale}>
     <div>
       <h2>{ui(locale, "Original reply")}</h2>
       <p className="conversation-answer">{value.answer.text}</p>
-      {value.answer.nextStep && <p className="conversation-history">{ui(locale, "Suggested next step")}: {value.answer.nextStep}</p>}
+      {nextStep ? <p className="conversation-history">{ui(locale, "Suggested next step")}: {nextStep}</p> : null}
+      {successful !== null ? (
+        <p className="conversation-history">
+          {ui(locale, successful ? "Reply available." : "Unsuccessful native result available.")}
+        </p>
+      ) : null}
       <details className="conversation-receipts"><summary>{ui(locale, "Source details")}</summary>
         <p>{ui(locale, "Original read reference")}: <code>{value.answer.readRef}</code></p>
         <p>{ui(locale, "Original-parent acceptance is not established by this local display.")}</p>

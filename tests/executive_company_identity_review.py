@@ -32,10 +32,10 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
-        # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "9b7dee55b65807867d08840c44b79c5932f30cdc7c13645228736eb240aade0c",
-        "ast_sha256": "bfeed80a98cf1e20152070659d1397600a2597921c38b938799ce2e095a879eb",
+        # Selected-child App-peer admission changes the enclosing ingress AST.
+        # The original Fabric reply operands and Company listener remain unchanged.
+        "source_sha256": "ea7aee823d3b38eb5c8b102d713678cc35a818213bb6777560cdce09a7976720",
+        "ast_sha256": "d6dc49f5ec033025ac0fbf1903374049a4ec7c5cde5daa504c3f0473e5507164",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -61,3 +61,5 @@ REVIEWED_ANCHORS = {
 # Fabric response branch are unchanged; only the enclosing ingress composition
 # and mapped sites change. These fixed pins are a new source-drift qualification,
 # not inherited native SEND approval or installation/release authority.
+
+# Parent C17 dispatch composition retains the protected821 ingress AST and exact operands.

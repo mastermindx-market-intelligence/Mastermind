@@ -977,6 +977,9 @@ function KnowledgeLibraryBody(props: BodyProps) {
       return (
         <div className="knowledge-library-reader">
           <article className="knowledge-library-document">
+            <button type="button" className="knowledge-library-button" onClick={closeReader}>
+              {copy.back}
+            </button>
             <p aria-live="polite">{copy.loading}</p>
           </article>
         </div>

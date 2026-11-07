@@ -4,13 +4,15 @@ This validates publisher documents; it does not discover hosts, load a role
 profile, attest installed source, or open a credential/provider/service. The
 fixed observer must independently qualify PID1 and installed-source custody.
 
-Two status revisions share this one validation owner.  The v1 document
+Three explicit status revisions share this one validation owner.  The v1 document
 (``mastermind.hermes.role_status.v1``) is unchanged and remains what legacy
 diagnostic consumers read.  The v2 document
 (``mastermind.hermes.role_status.v2``) carries every v1 field plus one closed
 ``custody`` object: the main supervisor's own measured process identity and
 the two hashes it was measured against.  v2 is never a fallback for v1 and a
-v1 payload never satisfies a v2/custody-required read.
+v1 payload never satisfies a custody-required read. The v3 document adds a
+closed witness measured from the selected role supervisor's real listening socket;
+only the listener-required consumer can use that witness to authenticate it.
 """
 from __future__ import annotations
 
@@ -22,9 +24,11 @@ from common import workspace_byok_read_contract as workspace
 
 STATUS_SCHEMA = "mastermind.hermes.role_status.v1"
 STATUS_SCHEMA_V2 = "mastermind.hermes.role_status.v2"
+STATUS_SCHEMA_V3 = "mastermind.hermes.role_status.v3"
 METADATA_SCHEMA = "mastermind.hermes.role_metadata.v1"
 STATUS_PREFIX = "MM_HERMES_ROLE_V1:"
 STATUS_PREFIX_V2 = "MM_HERMES_ROLE_V2:"
+STATUS_PREFIX_V3 = "MM_HERMES_ROLE_V3:"
 MAX_STATUS_BYTES = 2048
 MAX_OBSERVATION_BYTES = 8192
 ROLES = workspace.ROLES
@@ -49,6 +53,7 @@ _METADATA_BASE = frozenset({"schema", "role", "state", "reason", "source_binding
 _STATUS_KEYS = frozenset({"schema", "role", "host_boot_id", "invocation_id",
                           "implementation_sha", "observed_at_ms", "observed_monotonic_ms", "metadata"})
 _STATUS_KEYS_V2 = _STATUS_KEYS | {"custody"}
+_STATUS_KEYS_V3 = _STATUS_KEYS_V2 | {"gateway_listener"}
 # The closed main-process custody witness: exactly these six measurements.
 _CUSTODY_KEYS = frozenset({"pid", "start_ticks", "uid", "gid",
                            "manifest_sha256", "image_sha256"})
@@ -209,6 +214,41 @@ def validate_status_v2(value, *, expected_role: str | None = None) -> dict:
                                      prefix=STATUS_PREFIX_V2, expected_role=expected_role)
 
 
+def validate_gateway_listener(value, *, role: str = "mmsecretary") -> dict:
+    """Closed witness measured from the selected supervisor's own socket."""
+    hosts = {"mmsecretary": "127.0.0.2", "mmmeta": "127.0.0.3"}
+    if type(role) is not str or role not in hosts:
+        raise RoleStatusError()
+    if (type(value) is not dict or set(value) != {"host", "port", "inode"}
+            or value["host"] != hosts[role]
+            or not _integer(value["port"], minimum=1024, maximum=65535)
+            or not _matches(value["inode"], _DECIMAL)
+            or int(value["inode"]) > MAX_START_TICKS):
+        raise RoleStatusError()
+    return dict(value)
+
+
+def validate_status_v3(value, *, expected_role: str | None = None) -> dict:
+    """Explicit listener-bearing revision; the v2 shape remains unchanged."""
+    if (type(value) is not dict or type(value.get("role")) is not str
+            or value["role"] not in ROLES):
+        raise RoleStatusError()
+    validate_custody(value.get("custody"))
+    validate_gateway_listener(value.get("gateway_listener"), role=value["role"])
+    return _validate_status_document(value, schema=STATUS_SCHEMA_V3, keys=_STATUS_KEYS_V3,
+                                     prefix=STATUS_PREFIX_V3, expected_role=expected_role)
+
+
+def validate_status_custody(value, *, expected_role: str | None = None) -> dict:
+    if type(value) is dict and value.get("schema") == STATUS_SCHEMA_V3:
+        return validate_status_v3(value, expected_role=expected_role)
+    return validate_status_v2(value, expected_role=expected_role)
+
+
+def encode_status_v3_text(value) -> str:
+    return STATUS_PREFIX_V3 + canonical(validate_status_v3(value)).decode("ascii")
+
+
 def encode_status_text(value) -> str:
     return STATUS_PREFIX + canonical(validate_status(value)).decode("ascii")
 
@@ -246,17 +286,37 @@ def decode_status_v2_text(value, *, expected_role: str) -> dict:
     return validate_status_v2(document, expected_role=expected_role)
 
 
+def decode_status_v3_text(value, *, expected_role: str) -> dict:
+    if (type(value) is not str or not value.startswith(STATUS_PREFIX_V3)
+            or any(character in value for character in "\x00\r\n")):
+        raise RoleStatusError()
+    try:
+        raw = value.encode("utf-8", errors="strict")
+    except UnicodeError:
+        raise RoleStatusError() from None
+    if len(raw) > MAX_STATUS_BYTES:
+        raise RoleStatusError()
+    return validate_status_v3(closed_json(raw[len(STATUS_PREFIX_V3):], limit=MAX_STATUS_BYTES),
+                              expected_role=expected_role)
+
+
+def decode_status_custody_text(value, *, expected_role: str) -> dict:
+    if type(value) is str and value.startswith(STATUS_PREFIX_V3):
+        return decode_status_v3_text(value, expected_role=expected_role)
+    return decode_status_v2_text(value, expected_role=expected_role)
+
+
 def decode_status_text_any(value, *, expected_role: str,
                            require_custody: bool = False) -> dict:
     """Read either closed status revision from one PID1 StatusText.
 
     ``require_custody`` is the explicit custody-required read: it accepts
-    only the v2 document and refuses a v1 payload instead of degrading.
+    the explicit v2/v3 documents and refuses a v1 payload instead of degrading.
     """
     if require_custody:
-        return decode_status_v2_text(value, expected_role=expected_role)
-    if type(value) is str and value.startswith(STATUS_PREFIX_V2):
-        return decode_status_v2_text(value, expected_role=expected_role)
+        return decode_status_custody_text(value, expected_role=expected_role)
+    if type(value) is str and value.startswith((STATUS_PREFIX_V2, STATUS_PREFIX_V3)):
+        return decode_status_custody_text(value, expected_role=expected_role)
     return decode_status_text(value, expected_role=expected_role)
 
 
@@ -273,7 +333,7 @@ def validate_observation(value) -> dict:
                 or not _integer(row["main_start_monotonic_us"], minimum=1)
                 or not _matches(row["invocation_id"], _INVOCATION)):
             raise RoleStatusError()
-        status = validate_status_v2(row["status"], expected_role=role)
+        status = validate_status_custody(row["status"], expected_role=role)
         if (status["custody"]["pid"] != row["main_pid"]
                 or status["host_boot_id"] != value["host_boot_id"]
                 or status["implementation_sha"] != value["implementation_sha"]

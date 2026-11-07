@@ -80,6 +80,7 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
+    await user.click(screen.getByText("Original capacity receipts and run records", {selector:"summary"}));
     expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Recent Fabric runs" })).toBeTruthy();
     expect(screen.getByText(/No authorized catalog reader is connected/)).toBeTruthy();
@@ -94,6 +95,7 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
+    await user.click(screen.getByText("Original capacity receipts and run records", {selector:"summary"}));
     expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(owner.catalogRead).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Load runs" }));
@@ -118,6 +120,7 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
+    await user.click(screen.getByText("Original capacity receipts and run records", {selector:"summary"}));
     await user.click(screen.getByRole("button", { name: "Load runs" }));
     await screen.findByRole("button", { name: /fabric-selected-run · TERMINAL/ });
     owner.authChanged();

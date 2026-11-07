@@ -273,14 +273,29 @@ class DelegateBridge(unittest.TestCase):
 
     def test_model_tool_cannot_issue_or_reach_review_or_parent_consume(self):
         public = TOOL_REGISTRATION["schema"]["parameters"]
-        self.assertEqual(public["properties"]["action"]["enum"], [
+        branches = public["oneOf"]
+        self.assertEqual(len(branches), 2)
+        bridge, selected = branches
+        self.assertEqual(bridge["properties"]["action"]["enum"], [
             "cancel", "status", "submit",
         ])
+        self.assertEqual(bridge["required"], ["action", "idempotency_key"])
+        # The selected-child branch is closed: the action and the exact
+        # canonical command reference, and nothing else.
+        self.assertEqual(selected["properties"]["action"]["enum"], [
+            "selected_child_status", "selected_child_submit",
+        ])
+        self.assertEqual(selected["required"], ["action", "command"])
+        self.assertEqual(set(selected["properties"]), {"action", "command"})
         for forbidden in (
             "reviewer_id", "verdict", "result_sha256",
             "handoff_model", "workstream", "session",
         ):
-            self.assertNotIn(forbidden, public["properties"])
+            self.assertNotIn(forbidden, bridge["properties"])
+            self.assertNotIn(forbidden, selected["properties"])
+        for closed in ("idempotency_key", "job_id", "root_id", "carrier",
+                       "objective", "acceptance", "child_kind", "task_class"):
+            self.assertNotIn(closed, selected["properties"])
 
         bridge, _admission, fabric, _cursor = bridge_for()
         submitted = loads(dispatch(request(), bridge))
@@ -553,6 +568,79 @@ class DelegateBridge(unittest.TestCase):
         self.assertEqual(len(carrier.submits), 1)
         self.assertEqual(other_cursor.submits, [])
 
+    def test_selected_child_branch_is_closed_and_unbound_by_default(self):
+        from integrations.hermes_delegate.executive import (
+            clear_selected_child_composition,
+            selected_child_composition,
+        )
+
+        clear_selected_child_composition()
+        self.assertIsNone(selected_child_composition())
+        command = "coo-cycle:JOB-001:dispatch:JOB-003:attempt:1"
+
+        # The default process has no trusted-host composition, so the branch
+        # refuses instead of constructing a live bridge.
+        for action in ("selected_child_submit", "selected_child_status"):
+            refused = loads(dispatch({"action": action, "command": command}))
+            self.assertEqual(refused["state"], "REFUSED")
+            self.assertEqual(refused["reason"], "EXECUTIVE_SELECTED_CHILD_NOT_BOUND")
+            self.assertFalse(refused["live_submit"])
+
+        # A request key never selects or replaces a canonical Attempt.
+        keyed = loads(dispatch({
+            "action": "selected_child_submit", "command": command,
+            "idempotency_key": "child-impl-0001",
+        }))
+        self.assertEqual(keyed["state"], "REFUSED")
+        self.assertEqual(keyed["reason"], "UNKNOWN_FIELD")
+
+        # The model cannot name a Job, root, carrier, objective or acceptance.
+        for extra in (
+            {"job_id": "JOB-003"}, {"root_id": "JOB-001"},
+            {"carrier": "fabric"}, {"objective": "choose another child"},
+            {"acceptance": "choose another child"},
+        ):
+            refused = loads(dispatch({
+                "action": "selected_child_submit", "command": command, **extra,
+            }))
+            self.assertEqual(refused["state"], "REFUSED")
+            self.assertEqual(refused["reason"], "UNKNOWN_FIELD")
+
+        # A malformed command reference is not a canonical command.
+        for bad in ("", "JOB-003", "coo-cycle:JOB-001:dispatch:JOB-003",
+                    "coo-cycle:JOB-001:dispatch:JOB-003:attempt:0",
+                    "coo-cycle:JOB-001:dispatch:JOB-003:attempt:x"):
+            refused = loads(dispatch({
+                "action": "selected_child_status", "command": bad,
+            }))
+            self.assertEqual(refused["state"], "REFUSED")
+            self.assertEqual(refused["reason"], "COMMAND_INVALID")
+
+        # Owner operations and generic cancel stay outside this branch.
+        for action in ("review", "consume"):
+            refused = loads(dispatch({
+                "action": action, "command": command,
+            }))
+            self.assertEqual(refused["state"], "REFUSED")
+            self.assertEqual(refused["reason"], "REVIEW_AND_CONSUME_OWNER_ONLY")
+        cancelled = loads(dispatch({
+            "action": "cancel", "command": command,
+        }))
+        self.assertEqual(cancelled["state"], "REFUSED")
+        self.assertEqual(cancelled["reason"], "UNKNOWN_FIELD")
+
+        # The inert bridge path is unchanged by the selected-child branch.
+        bridge, _admission, fabric, _cursor = bridge_for()
+        self.assertEqual(loads(dispatch(request(), bridge))["state"], "SUBMITTED")
+        self.assertEqual(len(fabric.submits), 1)
+
+        # The handler answers one JSON object and never raises, whatever the
+        # model puts in the action field.
+        for bad_action in ([], {}, 3, None, True):
+            answered = loads(dispatch({"action": bad_action}))
+            self.assertEqual(answered["state"], "REFUSED")
+            self.assertFalse(answered["live_submit"])
+
     def test_builtin_delegation_stays_disabled_and_only_one_tool_exists(self):
         policy = load_policy()
         self.assertIn("delegation", policy["disabled_toolsets"])
@@ -676,11 +764,18 @@ class DelegateBridge(unittest.TestCase):
 
     def test_package_has_no_live_transport(self):
         banned = {"subprocess", "urllib", "socket", "requests", "http", "fabric_task"}
-        # Only the explicit host-side read adapter may import its two existing
-        # owner modules. Bridge/tool/package imports still cannot bind Runtime.
+        # Only the explicit host composition may import these existing Runtime,
+        # Service and current-principal owners. Bridge/tool/package stays unbound;
+        # the transport ban and exact per-module import set remain enforced.
+        # The terminal-return owner contributes only the pure, closed result
+        # capsule validator; it creates no transport or result lifecycle.
         owner_reads = {
             "control_plane.executive_runtime",
             "control_plane.executive_delegation_identity",
+            "control_plane.executive_service",
+            "control_plane.executive_terminal_return",
+            "control_plane.coo_principal_host",
+            "control_plane.coo_principal_envelope",
         }
         for path in PACKAGE.glob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))

@@ -72,7 +72,7 @@ RELEASE_PATHS = (
     "scripts/ohf/fixtures/__init__.py",
     # First-party runtime/native-BYOK source and role data only. This does not
     # install third-party dependencies, enroll credentials, attest a running
-    # interpreter/unit, or package the broader hermesctl delegation CLI.
+    # interpreter/unit, or install a delegation CLI entrypoint.
     "common",
     "integrations/__init__.py",
     "integrations/hermes_runtime",
@@ -85,6 +85,8 @@ RELEASE_PATHS = (
     "ops/native_fabric/quota_continuity/candidate/paid_initializer.py",
     "ops/native_fabric/quota_continuity/candidate/linux_process_identity.py",
     "integrations/hermes_harness",
+    # Native consumer imports include this package and its eager bridge/tool closure.
+    "integrations/hermes_delegate",
     "integrations/hermes_models",
     "integrations/hermes_steward",
     "integrations/hermes_qualification",
@@ -822,6 +824,21 @@ def _verify_release_tree(root: Path) -> None:
                 raise EnrollmentError("installed_release_metadata_invalid")
 
 
+def _prepare_native_dependencies(repo: Path, destination: Path, expected_sha: str,
+                                 expected_tree: str, hermes_runtime) -> None:
+    if hermes_runtime is None or not any("native_gateway" in row for row in hermes_runtime["roles"]):
+        return
+    # Same immutable release, same frozen input, before unit/config selection.
+    # Failure leaves the source release inert and eligible for exact adoption.
+    _run([
+        "/usr/bin/python3", "-I", "-S", "-B",
+        os.fspath(repo / "ops/executive_os/release_manifest.py"),
+        "prepare-hermes-dependencies", "--root", os.fspath(destination),
+        "--commit-sha", expected_sha, "--tree-sha", expected_tree,
+        "--hermes-runtime-json", _hermes_runtime_argument(hermes_runtime),
+    ])
+
+
 def install_release(repo: Path, expected_sha: str, expected_tree: str,
                      *, hermes_runtime: Mapping[str, Any] | None = None) -> Path:
     """Create or adopt the immutable release at its final path.
@@ -930,6 +947,7 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str,
                 pass
             if staging.exists():
                 shutil.rmtree(staging)
+    _prepare_native_dependencies(repo, destination, expected_sha, expected_tree, hermes_runtime)
     return destination
 
 

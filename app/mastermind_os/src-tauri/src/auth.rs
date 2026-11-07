@@ -1,6 +1,7 @@
 //! The native client owns OAuth transactions and bearer tokens. The webview
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
+pub mod control_room_read;
 mod draft_continuity;
 mod transport_diagnostics;
 use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};
@@ -960,6 +961,51 @@ impl MissionSelection {
         } else {
             Err("SELECTION_INVALID".into())
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionSelection {
+    work_ref: String,
+    root_job_id: String,
+    /// The closed target kind of the selected session. An absent kind keeps
+    /// the incumbent fabric target; no other kind is admitted.
+    #[serde(default, deserialize_with = "deserialize_session_target_kind")]
+    target_kind: Option<String>,
+}
+fn deserialize_session_target_kind<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Only omission uses the default. Explicit null is not legacy Fabric.
+    String::deserialize(deserializer).map(Some)
+}
+impl SessionSelection {
+    fn validate(&self) -> Result<()> {
+        MissionSelection {
+            work_ref: self.work_ref.clone(),
+            root_job_id: self.root_job_id.clone(),
+        }
+        .validate()?;
+        match self.target_kind.as_deref() {
+            None => Ok(()),
+            Some("fabric_attempt") | Some("hermes_secretary") | Some("hermes_meta") => Ok(()),
+            Some(_) => Err("SELECTION_INVALID".into()),
+        }
+    }
+    /// The exact wire selection. The legacy pair is carried verbatim; an
+    /// explicit kind adds the one closed key and nothing else.
+    fn wire(&self) -> Value {
+        let mut selection = serde_json::json!({
+            "work_ref": self.work_ref, "root_job_id": self.root_job_id
+        });
+        if let Some(kind) = &self.target_kind {
+            selection["target_kind"] = Value::String(kind.to_owned());
+        }
+        selection
     }
 }
 
@@ -2866,14 +2912,13 @@ pub async fn executive_session_send(app:AppHandle,arguments:Value)->Result<Value
     result
 }
 #[tauri::command]
-pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+pub async fn executive_session_context(app: AppHandle, selection: SessionSelection) -> Result<Value> {
     selection.validate()?;
-    // The Session context endpoint requires the selected pair directly,
-    // whereas replies/references use the existing arguments envelope.
+    // The Session context endpoint requires the selected variant directly,
+    // whereas replies/references use the existing arguments envelope. This
+    // stays a READ. The fixed SEND command validates Fabric, Secretary or Meta targets.
     let result = executive_post(app.clone(), "/os/executive/session/context",
-        serde_json::json!({ "selection": {
-            "work_ref": selection.work_ref, "root_job_id": selection.root_job_id
-        }})).await;
+        serde_json::json!({ "selection": selection.wire() })).await;
     if result.is_err() { emit(&app); }
     result
 }
@@ -3916,62 +3961,76 @@ mod tests {
         assert_eq!(result.unwrap_err(), "EXECUTIVE_TRANSPORT_UNAVAILABLE"); assert_eq!(calls.get(), 1);
     }
 
+    fn native_session_send_fixtures() -> Vec<Value> {
+        [
+            include_str!("../../src/fixtures/native-session-send-producer.json"),
+            include_str!("../../src/fixtures/native-hermes-session-send-producer.json"),
+        ].into_iter().map(|raw| serde_json::from_str(raw).unwrap()).collect()
+    }
+
     #[test]
     fn native_session_send_actual_signed_body_uses_only_current_executive_resource() {
-        let fixture:Value=serde_json::from_str(include_str!("../../src/fixtures/native-session-send-producer.json")).unwrap();
-        let state=native_executive_state(EXECUTIVE_SCOPE);
-        {let mut i=state.lock().unwrap();i.acquisition=None;i.content=None;}
-        let body=crate::native_session_send::body(fixture["arguments"].clone()).unwrap();
-        let count=std::cell::Cell::new(0);
-        let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,body.clone(),|builder|{
-            count.set(count.get()+1);let request=builder.build().unwrap();
-            assert_eq!(request.url().as_str(),format!("{ORIGIN}/os/executive/session/send"));
-            assert_eq!(request.headers()["authorization"],"Bearer fixture-native-executive");
-            assert!(!request.headers().contains_key("x-mastermind-workspace-authorization"));
-            assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(),body);
-            let result:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();
-            async{Ok(result)}
-        })).unwrap();
-        assert_eq!(count.get(),1);assert_eq!(result,fixture["sent"]);
-    }
-    #[test]
-    fn native_session_send_absent_readonly_and_expired_private_tokens_never_dispatch() {
-        let fixture:Value=serde_json::from_str(include_str!("../../src/fixtures/native-session-send-producer.json")).unwrap();
-        for mode in ["absent","read","expired"] {
-            let state=native_executive_state(if mode=="read"{"mastermind.executive.read"}else{EXECUTIVE_SCOPE});
-            {let mut i=state.lock().unwrap();i.acquisition=None;i.content=None;
-                if mode=="absent"{i.executive=None;}
-                if mode=="expired"{i.executive.as_mut().unwrap().expires=Instant::now()-Duration::from_secs(1);}}
+        for fixture in native_session_send_fixtures() {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            {let mut i=state.lock().unwrap();i.acquisition=None;i.content=None;}
+            let body=crate::native_session_send::body(fixture["arguments"].clone()).unwrap();
             let count=std::cell::Cell::new(0);
-            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,crate::native_session_send::body(fixture["arguments"].clone()).unwrap(),|_|{
-                count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
-            }));
-            assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),if mode=="read"{"EXECUTIVE_SEND_SCOPE_REQUIRED"}else{"EXECUTIVE_AUTH_REQUIRED"});
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,body.clone(),|builder|{
+                count.set(count.get()+1);let request=builder.build().unwrap();
+                assert_eq!(request.url().as_str(),format!("{ORIGIN}/os/executive/session/send"));
+                assert_eq!(request.headers()["authorization"],"Bearer fixture-native-executive");
+                assert!(!request.headers().contains_key("x-mastermind-workspace-authorization"));
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(),body);
+                let result:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();
+                async{Ok(result)}
+            })).unwrap();
+            assert_eq!(count.get(),1);assert_eq!(result,fixture["sent"]);
         }
     }
+
+    #[test]
+    fn native_session_send_absent_readonly_and_expired_private_tokens_never_dispatch() {
+        for fixture in native_session_send_fixtures() {
+            for mode in ["absent","read","expired"] {
+                let state=native_executive_state(if mode=="read"{"mastermind.executive.read"}else{EXECUTIVE_SCOPE});
+                {let mut i=state.lock().unwrap();i.acquisition=None;i.content=None;
+                    if mode=="absent"{i.executive=None;}
+                    if mode=="expired"{i.executive.as_mut().unwrap().expires=Instant::now()-Duration::from_secs(1);}}
+                let count=std::cell::Cell::new(0);
+                let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,crate::native_session_send::body(fixture["arguments"].clone()).unwrap(),|_|{
+                    count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
+                }));
+                assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),if mode=="read"{"EXECUTIVE_SEND_SCOPE_REQUIRED"}else{"EXECUTIVE_AUTH_REQUIRED"});
+            }
+        }
+    }
+
     #[test]
     fn native_session_send_unknown_fields_or_foreign_route_never_dispatch() {
-        let fixture:Value=serde_json::from_str(include_str!("../../src/fixtures/native-session-send-producer.json")).unwrap();
-        let state=native_executive_state(EXECUTIVE_SCOPE);
-        for extra in ["principal_scope","url","work_ref","permission"] {
-            let mut args=fixture["arguments"].clone();args[extra]="not an authority".into();let count=std::cell::Cell::new(0);
-            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,serde_json::json!({"arguments":args}),|_|{
+        for fixture in native_session_send_fixtures() {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            for extra in ["principal_scope","url","work_ref","permission"] {
+                let mut args=fixture["arguments"].clone();args[extra]="not an authority".into();let count=std::cell::Cell::new(0);
+                let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,serde_json::json!({"arguments":args}),|_|{
+                    count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
+                }));assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),"REQUEST_INVALID");
+            }
+            let count=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,"/os/executive/session/send/",serde_json::json!({"arguments":fixture["arguments"]}),|_|{
                 count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
             }));assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),"REQUEST_INVALID");
         }
-        let count=std::cell::Cell::new(0);
-        let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,"/os/executive/session/send/",serde_json::json!({"arguments":fixture["arguments"]}),|_|{
-            count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
-        }));assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),"REQUEST_INVALID");
     }
+
     #[test]
     fn native_session_send_auth_change_after_one_dispatch_withholds_receipt_without_retry() {
-        let fixture:Value=serde_json::from_str(include_str!("../../src/fixtures/native-session-send-producer.json")).unwrap();
-        let state=native_executive_state(EXECUTIVE_SCOPE);let count=std::cell::Cell::new(0);
-        let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,crate::native_session_send::body(fixture["arguments"].clone()).unwrap(),|_|{
-            count.set(count.get()+1);state.lock().unwrap().executive_generation+=1;
-            let response:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();async{Ok(response)}
-        }));assert_eq!(count.get(),1);assert_eq!(result.unwrap_err(),"EXECUTIVE_AUTH_CHANGED");
+        for fixture in native_session_send_fixtures() {
+            let state=native_executive_state(EXECUTIVE_SCOPE);let count=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,crate::native_session_send::body(fixture["arguments"].clone()).unwrap(),|_|{
+                count.set(count.get()+1);state.lock().unwrap().executive_generation+=1;
+                let response:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();async{Ok(response)}
+            }));assert_eq!(count.get(),1);assert_eq!(result.unwrap_err(),"EXECUTIVE_AUTH_CHANGED");
+        }
     }
 
     #[test]
@@ -5008,4 +5067,40 @@ mod source_operation_context_tests {
         }
     }
 
+}
+
+
+#[cfg(test)]
+mod secretary_selection_contract_tests {
+    use super::*;
+
+    #[test]
+    fn session_kind_omission_and_closed_strings_preserve_the_wire_shape() {
+        let pair = serde_json::json!({"work_ref": "WS:ALPHA", "root_job_id": "JOB-1"});
+        let legacy: SessionSelection = serde_json::from_value(pair.clone()).unwrap();
+        legacy.validate().unwrap();
+        assert_eq!(legacy.wire(), pair);
+        for kind in ["fabric_attempt", "hermes_secretary", "hermes_meta"] {
+            let value = serde_json::json!({
+                "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
+            });
+            let selected: SessionSelection = serde_json::from_value(value.clone()).unwrap();
+            selected.validate().unwrap();
+            assert_eq!(selected.wire(), value);
+        }
+    }
+
+    #[test]
+    fn an_explicit_null_kind_is_never_legacy_fabric() {
+        for kind in [Value::Null, serde_json::json!(true), serde_json::json!(7), serde_json::json!([])] {
+            let value = serde_json::json!({
+                "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
+            });
+            assert!(serde_json::from_value::<SessionSelection>(value).is_err());
+        }
+        let unsupported: SessionSelection = serde_json::from_value(serde_json::json!({
+            "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": "other"
+        })).unwrap();
+        assert!(unsupported.validate().is_err());
+    }
 }

@@ -168,9 +168,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 109297,
+      "bytes": 111035,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+      "sha256": "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -294,9 +294,9 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 91552,
+      "bytes": 92154,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d",
+      "sha256": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
@@ -426,9 +426,9 @@
       "source": "candidate/original_advertised_artifact.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 94249,
+      "bytes": 103052,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
+      "sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {

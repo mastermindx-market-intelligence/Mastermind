@@ -327,6 +327,38 @@ it("retains only the context READ refusal code and preserves every public reject
   expect(f.transport.diagnostics?.().contextReadReason).toBe("NONE");
 });
 
+describe("native Secretary selection beside qualified Fabric SEND", () => {
+  it.each([false, true])("preserves the qualified Secretary SEND capability %s on the same native route", async (send) => {
+    const f = await fixture(), signal = new AbortController().signal;
+    const selection = { workRef: "WS:ALPHA", rootJobId: "JOB-1", targetKind: "hermes_secretary" as const };
+    const target = "hermes_secretary:" + "a".repeat(64);
+    const key = "session-continue-416b8fb98b2d93a068cd6dbd4ff5516c0a75961314334810df3f5b86cf754137";
+    const raw = { schema: "mastermind.os.executive.session_result.v1",
+      operation: "context", ok: true, effect: "NONE", operation_key: null, error: null,
+      data: { schema: "mastermind.os.executive.session_context.v1",
+        principal_scope: "c".repeat(64), verified_expiry: 4102444800,
+        selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId,
+          target_kind: selection.targetKind },
+        selection_state: "RESOLVED", target: { target_ref: target, generation: "a".repeat(24),
+          addressable: true, kind: "hermes_secretary", continuation_operation_key: key,
+          work_ref: selection.workRef, root_job_id: selection.rootJobId },
+        capabilities: { send, reply_read: true, stop: false } } };
+    f.invoke.mockResolvedValueOnce(raw);
+    const result = await f.sessionTransport.context(selection, signal);
+    expect(decodeSessionContext(result, selection)?.capabilities)
+      .toEqual({ send, reply_read: true, stop: false });
+    expect(raw.data.capabilities.send).toBe(send);
+    const arguments_ = { target_ref: target, operation_key: key,
+      instruction: "One native question", stop_condition: "Return once" };
+    if (send) await f.sessionTransport.send(arguments_, signal);
+    expect(f.invoke.mock.calls).toEqual([
+      ["executive_auth_status"],
+      ["executive_session_context", { selection: raw.data.selection }],
+      ...(send ? [["executive_session_send", { arguments: arguments_ }]] : []),
+    ]);
+  });
+});
+
 describe("native project execution bridge", () => {
   const original = {operation_key: "mmos-project-execute-" + "a".repeat(40), work_ref: "WS:EXAMPLE"};
   const context = {record_source: {repository: "mastermindx-market-intelligence/macro", commit: "b".repeat(40),

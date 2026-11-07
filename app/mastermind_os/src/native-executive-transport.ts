@@ -2,6 +2,10 @@ import {freshConversationArguments} from "./orchestration/fresh-conversation-tra
 import {projectConversationArguments} from './conversations/project-conversation-transport';
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+} from "./orchestration/executive-session-command-port";
 import {sessionSendArguments} from "./orchestration/session-send-arguments";
 import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
 import { projectHistorySelection } from "./conversations/project-history-selection";
@@ -171,10 +175,9 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       },
     },
   };
-  // Session history and the separately qualified fixed continuation reuse
-  // the same native bearer owner/epoch. The backend supplies the current
-  // target and SEND capability. The independent native executive_submit F2
-  // review remains separate; this does not modify that route.
+  // History and qualified Fabric/Secretary continuations reuse the same
+  // native bearer owner, fixed SEND command and auth epoch.
+  // The independent executive_submit F2 review remains unchanged.
   const sessionTransport: ProjectConversationHistoryTransport = {
     projectConversations: {request: (operation,arguments_,signal) => {
       const closed=projectConversationArguments(operation,arguments_);
@@ -189,10 +192,11 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
         : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
     },
     context: async (selection, signal) => {
-      if (!WORK.test(selection.workRef) || !ROOT.test(selection.rootJobId))
-        throw new Error("SESSION_SELECTION_INVALID");
+      const normalized = normalizeExecutiveSessionSelection(selection);
+      if (!normalized) throw new Error("SESSION_SELECTION_INVALID");
+      // The Session owner validates the returned target and capability.
       return call("executive_session_context", signal, {
-        selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId },
+        selection: sessionSelectionWire(normalized),
       });
     },
     reply: (args, signal) => OPERATION.test(args.operation_key)
