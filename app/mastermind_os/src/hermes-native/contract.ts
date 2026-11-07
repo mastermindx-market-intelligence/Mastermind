@@ -1,7 +1,9 @@
 /** Stable UI port. Native sessions are not Executive Jobs or accepted outcomes. */
 import type { NativePendingOperation } from "./pending-pointer";
+import type { NativeLiveFrame, NativeLiveTarget } from "./live-stream";
 export type NativeOperation =
   | { operation: "status" | "list" | "recover" }
+  | { operation: "stop"; sessionId: string; requestId: string }
   | { operation: "create"; role: "meta-ceo" | "secretary"; requestId: string }
   | { operation: "read"; sessionId: string }
   | { operation: "send"; sessionId: string; requestId: string; text: string }
@@ -34,11 +36,15 @@ export interface NativeView {
   sessions?: { id: string; title: string; running: boolean | null; messageCount: number }[];
   receipt?: NativeReceipt;
 }
-export interface NativeHermesPort { available(): boolean; request(request: NativeOperation): Promise<NativeView> }
+export interface NativeHermesPort {
+  available(): boolean;
+  request(request: NativeOperation): Promise<NativeView>;
+  observe?(target: NativeLiveTarget, receive: (frame: NativeLiveFrame) => void, failed: (code: string) => void): () => void;
+}
 
 const states = new Set(["READY", "OPENED", "ADMITTED", "REFUSED", "NOT_SENT", "UNAVAILABLE", "EFFECT_UNKNOWN"]);
 const admissions = new Set(["queued", "started", "unknown", "terminal"]);
-const operations = new Set(["status", "list", "create", "read", "send", "receipt", "recover"]);
+const operations = new Set(["status", "list", "create", "read", "send", "receipt", "recover", "stop"]);
 const capabilities = new Set(["native_chat", "native_history", "admission_recovery"]);
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 function invalid(): never { throw new Error("NATIVE_RESPONSE_INVALID"); }

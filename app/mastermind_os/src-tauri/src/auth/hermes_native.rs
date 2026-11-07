@@ -8,6 +8,14 @@ const BRIDGE: &str = include_str!("../hermes_native/bridge.py");
 const SCHEMA: &str = "mastermind.hermes_native_view.v1";
 static IN_FLIGHT: Mutex<()> = Mutex::new(());
 
+// One disposable view pipe, independent of foreground send/Stop. This is not
+// session state: cancellation kills only our read helper, never the native turn.
+struct Observation {
+    active: Option<(String, std::sync::Arc<std::sync::atomic::AtomicBool>)>,
+    cancelled_before_start: Option<String>,
+}
+static OBSERVATION: Mutex<Observation> = Mutex::new(Observation { active: None, cancelled_before_start: None });
+
 fn validate(request: &Value) -> Result<bool> {
     let object = request.as_object().ok_or("REQUEST_INVALID")?;
     let operation = object.get("operation").and_then(Value::as_str).ok_or("REQUEST_INVALID")?;
@@ -27,7 +35,7 @@ fn validate(request: &Value) -> Result<bool> {
     if operation == "send" && !object["text"].as_str().is_some_and(core::valid_prompt) {
         return Err("REQUEST_INVALID".into());
     }
-    Ok(matches!(operation, "create" | "send"))
+    Ok(matches!(operation, "create" | "send" | "stop_send"))
 }
 
 // A rejected IPC call may clear a reservation only with this closed, original-
@@ -58,13 +66,13 @@ type InvocationResult = std::result::Result<Value, InvocationError>;
 
 fn unavailable(mutating: bool, code: &'static str, request: &Value) -> Value {
     let operation = match request["operation"].as_str().unwrap_or("") {
-        "recover_create" | "recover_send" => "recover", operation => operation,
+        "recover_create" | "recover_send" => "recover", "stop_send" => "stop", operation => operation,
     };
     let mut value = serde_json::json!({"schema":SCHEMA,
         "state":if mutating || operation == "recover" {"EFFECT_UNKNOWN"} else {"UNAVAILABLE"},
         "capabilities":[], "delegation":"NOT_ENABLED", "retryAllowed":false, "code":code, "operation":operation});
     if request.get("requestId").is_some() { value["requestId"] = request["requestId"].clone(); }
-    if matches!(request["operation"].as_str(), Some("send" | "recover_send")) {
+    if matches!(request["operation"].as_str(), Some("send" | "recover_send" | "stop_send")) {
         value["requestSessionId"] = request["sessionId"].clone();
     }
     value
@@ -145,13 +153,9 @@ fn trusted_path(path: &std::path::Path, home: &std::path::Path, file: bool) -> R
 }
 
 #[cfg(unix)]
-fn run_local(app: AppHandle, request: Value, generation: u64, mutating: bool) -> InvocationResult {
-    use std::{io::{Read, Write}, process::{Command, Stdio}, thread, time::{Duration, Instant}};
-    // A foreground client is bounded, not another scheduler. A concurrent invocation is not queued.
-    // This closure contains every fallible step before a child can receive bytes.
-    // After spawn, errors use AfterDispatch even if IO may have failed immediately.
-    let prepared = (|| -> Result<_> {
-    let single = IN_FLIGHT.try_lock().map_err(|_| "NATIVE_BUSY")?;
+fn spawn_helper(app: &AppHandle, request: &Value, generation: u64)
+    -> Result<(std::process::Child, Vec<u8>)> {
+    use std::{io::Read, process::{Command, Stdio}};
     qualified_auth(&app, Some(generation), true)?;
     let home = app.path().home_dir().map_err(|_| "NATIVE_INSTALL_UNAVAILABLE")?;
     if home.canonicalize().map_err(|_| "NATIVE_INSTALL_UNAVAILABLE")? != home {
@@ -185,6 +189,18 @@ fn run_local(app: AppHandle, request: Value, generation: u64, mutating: bool) ->
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
     drop(inner);
     let child = child.map_err(|_| "NATIVE_CLIENT_NOT_STARTED")?;
+    Ok((child, bytes))
+}
+
+#[cfg(unix)]
+fn run_local(app: AppHandle, request: Value, generation: u64, mutating: bool) -> InvocationResult {
+    use std::{io::{Read, Write}, thread, time::{Duration, Instant}};
+    // A foreground client is bounded, not another scheduler. A concurrent invocation is not queued.
+    // This closure contains every fallible step before a child can receive bytes.
+    // After spawn, errors use AfterDispatch even if IO may have failed immediately.
+    let prepared = (|| -> Result<_> {
+    let single = IN_FLIGHT.try_lock().map_err(|_| "NATIVE_BUSY")?;
+    let (child, bytes) = spawn_helper(&app, &request, generation)?;
     Ok((single, child, bytes))
     })();
     let (_single, mut child, bytes) = prepared.map_err(InvocationError::BeforeDispatch)?;
@@ -248,6 +264,144 @@ pub async fn hermes_native(app: AppHandle, request: Value, expected_auth_generat
     release_result(result, qualified_auth(&check, Some(generation), false), &original, generation)
 }
 
+fn validate_observation(request: &Value) -> Result<()> {
+    let object = request.as_object().ok_or("REQUEST_INVALID")?;
+    let fields = ["operation", "sessionId", "admissionId", "authorityEpoch"];
+    if object.len() != fields.len() || fields.iter().any(|key| !object.contains_key(*key))
+        || request["operation"] != "observe"
+        || !request["sessionId"].as_str().is_some_and(core::valid_id)
+        || !request["admissionId"].as_str().is_some_and(core::valid_id)
+        || !request["authorityEpoch"].as_u64().is_some_and(|n| n > 0 && n <= 9_007_199_254_740_991) {
+        return Err("REQUEST_INVALID".into());
+    }
+    Ok(())
+}
+
+fn valid_stream_frame(value: &Value, request: &Value) -> bool {
+    let Some(object) = value.as_object() else { return false; };
+    let fields = ["schema", "sessionId", "admissionId", "authorityEpoch", "executionGeneration",
+        "replayEpoch", "sequence", "state", "text", "activity", "code"];
+    object.len() == fields.len() && fields.iter().all(|key| object.contains_key(*key))
+        && value["schema"] == "mastermind.hermes_native_stream.v1"
+        && value["sessionId"] == request["sessionId"] && value["admissionId"] == request["admissionId"]
+        && value["authorityEpoch"] == request["authorityEpoch"]
+        && value["replayEpoch"].as_str().is_some_and(core::valid_id)
+        && value["sequence"].as_u64().is_some_and(|n| n <= 9_007_199_254_740_991)
+        && (value["executionGeneration"].is_null() || value["executionGeneration"].as_u64().is_some_and(|n| n <= 9_007_199_254_740_991))
+        && matches!(value["state"].as_str(), Some("live" | "complete" | "interrupted"))
+        && matches!(value["activity"].as_str(), Some("working" | "responding" | "tool"))
+        && value["text"].as_str().is_some_and(|s| s.len() <= 262_144)
+        && (value["code"].is_null() || value["code"].as_str().is_some_and(|s|
+            s.starts_with("NATIVE_STREAM_") && s.len() < 100 && s.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')))
+}
+
+#[cfg(unix)]
+fn run_observation(app: AppHandle, request: Value, generation: u64,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>, channel: tauri::ipc::Channel<Value>) -> Result<()> {
+    use std::{io::{BufRead, BufReader, Read, Write}, sync::{atomic::Ordering, mpsc}, thread, time::{Duration, Instant}};
+    if cancelled.load(Ordering::Acquire) { return Ok(()); }
+    let (mut child, bytes) = spawn_helper(&app, &request, generation)?;
+    let result = (|| -> Result<()> {
+        let mut input = child.stdin.take().ok_or("NATIVE_STREAM_INTERRUPTED")?;
+        let output = child.stdout.take().ok_or("NATIVE_STREAM_INTERRUPTED")?;
+        input.write_all(&bytes).map_err(|_| "NATIVE_STREAM_INTERRUPTED")?;
+        drop(input);
+        let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(4);
+        let reader = thread::spawn(move || {
+            let mut pipe = BufReader::new(output);
+            loop {
+                let mut line = Vec::new();
+                match (&mut pipe).take(300_001).read_until(b'\n', &mut line) {
+                    Ok(n) if n > 0 && n <= 300_000 && line.last() == Some(&b'\n') => {
+                        if sender.send(line).is_err() { break; }
+                    },
+                    _ => break,
+                }
+            }
+        });
+        let deadline = Instant::now() + Duration::from_secs(610);
+        let mut total = 0usize;
+        let observed = (|| -> Result<()> {
+            loop {
+                if cancelled.load(Ordering::Acquire) { return Ok(()); }
+                qualified_auth(&app, Some(generation), false)?;
+                if Instant::now() >= deadline { return Err("NATIVE_STREAM_INTERRUPTED".into()); }
+                match receiver.recv_timeout(Duration::from_millis(50)) {
+                    Ok(bytes) => {
+                        total += bytes.len();
+                        if total > 16_777_216 { return Err("NATIVE_STREAM_TOO_LARGE".into()); }
+                        let mut value: Value = serde_json::from_slice(&bytes).map_err(|_| "NATIVE_STREAM_INVALID")?;
+                        if !valid_stream_frame(&value, &request) { return Err("NATIVE_STREAM_INVALID".into()); }
+                        let done = value["state"] != "live";
+                        value["authGeneration"] = generation.into();
+                        // Lock over each release, so sign-out cannot race a private
+                        // frame after the final authority check. No bearer crosses.
+                        let state = app.state::<NativeAuth>();
+                        let inner = state.lock()?;
+                        if !core::release_allowed(generation, inner.generation,
+                            inner.token(Resource::Acquisition).is_some(), inner.status().status == "signed_in") {
+                            return Err("AUTHENTICATION_CHANGED".into());
+                        }
+                        channel.send(value).map_err(|_| "NATIVE_STREAM_INTERRUPTED")?;
+                        drop(inner);
+                        if done { return Ok(()); }
+                    },
+                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return Err("NATIVE_STREAM_INTERRUPTED".into()),
+                }
+            }
+        })();
+        // Closing this pipe does not cancel the Hermes admission. The existing
+        // original-request Stop command is the sole route to prompt.cancel.
+        drop(receiver);
+        let _ = child.kill(); let _ = child.wait(); let _ = reader.join();
+        observed
+    })();
+    let _ = child.kill(); let _ = child.wait();
+    result
+}
+
+#[cfg(not(unix))]
+fn run_observation(_app: AppHandle, _request: Value, _generation: u64,
+    _cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>, _channel: tauri::ipc::Channel<Value>) -> Result<()> {
+    Err("NATIVE_PLATFORM_UNAVAILABLE".into())
+}
+
+#[tauri::command]
+pub async fn hermes_native_observe(app: AppHandle, request: Value, observer_id: String,
+    expected_auth_generation: u64, on_event: tauri::ipc::Channel<Value>) -> Result<()> {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    validate_observation(&request)?;
+    if !core::valid_request_id(&observer_id) { return Err("REQUEST_INVALID".into()); }
+    let generation = qualified_auth(&app, Some(expected_auth_generation), true)?;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    {
+        let mut owner = OBSERVATION.lock().map_err(|_| "NATIVE_STREAM_UNAVAILABLE")?;
+        if owner.cancelled_before_start.as_ref() == Some(&observer_id) { return Ok(()); }
+        if let Some((_, previous)) = owner.active.take() { previous.store(true, Ordering::Release); }
+        owner.active = Some((observer_id.clone(), cancelled.clone()));
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || run_observation(app, request, generation, cancelled, on_event))
+        .await.map_err(|_| "NATIVE_STREAM_UNAVAILABLE".to_string());
+    let mut owner = OBSERVATION.lock().map_err(|_| "NATIVE_STREAM_UNAVAILABLE")?;
+    if owner.active.as_ref().is_some_and(|(id, _)| id == &observer_id) { owner.active = None; }
+    result?
+}
+
+#[tauri::command]
+pub fn hermes_native_unobserve(observer_id: String) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    if !core::valid_request_id(&observer_id) { return Err("REQUEST_INVALID".into()); }
+    let mut owner = OBSERVATION.lock().map_err(|_| "NATIVE_STREAM_UNAVAILABLE")?;
+    // A bounded tombstone also closes the cancel-before-start race. This holds
+    // only a random disposable view ID, with no session or request payload.
+    owner.cancelled_before_start = Some(observer_id.clone());
+    if let Some((id, cancelled)) = &owner.active {
+        if id == &observer_id { cancelled.store(true, Ordering::Release); }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod native_tests {
     use super::*;
@@ -258,6 +412,17 @@ mod native_tests {
         assert!(validate(&serde_json::json!({"operation":"create","role":"secretary","requestId":"a".repeat(32)})).unwrap());
         assert!(validate(&serde_json::json!({"operation":"send","sessionId":"one","requestId":"a".repeat(32),"text":"original\n 文本"})).unwrap());
         assert!(validate(&serde_json::json!({"operation":"send","sessionId":"../other","requestId":"a".repeat(32),"text":"original"})).is_err());
+    }
+    #[test]
+    fn stop_is_mutating_and_retains_original_binding_on_interruption() {
+        let request = serde_json::json!({"operation":"stop_send","sessionId":"original","requestId":"a".repeat(32)});
+        assert!(validate(&request).unwrap());
+        let value = unavailable(true, "NATIVE_CLIENT_INTERRUPTED", &request);
+        assert_eq!(value["operation"], "stop");
+        assert_eq!(value["state"], "EFFECT_UNKNOWN");
+        assert_eq!(value["requestId"], request["requestId"]);
+        assert_eq!(value["requestSessionId"], "original");
+        assert!(no_send_error(&request, Some(9), "NATIVE_AUTH_NOT_DISPATCHED").is_string());
     }
     #[test]
     fn auth_races_require_complete_original_no_send_proof() {

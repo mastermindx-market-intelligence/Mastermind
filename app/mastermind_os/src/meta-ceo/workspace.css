@@ -1,0 +1,25 @@
+.office-chat-workspace { min-height: 0; min-width: 0; }
+.office-chat-workspace [hidden] { display: none !important; }
+.office-chat-workspace[data-view="chat"] { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.office-chat-tabs { display: flex; align-items: center; gap: 16px; min-height: 44px; border-bottom: 1px solid var(--border); padding: 0 24px; flex: 0 0 auto; }
+.office-chat-tabs button { min-height: 44px; padding: 8px 4px; font: 500 12px/20px var(--font-ui); border: 0; border-radius: 0; background: transparent; color: var(--muted); cursor: pointer; position: relative; }
+.office-chat-tabs button[aria-selected="true"] { color: var(--text); }
+.office-chat-tabs button[aria-selected="true"]::after { content: ""; height: 2px; background: var(--text); position: absolute; inset: auto 4px -1px; }
+.office-chat-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.office-chat-panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) { display: flex; flex-direction: column; height: 100dvh; min-height: 0; padding: 0; overflow: hidden; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header { min-height: 44px; flex: 0 0 auto; margin: 0; padding: 6px 24px; gap: 16px; align-items: center; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header h2 { font-size: 13px; line-height: 20px; }
+.shell > main:has(.office-chat-workspace[data-view="chat"]) > .build-details { display: none; }
+.hermes-chat-header { margin-bottom: 0; }
+.native-chat-entry { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px; min-height: 60dvh; max-width: 680px; margin: 0 auto; text-align: center; }
+.native-chat-entry-mark { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); color: var(--brass); font-size: 24px; }
+.native-chat-entry h2 { font: 500 28px/36px var(--font-display); margin: 24px 0 12px; letter-spacing: -.02em; }
+.native-chat-entry p { max-width: 440px; color: var(--muted); font-size: 14px; line-height: 24px; }
+.native-chat-entry button { margin-top: 16px; padding: 12px 20px; border: 1px solid var(--border); background: var(--raised); border-radius: 12px; color: var(--text); font: 500 13px/20px var(--font-ui); cursor: pointer; }
+.native-chat-entry button:disabled { opacity: .5; cursor: default; }
+.native-chat-entry .native-chat-entry-note { margin-top: 16px; font-size: 11px; color: var(--faint); }
+@media (max-width: 600px) {
+  .office-chat-tabs { padding-inline: 16px; }
+  .shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header { padding-inline: 16px; }
+}
