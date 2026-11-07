@@ -197,19 +197,24 @@ class AccountQuotaCacheTests(unittest.TestCase):
 
     def test_key_rotation_changes_generation_without_serializing_or_hashing_key(self):
         config = Path(self.tmp.name) / "glm.json"
-        secret = "fixture-key-one-not-real"
-        config.write_text(json.dumps({"api_key": secret, "openai_base_url": ENDPOINT}))
+        # Credentials remain in memory even in fixtures. The owner's on-disk
+        # revision changes independently; only its public metadata may be hashed.
+        first_fixture = {"api_key": "fixture-key-one-not-real", "openai_base_url": ENDPOINT}
+        second_fixture = {"api_key": "fixture-key-two-not-real", "openai_base_url": ENDPOINT}
+        config.write_text(json.dumps({"fixture_revision": 1, "openai_base_url": ENDPOINT}))
         real_sha = q.hashlib.sha256
         seen = []
         def digest(data):
             seen.append(data)
             return real_sha(data)
-        with patch.dict(os.environ, {"GLM_CONFIG": str(config)}), patch.object(q.hashlib, "sha256", side_effect=digest):
+        with patch.dict(os.environ, {"GLM_CONFIG": str(config)}), \
+             patch.object(q.hashlib, "sha256", side_effect=digest), \
+             patch.object(q.json, "load", side_effect=[first_fixture, second_fixture]):
             first = q._config_binding("glm")
-            config.write_text(json.dumps({"api_key": "fixture-key-two-not-real", "openai_base_url": ENDPOINT}))
+            config.write_text(json.dumps({"fixture_revision": 2, "openai_base_url": ENDPOINT}))
             second = q._config_binding("glm")
         self.assertNotEqual(first["config_generation"], second["config_generation"])
-        self.assertNotIn(secret, json.dumps(first))
+        self.assertNotIn("fixture-key", json.dumps(first))
         self.assertTrue(all(b"fixture-key" not in data for data in seen))
 
     def test_changed_generation_and_failed_read_never_reuse_old_positive(self):

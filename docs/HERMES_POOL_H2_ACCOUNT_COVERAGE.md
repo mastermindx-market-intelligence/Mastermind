@@ -140,10 +140,20 @@ This is the unchanged installed candidate, not the H2 successor.
 
 All four came from `PROVIDER_AUTHORITATIVE` rows and were fresh at readback. These
 are historical timestamped receipts, not a claim that the balances remain current.
-The 12:03:09 boundary had not yet been observed when this receipt was recorded.
-No elapsed timestamp is reported as live recovery. Reset/missing/future cases have
-fixture proof; natural-time rollover and any exhausted-account recovery remain
-separate observations until a successor original-owner read proves them.
+The initial receipt preceded the 12:03:09 boundary. One subsequent original-owner
+refresh started at 12:03:18Z and completed at 12:03:22Z (Studio PID51107, exit0,
+4.78 seconds, empty stderr). Generation and sequence35 were unchanged before/after.
+At **12:03:21Z**, the provider reported chairman-max 5h remaining **100%**, up from
+99%, and a **null** next-reset clock. Its weekly balance/reset stayed99% / November14.
+This is observed natural window replenishment, not an elapsed-clock inference,
+recovery from total exhaustion, APPLICATION admission or installation of H2 source.
+
+Post-refresh 5h/weekly observations at12:03:18–22Z were GLM chairman-max100%/99%,
+chairman-max-2 100%/59%, chairman-max-3 76%/74%, and MiniMax96%/20%. The null
+five-hour clocks for the first two GLM accounts are retained. The exact before/after
+selection, cache modification times, producer clocks and balances are in
+[the structured original-owner receipt](evidence/hermes-pool-h2-original-refresh-reset-2026-11-07.json)
+and the [same H2 return carrier](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706283300).
 
 ## Source qualification and remaining consumer joins
 
@@ -157,6 +167,15 @@ not be persisted is not claimed durably recorded and is not retried within the c
 The existing seven Grok billing tests also passed, including frozen source/candidate
 manifest checks and no model-prompt/automatic marker mutation. These are local tests;
 hosted CI is an independent release condition recorded on the exact PR head.
+
+Initial head17164ab CodeQL identified clear-text sensitive-data storage in the
+key-rotation test fixture. The test used a deliberately fake token, not a real
+credential. The repair keeps both credential-shaped fixture objects in memory and
+writes only public revision/endpoint metadata to its temporary owner file. The
+generation-change and no-secret-hashing assertions remain; no query, severity,
+assertion or security gate was suppressed. Hosted requalification must cover the
+repaired head before release. The production quota-reader bytes are unchanged by
+that fixture repair.
 
 The source successor is `ops/native_fabric/grok47/quota_billing/quota_remote.py`, the
 existing replacement surface. No frozen candidate/source, generation manifest, active
