@@ -779,9 +779,9 @@ class C4PublisherFrozenContractTests(unittest.TestCase):
             "chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"})
         self.assertNotEqual(owner.C4_PUBLISHER_TRANSACTION, owner.TRANSACTION)
 
-    def test_current_protected_payload_matches_frozen_successor(self):
+    def test_current_protected_payload_matches_inventory_successor(self):
         payload = Path(__file__).with_name("git-publish.mjs").read_bytes()
-        self.assertEqual(owner.digest(payload), owner.C4_PUBLISHER_AFTER)
+        self.assertEqual(owner.digest(payload), owner.C4_INVENTORY_AFTER)
         adapter = Path(__file__).with_name("workspace-access.mjs").read_bytes()
         self.assertEqual(owner.digest(adapter), owner.C4_ADAPTER_AFTER)
 

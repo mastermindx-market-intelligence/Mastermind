@@ -54,7 +54,8 @@
     "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "c520edb091932152bd94b77bda65722a16294dd0a84c484ca03c362962cf3670",
     "integrations/studio_direct_mcp/private_service_status_successor_test.py": "c7ada1ce2ed36fd3fa66569b0d729f56b7dd5c2b45ea677aeeeb02a1bfc7b42c",
     "integrations/studio_direct_mcp/private_service_c4_parent_proof_test.py": "7ebe6711510cc8388650bbf8dddcfc7332646df38cc9f654f7764de9a61ce7b0",
-    "docs/runbooks/c4-macro-publisher-enrollment.md": "cab1d608777dce7eb9f7830efe5ae3794cdad4a796f3fdd2471b1ab07a51a322"
+    "docs/runbooks/c4-macro-publisher-enrollment.md": "cab1d608777dce7eb9f7830efe5ae3794cdad4a796f3fdd2471b1ab07a51a322",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment_test.py": "4d72dc65c52b0c4bdb175f184031fc8f0e99c58c1169738f59b2b1ea7afc6a5f"
   },
   "qualification": {
     "publisher_final": {
@@ -67,14 +68,14 @@
       "rc": 0,
       "seconds": 129.814,
       "summary": [
-        "ℹ tests 142",
-        "ℹ suites 0",
-        "ℹ pass 142",
-        "ℹ fail 0",
-        "ℹ cancelled 0",
-        "ℹ skipped 0",
-        "ℹ todo 0",
-        "ℹ duration_ms 129716.097666"
+        "\u2139 tests 142",
+        "\u2139 suites 0",
+        "\u2139 pass 142",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 129716.097666"
       ],
       "log_sha256": "2fcdf31bad4b280be69ae0513a2ec1901afb5d64ebebf847d38f8bc7d1a1eaf8",
       "files": {
@@ -175,6 +176,27 @@
       "errors": 1,
       "log_sha256": "1f9bf8e3a37141c0afd11c7afea84f9aa16f43de022116daf1e38f995daf0617",
       "cause": "Fixture restoration attempted to write after changing a file to 0400; two inherited absence assertions ignored the retained lock file from completed v4. Restored mode before write and asserted initial lock inode/bytes unchanged. No installed action or permission denial occurred."
+    },
+    "hosted_compatibility_followup": {
+      "failed_run": 42383094654,
+      "failed_job": 128434821767,
+      "failed_head": "2a121aa9b938982a7adcc9e0be8013c538d6a469",
+      "hosted_tests": 626,
+      "hosted_failures": 1,
+      "cause": "The existing current-protected-payload assertion compared current inventory child bytes against the immutable historical v4 C4_PUBLISHER_AFTER. Corrected only this assertion and test name to C4_INVENTORY_AFTER; retained historical v4 literals and unchanged adapter assertion.",
+      "command": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "private_service_pin_enrollment_test"
+      ],
+      "rc": 0,
+      "tests": 59,
+      "seconds": 6.093,
+      "log_sha256": "3c076cd927bc778e43801871c8dd5b12d89e0bce5ad054b6964d2a1b4d8104a5",
+      "test_file_sha256": "4d72dc65c52b0c4bdb175f184031fc8f0e99c58c1169738f59b2b1ea7afc6a5f",
+      "runtime_source_unchanged": true
     }
   },
   "review": {
