@@ -834,9 +834,39 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {
-    "sha256": "af7c54df3f34329ff7c02cfa6ad283d6bfa28ab21e1b5d1f809616eef71fd67b",
-    "sites": ((346, 37, 40, 'int', '409'),),
+] = {'sha256': 'ed3ff43271312af878fcdb06bf8407939d40e4c844e5222d7be935fdcc1d31fc', 'sites': ((364, 37, 40, 'int', '409'),)}
+
+# Original H4 f008 receipts record the existing Darwin host's ownership.
+# These are observed identities, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these fifteen
+# typed integer tokens in the two exact files are reviewed; any byte or path
+# drift restores the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
+    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "sites": (),
+    "utf8_sites": (
+        (20, 20, 23, "int", "501"),
+        (47, 20, 23, "int", "501"),
+        (70, 20, 23, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
+    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "sites": (),
+    "utf8_sites": (
+        (29, 18, 21, "int", "501"),
+        (42, 18, 21, "int", "501"),
+        (55, 18, 21, "int", "501"),
+        (68, 18, 21, "int", "501"),
+        (85, 18, 21, "int", "501"),
+        (98, 18, 21, "int", "501"),
+        (111, 18, 21, "int", "501"),
+        (128, 18, 21, "int", "501"),
+        (141, 18, 21, "int", "501"),
+        (154, 18, 21, "int", "501"),
+        (167, 18, 21, "int", "501"),
+        (180, 18, 21, "int", "501"),
+    ),
 }
 
 # Exact HTTPS port excluded by the disposable Chisel fixture.

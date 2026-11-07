@@ -134,7 +134,7 @@ def test_metadata_refuses_invalid_or_unsafe_provider_reply(tmp_path, mode, path)
                               content=b'{"org_id":"x","org_slug":"y","padding":"' +
                               b"x" * (65 * 1024) + b'"}')
 
-    app = create_app(settings(tmp_path, enable_account_metadata=True),
+    app = create_app(settings(tmp_path, enable_account_metadata=True, max_queue_wait_s=5.0),
                      transport=httpx.MockTransport(upstream))
 
     async def exercise():
@@ -143,8 +143,9 @@ def test_metadata_refuses_invalid_or_unsafe_provider_reply(tmp_path, mode, path)
                                           base_url="http://proxy") as client:
                 headers = {"Authorization": "Bearer " + LOCAL}
                 r = await client.get(path, headers=headers)
-                await assert_one_metadata_admission(client, headers)
                 assert r.status_code == (403 if mode == "refusal" else 502)
+                assert seen == [path]
+                await assert_one_metadata_admission(client, headers)
                 assert "SENSITIVE-METADATA" not in r.text
                 assert PROVIDER not in r.text
                 assert LOCAL not in r.text

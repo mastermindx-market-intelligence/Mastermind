@@ -1,0 +1,33 @@
+{
+  "operational_enrollment": false,
+  "owner_commit": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+  "owner_pr": 10740,
+  "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+  "postimages": {
+    "engine/provider_production_modes.py": "4df41a878c1368ad3d18da3d6b4eda9f3e4a6ea2afcdf38429a29518bf6464e8",
+    "tests/test_hermes_application_source_support.py": "e3253732804c5adb33b1b2360b1366f9425026897a47e4e843877538d28133bd",
+    "tests/test_hermes_attended_fabric_identity.py": "f344443fd3325ddac1a91d6f77b4add154b40e2c4f6aaa1cf99eb19d50922866",
+    "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+  },
+  "preimages": {
+    "engine/provider_production_modes.py": "d753ac54c28c20a1796d0dd8f0ea4107ef04523173128e755e756934be9fea9e",
+    "tests/test_hermes_application_source_support.py": null,
+    "tests/test_hermes_attended_fabric_identity.py": "9e4f14335b69f1b3650f940fa2afd578de77fe0e4b303195692a6733a7b29c88",
+    "tests/test_hermes_primary_fabric_identity.py": "7ee4f3d76d80d1068f9363583d6463bdde3f9f884f517a90b1564d6d420f8e74"
+  },
+  "schema": "mastermind.hermes_owner_source_support.v1",
+  "source_blobs": {
+    "engine/provider_production_modes.py": "a8d1b7a8d86946eb9870c56a54e1599eae5fa5c5",
+    "tests/test_hermes_application_source_support.py": null,
+    "tests/test_hermes_attended_fabric_identity.py": "3725f43f67f17e4e290c5c7b9791f65b85f692eb",
+    "tests/test_hermes_primary_fabric_identity.py": "8197798e0be85038b9349b646cd30b7125dc4e96"
+  },
+  "source_only": true,
+  "unchanged_inputs": {
+    "config/capability_manifest.yml": "14cb9f81545de02f596f49f36f3f48e02d7851ce",
+    "config/provider_production_modes.v1.json": "1ec5bcf241f6a8e4838983348a7692bdb971c989",
+    "config/provider_workloads.v1.json": "f9f0bd26af3f543aaee8d05fb465a4ea53219660",
+    "engine/fabric_inference_client.py": "323953c2030ce45b3a889bbb6e7a6a6751c90702",
+    "tests/test_fabric_service_identity.py": "4978c965262b0f63da3e72ce3c06d07de898733c"
+  }
+}
