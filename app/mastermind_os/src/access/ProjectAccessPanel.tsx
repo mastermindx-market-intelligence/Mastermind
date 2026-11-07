@@ -80,6 +80,7 @@ const LABELS = {
     pause_instruction_admission: "Pause new work from one instruction",
     publish_project_plan_proposal: "Publish a draft plan proposal",
     read_latest_project_data: "Read the latest project data",
+    correct_project_discovery: "Correct a project discovery",
   },
   "zh-CN": {
     publish_project_proposal: "发布项目提案",
@@ -92,6 +93,7 @@ const LABELS = {
     pause_instruction_admission: "暂停来自一条指令的新工作",
     publish_project_plan_proposal: "发布计划提案草稿",
     read_latest_project_data: "读取最新项目数据",
+    correct_project_discovery: "更正项目发现",
   },
 } as const;
 export function ProjectAccessPanel({
@@ -118,9 +120,10 @@ export function ProjectAccessPanel({
     "read_latest_project_data",
     "add_project_file",
     "set_project_communication_preference",
+    "correct_project_discovery",
     "publish_project_plan_proposal",
   ];
-  if (body?.schema === "mastermind.workspace_project_access.v2")
+  if (body?.schema === "mastermind.workspace_project_access.v2" || body?.schema === 'mastermind.workspace_project_access.v3')
     rows.sort(
       (a, b) =>
         (priority.includes(a.action)
@@ -192,8 +195,8 @@ export function ProjectAccessPanel({
             <dd>{body.selection.work_ref}</dd>
             {current && (
               <>
-                {current.schema ===
-                  "mastermind.workspace_project_access.v2" && (
+                {(current.schema ===
+                  "mastermind.workspace_project_access.v2" || current.schema === 'mastermind.workspace_project_access.v3') && (
                   <>
                     <dt>{t.grantVersion}</dt>
                     <dd>{current.grant_schema}</dd>

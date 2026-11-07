@@ -1889,6 +1889,11 @@ body.page-mm .mm-pf-tab .mm-pf-sub {
   white-space: nowrap;
 }
 
+body.page-mm .mm-pf-status-chip { margin-left: 5px; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+body.page-mm .mm-pf-status-chip.partial { color: var(--warn); }
+body.page-mm .mm-pf-status-chip.unavailable { color: var(--down); }
+body.page-mm .mm-pf-switch-unavailable { align-self: center; padding: 0 10px; color: var(--down); font-size: 11px; font-weight: 750; }
+
 /* Unified layout rhythm and machined panels. */
 body.page-mm .mm-section { margin-top: 18px; }
 body.page-mm .grid { gap: 18px; }
@@ -3996,6 +4001,7 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
+var _portfoliosStatus = 'loading'; // loading | available | unavailable
 var _decisionAvailability = null; // independent persisted decision/account clocks; active regional books only
 var _forwardEvaluation = null;
 var _forwardEvaluationPending = true;
@@ -6382,13 +6388,21 @@ window.downloadPaperPdf = function() {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="l-en">Generating…</span><span class="l-zh">生成中…</span>'; }
   var ticker = ((E('mm-modal-title') || {}).textContent || 'research').split(' ')[0].replace(/[^A-Za-z0-9._-]/g, '');
+  var failureMessage = 'PDF generation failed';
   fetch('/research_paper.pdf?id=' + encodeURIComponent(_openPaperId))
     .then(function(r) {
       if (!r.ok) {
-        return r.text().then(function(body) {
-          var msg = 'HTTP ' + r.status;
-          try { var j = JSON.parse(body); if (j && j.error) msg = j.error; } catch (e) { if (body) msg = body; }
-          throw new Error(msg);
+        return r.json().catch(function(){ return null; }).then(function(j) {
+          failureMessage = r.status === 404 ? 'research paper not found' : 'PDF generation failed';
+          var allowedNotes = {
+            404: ['research paper not found'],
+            500: ['research paper unavailable', 'PDF generation failed'],
+            503: ['research store unavailable', 'PDF engine unavailable']
+          }[r.status] || [];
+          if (j && typeof j.note === 'string' && allowedNotes.indexOf(j.note) !== -1) {
+            failureMessage = j.note;
+          }
+          return Promise.reject();
         });
       }
       return r.blob();
@@ -6400,7 +6414,7 @@ window.downloadPaperPdf = function() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
     })
-    .catch(function(e) { alert('PDF generation failed: ' + (e && e.message ? e.message : e)); })
+    .catch(function() { alert(failureMessage); })
     .finally(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } });
 };
 
@@ -7114,6 +7128,10 @@ function _fmtPctSigned(v) {
 function renderPortfolioSwitch() {
   var host = E('pf-switch');
   if (!host) return;
+  if (_portfoliosStatus === 'unavailable') {
+    host.innerHTML = '<span class="mm-pf-switch-unavailable"><span class="l-en">Portfolios unavailable</span><span class="l-zh">组合列表暂不可用</span></span>';
+    return;
+  }
   if (!_portfolios.length) { host.innerHTML = ''; return; }
   host.innerHTML = _pfOrdered(_portfolios).map(function(p) {
     var st = p.status || {};
@@ -7124,7 +7142,13 @@ function renderPortfolioSwitch() {
     // tracks the live mark. The old $X.XXM format quantized to $10k steps, so intraday moves
     // (and books sitting near $1M) looked frozen even though /api/portfolios refreshes them.
     var navStr = st.nav != null ? ccy + Math.round(st.nav).toLocaleString('en-US') : '—';
-    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>';
+    var statusChip = '';
+    if (st.read_status === 'partial') {
+      statusChip = '<span class="mm-pf-status-chip partial"><span class="l-en">PARTIAL</span><span class="l-zh">不完整</span></span>';
+    } else if (st.read_status === 'unavailable') {
+      statusChip = '<span class="mm-pf-status-chip unavailable"><span class="l-en">UNAVAILABLE</span><span class="l-zh">不可用</span></span>';
+    }
+    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>' + statusChip;
     var archived = p.lifecycle === 'archived' || p.active === false;
     var archiveChip = archived ? '<span class="mm-archive-chip">' + (document.documentElement.getAttribute('data-lang') === 'zh' ? '已归档' : 'ARCHIVED') + '</span>' : '';
     var title = archived ? ((p.archived_reason || 'Frozen historical portfolio') + (p.superseded_by ? ' · successor: ' + p.superseded_by : '')) : (p.tagline || '');
@@ -7263,7 +7287,14 @@ async function loadPortfolios() {
   try {
     var r = await fetch('/api/portfolios');
     var d = r.ok ? await r.json() : null;
-    if (d && d.portfolios) {
+    if (!d || d.read_status === 'unavailable' || !Array.isArray(d.portfolios) ||
+        !d.portfolios.every(function(p) { return p && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && p.id.length > 0; })) {
+      _portfoliosStatus = 'unavailable';
+      renderPortfolioSwitch();
+      return;
+    }
+    if (Array.isArray(d.portfolios)) {
+      _portfoliosStatus = 'available';
       _portfolios = d.portfolios;
       // The registry owns the product default. Explicit historical/workspace URLs keep their
       // selected book, while the root dashboard follows the backend contract instead of a second
@@ -7283,7 +7314,10 @@ async function loadPortfolios() {
       }
       _schedulePortfolioPrefetch();
     }
-  } catch (e) {}
+  } catch (e) {
+    _portfoliosStatus = 'unavailable';
+    renderPortfolioSwitch();
+  }
 }
 
 // ── DECISION AVAILABILITY: display-only, per-book, independent source clocks ──

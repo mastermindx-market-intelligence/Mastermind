@@ -438,7 +438,21 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
         and type(after.get("available_bytes")) is int else None)
     result["attributable_reclaimed_bytes"] = 0
     result["reclaim_attribution"] = "NO_VERIFIED_MANAGER_SPECIFIC_BYTE_EVIDENCE"
-    result["degraded"] = (result["effect_hold"] == "PRESENT"
+    # A no-op, report-only or held cleanup must not report a healthy
+    # service when the underlying root remains critically short of space.
+    # This classifies a fresh post-operation observation; it grants no cleanup
+    # permission and does not change Fabric's separate admission owner.
+    after_inode_fraction = after.get("inodes_free_fraction")
+    after_pressure = "UNVERIFIED"
+    if (after.get("state") == "OK"
+            and type(after.get("total_gib")) in (float, int)
+            and type(after.get("free_gib")) in (float, int)
+            and (after_inode_fraction is None
+                 or type(after_inode_fraction) in (float, int))):
+        after_pressure = classify(
+            after["total_gib"], after["free_gib"], after_inode_fraction, floor)
+    result["degraded"] = (after_pressure in ("CRITICAL", "UNVERIFIED")
+                          or result["effect_hold"] == "PRESENT"
                           or not mandatory_ok or after.get("state") != "OK"
                           or after.get("inodes_free_fraction") is None
                           or (before.get("state") == "OK" and after.get("device") != before.get("device"))

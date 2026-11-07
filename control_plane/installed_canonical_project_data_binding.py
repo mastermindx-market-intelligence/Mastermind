@@ -53,7 +53,7 @@ def read_installed_project_data(binding,principal,*,operation,selection):
             and type(binding.owner).__dict__.get('read_context') is binding.agentos_context_callback.__func__)
     if not current():raise ValueError('CANONICAL_DATA_UNAVAILABLE')
     if operation not in {'project_plan','project_knowledge_catalogue','project_knowledge_memory',
-                          'project_knowledge_source','agentos_current_context'}:
+                          'project_knowledge_source','project_discovery_source','agentos_current_context'}:
         raise ValueError('CANONICAL_DATA_UNAVAILABLE')
     callback=(binding.plan_callback if operation=='project_plan' else binding.agentos_context_callback
               if operation=='agentos_current_context' else binding.callback)
