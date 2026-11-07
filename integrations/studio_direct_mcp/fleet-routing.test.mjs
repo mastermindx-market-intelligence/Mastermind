@@ -386,6 +386,12 @@ test('fleet selector teaches that typed Git/Paper remain independent of remote h
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /NOT required for studio_git_\*/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /studio_fleet_status or paper_\*/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /only routed Desktop Commander operations/);
+  assert.equal(STUDIO_SELECT_HOST_TOOL.title, 'Select Remote Studio Host');
+  assert.equal(STUDIO_SELECT_HOST_TOOL.annotations.title, 'Select Remote Studio Host');
+  assert.match(STUDIO_SELECT_HOST_TOOL.inputSchema.properties.hostRef.description,
+    /remote fleetRouting.routes hostRef, not the local gateway name/);
+  assert.match(STUDIO_SELECT_HOST_TOOL.inputSchema.properties.hostRef.description,
+    /For local M2 Studio, leave this session unselected/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /operator-configured REMOTE fleet route/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /leave the MCP session unselected and use local tools/);
   assert.match(STUDIO_SELECT_HOST_TOOL.description, /do NOT select the gateway host as a remote hostRef/);
