@@ -1,0 +1,103 @@
+{
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
+  "candidate_sha256": "54d7ba3e6164cf05ef90ff1e169b0fef716655e759d4076b6d218e1e4d9bf096",
+  "patch_sha256": "664002d7309779e69cd5f1b3e6a260215f1247526c813824e7e8f5897c8457be",
+  "worker_id": "fabric-bound-launch-port-01a11e90-v1",
+  "retained_result_sha256": "efe84085be5f17112d286001535fe201d6368f1d8dbc5f1de7a167918a7649bd",
+  "original_symbols": 59,
+  "changed_existing_symbols": [
+    "OwnedProcessResult",
+    "_wait_owned_process_with_fuse",
+    "_terminate_verified_group",
+    "_BoundedStreamCollector",
+    "_mark_stream_state_unproven",
+    "run_owned_process",
+    "LaneLease"
+  ],
+  "validation": "Prior combined assembly:171 outer nodes PASS at b196c183 (76 nested in one node). Current cancellation-finisher repair:87 affected outer nodes PASS, including four new interleaving cases. Counts overlap and are not additive.",
+  "limits": [
+    "SOURCE_ONLY_UNINSTALLED",
+    "PRE_EXEC remains immutable and does not prove exec",
+    "Capture and group cleanup are not authenticated realm, dedicated UID sweep, assignment seal or Supervisor ACK",
+    "No production factory, public bound CLI, profile, credential, enrollment, service or host activation",
+    "Original lease/exclusion must remain through actual assignment seal/worker denial/durable Supervisor ACK"
+  ],
+  "reviewed_port_sha256": "df229997a0625b94bbfc207084ac9fde19526e49bbfe5e04eff97d58c556a7fa",
+  "parent_delta": "Original prepared descriptor/private FD capture and canonical parser; Control-manifest run/store coordinates; entry-once publication; exact reason/real cancellation telemetry; sole-finisher immutable terminal bytes; uncertainty retains original lease and no replay.",
+  "added_symbols": [
+    "_owned_fuse_check",
+    "_OwnedCaptureResultParse",
+    "_parse_owned_result_schema",
+    "_owned_capture_parse_cli_result",
+    "_PinnedPrivateDir",
+    "_OwnedCaptureFile",
+    "_open_private_dir_child",
+    "_OwnedCaptureReservation",
+    "owned_capture_paths",
+    "validate_owned_capture_live",
+    "_launch_receipt_input",
+    "_launch_receipt_directory",
+    "_write_immutable_launch_receipt",
+    "_write_immutable_owned_bytes",
+    "_LaunchProcBSDInfo",
+    "_launch_kernel_text",
+    "_observe_owned_launch_identity",
+    "_publish_owned_launch_receipt",
+    "_owned_gate_command",
+    "_owned_process_steps",
+    "_nonsecret_environment_sha256",
+    "OwnedExecution",
+    "_require_owned_execution",
+    "retain_owned_start_bytes",
+    "_begin_owned_process",
+    "begin_owned_process",
+    "observe_owned_process_image",
+    "_settle_owned_process",
+    "abort_owned_process",
+    "finish_owned_process",
+    "_finish_owned_process_async",
+    "start_owned_process_finisher",
+    "collect_owned_process",
+    "cancel_exact_owned_process",
+    "owned_capture_collection",
+    "LaneReleaseReceipt"
+  ],
+  "capture_worker": {
+    "id": "fabric-owned-capture-build-01a11e90-v1",
+    "result_bytes": 4134,
+    "result_sha256": "d938fd841d9838d33b45b7e1fbd7cd9456162ce790f9c6e64b799e18f9f82a56",
+    "exported_patch_sha256": "9a3417da4c1b8cdc7e87cbf2e192d5623f9d371cd1fad760ecba471aa5a1fd88",
+    "classification": "NOT_ACCEPTED_AS_PRODUCED; coordinator corrections integrated"
+  },
+  "cancellation_finisher_repair": "Actual retained already-exited/no-signal/passing-cleanup observation preserves natural result; attempt/once/retry fences remain consumed. Uncertain or signaled cancellation suppresses publication.",
+  "cancellation_finisher_validation": {
+    "junit": "CANCEL_FINISHER_AFFECTED_GREEN.xml",
+    "sha256": "401eda2dc6b8111fcaa9ef01185e2ed3aab500dc933105f8b9854f919c8ef830",
+    "nodes": 87,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "assignment_release": {
+    "api": "LaneLease.release_after_assignment_ack() -> LaneReleaseReceipt",
+    "scope": "Physical original marker release only; caller authenticates ACK separately. Once-only, no held/drift/restart retry. Unknown retains original admission lock/FDs; no marker recreation.",
+    "checks": {
+      "path": "assignment-control-join/LEASE_OWNER_COMPATIBILITY.xml",
+      "nodes": 71,
+      "failures": 0,
+      "errors": 0,
+      "sha256": "14bcb391748882b2f46a154a28016647be2aa30ac477fc1dd57c4235dfd64565"
+    },
+    "finite_hold_guard": "An already-preserved finite release interruption retains its existing lock/FDs; no second lock or marker write. Legacy hold unchanged outside that new state.",
+    "finite_hold_validation": {
+      "source_only": true,
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "sha256": "97fd2c457e7206c1acab357847eb95258870c03826a3ed67df67473fcc6fb928",
+      "red_sha256": "f585f586a63567ca59a0c213ef315a21dea44e4bd59aefac8e502f3119198fc5"
+    }
+  }
+}

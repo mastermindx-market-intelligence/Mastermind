@@ -1,0 +1,93 @@
+--- a/run_observation_delivery.py
++++ b/run_observation_delivery.py
+@@ -35,0 +36,4 @@
++# One original assigning parent requested this active-run metadata diagnostic.
++# Bind the retained launch prefix; later controller polls may append to it.
++ACTIVE_RUN = 'mm-os-incident-issuer-custody-preflight-20261013-01a104e6'
++SCOPES[ACTIVE_RUN] = {'root': '01a104e6-58f8-76d3-8d99-1302a1cca072', 'parent': '01a104e6-58f8-76d3-8d99-1302a1cca072', 'host': 'ubuntu2', 'support_digest': '4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/mm-os-incident-issuer-custody-preflight-20261013-01a104e6.packet.16qpaved', 'packet_sha256': '7c9ec569638e276a47bb311a748b5bdcb3b905e253f031c74bd91676c3078e61', 'log_prefix_bytes': 1693, 'log_prefix_sha256': 'cb5b9ec957b240025a62b5e090967909fb18df00ea65dab58076a51143a9a9dd'}
+@@ -59,0 +64,2 @@
++    if run_id == ACTIVE_RUN:
++        request['parent'] = scope['parent']
+@@ -73,8 +79,26 @@
+-def qualify(request):
+-    validate_request(request)
+-    scope = SCOPES[request['run_id']]
+-    paths = {'log': delivery.HERE/'state/remote_sub'/(request['run_id']+'.log'),
+-             'packet': Path(scope['packet_path']), 'registry': delivery.HERE/'hosts.json',
+-             'observer': delivery.HERE/'run_observation.py'}
+-    raw = {key:delivery.local_file(path, 1048576) for key,path in paths.items()}
+-    if any(delivery.digest(raw[key]) != scope[key+'_sha256'] for key in ('log','packet')):
++def qualify_bytes(request, scope, raw):
++    """No I/O: retain immutable launch identity while permitting later polls.
++
++    This is provenance from the original parent's retained packet and launch,
++    not caller authentication, progress or permission to retry the operation.
++    """
++    if delivery.digest(raw['packet']) != scope['packet_sha256']:
++        raise ValueError('original_observation_sources_changed')
++    stable = dict(raw)
++    if request['run_id'] == ACTIVE_RUN:
++        size = scope['log_prefix_bytes']
++        launch = raw['log'][:size]
++        if len(launch) != size or delivery.digest(launch) != scope['log_prefix_sha256']:
++            raise ValueError('original_launch_prefix_changed')
++        first, body = raw['packet'].split(b'\n', 1)
++        if not first.startswith(b'FABRIC_ARTIFACT_REQUEST_V1 '):
++            raise ValueError('original_packet_header_missing')
++        header = reader.strict_json(first.split(b' ', 1)[1])
++        if (type(header) is not dict or any(header.get(k) != request[k]
++                for k in ('root','parent','run_id','support_digest'))):
++            raise ValueError('original_packet_identity_mismatch')
++        if header.get('body_sha256') != delivery.digest(body):
++            raise ValueError('original_packet_body_mismatch')
++        # Stable evidence identity deliberately hashes the prefix, not a growing log.
++        stable['log'] = launch
++    elif delivery.digest(raw['log']) != scope['log_sha256']:
+@@ -85,0 +110,6 @@
++    if request['run_id'] == ACTIVE_RUN:
++        for line in raw['log'].decode().splitlines():
++            if not re.fullmatch(prefix, line):
++                raise ValueError('original_log_identity_or_line_invalid')
++        if not raw['log'].endswith(b'\n'):
++            raise ValueError('original_log_incomplete')
+@@ -95,0 +126,16 @@
++    if request['run_id'] == ACTIVE_RUN:
++        if ([e for e in events if e.startswith('RUN_RESERVED ')] != ['RUN_RESERVED explicit=1']
++                or len([e for e in events if e.startswith('LAUNCH ')]) != 1):
++            raise ValueError('original_launch_repeated')
++    return stable
++
++
++def qualify(request, *, observed_log=None):
++    validate_request(request)
++    scope = SCOPES[request['run_id']]
++    paths = {'log': delivery.HERE/'state/remote_sub'/(request['run_id']+'.log'),
++             'packet': Path(scope['packet_path']), 'registry': delivery.HERE/'hosts.json',
++             'observer': delivery.HERE/'run_observation.py'}
++    raw = {key:delivery.local_file(path, 1048576) for key,path in paths.items()}
++    stable = qualify_bytes(request, scope, raw)
++
+@@ -100 +146,2 @@
+-    if any(delivery.local_file(path,1048576)!=raw[key] for key,path in paths.items()):
++    after = {key:delivery.local_file(path,1048576) for key,path in paths.items()}
++    if qualify_bytes(request, scope, after) != stable:
+@@ -102 +149,8 @@
+-    return dict(ssh_alias=entry['ssh_alias'],evidence_sha256={key:delivery.digest(value) for key,value in raw.items()},
++    if request['run_id'] == ACTIVE_RUN:
++        if (not after['log'].startswith(raw['log'])
++                or observed_log and not raw['log'].startswith(observed_log[-1])):
++            raise ValueError('original_log_rewritten')
++        if observed_log is not None:
++            observed_log[:] = [after['log']]
++    return dict(ssh_alias=entry['ssh_alias'],evidence_sha256={key:delivery.digest(value) for key,value in stable.items()},
++                log_binding=('launch_prefix_1693_bytes' if request['run_id']==ACTIVE_RUN else 'complete_log'),
+@@ -273 +327 @@
+-                    or row['verified_code_files'] not in (21,23,24)
++                    or row['verified_code_files'] not in ((30,) if request['run_id']==ACTIVE_RUN else (21,23,24))
+@@ -329 +383,2 @@
+-    evidence=qualify(request)
++    observed_log=[]
++    evidence=qualify(request,observed_log=observed_log)
+@@ -335 +390 @@
+-        if qualify(request)!=evidence:raise ValueError('observation_sources_changed')
++        if qualify(request,observed_log=observed_log)!=evidence:raise ValueError('observation_sources_changed')

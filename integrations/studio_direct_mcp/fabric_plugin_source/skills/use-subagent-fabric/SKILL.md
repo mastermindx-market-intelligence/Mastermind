@@ -1,0 +1,51 @@
+---
+name: use-subagent-fabric
+description: Use when an attended ChatGPT Web or Codex session needs bounded external-worker labor through the existing Mastermind M2 Subagent Fabric, including review, tests, research, census, or routine implementation.
+---
+
+# Use the existing Mastermind Subagent Fabric
+
+Use the connected **Mastermind Subagent Fabric** tools for independently checkable leaf work. Keep coordinator judgment and acceptance with the parent. Native Codex forks are not external Fabric workers and can inherit the parent model. Do not substitute native Sol labor, create another orchestrator, or rebuild routing, queues, credentials or run state.
+
+## Independent PR review: source-linked session route
+
+For an independent PR/source review, read `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` at the verified protected Mastermind revision before commissioning. Check exact PR head and the active review owner. Only an independently admitted Fabric reviewer may receive a new run; a separately authorized Slack Dot can provide manual technical review when genuinely eligible, but never as a workaround for a safety/permission denial, `retry_allowed=false` or `EFFECT_UNKNOWN`. Neither a Fabric result nor a Slack Dot verdict is a submitted non-author GitHub review. Installation of this plugin/skill and live reviewer START still need separate proof.
+
+## Choose an admitted path
+
+Load the current protected Mastermind procedures once at unfamiliar mission entry; reuse the compatible pin. Use an actually armed/admitted Executive route when appropriate. A read-only Executive connection or QUEUED intent is not dispatch. An existing Executive operation never becomes a new manual request.
+
+This dedicated plugin is a typed attended interface to the existing M2 adapter. It requires a genuinely connected, authorized private channel. Installation, tool exposure, provider admission, worker START and result acceptance are separate facts. Missing optional Executive integration does not block an independently admitted new attended request. An explicit permission/consent denial never permits fallback through another actor or carrier.
+
+## Dispatch one bounded child
+
+For an unfamiliar connection, call `fabric_capabilities`; this observes the adapter, not provider admission. **No separate worker-list tool is required or exposed.** A successful `adapter_available:true` with `worker_admission:UNPROBED` and `worker_start:UNPROBED` is normal: neither proves a ready worker nor blocks a properly scoped new request. `fabric_request` delegates actual provider/host admission to the incumbent native router. Do not treat an absent worker list as a permission gate, fabricate a worker reservation, or claim START before native evidence. An `OBSERVATION_INCOMPLETE` capability error is a failed original process-output observation, not evidence that M2 workers are absent or an explicit safety denial; retain its original PID, do not replay an unchanged command or issue an unqualified request, and diagnose the existing process owner while advancing unrelated safe work. Resolve the **verified original operation root and immediate parent**. Web sessions must not invent `CODEX_THREAD_ID`, borrow a host's inherited native identity, or treat a root string as authentication. A new attended operation uses the incumbent operation/custody convention. Nested children retain the same original root and shared grant/capacity.
+
+Choose one stable child ID once. `fabric_request` requires:
+
+```text
+run_id, root_id, parent_id
+task_class: mechanical | fix_build | review | census | audit
+task_complexity: C0_MECHANICAL | C1_ROUTINE_BOUNDED | C2_COMPLEX_BOUNDED | C3_FRONTIER_JUDGMENT
+work_packet: objective, exact inputs, scope/non-goals, acceptance evidence, stop/return condition
+```
+
+Classify the child, not its parent's prestige. C3 requires `escalation_reason`. Let the existing router select a qualified economical provider/host; the tool does not accept host/model/account overrides. For review, use an actual author `subject_pool` when applicable, not a guessed provider. Include inputs in the packet or use verified worker-accessible references: Web `/mnt/data` and M2-only paths are not automatically available remotely. Keep packets within 16,000 characters and 32 KiB; avoid unnecessary disclosure or full-history dumps. Authorized work may legitimately involve keys or credentials; the request boundary does not scan, block or redact them.
+
+**Hash presentation in request briefs:** In human/model-readable prose, show SHA-256 file hashes (64 hex) and git commit IDs (40 hex) as about **12 leading hex characters** (for example, `abc123def456`), clearly labeled as abbreviated. Preserve the **complete** digest/commit ID where required for machine verification, exact checkout, integrity checks, or executable commands, ideally in explicit structured identity fields rather than repeating it in prose. Never abbreviate the Fabric `run_id`, `root_id` or `parent_id`; those are exact correlation IDs, not hash displays. Do not rewrite a submitted packet or add a content-based refusal. This presentation rule avoids needless long hex strings in operator prose without weakening exact verification.
+
+The tool checks the exact ID before submission. An existing run is inspected/reconciled, never replayed. Record its controller PID and original connection generation. `CONTROLLER_CREATED` does not prove worker START. Continue another useful parent-owned task without duplicating the child.
+
+## Consume and verify
+
+Observe only the same ID using `fabric_status`, bounded `fabric_wait`, or the original bound `fabric_controller_output`. Unchanged polling is not useful Pro work. No supported return path means no promise of background delivery.
+
+Use `fabric_result` only when retained output is available and the ledger root matches. Read the **complete** response; use the existing `studio_output_page` receipt when the gateway pages its response. A preview or digest alone is not review. The whole-result limit defaults to 8 KiB and permits at most 64 KiB.
+
+For a larger retained response, use `fabric_result_page` if the installed catalog exposes it. Read from `offset: 0`, request at most 4096 bytes per page, retain the returned `accept_run_id` and complete `response_sha256`, then pass that digest and each `next_offset` on following reads. Verify page hashes and reassemble all decoded bytes before decoding UTF-8 or verifying the result. Each call hashes and validates the complete incumbent response, bounded to 8 MiB. Complete every page in order until `full_result_delivered` is true; a preview, the digest or gateway receipt alone is insufficient. Delivery belongs to the observed effective leaf: a changed successor requires its own complete reads even if the bytes are identical. An unconfirmed continuation controller refuses delivery. A new backend generation loses only this in-memory delivery record and requires rereading the same result; never rerun the worker to recover it. Oversized/unavailable output still requires same-run recovery, not another worker.
+
+After actual deterministic verification or authorized review, call `fabric_accept` for the explicit returned `accept_run_id`, with `by`, `expected_response_sha256`, and a concrete `verification_summary`. Accepting through a predecessor refuses `ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED`. Results larger than 64 KiB require complete contiguous delivery for that exact leaf, root and digest in the current backend generation; acceptance then rechecks the complete current digest. Supply `verification_summary` as one controlled evidence-basis code only: `deterministic_test_evidence` or `artifact_digest_comparison` for `by=deterministic`; `manual_result_review` or `independent_review_evidence` for `by=reviewer`. Free-form prose is rejected before any adapter call. Put the detailed review findings and evidence references in the existing source/review artifact, not this field. The code is an attestation of the method, not proof of the external checks. Never reattempt an acceptance whose effect is uncertain. It rechecks the response digest and reads back acceptance. The digest identifies the adapter response, not every referenced artifact; legacy acceptance is not an atomic cryptographic attestation. DONE or exit zero is not acceptance.
+
+For `EFFECT_UNKNOWN`, lost modifying responses, existing IDs, or undelivered results: preserve the original root/run/PID, inspect the incumbent owner, and do not retry through another ID/host/carrier. Do not kill a controller or release a lease to simulate cancellation. A new chat or backend generation does not transfer custody or recreate a PID binding.
+
+Protected procedures, actual resource permissions, source custody, admission and release controls remain controlling. The private channel identifies an enrolled machine-owner connection, not an authenticated individual Web conversation.

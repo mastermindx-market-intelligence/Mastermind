@@ -1,0 +1,424 @@
+"""Pure COO principal envelope derivation for the existing Executive sink.
+
+This is a pre-sink construction law only. It creates no Job/Event, opens no
+Runtime, authenticates no OAuth token, selects no provider/host/account, reads
+no clock, persists no state, and grants no source/release authority.
+
+Public semantics come from control_plane.coo_principal_request. Trusted code
+supplies only immutable principal/mission admission identity plus grounding and
+the existing workspace root. A later reviewed sink discriminator remains the
+only authority that may accept this envelope into Executive Runtime.
+"""
+from __future__ import annotations
+
+import dataclasses
+import hashlib
+import re
+from collections.abc import Mapping
+from typing import Any
+
+from control_plane import ceo_intent, ceo_request
+from control_plane.coo_principal_request import (
+    ORCHESTRATION_ACTION_KIND,
+    normalize_principal_orchestration_request,
+    normalize_principal_request,
+    orchestration_request_fingerprint,
+    orchestration_request_ref,
+    principal_intent_id,
+    principal_request_ref,
+)
+
+
+INTENT_SCHEMA = "mastermind.executive_principal_intent.v1"
+ORCHESTRATION_INTENT_SCHEMA = "mastermind.executive_principal_orchestration.v1"
+ACTOR = "coo-principal"
+SEAT = "coo"
+
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{1,255}$")
+_WORK_REF_RE = re.compile(r"^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$")
+_GROUNDING_KEYS = frozenset({"mastermind_sha", "macro_sha", "boot_packet_schema"})
+
+
+class CooPrincipalEnvelopeError(ValueError):
+    """Trusted principal-envelope derivation was refused."""
+
+
+def _digest(value: object, field: str) -> str:
+    if type(value) is not str or _DIGEST_RE.fullmatch(value) is None:
+        raise CooPrincipalEnvelopeError(f"{field} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _ref(value: object, field: str, *, pattern: re.Pattern[str] = _REF_RE) -> str:
+    if type(value) is not str or pattern.fullmatch(value) is None:
+        raise CooPrincipalEnvelopeError(f"{field} is invalid")
+    return value
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PrincipalAdmissionContext:
+    """Immutable server-derived identity for one COO mission authority generation."""
+
+    work_ref: str
+    principal_binding_digest: str
+    mission_authority_ref: str
+    authority_generation_digest: str
+
+    def __post_init__(self) -> None:
+        _ref(self.work_ref, "work_ref", pattern=_WORK_REF_RE)
+        _digest(self.principal_binding_digest, "principal_binding_digest")
+        _ref(self.mission_authority_ref, "mission_authority_ref")
+        _digest(self.authority_generation_digest, "authority_generation_digest")
+
+
+def _grounding(value: object) -> dict[str, Any]:
+    """Validate the existing two-SHA grounding shape without discovering state."""
+
+    if not isinstance(value, Mapping):
+        raise CooPrincipalEnvelopeError("grounding must be an object")
+    keys = set(value)
+    required = {"mastermind_sha", "macro_sha"}
+    missing = sorted(required - keys)
+    unexpected = sorted(keys - _GROUNDING_KEYS)
+    if missing:
+        raise CooPrincipalEnvelopeError(
+            f"grounding is missing required field(s): {missing}"
+        )
+    if unexpected:
+        raise CooPrincipalEnvelopeError(
+            f"grounding has unexpected field(s): {unexpected}"
+        )
+
+    result: dict[str, Any] = {}
+    for key in ("macro_sha", "mastermind_sha"):
+        sha = value[key]
+        if type(sha) is not str or ceo_intent.SHA_RE.fullmatch(sha) is None:
+            raise CooPrincipalEnvelopeError(
+                f"grounding.{key} must be a full 40-character lowercase Git SHA"
+            )
+        result[key] = sha
+
+    if "boot_packet_schema" in value:
+        schema = value["boot_packet_schema"]
+        if (
+            type(schema) is not str
+            or not schema
+            or len(schema) > 128
+            or any(ord(char) < 32 or ord(char) == 127 for char in schema)
+        ):
+            raise CooPrincipalEnvelopeError("grounding.boot_packet_schema is invalid")
+        result["boot_packet_schema"] = schema
+    return result
+
+
+_ORCHESTRATION_ENVELOPE_KEYS = frozenset(
+    {
+        "schema",
+        "intent_id",
+        "action_kind",
+        "request_fingerprint",
+        "actor",
+        "seat",
+        "principal_binding_digest",
+        "mission_authority_ref",
+        "authority_generation_digest",
+        "objective",
+        "department",
+        "priority",
+        "business_impact",
+        "workstream",
+        "grounding",
+    }
+)
+_ORCHESTRATION_BUNDLE_KEYS = frozenset(
+    {
+        "request_ref",
+        "intent_id",
+        "action_kind",
+        "request_fingerprint",
+        "normalized_request",
+        "envelope",
+        "bundle_digest",
+    }
+)
+
+
+def validate_principal_orchestration_bundle(value: object) -> dict[str, Any]:
+    """Validate the complete H4 pre-sink bundle without creating effects."""
+
+    if not isinstance(value, Mapping) or set(value) != _ORCHESTRATION_BUNDLE_KEYS:
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle is not the closed principal wire"
+        )
+    raw_request = value.get("normalized_request")
+    if not isinstance(raw_request, Mapping):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle normalized_request is invalid"
+        )
+    work_ref = raw_request.get("workstream")
+    if type(work_ref) is not str:
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle normalized_request requires workstream"
+        )
+    try:
+        normalized = normalize_principal_orchestration_request(
+            dict(raw_request),
+            expected_work_ref=work_ref,
+        )
+        request_ref = orchestration_request_ref(normalized)
+        intent_id = principal_intent_id(request_ref)
+        request_fingerprint = orchestration_request_fingerprint(normalized)
+    except ValueError as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+    if normalized != dict(raw_request):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle request is not canonical"
+        )
+    if (
+        value.get("request_ref") != request_ref
+        or value.get("intent_id") != intent_id
+        or value.get("action_kind") != ORCHESTRATION_ACTION_KIND
+        or value.get("request_fingerprint") != request_fingerprint
+    ):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle identity does not match its request"
+        )
+
+    raw_envelope = value.get("envelope")
+    if (
+        not isinstance(raw_envelope, Mapping)
+        or set(raw_envelope) != _ORCHESTRATION_ENVELOPE_KEYS
+    ):
+        raise CooPrincipalEnvelopeError(
+            "orchestration envelope is not the closed principal wire"
+        )
+    try:
+        context = PrincipalAdmissionContext(
+            work_ref=raw_envelope["workstream"],
+            principal_binding_digest=raw_envelope["principal_binding_digest"],
+            mission_authority_ref=raw_envelope["mission_authority_ref"],
+            authority_generation_digest=raw_envelope["authority_generation_digest"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+    canonical_envelope = {
+        "schema": ORCHESTRATION_INTENT_SCHEMA,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "actor": ACTOR,
+        "seat": SEAT,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "objective": str(normalized["objective"]),
+        "department": str(normalized["department"]),
+        "priority": int(normalized["priority"]),
+        "business_impact": str(normalized["business_impact"]),
+        "workstream": str(normalized["workstream"]),
+        "grounding": _grounding(raw_envelope["grounding"]),
+    }
+    if context.work_ref != work_ref or dict(raw_envelope) != canonical_envelope:
+        raise CooPrincipalEnvelopeError(
+            "orchestration envelope differs from its canonical bundle"
+        )
+    material = {
+        "request_ref": request_ref,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "normalized_request": normalized,
+        "envelope": canonical_envelope,
+    }
+    expected_bundle_digest = hashlib.sha256(
+        ceo_intent.canonical_bytes(material)
+    ).hexdigest()
+    supplied_bundle_digest = value.get("bundle_digest")
+    if (
+        type(supplied_bundle_digest) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", supplied_bundle_digest) is None
+        or supplied_bundle_digest != expected_bundle_digest
+    ):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle digest does not bind its canonical content"
+        )
+    return {**material, "bundle_digest": expected_bundle_digest}
+
+
+def principal_orchestration_bundle_digest(value: object) -> str:
+    normalized = validate_principal_orchestration_bundle(value)
+    return str(normalized["bundle_digest"])
+
+
+def _execution_contract(
+    normalized_request: Mapping[str, Any],
+    *,
+    intent_id: str,
+    workspace_root: str,
+) -> dict[str, Any]:
+    """Reuse the incumbent worker-profile derivations without CEO provenance."""
+
+    try:
+        authorities = ceo_request.derive_authorities(
+            str(normalized_request["execution_profile"])
+        )
+        branch = ceo_request.derive_branch(intent_id)
+        worktree = ceo_request.derive_worktree(workspace_root, intent_id)
+        commands = ceo_request.build_validation_commands(
+            normalized_request.get("validation")
+        )
+    except ceo_request.CeoRequestError as exc:
+        raise CooPrincipalEnvelopeError(
+            "trusted worker-profile derivation is inconsistent"
+        ) from exc
+
+    contract: dict[str, Any] = {
+        "requested_authorities": authorities,
+        "authority_level": ceo_request.AUTHORITY_LEVEL,
+        "branch": branch,
+        "worktree": worktree,
+        "attempt_limit": int(normalized_request["attempt_limit"]),
+    }
+    paths = list(normalized_request.get("allowed_write_paths") or [])
+    if paths:
+        contract["allowed_write_paths"] = paths
+    if commands:
+        contract["validation_commands"] = commands
+    return contract
+
+
+def derive_principal_envelope(
+    public_request: object,
+    *,
+    context: PrincipalAdmissionContext,
+    workspace_root: str,
+    grounding: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the exact server-derived pre-sink COO principal envelope bundle."""
+
+    if not isinstance(context, PrincipalAdmissionContext):
+        raise TypeError("context must be PrincipalAdmissionContext")
+
+    try:
+        normalized = normalize_principal_request(
+            public_request,
+            expected_work_ref=context.work_ref,
+        )
+        request_ref = principal_request_ref(normalized)
+        intent_id = principal_intent_id(request_ref)
+    except ValueError as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+
+    if normalized["workstream"] != context.work_ref:
+        raise CooPrincipalEnvelopeError(
+            "normalized workstream differs from principal admission context"
+        )
+
+    envelope = {
+        "schema": INTENT_SCHEMA,
+        "intent_id": intent_id,
+        "actor": ACTOR,
+        "seat": SEAT,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "objective": str(normalized["objective"]),
+        "department": str(normalized["department"]),
+        "priority": int(normalized["priority"]),
+        "workstream": str(normalized["workstream"]),
+        "grounding": _grounding(grounding),
+        "execution_contract": _execution_contract(
+            normalized,
+            intent_id=intent_id,
+            workspace_root=workspace_root,
+        ),
+    }
+
+    return {
+        "request_ref": request_ref,
+        "intent_id": intent_id,
+        "normalized_request": normalized,
+        "envelope": envelope,
+    }
+
+
+def derive_principal_orchestration_envelope(
+    public_request: object,
+    *,
+    context: PrincipalAdmissionContext,
+    grounding: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return one source-only governed-orchestration pre-sink bundle.
+
+    The envelope is intentionally not accepted by today's Executive sink.  It
+    carries no caller-authored execution profile, tree, placement or Runtime
+    identity.  A later reviewed host/sink unit must derive those facts from
+    existing owners before any aggregation root can be committed.
+    """
+
+    if not isinstance(context, PrincipalAdmissionContext):
+        raise TypeError("context must be PrincipalAdmissionContext")
+
+    try:
+        normalized = normalize_principal_orchestration_request(
+            public_request,
+            expected_work_ref=context.work_ref,
+        )
+        request_ref = orchestration_request_ref(normalized)
+        intent_id = principal_intent_id(request_ref)
+        request_fingerprint = orchestration_request_fingerprint(normalized)
+    except ValueError as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+
+    if normalized["workstream"] != context.work_ref:
+        raise CooPrincipalEnvelopeError(
+            "normalized workstream differs from principal admission context"
+        )
+
+    envelope = {
+        "schema": ORCHESTRATION_INTENT_SCHEMA,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "actor": ACTOR,
+        "seat": SEAT,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "objective": str(normalized["objective"]),
+        "department": str(normalized["department"]),
+        "priority": int(normalized["priority"]),
+        "business_impact": str(normalized["business_impact"]),
+        "workstream": str(normalized["workstream"]),
+        "grounding": _grounding(grounding),
+    }
+
+    material = {
+        "request_ref": request_ref,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "normalized_request": normalized,
+        "envelope": envelope,
+    }
+    return {
+        **material,
+        "bundle_digest": hashlib.sha256(
+            ceo_intent.canonical_bytes(material)
+        ).hexdigest(),
+    }
+
+
+__all__ = [
+    "ACTOR",
+    "INTENT_SCHEMA",
+    "ORCHESTRATION_INTENT_SCHEMA",
+    "SEAT",
+    "CooPrincipalEnvelopeError",
+    "PrincipalAdmissionContext",
+    "derive_principal_envelope",
+    "derive_principal_orchestration_envelope",
+    "principal_orchestration_bundle_digest",
+    "validate_principal_orchestration_bundle",
+]

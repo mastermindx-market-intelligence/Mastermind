@@ -168,6 +168,36 @@ class TrustedAckContext:
 
 
 @dataclasses.dataclass(frozen=True)
+class NativeContinuationAckEvidence:
+    """Versioned evidence within the existing ACK event, never a new grant."""
+    schema: str
+    request_event_id: int
+    request_event_sha256: str
+    target_attempt_id: str
+    process_generation_id: str
+    native_session_sha256: str
+    native_turn_sha256: str
+    nudge_id: str
+
+    def __post_init__(self):
+        if (self.schema != "mastermind.native_continuation_ack.v1"
+                or type(self.request_event_id) is not int or self.request_event_id < 1):
+            raise WakeLedgerError("invalid native continuation ACK evidence")
+        for value in (self.request_event_sha256, self.native_session_sha256, self.native_turn_sha256):
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise WakeLedgerError("invalid native continuation ACK digest")
+        for value in (self.target_attempt_id, self.process_generation_id, self.nudge_id):
+            if type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", value) is None:
+                raise WakeLedgerError("invalid native continuation ACK identity")
+
+    @classmethod
+    def from_dict(cls, value):
+        if type(value) is not dict or set(value) != {f.name for f in dataclasses.fields(cls)}:
+            raise WakeLedgerError("invalid native continuation ACK fields")
+        return cls(**value)
+
+
+@dataclasses.dataclass(frozen=True)
 class WakeAcknowledgement:
     obligation_id: str
     ack_mode: AckMode
@@ -180,6 +210,7 @@ class WakeAcknowledgement:
     operator_authority_receipt: str | None = None
     binding_generation: int | None = None
     delivered_command_id: str | None = None
+    native_continuation: NativeContinuationAckEvidence | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -227,6 +258,52 @@ UNARMED_RETRY_POLICY = WakeRetryPolicy()
 
 
 @dataclasses.dataclass(frozen=True)
+class NativeCompanyReadEvidence:
+    """One native read observation; no raw provider address or consumption claim."""
+
+    target_attempt_id: str
+    process_generation_id: str
+    binding_id: str
+    binding_generation: int
+    nudge_id: str
+    consultation_ref: str
+    provider_session_sha256: str
+    provider_native_turn_sha256: str
+    result_sha256: str
+    native_item_sha256: str
+    answer_attestation_sha256: str
+
+    def __post_init__(self) -> None:
+        patterns = {
+            "target_attempt_id": r"ATT-[0-9a-f]{32}",
+            "process_generation_id": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            "binding_id": BINDING_ID_RE.pattern,
+            "nudge_id": NUDGE_ID_RE.pattern,
+            "consultation_ref": r"consult-[0-9a-f]{32}",
+        }
+        for name, pattern in patterns.items():
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(pattern, value) is None:
+                raise WakeLedgerError(f"native Company evidence {name} is malformed")
+        _strict_positive_int(self.binding_generation, "binding_generation")
+        for name in ("provider_session_sha256", "provider_native_turn_sha256",
+                     "result_sha256", "native_item_sha256", "answer_attestation_sha256"):
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise WakeLedgerError(f"native Company evidence {name} is malformed")
+
+    def to_dict(self) -> dict[str, object]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: object) -> "NativeCompanyReadEvidence":
+        if (not isinstance(value, Mapping)
+                or set(value) != {field.name for field in dataclasses.fields(cls)}):
+            raise WakeLedgerError("native Company evidence must have its exact closed shape")
+        return cls(**dict(value))
+
+
+@dataclasses.dataclass(frozen=True)
 class WakeLedgerRecord:
     command_id: str
     phase: LedgerPhase
@@ -245,6 +322,7 @@ class WakeLedgerRecord:
     source_resolution: SourceResolution | None = None
     obligation: WakeObligation | None = None
     physical_source: PhysicalDialogueSourceIdentity | None = None
+    native_company_read: NativeCompanyReadEvidence | None = None
 
     def matches_attempt(self, attempt: DeliveryAttempt) -> bool:
         return (
@@ -329,7 +407,8 @@ def requested_record(
 
 
 def attempt_record(
-    attempt: DeliveryAttempt, phase: LedgerPhase
+    attempt: DeliveryAttempt, phase: LedgerPhase,
+    *, native_company_read: NativeCompanyReadEvidence | None = None,
 ) -> WakeLedgerRecord:
     if phase not in ATTEMPT_PHASES:
         raise WakeLedgerError(f"{phase} is not an attempt-scoped phase")
@@ -349,6 +428,7 @@ def attempt_record(
             wake_transport=attempt.wake_transport,
             nudge_id=attempt.nudge_id,
             nudge_attempt_command_ids=attempt.nudge_attempt_command_ids,
+            native_company_read=native_company_read,
         )
     )
 
@@ -375,6 +455,7 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 record.nudge_id,
                 record.nudge_attempt_command_ids,
                 record.native_handle,
+                record.native_company_read,
             )
         ):
             raise WakeLedgerError("global wake phase cannot carry route/native fields")
@@ -453,6 +534,19 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
             raise WakeLedgerError(
                 "nudge attempt command identities do not contain this attempt"
             )
+    evidence = record.native_company_read
+    if evidence is not None:
+        if type(evidence) is not NativeCompanyReadEvidence:
+            raise WakeLedgerError("native Company evidence must be typed")
+        NativeCompanyReadEvidence.from_dict(evidence.to_dict())
+        if (record.phase is not LedgerPhase.DELIVERED
+                or record.reasoning_surface != "codex"
+                or record.wake_transport != "codex-app-server"
+                or evidence.binding_id != record.binding_id
+                or evidence.binding_generation != record.binding_generation
+                or evidence.nudge_id != record.nudge_id
+                or len(record.nudge_attempt_command_ids) != 1):
+            raise WakeLedgerError("native Company evidence disagrees with exact DELIVERED route")
     return record
 
 
@@ -580,6 +674,11 @@ def parse_acknowledgement(
         raise WakeLedgerError("trusted ack contains a malformed obligation_id")
     if oid not in claims:
         raise WakeLedgerError("trusted ack does not include this obligation_id")
+    if ack.native_continuation is not None:
+        if (type(ack.native_continuation) is not NativeContinuationAckEvidence
+                or ack.ack_mode is not AckMode.REASONING_SESSION or ack.reasoning_surface != "codex"):
+            raise WakeLedgerError("native continuation evidence requires native reasoning ACK")
+        NativeContinuationAckEvidence.from_dict(dataclasses.asdict(ack.native_continuation))
     if ack.ack_mode is AckMode.REASONING_SESSION:
         if BINDING_ID_RE.fullmatch(str(ack.binding_id or "")) is None:
             raise WakeLedgerError("reasoning_session ack requires trusted binding context")
@@ -964,6 +1063,10 @@ WAKE_EVENT_ACTOR = "wake_reconcile"
 FORBIDDEN_EVENT_PAYLOAD_KEYS = frozenset(
     {
         "native_handle",
+        "provider_session_id",
+        "provider_native_turn_id",
+        "threadId",
+        "turnId",
         "native",
         "thread_id",
         "account_label",
@@ -1025,7 +1128,7 @@ def resolution_event_payload(resolution: SourceResolution) -> dict[str, object]:
 
 
 def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
-    return {
+    payload = {
         "obligation_id": ack.obligation_id,
         "ack_mode": ack.ack_mode.value,
         "target_seat": ack.target_seat,
@@ -1038,6 +1141,10 @@ def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
         "binding_generation": ack.binding_generation,
         "delivered_command_id": ack.delivered_command_id,
     }
+
+    if ack.native_continuation is not None:
+        payload["native_continuation"] = dataclasses.asdict(ack.native_continuation)
+    return payload
 
 
 def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
@@ -1104,6 +1211,8 @@ def event_payload_for(
             payload["nudge_attempt_command_ids"] = list(
                 record.nudge_attempt_command_ids
             )
+        if record.native_company_read is not None:
+            payload["native_company_read"] = record.native_company_read.to_dict()
         return payload
     raise WakeLedgerError(f"unsupported ledger phase {record.phase}")
 
@@ -1150,6 +1259,8 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         raise WakeLedgerError(f"wake event_type {event_type!r} is not a ledger phase") from exc
     if phase is not LedgerPhase.WAKE_REQUESTED and "physical_source" in payload:
         raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
+    if "native_company_read" in payload and phase is not LedgerPhase.DELIVERED:
+        raise WakeLedgerError("native Company evidence is DELIVERED-only")
     oid = _obligation_id(aggregate_id)
     if command_id.split(":", 1)[0] != oid:
         raise WakeLedgerError("wake command_id does not belong to aggregate_id")
@@ -1224,6 +1335,8 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
                 operator_authority_receipt=payload.get("operator_authority_receipt"),
                 binding_generation=payload.get("binding_generation"),
                 delivered_command_id=payload.get("delivered_command_id"),
+                native_continuation=(NativeContinuationAckEvidence.from_dict(payload["native_continuation"])
+                                     if "native_continuation" in payload else None),
             ),
             obligation_id=oid,
         )
@@ -1231,6 +1344,19 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         return parse_ledger_record(
             WakeLedgerRecord(command_id=command_id, phase=phase, ack=ack)
         )
+    evidence = None
+    if "native_company_read" in payload:
+        allowed = {
+            "obligation_id", "attempt_n", "attempt_command_id", "destination_digest",
+            "route_digest", "binding_id", "binding_generation", "session_alias",
+            "reasoning_surface", "wake_transport", "nudge_id",
+            "nudge_attempt_command_ids", "native_company_read",
+        }
+        if set(payload) != allowed:
+            raise WakeLedgerError("native Company DELIVERED payload must have its exact shape")
+        evidence = NativeCompanyReadEvidence.from_dict(payload["native_company_read"])
+        if getattr(event, "attempt_id", None) != evidence.target_attempt_id:
+            raise WakeLedgerError("native Company evidence disagrees with Event attempt")
     attempt_n = _strict_positive_int(payload.get("attempt_n"))
     raw_group = payload.get("nudge_attempt_command_ids", ())
     if not isinstance(raw_group, (list, tuple)):
@@ -1250,6 +1376,7 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
             wake_transport=str(payload.get("wake_transport") or "") or None,
             nudge_id=str(payload.get("nudge_id") or "") or None,
             nudge_attempt_command_ids=tuple(str(item) for item in raw_group),
+            native_company_read=evidence,
         )
     )
 
@@ -1288,6 +1415,7 @@ __all__ = [
     "AckMode",
     "DeliveryAttempt",
     "LedgerPhase",
+    "NativeCompanyReadEvidence",
     "ObligationStatus",
     "SourceReadHealth",
     "SourceResolution",

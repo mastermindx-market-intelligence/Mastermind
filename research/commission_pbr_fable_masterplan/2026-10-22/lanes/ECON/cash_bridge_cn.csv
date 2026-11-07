@@ -1,0 +1,90 @@
+date,cash_prev,cash,net_fill_cash,non_trade,expected_yield,k_accruals,class,evidence
+2026-06-22,1000000.00,445173.77,-568841.84,14015.61,0.00,0,REPAIR,"scripts/scrub_cn_tiny_trims.py + _backup_scrub_tiny_trims_20260623-052644: two 06-22 sell fills (688411.SS 5689.84 + 688585.SS 8325.77 = 14015.61) were credited into cash BEFORE the 06-22 nav row was written, then REMOVED from fills.jsonl and debited from cash after it; the 06-22 row still embeds the proceeds (1000000 - 568841.84 + 14015.61 = 445173.77 exact); no sweep candidate matches the delta"
+2026-06-24,445173.77,674041.09,242746.04,-13878.72,0.00,0,REPAIR,"_backup_fx_repair_20260624-173547: 06-23 nav row DELETED (cash 431226.60, invested 82996.93 - USD-marked CNY positions); 06-24 row invested rewritten 559941.84->317195.81, row later replaced by post-fill mark (cash unchanged by the repair itself). Verified decomposition of this row's delta: -14015.61 scrub debit (fills removed from ledger) + 68.44 (06-23 sweep) + 68.45 (06-24 sweep) = -13878.72; backup chain 431158.16 (post-scrub account) -> 431226.60 (deleted 06-23 row) -> 431295.05 (backup 06-24 row/account, yield_through 06-24) -> +242746.04 06-24 fills = 674041.09 exact; no sweep candidate matches the delta"
+2026-06-25,674041.09,674148.08,0.00,106.99,106.99,1,YIELD,sweep 1d on prev base
+2026-06-26,674148.08,674255.09,0.00,107.01,107.01,1,YIELD,sweep 1d on prev base
+2026-06-28,674255.09,722455.89,48200.80,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-06-29,722455.89,722570.56,0.00,114.67,114.68,1,YIELD,sweep 1d on prev base
+2026-06-30,722570.56,438782.20,-283903.05,114.69,114.69,1,YIELD,sweep 1d on prev base
+2026-07-01,438782.20,438851.84,0.00,69.64,69.65,1,YIELD,sweep 1d on prev base
+2026-07-02,438851.84,518931.50,80010.00,69.66,69.66,1,YIELD,sweep 1d on prev base
+2026-07-03,518931.50,519013.87,0.00,82.37,82.37,1,YIELD,sweep 1d on prev base
+2026-07-05,519013.87,427291.34,-91722.53,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-07-06,427291.34,431955.57,4596.40,67.83,67.82,1,YIELD,sweep 1d on prev base
+2026-07-07,431955.57,432024.13,0.00,68.56,68.56,1,YIELD,sweep 1d on prev base
+2026-07-08,432024.13,487031.80,54939.09,68.58,68.58,1,YIELD,sweep 1d on prev base
+2026-07-09,487031.80,490919.66,3810.56,77.30,77.31,1,YIELD,sweep 1d on prev base
+2026-07-10,490919.66,490997.58,0.00,77.92,77.92,1,YIELD,sweep 1d on prev base
+2026-07-12,490997.58,451062.41,-39935.17,-0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-07-13,451062.41,451134.01,0.00,71.60,71.60,1,YIELD,sweep 1d on prev base
+2026-07-14,451134.01,451205.62,0.00,71.61,71.61,1,YIELD,sweep 1d on prev base
+2026-07-15,451205.62,451277.24,0.00,71.62,71.62,1,YIELD,sweep 1d on prev base
+2026-07-16,451277.24,451348.87,0.00,71.63,71.63,1,YIELD,sweep 1d on prev base
+2026-07-17,451348.87,451420.51,0.00,71.64,71.64,1,YIELD,sweep 1d on prev base
+2026-07-20,451420.51,593349.83,141857.67,71.65,71.65,1,YIELD,sweep 1d on prev base
+2026-07-21,593349.83,513477.32,-79966.69,94.18,94.18,1,YIELD,sweep 1d on prev base
+2026-07-22,513477.32,427880.20,-85678.62,81.50,81.50,1,YIELD,sweep 1d on prev base
+2026-07-23,427880.20,427948.12,0.00,67.92,67.92,1,YIELD,sweep 1d on prev base
+2026-07-24,427948.12,428016.05,0.00,67.93,67.93,1,YIELD,sweep 1d on prev base
+2026-07-29,428016.05,428083.99,0.00,67.94,67.94,1,YIELD,sweep 1d on prev base
+2026-07-30,428083.99,428151.94,0.00,67.95,67.95,1,YIELD,sweep 1d on prev base; inside repair window 'ashare_quote_route_incident' (backup shows cash unchanged by it)
+2026-07-31,428151.94,544673.69,116435.30,86.45,86.44,1,YIELD,sweep 1d on prev+fills base
+2026-08-03,544673.69,612245.99,67475.13,97.17,97.17,1,YIELD,sweep 1d on prev+fills base
+2026-08-04,612245.99,660088.47,47737.72,104.76,104.76,1,YIELD,sweep 1d on prev+fills base
+2026-08-05,660088.47,552982.63,-107193.61,87.77,87.76,1,YIELD,sweep 1d on prev+fills base
+2026-08-06,552982.63,502109.89,-50952.43,79.69,79.69,1,YIELD,sweep 1d on prev+fills base
+2026-08-07,502109.89,501479.81,-709.66,79.58,79.59,1,YIELD,sweep 1d on prev+fills base
+2026-08-10,501479.81,511734.23,10173.21,81.21,81.21,1,YIELD,sweep 1d on prev+fills base
+2026-08-11,511734.23,511815.46,0.00,81.23,81.23,1,YIELD,sweep 1d on prev base
+2026-08-12,511815.46,519510.57,7612.66,82.45,82.45,1,YIELD,sweep 1d on prev+fills base
+2026-08-13,519510.57,398246.37,-121327.41,63.21,63.20,1,YIELD,sweep 1d on prev+fills base
+2026-08-14,398246.37,398309.58,0.00,63.21,63.21,1,YIELD,sweep 1d on prev base
+2026-08-17,398309.58,398372.80,0.00,63.22,63.22,1,YIELD,sweep 1d on prev base
+2026-08-18,398372.80,398436.03,0.00,63.23,63.23,1,YIELD,sweep 1d on prev base
+2026-08-19,398436.03,424050.69,25547.36,67.30,67.30,1,YIELD,sweep 1d on prev+fills base
+2026-08-20,424050.69,424118.00,0.00,67.31,67.31,1,YIELD,sweep 1d on prev base
+2026-08-21,424118.00,424185.32,0.00,67.32,67.32,1,YIELD,sweep 1d on prev base
+2026-08-24,424185.32,424252.65,0.00,67.33,67.33,1,YIELD,sweep 1d on prev base
+2026-08-25,424252.65,496889.51,72558.00,78.86,78.86,1,YIELD,sweep 1d on prev+fills base
+2026-08-26,496889.51,496968.38,0.00,78.87,78.87,1,YIELD,sweep 1d on prev base
+2026-08-27,496968.38,497047.26,0.00,78.88,78.88,1,YIELD,sweep 1d on prev base
+2026-08-28,497047.26,497126.16,0.00,78.90,78.90,1,YIELD,sweep 1d on prev base
+2026-08-31,497126.16,497205.07,0.00,78.91,78.91,1,YIELD,sweep 1d on prev base
+2026-09-01,497205.07,497283.99,0.00,78.92,78.92,1,YIELD,sweep 1d on prev base
+2026-09-02,497283.99,497362.92,0.00,78.93,78.93,1,YIELD,sweep 1d on prev base
+2026-09-03,497362.92,497441.87,0.00,78.95,78.95,1,YIELD,sweep 1d on prev base
+2026-09-04,497441.87,497520.83,0.00,78.96,78.96,1,YIELD,sweep 1d on prev base
+2026-09-07,497520.83,497599.80,0.00,78.97,78.97,1,YIELD,sweep 1d on prev base
+2026-09-08,497599.80,497678.78,0.00,78.98,78.98,1,YIELD,sweep 1d on prev base
+2026-09-09,497678.78,497757.78,0.00,79.00,79.00,1,YIELD,sweep 1d on prev base
+2026-09-10,497757.78,497836.79,0.00,79.01,79.01,1,YIELD,sweep 1d on prev base
+2026-09-11,497836.79,497915.81,0.00,79.02,79.02,1,YIELD,sweep 1d on prev base
+2026-09-14,497915.81,497994.84,0.00,79.03,79.03,1,YIELD,sweep 1d on prev base
+2026-09-15,497994.84,479611.04,-18459.91,76.11,76.12,1,YIELD,sweep 1d on prev+fills base
+2026-09-16,479611.04,493525.71,13836.35,78.32,78.32,1,YIELD,sweep 1d on prev+fills base
+2026-09-17,493525.71,354323.56,-139258.38,56.23,56.23,1,YIELD,sweep 1d on prev+fills base
+2026-09-18,354323.56,340011.89,-14365.63,53.96,53.96,1,YIELD,sweep 1d on prev+fills base
+2026-09-21,340011.89,350493.31,10425.80,55.62,55.63,1,YIELD,sweep 1d on prev+fills base
+2026-09-22,350493.31,344000.66,-6547.24,54.59,54.59,1,YIELD,sweep 1d on prev+fills base
+2026-09-23,344000.66,349536.55,5480.42,55.47,55.47,1,YIELD,sweep 1d on prev+fills base
+2026-09-24,349536.55,360417.50,10823.75,57.20,57.20,1,YIELD,sweep 1d on prev+fills base
+2026-09-25,360417.50,360417.50,0.00,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-09-28,360417.50,336297.30,-24173.57,53.37,53.37,1,YIELD,sweep 1d on prev+fills base
+2026-09-29,336297.30,336350.68,0.00,53.38,53.38,1,YIELD,sweep 1d on prev base
+2026-09-30,336350.68,336404.07,0.00,53.39,53.39,1,YIELD,sweep 1d on prev base
+2026-10-01,336404.07,336404.07,0.00,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-10-02,336404.07,336404.07,0.00,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-10-05,336404.07,336404.07,0.00,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-10-06,336404.07,336404.07,0.00,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-10-07,336404.07,336404.07,0.00,0.00,0.00,0,ROUNDING,exact zero non-trade delta
+2026-10-08,336404.07,362382.91,25921.33,57.51,57.51,1,YIELD,sweep 1d on prev+fills base
+2026-10-09,362382.91,362440.43,0.00,57.52,57.52,1,YIELD,sweep 1d on prev base
+2026-10-12,362440.43,388886.62,26384.47,61.72,61.72,1,YIELD,sweep 1d on prev+fills base
+2026-10-13,388886.62,388948.35,0.00,61.73,61.73,1,YIELD,sweep 1d on prev base
+2026-10-14,388948.35,389010.09,0.00,61.74,61.74,1,YIELD,sweep 1d on prev base
+2026-10-15,389010.09,389071.84,0.00,61.75,61.75,1,YIELD,sweep 1d on prev base
+2026-10-16,389071.84,389133.60,0.00,61.76,61.76,1,YIELD,sweep 1d on prev base
+2026-10-19,389133.60,389195.37,0.00,61.77,61.77,1,YIELD,sweep 1d on prev base
+2026-10-20,389195.37,389257.15,0.00,61.78,61.78,1,YIELD,sweep 1d on prev base
+2026-10-21,389257.15,389318.94,0.00,61.79,61.79,1,YIELD,sweep 1d on prev base
+2026-10-21+tail,389318.94,389318.94,0.00,0.00,0.00,0,ROUNDING,account.cash vs last nav row

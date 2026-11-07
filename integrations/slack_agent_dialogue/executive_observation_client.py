@@ -201,6 +201,7 @@ class ExecutiveDialogueObservationClient(
         if path in {
             Path("/var/run/mastermind-executive/control.sock"),
             Path("/var/run/mastermind-agent-relay/agent-relay.sock"),
+            Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock"),
         }:
             raise ValueError("Executive observation client cannot use a fallback socket")
         if (
@@ -314,6 +315,23 @@ class ExecutiveDialogueObservationClient(
         ):
             raise WakePreSubmitError("dialogue Wake parent context is invalid") from None
         if source_observation is not None:
+            # Executive-surface CONTINUE attention has no worker identity of
+            # its own. Bind the v2 proposal to the same fresh observation
+            # candidate already validated above, as the v1 correlated envelope
+            # does. The server still reauthorizes this exact current worker.
+            attention_obligation = mint_obligation(
+                wake_kind=obligation.wake_kind,
+                source_kind=obligation.source_kind,
+                source_ref=obligation.source_ref,
+                declared_target_seat=obligation.declared_target_seat,
+                job_id=candidate_value.job_id,
+                attempt_id=candidate_value.attempt_id,
+                root_job_id=candidate_value.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=obligation.source_workstream,
+                source_created_at=obligation.source_created_at,
+                emitted_at=obligation.emitted_at,
+            )
             if (
                 type(source_observation) is not DialogueSourceObservation
                 or source_observation.thread_ts != thread_ts
@@ -648,6 +666,15 @@ class ExecutiveDialogueObservationClient(
                 "parent": canonical_parent,
             }
         )
+        return self.decode_response(response, parent=canonical_parent,
+                                    thread_ts=canonical_thread_ts)
+
+    @classmethod
+    def decode_response(cls, response: Mapping[str, Any], *,
+                        parent: Mapping[str, Any], thread_ts: str) -> ResolvedDialogueObservation:
+        """Shared closed decoder; it performs no exchange, Wake or write."""
+        canonical_parent = _validated_parent(parent)
+        canonical_thread_ts = _validated_thread_ts(thread_ts)
         if response.get("schema") != RESPONSE_SCHEMA:
             raise ExecutiveObservationClientError("RESPONSE_REFUSED")
         state = response.get("state")
@@ -667,16 +694,16 @@ class ExecutiveDialogueObservationClient(
         ):
             raise ExecutiveObservationClientError("RESPONSE_REFUSED")
         mode = response.get("mode")
-        target_bindings = self._target_bindings(response["target_bindings"])
+        target_bindings = cls._target_bindings(response["target_bindings"])
         if mode == ACTIVE_CURRENT_WORKER:
-            return self._active(
+            return cls._active(
                 parent=canonical_parent,
                 thread_ts=canonical_thread_ts,
                 observation=response["observation"],
                 target_bindings=target_bindings,
             )
         if mode == TERMINAL_RESULT:
-            return self._terminal(
+            return cls._terminal(
                 parent=canonical_parent,
                 thread_ts=canonical_thread_ts,
                 observation=response["observation"],
