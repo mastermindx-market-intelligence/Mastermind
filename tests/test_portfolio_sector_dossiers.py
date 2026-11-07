@@ -44,11 +44,11 @@ def bind(monkeypatch, measured, health=None):
     data = {"as_of": "2026-10-09", "measured_read": measured}
     calls = []
 
-    def read(rel, **kwargs):
-        calls.append(rel)
+    def read(**kwargs):
+        calls.append(pi._PSL_ARTIFACT)
         return data, health or {"status": "stale", "as_of": "2026-10-09", "stale": True}
 
-    monkeypatch.setattr(pi, "_read_vendor", read)
+    monkeypatch.setattr(pi, "_read_sector_central", read)
     return data, calls
 
 
@@ -196,7 +196,7 @@ def test_absent_and_invalid_addenda_keep_expected_identities(monkeypatch, measur
 
 
 def test_missing_artifact_stays_unavailable(monkeypatch):
-    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: (None, {"status": "missing"}))
+    monkeypatch.setattr(pi, "_read_sector_central", lambda *a, **k: (None, {"status": "missing"}))
     packet = pi.sector_rotation(projection="sector_dossiers")
     assert packet["consumer_reason"] == "dossier_not_supplied"
     assert packet["artifact_health"]["status"] == "missing"
@@ -205,7 +205,7 @@ def test_missing_artifact_stays_unavailable(monkeypatch):
 
 @pytest.mark.parametrize("selector", ["unknown", None, False, 0, {}, []])
 def test_invalid_selector_cannot_fall_back_to_legacy_ranked_values(monkeypatch, selector):
-    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: pytest.fail("must not read"))
+    monkeypatch.setattr(pi, "_read_sector_central", lambda *a, **k: pytest.fail("must not read"))
     response = asyncio.run(autonomous_mcp.get_sector_rotation.handler({"projection": selector}))
     packet = json.loads(response["content"][0]["text"])
     assert packet["consumer_reason"] == "unsupported_projection"
@@ -260,7 +260,7 @@ def test_legacy_reader_and_handler_keep_their_original_contract(monkeypatch):
         for i in range(8)]
     data = {"as_of": "2026-10-09", "market": {"risk_on": False}, "sectors": sectors, "baskets": []}
     health = {"status": "stale", "as_of": "2026-10-09", "stale": True}
-    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: (data, health))
+    monkeypatch.setattr(pi, "_read_sector_central", lambda *a, **k: (data, health))
     before = json.dumps(pi.sector_rotation(), ensure_ascii=False)
     data["measured_read"] = fixture()
     assert json.dumps(pi.sector_rotation(), ensure_ascii=False) == before
@@ -308,11 +308,11 @@ def bind_window(monkeypatch, measured, health=None):
     data = {"as_of": "2026-11-05", "measured_read": measured}
     calls = []
 
-    def read(rel, **kwargs):
-        calls.append(rel)
+    def read(**kwargs):
+        calls.append(pi._PSL_ARTIFACT)
         return data, health or {"status": "stale", "as_of": "2026-11-05", "stale": True}
 
-    monkeypatch.setattr(pi, "_read_vendor", read)
+    monkeypatch.setattr(pi, "_read_sector_central", read)
     return data, calls
 
 
@@ -643,7 +643,7 @@ def test_parent_benchmark_normalization_is_derived_not_hardcoded(monkeypatch):
 
 
 def test_missing_artifact_or_companion_refuses_without_legacy_fallback(monkeypatch):
-    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: (None, {"status": "missing"}))
+    monkeypatch.setattr(pi, "_read_sector_central", lambda *a, **k: (None, {"status": "missing"}))
     packet = pi.sector_rotation(projection="sector_windows", sector="XLK")
     assert packet["consumer_reason"] == "window_companion_not_supplied"
     assert packet["cohort_status"] == "expected_not_admitted"
@@ -672,7 +672,7 @@ def test_missing_artifact_or_companion_refuses_without_legacy_fallback(monkeypat
     {"projection": "sector_dossiers", "sector": "XLK"},
 ])
 def test_invalid_or_incompatible_selectors_never_fall_back_to_legacy(monkeypatch, args):
-    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: pytest.fail("must not read"))
+    monkeypatch.setattr(pi, "_read_sector_central", lambda *a, **k: pytest.fail("must not read"))
     wire = asyncio.run(autonomous_mcp.get_sector_rotation.handler(args))
     text = wire["content"][0]["text"]
     packet = json.loads(text)
@@ -748,7 +748,7 @@ def test_legacy_and_dossier_projections_ignore_the_companion(monkeypatch):
     legacy_data = {"as_of": "2026-10-09", "market": {"risk_on": False},
                     "sectors": sectors, "baskets": []}
     health = {"status": "stale", "as_of": "2026-10-09", "stale": True}
-    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: (legacy_data, health))
+    monkeypatch.setattr(pi, "_read_sector_central", lambda *a, **k: (legacy_data, health))
     before = json.dumps(pi.sector_rotation(), ensure_ascii=False)
     legacy_data["measured_read"] = window_parent(
         window_fixture("sector_window_measurements.complete.v1.json"))
@@ -769,7 +769,7 @@ def test_legacy_and_dossier_projections_ignore_the_companion(monkeypatch):
     broken["measured_read"]["sector_window_measurements"]["groups"][0]["group_id"] = "XLC"
     projections = []
     for artifact in (without, with_companion, broken):
-        monkeypatch.setattr(pi, "_read_vendor", lambda *a, _a=artifact, **k: (_a, health))
+        monkeypatch.setattr(pi, "_read_sector_central", lambda *a, _a=artifact, **k: (_a, health))
         projected = pi.sector_rotation(projection="sector_dossiers")
         assert projected["consumer_reason"] is None
         assert len(projected["groups"]) == 11
