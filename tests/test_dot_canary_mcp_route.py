@@ -25,7 +25,7 @@ SECRET = "whsec_" + base64.b64encode(b"k" * 32).decode("ascii")
 CHANNEL = "C0BSBM78V1N"
 
 
-def principal(scopes=("mastermind.executive.read", CANARY_SCOPE), *, subject="a" * 64):
+def principal(scopes=(CANARY_SCOPE,), *, subject="a" * 64):
     issuer = "https://auth.example.com"
     return neutral_principal_projection(
         policy_id="mmx-chris-dot-canary",
@@ -138,16 +138,13 @@ def test_scoped_discovery_shows_two_distinct_events_without_mutating_reply_catal
 
 
 @pytest.mark.parametrize("scopes", [
-    ("mastermind.executive.read",), (CANARY_SCOPE,), (),
+    (), ("unrelated.scope",),
 ])
-def test_missing_scope_cannot_discover_or_subscribe(scopes):
+def test_missing_read_scope_cannot_discover_or_subscribe(scopes):
     p = principal(scopes=scopes)
     canary = FakeCanaryOwner()
     catalog = invoke("events/list", {}, canary=canary, who=p)
-    if "mastermind.executive.read" not in scopes:
-        assert catalog["error"]["code"] == -32001
-    else:
-        assert [x["name"] for x in catalog["result"]["events"]] == ["session.reply_committed"]
+    assert catalog["error"]["code"] == -32001
     sub = invoke("events/subscribe", subscribe_params(), canary=canary, who=p)
     assert sub["error"]["code"] == -32001
     assert not any(item[0] == "subscribe" for item in canary.calls)
