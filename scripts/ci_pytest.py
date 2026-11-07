@@ -609,7 +609,7 @@ def run_shards(
             # Explicit argv, not inherited env, activates one serial receipt.
             # Each controller owns a separate pytest cache. Pytest itself keeps
             # its ordinary uniquely allocated temporary-session directory.
-            argv += ["-n", "0", "-p", "scripts.ci_xdist_guard",
+            argv += ["--ci-case-evidence", "-n", "0", "-p", "scripts.ci_xdist_guard",
                      "--ci-child-receipt", str(directory / guard.CHILD_RECEIPT_NAME),
                      "--ci-child-token", token,
                      "-o", "cache_dir=" + str(directory / "pytest-cache")]

@@ -271,7 +271,7 @@ def test_worker_executes_only_its_exact_canonical_shard_and_preserves_status(
     assert code == 17  # A failed shard cannot become a green matrix leg.
     expected = cip.partition_modules(included, jobs=6)[1]
     assert recorded == [
-        (cip.pytest_argv(expected, progress=True), tmp_path.resolve(), False),
+        ([*cip.pytest_argv(expected, progress=True), "--ci-case-evidence"], tmp_path.resolve(), False),
     ]
     assert "-n" not in recorded[0][0]  # workers default to one serial interpreter
 

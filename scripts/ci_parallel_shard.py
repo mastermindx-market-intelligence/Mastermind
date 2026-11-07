@@ -606,7 +606,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         completed = subprocess.run(shard_argv, cwd=root, check=False, env=env)
     else:
         completed = subprocess.run(
-            shard_argv,
+            [*shard_argv, "--ci-case-evidence"],
             cwd=root,
             check=False,
         )
