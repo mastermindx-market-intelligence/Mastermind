@@ -90,3 +90,141 @@ def test_new_fixed_prefixes_never_emit_suffixes(prefix, suffix):
     value=m.refusal_prefix(raw)
     assert value==('UNKNOWN' if suffix!=PRIVATE.encode() else prefix)
     assert PRIVATE not in value and '\x1b' not in value
+
+
+def admission_snapshot(**changes):
+    value=dict(allowed=False,active_count=2,legacy_count=0,json_locked_count=2,
+        stale_reaped=[PRIVATE+'/escaped-label'],max_active=2,load1=1.25,cpu_count=4,
+        load_ratio_limit=1.5,reasons=['active_lane_limit_reached'])
+    value.update(changes)
+    return value
+
+
+def admission_raw(value=None):
+    return b'REMOTE_SUB_ADMISSION_REFUSED '+json.dumps(
+        admission_snapshot() if value is None else value).encode('ascii')+b'\n'
+
+
+def diagnostic(raw,code=75,timeout=False):
+    lines=[]
+    m.failure_notice(request(lines),receipt_error(None),
+        SimpleNamespace(returncode=code,timed_out=timeout),raw)
+    assert len(lines)==1
+    assert PRIVATE not in lines[0] and m.CANARY.decode() not in lines[0]
+    return json.loads(lines[0].split('::',2)[2])
+
+
+@pytest.mark.parametrize('reason',[
+    'reconciliation_hold_present','lane_key_already_active',
+    'active_lane_limit_reached','host_load_at_or_above_limit',
+    'host_memory_unknown','host_memory_below_floor',
+    'host_temperature_unknown','host_temperature_at_or_above_limit',
+    'host_disk_unknown','host_disk_volume_mismatch','host_disk_below_staging_reserve'])
+def test_admission_reason_and_quantities_are_reported_without_private_labels(reason):
+    value=diagnostic(admission_raw(admission_snapshot(reasons=[reason])))
+    assert value['stage']=='PRIMARY' and value['receipt_state']=='ABSENT'
+    assert value['admission']==dict(active_count=2,legacy_count=0,json_locked_count=2,
+        max_active=2,load1=1.25,cpu_count=4,load_ratio_limit=1.5,reasons=[reason])
+
+
+def test_admission_observations_do_not_recompute_or_restrict_refused_occupancy():
+    snapshot=admission_snapshot(active_count=17,legacy_count=5,json_locked_count=12,
+        load1=1.999999,reasons=['active_lane_limit_reached','host_load_at_or_above_limit'])
+    facts=diagnostic(admission_raw(snapshot))['admission']
+    assert facts['active_count']==17 and facts['max_active']==2
+    assert facts['load1']==1.999999
+    assert facts['reasons']==snapshot['reasons']
+
+
+@pytest.mark.parametrize('code,timeout',[(74,False),(True,False),(75,True),(75,None),(None,False)])
+def test_admission_requires_exact_returncode_and_non_timeout(code,timeout):
+    value=diagnostic(admission_raw(),code,timeout)
+    assert 'admission' not in value
+    assert value['refusal_prefix']=='REMOTE_SUB_ADMISSION_REFUSED'
+
+
+@pytest.mark.parametrize('raw',[
+    b'REMOTE_SUB_ADMISSION_REFUSED_SUFFIX {}',
+    b'REMOTE_SUB_ADMISSION_ERROR {}',
+    b'REMOTE_SUB_ADMISSION_REFUSED',
+    b'REMOTE_SUB_ADMISSION_REFUSED []',
+    b'REMOTE_SUB_ADMISSION_REFUSED null',
+    b'REMOTE_SUB_ADMISSION_REFUSED {',
+    admission_raw()+b'PRIVATE_SECOND_LINE',
+    admission_raw()[:-1]+b' trailing',
+    admission_raw().replace(b'"allowed": false',b'"allowed": false, "allowed": false'),
+    admission_raw().replace(b'"load1": 1.25',b'"load1": NaN'),
+    admission_raw().replace(b'"load1": 1.25',b'"load1": Infinity'),
+    admission_raw().replace(b'"load1": 1.25',b'"load1": 1e999'),
+    b'REMOTE_SUB_ADMISSION_REFUSED '+b' '*4096+b'{}',
+    admission_raw()+m.CANARY,
+    admission_raw()+b'\x1b[31mPRIVATE',
+    admission_raw()+b'\x9b31mPRIVATE',
+],ids=['prefix-lookalike','other-prefix','no-json','array','null','truncated',
+    'second-line','trailing','duplicate','nan','infinity','overflow',
+    'line-limit','canary','ansi','c1-control'])
+def test_malformed_admission_keeps_only_original_safe_primary_facts(raw):
+    value=diagnostic(raw)
+    # An unrelated second line is never consumed; first-line facts remain valid.
+    if raw==admission_raw()+b'PRIVATE_SECOND_LINE':
+        assert value['admission']['active_count']==2
+    else:
+        assert 'admission' not in value
+    assert set(value)<= {'stage','source','returncode','timed_out','receipt_state','refusal_prefix','admission'}
+    assert 'PRIVATE_SECOND_LINE' not in json.dumps(value)
+
+
+@pytest.mark.parametrize('changes',[
+    {'allowed':True},{'allowed':0},{'unknown':PRIVATE},{'reasons':[]},
+    {'reasons':[PRIVATE]},{'reasons':['active_lane_limit_reached']*2},
+    {'reasons':{'private':PRIVATE}},{'stale_reaped':PRIVATE},
+    {'stale_reaped':[{'private':PRIVATE}]},{'stale_reaped':['x']*129},
+    {'stale_reaped':['x'*257]},
+    {'active_count':True},{'legacy_count':'1'},{'json_locked_count':-1},
+    {'active_count':65536},{'cpu_count':0},{'cpu_count':True},
+    {'cpu_count':65536},{'max_active':0},{'max_active':5},
+    {'max_active':33,'cpu_count':64},{'max_active':2.0},
+    {'load1':True},{'load1':-0.1},{'load1':65536},{'load1':10**400},{'load1':PRIVATE},
+    {'load_ratio_limit':0},{'load_ratio_limit':1.50001},
+    {'load_ratio_limit':True},{'load_ratio_limit':{'private':PRIVATE}},
+],ids=['allowed-true','allowed-int','extra-key','no-reasons','unknown-reason',
+    'duplicate-reason','reason-object','stale-string','stale-object','stale-count',
+    'stale-length','count-bool','count-string','count-negative','count-ceiling',
+    'zero-cpu','cpu-bool','cpu-ceiling','zero-limit','limit-above-cpu',
+    'limit-above-contract','limit-float','load-bool','load-negative','load-ceiling',
+    'load-huge-int','load-string','ratio-zero','ratio-ceiling','ratio-bool','ratio-object'])
+def test_invalid_snapshot_or_numeric_fields_suppress_optional_admission(changes):
+    assert 'admission' not in diagnostic(admission_raw(admission_snapshot(**changes)))
+
+
+def test_missing_snapshot_field_and_escaped_private_labels():
+    snapshot=admission_snapshot();del snapshot['allowed']
+    assert 'admission' not in diagnostic(admission_raw(snapshot))
+    raw=admission_raw().replace(PRIVATE.encode(),b'\\u0050RIVATE_MESSAGE_PARAMETER_PATH')
+    assert diagnostic(raw)['admission']['active_count']==2
+
+
+@pytest.mark.parametrize('unsafe',[
+    {'reasons':[PRIVATE]},dict(admission_snapshot(),private=PRIVATE),None,
+    dict(active_count=1,legacy_count=0,json_locked_count=0,max_active=1,
+        load1=float('nan'),cpu_count=2,load_ratio_limit=1.0,
+        reasons=['active_lane_limit_reached']),
+])
+def test_emission_revalidates_optional_details_and_retains_safe_primary(monkeypatch,unsafe):
+    monkeypatch.setattr(m,'failure_state',lambda *a:dict(returncode=75,timed_out=False,
+        receipt_state='ABSENT',refusal_prefix='REMOTE_SUB_ADMISSION_REFUSED',admission=unsafe))
+    value=diagnostic(admission_raw())
+    assert 'admission' not in value and value['returncode']==75
+
+
+def test_optional_parser_fault_cannot_replace_the_primary_or_cleanup(monkeypatch):
+    def fail(*args):raise ValueError(PRIVATE)
+    monkeypatch.setattr(m,'admission_facts',fail)
+    lines=[]
+    with pytest.raises(RuntimeError,match=PRIVATE):
+        try:
+            error=receipt_error(None)
+            m.failure_notice(request(lines),error,SimpleNamespace(returncode=75,timed_out=False),admission_raw())
+            raise error
+        finally:raise RuntimeError(PRIVATE)
+    assert lines==[]
