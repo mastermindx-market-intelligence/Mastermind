@@ -13,7 +13,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
@@ -157,10 +157,41 @@ function fakeRes() {
   };
 }
 
-async function readCounters(path) {
-  const text = await readFile(path, 'utf8').catch(() => '');
-  return text.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+async function readCounters(path, { timeoutMs = 4000, stepMs = 50 } = {}) {
+  // The fixture's marker timer may still append after its tool reply. Read a
+  // complete JSONL snapshot through the existing bounded observation wait;
+  // malformed completed records still fail rather than being discarded.
+  return waitFor(async () => {
+    const text = await readFile(path, 'utf8').catch(() => '');
+    assert.ok(!text || text.endsWith('\n'), 'fixture counter append is incomplete');
+    return text.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  }, timeoutMs, stepMs);
 }
+
+test('fixture counters wait for a complete JSONL append without dropping rows', async () => {
+  const stateDir = mkdtempSync(resolve(tmpdir(), 'studio-counter-'));
+  cleanup.dirs.push(stateDir);
+  const path = resolve(stateDir, 'effects.jsonl');
+  const first = { marker: 'COUNTER-FIRST', phase: 'start' };
+  const second = { marker: 'COUNTER-SECOND', phase: 'start' };
+  const encoded = JSON.stringify(second);
+  writeFileSync(path, JSON.stringify(first) + '\n' + encoded.slice(0, -1));
+  let settled = false;
+  const pending = readCounters(path, { timeoutMs: 1000, stepMs: 1 });
+  pending.then(() => { settled = true; }, () => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(settled, false, 'an incomplete append is not a complete counter snapshot');
+  appendFileSync(path, encoded.slice(-1) + '\n');
+  assert.deepEqual(await pending, [first, second]);
+});
+
+test('fixture counters still reject a persistently malformed completed record', async () => {
+  const stateDir = mkdtempSync(resolve(tmpdir(), 'studio-counter-'));
+  cleanup.dirs.push(stateDir);
+  const path = resolve(stateDir, 'effects.jsonl');
+  writeFileSync(path, '{malformed}\n');
+  await assert.rejects(readCounters(path, { timeoutMs: 20, stepMs: 1 }), SyntaxError);
+});
 
 // ---- unit: createTunnelAuth -------------------------------------------------
 
