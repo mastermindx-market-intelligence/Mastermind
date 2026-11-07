@@ -160,11 +160,14 @@ def test_receipt_stream_has_a_byte_budget_and_no_retained_transcript():
 
 
 def test_read_original_missing_is_unknown_and_wrong_principal_refuses(monkeypatch, tmp_path):
-    db = SimpleNamespace(close=lambda: None)
+    from contextlib import nullcontext
+    conn = SimpleNamespace(execute=lambda *args: SimpleNamespace(fetchone=lambda: None))
+    db = SimpleNamespace(close=lambda: None, _read_ctx=lambda: nullcontext(conn))
     monkeypatch.setattr(control, "_db", lambda home: db)
     state = SimpleNamespace(row=None)
     module(monkeypatch, "hermes_state_runtime", find_session_admission=lambda *a, **k: state.row,
            get_session_admission=lambda *a, **k: state.row)
+    module(monkeypatch, "hermes_state_terminal", identity_key=lambda *args: "fixture-original-key")
     module(monkeypatch, "gateway.session_results", admission_result=lambda *a: None)
     params = dict(operation="read_original", profile_id=str(tmp_path), session_id="s", submission_id="op",
                   input_sha256=control.input_digest("question"), admission_id=None)
@@ -199,6 +202,7 @@ def test_private_wire_uses_one_existing_socket_request(monkeypatch, tmp_path):
 @pytest.fixture
 def original_terminal(monkeypatch, tmp_path):
     """Stored-owner doubles, reached through the real original-result reader."""
+    from contextlib import nullcontext
     state = SimpleNamespace(
         row=dict(admission_id="original-admission", principal_id="uid:994",
                  target_session_id="owned-session", request_id="original-submission",
@@ -214,7 +218,8 @@ def original_terminal(monkeypatch, tmp_path):
     )
     def close():
         state.closes += 1
-    db = SimpleNamespace(close=close)
+    conn = SimpleNamespace(execute=lambda *args: SimpleNamespace(fetchone=lambda: None))
+    db = SimpleNamespace(close=close, _read_ctx=lambda: nullcontext(conn))
     monkeypatch.setattr(control, "_db", lambda home: db)
     def lookup(_db, **kwargs):
         assert _db is db
@@ -226,6 +231,7 @@ def original_terminal(monkeypatch, tmp_path):
         return state.saved
     module(monkeypatch, "hermes_state_runtime", find_session_admission=lookup,
            get_session_admission=lookup)
+    module(monkeypatch, "hermes_state_terminal", identity_key=lambda *args: "fixture-original-key")
     module(monkeypatch, "gateway.session_results", admission_result=stored)
     state.params = dict(operation="read_original", profile_id=str(tmp_path),
                         session_id="owned-session", submission_id="original-submission",
