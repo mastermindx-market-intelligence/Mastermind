@@ -422,11 +422,20 @@ def test_source_pins_match_complete_attributed_donor_fixtures():
 
 def test_fixture_source_audit_parses_docstrings_and_keeps_identity_guard():
     from tests.test_ceo_submit_armed_composition import _d8_frozen_source_diff, _scan_added_identity_diff
-    path = "integrations/hermes_runtime/tests/fixtures/agentos_memory/agent__agent_init.py"
-    text = (ROOT / path).read_text()
-    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, text), source_postimages={path: text}) == []
-    changed = text + "\nnew_peer_uid = 471\n"
-    assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, changed), source_postimages={path: changed})
+    # Full immutable donor snapshots are archive data, matching the accepted
+    # request_observation .py.source convention. They remain subject to the
+    # ordinary changed-source gate; also audit every original logical Python
+    # source here, including a live identity-literal refusal canary.
+    for item in MANIFEST["files"].values():
+        assert item["fixture"].endswith(".py.source")
+        path = "integrations/hermes_runtime/tests/fixtures/agentos_memory/" + item["fixture"].removesuffix(".source")
+        text = (FIXTURES / item["fixture"]).read_text()
+        assert _scan_added_identity_diff(_d8_frozen_source_diff(path, text), source_postimages={path: text}) == [], path
+        archive = str((FIXTURES / item["fixture"]).relative_to(ROOT))
+        assert _scan_added_identity_diff(_d8_frozen_source_diff(archive, text), source_postimages={archive: text}) == [], archive
+        changed = text + "\nnew_peer_uid = 471\n"
+        assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, changed), source_postimages={path: changed}), path
+        assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(archive, changed), source_postimages={archive: changed}), archive
 
 
 @pytest.mark.parametrize("when", ["before_resolve", "before_build"])
