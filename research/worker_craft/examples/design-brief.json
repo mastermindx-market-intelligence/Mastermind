@@ -1,0 +1,79 @@
+{
+  "schema_version": "mastermind.craft_brief.v1",
+  "role": "designer",
+  "assignment_ref": null,
+  "mission": "Illustrative rehearsal only: design one alert-detail interaction, including a corrected-source state, for an existing Mastermind screen.",
+  "why": "An agent must preserve useful analytical depth while making the immediate user action obvious.",
+  "user_journey": "A researcher opens an alert, understands why it matters and how fresh it is, inspects evidence, and returns to the original context.",
+  "machine_outcome": "An engineer receives component mappings, data requirements, interaction states and inspected design evidence.",
+  "source_refs": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+      "path": "docs/sol_skills/INDEX.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+      "path": "control_plane/worker_execution_contract.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "194fa4fa34719faba9481e4f82f14e52535595cf",
+      "path": "docs/superpowers/plans/2026-09-13-web-ceo-native-operator-environment.md"
+    }
+  ],
+  "scope": {
+    "proposed_write_paths": [],
+    "non_goals": [
+      "This example does not assign a production screen or grant a Paper mutation.",
+      "No new design bridge, framework, or branding."
+    ]
+  },
+  "workspace": {
+    "workspace_ref": null,
+    "host_ref": null
+  },
+  "inputs": [
+    "An approved target document and source screen would be supplied by their existing owners.",
+    "Representative lawful alert data must cover empty, partial, stale, corrected and long-text cases."
+  ],
+  "data_contract": {
+    "time": "Source references are exact commits. Vendor and host observations are dated evidence, not an evergreen health claim.",
+    "missing": "Unknown runtime, workspace, auth, and provider readiness stay unknown; null bindings are authoring-only.",
+    "corrections": "Recompile when mission or method bytes change. These hashes are not canonical capability-generation or authorization receipts.",
+    "rights": "Use original playbooks, public source metadata and official documentation. Do not publish credentials, private captures, or account homes."
+  },
+  "methods": {
+    "deterministic": [
+      "Validate a closed brief shape, exact source SHA syntax, bounded input and normalized relative paths.",
+      "Compile the common method and exactly one role, with reproducible authoring hashes."
+    ],
+    "model": [
+      "Synthesize the user and machine outcomes, preserve existing owner boundaries, and define useful role-specific acceptance."
+    ]
+  },
+  "deliverables": [
+    "User flow and complete state matrix.",
+    "Approved design reference and inspected screenshot bytes when a real canary is admitted.",
+    "JSX/component mapping and real API-field handoff."
+  ],
+  "acceptance": [
+    "The primary action is understandable on narrow and wide layouts.",
+    "Unknown data does not render as zero or fresh.",
+    "A real design edit, screenshot and JSX extraction must be separately proven before any live design-to-code claim."
+  ],
+  "stop_conditions": [
+    "Any requested effect overlaps an incumbent source owner.",
+    "A modifying response becomes ambiguous or a required tool/policy gate is unavailable.",
+    "The next step requires actual runtime admission, provider enrollment or app authorization absent in this session."
+  ],
+  "resource_constraints": [
+    "Use one reserved design writer per desktop context until stronger isolation is proven.",
+    "Stay within actual observed account/tool limits."
+  ],
+  "continuation": {
+    "record_owner": "Owning screen repository and existing organizational workstream; no parent is invented by this example.",
+    "next_action": "After actual owner assignment and tool/resource admission, inspect the intended document, execute one bounded design slice, and hand its evidence to the existing frontend owner."
+  }
+}

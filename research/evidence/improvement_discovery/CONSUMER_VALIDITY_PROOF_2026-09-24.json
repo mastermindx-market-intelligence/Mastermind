@@ -1,0 +1,76 @@
+{
+  "browser_proof": "research/improvement_discovery/OWNER_BROWSER_PROOF_2026-09-24.json",
+  "browser_scope": "Four EN desktop/mobile dark/light cases; synthetic inputs and actual owner/default Agenda/writer/API/page with archive-shaped source root; not deployed proof. Legacy page remains owned by #775.",
+  "changes": [
+    "Reject noncanonical dictionary keys; coverage uses the exact keys that the real candidate reader can retrieve",
+    "Use one owner predicate for complete, coherent, nonempty coverage observations before derivation and resolution",
+    "Revalidate persisted coverage nudges at Agenda, directive-authoring, and publication consumers",
+    "Preserve unrelated nudge families and prior registry state; do not rewrite persisted historical snapshots",
+    "Reject stale/future/undated coverage nudge evidence using the existing context freshness budget; no new clock or scheduler",
+    "Compose protected master non-destructively; owned source blobs unchanged by the base merge"
+  ],
+  "code_hashes": {
+    "brain/improvement_agenda.py": "22f9e0d264f31d73c7fed92b78abaf307dce9911ff57936e9741f09616e81c87",
+    "brain/improvement_discovery.py": "aae158a56005ce29f0e39fea5f7c7c1572cb750e15042b32fa374b553005575d",
+    "brain/improvement_discovery_nw.py": "db0670bb243ccfdeabc3772d81c3012c09872ed75302ded0a187e8f38352efe9",
+    "brain/mastermind_ai.py": "bff839f437b4cbe7632314724134314c7346f19fa5bec474ab42ca71b7bbc6c5",
+    "brain/neural_web_context.py": "4455ace359b016dc55039d68c8f9d77cc86b18abcb61dec2c2dce5eb7f5d5d11",
+    "brain/nw_reflection.py": "3920d9373f6371d88426153e2176b6f8b4eee36653bffbad2dfdd8e8c7f259fd",
+    "bridge/nw_feedback.py": "b998499afed1f74315ee6aeb1989a3ffff49e25a01684d08768f88660ad3b54b",
+    "tests/test_ceo_submit_armed_composition.py": "b936dfbda26b813f9735d57c17bec3877e9c74d5d0df8d3045680a459315c5be",
+    "tests/test_improvement_discovery_owner.py": "fef152d925f3f0dec80c9ef5e91237197459773bc834777b1daa0bbfd12b6c55",
+    "tests/test_nw_reflection.py": "8f162698ff30c01af03a4a6bd72fabe82c1b4f807e9d2497a0885f543b405f2b"
+  },
+  "combined_test_suite": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 450
+  },
+  "command": "python3 -m pytest -q tests/test_improvement_discovery_owner.py tests/test_improvement_discovery.py tests/test_improvement_discovery_agenda.py tests/test_agentos_readiness_agenda.py tests/test_nw_reflection.py tests/test_nw_feedback.py tests/test_mastermind_ai.py tests/test_ceo_submit_armed_composition.py",
+  "findings": [
+    4090804388,
+    4090804396,
+    4090920998
+  ],
+  "focused": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 308
+  },
+  "historical_asof_repair": {
+    "behavior": "historical Agenda eligibility requires both owner asof and generated_at UTC date at or before requested Agenda date",
+    "finding": 4090920998,
+    "red_commit": "3128e1a8",
+    "repair_commit": "4021885a",
+    "timezone_cases": [
+      "future UTC same declared asof rejected",
+      "offset timestamp crossing into next UTC day rejected",
+      "prior UTC day accepted",
+      "positive offset mapping to prior UTC day accepted"
+    ]
+  },
+  "hosted_ci_for_final_published_head": "NOT_YET_STARTED",
+  "independent_final_head_review": "NOT_YET_REQUESTED",
+  "independent_ideation_proven": false,
+  "independent_review": 5300894640,
+  "jobs_created": 0,
+  "local_exact_head": "4021885ad2bc7673a8e51b1d72564eb21263218b",
+  "observed_at": "2026-09-24T07:11:41.811945+00:00",
+  "procedure_material_invalidators": [],
+  "procedure_pin": "4fe4d25e3ee268e24162f33c35d176ebf9ab02e6",
+  "production_proven": false,
+  "protected_base": "294b4c00ed668b497edb834be8108f14bc1bee8a",
+  "red": {
+    "errors": 0,
+    "failures": 15,
+    "skipped": 0,
+    "tests": 17
+  },
+  "red_commit": "c8cd8cb8b2752017ef7b488860706c4eab519780",
+  "repair_commit": "37b07ee313469582b104d8875a99b9240e52b894",
+  "review_stop_comment": 5809392776,
+  "scope": "LOCAL_COMPOSED_SOURCE_CONSUMER_PARITY_AND_PERSISTED_NUDGE_VALIDITY",
+  "source_commit": "7cd94c4371ab6b5c5c9bb9a3a709051652ec73c0"
+}

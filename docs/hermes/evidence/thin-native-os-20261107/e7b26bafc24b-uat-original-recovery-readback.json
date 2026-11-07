@@ -1,0 +1,577 @@
+{
+  "pid": 35606,
+  "observed_at": "2026-11-07T06:42:42.309Z",
+  "nodes": [
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7
+      ],
+      "role": "AXGroup",
+      "name": "Native Hermes",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        0
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        0,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "LOCAL NATIVE RUNTIME",
+      "value": "LOCAL NATIVE RUNTIME",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        1
+      ],
+      "role": "AXHeading",
+      "name": "Hermes v0.23.0",
+      "value": 3,
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        1,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "Hermes ",
+      "value": "Hermes ",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        1,
+        1
+      ],
+      "role": "AXStaticText",
+      "name": "v0.23.0",
+      "value": "v0.23.0",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        2
+      ],
+      "role": "AXButton",
+      "name": "Connect local Hermes",
+      "value": null,
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        1
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        1,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "Your existing local conversations, one native runtime. Worker dispatch is not enabled by this connection.",
+      "value": "Your existing local conversations, one native runtime. Worker dispatch is not enabled by this connection.",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        2
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        2,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "Conversation purpose",
+      "value": "Conversation purpose",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        2,
+        1
+      ],
+      "role": "AXPopUpButton",
+      "name": "Conversation purpose",
+      "value": "Meta-CEO",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        3
+      ],
+      "role": "AXButton",
+      "name": "New conversation",
+      "value": null,
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        4
+      ],
+      "role": "AXButton",
+      "name": "Local history",
+      "value": null,
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        5
+      ],
+      "role": "AXHeading",
+      "name": "Mastermind OS \u00b7 Meta-CEO",
+      "value": 4,
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        5,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "Mastermind OS \u00b7 Meta-CEO",
+      "value": "Mastermind OS \u00b7 Meta-CEO",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        6
+      ],
+      "role": "AXButton",
+      "name": "Read original conversation",
+      "value": null,
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        7
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        7,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "Configured model",
+      "value": "Configured model",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        7,
+        1
+      ],
+      "role": "AXStaticText",
+      "name": ": ",
+      "value": ": ",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        7,
+        2
+      ],
+      "role": "AXStaticText",
+      "name": "qwen3:14b",
+      "value": "qwen3:14b",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        7,
+        3
+      ],
+      "role": "AXStaticText",
+      "name": " \u00b7 ",
+      "value": " \u00b7 ",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        7,
+        4
+      ],
+      "role": "AXStaticText",
+      "name": "Saved history \u00b7 current send access is checked when you send",
+      "value": "Saved history \u00b7 current send access is checked when you send",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8
+      ],
+      "role": "AXGroup",
+      "name": "Native conversation messages",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        0
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        0,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "The native conversation is ready. Start with your question or project context.",
+      "value": "The native conversation is ready. Start with your question or project context.",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "Message Hermes",
+      "value": "Message Hermes",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        1
+      ],
+      "role": "AXTextArea",
+      "name": "Message Hermes",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        1,
+        0
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        1,
+        0,
+        0
+      ],
+      "role": "AXStaticText",
+      "name": "What should we work through?",
+      "value": "What should we work through?",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        10
+      ],
+      "role": "AXStaticText",
+      "name": "The message is sent exactly as written. No automatic resend.",
+      "value": "The message is sent exactly as written. No automatic resend.",
+      "enabled": true
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        11
+      ],
+      "role": "AXButton",
+      "name": "Check and send message",
+      "value": null,
+      "enabled": false
+    }
+  ]
+}

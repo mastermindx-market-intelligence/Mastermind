@@ -14,6 +14,7 @@ current signal.
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -28,6 +29,12 @@ _DAILY_MAX_AGE = 4
 _WEEKLY_MAX_AGE = 9
 _INTRADAY_MAX_AGE = 1
 _MAX_LIMIT = 20
+
+_CHINA_COMPANY_EVIDENCE_ARTIFACT = "site/china_intel/command.json"
+_CHINA_COMMAND_SCHEMA = "china_intel.command.v1"
+_CHINA_COMPANY_EVIDENCE_SOURCE_SCHEMA = "china_intel.company_evidence.v1"
+_CHINA_COMPANY_EVIDENCE_PACKET_SCHEMA = "mastermind.china_company_evidence.v1"
+_CHINA_A_SHARE_RE = re.compile(r"^\d{6}\.(?:SS|SZ)$")
 
 
 def _clamp_limit(value: int | None, default: int = 8) -> int:
@@ -393,6 +400,306 @@ def _fit_content(value: Any, *, budget: int) -> Any:
     return {"status": "content_budget_exceeded", "_content_truncated": True}
 
 
+def _fit_china_company_evidence(packet: dict) -> dict:
+    """Fit CIE-15 without dropping its authority or negative-context envelope."""
+    budget = 6_500
+    complete = {**packet, "packet_truncated": False}
+    if _packet_size(complete) <= budget:
+        return complete
+
+    row_priority = (
+        "basis", "detail_en", "detail_zh", "kind", "title", "source",
+        "source_id", "source_url", "source_published_at",
+        "system_recorded_at", "visitor_identity_state",
+    )
+    exact_provenance = (
+        "source", "source_id", "source_url", "source_published_at",
+        "system_recorded_at", "visitor_identity_state",
+    )
+
+    def project_rows(rows: list, limit: int, text_limit: int) -> list:
+        projected = []
+        for row in rows[:limit]:
+            if not isinstance(row, dict):
+                projected.append(_bounded_value(row, str_limit=text_limit))
+                continue
+            ordered = {key: row[key] for key in row_priority if key in row}
+            ordered.update({key: value for key, value in row.items() if key not in ordered})
+            item = _bounded_value(
+                ordered, list_limit=limit, dict_limit=14,
+                str_limit=text_limit, max_depth=4,
+            )
+            # A shortened URL, source ID or clock is not usable provenance.
+            for key in exact_provenance:
+                if key in row:
+                    item[key] = row[key]
+            projected.append(item)
+        return projected
+
+    # Never pass this top-level packet through an insertion-order dict limiter.
+    # Source, clocks, market context and both authority boundaries remain exact.
+    for limit, text_limit in ((6, 180), (4, 120), (2, 90), (1, 60)):
+        compact = {
+            **packet,
+            "name": _bounded_value(packet.get("name"), str_limit=140),
+            "evidence": project_rows(packet["evidence"], limit, text_limit),
+            "packet_truncated": True,
+            "compaction": {
+                "evidence_rows_omitted": max(0, len(packet["evidence"]) - limit),
+                "contradiction_rows_omitted": 0,
+                "unknown_rows_omitted": 0,
+            },
+        }
+        if _packet_size(compact) <= budget:
+            return compact
+
+    # Bulk positive evidence has reached one row before negative text/row
+    # compaction begins. Keep at least that row's exact citation when present.
+    for limit, text_limit in ((6, 180), (4, 120), (2, 90), (1, 60), (1, 40)):
+        compact = {
+            **packet,
+            "name": _bounded_value(packet.get("name"), str_limit=140),
+            "evidence": project_rows(packet["evidence"], 1, 60),
+            "contradictions": project_rows(packet["contradictions"], limit, text_limit),
+            "falsifier": {
+                key: _bounded_value(value, str_limit=text_limit)
+                for key, value in packet["falsifier"].items()
+            },
+            "unknowns": _bounded_value(
+                packet["unknowns"], list_limit=limit, str_limit=text_limit,
+            ),
+            "packet_truncated": True,
+            "compaction": {
+                "evidence_rows_omitted": max(0, len(packet["evidence"]) - 1),
+                "contradiction_rows_omitted": max(0, len(packet["contradictions"]) - limit),
+                "unknown_rows_omitted": max(0, len(packet["unknowns"]) - limit),
+            },
+        }
+        if _packet_size(compact) <= budget:
+            return compact
+
+    # Unrepresentable mandatory context is unavailable, never a smaller
+    # positive packet that silently lost its clocks, warnings or boundaries.
+    return {
+        "schema": packet["schema"],
+        "status": "packet_budget_exceeded",
+        "ticker": packet["ticker"],
+        "name": None,
+        "context_only": True,
+        "execution_authority": False,
+        "authority": packet["authority"],
+        "source": {
+            "artifact": _CHINA_COMPANY_EVIDENCE_ARTIFACT,
+            "url": f"{_URL_BASE}/china_intel.html",
+            "available": False,
+            "status": "packet_budget_exceeded",
+        },
+        "contradictions": [],
+        "falsifier": {"en": None, "zh": None},
+        "unknowns": ["mandatory_context_exceeds_packet_budget"],
+        "evidence_context": {"status": "unavailable", "clocks": None},
+        "evidence": [],
+        "recognition": packet["recognition"],
+        "prophet_timing": packet["prophet_timing"],
+        "packet_truncated": True,
+    }
+
+
+def china_company_evidence(ticker: str) -> dict:
+    """Return one bounded, read-only China company-evidence packet.
+
+    The reader consumes only the fixed vendored Macro publication at
+    site/china_intel/command.json. It never fetches source documents, never
+    reads an arbitrary path, and never grants ranking, Prophet, sizing, exit or
+    trade authority. CIE-14 recognition fields attach only after their separate
+    acceptance; this slice is grounded in the already PROVEN_LIVE CIE-06
+    company-evidence contract.
+    """
+    symbol = _ticker(ticker)
+    authority = {
+        "context_only": True,
+        "may_rank": False,
+        "may_feed_prophet": False,
+        "may_size": False,
+        "may_change_eligibility": False,
+        "may_change_entry": False,
+        "may_change_exit": False,
+        "may_trade": False,
+        "may_execute_source_text": False,
+    }
+
+    def _base(status: str, *, source: dict | None = None) -> dict:
+        return {
+            "schema": _CHINA_COMPANY_EVIDENCE_PACKET_SCHEMA,
+            "status": status,
+            "ticker": symbol,
+            "context_only": True,
+            "execution_authority": False,
+            "authority": authority,
+            "source": source,
+        }
+
+    if symbol is None or not _CHINA_A_SHARE_RE.fullmatch(symbol):
+        return _fit_packet(_base("invalid_or_off_venue_ticker"), budget=6_500)
+
+    payload, health = _read_vendor(
+        _CHINA_COMPANY_EVIDENCE_ARTIFACT,
+        max_age_days=_DAILY_MAX_AGE,
+        cadence="settled-close",
+        authority="context",
+    )
+    source = {
+        **_source_ref(health),
+        "url": f"{_URL_BASE}/china_intel.html",
+    }
+    if not health.get("available"):
+        return _fit_packet(_base("unavailable", source=source), budget=6_500)
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != _CHINA_COMMAND_SCHEMA
+        or payload.get("is_context_only") is not True
+        or not isinstance(payload.get("command"), list)
+    ):
+        return _fit_packet(
+            {
+                **_base("unsupported_contract", source=source),
+                "observed_contract": {
+                    "schema": payload.get("schema") if isinstance(payload, dict) else None,
+                    "is_context_only": (
+                        payload.get("is_context_only") if isinstance(payload, dict) else None
+                    ),
+                },
+            },
+            budget=6_500,
+        )
+
+    rows = [
+        row for row in payload["command"]
+        if isinstance(row, dict)
+        and str(row.get("ticker") or "").upper().strip() == symbol
+    ]
+    if not rows:
+        return _fit_packet(
+            {
+                **_base("not_in_published_cohort", source=source),
+                "publication": {
+                    "schema": payload.get("schema"),
+                    "as_of": payload.get("as_of"),
+                    "generated_utc": payload.get("generated_utc"),
+                    "n_universe": payload.get("n_universe"),
+                    "command_count": len(payload["command"]),
+                },
+            },
+            budget=6_500,
+        )
+    if len(rows) != 1:
+        return _fit_packet(
+            {
+                **_base("ambiguous_published_identity", source=source),
+                "matching_rows": len(rows),
+            },
+            budget=6_500,
+        )
+
+    row = rows[0]
+    evidence = row.get("company_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("schema") != _CHINA_COMPANY_EVIDENCE_SOURCE_SCHEMA
+        or evidence.get("is_context_only") is not True
+    ):
+        return _fit_packet(
+            {
+                **_base("unsupported_company_evidence_contract", source=source),
+                "observed_contract": {
+                    "schema": evidence.get("schema") if isinstance(evidence, dict) else None,
+                    "is_context_only": (
+                        evidence.get("is_context_only") if isinstance(evidence, dict) else None
+                    ),
+                },
+            },
+            budget=6_500,
+        )
+
+    upstream_authority = evidence.get("authority")
+    if (
+        not isinstance(upstream_authority, dict)
+        or upstream_authority.get("ranking") != "none"
+        or upstream_authority.get("prophet") != "none"
+        or upstream_authority.get("trade") != "none"
+    ):
+        return _fit_packet(
+            {
+                **_base("authority_contract_refused", source=source),
+                "observed_authority": _bounded_value(
+                    upstream_authority,
+                    list_limit=2,
+                    dict_limit=8,
+                    str_limit=100,
+                    max_depth=2,
+                ),
+            },
+            budget=6_500,
+        )
+
+    contradictions = (
+        evidence.get("contradictions")
+        if isinstance(evidence.get("contradictions"), list)
+        else []
+    )
+    unknowns = (
+        evidence.get("unknowns")
+        if isinstance(evidence.get("unknowns"), list)
+        else []
+    )
+    source_rows = (
+        evidence.get("evidence")
+        if isinstance(evidence.get("evidence"), list)
+        else []
+    )
+
+    packet = {
+        "schema": _CHINA_COMPANY_EVIDENCE_PACKET_SCHEMA,
+        "status": "stale" if health.get("status") == "stale" else "ok",
+        "ticker": symbol,
+        "name": row.get("name"),
+        "context_only": True,
+        "execution_authority": False,
+        "authority": authority,
+        "source": {
+            **source,
+            "root_schema": payload.get("schema"),
+            "root_as_of": payload.get("as_of"),
+            "root_generated_utc": payload.get("generated_utc"),
+            "company_schema": evidence.get("schema"),
+        },
+        "contradictions": contradictions[:6],
+        "falsifier": {
+            "en": row.get("falsifier"),
+            "zh": row.get("falsifier_zh"),
+        },
+        "unknowns": unknowns[:12],
+        "evidence_context": {
+            "source_state": evidence.get("source_state"),
+            "coverage_start": evidence.get("coverage_start"),
+            "clocks": evidence.get("clocks"),
+            "change": evidence.get("change"),
+            "market_context": evidence.get("market_context"),
+        },
+        "evidence": source_rows[:6],
+        "recognition": {
+            "status": "not_attached_until_accepted_cie14",
+            "may_multiply_conviction": False,
+        },
+        "prophet_timing": {
+            "included": False,
+            "reason": "separate_authority",
+        },
+    }
+    return _fit_china_company_evidence(packet)
+
+
 def _num(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -547,8 +854,947 @@ def _rotation_row(row: dict) -> dict:
     }
 
 
-def sector_rotation(limit: int = 6) -> dict:
-    """Return a slim, ranked Sector Central packet (up to six sectors and baskets)."""
+# Closed native wire identities; this reader does not own sector membership.
+_PSL_GROUP_IDS = ("XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY")
+_PSL_NATIVE_SCHEMA = "leadership_rotation_context.sector_dossiers/v1"
+_PSL_PACKET_SCHEMA = "mastermind.portfolio_intelligence.sector_dossiers/v1"
+_PSL_ARTIFACT = "site/sectordata/sector_central.json"
+_PSL_FIELDS = ("rs_21d", "rs_63d")
+_PSL_MAX_BYTES = 7200  # Below the existing serializer's 8,000-character/byte boundary.
+
+# Exact-session companion: the same artifact and cohort, one explicitly selected sector.
+PSL_SECTOR_IDS = _PSL_GROUP_IDS
+_PSL_WINDOW_NATIVE_SCHEMA = "leadership_rotation_context.sector_window_measurements/v1"
+_PSL_WINDOW_PACKET_SCHEMA = "mastermind.portfolio_intelligence.sector_window_measurements/v1"
+_PSL_WINDOW_KEYS = ("5", "20", "63")
+_PSL_WINDOW_SESSIONS = (5, 20, 63)
+_PSL_WINDOW_EXPECTED = {"5": 6, "20": 21, "63": 64}
+_PSL_WINDOW_MAX_INPUT_BYTES = 131072  # Native ceiling for one detached companion document.
+_PSL_MEASUREMENT_REASONS = (
+    "missing_input", "non_finite_input", "invalid_price", "benchmark_missing",
+    "benchmark_invalid", "insufficient_reference_history", "empty_panel", "future_tail",
+    "source_session_mismatch", "ambiguous_duplicate_price_index", "ambiguous_duplicate_column",
+    "cohort_identity_mismatch", "benchmark_identity_mismatch", "return_basis_not_qualified",
+)
+_PSL_BLOCK_REASONS = _PSL_MEASUREMENT_REASONS[6:]
+_PSL_BINDING_KEYS = (
+    "benchmark", "clocks", "cohort_id", "price_basis", "receipt", "source_roots", "source_session",
+)
+# The native endpoint definition is a fixed literal of the pinned producer contract.
+_PSL_WINDOW_ENDPOINT = (
+    "Endpoint return: P(T)/P(S_N) - 1, where T is the explicit end session and S_N is the "
+    "canonical US session exactly N positions before T, so a 5-session return spans 6 session "
+    "endpoints. Relative wealth is (1+R_group)/(1+R_benchmark) - 1 -- a wealth ratio, never a "
+    "return difference. Interior gaps never move an endpoint; they are disclosed as observed "
+    "coverage. Prices are strictly positive, finite, total-return adjusted closes read at the two "
+    "endpoints only."
+)
+# Separates an absent selector from an explicit null so neither can fall back to legacy.
+_PSL_SECTOR_UNSET = object()
+
+
+def _psl_schema() -> dict:
+    """Validate the closed producer v1, including fields omitted by this projection."""
+    def obj(**properties):
+        return {"type": "object", "properties": properties,
+                "required": list(properties), "additionalProperties": False}
+
+    def literal(value):
+        result = {"const": value}
+        if isinstance(value, bool):
+            result["type"] = "boolean"
+        return result
+
+    def nullable(value):
+        return {"anyOf": [value, {"type": "null"}]}
+
+    def count(maximum):
+        return {"type": "integer", "minimum": 0, "maximum": maximum}
+
+    def unavailable(reason, **extra):
+        return obj(status=literal("unavailable"), reason=literal(reason), **extra)
+
+    def windows(value):
+        return obj(rs_21d=value, rs_63d=value)
+
+    text = {"type": "string", "minLength": 1, "maxLength": 120,
+            "pattern": r"^[^\x00-\x1f]+\Z"}
+    reasons = {"type": "array", "items": text, "maxItems": 32, "uniqueItems": True}
+    ids = {"type": "array", "items": {"enum": list(_PSL_GROUP_IDS)},
+           "maxItems": 11, "uniqueItems": True}
+    breadth = obj(expected_n=literal(11), measured_n=count(11),
+                  positive_n=nullable(count(11)))
+    return obj(
+        schema=literal(_PSL_NATIVE_SCHEMA),
+        status={"enum": ["partial", "unavailable"]},
+        measurement_status={"enum": ["available", "partial", "unavailable"]},
+        cohort_id=literal("us_sectors_11"), population=literal("eleven_sector_etf_proxies"),
+        as_of=nullable({"type": "string", "format": "date", "pattern": r"^\d{4}-\d{2}-\d{2}\Z"}),
+        benchmark=nullable({"type": "string", "pattern": r"^[A-Z][A-Z0-9.^-]{0,15}\Z",
+                            "not": {"enum": ["UNKNOWN", "NONE", "NULL"]}}),
+        price_basis={"enum": ["total_return", None]}, units=literal("pct"),
+        windows_sessions=literal([21, 63]),
+        unavailable_windows=obj(sessions=literal([5, 20]), reason=literal("not_supplied_by_owner")),
+        absolute_returns=unavailable("not_supplied_by_owner"),
+        compatibility_key=nullable({**text, "maxLength": 160}),
+        source_generation=unavailable("immutable_generation_not_supplied", id=literal(None)),
+        availability=obj(
+            mode={"enum": ["dated_snapshot", "as_known"]},
+            decision_cutoff=nullable({**text, "format": "date-time", "maxLength": 64}),
+            original_available_at=literal(None), historically_admissible=literal(False),
+            reason={"enum": ["original_availability_not_supplied", "invalid_decision_cutoff",
+                             "source_session_after_decision_cutoff", "availability_time_missing"]}),
+        history=obj(mode=literal("reconstructed_price_history"), naturally_observed=literal(False)),
+        freshness=obj(status=literal("unverified"),
+                      reason=literal("owner_freshness_receipt_not_supplied")),
+        corrections=unavailable("native_revision_selection_not_supplied"),
+        authority=obj(**{key: literal(False) for key in
+                         ("may_rank", "may_gate", "may_size", "may_trade", "may_escalate")}),
+        forecasts=obj(status=literal("not_qualified"), expected_return=literal(None),
+                      persistence_estimate=literal(None), allocation_weight=literal(None)),
+        mechanism=unavailable("no_qualified_evidence", owner=literal("engine.theme_graph")),
+        risk=unavailable("no_qualified_risk_context", owner=literal("engine.risk_envelope"),
+                         scope=literal(None)),
+        constituent_breadth=unavailable("native_membership_not_supplied"),
+        constituent_concentration=unavailable("native_weights_not_supplied"),
+        cross_sector_breadth_counts=obj(**{"21": breadth, "63": breadth}),
+        dependency_audit=obj(
+            source_roots={"type": "array", "items": literal("engine.sector_cycles"),
+                          "maxItems": 1, "uniqueItems": True},
+            source_family_count=count(1), independence=literal("not_established"),
+            shared_rolling_windows=literal(True), constituent_overlap=literal("unknown")),
+        diagnostics=obj(
+            qualification_reasons=reasons, duplicate_groups=ids,
+            outside_cohort={"type": "array", "items": {
+                "type": "string", "pattern": r"^[A-Z][A-Z0-9]{0,7}\Z"},
+                "maxItems": 11, "uniqueItems": True},
+            malformed_source_rows=count(128), malformed_measured_rows=count(128)),
+        groups={"type": "array", "minItems": 11, "maxItems": 11, "items": obj(
+            group_id={"enum": list(_PSL_GROUP_IDS)}, name_en=nullable(text),
+            name_zh=nullable(text), status={"enum": ["available", "partial", "unavailable"]},
+            relative_wealth_pct=windows(nullable({"type": "number", "minimum": -100})),
+            null_reasons=windows(nullable(text)), qualification_reasons=reasons)},
+    )
+
+
+def _psl_consistent(dossier: dict, measured: dict) -> bool:
+    generation = measured.get("generation")
+    if not isinstance(generation, dict) or generation.get("cohort_id") != "us_sectors_11":
+        return False
+    for native, parent in (("as_of", "session_end"), ("benchmark", "benchmark"),
+                           ("price_basis", "price_basis"), ("compatibility_key", "id")):
+        if dossier[native] is not None and dossier[native] != generation.get(parent):
+            return False
+    parents = measured.get("groups")
+    if not isinstance(parents, list) or len(parents) != 11:
+        return False
+    by_id = {}
+    for row in parents:
+        if (not isinstance(row, dict) or row.get("group_id") not in _PSL_GROUP_IDS
+                or row.get("group_kind") != "sector" or row["group_id"] in by_id):
+            return False
+        by_id[row["group_id"]] = row
+    seen, available, any_values = set(), 0, False
+    for row in dossier["groups"]:
+        gid = row["group_id"]
+        if gid in seen:
+            return False
+        seen.add(gid)
+        current = by_id[gid].get("current")
+        if (not isinstance(current, dict) or current.get("metric") != "relative_wealth_pct"
+                or current.get("units") != "pct"):
+            return False
+        n = 0
+        for key in _PSL_FIELDS:
+            value, reason = row["relative_wealth_pct"][key], row["null_reasons"][key]
+            if value is None:
+                if reason is None:
+                    return False
+            else:
+                if (reason is not None or row["qualification_reasons"]
+                        or type(current.get(key)) not in (int, float) or current[key] != value):
+                    return False
+                n += 1
+        if row["status"] != ("available" if n == 2 else "partial" if n else "unavailable"):
+            return False
+        available += n == 2
+        any_values |= n > 0
+    if (dossier["measurement_status"] !=
+            ("available" if available == 11 else "partial" if any_values else "unavailable")
+            or dossier["status"] != ("partial" if any_values else "unavailable")):
+        return False
+    diagnostics = dossier["diagnostics"]
+    if diagnostics["qualification_reasons"] and any_values:
+        return False
+    if set(diagnostics["outside_cohort"]) & set(_PSL_GROUP_IDS):
+        return False
+    rows = {row["group_id"]: row for row in dossier["groups"]}
+    if any(rows[gid]["status"] != "unavailable" for gid in diagnostics["duplicate_groups"]):
+        return False
+    for window, field in zip(("21", "63"), _PSL_FIELDS):
+        values = [row["relative_wealth_pct"][field] for row in dossier["groups"]
+                  if row["relative_wealth_pct"][field] is not None]
+        counts = dossier["cross_sector_breadth_counts"][window]
+        if (counts["measured_n"] != len(values)
+                or counts["positive_n"] != (sum(value > 0 for value in values) if values else None)):
+            return False
+    dependency = dossier["dependency_audit"]
+    if dependency["source_family_count"] != len(dependency["source_roots"]):
+        return False
+    if any_values and (dossier["as_of"] is None or dossier["benchmark"] is None
+                       or dossier["price_basis"] != "total_return"
+                       or dependency["source_family_count"] != 1):
+        return False
+    availability = dossier["availability"]
+    if availability["mode"] == "dated_snapshot":
+        if (availability["decision_cutoff"] is not None
+                or availability["reason"] != "original_availability_not_supplied"):
+            return False
+    elif (any_values or availability["reason"] == "original_availability_not_supplied"
+          or (availability["reason"] == "invalid_decision_cutoff") !=
+             (availability["decision_cutoff"] is None)):
+        return False
+    return True
+
+
+def _psl_health(health: Any) -> dict:
+    """Bound the existing artifact-health disclosure without upgrading native clocks."""
+    health = health if isinstance(health, dict) else {}
+    status = health.get("status")
+    stamp = health.get("as_of")
+    return {
+        "status": status if status in ("missing", "malformed", "undated", "stale", "fresh") else "unknown",
+        "as_of": stamp if isinstance(stamp, str) and 0 < len(stamp) <= 64
+        and not any(ord(char) < 32 for char in stamp) else None,
+        "stale": health.get("stale") if isinstance(health.get("stale"), bool) else None,
+        "execution_authority": False,
+    }
+
+
+def _psl_unavailable(reason: str, health: Any = None) -> dict:
+    """Consumer refusal: expected identities are explicit, never represented as source facts."""
+    return {
+        "schema": _PSL_PACKET_SCHEMA, "source_schema": None, "source_artifact": _PSL_ARTIFACT,
+        "context_only": True, "status": "unavailable", "measurement_status": "unavailable",
+        "consumer_reason": reason, "cohort_id": "us_sectors_11",
+        "population": "eleven_sector_etf_proxies", "cohort_status": "expected_not_admitted",
+        "as_of": None, "benchmark": None, "price_basis": None, "units": "pct",
+        "windows_sessions": [21, 63], "compatibility_key": None,
+        "source_generation": {"status": "unavailable", "id": None, "reason": reason},
+        "availability": {"mode": "unavailable", "decision_cutoff": None,
+                         "original_available_at": None, "historically_admissible": False,
+                         "reason": reason},
+        "history": {"mode": "unavailable", "naturally_observed": False},
+        "freshness": {"status": "unverified", "reason": reason},
+        "corrections": {"status": "unavailable", "reason": reason},
+        "authority": {key: False for key in
+                      ("may_rank", "may_gate", "may_size", "may_trade", "may_escalate")},
+        "forecasts": {"status": "not_qualified", "expected_return": None,
+                      "persistence_estimate": None, "allocation_weight": None},
+        "mechanism": {"status": "unavailable", "reason": reason},
+        "risk": {"status": "unavailable", "reason": reason},
+        "artifact_health": _psl_health(health),
+        "cross_sector_breadth_counts": {
+            window: {"expected_n": 11, "measured_n": 0, "positive_n": None}
+            for window in ("21", "63")},
+        "row_encoding": {"values": "windows_sessions order", "reasons": "reason_table indexes"},
+        "reason_table": [reason],
+        "groups": [{"group_id": gid, "status": "unavailable",
+                    "relative_wealth_pct": [None, None], "null_reason_refs": [0, 0],
+                    "qualification_reason_refs": [0]} for gid in _PSL_GROUP_IDS],
+    }
+
+
+def _sector_dossier_projection(data: Any, health: Any) -> dict:
+    """Project one validated native dossier within the unchanged MCP transport budget."""
+    if not isinstance(data, dict) or "measured_read" not in data:
+        return _psl_unavailable("dossier_not_supplied", health)
+    measured = data["measured_read"]
+    if not isinstance(measured, dict):
+        return _psl_unavailable("invalid_dossier_contract", health)
+    if "sector_dossiers" not in measured:
+        return _psl_unavailable("dossier_not_supplied", health)
+    if (measured.get("schema") != "leadership_rotation_context.measured_group_read/v1"
+            or measured.get("status") not in ("available", "partial", "unavailable")):
+        return _psl_unavailable("invalid_dossier_contract", health)
+    try:
+        # JSON detachment rejects nonfinite/non-JSON input and bounds the native addendum.
+        encoded = json.dumps(measured["sector_dossiers"], ensure_ascii=False, allow_nan=False)
+        if len(encoded.encode("utf-8")) > 32768:
+            return _psl_unavailable("dossier_input_budget_exceeded", health)
+        dossier = json.loads(encoded)
+        from jsonschema import Draft202012Validator, FormatChecker
+
+        if (not Draft202012Validator(_psl_schema(), format_checker=FormatChecker()).is_valid(dossier)
+                or not _psl_consistent(dossier, measured)):
+            return _psl_unavailable("invalid_dossier_contract", health)
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        return _psl_unavailable("invalid_dossier_contract", health)
+
+    reasons = sorted({reason for row in dossier["groups"]
+                      for reason in [*row["null_reasons"].values(), *row["qualification_reasons"]]
+                      if reason is not None})
+    reason_ids = {reason: index for index, reason in enumerate(reasons)}
+    packet = {key: value for key, value in dossier.items() if key != "groups"}
+    packet.update({
+        "schema": _PSL_PACKET_SCHEMA, "source_schema": _PSL_NATIVE_SCHEMA,
+        "source_artifact": _PSL_ARTIFACT, "context_only": True, "consumer_reason": None,
+        "cohort_status": "native_contract_admitted", "artifact_health": _psl_health(health),
+        "row_encoding": {"values": "windows_sessions order", "reasons": "reason_table indexes"},
+        "reason_table": reasons,
+        "groups": [{
+            "group_id": row["group_id"], "status": row["status"],
+            "relative_wealth_pct": [row["relative_wealth_pct"][field] for field in _PSL_FIELDS],
+            "null_reason_refs": [reason_ids.get(row["null_reasons"][field]) for field in _PSL_FIELDS],
+            "qualification_reason_refs": [reason_ids[reason] for reason in row["qualification_reasons"]],
+        } for row in dossier["groups"]],
+    })
+    # Both the current character budget and the held stricter byte-budget proposal are met.
+    # If exact reasons cannot fit, refuse the whole projection; never silently drop a sector.
+    if len(json.dumps(packet, ensure_ascii=False, allow_nan=False).encode("utf-8")) > _PSL_MAX_BYTES:
+        return _psl_unavailable("dossier_transport_budget_exceeded", health)
+    return packet
+
+
+def _psl_window_schema() -> dict:
+    """Validate the closed exact-session companion, including fields this projection omits."""
+    def obj(**properties):
+        return {"type": "object", "properties": properties,
+                "required": list(properties), "additionalProperties": False}
+
+    def literal(value):
+        result = {"const": value}
+        if isinstance(value, bool):
+            result["type"] = "boolean"
+        return result
+
+    def nullable(value):
+        return {"anyOf": [value, {"type": "null"}]}
+
+    def count(maximum):
+        return {"type": "integer", "minimum": 0, "maximum": maximum}
+
+    text = {"type": "string", "minLength": 1, "maxLength": 120,
+            "pattern": r"^[^\x00-\x1f]+\Z"}
+    reason = {"enum": list(_PSL_MEASUREMENT_REASONS)}
+    block = {"enum": list(_PSL_BLOCK_REASONS)}
+    iso_date = {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}\Z"}
+    clock = {"type": "string", "minLength": 1, "maxLength": 64,
+             "pattern": r"^[^\x00-\x1f]+\Z"}
+
+    def coverage():
+        return obj(observed_n=count(64), expected_n=count(64),
+                   ratio={"type": "number", "minimum": 0, "maximum": 1})
+
+    def clock_limitation(owner_reason):
+        return {"anyOf": [
+            obj(status=literal("unknown"), reason=literal(owner_reason)),
+            obj(status=literal("supplied"), clock=clock),
+        ]}
+
+    cell = obj(
+        status={"enum": ["available", "partial", "unavailable"]},
+        absolute_return_pct=nullable({"type": "number", "minimum": -100}),
+        relative_wealth_pct=nullable({"type": "number", "minimum": -100}),
+        null_reasons=obj(absolute_return_pct=nullable(reason),
+                         relative_wealth_pct=nullable(reason)),
+        coverage=coverage(),
+    )
+    window = obj(
+        window_sessions=count(63),
+        status={"enum": ["available", "partial", "unavailable"]},
+        start_session=nullable(iso_date),
+        end_session=iso_date,
+        benchmark_return_pct=nullable({"type": "number", "minimum": -100}),
+        benchmark_null_reason=nullable(reason),
+        benchmark_coverage=coverage(),
+        null_reason=nullable(reason),
+    )
+    group = obj(
+        group_id={"enum": list(_PSL_GROUP_IDS)},
+        name_en=nullable(text),
+        name_zh=nullable(text),
+        windows=obj(**{key: cell for key in _PSL_WINDOW_KEYS}),
+    )
+    return obj(
+        schema=literal(_PSL_WINDOW_NATIVE_SCHEMA),
+        status={"enum": ["available", "partial", "unavailable"]},
+        reason=nullable(reason),
+        units=literal("pct"),
+        price_basis=literal("total_return"),
+        benchmark={"type": "string", "pattern": r"^[A-Z][A-Z0-9.^-]{0,15}\Z",
+                   "not": {"enum": ["UNKNOWN", "NONE", "NULL"]}},
+        cohort_id=literal("us_sectors_11"),
+        population=literal("eleven_sector_etf_proxies"),
+        source_session=iso_date,
+        end_session=iso_date,
+        windows_sessions=literal([5, 20, 63]),
+        endpoint_definition=literal(_PSL_WINDOW_ENDPOINT),
+        clocks=obj(publication=nullable(clock), availability=nullable(clock),
+                   correction=nullable(clock), history=nullable(clock)),
+        source_roots={"type": "array", "maxItems": 32, "items": {
+            "type": "string", "minLength": 1, "maxLength": 256,
+            "pattern": r"^[^\x00-\x1f]+\Z"}},
+        receipt=nullable({"type": "object"}),
+        limitations=obj(
+            availability=clock_limitation("owner_availability_clock_not_supplied"),
+            publication=clock_limitation("owner_publication_clock_not_supplied"),
+            history=clock_limitation("owner_history_clock_not_supplied"),
+            corrections=obj(status=literal("unavailable"),
+                            reason=literal("native_revision_selection_not_supplied")),
+            freshness=obj(status=literal("unverified"),
+                          reason=literal("owner_freshness_receipt_not_supplied")),
+            point_in_time=obj(status=literal("not_qualified"),
+                              reason=literal("point_in_time_admission_not_supplied")),
+        ),
+        windows=obj(**{key: window for key in _PSL_WINDOW_KEYS}),
+        groups={"type": "array", "minItems": 11, "maxItems": 11, "items": group},
+        diagnostics=obj(
+            panel_rows=count(20000),
+            malformed_rows=count(9007199254740991),
+            duplicate_sessions={"type": "array", "maxItems": 16, "items": {
+                "type": "string", "minLength": 1, "maxLength": 64}},
+            ambiguous_columns={"type": "array", "maxItems": 16, "items": {
+                "type": "string", "minLength": 1, "maxLength": 64}},
+            columns={"type": "array", "maxItems": 64, "items": {
+                "type": "string", "minLength": 1, "maxLength": 64}},
+            binding_keys={"type": "array", "maxItems": 7, "uniqueItems": True,
+                          "items": {"enum": list(_PSL_BINDING_KEYS)}},
+            receipt_withheld={"type": "boolean"},
+            future_tail_sessions={"type": "array", "maxItems": 16, "items": iso_date},
+            expected_columns=literal(12),
+            qualification_reasons={"type": "array", "maxItems": 8, "uniqueItems": True,
+                                   "items": block},
+            measured_cells=count(33),
+            complete_cells=count(33),
+            total_cells=literal(33),
+            coverage_note={"type": "string", "minLength": 1, "maxLength": 256},
+        ),
+        authority=obj(**{key: literal(False) for key in
+                         ("may_rank", "may_gate", "may_size", "may_trade", "may_escalate")}),
+    )
+
+
+def _psl_real_date(value: Any) -> date | None:
+    """Accept only a strict, real YYYY-MM-DD calendar date."""
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.isoformat() == value else None
+
+
+def _psl_aware_clock(value: Any) -> bool:
+    """Accept the producer's timezone-aware ISO text; never restamp or infer a clock."""
+    if value is None:
+        return True
+    if not isinstance(value, str) or not 0 < len(value) <= 64:
+        return False
+    if any(ord(char) < 32 for char in value):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
+def _psl_coverage_ok(observed: Any, expected: Any, ratio: Any) -> bool:
+    """A published ratio must agree with its own counts within the six-decimal rounding."""
+    if not isinstance(observed, int) or isinstance(observed, bool):
+        return False
+    if not isinstance(expected, int) or isinstance(expected, bool):
+        return False
+    if expected <= 0 or not 0 <= observed <= expected:
+        return False
+    if not isinstance(ratio, (int, float)) or isinstance(ratio, bool):
+        return False
+    return abs(ratio - round(observed / expected, 6)) <= 1e-6
+
+
+def _psl_json_preflight(value: Any, *, byte_limit: int,
+                        depth_limit: int, node_limit: int) -> None:
+    """Bound exact builtin JSON before copying or serializing a container.
+
+    Match the producer's default ASCII encoding and separator spaces. The
+    length limit applies to each container; keys count bytes, values count
+    nodes, and receipt depth starts at zero. No custom conversion hook runs.
+    """
+    nodes, encoded = 0, 0
+    active: set[int] = set()
+
+    def invalid():
+        raise ValueError("invalid_window_contract")
+
+    def add(size):
+        nonlocal encoded
+        encoded += size
+        if encoded > byte_limit:
+            raise ValueError("window_input_budget_exceeded")
+
+    def string_size(text):
+        if type(text) is not str:
+            invalid()
+        if len(text) > byte_limit:
+            raise ValueError("window_input_budget_exceeded")
+        add(2)
+        for char in text:
+            point = ord(char)
+            add(2 if char in '"\\\b\f\n\r\t' else
+                6 if point < 32 or 127 <= point <= 65535 else
+                12 if point > 65535 else 1)
+
+    def walk(node, depth):
+        nonlocal nodes
+        nodes += 1
+        if nodes > node_limit or depth > depth_limit:
+            invalid()
+        kind = type(node)
+        if node is None:
+            add(4)
+        elif kind is bool:
+            add(4 if node else 5)
+        elif kind is str:
+            string_size(node)
+        elif kind in (int, float):
+            if kind is int and node.bit_length() > byte_limit * 4:
+                raise ValueError("window_input_budget_exceeded")
+            if kind is float and not math.isfinite(node):
+                invalid()
+            # Only an already bounded primitive is serialized here.
+            add(len(json.dumps(node, allow_nan=False)))
+        elif kind in (dict, list):
+            if len(node) > 256 or id(node) in active:
+                invalid()
+            active.add(id(node))
+            add(2 + max(0, len(node) - 1) * 2)
+            try:
+                if kind is dict:
+                    for key, child in node.items():
+                        string_size(key)
+                        add(2)
+                        walk(child, depth + 1)
+                else:
+                    for child in node:
+                        walk(child, depth + 1)
+            finally:
+                active.remove(id(node))
+        else:
+            invalid()
+
+    walk(value, 0)
+
+
+def _psl_receipt_ok(receipt: Any) -> bool:
+    """Qualify the opaque owner receipt before detachment; never infer authority."""
+    if receipt is None:
+        return True
+    if type(receipt) is not dict or len(receipt) > 32:
+        return False
+    try:
+        _psl_json_preflight(receipt, byte_limit=16384, depth_limit=8, node_limit=2048)
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        return False
+    return True
+
+
+def _psl_window_consistent(companion: dict, measured: dict) -> bool:
+    """Admit one companion only against the exact parent binding and the closed native contract."""
+    if (measured.get("schema") != "leadership_rotation_context.measured_group_read/v1"
+            or measured.get("status") not in ("available", "partial", "unavailable")):
+        return False
+    generation = measured.get("generation")
+    if not isinstance(generation, dict):
+        return False
+    if generation.get("cohort_id") != companion["cohort_id"]:
+        return False
+    if generation.get("price_basis") != companion["price_basis"]:
+        return False
+    end = _psl_real_date(companion["end_session"])
+    source = _psl_real_date(companion["source_session"])
+    if end is None or source is None or end != source:
+        return False
+    if generation.get("session_end") != companion["end_session"]:
+        return False
+    parent_benchmark = generation.get("benchmark")
+    if not isinstance(parent_benchmark, str):
+        return False
+    if parent_benchmark.strip().upper() != companion["benchmark"]:
+        return False
+
+    clocks = companion["clocks"]
+    for name, owner_reason in (("availability", "owner_availability_clock_not_supplied"),
+                                ("publication", "owner_publication_clock_not_supplied"),
+                                ("history", "owner_history_clock_not_supplied")):
+        clock = clocks[name]
+        if not _psl_aware_clock(clock):
+            return False
+        limitation = companion["limitations"][name]
+        if clock is None:
+            if limitation != {"status": "unknown", "reason": owner_reason}:
+                return False
+        elif limitation != {"status": "supplied", "clock": clock}:
+            return False
+    if not _psl_aware_clock(clocks["correction"]):
+        return False
+    if not _psl_receipt_ok(companion["receipt"]):
+        return False
+
+    groups = companion["groups"]
+    if [row["group_id"] for row in groups] != list(_PSL_GROUP_IDS):
+        return False
+    measured_cells = 0
+    complete_cells = 0
+    per_window_measured = {key: 0 for key in _PSL_WINDOW_KEYS}
+    per_window_complete = {key: 0 for key in _PSL_WINDOW_KEYS}
+    for row in groups:
+        for key in _PSL_WINDOW_KEYS:
+            cell = row["windows"][key]
+            absolute = cell["absolute_return_pct"]
+            relative = cell["relative_wealth_pct"]
+            reasons = cell["null_reasons"]
+            if (absolute is None) == (reasons["absolute_return_pct"] is None):
+                return False
+            if (relative is None) == (reasons["relative_wealth_pct"] is None):
+                return False
+            present = (absolute is not None) + (relative is not None)
+            status = ("available" if present == 2 else "partial" if present == 1 else "unavailable")
+            if cell["status"] != status:
+                return False
+            coverage = cell["coverage"]
+            if coverage["expected_n"] != _PSL_WINDOW_EXPECTED[key]:
+                return False
+            if not _psl_coverage_ok(coverage["observed_n"], coverage["expected_n"],
+                                    coverage["ratio"]):
+                return False
+            measured_cells += present > 0
+            complete_cells += present == 2
+            per_window_measured[key] += present > 0
+            per_window_complete[key] += present == 2
+
+    block_reason = companion["reason"]
+    diagnostics = companion["diagnostics"]
+    if companion["receipt"] is not None and diagnostics["receipt_withheld"]:
+        return False
+    count_fields = ("panel_rows", "malformed_rows", "expected_columns",
+                    "measured_cells", "complete_cells", "total_cells")
+    if any(type(diagnostics[name]) is not int for name in count_fields):
+        return False
+    if any(type(value) is not int for value in companion["windows_sessions"]):
+        return False
+    for name in ("duplicate_sessions", "future_tail_sessions"):
+        for value in diagnostics[name]:
+            parsed = _psl_real_date(value)
+            if parsed is None or (name == "future_tail_sessions" and parsed <= end):
+                return False
+    window_only_reasons = set(_PSL_BLOCK_REASONS) | {"insufficient_reference_history"}
+    if block_reason is not None:
+        if block_reason not in _PSL_BLOCK_REASONS or companion["status"] != "unavailable":
+            return False
+        if (not diagnostics["qualification_reasons"]
+                or diagnostics["qualification_reasons"][0] != block_reason):
+            return False
+        if measured_cells or complete_cells:
+            return False
+    else:
+        if diagnostics["qualification_reasons"]:
+            return False
+        expected_status = ("available" if complete_cells == 33
+                           else "partial" if measured_cells else "unavailable")
+        if companion["status"] != expected_status:
+            return False
+
+    for key in _PSL_WINDOW_KEYS:
+        window = companion["windows"][key]
+        if type(window["window_sessions"]) is not int or window["window_sessions"] != int(key):
+            return False
+        if window["end_session"] != companion["end_session"]:
+            return False
+        start = window["start_session"]
+        insufficient = start is None
+        if not insufficient:
+            parsed = _psl_real_date(start)
+            if parsed is None or parsed >= end:
+                return False
+        if (window["benchmark_return_pct"] is None) == (window["benchmark_null_reason"] is None):
+            return False
+        benchmark_coverage = window["benchmark_coverage"]
+        if benchmark_coverage["expected_n"] != _PSL_WINDOW_EXPECTED[key]:
+            return False
+        if not _psl_coverage_ok(benchmark_coverage["observed_n"],
+                                benchmark_coverage["expected_n"],
+                                benchmark_coverage["ratio"]):
+            return False
+        if (window["benchmark_return_pct"] is not None
+                and benchmark_coverage["observed_n"] < 2):
+            return False
+        complete = per_window_complete[key]
+        present = per_window_measured[key]
+        status = ("available" if complete == 11 else "partial" if present else "unavailable")
+        if window["status"] != status:
+            return False
+        if insufficient:
+            # Insufficient reference history takes precedence for this window.
+            if (window["null_reason"] != "insufficient_reference_history"
+                    or window["benchmark_return_pct"] is not None
+                    or window["benchmark_null_reason"] != "insufficient_reference_history"):
+                return False
+            if (benchmark_coverage["observed_n"] != 0
+                    or abs(benchmark_coverage["ratio"]) > 1e-9):
+                return False
+        else:
+            if block_reason is not None:
+                if (window["null_reason"] != block_reason
+                        or window["benchmark_return_pct"] is not None
+                        or window["benchmark_null_reason"] != block_reason):
+                    return False
+            elif (window["null_reason"] is not None
+                  or window["benchmark_null_reason"] in window_only_reasons):
+                return False
+        for row in groups:
+            cell = row["windows"][key]
+            coverage = cell["coverage"]
+            absolute, relative = cell["absolute_return_pct"], cell["relative_wealth_pct"]
+            reasons = cell["null_reasons"]
+            if (absolute is not None or relative is not None) and coverage["observed_n"] < 2:
+                return False
+            if relative is not None and window["benchmark_return_pct"] is None:
+                return False
+            # A finite relative wealth needs valid endpoints. Absolute publication can
+            # still overflow when converting the independently finite factor to percent.
+            if (relative is not None and absolute is None
+                    and reasons["absolute_return_pct"] != "non_finite_input"):
+                return False
+            if (not insufficient and block_reason is None
+                    and any(reason in window_only_reasons for reason in reasons.values())):
+                return False
+            if insufficient:
+                if (cell["absolute_return_pct"] is not None
+                        or cell["relative_wealth_pct"] is not None):
+                    return False
+                if (cell["null_reasons"]["absolute_return_pct"]
+                        != "insufficient_reference_history"
+                        or cell["null_reasons"]["relative_wealth_pct"]
+                        != "insufficient_reference_history"):
+                    return False
+                if coverage["observed_n"] != 0 or abs(coverage["ratio"]) > 1e-9:
+                    return False
+            elif block_reason is not None:
+                if (cell["absolute_return_pct"] is not None
+                        or cell["relative_wealth_pct"] is not None):
+                    return False
+                if (cell["null_reasons"]["absolute_return_pct"] != block_reason
+                        or cell["null_reasons"]["relative_wealth_pct"] != block_reason):
+                    return False
+
+    windows = companion["windows"]
+    # These nested windows retain counts from one panel with one end session.
+    for short, long, extra in (("5", "20", 15), ("20", "63", 43)):
+        if windows[short]["start_session"] is None or windows[long]["start_session"] is None:
+            continue
+        pairs = [(windows[short]["benchmark_coverage"]["observed_n"],
+                  windows[long]["benchmark_coverage"]["observed_n"])]
+        pairs.extend((row["windows"][short]["coverage"]["observed_n"],
+                      row["windows"][long]["coverage"]["observed_n"]) for row in groups)
+        if any(b < a or b - a > extra for a, b in pairs):
+            return False
+
+    if (diagnostics["measured_cells"] != measured_cells
+            or diagnostics["complete_cells"] != complete_cells
+            or diagnostics["total_cells"] != 33):
+        return False
+    if diagnostics["columns"] != sorted(diagnostics["columns"]):
+        return False
+    if diagnostics["qualification_reasons"] != sorted(diagnostics["qualification_reasons"]):
+        return False
+    for key in ("duplicate_sessions", "ambiguous_columns", "future_tail_sessions"):
+        if diagnostics[key] != sorted(diagnostics[key]):
+            return False
+    if diagnostics["binding_keys"] != sorted(diagnostics["binding_keys"]):
+        return False
+    return True
+
+
+def _psl_window_unavailable(reason: str, health: Any = None, sector: Any = None) -> dict:
+    """Consumer refusal: expected identities stay explicit and no source fact is invented."""
+    return {
+        "schema": _PSL_WINDOW_PACKET_SCHEMA, "source_schema": None,
+        "source_artifact": _PSL_ARTIFACT, "context_only": True, "consumer_reason": reason,
+        "cohort_id": "us_sectors_11", "population": "eleven_sector_etf_proxies",
+        "cohort_status": "expected_not_admitted",
+        "selected_group_id": sector if isinstance(sector, str) and sector in _PSL_GROUP_IDS else None,
+        "status": "unavailable", "reason": None,
+        "source_session": None, "end_session": None, "benchmark": None, "price_basis": None,
+        "units": "pct", "windows_sessions": list(_PSL_WINDOW_SESSIONS),
+        "endpoint_definition": None,
+        "clocks": {"publication": None, "availability": None, "correction": None, "history": None},
+        "limitations": {
+            "availability": {"status": "unknown",
+                             "reason": "owner_availability_clock_not_supplied"},
+            "publication": {"status": "unknown",
+                            "reason": "owner_publication_clock_not_supplied"},
+            "history": {"status": "unknown", "reason": "owner_history_clock_not_supplied"},
+            "corrections": {"status": "unavailable",
+                            "reason": "native_revision_selection_not_supplied"},
+            "freshness": {"status": "unverified",
+                          "reason": "owner_freshness_receipt_not_supplied"},
+            "point_in_time": {"status": "not_qualified",
+                              "reason": "point_in_time_admission_not_supplied"},
+        },
+        "authority": {key: False for key in
+                      ("may_rank", "may_gate", "may_size", "may_trade", "may_escalate")},
+        "artifact_health": _psl_health(health),
+        "metadata_projection": {"receipt": "not_projected", "source_roots": "not_projected"},
+        "row_encoding": {"windows": "keys 5,20,63", "values": "windows_sessions order",
+                         "reasons": "reason_table indexes"},
+        "reason_table": [reason],
+        "groups": [{"group_id": gid, "scope": "expected_not_admitted"} for gid in _PSL_GROUP_IDS],
+        "selected": None,
+        "windows": {},
+        "diagnostics": {"measured_cells": 0, "complete_cells": 0, "total_cells": 33,
+                        "block_reason_ref": 0, "qualification_reason_refs": []},
+    }
+
+
+def _sector_window_projection(data: Any, health: Any, sector: str) -> dict:
+    """Project one validated exact-session companion for one explicitly selected sector."""
+    if not isinstance(data, dict) or "measured_read" not in data:
+        return _psl_window_unavailable("window_companion_not_supplied", health, sector)
+    measured = data["measured_read"]
+    if not isinstance(measured, dict):
+        return _psl_window_unavailable("invalid_window_contract", health, sector)
+    if "sector_window_measurements" not in measured:
+        return _psl_window_unavailable("window_companion_not_supplied", health, sector)
+    try:
+        raw = measured["sector_window_measurements"]
+        if type(raw) is not dict or not _psl_receipt_ok(raw.get("receipt")):
+            return _psl_window_unavailable("invalid_window_contract", health, sector)
+        try:
+            _psl_json_preflight(raw, byte_limit=_PSL_WINDOW_MAX_INPUT_BYTES,
+                                depth_limit=16, node_limit=8192)
+        except ValueError as exc:
+            reason = ("window_input_budget_exceeded"
+                      if str(exc) == "window_input_budget_exceeded"
+                      else "invalid_window_contract")
+            return _psl_window_unavailable(reason, health, sector)
+        # Detachment occurs only after bounded, finite, exact-builtin admission.
+        companion = json.loads(json.dumps(raw, allow_nan=False))
+        from jsonschema import Draft202012Validator
+
+        if (not Draft202012Validator(_psl_window_schema()).is_valid(companion)
+                or not _psl_window_consistent(companion, measured)):
+            return _psl_window_unavailable("invalid_window_contract", health, sector)
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        return _psl_window_unavailable("invalid_window_contract", health, sector)
+
+    groups = companion["groups"]
+    selected = next(row for row in groups if row["group_id"] == sector)
+    used = set()
+    if companion["reason"] is not None:
+        used.add(companion["reason"])
+    used.update(companion["diagnostics"]["qualification_reasons"])
+    for key in _PSL_WINDOW_KEYS:
+        window = companion["windows"][key]
+        for value in (window["null_reason"], window["benchmark_null_reason"]):
+            if value is not None:
+                used.add(value)
+    for key in _PSL_WINDOW_KEYS:
+        for value in selected["windows"][key]["null_reasons"].values():
+            if value is not None:
+                used.add(value)
+    reason_table = sorted(used)
+    reason_ids = {reason: index for index, reason in enumerate(reason_table)}
+
+    packet = {
+        "schema": _PSL_WINDOW_PACKET_SCHEMA, "source_schema": _PSL_WINDOW_NATIVE_SCHEMA,
+        "source_artifact": _PSL_ARTIFACT, "context_only": True, "consumer_reason": None,
+        "cohort_id": companion["cohort_id"], "population": companion["population"],
+        "cohort_status": "native_contract_admitted", "selected_group_id": sector,
+        "status": companion["status"], "reason": companion["reason"],
+        "source_session": companion["source_session"], "end_session": companion["end_session"],
+        "benchmark": companion["benchmark"], "price_basis": companion["price_basis"],
+        "units": companion["units"], "windows_sessions": list(_PSL_WINDOW_SESSIONS),
+        "endpoint_definition": companion["endpoint_definition"],
+        "clocks": companion["clocks"], "limitations": companion["limitations"],
+        "authority": {key: False for key in
+                      ("may_rank", "may_gate", "may_size", "may_trade", "may_escalate")},
+        "artifact_health": _psl_health(health),
+        "metadata_projection": {"receipt": "not_projected", "source_roots": "not_projected"},
+        "row_encoding": {"windows": "keys 5,20,63", "values": "windows_sessions order",
+                         "reasons": "reason_table indexes"},
+        "reason_table": reason_table,
+        "groups": [{
+            "group_id": row["group_id"],
+            "scope": "selected" if row["group_id"] == sector else "status_only",
+            "window_status": [row["windows"][key]["status"] for key in _PSL_WINDOW_KEYS],
+        } for row in groups],
+        "selected": {
+            "group_id": selected["group_id"],
+            "name_en": selected["name_en"], "name_zh": selected["name_zh"],
+            "absolute_return_pct": [selected["windows"][key]["absolute_return_pct"]
+                                    for key in _PSL_WINDOW_KEYS],
+            "relative_wealth_pct": [selected["windows"][key]["relative_wealth_pct"]
+                                    for key in _PSL_WINDOW_KEYS],
+            "observed_n": [selected["windows"][key]["coverage"]["observed_n"]
+                           for key in _PSL_WINDOW_KEYS],
+            "coverage_ratio": [selected["windows"][key]["coverage"]["ratio"]
+                               for key in _PSL_WINDOW_KEYS],
+            "absolute_reason_refs": [
+                reason_ids.get(selected["windows"][key]["null_reasons"]["absolute_return_pct"])
+                for key in _PSL_WINDOW_KEYS],
+            "relative_reason_refs": [
+                reason_ids.get(selected["windows"][key]["null_reasons"]["relative_wealth_pct"])
+                for key in _PSL_WINDOW_KEYS],
+        },
+        "windows": {key: {
+            "window_sessions": companion["windows"][key]["window_sessions"],
+            "expected_observations": companion["windows"][key]["benchmark_coverage"]["expected_n"],
+            "start_session": companion["windows"][key]["start_session"],
+            "end_session": companion["windows"][key]["end_session"],
+            "status": companion["windows"][key]["status"],
+            "benchmark_return_pct": companion["windows"][key]["benchmark_return_pct"],
+            "benchmark_observed_n": companion["windows"][key]["benchmark_coverage"]["observed_n"],
+            "benchmark_coverage_ratio": companion["windows"][key]["benchmark_coverage"]["ratio"],
+            "benchmark_reason_ref": reason_ids.get(
+                companion["windows"][key]["benchmark_null_reason"]),
+            "window_reason_ref": reason_ids.get(companion["windows"][key]["null_reason"]),
+        } for key in _PSL_WINDOW_KEYS},
+        "diagnostics": {
+            "measured_cells": companion["diagnostics"]["measured_cells"],
+            "complete_cells": companion["diagnostics"]["complete_cells"],
+            "total_cells": companion["diagnostics"]["total_cells"],
+            "block_reason_ref": reason_ids.get(companion["reason"]),
+            "qualification_reason_refs": [reason_ids[reason] for reason
+                                          in companion["diagnostics"]["qualification_reasons"]],
+        },
+    }
+    # Both the character budget and the byte budget are measured on the exact serializer text.
+    # If the whole packet cannot fit, refuse it; never drop a member, window or reason.
+    payload = json.dumps(packet, default=str, ensure_ascii=False)
+    if len(payload) > _PSL_MAX_BYTES or len(payload.encode("utf-8")) > _PSL_MAX_BYTES:
+        return _psl_window_unavailable("window_transport_budget_exceeded", health, sector)
+    return packet
+
+
+def sector_rotation(limit: int = 6, *, projection: str = "legacy",
+                     sector: Any = _PSL_SECTOR_UNSET) -> dict:
+    """Return legacy leaders, an all-eleven dossier, or one selected exact-session sector view."""
+    if projection == "sector_windows":
+        if sector is _PSL_SECTOR_UNSET:
+            return _psl_window_unavailable("sector_selection_required")
+        if not isinstance(sector, str) or sector not in _PSL_GROUP_IDS:
+            return _psl_window_unavailable("invalid_sector_selection")
+        data, health = _read_vendor(_PSL_ARTIFACT)
+        return _sector_window_projection(data, health, sector)
+    if sector is not _PSL_SECTOR_UNSET:
+        return _psl_window_unavailable("incompatible_selector_combination")
+    if projection not in ("legacy", "sector_dossiers"):
+        return _psl_unavailable("unsupported_projection")
+    if projection == "sector_dossiers":
+        data, health = _read_vendor(_PSL_ARTIFACT)
+        return _sector_dossier_projection(data, health)
     cap = min(_clamp_limit(limit, 6), 6)
     data, health = _read_vendor("site/sectordata/sector_central.json")
     if not isinstance(data, dict):
