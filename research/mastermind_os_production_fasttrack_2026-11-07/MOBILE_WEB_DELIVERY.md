@@ -1,90 +1,110 @@
 # Hermes-backed mobile web delivery
 
 Operation: `hermes-mobile-web-20261107`.
-Parent: `WS:EXECUTIVE-ECOSYSTEM-COMPLETION`; supplement to this directory's README and HANDOFFS, not a new task/runtime registry.
-Assignment: current Chairman request to implement secure mobile access to the existing M2 Hermes Meta-CEO, Secretary and other profiles, preserving desktop streaming, history and tool rendering.
-Procedure: Mastermind protected `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c`, Skillpack 1.0.1/bootstrap 1. A subsequent relevant-path comparison changed only BOOTSTRAP_KERNEL; continuation emphasis remains compatible.
-Source carrier: isolated GitHub branch `sol/hermes-mobile-web-20261107`. Host effects use the original authorized Studio Direct local M2 carrier. No live writer or started job has been transferred.
+Parent: `WS:EXECUTIVE-ECOSYSTEM-COMPLETION`; supplement to this directory's README and HANDOFFS, not a new project/task/runtime registry.
+Assignment: Chairman-requested secure mobile access to the existing M2 Hermes Meta-CEO, Secretary and other profiles, preserving Mac streaming, formatting, history and tools.
+Procedure: Mastermind protected `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c`, Skillpack 1.0.1/bootstrap 1. A subsequent relevant-path comparison changed only BOOTSTRAP_KERNEL; its stronger continuation emphasis is compatible.
+Source carrier: isolated GitHub branch `sol/hermes-mobile-web-20261107`. Installed-host effects use the original authorized Studio Direct local M2 carrier. No live writer or started job has been transferred.
 
-## Outcome and completion ruler
+## Current outcome
 
-The Chairman can reach the existing M2 gateway from a phone, authenticate with a supported existing identity, select Meta-CEO or Secretary, receive a real streaming reply with desktop-equivalent formatting, reopen that conversation and reconnect without duplicate sends. Native desktop operation and other exposed services remain intact. A phone-sized browser is not physical iPhone acceptance.
+**Built, configured and component-tested; not activated or accepted as a working mobile product.** The existing gateway must restart to load Web Access. Its latest native guard reports a live chat plus scheduled work; no interruption has been authorized or performed. The private HTTPS endpoint therefore returns 502 rather than a working chat app.
 
-**Current status: installed and configured components, NOT an activated or accepted mobile product.** The running gateway predates Web Access configuration and cannot safely restart while an unrelated background delegation is active. No live mobile/provider reply, authenticated browser journey, phone test or production acceptance is claimed.
+Completion still means: the Chairman reaches the M2 gateway from a phone, signs in through the supported existing identity, selects Meta-CEO or Secretary, receives a real formatted streaming reply, reopens the original conversation and reconnects without duplicate sends. Desktop continuity and other services must remain intact. A phone-sized browser is not physical iPhone acceptance.
 
-## Reuse decision
+## Reuse and integration decision
 
-Use the installed MIT-licensed Hermes browser build of its actual Desktop renderer and native gateway. Preserve its profiles, sessions, memory, queues, Markdown/tool rendering and sign-in. No new chat framework, DeepSeek-to-Hermes protocol translator, scheduler, identity store or agent runtime.
+Adopt the installed MIT-licensed Hermes browser build of its actual Desktop renderer and its existing native gateway. Keep Hermes's profiles, sessions, memory, queues, Markdown/tool rendering and OAuth. No new chat framework, DeepSeek-to-Hermes translator, identity store, scheduler or agent runtime was introduced.
 
-The existing Mastermind OS shell and DeepSeek PR #2177 retain their separate integration work. Their active files were not edited. This vertical slice does not claim completion of the broader command center or all desktop/mobile OS work.
+The existing Mastermind OS shell and DeepSeek PR #2177 retain their separate integration work. Their active source files were untouched. This usable-first vertical slice does not claim completion of the wider mobile command center, desktop OS or project-execution programme.
 
-Private HTTPS uses the existing Tailscale service on a dedicated port, preserving its original root and Studio MCP routes. Hermes stays bound to loopback; `webapp.public_url` requires its native sign-in gate. No public Funnel, router forwarding, anonymous proxy or disabled origin/TLS/auth check. The phone must be connected to the same authorized tailnet; the web login uses Nous.
+Private HTTPS uses the existing Tailscale service on a dedicated port, preserving its root and Studio MCP routes. Hermes stays on loopback; its native `webapp.public_url` engages sign-in. No public Funnel, router forwarding, anonymous proxy, transferred provider key or disabled TLS/origin/auth check. The phone needs the authorized tailnet connection and the supported Nous login.
 
 ## Confirmed installed effects
 
-1. **Native browser renderer built.** `hermes webapp --build-only` completed with exit 0, original process 805. Installed source is `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` (v0.23.0). Output: the installed donor's `apps/desktop/dist-webapp`.
-   - Build source hash: `1faeb5281c0b84c0d235e64dcebf8709a497e48dcb573181b46b2e959f27b0ca`.
-   - Build output hash: `a9fd70c59c30de37a4fb9fbc7077dc28f35df2d5c530df79cb45cf6197e25d16`.
-   - Upstream build receipt reports Darwin/arm64, production mode and Node 26.12.1. The upstream isolated workspace avoided pruning native Desktop dependencies.
-2. **Nous Web Access registration succeeded.** Native `webapp_access.register` created the dedicated Web Access client for the private HTTPS callback. Registration remains in the gateway home's owner-only `webapp/sign-in-registration.json`; no tokens/client details are copied here. The existing dashboard client and provider configurations were not replaced.
-3. **Web Access configuration saved.** Enabled, default loopback host and port 9120, dedicated HTTPS URL on port 8443. Native status still says the gateway started before the Webapp was enabled and requires a restart. Configuration preservation checked all preexisting non-webapp values: no changes.
-4. **Private HTTPS route installed.** Existing Tailscale Serve now forwards port 8443 to `http://127.0.0.1:9120`. Exact original route values were read back unchanged. Public Funnel remains off. The endpoint currently returns **502**, correctly reflecting the unactivated upstream; this is not app availability.
-5. **TLS transport checked without weakening certificate validation.** A request to the correct hostname with an explicit mapping to the observed Tailscale IP completed with curl exit 0, TLS verification 0 and HTTP 502. Default hostname resolution failed on the M2; its Tailscale `CorpDNS` preference is false. That global DNS preference was preserved. Phone DNS/reachability remains unverified, not inferred from this local transport check.
+### Native browser renderer
 
-The exact private operating URL and non-secret raw receipts are in the operation's owner-only host evidence directory: `~/.local/state/mastermind/hermes-mobile-web-20261107/`. Configuration backups there are sensitive and must never be published.
+`hermes webapp --build-only` completed with exit 0, original process 805. Donor: Hermes v0.23.0 at `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`. Output is the installed donor's `apps/desktop/dist-webapp`.
 
-## Verification completed and limits
+- Source hash: `1faeb5281c0b84c0d235e64dcebf8709a497e48dcb573181b46b2e959f27b0ca`.
+- Output hash: `a9fd70c59c30de37a4fb9fbc7077dc28f35df2d5c530df79cb45cf6197e25d16`.
+- Upstream receipt: Darwin/arm64, production mode, Node 26.12.1.
+- Upstream's isolated browser-build workspace avoided pruning native Desktop dependencies. Existing mobile viewport/keyboard code and Apple touch icon are included. No generated bundle was hand-edited.
 
-**42 UI tests passed across 7 files**, exit 0, original process 19875:
-- Browser viewport/keyboard accommodation.
-- Web Access API/UI behavior.
-- Webapp-served profile selection and profile launch.
-- Gateway boot/profile routing.
+### Sign-in and configuration
 
-**47 streaming and continuation tests passed across 6 files**, original process 27493:
-- Delta flushing and completion boundaries.
-- Duplicate-completion handling.
-- Execution-authority event behavior.
-- Gateway message-stream processing and reload/resume stream targeting.
+Native Web Access registration succeeded using the existing signed-in Nous account, original process 18955/exit 0. Its dedicated client is separate from the dashboard client; the gateway retains the owner-only registration in `webapp/sign-in-registration.json`. No tokens or client/account details are published here.
 
-These are upstream component tests, not a live mobile conversation. React act/localStorage warnings were present; passing assertions are not visual acceptance.
+The gateway home now has Web Access enabled with the dedicated HTTPS public URL. Effective host remains 127.0.0.1 and port 9120. A preservation check found **zero changes to preexisting non-webapp settings**. Staff roles and model/provider choices were not changed.
 
-The Python authentication/boundary campaign is **not clean and not accepted**. Initial runner attempts failed before useful execution because of test-environment dependencies/bootstrap. The supported `scripts/run_tests.sh` campaign (original process 34068, six exact files, two workers) subsequently reported production-home isolation-guard failures in owner-identity/profile-scope fixtures. The guard was not disabled or bypassed. Preserve its actual terminal summary when available; do not describe these checks as passing or as proof of an exploitable production defect.
+### Private HTTPS transport
 
-Upstream browser end-to-end cases inspected here explicitly require Linux and skip on macOS. They were not presented as executed Mac/iPhone proof.
+`tailscale serve --bg --https=8443 http://127.0.0.1:9120` succeeded, original process 28220. Readback proved every original Serve route unchanged; public Funnel remains off. The actual private URL is retained in the operation's private host receipts and the Chairman's chat, not exposed as a public service.
 
-The installed donor's preexisting tracked modifications remained byte-identical through the build: patch SHA-256 `3cae368c9ca1369184e9ff0e7afae06a57c43cc12f5483ebfec68f93a77177af`. They belong to other work and were not reset, stashed or edited. Existing staff providers/roles were not changed. No live inference canary has been sent by this operation.
+An HTTPS request with the correct hostname/SNI and an explicit mapping to the observed Tailscale IP returned curl exit 0, TLS verification 0 and **HTTP 502**. This proves the transport and certificate, not app availability. Default hostname resolution failed on the M2 because its observed Tailscale `CorpDNS` preference is false. That existing global preference was preserved. Phone DNS/reachability remains unverified.
 
-## Activation hold and exact next action
+## Validation: 189 passing checks, bounded proof
 
-The last native guard read narrowed five active units to one: background delegation `deleg_4ec60078` in gateway PID 48443, watching Mastermind PR #2155 until terminal state or its own deadline. The PR was still open when checked. It is not this operation's worker. No cancel, interrupt, kill, replacement watcher or forced restart was issued.
+| Campaign | Scope | Result | Original process |
+|---|---|---|---|
+| Installed renderer UI | Browser viewport, Web Access API/UI, served-profile selection/launch, gateway boot | 42 passed / 7 files, exit 0 | 19875 |
+| Installed renderer streaming | Delta flushing, completion boundaries, duplicate completion, execution-authority events, gateway message stream, reload/resume targeting | 47 passed / 6 files, exit 0 | 27493 |
+| Isolated native access tests A | Public URL/auth engagement, OAuth callbacks/trusted hosts, shared Desktop/Webapp owner, socket profile isolation | 40 passed / 3 files, exit 0 | 57678 |
+| Isolated native access tests B | Web Access behavior, originless remote WebSocket tickets, page content-security policy | 60 passed / 3 files, exit 0 | 62403 |
 
-The Chairman has been asked specifically whether that watcher may be interrupted. No reply/authorization is assumed. Do not broaden permission to interrupt another session that starts later.
+These are component and fixture checks, **not a real authenticated phone/provider conversation**. No live inference canary, browser login, production WebSocket denial check or physical-device acceptance is claimed. Renderer tests emitted React act/localStorage warnings without failed assertions. The upstream browser end-to-end cases inspected explicitly skip non-Linux; they were not misreported as executed Mac proof.
 
-Next action:
-1. Reconcile original test process 34068 and its terminal evidence. Reuse completed build/OAuth/HTTPS effects; do not recreate them.
-2. At the next actual activation opportunity, read native activity and gateway identity. If clear, use Hermes's supported safe restart path. If the Chairman explicitly permits interruption of the named watcher, verify no additional unrelated active units before applying that exact scope. Never add `--interrupt` by inference.
-3. Verify that the same configured gateway is serving port 9120 and HTTPS no longer returns 502. Check unauthorized API/WebSocket denial and the intended OAuth callback with certificate verification intact.
-4. Complete a real signed-in browser journey: select Meta-CEO and Secretary, bounded uniquely marked stream, Markdown/code/tool rendering, original history reload, stop/reconnect and desktop continuity. Do not duplicate uncertain sends.
-5. Verify an actual phone connection and keyboard/layout. Do not treat current unit tests as that proof.
+### Test-environment failure and resolved qualification
 
-No new background activation watcher/runner was created. Tailscale Serve is an existing transport service, not a promise that this Web session will continue implementation after its response.
+Retain the initial failures as historical evidence. Early runner attempts failed on missing dependencies/bootstrap. The first supported `scripts/run_tests.sh` campaign, original process 34068, ended exit 1 with **89 passed, 3 failed and 8 errors**. The causal stack showed bootstrap probing `root.parent/manifest.json` under the real Hermes home, correctly refused by the test I/O guard. A subprocess fixture also re-bootstrapped an incomplete isolated environment and lacked httpx. This was not accepted production-security evidence.
 
-## Delivery nodes
+Qualification then used a disposable source snapshot **outside the live Hermes home**, from the exact donor Git revision plus byte-verified copies of its six existing tracked modifications. No credentials, runtime state or production database were copied. The official per-file test runner and pinned test environment ran all six selected files in two disjoint batches: 40 + 60 passing checks. The production-home guard and all assertions remained intact; no production or test source was patched to force a pass. The archive emitted a nonfatal no-Git-metadata message; its retained input manifest, exact base and delta hashes establish source identity.
 
-| Node | Evidence/state |
+### Preservation and evidence
+
+The donor's existing tracked modifications were byte-identical through the native build; combined patch SHA-256 `3cae368c9ca1369184e9ff0e7afae06a57c43cc12f5483ebfec68f93a77177af`. Other writers' fallback/session edits and untracked tests were not reset, stashed or changed.
+
+Private receipts: `~/.local/state/mastermind/hermes-mobile-web-20261107/` on the M2. Relevant names: `build.log`, `mobile-ui-tests.log`, `stream-tests.log`, `auth-boundary-canonical-tests.log`, `auth-isolated-source-tests.log`, `auth-isolated-source-remaining-tests.log`, their exit files, `qualification-source.json`, `configuration-preservation.json`, `oauth-result.json`, `tailscale-serve-after.json`, `https-preactivation-check.json`, `activation-state.json`. Configuration backups are sensitive and must never be published.
+
+## Exact activation boundary
+
+The original background delegation `deleg_4ec60078` watching PR #2155 ceased to appear in the later native guard. The earlier question about interrupting that watcher is therefore **not permission to interrupt the subsequently observed live chat or scheduled work**.
+
+Latest activation preflight, process 65710/exit 0:
+- Existing gateway PID 48443, same recorded start identity.
+- Web Access enabled in saved config but live gateway state still `off`.
+- Native guard reports three live units: one GLM chat turn, one cron job and one managed run.
+- `restart_started: false`, `held_for_live_work: true`, validated checks 189.
+
+No restart, force/interrupt, kill, cancellation, replacement gateway, duplicate monitoring job or automatic activation watcher was issued. `restart-result.json` remains absent. All this operation's test/build processes have terminal receipts. No modifying effect is unknown.
+
+**Required next action:** obtain a safe idle opportunity, or exact Chairman permission for a brief gateway interruption after a fresh census of the work it would affect. The default is preservation. Use the native supported restart path only when that condition is satisfied; the general implementation request and the earlier watcher question do not silently widen interruption scope.
+
+Then verify, in order:
+1. The same configured gateway serves port 9120 and private HTTPS no longer returns 502.
+2. Unauthenticated HTTP/API/WebSocket denial, intended OAuth callback, certificate/origin/cookie behavior.
+3. Real signed-in browser selection of Meta-CEO and Secretary; one uniquely marked bounded stream with actual Markdown/code/tool rendering; original history reload, stop/reconnect and native Desktop continuity. Reconcile uncertain sends rather than repeat them.
+4. Phone connectivity, narrow layout and keyboard behavior. Preserve a physical-device gap until actually tested.
+
+Do not redo the build, OAuth registration or HTTPS publication. Do not restart another implementation or re-run unchanged passing campaigns merely for activity. Continue on the existing branch and original Studio local carrier.
+
+## Delivery nodes and recovery
+
+| Node | State |
 |---|---|
-| M1: adopt/build native renderer | Completed installed build; exact source/output hashes above |
-| M2: sign-in and gateway activation | OAuth/configuration saved; activation held by live delegation |
-| M3: private HTTPS | Route installed and TLS verified; upstream intentionally unavailable pending activation |
-| M4: mobile/streaming acceptance | 89 component assertions passed; live/authenticated/mobile journey still owed |
-| M5: repair demonstrated gaps | No speculative UI fork; Python test-isolation issues recorded separately |
-| M6: operating evidence and recovery | This source record plus private host receipts; broader OS integration remains scoped to its incumbent work |
+| M1: native renderer adoption | Installed build completed; exact hashes above |
+| M2: sign-in and activation | OAuth/configuration complete; activation held by current live work |
+| M3: private HTTPS | Route installed and TLS verified; upstream unavailable pending activation |
+| M4: streaming/mobile acceptance | 189 component/fixture checks pass; live browser and phone proof still owed |
+| M5: demonstrated gap repair | Test isolation corrected through a disposable source snapshot; no speculative UI fork |
+| M6: continuity and wider OS | Source evidence retained here; broader incumbent OS work untouched |
 
-Execution reason: UNIQUE_APPROVED_ACCESS and LOWER_TOTAL_OVERHEAD for deterministic native installation/integration. No Fabric worker, delegated lifecycle or post-turn autonomous executor is claimed. Agent OS linkage remains PLAN_NOT_ORG_LINKED; this is recoverable source evidence, not runtime admission.
+Finalization boundary: `EXACT_HUMAN_GATE` for an immediate interrupting restart; safe idle activation remains a permitted alternative in a later attended continuation. `MISSION_COMPLETE: false`. Capability: `BUILT_NOT_PROVEN` / partial installed composition, not production-ready.
 
-## Rollback and ongoing maintenance
+Execution reason: `UNIQUE_APPROVED_ACCESS` and `LOWER_TOTAL_OVERHEAD` for native deterministic integration. No Fabric child, delegated lifecycle or post-turn autonomous executor is claimed. Agent OS linkage remains `PLAN_NOT_ORG_LINKED`; this is source evidence, not runtime admission or an adopted organizational completion record.
 
-Remove only this operation's private route with `tailscale serve --https=8443 off`; never reset all Serve configuration. Disable only `webapp.enabled` through Hermes configuration and use a safe restart when permitted. Do not restore an entire old config over concurrent changes. Revoke the dedicated Web Access client through the existing Nous owner interface only when that rollback is authorized; leave dashboard/provider identities intact.
+## Rollback and maintenance
 
-Hermes's own update/build mechanism remains the renderer maintenance path. No hand-edited generated bundle, parallel app daemon or extra provider key is required.
+Remove only this operation's route with `tailscale serve --https=8443 off`; never reset all Serve configuration. Disable only `webapp.enabled` through Hermes configuration and safely restart when permitted. Do not restore an old whole config over concurrent changes. Revoke only the dedicated Web Access client through its existing Nous owner interface when that rollback is authorized; preserve dashboard/provider identities.
+
+Use Hermes's own update/build path for renderer maintenance. No hand-edited generated bundle, parallel app daemon or new provider key is required.
