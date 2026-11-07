@@ -184,7 +184,7 @@ def test_policy_fingerprint_change_refuses_discovery_and_new_subscribe(tmp_path)
 
 def test_subscription_lifetime_bounded_by_authenticated_principal(tmp_path):
     runtime,store,state,challenge,handler=setup(tmp_path)
-    long=dataclasses.replace(request(),requested_ttl_ms=24*60*60*1000)
+    long=dataclasses.replace(request(),requested_ttl_ms=8*24*60*60*1000)
     with pytest.raises(Exception):
         call(handler.subscribe(principal(),long))
     accepted=call(handler.subscribe(principal(),dataclasses.replace(request(),requested_ttl_ms=700000)))
