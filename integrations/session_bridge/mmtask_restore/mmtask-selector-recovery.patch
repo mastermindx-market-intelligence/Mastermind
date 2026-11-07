@@ -1,0 +1,418 @@
+--- a/gwcap/bin/mmtask
++++ b/gwcap/bin/mmtask
+@@ -17,7 +17,9 @@
+   done ID --evidence E           -> implementation_complete      review ID --evidence E -> reviewed
+   accept ID --evidence E         -> accepted                     block ID --reason R
+   supersede ID --by A[,B] --reason R      drop ID --reason R      edit ID [...]   note ID "text"
+-  list [--all] [--json] | next | show ID | render | waves
++  list [--all] [--json] | next [--explain] | show ID | render | waves
++                                          next is read-only; when no task is eligible, show recovery candidates.
++                                          --explain also shows gaps alongside eligible tasks; candidates grant no permission.
+   import [--mirror DIR] [--no-fetch] [--tasks FILE] [--allow-live]
+                                           MERGE refresh from Agent OS: never replaces/deletes local tasks or waves; a
+                                           missing record keeps live work; --tasks merges foreign rows (local wins,
+@@ -38,13 +40,19 @@
+                                           and inherit the binding. Refuses without writing: already bound to another key,
+                                           any unrelated task/wave workstream, missing target. Re-running when already bound
+                                           to the same target is a no-op (rc 0).
++  rebind [SLUG] --from 'WS:<unknown>'|'WS:<KEY>' --to WS:Y --reason R
++                                          Explicit placeholder recovery for a pristine seed only: zero tasks/waves,
++                                          no related bindings/history/import/export. Retains the original seed in binding_history.
+ """
+-import argparse, datetime, difflib, fcntl, glob, json, os, re, shutil, subprocess, sys, tempfile
++import argparse, datetime, difflib, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+ 
+ SCHEMA_VERSION = "2.0.0"
+ STATUSES = ["proposed", "ready", "blocked", "in_progress", "implementation_complete", "reviewed", "accepted", "superseded"]
+ CLOSED = {"accepted", "superseded"}
+ DEP_OK = {"implementation_complete", "reviewed", "accepted", "superseded"}
++# v1 'done' is retained historical completion, not a new acceptance verdict.
++DEPENDENCY_COMPLETE = DEP_OK | {"done"}
++PLACEHOLDER_BINDINGS = {"WS:<unknown>", "WS:<KEY>"}
+ OPEN = {"proposed", "ready", "blocked", "in_progress"}
+ MIRROR = os.path.expanduser(os.environ.get("MM_AGENTOS_MIRROR", "~/gwcap/agentos-mirror/macro"))
+ WAVE_FROM_TASKS = {"accepted": "done", "superseded": "dropped"}
+@@ -125,15 +133,101 @@
+     return "todo"
+ 
+ 
++def dependency_satisfied(db, task, dependency):
++    if not dependency:
++        return False
++    if dependency.get("status") in DEP_OK:
++        return True
++    # The new v1 compatibility must not qualify a foreign completed row as our prerequisite.
++    return (dependency.get("status") == "done"
++            and dependency.get("workstream", db.get("workstream")) == task.get("workstream", db.get("workstream")))
++
++
+ def next_tasks(db, exclude_ip=False):
+     by = {t["id"]: t for t in db["tasks"]}
+     ip = [] if exclude_ip else [t for t in db["tasks"] if t["status"] == "in_progress"]
+-    ok0 = lambda t: all(by.get(x, {}).get("status") in DEP_OK for x in t.get("depends_on") or [])
+-    has_open_kids = lambda t: any(c.get("parent") == t["id"] and c["status"] not in DEP_OK for c in db["tasks"])
++    ok0 = lambda t: all(dependency_satisfied(db, t, by.get(x)) for x in t.get("depends_on") or [])
++    has_open_kids = lambda t: any(c.get("parent") == t["id"] and not dependency_satisfied(db, t, c) for c in db["tasks"])
+     ok = lambda t: ok0(t) and not has_open_kids(t)
+     ready = [t for t in db["tasks"] if t["status"] == "ready" and ok(t)]
+     prop = [t for t in db["tasks"] if t["status"] == "proposed" and ok(t)]
+     return ip + ready + prop
++
++
++def compact(value, limit=180):
++    text = " ".join(str(value or "").split())
++    return text if len(text) <= limit else text[:limit - 1] + "…"
++
++
++def recovery_scope_issues(db, task):
++    issues = []
++    ws = task.get("workstream", db.get("workstream"))
++    if ws and ws not in ws_keys(db):
++        issues.append(f"FOREIGN_WORKSTREAM {compact(ws, 80)}: reconcile original scope; no automatic adoption")
++    matches = [w for w in db["waves"] if w.get("id") == task.get("wave") and w.get("workstream", db.get("workstream")) == ws]
++    if len(matches) != 1:
++        issues.append(f"UNMAPPED_WAVE {compact(task.get('wave') or '(missing)', 80)}: recover the original wave mapping")
++    return issues
++
++
++def next_recovery(db, directory):
++    """Explain existing evidence gaps without promoting candidates or changing the buffer."""
++    out = ["RECOVERY CANDIDATES — not execution permission; verify source, custody, holds and effects first."]
++    tasks, waves = db["tasks"], db["waves"]
++    by = {t["id"]: t for t in tasks}
++    if not tasks:
++        out.append("- EMPTY_BUFFER: recover the objective/current action from Agent OS and STATE.md; import the existing record, then pin the breakdown before executing.")
++    if not db.get("workstream"):
++        out.append("- UNBOUND_BUFFER: read NORTH_STAR.md, STATE.md and the existing Agent OS record; qualify its identity before using `mmtask rebind --from null --to WS:KEY --reason …`. Do not invent a binding.")
++    elif db.get("workstream") in PLACEHOLDER_BINDINGS:
++        out.append(f"- PLACEHOLDER_BINDING {db['workstream']}: recover the canonical Agent OS identity; only a pristine empty seed supports explicit `mmtask rebind --from '{db['workstream']}' --to WS:KEY --reason …`. Populated seeds require source reconciliation.")
++    if not read(os.path.join(directory, "HANDOFF.md")).strip():
++        out.append("- BLANK_HANDOFF: HANDOFF.md is missing or blank; recover the latest canonical handoff and STATE.md before restoring the local handoff. Absence is not completion.")
++
++    selected = {t["id"] for t in next_tasks(db)}
++    for t in [t for t in tasks if t["id"] in selected][:5]:
++        issues = recovery_scope_issues(db, t)
++        if issues:
++            out.append(f"- SELECTOR_WARNING {t['id']} ({t.get('status')}): " + "; ".join(issues) + ". Legacy selection is not qualified readiness or permission.")
++    closed = CLOSED | {"done"}
++    actions = {
++        "todo": "legacy todo: reconcile the original task/wave and dependencies before any explicit ready/start; do not auto-dispatch",
++        "implementation_complete": "consume existing evidence and finish the applicable verification/acceptance boundary; do not redo implementation",
++        "reviewed": "consume existing evidence and resolve remaining acceptance/release obligations; review alone is not mission completion",
++        "blocked": "preserve the exact blocker/refusal/unknown effect; resolve its permitted next step or continue an independent lane",
++    }
++    candidates = [t for t in tasks if t["id"] not in selected and t.get("status") not in closed]
++    for t in candidates[:8]:
++        issues = []
++        for dep in t.get("depends_on") or []:
++            status = by.get(dep, {}).get("status")
++            if not dependency_satisfied(db, t, by.get(dep)):
++                detail = ("done (FOREIGN_DEPENDENCY: reconcile original scope)" if status == "done" else status)
++                issues.append(f"dependency {dep}: {detail or 'UNMAPPED_DEPENDENCY (reconcile original source)'}")
++        issues.extend(recovery_scope_issues(db, t))
++        if t.get("reason"):
++            issues.append("recorded reason: " + compact(t["reason"]))
++        kids = [c["id"] for c in tasks if c.get("parent") == t["id"] and not dependency_satisfied(db, t, c)]
++        if kids:
++            issues.append("unfinished children: " + compact(", ".join(kids)))
++        action = actions.get(t.get("status"), "reconcile the recorded status/dependencies and existing source before selecting work")
++        out.append(f"- {t['id']} ({t.get('status')}): {compact(t.get('title'), 90)} — {action}" + ("; " + compact("; ".join(issues), 500) if issues else ""))
++    if len(candidates) > 8:
++        out.append(f"- {len(candidates) - 8} more unfinished rows; inspect `mmtask list --all --json` and `mmtask show ID`.")
++
++    # A canonical wave can carry the next action even when its local task mapping is absent.
++    wave_candidates = [w for w in waves if w.get("status") not in {"done", "dropped", "accepted", "superseded", "complete", "completed"}
++                       and not any(t.get("wave") == w.get("id") and t.get("workstream", db.get("workstream")) == w.get("workstream", db.get("workstream"))
++                                   and t.get("status") not in closed for t in tasks)]
++    for w in wave_candidates[:5]:
++        deps = compact(", ".join(str(x) for x in w.get("depends_on") or []) or "none recorded")
++        action = w.get("next_action") or "read the existing canonical wave/handoff and pin its remaining task breakdown"
++        out.append(f"- UNMAPPED_WAVE {w.get('p', '?')}={w.get('id')} ({w.get('status')}): {compact(action)}; wave dependencies: {deps}. Reconcile source scope and dependencies before execution.")
++    if len(wave_candidates) > 5:
++        out.append(f"- {len(wave_candidates) - 5} more unmapped unfinished waves; inspect `mmtask waves`.")
++    if not candidates and not wave_candidates and tasks and not selected:
++        out.append("- No eligible task and no unfinished buffered task/wave; verify the actual mission outcome against Agent OS/STATE.md. Preserve closed work; do not infer full completion or reopen accepted work.")
++    return out
+ 
+ 
+ def render(db):
+@@ -433,11 +527,15 @@
+     frm, to = a.from_ws, a.to_ws
+     if str(frm).lower() in NULL_FROM:
+         return do_bind_init(d, db, a)
+-    for v in (frm, to):
++    placeholder = frm in PLACEHOLDER_BINDINGS
++    for v in ((to,) if placeholder else (frm, to)):
+         if not re.fullmatch(r"WS:[A-Z0-9-]+", v or ""):
+             sys.exit(f"mmtask rebind: bad workstream key {v!r} (expected WS:KEY)")
+     if db.get("workstream") != frm:
+         sys.exit(f"mmtask rebind: harness is bound to {db.get('workstream')}, not {frm}; nothing changed")
++    if placeholder and (db["tasks"] or db["waves"] or db.get("binding_history") or db.get("related_workstreams")
++                        or any(db["agentos"].get(k) for k in ("records", "source_sha", "imported_at", "last_export", "last_export_attempt"))):
++        sys.exit("mmtask rebind: placeholder recovery requires a pristine empty seed (zero tasks/waves, no related bindings/history/import/export); reconcile populated evidence on its original source; nothing changed")
+     mirror = a.mirror or db["agentos"].get("mirror") or MIRROR
+     rec = os.path.join(mirror, "agentos/workstreams", f"WS-{to.split(':', 1)[1]}.md")
+     if not os.path.exists(rec):
+@@ -451,8 +549,13 @@
+             w["workstream"] = to; w.setdefault("rebound_from", frm); nw += 1
+     db["related_workstreams"] = [x for x in (db.get("related_workstreams") or []) if x != to]
+     db["workstream"] = to
++    previous_seed = {}
++    if placeholder:
++        raw = open(os.path.join(d, "TASKS.json"), "rb").read()
++        previous_seed = {"kind": "placeholder-init", "previous_seed": json.loads(raw),
++                         "previous_seed_sha256": hashlib.sha256(raw).hexdigest()}
+     db.setdefault("binding_history", []).append({"at": now(), "by": session(), "from": frm, "to": to, "reason": a.reason,
+-                                                 "previous_records": db["agentos"].get("records"), "previous_source_sha": db["agentos"].get("source_sha")})
++                                                 "previous_records": db["agentos"].get("records"), "previous_source_sha": db["agentos"].get("source_sha"), **previous_seed})
+     imported, _ = do_import(d, db, mirror, False)
+     sha = (db["agentos"].get("source_sha") or "-")[:10]
+     nwaves = next((r.get("waves") for r in imported if r["workstream"] == to), 0)
+@@ -663,20 +766,23 @@
+     p = sp.add_parser("edit"); p.add_argument("id"); p.add_argument("--title"); p.add_argument("--wave"); p.add_argument("--deps"); p.add_argument("--accept", action="append"); p.add_argument("--owner")
+     p = sp.add_parser("note"); p.add_argument("id"); p.add_argument("text")
+     p = sp.add_parser("list"); p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
+-    sp.add_parser("next"); sp.add_parser("render"); sp.add_parser("waves"); p = sp.add_parser("show"); p.add_argument("id")
++    p = sp.add_parser("next"); p.add_argument("--explain", action="store_true", help="show read-only recovery gaps even when eligible tasks exist")
++    sp.add_parser("render"); sp.add_parser("waves"); p = sp.add_parser("show"); p.add_argument("id")
+     p = sp.add_parser("wave-propose"); p.add_argument("id"); p.add_argument("title"); p.add_argument("--workstream"); p.add_argument("--pr")
+     p = sp.add_parser("import"); p.add_argument("--mirror", default=MIRROR); p.add_argument("--no-fetch", action="store_true")
+     p.add_argument("--tasks", help="merge task rows from a TASKS.json (v1 or v2); local always wins"); p.add_argument("--allow-live", action="store_true")
+     p = sp.add_parser("export"); p.add_argument("--ended-because", default="ci_handoff", choices=["complete", "ci_handoff", "blocked", "context_budget", "crashed"])
+     p.add_argument("--session"); p.add_argument("--mission"); p.add_argument("--dry-run", action="store_true")
+     p = sp.add_parser("export-state"); p.add_argument("--recompute", action="store_true"); p.add_argument("--reason")
+-    p = sp.add_parser("rebind"); p.add_argument("slug_pos", nargs="?", metavar="SLUG"); p.add_argument("--from", dest="from_ws", required=True, help="WS:KEY, or 'null' to initialize an unbound (workstream:null) buffer")
++    p = sp.add_parser("rebind"); p.add_argument("slug_pos", nargs="?", metavar="SLUG"); p.add_argument("--from", dest="from_ws", required=True, help="WS:KEY, 'null', or an exact quoted placeholder ('WS:<unknown>' / 'WS:<KEY>') for a pristine empty seed")
+     p.add_argument("--to", dest="to_ws", required=True); p.add_argument("--reason", required=True); p.add_argument("--mirror")
+     a = ap.parse_args()
+     if getattr(a, "slug_pos", None) and not (a.slug or a.dir):
+         a.slug = a.slug_pos
+     d = resolve(a)
+-    lockf = open(os.path.join(d, ".TASKS.lock"), "a+"); fcntl.flock(lockf, fcntl.LOCK_EX)
++    # next reads an atomically published snapshot and never creates a lock or writes a charter.
++    if a.cmd != "next":
++        lockf = open(os.path.join(d, ".TASKS.lock"), "a+"); fcntl.flock(lockf, fcntl.LOCK_EX)
+     db = load(d); changed = False; msg = None
+     snap = {t["id"]: (t.get("status"), t.get("evidence"), len(t.get("history") or [])) for t in db["tasks"]}
+     snap_alias = {t["id"]: list(t.get("aliases") or []) for t in db["tasks"]}
+@@ -792,10 +898,11 @@
+         for w in db["waves"]: print(f"{w['p']:4} {w.get('workstream','')[:32]:32} {w['id'][:28]:28} AO={w.get('status')} derived={derived_wave_status(db, w)} {w.get('source')}")
+     elif a.cmd == "next":
+         nx = next_tasks(db)
+-        if not nx: print("(no ready task — plan the breakdown with `mmtask add --wave …` before executing)")
+         for x in nx[:5]:
+             print(f"{x['id']:10} {x['status']:12} [{x.get('wave')}] {x['title']}")
+             for c in x.get("acceptance") or []: print(f"           accept: {c}")
++        if not nx or a.explain:
++            for line in next_recovery(db, d): print(line)
+     elif a.cmd == "show":
+         print(json.dumps(get(db, a.id), indent=2, ensure_ascii=False))
+ 
+--- a/gwcap/bin/mmtask-repair/test_mmtask.py
++++ b/gwcap/bin/mmtask-repair/test_mmtask.py
+@@ -285,6 +285,205 @@
+         self.assertEqual(json.dumps(self.db()["tasks"], sort_keys=True), tasks0)
+ 
+ 
++class NextRecovery(unittest.TestCase):
++    """Selector diagnostics use disposable buffers and never grant execution authority."""
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory(prefix="mmtask-next-")
++        self.d = self.tmp.name
++
++    def tearDown(self):
++        self.tmp.cleanup()
++
++    def task(self, tid, status, **kw):
++        return dict(id=tid, title="Work " + tid, status=status, wave="W1", **kw)
++
++    def seed(self, tasks=(), **kw):
++        db = dict(workstream="WS:FIXTURE", tasks=list(tasks), waves=[dict(
++            p="P1", id="W1", workstream="WS:FIXTURE", status="in_progress", title="Fixture wave")])
++        db.update(kw)
++        with open(os.path.join(self.d, "TASKS.json"), "w") as f:
++            json.dump(db, f)
++        return db
++
++    def next(self, *args):
++        before = {p: open(os.path.join(self.d, p), "rb").read() for p in os.listdir(self.d)}
++        r = subprocess.run([sys.executable, MMTASK, "--dir", self.d, "next", *args],
++                           capture_output=True, text=True)
++        self.assertEqual(r.returncode, 0, r.stderr)
++        self.assertEqual({p: open(os.path.join(self.d, p), "rb").read() for p in os.listdir(self.d)}, before)
++        return r.stdout
++
++    def test_legacy_done_satisfies_dependency_without_reopening_done(self):
++        self.seed([self.task("T001", "done", evidence="historical proof"),
++                   self.task("P1.T1", "ready", depends_on=["T001"])])
++        out = self.next()
++        self.assertIn("P1.T1", out)
++        self.assertNotIn("T001", out)
++
++    def test_legacy_todo_is_recovery_candidate_even_with_satisfied_deps(self):
++        self.seed([self.task("T001", "done"), self.task("T002", "todo", depends_on=["T001"])])
++        out = self.next()
++        self.assertIn("RECOVERY CANDIDATES", out)
++        self.assertIn("T002 (todo)", out)
++        self.assertIn("legacy todo", out)
++        self.assertIn("not execution permission", out)
++        self.assertNotIn("T001 (done)", out)
++
++    def test_empty_unbound_buffer_and_blank_handoff_have_concrete_recovery(self):
++        self.seed(workstream=None, waves=[])
++        open(os.path.join(self.d, "HANDOFF.md"), "w").write(" \n")
++        out = self.next()
++        for expected in ["EMPTY_BUFFER", "UNBOUND_BUFFER", "BLANK_HANDOFF", "Agent OS", "STATE.md"]:
++            self.assertIn(expected, out)
++
++    def test_unfinished_acceptance_and_blocked_rows_are_visible(self):
++        self.seed([self.task("P1.T1", "implementation_complete"), self.task("P1.T2", "reviewed"),
++                   self.task("P1.T3", "blocked", reason="original consent pending")])
++        out = self.next()
++        for expected in ["P1.T1 (implementation_complete)", "P1.T2 (reviewed)", "P1.T3 (blocked)",
++                         "original consent pending", "existing evidence", "preserve"]:
++            self.assertIn(expected, out)
++
++    def test_missing_dependency_and_foreign_unmapped_todo_stay_candidates(self):
++        t = self.task("P1.T1", "ready", depends_on=["MISSING"])
++        foreign = dict(id="T900", title="Foreign legacy", status="todo", wave="unknown",
++                       workstream="WS:OTHER", depends_on=["FOREIGN"])
++        self.seed([t, foreign])
++        out = self.next()
++        for expected in ["MISSING", "FOREIGN", "UNMAPPED_WAVE", "FOREIGN_WORKSTREAM", "T900 (todo)"]:
++            self.assertIn(expected, out)
++        self.assertIn("not execution permission", out)
++
++    def test_unrepresented_active_wave_and_unknown_status_are_not_silently_complete(self):
++        self.seed([self.task("P1.T1", "waiting_external")], waves=[dict(
++            p="P2", id="W2", workstream="WS:FIXTURE", title="Unmapped wave", status="blocked",
++            next_action="Consume original result", depends_on=["FOREIGN-WAVE"])])
++        out = self.next()
++        for expected in ["waiting_external", "W2", "Consume original result", "FOREIGN-WAVE"]:
++            self.assertIn(expected, out)
++
++    def test_closed_rows_and_waves_are_not_reopened(self):
++        self.seed([self.task("P1.T1", "accepted"), self.task("P1.T2", "superseded"), self.task("T003", "done")],
++                  waves=[dict(p="P1", id="W1", status="done", workstream="WS:FIXTURE")])
++        out = self.next()
++        for tid in ["P1.T1", "P1.T2", "T003"]:
++            self.assertNotIn(tid, out)
++        self.assertIn("no unfinished buffered", out)
++
++    def test_explain_is_additive_for_eligible_rows_and_reports_handoff(self):
++        self.seed([self.task("P1.T1", "in_progress"), self.task("P1.T2", "ready"),
++                   self.task("T003", "todo")])
++        normal = self.next()
++        explained = self.next("--explain")
++        self.assertTrue(explained.startswith(normal))
++        self.assertNotIn("T003", normal)
++        self.assertIn("T003 (todo)", explained)
++        self.assertIn("BLANK_HANDOFF", explained)
++
++    def test_explain_warns_on_foreign_and_unmapped_ready_rows_already_selected(self):
++        self.seed([dict(id="P1.T1", title="foreign ready", status="ready", wave="FOREIGN",
++                        workstream="WS:OTHER")])
++        normal = self.next()
++        explained = self.next("--explain")
++        self.assertTrue(explained.startswith(normal))
++        for expected in ["SELECTOR_WARNING P1.T1", "FOREIGN_WORKSTREAM", "UNMAPPED_WAVE",
++                         "not qualified readiness"]:
++            self.assertIn(expected, explained)
++
++    def test_long_blocker_reason_is_compact_and_points_to_original_row(self):
++        self.seed([self.task("P1.T1", "blocked", reason="original hold " + "x" * 12000)])
++        out = self.next()
++        self.assertIn("original hold", out)
++        self.assertLess(len(out), 1800)
++
++    def test_nonexact_legacy_done_variants_do_not_satisfy_dependency(self):
++        for status in ["Done", "DONE", " done "]:
++            with self.subTest(status=status):
++                self.seed([self.task("T001", status), self.task("P1.T1", "ready", depends_on=["T001"])])
++                out = self.next()
++                self.assertIn("RECOVERY CANDIDATES", out)
++                self.assertIn("dependency T001:", out)
++
++    def test_legacy_done_child_does_not_hide_ready_parent(self):
++        self.seed([self.task("P1.T1", "ready"), self.task("P1.T1.S1", "done", parent="P1.T1")])
++        self.assertIn("P1.T1      ready", self.next())
++
++    def test_foreign_legacy_done_dependency_is_not_newly_qualified(self):
++        self.seed([self.task("T900", "done", workstream="WS:OTHER"),
++                   self.task("P1.T1", "ready", depends_on=["T900"])])
++        out = self.next()
++        self.assertIn("RECOVERY CANDIDATES", out)
++        self.assertIn("FOREIGN_DEPENDENCY", out)
++
++
++class PlaceholderBind(Base):
++    def seed(self, sentinel="WS:<unknown>", **kw):
++        db = dict(workstream=sentinel, tasks=[], waves=[], agentos={},
++                  seed_evidence="original audit seed; not an execution grant")
++        db.update(kw)
++        with open(os.path.join(self.d, "TASKS.json"), "w") as f:
++            json.dump(db, f)
++        return open(os.path.join(self.d, "TASKS.json"), "rb").read()
++
++    def bind(self, sentinel="WS:<unknown>", to="WS:MARKET-OS", ok=True):
++        return self.mm("rebind", "--from", sentinel, "--to", to, "--reason", "qualified existing record",
++                       "--mirror", mirror(), ok=ok)
++
++    def test_exact_placeholder_initializes_and_preserves_original_seed(self):
++        import hashlib
++        for sentinel in ["WS:<unknown>", "WS:<KEY>"]:
++            with self.subTest(sentinel=sentinel):
++                raw = self.seed(sentinel)
++                self.bind(sentinel)
++                db = self.db()
++                self.assertEqual(db["workstream"], "WS:MARKET-OS")
++                self.assertEqual(db["tasks"], [])
++                self.assertTrue(db["waves"])
++                history = db["binding_history"][-1]
++                self.assertEqual(history["from"], sentinel)
++                self.assertEqual(history["kind"], "placeholder-init")
++                self.assertEqual(history["previous_seed"], json.loads(raw))
++                self.assertEqual(history["previous_seed_sha256"], hashlib.sha256(raw).hexdigest())
++                self.assertEqual(db["seed_evidence"], json.loads(raw)["seed_evidence"])
++
++    def test_populated_or_previously_bound_seed_refuses_without_buffer_write(self):
++        cases = [dict(tasks=[dict(id="T001", status="accepted", title="retained", evidence="proof")]),
++                 dict(waves=[dict(p="P1", id="W1")]), dict(binding_history=[dict(from_ws="WS:REAL")]),
++                 dict(related_workstreams=["WS:REAL"]), dict(agentos=dict(source_sha="historical-source"))]
++        for kw in cases:
++            with self.subTest(kw=kw):
++                raw = self.seed(**kw)
++                out = self.bind(ok=False)
++                self.assertNotEqual(out.returncode, 0)
++                self.assertIn("pristine", out.stderr)
++                self.assertEqual(open(os.path.join(self.d, "TASKS.json"), "rb").read(), raw)
++
++    def test_mismatched_null_or_canonical_from_is_not_rewritten(self):
++        for cur, frm in [("WS:<KEY>", "WS:<unknown>"), (None, "WS:<unknown>"),
++                         ("WS:MARKET-OS", "WS:<unknown>"), ("WS:<unknown>", "null")]:
++            with self.subTest(cur=cur, frm=frm):
++                raw = self.seed(cur)
++                out = self.bind(frm, ok=False)
++                self.assertNotEqual(out.returncode, 0)
++                self.assertEqual(open(os.path.join(self.d, "TASKS.json"), "rb").read(), raw)
++
++    def test_missing_or_noncanonical_target_and_unknown_sentinel_refuse(self):
++        for frm, to in [("WS:<unknown>", "WS:NO-SUCH-THING"), ("WS:<KEY>", "WS:<unknown>"),
++                        ("WS:<other>", "WS:MARKET-OS")]:
++            with self.subTest(frm=frm, to=to):
++                raw = self.seed(frm)
++                out = self.bind(frm, to=to, ok=False)
++                self.assertNotEqual(out.returncode, 0)
++                self.assertEqual(open(os.path.join(self.d, "TASKS.json"), "rb").read(), raw)
++
++    def test_placeholder_next_explains_exact_quoted_recovery(self):
++        self.seed()
++        out = self.mm("next").stdout
++        self.assertIn("PLACEHOLDER_BINDING", out)
++        self.assertIn("--from 'WS:<unknown>'", out)
++        self.assertIn("pristine", out)
++
++
+ if __name__ == "__main__":
+     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+         MMTASK = sys.argv.pop(1)

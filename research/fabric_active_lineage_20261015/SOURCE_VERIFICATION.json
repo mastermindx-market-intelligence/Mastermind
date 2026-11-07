@@ -1,0 +1,18 @@
+{
+  "candidate": {
+    "fabric_task.py": "b8cb82fbf919562b6a49d9d402bfa58fb111c411781d9c20bea2715c2cebb78d",
+    "run_observation_delivery.py": "b05f1f8c57c6eac1da102d13075ee90e8402918a8f0a10a0726d38bfb3048e6b"
+  },
+  "focused_checks": 38,
+  "baseline_discriminating_checks": "3 failures before repair; expected red",
+  "qualification": "local installed public dependencies; no provider or live-run access",
+  "consumer_check": "actual native facade leaves root_verified false and refuses result with ROOT_UNVERIFIED despite available partial file",
+  "changed_risk_repairs": [
+    "reject group-writable file",
+    "refuse correlation after explicit post-binding uncertainty",
+    "separate controller_lineage from terminal root fields",
+    "missing optional reader remains unverified"
+  ],
+  "unchanged": "existing adapter functions except additive inspect_run are AST-identical; historical observation scope assignments unchanged",
+  "installed": false
+}

@@ -1,0 +1,16 @@
+/* The accepted Office material owns both themes. Priority rows are compact
+   native disclosures; full authored prose belongs behind the row, not at glance. */
+.office-company-priorities .office-company-priority-list { gap: 0; }
+.office-company-priorities .office-company-priority-list > li { padding: 0; }
+.office-company-priorities .office-company-priority-list > li > details { width: 100%; min-width: 0; }
+.office-company-priorities .office-company-priority-list > li > details > summary {
+  min-height: var(--sp-8);
+  padding-block: var(--sp-3);
+  cursor: pointer;
+  list-style-position: inside;
+  font-size: inherit;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.office-company-priority-detail { padding-bottom: var(--sp-4); max-width: 75ch; }
+.office-company-priority-detail > p:not(.office-ref) { font-size: inherit; line-height: inherit; }

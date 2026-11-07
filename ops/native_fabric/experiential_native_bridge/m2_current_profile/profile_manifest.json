@@ -1,0 +1,31 @@
+{
+  "bridge_sha256": "aac228bf7cc8bad6cc607eebd338c4a0453bc5f66b05a19eb204c532fb097c9a",
+  "current_selection_sha256": "e825f23c77305d3cdd7b58cadaf2709b23d8867cd72d916b130fca82a502eb5f",
+  "owner_modules_sha256": {
+    "experiential_pin.py": "8ddb970fa460634a44c4c2db309207be62e07ea02843e4d6776e084e31c5eb06",
+    "experiential_transport.py": "ce194b85a5ffd05e202c9696991e36d08a85c16595c243a12256baab6aebf7a7"
+  },
+  "patches_sha256": {
+    "fabric_task.py.patch": "9117d77f2687632dd5c5fd20ebdbebde368beefa0f0d6f5e7ae3d479f007e3c7",
+    "remote_sub.sh.patch": "02f2ddc9f36638a924cf8dca7826dec41aaa7c926fcf37843ccbcb4cc26fd9c4",
+    "slot.py.patch": "5b5a5a20822246740c31fcf3446d7980d519aa10330dab454a57731d4bdea070",
+    "sub.sh.patch": "e1d55af74e64a09fc29318c09179e5c484a90481f5eadd640e483f755421732f"
+  },
+  "postimages_sha256": {
+    "fabric_task.py": "ce56c953e3d5b3051afc8073bb9d50d4ca469d6b4cc2f80d5c25591e0bf00473",
+    "remote_sub.sh": "9c22c433721b26cc54b77b9b2e5388f3e3e8208c0c3a313c30ddda82de47e78d",
+    "slot.py": "9e853c7ee0f83b47c789c9e9e02656305c247b523a484b7dba31dfd0a6b9e0ca",
+    "sub.sh": "3178ab9219d794896b4691826987b9736146cdfc6035b2d2dbd894c530dc2484"
+  },
+  "preimages_sha256": {
+    "fabric_task.py": "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b",
+    "remote_sub.sh": "e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05",
+    "slot.py": "85c8c2140d314241d8d8e324cf07428672f842ecacfc126570c25400affe406f",
+    "sub.sh": "4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f"
+  },
+  "profile": "m2-9691-20261104-exact-selected-code",
+  "schema": "mastermind.experiential_m2_installed_profile.v1",
+  "selected_generation": "9691fff17648c82b09152ba285d620abf0fd12d10a9530a7abae0cd1ab96238b",
+  "selected_sequence": 30,
+  "status": "source_candidate_not_installed"
+}
