@@ -230,3 +230,111 @@ def test_core_source_issuer_rejects_fake_and_subclass_services(tmp_path, monkeyp
         pass
     with pytest.raises(ValueError, match="ISSUER_REQUIRED"):
         source_owner.bind_issuer(object.__new__(OtherService))
+
+
+@pytest.mark.parametrize("authority_change", [
+    "unchanged", "execution_disarmed", "workspace_revoked", "expired_token",
+])
+def test_lost_submit_reopens_original_durable_job_without_fresh_plan_or_dispatch(
+    tmp_path, monkeypatch, authority_change,
+):
+    """H4/H5 source qualification: response loss followed by a cold owner reopen.
+
+    Runtime, Job/Event persistence, private input custody and the authenticated
+    request owner are real. Source observations and physical worker preparation
+    remain the existing fixture seams; no installed runtime or provider is used.
+    """
+    from control_plane.workspace_source_operations import SourceOperationEvents
+    from integrations.mastermind_executive_app.project_planning_factory import (
+        ProjectPlanningAppFactory,
+    )
+    from tests.test_project_execution_service import _reopen_project_service
+
+    factory, principal, args, armed, _ = fixture(tmp_path, monkeypatch)
+    attempts_to_prepare = []
+
+    async def lose_response(root, operation):
+        operation.require_root(root.job_id)
+        attempts_to_prepare.append(root.job_id)
+        raise ConnectionError("response lost after the original Job committed")
+
+    monkeypatch.setattr(factory, "_prepare_workspace", lose_response)
+    lost = asyncio.run(invoke(factory, principal, args))
+    assert not lost["ok"] and lost["error"]["code"] == "effect_unknown"
+    original_runtime = factory.service._require_runtime()
+    original_job = original_runtime.jobs.list_jobs()[0]
+    original_event = original_runtime.store.unique_root_created_event(original_job.job_id)
+    original_source = source_owner.read_source(original_runtime, original_job)
+    original_input = source_owner.read_original_input(factory._supervisor(), original_source)
+    assert attempts_to_prepare == [original_job.job_id]
+    assert original_runtime.attempts.list_attempts() == []
+
+    # Drop the Runtime/Store/Supervisor/App-factory objects that submitted the
+    # operation. Recovery must derive its answer from retained original owners.
+    old_planning = factory.planning
+    restored_service = _reopen_project_service(factory.service)
+    restored_service._service_state = "READY"
+    restored_service._ceo_ingress_ready = True
+    planning = ProjectPlanningAppFactory(
+        service=restored_service,
+        app_binding=restored_service._ceo_ingress_app_binding,
+        policies=old_planning.policies,
+        reader=old_planning.reader,
+        plan_reader=old_planning.plan_reader,
+        events=SourceOperationEvents(restored_service.runtime.store),
+        workspace_policy=old_planning.workspace_policy,
+        load_workspace_bindings=lambda: copy.deepcopy(old_planning._test_bindings[0]),
+        policy_loader=old_planning.policy_loader,
+        clock=old_planning.clock,
+    )
+    planning._test_workspace_principal = old_planning._test_workspace_principal
+    recovered = ProjectExecutionAppFactory(planning)
+
+    def forbidden(*_, **__):
+        raise AssertionError("original reconciliation consulted fresh plan or dispatch")
+
+    for name in ("_capture", "_binding", "_fixed_source", "_prepare_workspace"):
+        monkeypatch.setattr(recovered, name, forbidden)
+    monkeypatch.setattr(planning, "_canonical_plan", forbidden)
+    monkeypatch.setattr(planning, "_canonical_view", forbidden)
+
+    if authority_change == "execution_disarmed":
+        armed[0] = False
+    elif authority_change == "workspace_revoked":
+        old_planning._test_bindings[0]["profiles"]["member-0"]["enabled"] = False
+    elif authority_change == "expired_token":
+        principal = dataclasses.replace(principal, expires_at=int(planning.clock()) - 1)
+
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    if authority_change == "expired_token":
+        # The existing foreground owner refuses an expired principal before the
+        # App factory can read the original event; it is not an unknown effect.
+        from control_plane.foreground_operation import ForegroundOperationRefusal
+
+        for selected, operation in ((lookup, "status"), (args, "submit")):
+            with pytest.raises(ForegroundOperationRefusal, match="principal window is not live"):
+                asyncio.run(invoke(recovered, principal, selected, operation))
+    else:
+        status = asyncio.run(invoke(recovered, principal, lookup, "status"))
+        replay = asyncio.run(invoke(recovered, principal, args))
+        if authority_change in {"unchanged", "execution_disarmed"}:
+            assert status["ok"] and replay["ok"], (status, replay)
+            for response in (status, replay):
+                assert response["data"]["receipt"]["job_id"] == original_job.job_id
+                assert response["data"]["receipt"]["intent_id"] == original_source["intent_id"]
+            changed = {**args, "handoff_text": "A different turn cannot replace the original"}
+            conflict = asyncio.run(invoke(recovered, principal, changed))
+            assert not conflict["ok"] and conflict["error"]["code"] == "operation_conflict"
+        else:
+            assert not status["ok"] and not replay["ok"]
+            assert status["data"] is None and replay["data"] is None
+
+    runtime = restored_service._require_runtime()
+    assert runtime is not original_runtime and runtime.store is not original_runtime.store
+    assert runtime.store.path == original_runtime.store.path
+    assert [job.job_id for job in runtime.jobs.list_jobs()] == [original_job.job_id]
+    assert runtime.attempts.list_attempts() == []
+    assert runtime.store.unique_root_created_event(original_job.job_id).to_dict() == original_event.to_dict()
+    assert source_owner.read_source(runtime, runtime.jobs.get_job(original_job.job_id)) == original_source
+    assert source_owner.read_original_input(recovered._supervisor(), original_source) == original_input
+    assert attempts_to_prepare == [original_job.job_id]
