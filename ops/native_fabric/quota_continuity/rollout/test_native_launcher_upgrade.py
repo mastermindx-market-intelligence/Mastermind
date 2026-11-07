@@ -282,6 +282,10 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 # process qualifier changed CURRENT. Never relabel old95.
                 'ext/linux_process_identity.py': (
                     fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt'),
+                # The standard-Linux MemTotal forward stage changed CURRENT only.
+                # Restore the exact historical95 probe bytes in this disposable owner.
+                'ext/host_pull_probe.template': (
+                    fixture.parent / 'native_historical_payloads/host_pull_probe.template.txt'),
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()

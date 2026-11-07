@@ -787,3 +787,69 @@ test('null TTL still refuses loaded, active, anomalous, or claimed-ready tunnels
       /FLEET_STATUS_OWNER_RESULT_INVALID/, name);
   }
 });
+
+test('Capacity annotations preserve exact measurements and effective lane limit without admitting held hosts', async t => {
+  const fx = await fabricFixture(ownerFor([statusRow('chatgpt1', true)]), rows => rows.map(row => ({
+    ...row, eligible: false,
+    gates: row.gates.map(gate =>
+      gate.gate === 'lane-ceiling' ? {...gate, result: row.host === 'ubuntu3' ? 'FAIL' : 'PASS',
+        detail: row.host === 'ubuntu3' ? 'reconciliation_hold' : '4<12 (lane_ceiling=32, max_active=12)'} :
+      gate.gate === 'disk' ? {...gate, result: 'FAIL', detail: '51.2>=75 (base=60,stage=15)'} : gate),
+  })));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  const m2 = result.physicalFleet.hosts.find(row => row.hostRef === 'm2');
+  assert.equal(m2.environment.activeLanes, 4);
+  assert.equal(m2.environment.laneCeiling, 12); // Existing Capacity's effective launch limit.
+  assert.equal(m2.environment.diskFreeGb, 51.2); // A failed floor still has a measurement.
+  assert.equal(m2.modes['go-codex'].eligible, false);
+  assert.equal(m2.placementAuthority, false);
+  const held = result.physicalFleet.hosts.find(row => row.hostRef === 'ubuntu3');
+  assert.equal(held.environment.activeLanes, null);
+  assert.equal(held.environment.laneCeiling, null);
+  assert.equal(held.modes['go-codex'].eligible, false);
+  const stale = result.physicalFleet.hosts.find(row => row.hostRef === 'mb');
+  assert.equal(stale.online, true);
+  assert.equal(stale.fresh, false);
+  assert.equal(stale.modes['go-codex'].eligible, false);
+});
+
+test('blank, nondecimal and unknown annotated details remain unknown instead of measured zero', async t => {
+  const malformed = [
+    ['', '2'], [' ', '2'], ['0x10', '2'], ['0b10', '2'], ['0o10', '2'],
+    ['1e3', '2'], ['NaN', '2'], ['Infinity', '2'], ['-1', '2'],
+    ['2', ''], ['2', ' '], ['2', '3 (unexpected=1)'], ['2', '3<4'],
+    ['2', '3 (lane_ceiling=32, max_active=)'], ['2', '3 (base=,stage=15)'],
+  ];
+  for (const [left, right] of malformed) {
+    const fx = await fabricFixture(ownerFor([statusRow('chatgpt1', true)]), rows => rows.map(row => ({
+      ...row,
+      gates: row.gates.map(gate =>
+        ['load', 'lane-ceiling', 'disk'].includes(gate.gate)
+          ? {...gate, detail: left + (gate.gate === 'disk' ? '>=' : '<') + right} : gate),
+    })));
+    t.after(() => rm(fx.dir, {recursive:true, force:true}));
+    const result = await createFleetStatus(fx.config).status();
+    const measured = result.physicalFleet.hosts.find(row => row.hostRef === 'm2').environment;
+    for (const key of ['load1', 'activeLanes', 'laneCeiling', 'diskFreeGb']) {
+      assert.equal(measured[key], null, key + ': ' + JSON.stringify([left, right]));
+    }
+  }
+});
+
+test('valid decimal zero and whitespace remain measured with known Capacity annotations', async t => {
+  const fx = await fabricFixture(ownerFor([statusRow('chatgpt1', true)]), rows => rows.map(row => ({
+    ...row,
+    gates: row.gates.map(gate =>
+      gate.gate === 'load' ? {...gate, detail: ' 0.0 < 12 '} :
+      gate.gate === 'lane-ceiling' ? {...gate, detail: '0<2 (lane_ceiling=32, max_active=2)'} :
+      gate.gate === 'disk' ? {...gate, detail: '0>=75 (base=60,stage=15)'} : gate),
+  })));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  const measured = result.physicalFleet.hosts.find(row => row.hostRef === 'm2').environment;
+  assert.equal(measured.load1, 0);
+  assert.equal(measured.activeLanes, 0);
+  assert.equal(measured.laneCeiling, 2);
+  assert.equal(measured.diskFreeGb, 0);
+});

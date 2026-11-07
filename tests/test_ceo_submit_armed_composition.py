@@ -1592,14 +1592,16 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # static literal freezes the combined candidate, not independent review or
     # release authority, and grants no native SEND or installed-release
     # approval.
-    # The adopted-context read composition changes this full-file pin. The
-    # exact installed entry AST and all ten mutation refusals remain unchanged;
-    # no additional event loop or execution call is admitted.
+    # The adopted-context read composition and original Fleet observer binding
+    # change this full-file pin. The exact installed entry AST and all ten
+    # mutation refusals remain unchanged; no additional event loop or execution
+    # call is admitted. This static pin describes source composition only and
+    # grants no install, release, native-runtime or collector activation authority.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '8208bae9f1af55cc313f176f73740182db89ecd4578572c11f79d131055f7803'):
+            'c9e5e82f4b30b24afcdd7b88835e3f283d63f1fd301f1ba8063f525a2baf4c96'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

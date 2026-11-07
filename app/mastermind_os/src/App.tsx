@@ -1,3 +1,4 @@
+import { FleetHealth } from "./fleet/FleetHealth";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
 import {PlanAdoptionWorkflow} from "./planning/PlanAdoptionWorkflow";
@@ -3084,7 +3085,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               : active === "Control Room" || active === "Session Estate"
                 ? currentControlRoom.state === "PENDING" ? "SOURCE_READ_PENDING" : currentControlRoom.state
               : active === "Fleet & Capacity"
-                ? "NOT_PROJECTED"
+                ? "OBSERVATION_ONLY"
                 : (d?.read_state.state ?? "UNAVAILABLE"),
     headerSummary =
       active === "Conversations"
@@ -3137,7 +3138,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                           ? "Reading one authenticated incumbent Control Room cache."
                           : "Authenticated Control Room source unavailable; no current operation is inferred."
                     : active === "Fleet & Capacity"
-                      ? "Fleet health and placement require their canonical Capacity source."
+                      ? "Hardware diagnostics from the existing Fleet observer; placement authority remains with Capacity."
                       : d
                         ? d.mission.root_job_id &&
                           d.read_state.state === "CURRENT"
@@ -3171,7 +3172,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   : "Work projection unavailable; zero work is not inferred."
                 : "Work source unavailable; zero work is not inferred."
             : active === "Fleet & Capacity"
-              ? "Capacity source not connected. No host readiness was inferred."
+              ? "Fleet readings retain sensor and subagent coverage limits. This view does not authorize placement."
               : notice,
     open = (w: string, r: string | null, direct = false) => {
       setCatalogueProject(null);
@@ -5744,6 +5745,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setProjectTab("Work");setActive("Projects");}}
         canOpenWork={resourcesCanOpenWork}
         onReviewSources={() => setActive("Sources")}/></div>
+      <FleetHealth
+        key={authRevision}
+        read={authState?.acquisition ? window.MastermindMissionHost?.readFleet : undefined}
+        generation={authRevision}
+      />
       <details className="reason-details"><summary>{locale === "zh-CN" ? "原始容量凭据与运行记录" : "Original capacity receipts and run records"}</summary>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,

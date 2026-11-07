@@ -121,6 +121,12 @@ def source_owners(tmp_path_factory):
             fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
         'ext/paid_initializer.py':
             fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
+        # The standard-Linux MemTotal forward stage changed CURRENT only.
+        # Restore the exact historical102 bytes of that pair in this disposable owner.
+        'ext/host_pull_backend.py':
+            fixture.parent / 'native_historical_payloads/host_pull_backend.py.txt',
+        'ext/host_pull_probe.template':
+            fixture.parent / 'native_historical_payloads/host_pull_probe.template.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected

@@ -367,16 +367,52 @@ function expectFiniteNumber(value, min, max) {
   return value;
 }
 
+const GATE_DECIMAL = /^\+?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+function parseGateValue(raw) {
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (!GATE_DECIMAL.test(text)) return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 function parseGatePair(detail, separator) {
   if (typeof detail !== 'string' || detail.length > 96) return [null, null];
+  if (typeof separator !== 'string' || separator.length === 0) return [null, null];
   const parts = detail.split(separator);
   if (parts.length !== 2) return [null, null];
-  const left = Number(parts[0]);
-  const right = Number(parts[1]);
-  if (!Number.isFinite(left) || !Number.isFinite(right) || left < 0 || right < 0) {
-    return [null, null];
+  const left = parseGateValue(parts[0]);
+  const right = parseGateValue(parts[1]);
+  return left === null || right === null ? [null, null] : [left, right];
+}
+
+function parseLaneGatePair(detail) {
+  if (typeof detail !== 'string' || detail.length > 96) return [null, null];
+  // Match only the incumbent host_pick annotation, not arbitrary trailing text.
+  const annotated = /^(.+) \(lane_ceiling=([1-9]\d*), max_active=([1-9]\d*)\)$/.exec(detail);
+  const pair = parseGatePair(annotated ? annotated[1] : detail, '<');
+  if (!pair.every(Number.isSafeInteger) || pair[1] < 1) return [null, null];
+  if (annotated) {
+    const nominal = Number(annotated[2]);
+    const launch = Number(annotated[3]);
+    if (!Number.isSafeInteger(nominal) || !Number.isSafeInteger(launch)
+        || launch > 32 || pair[1] !== Math.min(nominal, launch)) return [null, null];
   }
-  return [left, right];
+  // This is the owner's effective gate threshold, never new placement authority.
+  return pair;
+}
+
+function parseDiskGatePair(detail) {
+  if (typeof detail !== 'string' || detail.length > 96) return [null, null];
+  const annotated = /^(.+) \(base=([^,()]+),stage=([^,()]+)\)$/.exec(detail);
+  if (annotated) {
+    const base = parseGateValue(annotated[2]);
+    const reserve = parseGateValue(annotated[3]);
+    if (base === null || reserve === null || reserve > 128) return [null, null];
+  }
+  // A failed floor is still a measured disk value; eligibility stays with Capacity.
+  return parseGatePair(annotated ? annotated[1] : detail, '>=');
 }
 
 function normalizeRoles(detail) {
@@ -428,8 +464,8 @@ function projectFabricRow(row, mode) {
       && (gates.get('fresh')?.result !== 'FAIL' || row.eligible)) invalidOwner();
   const roles = normalizeRoles(gates.get('roles')?.detail ?? '');
   const [load1] = parseGatePair(gates.get('load')?.detail, '<');
-  const [activeLanes, laneCeiling] = parseGatePair(gates.get('lane-ceiling')?.detail, '<');
-  const [diskFreeGb] = parseGatePair(gates.get('disk')?.detail, '>=');
+  const [activeLanes, laneCeiling] = parseLaneGatePair(gates.get('lane-ceiling')?.detail);
+  const [diskFreeGb] = parseDiskGatePair(gates.get('disk')?.detail);
   const cpuDetail = gates.get('cpu')?.detail;
   const logicalCpuCount = /^\d{1,4}$/.test(cpuDetail ?? '') ? Number(cpuDetail) : null;
 

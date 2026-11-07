@@ -1,0 +1,880 @@
+{
+  "proof": "installed observer permitted read before S5 source edits; tool did not expose an overall capture timestamp",
+  "state": "DEGRADED",
+  "accountCount": 8,
+  "readyCount": 8,
+  "publicAllReady": true,
+  "issues": [
+    "OWNER_FLEET_DEGRADED"
+  ],
+  "physicalFleet": {
+    "schema": "mastermind.studio_fleet_hosts.v1",
+    "scope": "subagent-fabric-registered-hosts",
+    "hostCount": 13,
+    "hosts": [
+      {
+        "hostRef": "m1",
+        "title": "M1 Studio — Data + CI",
+        "roles": [
+          "ci-runner",
+          "data-service",
+          "lanes"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 41,
+        "environment": {
+          "logicalCpuCount": 10,
+          "load1": 6.19,
+          "diskFreeGb": 137.5,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "m2",
+        "title": "M2 Studio — Lead Computer",
+        "roles": [
+          "seat"
+        ],
+        "seat": true,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 40,
+        "environment": {
+          "logicalCpuCount": 24,
+          "load1": 41.4,
+          "diskFreeGb": 212.8,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "mb",
+        "title": "MacBook Pro — Mobile Computer",
+        "roles": [
+          "candidate"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": false,
+        "freshAgeSeconds": 1369573,
+        "environment": {
+          "logicalCpuCount": 12,
+          "load1": 1.26,
+          "diskFreeGb": 116.2,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "mini1",
+        "title": "Mac mini 1 — Worker",
+        "roles": [
+          "candidate"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": false,
+        "freshAgeSeconds": 2348693,
+        "environment": {
+          "logicalCpuCount": 12,
+          "load1": 1.19,
+          "diskFreeGb": 119.9,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "mini2",
+        "title": "Mac mini 2 — Worker",
+        "roles": [
+          "candidate"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": false,
+        "freshAgeSeconds": 2348693,
+        "environment": {
+          "logicalCpuCount": 12,
+          "load1": 1.26,
+          "diskFreeGb": 49.9,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "mini3",
+        "title": "Mac mini 3 — Worker",
+        "roles": [
+          "candidate"
+        ],
+        "seat": false,
+        "online": false,
+        "fresh": false,
+        "freshAgeSeconds": 2348688,
+        "environment": {
+          "logicalCpuCount": null,
+          "load1": null,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": false,
+            "toolsReady": false,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "mini4",
+        "title": "Mac mini 4 — Candidate Worker",
+        "roles": [
+          "candidate"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": false,
+        "freshAgeSeconds": 2348687,
+        "environment": {
+          "logicalCpuCount": 12,
+          "load1": 1.01,
+          "diskFreeGb": 80.4,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "pc",
+        "title": "Windows/WSL PC — CI + Local Models",
+        "roles": [
+          "ci-runner"
+        ],
+        "seat": false,
+        "online": false,
+        "fresh": false,
+        "freshAgeSeconds": 2348679,
+        "environment": {
+          "logicalCpuCount": null,
+          "load1": null,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": false,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "ubuntu0",
+        "title": "Ubuntu 0 — Worker",
+        "roles": [
+          "lanes"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 31,
+        "environment": {
+          "logicalCpuCount": 32,
+          "load1": 0.03,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "glm": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "minimax": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "grok": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "ubuntu1",
+        "title": "Ubuntu 1 — Compute Worker",
+        "roles": [
+          "lanes"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 30,
+        "environment": {
+          "logicalCpuCount": 24,
+          "load1": 3.82,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "ubuntu2",
+        "title": "Ubuntu 2 — Compute Worker",
+        "roles": [
+          "lanes"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 28,
+        "environment": {
+          "logicalCpuCount": 32,
+          "load1": 3.08,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "glm": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "minimax": {
+            "eligible": true,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "ubuntu3",
+        "title": "Ubuntu 3 — Compute Worker",
+        "roles": [
+          "lanes"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 27,
+        "environment": {
+          "logicalCpuCount": 32,
+          "load1": 0.04,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": false
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": false,
+            "automaticQualification": true,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      },
+      {
+        "hostRef": "ubuntu4",
+        "title": "ubuntu4 — Fleet Host",
+        "roles": [
+          "lanes"
+        ],
+        "seat": false,
+        "online": true,
+        "fresh": true,
+        "freshAgeSeconds": 26,
+        "environment": {
+          "logicalCpuCount": 32,
+          "load1": 0,
+          "diskFreeGb": null,
+          "activeLanes": null,
+          "laneCeiling": null
+        },
+        "modes": {
+          "go-codex": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "glm": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "minimax": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "grok": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "cursor": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          },
+          "oc-free": {
+            "eligible": false,
+            "modeQualified": true,
+            "automaticQualification": false,
+            "toolsReady": true,
+            "candidateExcluded": true
+          }
+        },
+        "advisoryOnly": true,
+        "placementAuthority": false,
+        "executionAuthority": false,
+        "physicalIdentityProven": false
+      }
+    ],
+    "advisoryOnly": true,
+    "placementAuthority": false,
+    "executionAuthority": false
+  }
+}

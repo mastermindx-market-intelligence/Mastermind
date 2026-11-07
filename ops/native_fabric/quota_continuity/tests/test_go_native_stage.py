@@ -106,8 +106,16 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_request_refusal_task(manifest):
+def before_memtotal_cohort(manifest):
+    """A prior snapshot keeps the reviewed predecessor bytes of the forward pair."""
     prior = dict(manifest)
+    for name, base in builder.GO_MEMTOTAL_BASE_DIGESTS.items():
+        prior["ext/" + name] = base
+    return prior
+
+
+def before_request_refusal_task(manifest):
+    prior = before_memtotal_cohort(manifest)
     if prior["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST:
         prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
     return prior
@@ -166,6 +174,11 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
     historical = before_participant_cohort(default)
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
+    # The current forward MemTotal stage replaces exactly two installed members.
+    # The reviewed 395b closure keeps their predecessor bytes.
+    for name, base in builder.GO_MEMTOTAL_BASE_DIGESTS.items():
+        assert default["ext/" + name] == builder.GO_MEMTOTAL_CURRENT_DIGESTS[name]
+        historical["ext/" + name] = base
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
     assert default["ext/remote_sub_exec.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]
     historical["ext/remote_sub_exec.py"] = builder.GO_BASE_EXECUTOR_SHA256
@@ -226,6 +239,48 @@ def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_me
     bad = dict(manifest, unexpected="f" * 64)
     with pytest.raises(ValueError):
         builder.validate_go_base_manifest(bad, captured)
+
+
+def test_memtotal_cohort_is_one_exact_current_pair_and_cannot_relabel_history(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    # The complete current namespace carries exactly the reviewed MemTotal pair.
+    for name, digest in builder.GO_MEMTOTAL_CURRENT_DIGESTS.items():
+        assert current["ext/" + name] == digest
+    builder.validate_go_base_manifest(current, captured)
+    # The previous valid current composition still binds with predecessor bytes.
+    previous = dict(current)
+    previous.update({"ext/" + name: digest
+                     for name, digest in builder.GO_MEMTOTAL_BASE_DIGESTS.items()})
+    builder.validate_go_base_manifest(previous, captured)
+    # A mixed pair is not one exact protected cohort.
+    for name in builder.GO_MEMTOTAL_CURRENT_DIGESTS:
+        mixed = dict(current)
+        mixed["ext/" + name] = builder.GO_MEMTOTAL_BASE_DIGESTS[name]
+        with pytest.raises(ValueError, match="MemTotal cohort"):
+            builder.validate_go_base_manifest(mixed, captured)
+    # One mutated member is not one exact protected cohort.
+    for name in builder.GO_MEMTOTAL_CURRENT_DIGESTS:
+        forged = dict(current)
+        forged["ext/" + name] = "f" * 64
+        with pytest.raises(ValueError, match="MemTotal cohort"):
+            builder.validate_go_base_manifest(forged, captured)
+    # The same pair may not relabel a historical namespace.
+    prior = before_participant_cohort(current)
+    prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
+    for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
+        prior["ext/" + name] = original
+    for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
+        prior["ext/" + name] = original
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        del prior["ext/" + name]
+    assert len(prior) == 102
+    builder.validate_go_base_manifest(prior, captured)
+    relabelled = dict(prior)
+    relabelled.update({"ext/" + name: digest
+                       for name, digest in builder.GO_MEMTOTAL_CURRENT_DIGESTS.items()})
+    with pytest.raises(ValueError, match="MemTotal cohort cannot relabel historical namespace"):
+        builder.validate_go_base_manifest(relabelled, captured)
 
 
 @pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "executor", "original-collector", "ubuntu4", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])

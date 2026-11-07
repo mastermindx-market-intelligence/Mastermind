@@ -1,0 +1,26 @@
+{
+  "proof": "compiled App browser execution with explicitly synthetic host/auth fixtures",
+  "installed_service_proof": false,
+  "cross_uid_proof": false,
+  "host_effects": false,
+  "checks": [
+    "actual Resources/Fleet navigation",
+    "measured zero",
+    "stale host and missing sensors",
+    "fixed 30d window selector",
+    "390px page width",
+    "auth revocation removes hardware region"
+  ],
+  "elapsed_seconds": 3.0,
+  "console_page_errors": [],
+  "viewports": [
+    [
+      1440,
+      1100
+    ],
+    [
+      390,
+      844
+    ]
+  ]
+}

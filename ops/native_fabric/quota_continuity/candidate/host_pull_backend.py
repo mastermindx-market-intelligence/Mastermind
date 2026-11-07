@@ -694,6 +694,7 @@ def _write_state_unlocked(*, physical_only=False, publication_directory=None):
                     out[pieces[0]]=round(x,1)
                 return out
             mem_free=kv.get("therm_mem_available_bytes")
+            mem_total=kv.get("therm_mem_total_bytes")
             swap_used=kv.get("therm_swap_used_bytes")
             def uint(raw):
                 return (int(raw) if isinstance(raw,str) and 0<len(raw)<=20
@@ -708,6 +709,7 @@ def _write_state_unlocked(*, physical_only=False, publication_directory=None):
                 "per_core_freq_mhz":core_map("cpu_core_freq_csv",10000),
                 "psi_some_avg10":{k:safe_float("psi_"+k+"_some10") for k in ("cpu","memory","io")},
                 "mem_available_bytes":uint(mem_free),
+                "mem_total_bytes":uint(mem_total) or None,
                 "swap_used_bytes":uint(swap_used),
             }
         # Read-only, bounded trend summary in the existing host_pull daemon

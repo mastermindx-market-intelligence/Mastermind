@@ -496,6 +496,10 @@ describe("Executive OS convergence surfaces", () => {
     expect(
       screen.getByRole("heading", { name: "Resources & systems", level: 1 }),
     ).toBeTruthy();
+    expect(screen.getByRole("heading", {name: "Your machines, in view."})).toBeTruthy();
+    expect(screen.getByText("Source not connected")).toBeTruthy();
+    expect(screen.getByRole("heading", {name: "Connect the existing Fleet source."})).toBeTruthy();
+    expect(screen.queryByText(/0 registered hosts/)).toBeNull();
     expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.queryByText("Missingness and source state")).toBeNull();
   });

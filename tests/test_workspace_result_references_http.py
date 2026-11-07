@@ -373,7 +373,10 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
     assert GET_ROUTES.count(ROUTE) == 1
     # The composed profile retains the legacy ordering, then appends the
     # reference reader, Control Room reads, Fabric reads and the later
-    # project/archive/knowledge and source-operation reads, then the BYOK roles metadata read.
+    # project/archive/knowledge and source-operation reads, then the BYOK roles
+    # metadata read, and finally the one fixed Fleet Workspace health read.
+    # The Fleet read is appended to the current profile only; the historical
+    # legacy eight stay byte-exact and are never relabelled by a later read.
     assert GET_ROUTES == (
         "/os/", "/os/auth/callback", "/workspace/programs/current",
         "/workspace/work/current", "/workspace/mission/current",
@@ -399,6 +402,7 @@ def test_public_edge_allowlist_and_caddy_template_carry_the_exact_path():
         "/workspace/mission-result/current",
         "/workspace/native-draft-identity/current",
         "/workspace/byok/roles/current",
+        "/workspace/fleet/current",
     )
     assert not any("result-references" in route for route in POST_ROUTES)
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]

@@ -68,6 +68,7 @@ def test_authenticated_native_and_control_room_routes_are_exact_and_method_scope
         "/workspace/byok/roles/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
+        "/workspace/fleet/current",
     }
     expected_post = {
         "/workspace/control-room/open",

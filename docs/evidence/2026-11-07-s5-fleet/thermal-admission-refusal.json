@@ -1,0 +1,36 @@
+{
+  "schema": "mastermind.s5.fleet_admission_observation.v1",
+  "observed_controller_time": "2026-11-07T08:45Z",
+  "root_id": "01a1b498-2e4c-746b-bdea-77b474c900c4",
+  "run_id": "s5-fleet-translation-pin-20261107-c1-01",
+  "controller_pid": 54394,
+  "target_host": "ubuntu0",
+  "target_identity_scope": "existing transport target label; not additional physical identity proof",
+  "terminal_rc": 75,
+  "signal": "admission",
+  "response_sha256": "b96c2201cea936b019959dfa0ef0eb46f98fe14eee6c15b2c7f708d9c202201c",
+  "admission": {
+    "active_count": 2,
+    "allowed": false,
+    "cpu_count": 32,
+    "json_locked_count": 2,
+    "legacy_count": 0,
+    "load1": 1.616,
+    "load_ratio_limit": 0.375,
+    "max_active": 12,
+    "reasons": [
+      "host_temperature_at_or_above_limit"
+    ],
+    "stale_reaped": []
+  },
+  "actual_temperature_c": null,
+  "temperature_limit_c": null,
+  "execution_absence_proven": false,
+  "retry_allowed": false,
+  "followup": "No redispatch or alternate worker route. Parent performed the permitted source-only fallback in its existing managed workspace.",
+  "limits": [
+    "Transport staging/lease records are not proof of worker STARTED or service recovery.",
+    "The result is a thermal admission refusal, not proof of a general host outage.",
+    "The earlier retained thermal sample is not substituted for the unreturned current temperature."
+  ]
+}

@@ -184,6 +184,8 @@ for line in (value(pathlib.Path("/proc"),"meminfo") or "").splitlines():
         mem[k]=int(vals[0])*1024
 if "MemAvailable" in mem:
     print("therm_mem_available_bytes="+str(mem["MemAvailable"]))
+if mem.get("MemTotal"):
+    print("therm_mem_total_bytes="+str(mem["MemTotal"]))
 if "SwapTotal" in mem and "SwapFree" in mem:
     print("therm_swap_used_bytes="+str(max(0,mem["SwapTotal"]-mem["SwapFree"])))
 print("therm_reader=hwmon_v1")

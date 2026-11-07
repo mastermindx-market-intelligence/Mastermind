@@ -494,6 +494,7 @@ class WorkspaceReadService:
                  acquire=None, compose=None, bounded_runtime=None,
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
                  mission_v3_compose=None, work_acquire=None, work_compose=None,
+                 fleet_read=None,
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
@@ -554,6 +555,10 @@ class WorkspaceReadService:
         # or an unfrozen schema.
         self._work_acquire = work_acquire
         self._work_compose = work_compose
+        if fleet_read is not None and not callable(fleet_read):
+            raise ValueError("Fleet source binding refused")
+        self._fleet_read = fleet_read
+
         from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
         if (product_acceptance_basis_reader is not None
                 and type(product_acceptance_basis_reader) is not AgentOsProductAcceptanceBasisReader):
@@ -1052,6 +1057,16 @@ class WorkspaceReadService:
                 return error("access_denied", 403)
         except Exception:
             return error("access_denied", 403)
+        return result
+
+    def _read_fleet(self, frame):
+        from common.fleet_health_contract import validate_fleet_document, FLEET_MAX_RESPONSE_BYTES
+        from control_plane.fleet_health import unavailable_fleet
+        window = frame["selection"]["window"]
+        document = (self._fleet_read(window=window) if self._fleet_read is not None
+                    else unavailable_fleet(window, time.time()))
+        result = {"ok": True, "result": validate_fleet_document(document, expected_window=window)}
+        bounded_canonical(result, limit=FLEET_MAX_RESPONSE_BYTES - 1)
         return result
 
     def _read(self, frame):
@@ -2338,7 +2353,8 @@ class WorkspaceReadService:
             permission_before = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        worker = self._read_work if frame["operation"] == "work" else self._read
+        worker = (self._read_fleet if frame["operation"] == "fleet" else
+                  self._read_work if frame["operation"] == "work" else self._read)
         task = asyncio.create_task(asyncio.to_thread(worker, frame))
         try:
             result = await await_owned(task)
@@ -2507,6 +2523,7 @@ class _WorkRefusal(Exception):
 
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
+                               fleet_read=None,
                                authorize_discovery=None, authorize_actions=None, action_now=None,
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
@@ -2587,7 +2604,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     armed=armed, runtime_identity=runtime_identity,
                                     control_room_presenter=presenter, control_room_actions=actions,
                                     byok_roles_reader=byok_roles_reader,
-                                    bounded_runtime=bounded_runtime,
+                                    bounded_runtime=bounded_runtime, fleet_read=fleet_read,
                                     product_acceptance_basis_reader=product_acceptance_basis_reader,
                                     product_acceptance_owner_target=product_acceptance_owner_target,
                                     product_acceptance_owner_guard=product_acceptance_owner_guard,

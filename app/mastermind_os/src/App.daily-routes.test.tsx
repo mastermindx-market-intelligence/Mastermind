@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { openObservedConversation } from "./test-operational-navigation";
+import { navigateCompanyOperation, openObservedConversation } from "./test-operational-navigation";
 import {
   act,
   cleanup,
@@ -291,4 +291,24 @@ describe("owner-backed daily routes in App", () => {
         screen.getAllByRole("button", { name: legacy }).length,
       ).toBeGreaterThan(0);
   });
+});
+
+
+it("mounts the existing Fleet navigation and withdraws hardware data on sign-out", async () => {
+  const {fleetFixture} = await import("./fleet.test-fixture");
+  const {decodeFleetHealth} = await import("./fleet");
+  const e = await hostFixture();
+  const read = vi.fn(async () => decodeFleetHealth(fleetFixture())!);
+  e.host.readFleet = read;
+  window.MastermindMissionHost = e.host;
+  Object.defineProperty(document, "visibilityState", {configurable: true, value: "visible"});
+  const user = userEvent.setup(); render(<App />);
+  await user.click(screen.getByText("Advanced", {selector: "summary"}));
+  await navigateCompanyOperation(user, "Fleet & Capacity");
+  expect(await screen.findByRole("button", {name: "Inspect Ubuntu 2"})).toBeTruthy();
+  expect(read).toHaveBeenCalledTimes(1);
+  flushSync(() => e.notify({payload: {...signed, status: "signed_out", acquisition: false, content: false}}));
+  expect(screen.queryByRole("button", {name: "Inspect Ubuntu 2"})).toBeNull();
+  expect(screen.queryByRole("region", {name: "Fleet hardware health"})).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
 });

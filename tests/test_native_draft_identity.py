@@ -113,6 +113,7 @@ def test_real_registered_outer_to_signed_owner_is_zero_selector_and_non_effectfu
         PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES,
         PRE_PROJECT_EXECUTION_POST_ROUTES, PROJECT_EXECUTION_POST_ROUTES,
         PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES,
+        PRE_FLEET_GET_ROUTES, FLEET_READ_ROUTES,
     )
     # This native identity addition was GET-only. Later SEND, BYOK, project
     # and direct-native routes preserve the exact before/after profile of that cut.
@@ -120,7 +121,11 @@ def test_real_registered_outer_to_signed_owner_is_zero_selector_and_non_effectfu
     assert PRE_NATIVE_SESSION_SEND_POST_ROUTES == PRE_NATIVE_DRAFT_POST_ROUTES
     assert PRE_BYOK_ROLES_GET_ROUTES == PRE_NATIVE_SESSION_SEND_GET_ROUTES
     assert PRE_BYOK_ROLES_POST_ROUTES == PRE_NATIVE_SESSION_SEND_POST_ROUTES + ('/os/executive/session/send',)
-    assert GET_ROUTES == PRE_BYOK_ROLES_GET_ROUTES + ('/workspace/byok/roles/current',)
+    # The byok read is exactly one read past the byok predecessor; that
+    # complete pair is the retained prefleet current profile, and the current
+    # profile appends the one fixed Fleet read after it.
+    assert PRE_BYOK_ROLES_GET_ROUTES + ('/workspace/byok/roles/current',) == PRE_FLEET_GET_ROUTES
+    assert GET_ROUTES == PRE_FLEET_GET_ROUTES + FLEET_READ_ROUTES
     assert PRE_PROJECT_EXECUTION_POST_ROUTES == PRE_BYOK_ROLES_POST_ROUTES
     assert PRE_DIRECT_NATIVE_POST_ROUTES == PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
     assert POST_ROUTES == PRE_DIRECT_NATIVE_POST_ROUTES + (

@@ -14,6 +14,8 @@ from common.executive_workspace_contract import (  # noqa: F401
     RESOURCE,
     SCOPE,
     FRAME_SCHEMA,
+    FLEET_SCHEMA, FLEET_WINDOWS, FLEET_MAX_RESPONSE_BYTES,
+    fleet_selection, validate_fleet_document,
     FRAME_SCHEMA_V2,
     FRAME_SCHEMA_V3, PLAN_BODY_SCHEMA, PLAN_OBSERVATION_SCHEMA,
     MAX_PLAN_RESPONSE_BYTES, PLAN_REFUSAL_REASONS,

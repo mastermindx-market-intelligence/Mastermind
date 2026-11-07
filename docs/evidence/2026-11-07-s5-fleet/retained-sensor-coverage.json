@@ -1,0 +1,161 @@
+{
+  "proof": "read only retained incumbent host snapshots; no remote inspection, installation or admission",
+  "captured_at": "2026-11-07T06:43:38.283415+00:00",
+  "hosts": [
+    {
+      "host": "m1",
+      "observed_at": 1794033811,
+      "logical_cpus": 10,
+      "disk_free_gb": 140.5,
+      "mem_free_gb": 13.9,
+      "active_lanes": 0,
+      "active_lanes_status": "known",
+      "granular": {
+        "source": null,
+        "cpu_busy_pct": null,
+        "mem_available_bytes": null,
+        "mem_total_bytes": null,
+        "swap_used_bytes": null
+      },
+      "thermal": {
+        "source": null,
+        "cpu_tctl_c": null,
+        "nvme_hottest_c": null,
+        "cpu_fan_rpm": null
+      }
+    },
+    {
+      "host": "m2",
+      "observed_at": 1794033812,
+      "logical_cpus": 24,
+      "disk_free_gb": 237.5,
+      "mem_free_gb": 86.4,
+      "active_lanes": null,
+      "active_lanes_status": "unknown",
+      "granular": {
+        "source": null,
+        "cpu_busy_pct": null,
+        "mem_available_bytes": null,
+        "mem_total_bytes": null,
+        "swap_used_bytes": null
+      },
+      "thermal": {
+        "source": null,
+        "cpu_tctl_c": null,
+        "nvme_hottest_c": null,
+        "cpu_fan_rpm": null
+      }
+    },
+    {
+      "host": "ubuntu0",
+      "observed_at": 1794033815,
+      "logical_cpus": 32,
+      "disk_free_gb": 133.5,
+      "mem_free_gb": 20.0,
+      "active_lanes": 3,
+      "active_lanes_status": "known",
+      "granular": {
+        "source": "linux_procfs",
+        "cpu_busy_pct": 91.2,
+        "mem_available_bytes": 22000984064,
+        "mem_total_bytes": null,
+        "swap_used_bytes": 2976309248
+      },
+      "thermal": {
+        "source": "linux_hwmon",
+        "cpu_tctl_c": 87.0,
+        "nvme_hottest_c": 47.85,
+        "cpu_fan_rpm": null
+      }
+    },
+    {
+      "host": "ubuntu1",
+      "observed_at": 1794033817,
+      "logical_cpus": 24,
+      "disk_free_gb": 43.7,
+      "mem_free_gb": 52.0,
+      "active_lanes": 0,
+      "active_lanes_status": "known",
+      "granular": {
+        "source": "linux_procfs",
+        "cpu_busy_pct": 20.9,
+        "mem_available_bytes": 56896753664,
+        "mem_total_bytes": null,
+        "swap_used_bytes": 4630421504
+      },
+      "thermal": {
+        "source": "linux_hwmon",
+        "cpu_tctl_c": 77.0,
+        "nvme_hottest_c": 52.85,
+        "cpu_fan_rpm": 2409
+      }
+    },
+    {
+      "host": "ubuntu2",
+      "observed_at": 1794033743,
+      "logical_cpus": 32,
+      "disk_free_gb": 138.5,
+      "mem_free_gb": 24.0,
+      "active_lanes": 1,
+      "active_lanes_status": "known",
+      "granular": {
+        "source": "linux_procfs",
+        "cpu_busy_pct": 10.9,
+        "mem_available_bytes": 25814753280,
+        "mem_total_bytes": null,
+        "swap_used_bytes": 8396779520
+      },
+      "thermal": {
+        "source": "linux_hwmon",
+        "cpu_tctl_c": 67.375,
+        "nvme_hottest_c": 34.85,
+        "cpu_fan_rpm": null
+      }
+    },
+    {
+      "host": "ubuntu3",
+      "observed_at": 1794033744,
+      "logical_cpus": 32,
+      "disk_free_gb": 139.5,
+      "mem_free_gb": 27.0,
+      "active_lanes": null,
+      "active_lanes_status": "held",
+      "granular": {
+        "source": "linux_procfs",
+        "cpu_busy_pct": 0.0,
+        "mem_available_bytes": 29603221504,
+        "mem_total_bytes": null,
+        "swap_used_bytes": 1550815232
+      },
+      "thermal": {
+        "source": "linux_hwmon",
+        "cpu_tctl_c": 38.75,
+        "nvme_hottest_c": 27.85,
+        "cpu_fan_rpm": null
+      }
+    },
+    {
+      "host": "ubuntu4",
+      "observed_at": 1794033745,
+      "logical_cpus": 32,
+      "disk_free_gb": 864.0,
+      "mem_free_gb": 13.0,
+      "active_lanes": 0,
+      "active_lanes_status": "known",
+      "granular": {
+        "source": "linux_procfs",
+        "cpu_busy_pct": 0.0,
+        "mem_available_bytes": 14090256384,
+        "mem_total_bytes": null,
+        "swap_used_bytes": 0
+      },
+      "thermal": {
+        "source": "linux_hwmon",
+        "cpu_tctl_c": 36.625,
+        "nvme_hottest_c": 31.85,
+        "cpu_fan_rpm": null
+      }
+    }
+  ],
+  "retained_snapshot_generation": "ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46"
+}

@@ -1,3 +1,4 @@
+import { FLEET_WINDOWS } from "./fleet";
 import {hostObservationWebMethods} from "./resources/host-observation-web";
 import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
 import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
@@ -1312,6 +1313,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readFleet: ({ window, signal }) => {
+      if (typeof window !== "string" || !Object.hasOwn(FLEET_WINDOWS, window))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/fleet/current?window=${window}`, signal,
+        { cap: 1_500_000, typedUnavailableSchema: "mastermind.fleet_health.v1" });
+    },
     readAttendedFabricCatalog: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/fabric/catalog/current`, signal,
         { cap: 65_536, typedUnavailableSchema: null }),
