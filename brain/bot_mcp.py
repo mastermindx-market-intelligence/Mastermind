@@ -662,7 +662,30 @@ async def save_research_note(args):
           "prob_correct": {"type": "number"}},
        "required": ["subject", "lean", "thesis"]})
 async def propose_thesis(args):
-    _append(_PROPOSALS, {**args, **_execution_provenance(), "status": "proposed"})
+    queue_owner = None
+    try:
+        from brain import research_desk as queue_owner
+        queue_owner.enqueue_proposal(
+            {**args, **_execution_provenance(), "status": "proposed"},
+            queue_path=_PROPOSALS,
+        )
+    except Exception as exc:
+        not_committed = queue_owner is None or isinstance(
+            exc, queue_owner._ProposalQueueNotCommittedError
+        )
+        return _json({
+            "write_status": "unavailable" if not_committed else "unknown",
+            "error": (
+                "research_proposal_queue_unavailable" if not_committed
+                else "research_proposal_queue_outcome_unknown"
+            ),
+            "proposal_queued": False if not_committed else None,
+            "note": (
+                "This attempt did not replace the canonical proposal queue."
+                if not_committed else
+                "Proposal queue outcome is unknown. Reconcile it before considering retry."
+            ),
+        })
     return _ok(f"thesis proposed for {args['subject']} ({args['lean']}) → review queue. NOT executed.")
 
 

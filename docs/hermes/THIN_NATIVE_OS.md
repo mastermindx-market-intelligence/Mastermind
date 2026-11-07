@@ -482,3 +482,74 @@ It does not contain these later history edge-case fixes. The active native UI la
 retains that immutable artifact and original canary; final package equivalence,
 installed acceptance and protected release must bind the subsequent exact source.
 No new canary or synthetic pending pointer was created.
+
+
+## Pro continuation: protected composition and installed journey, 2026-11-07
+
+This section supersedes the historical artifact-custody paragraphs above. The
+original operation/workspace/PR remain in use. Governing law was verified at
+`d2f72b2d0d3066502adef103afa847904a70b18d`; the protected-source movement below
+changes no governing procedure or native app file.
+
+Source `2b7d65dddbef7a4cd245f23bc21f6072b7c582c4` repairs the D8 source-scan
+failure by putting the owner identifier and the unchanged512-byte title bound
+on separate dictionary lines. It preserves runtime behavior and every protected
+D8 assertion. The committed-head D8 test plus native bridge/history suite passed
+41 tests (`/tmp/hermes-thin-d8-history-2b7d65dd-20261107-pro.log`, exit0).
+The protected composition through `ea0e7c08b95271228c50dc5cb2c00c21a80c7c5e`
+resolves only the ModelArk test overlap: retain the full protected catalog
+presence/eligibility matrix, the real-router legacy-absent case, and both mapping
+and provider-flag nonmutation assertions. Seven focused tests pass, exit0
+(`/tmp/hermes-thin-protected-model-contract-20261107-pro.log`). No provider is enabled.
+
+The sole current native app is immutable candidate
+`486ec0275b74d8c508ca96dbe40173054b246978`, build
+`hermes-thin-native-486ec0275b74-20261107-pro-03`, PID27848. Its full original
+public profile and native-client reference are retained. It was built at
+06:46:39Z; the prior e7 app quit cleanly at07:02:43Z after verifying an empty draft
+and no unresolved request. LaunchServices was moved to the486 bundle and its
+actual Build details, signed-in state, Hermes0.23.0 connection and Organization
+and goal lineage were observed at07:10:51Z. Artifact directory:
+`/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-486ec0275b74/`.
+The package is local debug/ad-hoc; Apple distribution is not qualified.
+
+In e7, the retained create request `4ce58a3ebc6f4c6799c9099a662932e3` was
+reconciled by one actual Check previous request action at06:42:15Z; readback
+opened its existing empty conversation and removed the hold. Its trigger remains
+unattributed. The original canary prompt and exact retained answer were then
+visible through Local history at06:44:59Z, without resend. Receipt
+`candidate-e7b26bafc24b/uat-retained-canary-history.json` SHA256:
+`3385a1560c890e7d0553c5a56f38dffaa57fe795a1e39a59664bcf649f634b73`.
+
+At07:11:01Z, this continuation invoked the486 package's native New conversation
+once to begin a useful release-note conversation. Its original request
+`9fbc8f4abb944ab1a170b4990e59f729` is held as EFFECT_UNKNOWN; duplicate creation
+and sending are disabled. One actual UI recovery at07:13:25Z remained unresolved.
+A read-only exact-package diagnostic returned the same unknown result; a bounded
+exception trace locates the recovery failure in private Identify's3-second
+socket timeout, before original lookup or database reads. No deterministic
+schema/identity defect or causal gateway scheduling defect has been proved.
+Preserve that original pointer and target. No retry, pointer deletion, new
+conversation, service restart or native provider change is authorized by this
+uncertainty. Source work and the requested logout/reconnect journey continue
+independently; this is not yet acceptance of a new useful Send.
+
+Retained486 UI/source receipts: `uat-auth-build-confirmed.json`,
+`uat-created-conversation.json`, and `uat-created-recovery-diagnostic.json`
+(the last SHA256 `bf039e7fed407bcb29b221d39133b28ec36d633f666bf71530684feb46f80d7a`).
+The root continuation has issued zero native Send calls. Original canary receipt,
+source pin and admission remain unchanged.
+
+The S1 Stop patch returned in PR comment6703525951 is an additive follow-up;
+cancellation is outside this original thin-native slice. It has not been imported.
+A source-derived stale same-session target race remains: public Stop must carry
+the displayed original request/session tuple, validate it before pointer reservation,
+and bind the displayed receipt to that same original. A stale A response/click
+must not cancel newer requestB. This finding is not an observed cancellation.
+
+Remaining qualification: resolve original9fbc through its native owner, useful
+signed-in Send and original answer/history, logout/reconnect and process reopen,
+current protected CI and normal protected publication. Signed/notarized/updater
+release and broader remote-company orchestration remain separate production holds.
+No duplicate canary, active-service restart, second session owner or automatic
+merge/queue request has been performed by this continuation.
