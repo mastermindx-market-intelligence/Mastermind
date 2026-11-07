@@ -1500,6 +1500,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     controlRoomAuthEpoch = useRef(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
+    [missionReadRevision, setMissionReadRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -2994,8 +2995,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         controller.abort();
       };
     }
-    const readV3 = window.MastermindMissionHost?.readMissionV3;
-    const read = readV3 ?? window.MastermindMissionHost?.readMission;
+    const missionHost = window.MastermindMissionHost;
+    const readV3 = missionHost?.readMissionV3;
+    const read = readV3 ?? missionHost?.readMission;
+    const missionHostGeneration = missionHost?.invalidationGeneration?.();
+    const readIsCurrent = () => window.MastermindMissionHost === missionHost &&
+      authRevisionRef.current === authRevision &&
+      missionHost?.invalidationGeneration?.() === missionHostGeneration &&
+      (missionHost?.readMissionV3 ?? missionHost?.readMission) === read;
     setMissionV3(null);
     if (typeof read !== "function") {
       setMission(
@@ -3010,9 +3017,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     setMission(unavailableMission(selection, "SOURCE_READ_PENDING"));
     setNotice("Reading the exact selected mission pair…");
     Promise.resolve()
-      .then(() => read({ ...selection, signal: controller.signal }))
+      .then(() => {
+        if (!readIsCurrent()) throw new Error("MISSION_READ_OWNER_CHANGED");
+        return read({ ...selection, signal: controller.signal });
+      })
       .then((raw) => {
-        if (!attached || missionRequest.current !== current) return;
+        if (!attached || missionRequest.current !== current || !readIsCurrent()) return;
         const v3 = readV3 ? decodeMissionv3(raw, selection) : null;
         const decoded = readV3 ? v3 : decodeMission(raw, selection);
         office.acceptMission(officeRead, decoded);
@@ -3063,6 +3073,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.acquisition,
     officeSession.sessionRef,
     officeSession.bindingGeneration,
+    missionReadRevision,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -5791,7 +5802,22 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     <SupervisionLedger read={currentControlRoom.state === "AVAILABLE"
       ? currentControlRoom.supervision ?? { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }
       : { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }} locale={locale} onOpenMission={open}/>
-    <SupervisionTrace document={d} selection={selection} locale={locale}/>
+    <SupervisionTrace document={d} selection={selection} locale={locale}
+      onReadCurrent={authState?.acquisition && selection && !selectionRefused &&
+        missionSelectionState === "AVAILABLE" &&
+        typeof (window.MastermindMissionHost?.readMissionV3 ?? window.MastermindMissionHost?.readMission) === "function"
+        ? (() => {
+          const host = window.MastermindMissionHost;
+          const read = host?.readMissionV3 ?? host?.readMission;
+          const generation = host?.invalidationGeneration?.();
+          const revision = authRevision;
+          return () => {
+            if (window.MastermindMissionHost !== host || authRevisionRef.current !== revision ||
+                (host?.readMissionV3 ?? host?.readMission) !== read ||
+                host?.invalidationGeneration?.() !== generation || !host?.auth?.getState().acquisition) return;
+            setMissionReadRevision(value => value + 1);
+          };
+        })() : undefined}/>
     <ActivationFacts model={activationModel} locale={locale} onNavigate={navigateActivation}/>
     <details className="reason-details"><summary>{locale === "zh-CN" ? "原始请求状态" : "Original request status"}</summary>
       <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={() => navigateActivation("original_status")}/>
