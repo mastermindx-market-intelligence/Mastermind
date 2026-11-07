@@ -1,0 +1,97 @@
+{
+  "schema": "mastermind.h6.provider_common_admission_join.v1",
+  "accepted_source": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+  "accepted_http_manifest_sha256": "5da35ef46dc2a89449132c5043d4dd66cd30f020f3865ce2ad9cf3e8930d0479",
+  "all_native_member_bytes_verified": 121,
+  "source_owners_match_donor": true,
+  "patch_sha256": "9b8eab01260fcdf2d1e71135b609fd422c42303d64608fe592aedd1987d529e7",
+  "changes": [
+    {
+      "path": "ext/lease_broker.py",
+      "preimage_sha256": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+      "postimage_sha256": "8354ddaff32e3491f9e716bfb186f490496962f55609f183500691679163a6b5"
+    },
+    {
+      "path": "ext/native_go_entry.py",
+      "preimage_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "postimage_sha256": "f4d1da6b10cf532b99e3176bfb4664bba0be601ae9eff65681b544572f526868"
+    },
+    {
+      "path": "ext/native_runtime_bindings.py",
+      "preimage_sha256": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
+      "postimage_sha256": "15c0c046a1c7e1c9a0cf9aee5af8f6631793d8a9af6f219e16a69830df3b42e3"
+    },
+    {
+      "path": "ext/paid_model_owner.py",
+      "preimage_sha256": "75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b",
+      "postimage_sha256": "378c1d30757292da236713543d7c4935b1a83e0445d1e22e53db1b5f3a2ee8fe"
+    },
+    {
+      "path": "ext/paid_provider_entry.py",
+      "preimage_sha256": "780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0",
+      "postimage_sha256": "1b4af5ef7db5ab7f61c05eda4fc53aa4e9cfd1253c08cd09f8a2d9dbb5ab7d2c"
+    },
+    {
+      "path": "ext/quota_remote.py",
+      "preimage_sha256": "91c89d4197d791a078e804db9c591c4cddc197f1e35f54f46fba95fe7b27a9a5",
+      "postimage_sha256": "fd0ac449e6a74e491646b360d5c9882d640bfb658f94e950ee709003dec87f8c"
+    },
+    {
+      "path": "ext/remote_sub.sh",
+      "preimage_sha256": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+      "postimage_sha256": "3e30f9eb4841f7fa0e0a90fb124cac93fd7add2e4cf2bea060b7343911587107"
+    },
+    {
+      "path": "ext/support_bundle.py",
+      "preimage_sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+      "postimage_sha256": "c38319838f286f1cc1591d1050870a91c44df5c787ac6fa27f7bc916b0f1411e"
+    },
+    {
+      "path": "rollout/native_generation.py",
+      "preimage_sha256": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+      "postimage_sha256": "a570210825da7eb58be83381860c5ffa013ed5889486e4a3b822f96d0dab09db"
+    },
+    {
+      "path": "rollout/native_install.py",
+      "preimage_sha256": "7611de59d939df241bae3ee5987c11c7428dad856ad6842cef505d1affc62cc5",
+      "postimage_sha256": "29bd85f7e6d75aecf9bec7e2f9a8be14f98275a78833d201d67b7988faeb86b0"
+    }
+  ],
+  "forward_and_reverse_checks": true,
+  "candidate_source_matches_forward_application": true,
+  "qualification": {
+    "root": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-provider-common-fence-proof-iuh9ass9",
+    "argv": [
+      "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/common-fence-probes/test_current_selection_reader.py",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/common-fence-probes/test_common_admission_fence.py",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/common-fence-probes/test_fenced_native_owners.py",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/common-fence-probes/test_remote_fence_closure.py",
+      "--basetemp",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-provider-common-fence-proof-iuh9ass9/fixtures",
+      "--junitxml",
+      "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-provider-common-fence-proof-iuh9ass9/result.xml"
+    ],
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "rc": 0,
+    "seconds": 18.769,
+    "testcases": 73,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "files": {
+      "result.log": "19da9087d92935b2064df20f632357e22786ce3e50fd7075c1f2ef56c47433ca",
+      "result.xml": "81860ce91d2c54869f802325607f21e6d7c2ac23842927f8925be9f092846822"
+    }
+  },
+  "assembly_rule": "Apply this complete patch once to exact0a provider+H2 HTTP121 with its two rollout owners. It includes the four H3 predecessors and common-fence changes. Do not also apply old H3 or common-fence patches.",
+  "new_builder_relation_implemented": false,
+  "fully_authenticated_enrollment_proven": false,
+  "runtime_changed": false,
+  "selectable": false,
+  "scope": "Known source participant behavior only; account-config external writers/adoption, strict meters, remote APPLICATION closure and live acceptance remain separate."
+}

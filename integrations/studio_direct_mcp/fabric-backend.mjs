@@ -92,7 +92,9 @@ function createHermesOriginAdmission(config=null) {
       try {
         child=spawn(config.python,['-I','-B',checker,config.source,config.home,config.revision,config.packageSha256],{
           stdio:['pipe','pipe','ignore'],windowsHide:true,
-          env:{PATH:process.env.PATH??'',PYTHONNOUSERSITE:'1'},
+          env:{PATH:process.env.PATH??'',PYTHONNOUSERSITE:'1',
+            ...Object.fromEntries(['HERMES_HOME','HERMES_CONFIG_BACKEND','HERMES_MANAGED_DIR']
+              .filter(key=>process.env[key]!==undefined).map(key=>[key,process.env[key]]))},
         });
         child.on('error',()=>finish(null));
         child.stdout.on('data',chunk=>{

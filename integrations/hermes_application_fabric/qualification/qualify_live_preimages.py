@@ -23,6 +23,13 @@ CORE = frozenset((
     "gateway/session_provider_context.py", "hermes_cli/cli_agent_setup_mixin.py",
     "hermes_cli/plugins.py", "hermes_cli/runtime_provider.py",
     "hermes_cli/runtime_provider_host.py", "providers/base.py",
+    "hermes_cli/inventory.py", "pm/workspace.py",
+    "tests/pm/test_buildable_multi_home.py",
+    "ui-tui/src/components/modelPicker.tsx",
+    "ui-tui/src/__tests__/modelPickerHostBound.test.tsx",
+    "hermes_cli/config.py", "hermes_cli/config_backend.py",
+    "hermes_cli/env_loader.py", "hermes_cli/managed_scope.py",
+    "tests/hermes_cli/test_config_observational.py",
 ))
 FIXTURE = "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound"
 IDENTITY = ("st_dev", "st_ino", "st_mode", "st_uid", "st_nlink",
@@ -37,7 +44,8 @@ def git(root: Path, *args: str) -> bytes:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1",
                GIT_NO_LAZY_FETCH="1", GIT_TERMINAL_PROMPT="0")
-    result = subprocess.run(["git", "-C", str(root), *args],
+    result = subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                             "-C", str(root), *args],
                             stdin=subprocess.DEVNULL, capture_output=True,
                             timeout=20, env=env, check=False)
     if result.returncode:
@@ -134,7 +142,10 @@ def qualify(native: Path, repository: Path, candidate: str) -> dict:
             raw, _ = read_native(fixture, relative)
             if raw is None or digest(raw) != expected:
                 raise RuntimeError("PATCH_POSTIMAGE_MISMATCH: " + relative)
-            ast.parse(raw, filename=relative)
+            if relative.endswith(".py"):
+                ast.parse(raw, filename=relative)
+            # TSX syntax is qualified by the native Ink suite; this gate
+            # verifies its exact preimage, postimage and reversible patch.
             postimages[relative] = digest(raw)
         for relative in dirty:
             raw, _ = read_native(fixture, relative)
@@ -164,7 +175,9 @@ def qualify(native: Path, repository: Path, candidate: str) -> dict:
         "native_files": observed, "core_postimages": postimages,
         "preserved_tracked_edits": dirty,
         "patch_apply_check": True, "exact_postimages": True,
-        "syntax_checked_files": len(postimages), "reverse_patch_restores_preimages": True,
+        "syntax_checked_files": sum(path.endswith(".py") for path in postimages),
+        "non_python_postimages_verified": sorted(path for path in postimages if not path.endswith(".py")),
+        "reverse_patch_restores_preimages": True,
         "live_source_unchanged": True, "installed": False,
         "runtime_reload": False, "provider_request": False,
         "worker_dispatch": False, "live_acceptance": False,

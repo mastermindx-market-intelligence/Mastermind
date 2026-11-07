@@ -1,3 +1,11 @@
+## Current completed provider/H2 donor and isolated fence proof
+
+Completed0a6d explicitly qualifies provider+H2 together. Its exact builder, installer and combined negative controls supersede the temporary d9c mixed-flag refusal. All121 emitted native bytes match H6 h2-provider; the accepted source is5da35e. Native source differs from0a only in prior H6 review prose/test helpers, not production code. The current primary/tool real-owner chain is already covered by the retained21-case proof; completed60894 also supplies attended AUTO/exact27-case qualification. Reuse those existing tests and preserve actual source attribution.
+
+The ten-file provider-common-admission-unqualified.patch is now based directly on this exact121 source plus its original rollout pair. It contains all four H3 steps and the full fence; apply once, not alongside prior proposals. Forward/reverse and all postimages were verified. Its fresh73 known-owner cases passed with no failures/errors/skips. Full exact source records are in provider-common-admission-qualification.json. The strict builder/entry relation and genuine authenticated successor enrollment are the next bounded source phase. No installed selection or live effect changed; MISSION_COMPLETE=false.
+
+---
+
 ## Current source join — original7e and preserving2ce
 
 The owned H6 branch has preserved original7e's exact accepted CI repair and genuinely merged the completed provider-preserving2ce input. Source/installer proof passed391 cases and actual emitted provider AUTO/local-return proof passed27, all without failure/error/skip. Nine artifacts were read back member-by-member; provider116 staysf256, provider118 is72a393 and provider121 is7e9c46 with the accepted41dc entry. Full exact identities and source decisions: `provider-application-owner-join.json`.
@@ -296,3 +304,23 @@ See common-fence-remaining-owner-frontier.md for the exact remaining writer,
 selector, loaded-consumer and physical-allowance evidence. Native v9/v10 issuer
 implementation is present; remote APPLICATION support closure is a distinct
 missing input. No blanket human gate is invented. MISSION_COMPLETE=false.
+
+## Completed provider/H2 source intake
+
+The completed 0a6d33bf donor is composed into this H6 contribution using a genuine
+merge. Native production bytes equal the donor. The temporary d9 combined-flag
+refusal is superseded by the donor's complete provider/H2 relation. Existing
+original7e accepted test postimages and historical H6 negative cases remain.
+The 22 focused historical/partial/source-step boundary cases passed with no
+failures, errors or skips; provider-quota-donor-intake.json binds their receipts.
+Donor379+18 subtests and donor27 remain attributed to that donor execution.
+
+The independently prepared full121 provider-preserving admission-fence proposal
+matches the exact 0a combined HTTP source before its changes. Its 73 source
+checks passed. The ten-file patch remains unselectable proposal evidence:
+no production builder adoption, enrollment, release, deployment or live proof.
+Next: current Macro25ba conversation qualification using the existing27-case
+suite, and an isolated exact source relation plus genuine authenticated
+single/set enrollment proof. Config-writer, serving adoption, billable-meter,
+remote APPLICATION and live consumer predicates remain open as recorded.
+MISSION_COMPLETE=false. Original root retains final release/C3/J custody.

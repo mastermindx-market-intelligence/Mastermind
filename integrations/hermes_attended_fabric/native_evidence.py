@@ -77,19 +77,33 @@ def installed_package_identity(home: Path) -> dict[str, str]:
 
 
 def read_enrollment(home: Path) -> dict[str, Any]:
-    from hermes_cli.config import load_config_readonly
+    from hermes_cli.config import load_config_observational
+    from hermes_cli.config_read_errors import FailedConfigRead
     from hermes_cli.profiles import get_active_profile_name
     from hermes_constants import get_hermes_home, hermes_home_key
 
     if hermes_home_key(get_hermes_home()) != hermes_home_key(home):
         raise ValueError("NATIVE_PROFILE_SCOPE_MISMATCH")
-    cfg = load_config_readonly() or {}
+    cfg = load_config_observational()
+    if isinstance(cfg, FailedConfigRead) or type(cfg) is not dict:
+        raise ValueError("HERMES_NATIVE_CURRENT_CONFIGURATION_UNAVAILABLE")
     plugins = cfg.get("plugins", {})
+    if type(plugins) is not dict or type(plugins.get("entries", {})) is not dict:
+        raise ValueError("HERMES_NATIVE_CURRENT_CONFIGURATION_UNAVAILABLE")
     entry = plugins.get("entries", {}).get(PLUGIN_ID, {})
+    if type(entry) is not dict:
+        raise ValueError("HERMES_NATIVE_CURRENT_CONFIGURATION_UNAVAILABLE")
+    enabled, disabled, allowlist = (
+        plugins.get("enabled", []), plugins.get("disabled", []),
+        entry.get("mcp_allowlist", []))
+    if any(type(value) is not list
+           or any(type(item) is not str or not item or "${" in item for item in value)
+           for value in (enabled, disabled, allowlist)):
+        raise ValueError("HERMES_NATIVE_CURRENT_CONFIGURATION_UNAVAILABLE")
     origin = entry.get("native_origin", {})
-    if (PLUGIN_ID not in plugins.get("enabled", [])
-            or PLUGIN_ID in plugins.get("disabled", [])
-            or EXECUTION_SERVER not in entry.get("mcp_allowlist", [])
+    if (PLUGIN_ID not in enabled
+            or PLUGIN_ID in disabled
+            or EXECUTION_SERVER not in allowlist
             or type(origin) is not dict
             or origin.get("schema") != ENROLLMENT_SCHEMA
             or origin.get("enabled") is not True

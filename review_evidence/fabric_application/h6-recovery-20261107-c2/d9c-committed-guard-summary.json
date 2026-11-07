@@ -1,0 +1,35 @@
+{
+  "root": "/private/tmp/h6-d9c-committed-guard-dp9znsfo",
+  "argv": [
+    "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "--basetemp",
+    "/private/tmp/h6-d9c-committed-guard-dp9znsfo/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-d9c-committed-guard-dp9znsfo/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 59.451,
+  "testcases": 1,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_d8_template_topology_and_protected_defaults",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+    "result.xml": "21bfbf4021eb9713875d8d0dbcb8c1ac4a663b1211ddc5949f2f9ba5ae991a65"
+  }
+}

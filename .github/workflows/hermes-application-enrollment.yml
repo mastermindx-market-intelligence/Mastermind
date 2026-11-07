@@ -7,6 +7,9 @@ on:
       - 'tests/test_hermes_primary_retained_enrollment.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_native_install.py'
       - 'ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py'
+      - 'ops/native_fabric/grok47/quota_billing/**'
       - 'ops/native_fabric/quota_continuity/rollout/build_review_stage.py'
       - 'ops/native_fabric/quota_continuity/rollout/provider_application/**'
       - 'ops/native_fabric/provider_plans/profile.json'
@@ -62,6 +65,8 @@ jobs:
             tests/test_hermes_primary_retained_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
             ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
@@ -79,7 +84,15 @@ jobs:
             --junitxml="$native_rollout_test_root/provider-auto-proof.xml" \
             tests/test_provider_plan_auto_routing.py \
             tests/test_provider_plan_local_return.py
-          python - "$native_rollout_test_root/proof.xml" "$native_rollout_test_root/provider-auto-proof.xml" <<'PY'
+          python ops/native_fabric/quota_continuity/rollout/build_review_stage.py \
+            --output "$native_rollout_test_root/provider-quota-application" \
+            --include-provider-plan-application --include-quota-reset-recovery --include-go-application
+          MMX_PROVIDER_AUTO_TEST_STAGE="$native_rollout_test_root/provider-quota-application/native-code-stage" \
+            python -B -m pytest -q -o addopts= --noconftest \
+            --junitxml="$native_rollout_test_root/provider-quota-auto-proof.xml" \
+            tests/test_provider_plan_auto_routing.py \
+            tests/test_provider_plan_local_return.py
+          python - "$native_rollout_test_root/proof.xml" "$native_rollout_test_root/provider-auto-proof.xml" "$native_rollout_test_root/provider-quota-auto-proof.xml" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
           suites = [suite for path in sys.argv[1:] for suite in ET.parse(path).getroot().iter("testsuite")]

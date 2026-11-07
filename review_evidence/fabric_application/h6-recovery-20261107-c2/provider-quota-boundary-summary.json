@@ -1,0 +1,187 @@
+{
+  "root": "/private/tmp/h6-0a-donor-boundary-proof-usjqm001",
+  "argv": [
+    "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py::test_historical_complete_h2_parent_retains_its_exact_inverse",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py::test_current_builder_refuses_historical_parent_before_new_emission",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py::test_h2_cannot_relabel_an_incomplete_host_pull_parent",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py::test_provider_quota_partial_or_foreign_quartet_refuses",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py::test_provider_quota_cannot_relabel_legacy_or_foreign_parent",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py::test_provider_quota_component_authenticates_both_patch_steps",
+    "--basetemp",
+    "/private/tmp/h6-0a-donor-boundary-proof-usjqm001/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-0a-donor-boundary-proof-usjqm001/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 1.75,
+  "testcases": 22,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_historical_complete_h2_parent_retains_its_exact_inverse[False]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_complete_h2_parent_retains_its_exact_inverse[True]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_builder_refuses_historical_parent_before_new_emission[False]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_builder_refuses_historical_parent_before_new_emission[True]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[preimage-ext/host_pull.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[preimage-ext/host_pull_backend.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[preimage-ext/host_pull_daemon.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[foreign-ext/host_pull.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[foreign-ext/host_pull_backend.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[foreign-ext/host_pull_daemon.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[preimage-lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[preimage-pick.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[preimage-quota_circuit.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[preimage-quota_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[foreign-lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[foreign-pick.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[foreign-quota_circuit.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_partial_or_foreign_quartet_refuses[foreign-quota_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_cannot_relabel_legacy_or_foreign_parent[legacy-quartet]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_cannot_relabel_legacy_or_foreign_parent[missing-provider]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_cannot_relabel_legacy_or_foreign_parent[foreign-parent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_quota_component_authenticates_both_patch_steps",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "e2289c230135b682d66e48107f8caab30f5b37878e8daf2e9fb92df9aebb1375",
+    "result.xml": "81df61080516599a85f44b55a45b1fa8652b398bc98be568d9e9f247a8b3c05a"
+  }
+}
