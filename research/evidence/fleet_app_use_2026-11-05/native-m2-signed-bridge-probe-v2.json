@@ -1,0 +1,57 @@
+{
+  "binary_sha256": "36653bc046f4461cd07df98675194b25d511dac57a1a07723bbad091ab2d90a5",
+  "candidate_source_sha256": {
+    "integrations/workbench_action_mcp/action_artifacts.py": "e344c4240e7ced17a9b44e4cc53372e9b66e2a10aec3abe2895770ec29de3b7a",
+    "integrations/workbench_app_use/contracts.py": "71638d26f503665830d9fe0b68939ce6490c4ac97feec31f478e88a5ff6991a4",
+    "integrations/workbench_app_use/native_port.py": "6a5e469619bb99b2b107f049ef0a5b1b2ea9b5d37938ac3b303b1845fbae79d8",
+    "integrations/workbench_app_use/peekaboo_adapter.py": "39fa23d26088c3efcdf105ee1916e889cd1154a5198d9dbad7d4ac321d9a46a3",
+    "integrations/workbench_app_use/tunnel.py": "1e1e4aa3a0e262333dc8288f6728964ae4ae0ce1e01585671950ee7e9229c6a4",
+    "tests/fixtures/native_app_use/Probe.swift": "4dfa88ecaf9d04923f1d68e7fa2578a9905401cca7890d36ee1b96d010dbf766"
+  },
+  "carrier": "peekaboo-bridge",
+  "counter_after_action": 1,
+  "counter_after_duplicate": 1,
+  "duplicate_delivery_same_receipt": true,
+  "fixture_nonce_matched": true,
+  "foreground_unchanged": true,
+  "live_fabric_admission_proven": false,
+  "native_action": {
+    "action_id": "de834ede6fd90a7529d424500d2cd575",
+    "business_outcome_verified": false,
+    "details": {
+      "business_outcome_verified": false,
+      "carrier": "peekaboo-bridge",
+      "native_acknowledged": true,
+      "native_result_sha256": "e2b96921cb190d5e8ddcce07f6873dbe0d2986e7f71ca6e39cd060425589b47e"
+    },
+    "effect_state": "APPLIED",
+    "evidence_status": "qualified",
+    "replay_permitted": false,
+    "schema": "mastermind.workbench_native_app.v1"
+  },
+  "original_action_evidence": {},
+  "permissions": {
+    "observation_ready": true,
+    "permissions": {
+      "Accessibility": true,
+      "Event Synthesizing": true,
+      "Screen Recording": true
+    },
+    "screen_recording": true,
+    "source": "bridge"
+  },
+  "production_deployment_proven": false,
+  "reconciliation_matches": true,
+  "schema": "mastermind.native_app_use_real_path_proof.v1",
+  "scope": "disposable native fixture through Workbench action port",
+  "session_ref": "765ba219dd11c4ea53805d856a6223275254097cfed24c030c9282b5afa8889c",
+  "source_head": "2288918590089ab862c39021705d670985814334",
+  "started_at_utc": "2026-11-06T00:35:04Z",
+  "status": "PROVEN",
+  "target": {
+    "bundle_id": "com.mastermind.native-app-use-probe",
+    "pid": 15023,
+    "process_start_identity_decimal": "1793925309625170",
+    "window_id": 50571
+  }
+}
