@@ -835,7 +835,7 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da', 'sites': ((354, 37, 40, 'int', '409'),)}
+] = {'sha256': 'ed3ff43271312af878fcdb06bf8407939d40e4c844e5222d7be935fdcc1d31fc', 'sites': ((364, 37, 40, 'int', '409'),)}
 
 # Original H4 f008 receipts record the existing Darwin host's ownership.
 # These are observed identities, not runtime defaults, service enrollment or
@@ -951,8 +951,12 @@ REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/h5-co
 REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/native-loader-baseline.log'] = {'sha256': '3e21b01c58fdc2a90ad265a0cea6309ec87ac41ffe050200a07baef4a9ac3f93',
  'sites': ((9, 102, 105, 'int', '677'),)}
 
-# Existing disposable shared-relay proof parent; immutable receipt, no runtime grant.
-REVIEWED_FILES['review_evidence/fabric_application/shared-relay-source-qualification-20261107.json'] = {
-    "sha256": '3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3',
-    "sites": ((296, 26, 29, "int", "501"),),
+
+# Retained source qualification records the observed proof parent UID only.
+# It grants no runtime identity or enrollment. Exact bytes and the sole complete
+# UTF-8 integer token are required; drift restores the ordinary identity guard.
+REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualification-20261107.json"] = {
+    "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "sites": (),
+    "utf8_sites": ((296, 26, 29, "int", "501"),),
 }

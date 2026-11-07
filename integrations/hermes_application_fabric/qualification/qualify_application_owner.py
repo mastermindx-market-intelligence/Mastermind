@@ -21,6 +21,11 @@ from unittest.mock import patch
 
 
 def qualify(args):
+    from owner_source_support import CURRENT_OWNER_COMMIT, OWNER_COMMIT
+    source_context = ("committed_current" if args.current_owner_source else
+                      "historical_proposal" if args.source_support_proposal else
+                      "historical_fixture")
+    uses_source_flags = args.current_owner_source or args.source_support_proposal
     roots = {name: Path(getattr(args, name)).resolve()
              for name in ("adapter_root", "macro_root", "native_owner_root", "hermes_root")}
     candidate = subprocess.run(
@@ -29,7 +34,7 @@ def qualify(args):
     ).stdout.strip()
     expected = {
         "adapter_root": candidate,
-        "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+        "macro_root": CURRENT_OWNER_COMMIT if args.current_owner_source else OWNER_COMMIT,
         "native_owner_root": candidate,
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
@@ -40,11 +45,16 @@ def qualify(args):
             raise RuntimeError("Qualification source differs: " + name)
         subprocess.run(["git", "-c", "gc.auto=0", "-C", str(roots[name]), "diff", "--exit-code", "HEAD", "--"],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
-    support = None
+    support, committed_source = None, None
     if args.source_support_proposal:
         from owner_source_support import prepare, qualify_unit
         support = prepare(roots["macro_root"], roots["adapter_root"], args.proposal_directory)
         support["unit_qualification"] = qualify_unit(args.proposal_directory, sys.executable)
+        roots["macro_root"] = args.proposal_directory
+    elif args.current_owner_source:
+        from owner_source_support import prepare_current
+        committed_source = prepare_current(
+            roots["macro_root"], roots["adapter_root"], args.proposal_directory)
         roots["macro_root"] = args.proposal_directory
     owner_tests = roots["native_owner_root"] / "ops/native_fabric/quota_continuity/tests"
     sys.path[:0] = [str(roots["adapter_root"]), str(roots["macro_root"]),
@@ -141,7 +151,7 @@ def qualify(args):
             self.assertEqual(document["application_fabric_modes"], {})
             transport_id = self.automatic_transport if scoped else self.fixed_transport
             original = factory_owner._APPLICATION_FABRIC_TRANSPORTS[transport_id]
-            if support is None:
+            if not uses_source_flags:
                 self.assertFalse(original.qualified or original.application_allowed)
                 fixture_support = {"qualified": True, "application_allowed": True}
             else:
@@ -377,7 +387,7 @@ def qualify(args):
 
     class AttendedOwnerConversation(OriginalOwnerConversation):
         # Existing factory/handler/Broker with a distinct disposable service.
-        # Runtime application data remains unenrolled in both source contexts.
+        # Runtime application data remains unenrolled in every source context.
         service_lane = "hermes-attended"
         service_mode = "hermes_attended_fabric"
         workload = "hermes_attended"
@@ -390,8 +400,9 @@ def qualify(args):
                     AttendedOwnerConversation, MetaOwnerConversation,
                     MetaAutoOwnerConversation, MetaExactOwnerConversation))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    print(json.dumps({"sources": expected, "source_support_proposal": support,
-        "fixture_overrides_source_flags": support is None, "tests_run": result.testsRun,
+    print(json.dumps({"sources": expected, "source_context": source_context,
+        "source_support_proposal": support, "committed_owner_source": committed_source,
+        "fixture_overrides_source_flags": not uses_source_flags, "tests_run": result.testsRun,
         "network_counter_scope": "native_conversation_process_after_source_preparation",
         "failures": len(result.failures), "errors": len(result.errors), "skips": len(result.skipped),
         "blocked_external_connections": len(blocked), "provider_sdk_constructions": len(constructed),
@@ -407,7 +418,9 @@ def main():
     parser.add_argument("--macro-root", required=True)
     parser.add_argument("--native-owner-root", required=True)
     parser.add_argument("--hermes-root", required=True)
-    parser.add_argument("--source-support-proposal", action="store_true")
+    context = parser.add_mutually_exclusive_group()
+    context.add_argument("--source-support-proposal", action="store_true")
+    context.add_argument("--current-owner-source", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="hermes-owner-support-") as temporary:
         args.proposal_directory = Path(temporary) / "macro"

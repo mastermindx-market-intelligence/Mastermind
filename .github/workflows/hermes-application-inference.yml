@@ -242,6 +242,19 @@ jobs:
             tests
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Checkout committed Hermes support in the current Macro contribution
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 12efe39a6b6e2f6d19f3a9893f978c55d4656681
+          path: .ci-hermes-current-application-owner
+          sparse-checkout: |
+            engine
+            lib
+            config
+            tests
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
@@ -254,6 +267,17 @@ jobs:
         run: >-
           .ci-hermes-native/.venv/bin/python -B
           integrations/hermes_application_fabric/qualification/verify_source_materialization.py
+      - name: Qualify committed current support without applying the historical proposal
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-current-owner-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-current-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
+          --current-owner-source
       - name: Qualify the exact source-support proposal without overriding support flags
         env:
           HERMES_HOME: ${{ runner.temp }}/hermes-source-support-native-fixture
