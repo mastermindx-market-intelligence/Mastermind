@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { execFile as execFileCallback } from 'node:child_process';
+import { execFile as execFileCallback, spawn as spawnDefault } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath as realpathDefault, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
@@ -318,6 +318,11 @@ const PROTECTED_TRACKING_REFS = Object.freeze({
 });
 const NOT_REGISTERED = 'workspace is not registered to the source repository';
 const MAX_STDIO_BYTES = 1024 * 1024;
+// Recovery inventories may exceed the ordinary command-result buffer. Hash
+// their exact NUL-delimited bytes without retaining stdout; this separate hard
+// ceiling bounds work, not memory, and never changes other command limits.
+const MAX_RECOVERY_INVENTORY_BYTES = 64 * 1024 * 1024;
+const RECOVERY_INVENTORY_CLEANUP_MS = 1000;
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_PUSH_TIMEOUT_MS = 60_000;
 const RESOLVED_CONFIGS = new WeakSet();
@@ -1191,6 +1196,22 @@ export function createGitPublisher(config, dependencies = {}) {
   // One filesystem seam, beside the incumbent realpath and rm seams, so the
   // exact lock ownership check can be exercised without a privileged host.
   const statFile = dependencies.lstat ?? lstat;
+  const spawn = dependencies.spawn ?? spawnDefault;
+
+  function commandEnvironment(envExtra = {}) {
+    return {
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      HOME: process.env.HOME ?? '',
+      USER: process.env.USER ?? '',
+      LOGNAME: process.env.LOGNAME ?? '',
+      LANG: 'C',
+      LC_ALL: 'C',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '/usr/bin/false',
+      SSH_ASKPASS: '/usr/bin/false',
+      ...envExtra,
+    };
+  }
 
   async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {}, encoding = 'utf8' } = {}) {
     return execFile(file, args, {
@@ -1198,23 +1219,76 @@ export function createGitPublisher(config, dependencies = {}) {
       timeout: timeoutMs,
       maxBuffer: MAX_STDIO_BYTES,
       encoding,
-      env: {
-        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-        HOME: process.env.HOME ?? '',
-        USER: process.env.USER ?? '',
-        LOGNAME: process.env.LOGNAME ?? '',
-        LANG: 'C',
-        LC_ALL: 'C',
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_ASKPASS: '/usr/bin/false',
-        SSH_ASKPASS: '/usr/bin/false',
-        ...envExtra,
-      },
+      env: commandEnvironment(envExtra),
     });
   }
 
   async function git(cwd, args, options = {}) {
     return run(cfg.gitBinary, args, { cwd, ...options });
+  }
+
+  function gitInventoryDigest(cwd, args) {
+    return new Promise((resolve, reject) => {
+      // Only the four fixed, read-only recovery inventories call this helper.
+      // No shell, optional index refresh, caller command, or output exposure.
+      const child = spawn(cfg.gitBinary, args, {
+        cwd, env: commandEnvironment({GIT_OPTIONAL_LOCKS: '0'}),
+        stdio: ['ignore', 'pipe', 'pipe'], shell: false,
+      });
+      const digest = createHash('sha256');
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      let failure = null;
+      let settled = false;
+      let timer = null;
+      let cleanupTimer = null;
+      const finish = (error = null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(cleanupTimer);
+        if (error) reject(error);
+        else resolve(digest.digest('hex'));
+      };
+      const abort = (code) => {
+        if (failure || settled) return;
+        failure = Object.assign(new Error(code), {code});
+        // These fixed Git readers do not launch hooks or descendants. Require
+        // close to confirm reaping; a signal request alone is not that proof.
+        cleanupTimer = setTimeout(() => {
+          finish(Object.assign(new Error('RECOVERY_INVENTORY_CLEANUP_UNCONFIRMED'),
+            {code: 'RECOVERY_INVENTORY_CLEANUP_UNCONFIRMED', cause: failure}));
+          // Bound retained pipes even if an OS-level child failure
+          // prevents close. This does not claim that the child has exited.
+          child.stdout.destroy();
+          child.stderr.destroy();
+        }, RECOVERY_INVENTORY_CLEANUP_MS);
+        try { child.kill('SIGKILL'); } catch { /* Cleanup remains unconfirmed until close. */ }
+      };
+      timer = setTimeout(() => abort('RECOVERY_INVENTORY_TIMEOUT'), cfg.commandTimeoutMs);
+      child.on('error', () => abort('RECOVERY_INVENTORY_PROCESS_ERROR'));
+      child.stdout.on('error', () => abort('RECOVERY_INVENTORY_STDOUT_ERROR'));
+      child.stderr.on('error', () => abort('RECOVERY_INVENTORY_STDERR_ERROR'));
+      child.stdout.on('data', (chunk) => {
+        stdoutBytes += chunk.length;
+        if (stdoutBytes > MAX_RECOVERY_INVENTORY_BYTES) {
+          abort('RECOVERY_INVENTORY_LIMIT');
+        } else if (!failure && !settled) {
+          digest.update(chunk);
+        }
+      });
+      child.stderr.on('data', (chunk) => {
+        stderrBytes += chunk.length;
+        if (stderrBytes > MAX_STDIO_BYTES) abort('RECOVERY_INVENTORY_STDERR_LIMIT');
+      });
+      child.once('close', (code, signal) => {
+        if (failure) return finish(failure);
+        if (code !== 0 || signal !== null) {
+          return finish(new Error('RECOVERY_INVENTORY_COMMAND_FAILED'));
+        }
+        finish();
+      });
+    });
   }
 
   async function gitWithIndex(cwd, args, indexPath, options = {}) {
@@ -1524,7 +1598,6 @@ export function createGitPublisher(config, dependencies = {}) {
 
   async function captureRecoveryState(workspacePath, resolvedPaths = null) {
     const observationOptions = Object.freeze({envExtra: {GIT_OPTIONAL_LOCKS: '0'}});
-    const bufferOptions = Object.freeze({...observationOptions, encoding: 'buffer'});
     const resolved = resolvedPaths ?? await resolveRecoveryPaths(workspacePath);
     const [{stdout: headOut}, {stdout: treeOut}] = await Promise.all([
       git(workspacePath, ['rev-parse', 'HEAD']),
@@ -1538,10 +1611,10 @@ export function createGitPublisher(config, dependencies = {}) {
     // Fingerprint only the state this leaf can affect. This is the incumbent's
     // own bounded observation set, never an unbounded recursive census.
     const [staged, flags, dirty, untracked, indexMatchesHead] = await Promise.all([
-      git(workspacePath, ['ls-files', '--stage', '-z'], bufferOptions),
-      git(workspacePath, ['ls-files', '-v', '-z'], bufferOptions),
-      git(workspacePath, ['diff-files', '--name-status', '-z'], bufferOptions),
-      git(workspacePath, ['ls-files', '--others', '--exclude-standard', '-z'], bufferOptions),
+      gitInventoryDigest(workspacePath, ['ls-files', '--stage', '-z']),
+      gitInventoryDigest(workspacePath, ['ls-files', '-v', '-z']),
+      gitInventoryDigest(workspacePath, ['diff-files', '--name-status', '-z']),
+      gitInventoryDigest(workspacePath, ['ls-files', '--others', '--exclude-standard', '-z']),
       gitQuiet(workspacePath, ['diff-index', '--cached', '--quiet', 'HEAD', '--'], observationOptions),
     ]);
     const indexStats = await statFile(indexPath, {bigint: true});
@@ -1560,10 +1633,10 @@ export function createGitPublisher(config, dependencies = {}) {
       indexInode: indexStats.ino.toString(),
       indexDevice: indexStats.dev.toString(),
       indexMode: permissionMode(indexStats),
-      stagedStateSha256: digestOf(staged.stdout),
-      sparseStateSha256: digestOf(flags.stdout),
-      dirtyStateSha256: digestOf(dirty.stdout),
-      untrackedStateSha256: digestOf(untracked.stdout),
+      stagedStateSha256: staged,
+      sparseStateSha256: flags,
+      dirtyStateSha256: dirty,
+      untrackedStateSha256: untracked,
       indexMatchesHead,
     };
   }
