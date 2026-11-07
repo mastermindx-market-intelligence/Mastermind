@@ -262,7 +262,21 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
-    manifest = _policy_publisher_predecessor(manifest)
+    # The strict publisher transform is the only admission path. On a malformed
+    # proposed closure, run the original validator against a private predecessor
+    # solely to retain its historical refusal diagnostic. A successful diagnostic
+    # validation still re-raises the strict publisher refusal: no mixed, partial,
+    # historical or foreign publisher may become an accepted generation.
+    try:
+        manifest = _policy_publisher_predecessor(manifest)
+    except ValueError as publisher_refusal:
+        if (type(manifest) is not dict
+                or manifest.get("ext/support_bundle.py") != POLICY_PUBLISHER_SUCCESSOR):
+            raise
+        diagnostic = dict(manifest)
+        diagnostic["ext/support_bundle.py"] = POLICY_PUBLISHER_PREDECESSOR
+        validate_go_base_manifest(diagnostic, dependency_hashes)
+        raise publisher_refusal
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}

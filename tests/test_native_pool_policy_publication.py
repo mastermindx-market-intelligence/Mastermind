@@ -465,3 +465,31 @@ def test_unknown_publisher_never_receives_forward_compatibility():
     dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     with pytest.raises(ValueError, match="not the reviewed protected composition"):
         builder.validate_go_base_manifest(manifest, dependencies)
+
+
+@pytest.mark.parametrize(("mutation", "diagnostic"), [
+    ("foreign_picker", "native Go base picker is not the exact composed source"),
+    ("missing_picker", "native Go base dependency closure differs"),
+])
+def test_publisher_malformed_closure_keeps_original_go_refusal(mutation, diagnostic):
+    # Refusals reach the incumbent historical checks without admitting the
+    # publisher-only successor or changing any actual staged source bytes.
+    builder, manifest = _publisher_source_manifest()
+    dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    if mutation == "foreign_picker":
+        manifest["ext/pick.py"] = "f" * 64
+    else:
+        del manifest["ext/pick.py"]
+    with pytest.raises(ValueError, match=diagnostic):
+        builder.validate_go_base_manifest(manifest, dependencies)
+
+
+def test_legacy_valid_but_publisher_unqualified_combination_still_refuses():
+    # The prior Go validator alone permits this exact old provider-outcome
+    # digest, but the newer publisher requires every member of its full parent.
+    builder, manifest = _publisher_source_manifest()
+    assert manifest["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
+    manifest["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="native policy publisher successor is not one exact107 closure"):
+        builder.validate_go_base_manifest(manifest, dependencies)
