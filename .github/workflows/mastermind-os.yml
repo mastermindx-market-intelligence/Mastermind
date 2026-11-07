@@ -40,7 +40,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
+      # The production release archives only app/mastermind_os. Build that exact
+      # source closure, rather than succeeding because checkout-root fixtures
+      # happen to exist on the CI runner. Reuse the current frontend job.
+      - name: Build exact app-only release archive
+        working-directory: .
+        run: |
+          release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"
+          git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"
+          (
+            cd "$release_root/app/mastermind_os"
+            npm ci --ignore-scripts
+            npm run build
+          )
+          test -s "$release_root/app/mastermind_os/dist/index.html"
+          cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"
       - name: Build isolated browser source fixture
         run: npx vite build --config vite.browser-proof.config.ts
       - name: Record exact compiled source identity
