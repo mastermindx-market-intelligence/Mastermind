@@ -47,6 +47,7 @@ const invoke = vi.fn().mockResolvedValue({
   state: "BUILT_NOT_PROVEN",
 });
 vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => false,
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 const deferred = <T,>() => {

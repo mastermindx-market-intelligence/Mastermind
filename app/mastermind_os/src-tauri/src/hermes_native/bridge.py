@@ -5,6 +5,7 @@ session tickets and unprojected RPC replies never cross into the renderer.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 import json
 import os
@@ -23,7 +24,9 @@ METHODS = {"create": "session.create", "list": "session.list", "read": "session.
 FIELDS = {"status": {"operation"}, "list": {"operation"},
           "create": {"operation", "role", "requestId"}, "read": {"operation", "sessionId"},
           "send": {"operation", "sessionId", "requestId", "text"},
-          "receipt": {"operation", "sessionId", "admissionId"}}
+          "receipt": {"operation", "sessionId", "admissionId"},
+          "recover_create": {"operation", "requestId"},
+          "recover_send": {"operation", "sessionId", "requestId"}}
 
 
 class BridgeRefusal(ValueError):
@@ -66,6 +69,8 @@ def normalize_request(value):
                                 or not REQUEST_ID.fullmatch(value["requestId"])):
         raise BridgeRefusal("REQUEST_INVALID")
     session = {"session_id": identifier(value["sessionId"])} if "sessionId" in value else {}
+    if operation in {"recover_create", "recover_send"}:
+        return operation, {**session, "request_id": value["requestId"]}
     if operation == "create":
         names = {"meta-ceo": "Meta-CEO", "secretary": "Secretary"}
         if type(value["role"]) is not str or value["role"] not in names:
@@ -115,8 +120,11 @@ def qualify_identity(answer, home):
         revision = None
     if type(version) is not str or not re.fullmatch(r"[A-Za-z0-9_.+-]{1,64}", version):
         version = None
+    # Stable namespace for this same-OS-user native attachment. This is a local
+    # pending-pointer key, not a cloud principal, credential or permission grant.
+    scope = hashlib.sha256(("mastermind.hermes-native.local.v1\0" + str(home) + "\0" + str(os.getuid())).encode()).hexdigest()
     return endpoint, {"protocol": 1, "instanceId": instance, "authorityEpoch": data["authority_epoch"],
-                      "version": version, "sourceRevision": revision}
+                      "version": version, "sourceRevision": revision, "localScope": scope}
 
 
 def integer(value):
@@ -235,6 +243,21 @@ async def execute_request(request, runtime):
         if operation == "status":
             return envelope("READY", operation=operation, runtime=public)
         async with runtime.connect(endpoint) as client:
+            if operation in {"recover_create", "recover_send"}:
+                # Existing owner lookup only. Absence, pruning and read failure
+                # never prove that an interrupted mutation was not performed.
+                target = await asyncio.to_thread(runtime.resolve_original, operation, params)
+                if operation == "recover_create":
+                    original = await client.rpc("session.resume", session_id=target["session_id"])
+                    observed = project_result("read", original, target["session_id"], readonly_capacity=readonly_capacity)
+                    return envelope("OPENED", operation="recover", runtime=public, **observed)
+                # The canonical outcome is independent of transcript readability.
+                # The UI performs an ordinary history read after this receipt.
+                result = await client.rpc("prompt.receipt", session_id=target["session_id"], admission_id=target["admission_id"])
+                projected = project_result("receipt", result, target["session_id"], readonly_capacity=readonly_capacity)
+                if projected["receipt"]["id"] != target["admission_id"]:
+                    raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
+                return envelope("ADMITTED", operation="recover", runtime=public, **projected)
             if operation == "send":
                 original = await client.rpc("session.resume", session_id=params["session_id"])
                 observed = project_result("read", original, params["session_id"], readonly_capacity=readonly_capacity)
@@ -248,16 +271,24 @@ async def execute_request(request, runtime):
             state = {"create": "OPENED", "send": "ADMITTED"}.get(operation, "READY")
             return envelope(state, operation=operation, runtime=public, **projected)
     except OwnerRefusal as exc:
+        if operation.startswith("recover_"):
+            return envelope("EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
         reason = str(exc)
         code = reason if re.fullmatch(r"[a-z_]{1,80}", reason) else "NATIVE_REFUSED"
         return envelope("REFUSED", operation=operation, code=code)
     except NotSent:
+        if operation.startswith("recover_"):
+            return envelope("EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
         return envelope("NOT_SENT", operation=operation, code="NATIVE_NOT_SENT")
     except BridgeRefusal as exc:
-        return envelope("EFFECT_UNKNOWN" if mutation_sent else "REFUSED", operation=operation, code=str(exc))
+        recovering = operation.startswith("recover_")
+        return envelope("EFFECT_UNKNOWN" if mutation_sent or recovering else "REFUSED",
+                        operation="recover" if recovering else operation, code=str(exc))
     except Exception:
-        return envelope("EFFECT_UNKNOWN" if mutation_sent else "UNAVAILABLE", operation=operation,
-                        code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent else "NATIVE_UNAVAILABLE")
+        recovering = operation.startswith("recover_")
+        return envelope("EFFECT_UNKNOWN" if mutation_sent or recovering else "UNAVAILABLE",
+                        operation="recover" if recovering else operation,
+                        code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent or recovering else "NATIVE_UNAVAILABLE")
 
 
 class NativeRuntime:
@@ -288,6 +319,53 @@ class NativeRuntime:
             raise BridgeRefusal("NATIVE_DEPENDENCIES_UNAVAILABLE")
         site.addsitedir(str(selected))
         sys.path.insert(0, str(selected))
+
+    def require_recovery_source(self):
+        root = self.home / "hermes-agent"
+        hashes = {
+            "hermes_state_keys.py": "46a44bcc9a82552c606fc0eaec275aac76bfe3c5523d7793218377d15cccc676",
+            "hermes_state.py": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2",
+            "hermes_state_runtime.py": "6bbcc688799d3ea784545b5227d20e07f8b5ce8f26fcf545825bc8a60462ee3f",
+        }
+        if getattr(self, "observed_code", None) != "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19":
+            raise BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
+        for name, expected in hashes.items():
+            source = root / name
+            if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+                raise BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
+
+    def resolve_original(self, operation, params):
+        """Read the incumbent native identity/ledger, never replay prompt.submit.
+
+        Use the upstream read-only SessionDB and exact principal/target/request
+        index. No raw SQL, migration, provisioning, credential or new state owner.
+        Qualified source bytes prevent a compatible upgrade silently changing
+        these private lookup semantics. Ordinary history reads remain available.
+        """
+        import stat
+        self.require_recovery_source()
+        principal = f"uid:{os.getuid()}"  # incumbent private socket's POSIX peer identity
+        if operation == "recover_create":
+            from hermes_state_keys import local_identity
+            return {"session_id": local_identity(str(self.home), principal, params["request_id"])}
+        from hermes_state import SessionDB
+        from hermes_state_runtime import find_session_admission
+        path = self.home / "state.db"
+        before = path.lstat()
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid() or before.st_mode & 0o022):
+            raise BridgeRefusal("NATIVE_RECOVERY_UNAVAILABLE")
+        db = SessionDB(path, read_only=True)
+        try:
+            row = find_session_admission(db, principal_id=principal,
+                session_id=params["session_id"], request_id=params["request_id"])
+        finally:
+            db.close()
+        after = path.lstat()
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise BridgeRefusal("NATIVE_RECOVERY_UNAVAILABLE")
+        if not row or row.get("principal_id") != principal or row.get("target_session_id") != params["session_id"] or row.get("request_id") != params["request_id"]:
+            raise BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED")
+        return {"session_id": params["session_id"], "admission_id": identifier(row.get("admission_id"))}
 
     async def identify(self):
         from hermes_cli.gateway_client import private_control_query

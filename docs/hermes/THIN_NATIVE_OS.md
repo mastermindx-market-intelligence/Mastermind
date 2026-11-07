@@ -33,11 +33,13 @@ allowing sends, and the UI explicitly labels CAPACITY_READ_ONLY. Unqualified too
 remain read-only. It does not grant the local agent company execution tools. Native user requests remain
 exact, and the served model is not inferred from a configured model label.
 
-Only status/list/create/read/send/receipt are exposed. No arbitrary RPC, endpoint, profile,
+Only status/list/create/read/send/receipt and exact original-request recovery are exposed. No arbitrary RPC, endpoint, profile,
 model, key, cwd, shell, role grant, approval, cancellation or restart arguments. Role labels
 are conversation purposes, not two installed role authorities. Host auth generation is
-checked before invocation and before releasing its result. Sign-out discards pending UI
-results. Unexpected modifying outcomes remain unknown and are never automatically replayed.
+checked before invocation and before releasing its result. Mutations also require the
+generation observed before durable reservation. Sign-out discards private UI results,
+while the existing pending-pointer store retains the original request lookup. Unexpected
+modifying outcomes remain unknown and are never automatically replayed.
 
 ## Verified input, not product acceptance
 M2 upstream is clean at `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` (0.23.0).
@@ -71,55 +73,143 @@ Wrong/missing native identity; missing protocol/capability; credential-bearing o
 origin; extra caller authority; malformed/oversized frame; another session's receipt;
 logout during IO; timeout after send; malformed history; no-tool baseline; upgrade mismatch.
 
-## Progress
-THIN-1 and THIN-2 are implemented as candidates. A real native create/send/receipt/read
-roundtrip succeeded on M2. THIN-3 is not complete: source qualification, current-base
-composition, actual signed-in packaged-app proof and protected release remain outstanding.
-No remote, always-on company orchestration, paid-pool inference or Fabric dispatch is claimed.
+## Current recovery and source qualification
 
-## Crash recovery and continuation capsule
+The assigned continuation retains PR [#2180](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2180),
+branch `sol/web-hermes-thin-os-integration-20261106-c1-01` and workspace
+`/Volumes/Mastermind 2/agent-workspaces/web/hermes-thin-os-integration-20261106-c1-01`.
+The prior crash capsule is retained at
+[567fa69575fd1702b1972a214a9c95458f84c12d](https://github.com/mastermindx-market-intelligence/Mastermind/blob/567fa69575fd1702b1972a214a9c95458f84c12d/docs/hermes/THIN_NATIVE_OS.md).
+It is historical evidence, not the present unfinished-action list.
 
-Recorded after the previous long implementation turn ended in `Thinking failed`.
-This is a continuity boundary, not product acceptance. No failure cause beyond the
-observed terminal generation failure is established. Recovery only reconciles and
-persists existing work; no new native canary or delegated worker was submitted.
+- Governing continuation pin: `615146aac6a1b0c0933bc9b815517a2fd285ed4a`;
+  INDEX and governing laws were retrieved at that same protected SHA.
+- Fixture repair: [c0e9f73651d359e2fe8e669e7d611a5dae2cce34](https://github.com/mastermindx-market-intelligence/Mastermind/commit/c0e9f73651d359e2fe8e669e7d611a5dae2cce34).
+  Node `fileURLToPath` converts the URL, including spaces, `#`, `%` and Unicode.
+  The regression copies and consumes the exact committed producer fixtures without
+  weakening their hash/runtime-identity assertions. 10 passed, 3 existing skips.
+- Protected overlap composition: [b805a3ca2b7b458cc2f5f935894f977c89e1f5e8](https://github.com/mastermindx-market-intelligence/Mastermind/commit/b805a3ca2b7b458cc2f5f935894f977c89e1f5e8).
+  Preserved the newer Office/organization/selected-child shell and both native module
+  registrations, including `control_room_read` and Hermes. Focused Office/Hermes
+  composition: 243 passed, 9 existing skips.
+- Subsequent protected movement through `0bf1d891e6e22a938f184e7df02481c52f3aa2a4`
+  was inspected. New qualified role-request observations and Executive source-derivation
+  work do not replace this same-OS-user attachment or require an installed upstream
+  upgrade. No current owned source file overlap requires another ancestry-only merge.
+- Four web-only App fixtures now explicitly mock `isTauri=false`. This repairs the
+  actual frontend failure on b805a3ca without weakening the native platform check.
 
-- Classification: CHECKPOINTED_CONTINUATION after verified source publication/readback;
-  otherwise NOT_CANONICALLY_PERSISTED. MISSION_COMPLETE: false.
-- Runtime/source operation and branch remain those above. The original acquired M2
-  workspace is `/Volumes/Mastermind 2/agent-workspaces/web/hermes-thin-os-integration-20261106-c1-01`.
-- Recovery procedure pin: `e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46`.
-  INDEX and session reliability were read at that pin; changed AGENTS and delivery
-  rules were inspected. The previous core skill/review/continuity blobs are unchanged.
-- Protected movement overlaps the three existing mount files `auth.rs`, `main.rs` and
-  `MetaCeoOffice.tsx`. This checkpoint does not compose or overwrite that newer work.
-- The final interrupted action only read test source. It had no requested source or
-  runtime mutation. This branch has no previous commit/push attempt to replay.
-- PLAN_NOT_ORG_LINKED: the owning GitHub plan and source checkpoint are the continuity
-  record. No Macro Agent OS, Linear status or protected organizational acceptance was
-  changed or fabricated during this recovery.
+## Reopening an uncertain original request
 
-### Actual retained verification
+The adapter reuses `indexeddb-pending-pointer-store.ts`, database
+`mastermind-os-pending-v1`, object store `pointers`. Closed record variants 13/14
+extend its incumbent conversation-create/turn kinds; no second database, lifecycle,
+queue or retry owner is introduced. Atomic strict-durability reservation finishes
+before the native command is invoked. A concurrent reservation cannot dispatch.
 
-All test statements below are recovered original observations, not freshly rerun results.
-Commands are relative to the original operation workspace unless specified otherwise.
+The record contains only the original request ID, a fixed create-target discriminator
+or original send session ID, and the existing record kind/version. It contains no
+prompt, transcript, role, credential, permission, execution state or retry instruction.
+Its host-qualified scope hashes the native profile home and actual OS UID under a
+fixed domain. That scope survives gateway/app reopening and auth-generation changes;
+it is a same-OS-user storage namespace, not a cloud account or authority grant.
+Every command still requires the current native sign-in.
 
-| Verification | Actual result | Retained evidence |
+Reconnecting reads the pointer before enabling mutation controls. Reopening never
+creates, sends, or automatically recovers. The explicit **Check previous request**
+uses the original tuple:
+
+- Create: upstream `hermes_state_keys.local_identity(profile, uid, request_id)` locates
+  the original session; only `session.resume` is called. A missing session stays held.
+- Send: upstream `SessionDB(read_only=True)` and `find_session_admission` locate the
+  exact original `(principal_id, target_session_id, request_id)` in Hermes's ledger.
+  The adapter then reads that admission through the existing gateway's `prompt.receipt`
+  and checks session/admission correlation. Transcript readability is independent: the
+  UI reads history separately after observing the receipt. A history timeout preserves
+  the known terminal result and keeps Send disabled until a fresh read qualifies it.
+  It never calls `prompt.submit` in recovery.
+- Missing/pruned rows, mismatched evidence, read failures, changed lookup source,
+  malformed storage and auth changes after invocation retain the pointer. Empty
+  history, `running=false`, or an absent pending admission are not absence proof.
+- Only an exact opened create or canonical terminal original-send receipt settles
+  the pointer through `clearIfEqual`. A positively classified before-dispatch failure
+  may clear this invocation's reservation. Auth changes and malformed replies cannot.
+  A failed clear remains fenced; it cannot erase a newer pointer.
+- Foreground reads of an admitted original are bounded to 30. Recovery responses do
+  not reset that bound. An explicit user check may start another bounded observation.
+  Native running/admission/prompt state still blocks another send after settlement.
+
+Private lookup helpers are qualified to upstream `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`
+and exact source hashes. A compatible protocol upgrade can still expose ordinary
+history, but changed recovery helpers hold the original until requalified. No upgrade,
+restart, enrollment or tool-authority expansion is performed by this adapter.
+
+## Verification during this continuation
+
+These are actual local observations; they do not claim installed-app acceptance.
+
+| Check | Result | Retained local receipt |
 |---|---|---|
-| `python3 -m unittest discover -s tests -p test_hermes_native_os_bridge.py` | 16 passed | `/tmp/hermes-thin-send-contract-green-c1.log` |
-| `cd app/mastermind_os && npm test -- --run src/hermes-native` | 12 passed | `/tmp/hermes-thin-ui-mounted-c1.log` |
-| `cd app/mastermind_os && npm run build` | Passed; large-bundle and ineffective dynamic import warnings remain | `/tmp/hermes-thin-ui-build-c1.log` |
-| `cd app/mastermind_os/src-tauri && MM_SOURCE_REVISION=609bc3a3e4117fed9b656a0552cecb8b8c7e3bf1 MM_BUILD_IDENTITY=hermes-thin-c1-development-uncommitted cargo test --no-default-features` | 251 passed, 7 ignored across three binaries | `/tmp/hermes-thin-native-all-tests-c1.log` |
-| `cd app/mastermind_os && npm test -- --run src/hermes-native src/meta-ceo` | 223 passed, 18 skipped; one failed suite | `/tmp/hermes-thin-office-tests-c1.log` |
+| Current native UI, durable pointer and existing store suites | 127 passed | `/tmp/hermes-thin-recovery-web-20261107-c4.log` |
+| Current Hermes UI/port plus the four previously failing App suites, two workers | 163 passed | `/tmp/hermes-thin-recovery-focused-web-20261107-c2.log` |
+| Python bridge, exact owner lookup and negative recovery cases | 25 passed | `/tmp/hermes-thin-recovery-python-20261107-c2.log` |
+| Dependency-free native request/auth-generation guards | 6 passed | `/tmp/hermes-thin-recovery-rust-20261107-c1.log` |
+| Full native Rust suites, no default features, locked dependencies | 257 passed, 8 existing skips | `/tmp/hermes-thin-recovery-native-all-20261107-c1.log` |
+| Typecheck and packaged native frontend build | Passed; existing chunk/dynamic-import warnings retained | `/tmp/hermes-thin-recovery-typecheck-20261107-c5.log`, `/tmp/hermes-thin-recovery-build-20261107-c3.log` |
 
-The failed suite is `src/meta-ceo/mission-result-producer.test.ts`, committed-producer
-replay. The file exists on disk, but `new URL(..., import.meta.url).pathname` leaves the
-SSD space encoded as `%20`, causing ENOENT. Do not weaken the producer evidence check or
-substitute fixtures. Next repair uses correct URL-to-file-path conversion and a path-with-
-spaces regression, then reruns the affected suites. This defect is not yet repaired.
-The full React repository suite was not run; no all-green claim is made.
+The first unconstrained full app run was stopped at its owned process after measured
+host load exceeded 100 and multiple unrelated suites timed out. Its exit143 is not a
+passing full-suite receipt. The two-worker focused rerun passed; required hosted full
+checks remain to be consumed for the successor.
 
-### Original native result: do not recreate or resubmit
+A read-only attempt against the preserved native canary returned `EFFECT_UNKNOWN`.
+One bounded diagnostic confirmed dependency selection, live protocol/source identity,
+connection and exact original ledger lookup, then observed a `TimeoutError` on
+`session.resume`. High host contention was concurrent; causality is not established.
+No create/send was issued. The original canary receipt hash remained unchanged.
+Diagnostic: `/tmp/hermes-thin-os-recovery-diagnostic-20261107-c1.log`.
+The adapter was then corrected to read the canonical receipt independently of history.
+The changed recovery path returned the exact original terminal/completed admission,
+sequence6, execution generation1, without any create/send. Receipt:
+`/tmp/hermes-thin-os-original-recovery-20261107-c2.json`, SHA256
+`23f7fbf5edacf856316f5df3b0e15ac6172367da07443188e0e1e1a366f0f7a2`.
+The original canary file remains byte-for-byte unchanged. This proves actual native
+request-ID-to-admission recovery; packaged UI sign-in/history remain separately owed.
+Candidate bridge SHA256: `4f6eac9d057eb36c3afd94350cd98fd974a374bdd92ad71ecec76a9e941bc012`.
+
+## Remaining acceptance and protected release
+
+THIN-1/THIN-2 source candidates and reopened-request behavior are qualified by the
+checks above. THIN-3 still owes a current candidate build, real signed-in native
+attachment/history/reopening/logout proof and the protected source release result.
+The original adapter canary below is preserved; it is not a packaged UI Send receipt.
+Do not fabricate a pending record for this already-settled canary.
+
+The observed installed bundle at `/Users/chriswong/Applications/Mastermind OS.app`
+is an older source (`fca92d5a3cef710932b46082eef98a258079f806`, build
+`mmos-project-teams-fca92d5a-20261106-sol-002`). It cannot prove this successor.
+Its signature is ad hoc, with no TeamIdentifier; a read-only signing-identity check
+reported zero valid identities. A Developer ID certificate/key and notarization
+custodian are genuine signed-distribution inputs under the
+[incumbent release runbook](../runbooks/mastermind-os-macos-release.md).
+Source/functional qualification may continue without claiming a signed beta.
+The current native public-client build input must come from the existing registration,
+not a new identity or invented client. Candidate callback routing must name the actual
+candidate process, retaining the prior installed bundle.
+
+Protected GitHub release must use the existing exact-head workflow and squash merge
+queue; required `test`/ALLGREEN and actual holds bind. A full branch-protection read
+returned 403 from the integration and was not replayed through another carrier;
+required review count is not inferred from an empty review list. No self-approval,
+direct self-merge, bypass or duplicate auto-merge enrollment is authorized.
+
+DO_NOT_REDO: upstream install, private-socket discovery, completed synthetic native
+turn, incumbent dependency selection, source workspace acquisition or accepted sibling
+work. No new native canary, worker dispatch or Secretary message has been issued.
+ADV-1/ADV-2 remain outside this first native slice; no remote, always-on company
+orchestration, paid-pool inference or Fabric execution is claimed.
+
+## Original native result: do not recreate or resubmit
 
 - Upstream runtime observed: `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`, protocol1,
   version0.23.0. No installed-runtime upgrade or restart was performed.
@@ -141,47 +231,3 @@ then native invalid-parameter checks. The concrete repairs selected the incumben
 committed dependency generation, preserved the installed model route rather than a
 safe-mode model-less request, and removed an unsupported surface/unattended flag.
 The accepted original admission above is settled; do not replay earlier requests.
-
-### Unfinished acceptance and exact next action
-
-The next assigned fresh Pro session takes this same branch/workspace and checkpoint;
-no old-chat ACK or new project is needed. First reconcile the current source head and
-live-writer facts, then repair the fixture path conversion with a regression test.
-Compose only actual overlaps with protected source, preserving merged Hermes work.
-Review the native host/adapter boundary and test auth invalidation during IO, native
-identity/dependency drift and unknown effects across component unmount/reopen. The current
-UI holds uncertainty in component state only; durable/reopened recovery must be qualified
-before claiming duplicate-safe reconnect. Verify the effective upstream tool scope and
-no silent authority enlargement. No automatic retry or permission weakening.
-
-Then run affected React and Rust suites and the full available app suite, publish the
-qualified successor on this same carrier, consume required hosted CI and follow the
-normal protected release path. Real signed-in packaged-app roundtrip, logout/reconnect,
-upgrade behavior and role journeys remain owed. Native adapter canary is not app acceptance.
-Remote web access and advanced role/Fabric/Capacity integration remain ADV-1/ADV-2.
-The initial native slice is not a completed always-on CEO or Secretary service.
-
-DO_NOT_REDO: upstream install, working private-socket discovery, completed synthetic native
-turn, fulfilled dependency selection proof, acquired source workspace, or accepted sibling
-work. No automatic worker/observer is running for this continuation; foreground recovery
-needs one fresh same-mode conversation because this long chat already failed.
-
-### Owned code/test bytes retained for publication
-
-SHA256 of the sorted lines below: `62616c1025a88db6805648e8adb8978079a5db472e67b92a278fcd8aaaf6afbf`.
-
-```text
-c1249971c863234312c05e789d82c845f4f46793167583128f65e2c970be3c9b  app/mastermind_os/src-tauri/src/auth.rs
-ed4ddf8b16614f7d03525fc68edac0ce6ea7e7834ca699a7d4650d1c0d372760  app/mastermind_os/src-tauri/src/auth/hermes_native.rs
-e42fccd302ef7efb08e99b74b3fa30e19ba2718738f7d4b05d8f6189672510c0  app/mastermind_os/src-tauri/src/hermes_native/bridge.py
-81580bb39c8697909572c0ae5e20691b22bb94b17529d524f0326a29b3a18b6d  app/mastermind_os/src-tauri/src/hermes_native/core.rs
-a6ab00255adb7f19dbfe10eba842244b6b5b00aba2141870cf774d06c166bba2  app/mastermind_os/src-tauri/src/main.rs
-1b65bcb747e057be22cf723a7aa59a63c0b0fe82ca3bb1585a13580b8602a62f  app/mastermind_os/src/hermes-native/HermesNativePanel.test.tsx
-a1f9c61c1ec4e00900627709b17b90a72f412bda6de94b87d8adccf6def98249  app/mastermind_os/src/hermes-native/HermesNativePanel.tsx
-47f596ec6d80e889454cc77b509a34da9848e473b74599abfc9487dda3025f16  app/mastermind_os/src/hermes-native/contract.test.ts
-b949549427a3b17105f61621e406b5bc1f114b92c2323197162d4a21da0b1e6f  app/mastermind_os/src/hermes-native/contract.ts
-90d3fedd6b8292691f6566a4544df30ba5ddae3436b2594b1581617869b71577  app/mastermind_os/src/hermes-native/native-panel.css
-5eb523587b511afbdb8ee626f9f410ece13a348b09cf22e2575e6752859670aa  app/mastermind_os/src/hermes-native/native-port.ts
-0653885afca18191ae2be8f5d9cd56556ffff6fce7caf2ab600feff1dd8ce72d  app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx
-ce8793e256db8a9a424074dcd1b7e57c42aa2ee8e35b787b153fc83b3fbecd4f  tests/test_hermes_native_os_bridge.py
-```

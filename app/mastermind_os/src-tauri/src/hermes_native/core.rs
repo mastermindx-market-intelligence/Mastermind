@@ -8,6 +8,8 @@ pub fn valid_fields(operation: &str, keys: &[&str]) -> bool {
         "read" => &["operation", "sessionId"],
         "send" => &["operation", "sessionId", "requestId", "text"],
         "receipt" => &["operation", "sessionId", "admissionId"],
+        "recover_create" => &["operation", "requestId"],
+        "recover_send" => &["operation", "sessionId", "requestId"],
         _ => return false,
     };
     keys.len() == expected.len() && expected.iter().all(|key| keys.contains(key))
@@ -23,6 +25,9 @@ pub fn valid_request_id(value: &str) -> bool {
 pub fn valid_prompt(value: &str) -> bool {
     !value.trim().is_empty() && value.len() <= 32768
         && value.chars().all(|c| c != '\u{7f}' && (c >= ' ' || matches!(c, '\n' | '\r' | '\t')))
+}
+pub fn dispatch_generation_allowed(expected: Option<u64>, current: u64, mutating: bool) -> bool {
+    expected.map_or(!mutating, |generation| generation == current)
 }
 pub fn release_allowed(original: u64, current: u64, valid_token: bool, signed_in: bool) -> bool {
     original == current && valid_token && signed_in
@@ -55,6 +60,9 @@ mod tests {
         assert!(!valid_fields("status", &["operation", "url"]));
         assert!(!valid_fields("send", &["operation", "text"]));
         assert!(!valid_fields("shell", &["operation"]));
+        assert!(valid_fields("recover_create", &["operation", "requestId"]));
+        assert!(valid_fields("recover_send", &["operation", "requestId", "sessionId"]));
+        assert!(!valid_fields("recover_send", &["operation", "requestId", "sessionId", "text"]));
     }
     #[test]
     fn exact_identifiers_not_paths_or_authority() {
@@ -74,6 +82,14 @@ mod tests {
         for bad in ["", "  \n", "x\0y", "x\x7fy"] { assert!(!valid_prompt(bad)); }
         assert!(!valid_prompt(&"x".repeat(32769)));
         assert!(!valid_prompt(&"🦀".repeat(8193)));
+    }
+    #[test]
+    fn reservation_requires_current_generation_before_mutation() {
+        assert!(dispatch_generation_allowed(Some(7), 7, true));
+        assert!(!dispatch_generation_allowed(Some(6), 7, true));
+        assert!(!dispatch_generation_allowed(None, 7, true));
+        assert!(dispatch_generation_allowed(None, 7, false));
+        assert!(!dispatch_generation_allowed(Some(6), 7, false));
     }
     #[test]
     fn result_requires_same_current_signed_in_generation() {

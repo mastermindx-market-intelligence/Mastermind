@@ -154,9 +154,14 @@ fn run_local(_app: AppHandle, _request: Value, _generation: u64, _mutating: bool
 }
 
 #[tauri::command]
-pub async fn hermes_native(app: AppHandle, request: Value) -> Result<Value> {
+pub async fn hermes_native(app: AppHandle, request: Value, expected_auth_generation: Option<u64>) -> Result<Value> {
     let mutating = validate(&request)?;
-    let generation = qualified_auth(&app, None)?;
+    let generation = qualified_auth(&app, expected_auth_generation)?;
+    // A durable reservation may outlive a sign-in change before this invocation.
+    // Mutations must carry the generation observed before reserving that pointer.
+    if !core::dispatch_generation_allowed(expected_auth_generation, generation, mutating) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
     let check = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || run_local(app, request, generation, mutating))
         .await.map_err(|_| "NATIVE_CLIENT_UNAVAILABLE")?;

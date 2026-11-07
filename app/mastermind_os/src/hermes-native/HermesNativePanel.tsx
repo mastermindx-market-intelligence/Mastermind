@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHermesPort, NativeOperation, NativeReceipt, NativeSession, NativeView } from "./contract";
 import { nativeHermesPort } from "./native-port";
+import type { NativePendingOperation } from "./pending-pointer";
 import "./native-panel.css";
 
 const beforeDispatch = new Set(["REQUEST_INVALID", "NATIVE_BUSY", "NATIVE_INSTALL_UNAVAILABLE", "NATIVE_PLATFORM_UNAVAILABLE", "NATIVE_CLIENT_NOT_STARTED"]);
-const knownErrors = new Set([...beforeDispatch, "AUTHENTICATION_CHANGED", "NATIVE_RESPONSE_INVALID", "NATIVE_CLIENT_UNAVAILABLE"]);
+const knownErrors = new Set([...beforeDispatch, "NATIVE_RECOVERY_UNAVAILABLE", "AUTHENTICATION_CHANGED", "NATIVE_IDENTITY_CHANGED", "NATIVE_RECOVERY_REQUIRED", "NATIVE_RESPONSE_INVALID", "NATIVE_CLIENT_UNAVAILABLE"]);
 function requestId(): string { return crypto.randomUUID().replaceAll("-", ""); }
+function originalPointer(request: NativeOperation): NativePendingOperation | null {
+  return request.operation === "create" ? { kind: "create", requestId: request.requestId }
+    : request.operation === "send" ? { kind: "send", requestId: request.requestId, sessionId: request.sessionId } : null;
+}
 function title(value: string): string { return value.replace(/ · [a-f0-9]{32}$/, "") || "Native conversation"; }
 
 /** Local native conversation only. A future qualified backend implements the same port. */
@@ -20,8 +25,10 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [held, setHeld] = useState<NativeOperation | null>(null);
-  const heldRef = useRef<NativeOperation | null>(null);
+  const [held, setHeld] = useState<NativePendingOperation | null>(null);
+  const heldRef = useRef<NativePendingOperation | null>(null);
+  // Private, component-local draft cleanup only; never stored as an effect record.
+  const submittedDraft = useRef<{ requestId: string; text: string } | null>(null);
   const generation = useRef<number | undefined>(undefined);
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -30,12 +37,15 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const clearPrivate = useCallback(() => {
     setRuntime(undefined); setSession(undefined); setHistory(undefined); setReceipt(undefined); setDraft("");
+    heldRef.current = null; setHeld(null); submittedDraft.current = null;
     generation.current = undefined; stopAutomatic.current = true;
   }, []);
 
   const perform = useCallback(async (request: NativeOperation): Promise<NativeView | undefined> => {
     const mutating = request.operation === "send" || request.operation === "create";
     if (inFlight.current || (mutating && heldRef.current)) return;
+    const originalHeld = heldRef.current;
+    if (request.operation === "send") submittedDraft.current = { requestId: request.requestId, text: request.text };
     inFlight.current = true; setBusy(true); setNotice("");
     try {
       const result = await port.request(request);
@@ -49,14 +59,35 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       }
       if ("sessionId" in request && result.receipt && result.receipt.sessionId !== request.sessionId) throw new Error("NATIVE_RESPONSE_INVALID");
       if (request.operation === "receipt" && result.receipt && result.receipt.id !== request.admissionId) throw new Error("NATIVE_RESPONSE_INVALID");
+      if (result.pendingOperation !== undefined) {
+        heldRef.current = result.pendingOperation; setHeld(result.pendingOperation);
+        if (result.pendingOperation && result.state === "READY") {
+          stopAutomatic.current = true; setNotice("EFFECT_UNKNOWN");
+        }
+      }
       if (result.runtime) setRuntime(result.runtime);
       if (result.session) setSession(result.session);
       if (result.sessions) setHistory(result.sessions);
       if (result.receipt) setReceipt(result.receipt);
-      if (result.state === "OPENED") { setReceipt(undefined); setDraft(""); pollCount.current = 0; stopAutomatic.current = false; }
-      if (result.state === "ADMITTED") { setDraft(""); pollCount.current = 0; stopAutomatic.current = false; }
+      if (result.state === "OPENED") { setReceipt(undefined); setDraft(""); submittedDraft.current = null; pollCount.current = 0; stopAutomatic.current = false; }
+      if (result.state === "ADMITTED") {
+        const acceptedDraft = request.operation === "send" ? { requestId: request.requestId, text: request.text }
+          : request.operation === "recover" && originalHeld?.kind === "send" && submittedDraft.current?.requestId === originalHeld.requestId
+            ? submittedDraft.current : null;
+        if (acceptedDraft) {
+          setDraft(value => value === acceptedDraft.text ? "" : value);
+          submittedDraft.current = null;
+        }
+        if (request.operation === "send") pollCount.current = 0;
+        // A receipt settles only this admission. Refresh history before reusing send eligibility.
+        if (request.operation === "recover") setSession(previous => previous && result.receipt &&
+          [previous.id, previous.storedId].includes(result.receipt.sessionId) ? { ...previous, canSend: false } : undefined);
+        stopAutomatic.current = result.receipt?.status === "terminal";
+      }
       if (result.state === "EFFECT_UNKNOWN") {
-        if (mutating) { heldRef.current = request; setHeld(request); }
+        if (mutating && result.pendingOperation === undefined) {
+          heldRef.current = originalPointer(request); setHeld(heldRef.current);
+        }
         stopAutomatic.current = true; setNotice("EFFECT_UNKNOWN");
       } else if (["REFUSED", "UNAVAILABLE", "NOT_SENT"].includes(result.state)) {
         stopAutomatic.current = true; setNotice(result.code || result.state);
@@ -67,9 +98,9 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       const raw = typeof error === "string" ? error : error instanceof Error ? error.message : "";
       const code = knownErrors.has(raw) ? raw : "NATIVE_CLIENT_UNAVAILABLE";
       stopAutomatic.current = true;
-      if (code === "AUTHENTICATION_CHANGED") { clearPrivate(); setNotice(code); }
+      if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_IDENTITY_CHANGED") { clearPrivate(); setNotice(code); }
       else if (mutating && !beforeDispatch.has(code)) {
-        heldRef.current = request; setHeld(request); setNotice("EFFECT_UNKNOWN");
+        heldRef.current = originalPointer(request); setHeld(heldRef.current); setNotice("EFFECT_UNKNOWN");
       } else setNotice(code);
     } finally {
       inFlight.current = false;
@@ -82,20 +113,30 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
   const activeAdmission = receipt && ["queued", "started"].includes(receipt.status) ? receipt.id
     : session?.pending.find(row => ["queued", "started"].includes(row.status))?.id;
   useEffect(() => {
-    if (!session || !activeAdmission || busy || held || stopAutomatic.current || pollCount.current >= 30) return;
-    const original = session.id;
+    if ((!session && !receipt) || !activeAdmission || busy || stopAutomatic.current || pollCount.current >= 30) return;
+    const original = receipt?.sessionId ?? session!.id;
     const timer = window.setTimeout(async () => {
       pollCount.current += 1;
-      const result = await perform({ operation: "receipt", sessionId: original, admissionId: activeAdmission });
+      const result = await perform(heldRef.current ? { operation: "recover" }
+        : { operation: "receipt", sessionId: original, admissionId: activeAdmission });
       if (result?.receipt?.status === "terminal" && mounted.current) await perform({ operation: "read", sessionId: original });
     }, 2000);
     return () => window.clearTimeout(timer);
   }, [session, activeAdmission, busy, held, receipt, perform]);
 
+  const checkPrevious = async () => {
+    pollCount.current = 0;
+    const result = await perform({ operation: "recover" });
+    if (result?.receipt) {
+      await perform({ operation: "read", sessionId: result.receipt.sessionId });
+    }
+  };
   const readOriginal = async () => {
-    if (!session) return;
-    if (receipt) await perform({ operation: "receipt", sessionId: receipt.sessionId, admissionId: receipt.id });
-    await perform({ operation: "read", sessionId: session.storedId });
+    if (heldRef.current) { await checkPrevious(); return; }
+    const target = session?.storedId ?? receipt?.sessionId;
+    if (!target) return;
+    if (receipt && receipt.status !== "terminal") await perform({ operation: "receipt", sessionId: receipt.sessionId, admissionId: receipt.id });
+    await perform({ operation: "read", sessionId: target });
   };
   const unknownAdmission = receipt?.status === "unknown" || session?.pending.some(row => row.status === "unknown");
   const unresolved = Boolean(held || unknownAdmission);
@@ -119,18 +160,24 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       </select></label>
       <button type="button" disabled={!runtime || busy || unresolved || pending} onClick={() => void perform({ operation: "create", role, requestId: requestId() })}>{t("New conversation", "新建会话")}</button>
       <button type="button" disabled={!runtime || busy} onClick={() => void perform({ operation: "list" })}>{t("Local history", "本地历史")}</button>
+      {held && <button type="button" disabled={!runtime || busy} onClick={() => void checkPrevious()}>
+        {t("Check previous request", "检查原请求")}</button>}
     </div>
     {notice && <div role="alert" className="hermes-native-notice">
       {notice === "AUTHENTICATION_CHANGED" ? t("Sign-in changed. The previous conversation is hidden; reconnect under your current sign-in.", "登录状态已更改。原会话已隐藏，请使用当前账号重新连接。")
-        : notice === "EFFECT_UNKNOWN" ? t("Outcome unknown. Read the original conversation; do not resend or switch the operation.", "结果未知。请读取原会话，不要重新发送或转移操作。")
+        : notice === "EFFECT_UNKNOWN" ? t("Outcome unknown. Check the previous request before sending again.", "结果未知。请先检查原请求，再继续发送。")
+        : notice === "NATIVE_RECOVERY_UNAVAILABLE" ? t("Request recovery is unavailable. Sending is paused to protect the original request.", "原请求恢复暂不可用。为保护原请求，发送已暂停。")
+        : notice === "NATIVE_IDENTITY_CHANGED" ? t("The local connection changed. Reconnect to check the original request.", "本地连接已更改，请重新连接并检查原请求。")
         : `${t("Native runtime response", "原生运行时响应")}: ${notice}`}
     </div>}
-    {held && "requestId" in held && <p className="hermes-native-muted">{t("Original request", "原请求")}: <code>{held.requestId}</code></p>}
+    {held && <p className="hermes-native-muted">{t("Original request", "原请求")}: <code>{held.requestId}</code></p>}
     {history && <nav className="hermes-native-history" aria-label={t("Local Hermes conversations", "本地 Hermes 会话")}>
       {history.length === 0 ? <p>{t("No local conversations returned.", "没有返回本地会话。")}</p> : history.map(row => <button key={row.id} type="button"
         disabled={busy || unresolved} onClick={() => { setReceipt(undefined); void perform({ operation: "read", sessionId: row.id }); }}>
         <span>{title(row.title)}</span><small>{row.running ? t("Running", "运行中") : `${row.messageCount} ${t("messages", "条消息")}`}</small></button>)}
     </nav>}
+      {receipt && <p role="status" className="hermes-native-muted">{t("Native admission", "原生受理记录")}: <code>{receipt.id}</code> · {receipt.status}{receipt.outcome ? ` · ${receipt.outcome}` : ""}</p>}
+    {receipt && !session && <button type="button" disabled={busy} onClick={() => void readOriginal()}>{t("Read original conversation", "读取原会话")}</button>}
     {session && <div className="hermes-native-conversation">
       <div className="hermes-native-session-heading"><h4>{title(session.title)}</h4>
         <button type="button" disabled={busy} onClick={() => void readOriginal()}>{t("Read original conversation", "读取原会话")}</button></div>
@@ -143,7 +190,6 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
         {session.messages.map((message, i) => <article key={`${session.id}:${i}`} data-speaker={message.role}>
           <strong>{message.role === "user" ? t("You", "你") : "Hermes"}</strong><p>{message.text}</p></article>)}
       </div>
-      {receipt && <p role="status" className="hermes-native-muted">{t("Native admission", "原生受理记录")}: <code>{receipt.id}</code> · {receipt.status}{receipt.outcome ? ` · ${receipt.outcome}` : ""}</p>}
       {unknownAdmission && <p role="alert">{t("The original native admission is unknown. Sending stays held until its owner resolves it.", "原生请求状态未知；解决原请求前暂停发送。")}</p>}
       {session.promptsPending && <p role="status">{t("A native prompt needs attention in Hermes. This client does not auto-approve it.", "Hermes 中有待处理提示；此客户端不会自动批准。")}</p>}
       <label className="hermes-native-composer">{t("Message Hermes", "发送给 Hermes")}

@@ -213,5 +213,183 @@ class FakeRuntime:
         return snapshot()
 
 
+
+class RecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.b = load()
+
+    def test_recovery_accepts_only_original_identifiers_without_payload_or_authority(self):
+        for operation in ("recover_create", "recover_send"):
+            request = {"operation": operation, "requestId": "a" * 32}
+            if operation == "recover_send":
+                request["sessionId"] = "session-1"
+            op, params = self.b.normalize_request(request)
+            self.assertEqual(op, operation)
+            self.assertEqual(params["request_id"], "a" * 32)
+            for key in ("text", "role", "principal", "profile", "subject", "admissionId"):
+                with self.subTest(operation=operation, key=key), self.assertRaises(self.b.BridgeRefusal):
+                    self.b.normalize_request({**request, key: "not accepted"})
+
+    def test_stable_local_scope_survives_auth_and_native_process_reopening(self):
+        original = identity()
+        _, first = self.b.qualify_identity(original, Path("/fixture/hermes"))
+        original["result"].update(instance_id="new-instance", authority_epoch=15)
+        _, reopened = self.b.qualify_identity(original, Path("/fixture/hermes"))
+        self.assertEqual(first["localScope"], reopened["localScope"])
+        self.assertRegex(first["localScope"], r"^[a-f0-9]{64}$")
+        original["result"]["hermes_home"] = "/fixture/another"
+        _, other = self.b.qualify_identity(original, Path("/fixture/another"))
+        self.assertNotEqual(first["localScope"], other["localScope"])
+
+    def test_terminal_receipt_recovery_does_not_depend_on_conversation_history(self):
+        runtime = RecoveryRuntime()
+        result = asyncio.run(self.b.execute_request({"operation": "recover_send",
+            "sessionId": "session-1", "requestId": "a" * 32}, runtime))
+        self.assertEqual(result["state"], "ADMITTED")
+        self.assertEqual(result["operation"], "recover")
+        self.assertEqual(result["receipt"]["status"], "terminal")
+        self.assertEqual(result["receipt"]["id"], "original-admission")
+        self.assertNotIn("session", result)
+        self.assertEqual(runtime.lookups, [("recover_send", {"session_id": "session-1", "request_id": "a" * 32})])
+        self.assertEqual(runtime.calls, [
+            ("prompt.receipt", {"session_id": "session-1", "admission_id": "original-admission"})])
+        self.assertFalse(result["retryAllowed"])
+        self.assertNotIn("private tool", str(result))
+
+    def test_uncertain_create_reads_only_the_original_identity(self):
+        runtime = RecoveryRuntime()
+        result = asyncio.run(self.b.execute_request({"operation": "recover_create", "requestId": "b" * 32}, runtime))
+        self.assertEqual(result["state"], "OPENED")
+        self.assertEqual(result["session"]["id"], "session-1")
+        self.assertEqual(runtime.lookups, [("recover_create", {"request_id": "b" * 32})])
+        self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})])
+
+    def test_absence_failure_or_changed_source_is_not_permission_to_retry(self):
+        errors = [self.b.BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED"),
+                  self.b.BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED"), TimeoutError("private secret")]
+        for error in errors:
+            runtime = RecoveryRuntime(lookup_error=error)
+            result = asyncio.run(self.b.execute_request({"operation": "recover_send",
+                "sessionId": "session-1", "requestId": "a" * 32}, runtime))
+            self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+            self.assertEqual(result["operation"], "recover")
+            self.assertEqual(runtime.calls, [])
+            self.assertFalse(result["retryAllowed"])
+            self.assertNotIn("secret", str(result))
+        for error in [self.b.OwnerRefusal("not_found"), self.b.NotSent("not connected"), TimeoutError()]:
+            runtime = RecoveryRuntime(receipt_error=error)
+            result = asyncio.run(self.b.execute_request({"operation": "recover_send",
+                "sessionId": "session-1", "requestId": "a" * 32}, runtime))
+            self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+            self.assertEqual([method for method, _ in runtime.calls], ["prompt.receipt"])
+        runtime = RecoveryRuntime()
+        async def missing_original(method, **params):
+            runtime.calls.append((method, params))
+            raise self.b.OwnerRefusal("session_not_found")
+        runtime.rpc = missing_original
+        result = asyncio.run(self.b.execute_request({"operation": "recover_create", "requestId": "a" * 32}, runtime))
+        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+        self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})])
+
+    def test_crossed_receipt_never_settles_the_original(self):
+        for change in ({"admission_id": "other-admission"}, {"ref": {"session_id": "other-session"}}):
+            runtime = RecoveryRuntime(receipt_change=change)
+            result = asyncio.run(self.b.execute_request({"operation": "recover_send",
+                "sessionId": "session-1", "requestId": "a" * 32}, runtime))
+            self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+            self.assertNotIn("receipt", result)
+
+    def test_native_lookup_uses_upstream_readonly_api_and_exact_uid_session_request(self):
+        import os
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        with tempfile.TemporaryDirectory(prefix="native-hermes-readonly-") as directory:
+            runtime = object.__new__(self.b.NativeRuntime)
+            runtime.home = Path(directory)
+            runtime.require_recovery_source = Mock()
+            path = runtime.home / "state.db"
+            path.write_bytes(b"fixture owned by this test only")
+            path.chmod(0o600)
+            db = SimpleNamespace(close=Mock())
+            session_db = Mock(return_value=db)
+            principal = f"uid:{os.getuid()}"
+            row = {"principal_id": principal, "target_session_id": "session-1",
+                   "request_id": "a" * 32, "admission_id": "original-admission",
+                   "private": "not projected"}
+            find = Mock(return_value=row)
+            with patch.dict("sys.modules", {"hermes_state": SimpleNamespace(SessionDB=session_db),
+                                          "hermes_state_runtime": SimpleNamespace(find_session_admission=find)}):
+                result = runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
+                self.assertEqual(result, {"session_id": "session-1", "admission_id": "original-admission"})
+                session_db.assert_called_once_with(path, read_only=True)
+                find.assert_called_once_with(db, principal_id=principal, session_id="session-1", request_id="a" * 32)
+                db.close.assert_called_once_with()
+                for wrong in (None, {**row, "principal_id": "uid:other"}, {**row, "target_session_id": "other"},
+                              {**row, "request_id": "b" * 32}):
+                    find.return_value = wrong
+                    with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_UNRESOLVED"):
+                        runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
+                path.chmod(0o622)
+                session_db.reset_mock()
+                with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_UNAVAILABLE"):
+                    runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
+                session_db.assert_not_called()
+
+    def test_native_create_lookup_reuses_upstream_pure_identity(self):
+        import os
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        runtime = object.__new__(self.b.NativeRuntime)
+        runtime.home = Path("/fixture/hermes")
+        runtime.require_recovery_source = Mock()
+        identity_fn = Mock(return_value="the-original-created-session")
+        with patch.dict("sys.modules", {"hermes_state_keys": SimpleNamespace(local_identity=identity_fn)}):
+            self.assertEqual(runtime.resolve_original("recover_create", {"request_id": "b" * 32}),
+                             {"session_id": "the-original-created-session"})
+        identity_fn.assert_called_once_with("/fixture/hermes", f"uid:{os.getuid()}", "b" * 32)
+
+    def test_upgrade_or_tampered_lookup_source_is_held_before_import_or_database_access(self):
+        import tempfile
+        runtime = object.__new__(self.b.NativeRuntime)
+        runtime.home = Path("/nonexistent/native-fixture")
+        runtime.observed_code = "f" * 40
+        with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_SOURCE_CHANGED"):
+            runtime.resolve_original("recover_send", {"session_id": "session-1", "request_id": "a" * 32})
+        with tempfile.TemporaryDirectory(prefix="native-hermes-source-") as directory:
+            runtime.home = Path(directory)
+            runtime.observed_code = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+            (runtime.home / "hermes-agent").mkdir()
+            (runtime.home / "hermes-agent/hermes_state_keys.py").write_text("changed upstream source")
+            with self.assertRaisesRegex(self.b.BridgeRefusal, "NATIVE_RECOVERY_SOURCE_CHANGED"):
+                runtime.resolve_original("recover_create", {"request_id": "a" * 32})
+
+
+class RecoveryRuntime(FakeRuntime):
+    def __init__(self, lookup_error=None, receipt_error=None, receipt_change=None):
+        super().__init__()
+        self.lookup_error, self.receipt_error = lookup_error, receipt_error
+        self.receipt_change = receipt_change or {}
+        self.lookups = []
+        self.snapshot = snapshot()
+
+    def resolve_original(self, operation, params):
+        self.lookups.append((operation, params))
+        if self.lookup_error:
+            raise self.lookup_error
+        return {"session_id": "session-1", "admission_id": "original-admission"}
+
+    async def rpc(self, method, **params):
+        self.calls.append((method, params))
+        if method == "session.resume":
+            return self.snapshot
+        if self.receipt_error:
+            raise self.receipt_error
+        if method != "prompt.receipt":
+            raise AssertionError("Recovery must never mutate")
+        return {"admission_id": "original-admission", "ref": {"session_id": "session-1"}, "status": "terminal",
+                "sequence": 1, "outcome": "completed", "execution_generation": 1, **self.receipt_change}
+
+
 if __name__ == "__main__":
     unittest.main()
