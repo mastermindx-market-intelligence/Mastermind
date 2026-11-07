@@ -155,6 +155,7 @@ async def handle_canary(
                     or _SUB.fullmatch(receipt.subscription_id) is None
                     or type(receipt.expires_at) is not int
                     or not now < receipt.expires_at <= now + (ttl - 1) // 1000 + 1
+                    or receipt.expires_at > principal.expires_at
                     or await _current_policy(owner, principal, clock) != policy):
                 raise RuntimeError("unverified canary subscription effect")
             expires = datetime.fromtimestamp(receipt.expires_at, timezone.utc)
