@@ -155,6 +155,17 @@ describe("OrganizationWorkspace with the incumbent Mission projection", () => {
     expect(await screen.findByText("Plan read unavailable; no progress inferred.")).toBeTruthy();
   });
 
+  it("offers the existing Projects navigation when the observation is unavailable, without making a read", () => {
+    const { projection, binding } = observed();
+    const onOpenProjects = vi.fn();
+    render(<OrganizationWorkspace binding={binding} missionState="UNAVAILABLE" missionProjection={projection}
+      onOpenProjects={onOpenProjects} />);
+    expect(onOpenProjects).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Agents and work" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Projects" }));
+    expect(onOpenProjects).toHaveBeenCalledTimes(1);
+  });
+
   it("renders the same observed-work controls in Chinese", () => {
     const { projection, binding } = observed();
     render(<OrganizationWorkspace binding={binding} missionState="CURRENT" missionProjection={projection} locale="zh-CN" />);

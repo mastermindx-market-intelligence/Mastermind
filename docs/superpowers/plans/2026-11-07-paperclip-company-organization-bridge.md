@@ -280,3 +280,93 @@ Independent canonical reads are distinct:
 
 The parent mission remains incomplete. This source continuation is not a new
 program, task store, runtime grant, detached daemon or claimed background worker.
+
+### O3 integration delta and source ruling — 2026-11-07
+
+The source carrier is [Mastermind #2193](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2193).
+Its first implementation head `e9da9db07edc037d9efb5d0d33145d0f66be0789`
+passed all observed hosted checks: required test/PR fast checks,
+[frontend and native-macos](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137892),
+and [CodeQL](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343134196).
+These receipts apply to that exact historical head, not to later source.
+
+The next source delta adds an explicit **Open Projects** recovery action when
+no qualified Mission is present. It uses the incumbent navigation callback and
+does not initiate a read. The notice's CSS specificity is corrected. The local
+terminal receipt (PID 70743) proves typecheck, **71 tests in 3 files**
+(12 unchanged hierarchy, 21 UI, 38 adapter), and production build all exited 0.
+
+#### Concrete incumbent mount
+
+The unapplied patch now covers both incumbent integration surfaces. Office
+receives the real `missionLoading` value and navigation callbacks. App derives
+loading only from `LOCAL_UNAVAILABLE / SOURCE_READ_PENDING` and supplies its
+previously missing `onOpenProject`: it verifies current read permission and exact
+selected work/root, then opens the existing Projects conversation. Workspace
+receives the existing `onOpenProjects` recovery callback. No alternate selection,
+project registry, navigation owner or fetch path is introduced.
+
+A read-only `git apply --check --unidiff-zero` of the expanded patch succeeded
+against the original #2180 workspace at published head
+`2c0386936a49ab214802aee093b714626642acf6` (PID 95568, exit 0).
+The patch remains unapplied. The incumbent live writers have separately claimed
+native source repair and packaging; those active effects remain on their
+original carrier. Recheck exact preimages before application because their
+branch is advancing.
+
+Merged [#2192 production integration handoffs](https://github.com/mastermindx-market-intelligence/Mastermind/blob/7fee845723c44dafe1e9e1159058ad9bd3f3e06b/research/mastermind_os_production_fasttrack_2026-11-07/HANDOFFS.md)
+explicitly retain this operation as S6. S0/#1621 retains shared App/Office/native
+composition. This evidence adds no competing production or browser owner.
+
+#### Existing organization observation producer and missing binding
+
+The existing [native leadership registration](https://github.com/mastermindx-market-intelligence/Mastermind/blob/23c9b011e30a4acc6892a59d67a629f74b07a491/integrations/hermes_leadership/native.py)
+already exposes `mmx_leadership_brief({})`. Its argument contract is empty:
+the native host supplies the actual enrolled session. `HostLeadershipBinding.resolve`
+retrieves that session's incumbent reader; `native_handler` checks currentness
+before and after the read and rejects changed/revoked bindings. The existing
+[leadership reader](https://github.com/mastermindx-market-intelligence/Mastermind/blob/23c9b011e30a4acc6892a59d67a629f74b07a491/integrations/hermes_leadership/reader.py)
+uses the authenticated Secretary Mission reader and emits `organization_context`
+from the exact Mission summary.
+
+The missing integration is the incumbent host's delivery of that observation to
+Workspace with a demonstrated association between the enrolled native session,
+current viewer authorization and the current Mission revision. A signed-in web
+label does not establish a charter enrollment. The source must supply its actual
+freshness and identity; attaching the current UI revision to an unrelated brief
+would manufacture qualification.
+
+Current consumer contracts expose no organization acquisition port through the
+MissionHost. There is no complete authenticated path solely within the reserved
+`organization/**` consumer files. The app/native owner must compose the existing
+producer. #2179's active leadership reader/client need not be rewritten to reuse
+that producer. No hardcoded role/session, copied chat-tool output, new roster
+database or parallel authentication path is acceptable.
+
+Even a correctly delivered brief is `SOURCE_LINKED_ADVISORY`; actual enrollment
+and role availability remain `NOT_OBSERVED` until an owner source supplies them.
+Charter reporting relationships, execution-job parentage, workstream ownership,
+and observed live worker activity are different facts and must stay distinct.
+
+#### Remaining acceptance, with exact evidence required
+
+| Journey / fact | Current evidence | Next acceptance action |
+| --- | --- | --- |
+| Real selected operation and worker jobs | Qualified consumer plus source-derived regression exports | Restore the incumbent signed-in Projects/Mission read and select the retained operation |
+| Organization lineage and reporting | Existing #2173 hierarchy; no qualified live observation delivered | Bind the existing enrolled leadership read through the incumbent host; retain advisory/enrollment limits |
+| Project → job/worker → result | Component navigation and exact tuple tests; unapplied App mount | Apply through S0, then open the actual retained result without changing target or auth |
+| Dependencies and original operation progress | Reused single admitted-plan inspector and Mission root facts | Verify the actual admitted plan, dependencies, completion/review/acceptance separately |
+| Loading, stale, revoked, partial and unknown | 71 local tests with explicit controlled inputs | Exercise the mounted app; old selection and results must disappear on invalidation |
+| Responsive and accessible presentation | Responsive CSS, focus behavior, EN/ZH integration tests | Verify 390px/desktop, dark/light, keyboard and both locales on the actual candidate |
+| Candidate browser / production acceptance | NOT_PROVEN; retained deployed SOURCE_UNAVAILABLE screenshot | Record actual release identity and screenshots from an approved reachable signed-in app |
+
+The connected Browser refused the attempted `data:` layout inspection. That
+refusal is an action boundary, not permission to switch automation carriers or
+publish a workaround. The loopback preview was separately unreachable; no new
+host, proxy or browser service was created. The original deployed browser proof
+and source-qualified tests remain useful within their actual limits.
+
+No watcher, worker, inference, native turn, service restart, install, deployment
+or merge was started by this final integration delta. The paid test child is
+terminal and accepted; both read-only architecture advisers received ACCEPTED /
+STOP. Original O3 and the S0 product acceptance remain incomplete.

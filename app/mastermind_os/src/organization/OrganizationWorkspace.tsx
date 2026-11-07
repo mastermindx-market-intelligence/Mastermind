@@ -24,6 +24,7 @@ export interface OrganizationWorkspaceProps {
   /** The incumbent authenticated Office acquisition, never a second Mission fetch. */
   readonly missionProjection?: OfficeProjection;
   readonly loading?: boolean;
+  readonly onOpenProjects?: () => void;
   readonly onOpenProject?: (selection: { workRef: string; rootJobId: string }) => void;
   readonly onInspectWorkerResult?: (selection: ResultSelection) => void;
   /** Relocate the incumbent plan reader here; do not mount a second plan reader. */
@@ -132,6 +133,8 @@ export function qualifyOrganization(
 
 const COPY = {
   "Organization": "组织架构",
+  "Open Projects": "打开项目列表",
+  "Choose a project, then check its source status or use its existing refresh action.": "选择项目后，查看其来源状态或使用现有刷新操作。",
   "Observed work and reporting": "已观测工作与汇报关系",
   "Reading organization…": "正在读取组织信息…",
   "Current work is unavailable for this identity and selection. Activity remains unknown.": "当前身份和选择下的工作信息不可用，活动仍未知。",
@@ -160,7 +163,7 @@ const COPY = {
 
 export function OrganizationWorkspace({
   binding, missionState, observation, missionProjection, loading = false,
-  onOpenProject, onInspectWorkerResult, planReader, locale = "en",
+  onOpenProjects, onOpenProject, onInspectWorkerResult, planReader, locale = "en",
 }: OrganizationWorkspaceProps) {
   const t = (key: keyof typeof COPY) => locale === "zh-CN" ? COPY[key] : key;
   const context = qualifyOrganization(binding, missionState, observation);
@@ -185,6 +188,10 @@ export function OrganizationWorkspace({
     {missionProjection && !mission && <p className="organization-workspace__notice" role="status">
       {t("Current work is unavailable for this identity and selection. Activity remains unknown.")}
     </p>}
+    {!mission && onOpenProjects && <div className="organization-workspace__recovery">
+      <p>{t("Choose a project, then check its source status or use its existing refresh action.")}</p>
+      <button type="button" className="organization-workspace__action" onClick={onOpenProjects}>{t("Open Projects")}</button>
+    </div>}
     {planReader && <AdmittedPlanInspector key={binding.authGeneration} {...planReader}
       selection={binding.selection ? { work_ref: binding.selection.workRef, root_job_id: binding.selection.rootJobId } : null}
       mission={mission} missionSourceState={mission ? "CURRENT" : "UNAVAILABLE"}

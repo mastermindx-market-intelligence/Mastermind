@@ -2,13 +2,19 @@
 +++ b/app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx
 @@ -15 +14,0 @@
 -import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
-@@ -379 +378 @@
+@@ -35,0 +35,2 @@
++  /** Actual pending state supplied by the incumbent Mission acquisition. */
++  missionLoading?: boolean;
+@@ -203 +204 @@
+-  projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
++  projection, missionLoading = false, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
+@@ -379 +380 @@
 -    <details className="office-disclosure office-organization">
 +    <details className="office-disclosure office-organization" open={projection.mission.source.state === "CURRENT"}>
-@@ -382 +381,12 @@
+@@ -382 +383,12 @@
 -        observation={organizationObservation} locale={locale} />
-+        observation={organizationObservation} missionProjection={projection}
-+        onOpenProject={onOpenProject} onInspectWorkerResult={onInspectWorkerResult}
++        observation={organizationObservation} missionProjection={projection} loading={missionLoading}
++        onOpenProjects={onOpenProjects} onOpenProject={onOpenProject} onInspectWorkerResult={onInspectWorkerResult}
 +        planReader={{
 +          read: typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
 +            ? readOfficePlan : undefined,
@@ -19,7 +25,7 @@
 +          canRead: typeof window !== "undefined" && window.MastermindMissionHost?.auth
 +            ? officePlanPermission : undefined,
 +        }} locale={locale} />
-@@ -407,17 +416,0 @@
+@@ -407,17 +418,0 @@
 -    <AdmittedPlanInspector
 -      key={`plan:${projection.context.authGeneration}`}
 -      selection={mission?.program?.work_ref && mission?.mission?.root_job_id
@@ -37,3 +43,13 @@
 -      missionSourceState={projection.mission.source.state}
 -      missionObservedAt={projection.mission.source.observed_at}
 -    />
+--- a/app/mastermind_os/src/App.tsx
++++ b/app/mastermind_os/src/App.tsx
+@@ -5285,0 +5286,7 @@
++          missionLoading={"kind" in mission && mission.kind === "LOCAL_UNAVAILABLE" && mission.reason === "SOURCE_READ_PENDING"}
++          onOpenProject={(target) => {
++            if (projectReaders.canRead() && selection?.workRef === target.workRef && selection?.rootJobId === target.rootJobId) {
++              setProjectTab("Conversation");
++              setActive("Projects");
++            }
++          }}
