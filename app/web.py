@@ -1045,7 +1045,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         from brain import research_paper
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"research store unavailable: {exc}"}, status_code=503)
+        _log.warning("research paper store import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_store_unavailable",
+            "note": "research store unavailable",
+        }, status_code=503)
 
     paper = None
     try:
@@ -1055,15 +1060,24 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
         if paper is None and ticker:
             paper = research_paper.latest_for(ticker)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"could not load paper: {exc}"}, status_code=500)
+        _log.warning("research paper read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_paper_unavailable",
+            "note": "research paper unavailable",
+        }, status_code=500)
     if paper is None:
-        return JSONResponse({"error": "research paper not found"}, status_code=404)
+        return JSONResponse({"error": "research paper not found", "note": "research paper not found"}, status_code=404)
 
     try:
         from app import research_pdf
     except Exception as exc:  # noqa: BLE001 — reportlab missing, etc.
-        return JSONResponse({"error": f"PDF engine unavailable (is reportlab installed?): {exc}"},
-                            status_code=503)
+        _log.warning("research PDF engine import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_engine_unavailable",
+            "note": "PDF engine unavailable",
+        }, status_code=503)
 
     meta = {}
     try:
@@ -1073,7 +1087,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         pdf = research_pdf.build(paper, meta)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"PDF generation failed: {exc}"}, status_code=500)
+        _log.warning("research PDF generation failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_generation_failed",
+            "note": "PDF generation failed",
+        }, status_code=500)
 
     tkr = (paper.get("ticker") or "research").upper()
     datestr = str(paper.get("asof") or paper.get("generated_at") or "")[:10]
@@ -3094,16 +3113,38 @@ class _MMAIActNudgesReq(BaseModel):
     codes: list[str] | None = None    # missing/empty = all currently open nudges
 
 
+def _mastermind_ai_mutation_module():
+    """Load the incumbent mutation owner before any effectful method is called."""
+    import bot  # noqa: F401
+    from brain import mastermind_ai
+    return mastermind_ai
+
+
+def _mastermind_ai_mutation_failure(error: str, *, effect_status: str, retry_safe: bool) -> JSONResponse:
+    return JSONResponse({
+        "ok": False,
+        "effect_status": effect_status,
+        "retry_safe": retry_safe,
+        "error": error,
+    }, status_code=500)
+
+
 @router.post("/api/mastermind_ai/settings")
 def api_mastermind_ai_settings(req: _MMAISettingsReq) -> JSONResponse:
     """Operator settings patch — bounded to the known mastermind_ai keys (unknown/out-of-range
     keys are rejected, never applied)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio settings setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_settings_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.update_settings(req.settings or {}))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio settings update effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_settings_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/directive")
@@ -3112,11 +3153,17 @@ def api_mastermind_ai_directive(req: _MMAIDirectiveReq) -> JSONResponse:
     snapshot push, ingested by the next nightly macro build). Intake-scrubbed: secrets,
     env names, and $-amounts are refused — this text lands on a public artifact."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio directive setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_directive_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.add_directive(req.text))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio directive effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_directive_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/act_on_nudges")
@@ -3126,11 +3173,17 @@ def api_mastermind_ai_act_on_nudges(req: _MMAIActNudgesReq) -> JSONResponse:
     as a standing grant via the auto_act_on_findings setting (in which case run_cycle drafts
     them automatically). Every drafted text passes the same intake scrub as a typed one."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio nudge-action setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_act_on_nudges_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.draft_directives_from_nudges(req.codes))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio nudge-action effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_act_on_nudges_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/run")
@@ -3138,11 +3191,17 @@ def api_mastermind_ai_run() -> JSONResponse:
     """Run one self-improvement cycle now (non-LLM, observational; same code path as the
     nightly loop_maintenance step)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _mastermind_ai_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio manual-run setup failed: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_run_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.run_cycle(trigger="manual"))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio manual-run effect unknown: %s", type(exc).__name__)
+        return _mastermind_ai_mutation_failure(
+            "mastermind_ai_run_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.get("/api/readiness")
