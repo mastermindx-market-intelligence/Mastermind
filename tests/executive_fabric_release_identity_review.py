@@ -75,9 +75,10 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": '221380b249b8d4d960de4d6a5d5460338b447da603ed0f5c919c07968df744ff',
+        # v9 keeps the original private account directory permission check.
+        "sha256": '4506cc7cf9c325dbf916eb5f339761c78e5e8f91eb39fe4d59e578bfd5d1b121',
         "sites": (
-            (739, 60, 65, 'int', '0o700'),
+            (806, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -784,3 +785,4 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
     "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
 }
+
