@@ -276,6 +276,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
+    actual_manifest = manifest
     manifest = normalize_application_carrier_base_manifest(manifest)
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
@@ -346,7 +347,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        if manifest["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
@@ -563,6 +564,37 @@ SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST = "d15238fa70942463de99ca4f7679ad9e27d6b
 SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
 
 
+# Exact published scoped-model successor from APPLICATION d5df6b2. Only the
+# two current dependency members change in this base107 transition. Historical
+# parents stay frozen; normalization never rewrites captured dependency bytes.
+EXACT_SCOPED_MODEL_PREIMAGES = {
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+EXACT_SCOPED_MODEL_DIGESTS = {
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+
+
+def before_exact_scoped_models(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native scoped-model manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        raise ValueError("native scoped-model cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(EXACT_SCOPED_MODEL_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity != EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256:
+        raise ValueError("native scoped-model parent closure differs")
+    return previous
+
+
 def before_sparse_commit_preflight(manifest):
     if type(manifest) is not dict:
         raise ValueError("native sparse commit preflight manifest invalid")
@@ -603,6 +635,7 @@ def normalize_application_carrier_base_manifest(manifest):
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
+    manifest = before_exact_scoped_models(manifest)
     manifest = before_sparse_commit_preflight(manifest)
     manifest = before_admission_integrity(manifest)
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()

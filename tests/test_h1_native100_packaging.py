@@ -49,7 +49,7 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     historical = m.normalize_application_carrier_base_manifest(manifest)
     assert {key for key in manifest if historical[key] != manifest[key]} == {
         'ext/' + name for name in m.APPLICATION_CARRIER_DIGESTS
-    } | set(m.ADMISSION_INTEGRITY_DIGESTS)
+    } | set(m.ADMISSION_INTEGRITY_DIGESTS) | set(m.EXACT_SCOPED_MODEL_DIGESTS)
     for name, expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
         actual = hashlib.sha256((DRAFT.parent / 'candidate' / name).read_bytes()).hexdigest()
         assert actual == manifest['ext/' + name]

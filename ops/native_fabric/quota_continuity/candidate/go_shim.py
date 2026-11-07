@@ -109,6 +109,8 @@ APPLICATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 APPLICATION_BODY_KEYS = frozenset({"model", "messages", "stream", "max_tokens",
     "temperature", "top_p", "stop", "tools", "tool_choice", "parallel_tool_calls"})
 APPLICATION_NATIVE_BODY_KEYS = frozenset({"model", "messages", "stream", "max_tokens", "preferred_tokens"})
+# Only a scoped concrete request may reach H\'s closed Qwen control form.
+APPLICATION_EXACT_BODY_KEYS = APPLICATION_BODY_KEYS | {"reasoning_effort"}
 
 
 class ApplicationSelectionPurpose:
@@ -2688,30 +2690,35 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             self._application_reply(disposition, code="application_" + str(disposition))
 
         def _application_recover(self, scope, arguments):
-            """Resolve an omitted native recipe from the original owner only.
+            """Compare the frozen scope before exposing any original receipt.
 
-            A requires the exact stored recipe digest for recovery. Reading its
-            immutable turn through the same gateway supplies that commitment;
-            today's executor, recipe, grants and credentials are never queried.
-            The actual recovery still validates scope and the whole request.
+            This reads only A's original turn. Current service scope, registered
+            drivers and grants are irrelevant to receipt recovery; a caller's
+            supplied scope must still match the immutable original selection.
             """
-            if arguments["expected_recipe_digest"] is None:
-                from go_lease_gateway import LeaseGatewayError
-                from lease_broker import _application_requested_model
-                connection = lease_gateway._connection()
+            from go_lease_gateway import LeaseGatewayError, ApplicationSelectionRefused
+            from lease_broker import _application_requested_model, _application_stored_scope
+            arguments = dict(arguments)
+            expected_scope = arguments.pop("expected_route_scope_digest", None)
+            connection = lease_gateway._connection()
+            try:
+                connection.execute("BEGIN")
                 try:
-                    connection.execute("BEGIN")
-                    try:
-                        turn = lease_gateway._application_turn_lookup(connection, arguments["principal_id"], scope["turn_id"])
-                    except LeaseGatewayError:
-                        turn = None  # Exact owner lookup reports an absent turn.
-                    if turn is not None:
-                        if (turn["caller_host"] != arguments["host"] or turn["workload"] != scope["workload"]
-                                or _application_requested_model(turn) != scope["model"]):
-                            raise ValueError("original native recovery scope mismatch")
-                        arguments = {**arguments, "expected_recipe_digest": turn["recipe_digest"]}
-                finally:
-                    connection.close()
+                    turn = lease_gateway._application_turn_lookup(connection, arguments["principal_id"], scope["turn_id"])
+                except LeaseGatewayError:
+                    turn = None
+                if turn is not None:
+                    if (turn["caller_host"] != arguments["host"] or turn["workload"] != scope["workload"]
+                            or _application_requested_model(turn) != scope["model"]):
+                        raise ValueError("original recovery identity mismatch")
+                    frozen = _application_stored_scope(turn)
+                    if (scope["model"] is not None
+                            and (None if frozen is None else frozen[1]) != expected_scope):
+                        raise ApplicationSelectionRefused("original route scope changed")
+                    if arguments["expected_recipe_digest"] is None:
+                        arguments["expected_recipe_digest"] = turn["recipe_digest"]
+            finally:
+                connection.close()
             return lease_gateway.recover_application(scope, **arguments)
 
         def _application_close(self, service):
@@ -2776,7 +2783,8 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 if recovered["turn"]["disposition"] != "existing":
                     self._application_recovered(recovered["turn"])
                     return None
-                if scope["model"] is not None and recovered["turn"]["pool"] != scope["pool"]:
+                if (scope["model"] is not None and recovery_args.get("expected_route_scope_digest") is None
+                        and recovered["turn"]["pool"] != scope["pool"]):
                     self._application_reply("refused", code="application_turn_scope_changed", status=409)
                     return None
             return selection, purpose, recovered
@@ -2813,11 +2821,14 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             allowed_pools = service.route_scope.document["pools"]
             candidates = set()
             for pool, model in lease_gateway.application_registered_routes():
-                if pool not in allowed_pools:
+                if (pool not in allowed_pools
+                        or payload["model"] is not None and model != payload["model"]):
                     continue
                 concrete = dict(payload, model=model)
                 try:
                     if pool == "go":
+                        if payload["model"] == "qwen3.8-flash" and {"temperature", "reasoning_effort"} & set(payload):
+                            continue
                         if (set(concrete) - APPLICATION_BODY_KEYS
                                 or not router.application_model_supported(model, "/v1/chat/completions")):
                             continue
@@ -2838,15 +2849,16 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
 
         def _application_auto_commit(self, binding, permit, original_payload):
             """Project persisted A binding and original request, never live routes."""
-            if original_payload["model"] is not None:
-                return
             from lease_broker import (_application_requested_model, _application_record_scope,
                                       _application_routed_request)
-            if _application_requested_model(binding) is not None:
-                raise ValueError("AUTO intent unavailable")
-            record = json.loads(binding["selection_json"])
-            if _application_record_scope(record) is None:
-                raise ValueError("AUTO scope unavailable")
+            requested = _application_requested_model(binding)
+            record = json.loads(binding["selection_json"]) if binding["selection_json"] is not None else None
+            if record is None or _application_record_scope(record) is None:
+                if requested is None:
+                    raise ValueError("scoped intent unavailable")
+                return
+            if original_payload["model"] != requested:
+                raise ValueError("scoped request model changed")
             concrete, original_digest, routed_digest = _application_routed_request(binding, original_payload)
             if (permit.get("request_digest") != original_digest
                     or permit.get("routed_request_digest") != routed_digest
@@ -2855,7 +2867,8 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 raise ValueError("AUTO request commitment unavailable")
             identity = record["identity"]
             self.application_auto_route = {
-                "schema": "mastermind.fabric_application_route.v1", "requested_model": None,
+                "schema": ("mastermind.fabric_application_route.v1" if requested is None
+                           else "mastermind.fabric_application_route.v2"), "requested_model": requested,
                 "route_scope": record["route_scope"], "route_scope_digest": record["route_scope_digest"],
                 "selection_digest": binding["selection_digest"],
                 "request_digest": original_digest, "routed_request_digest": routed_digest,
@@ -2930,7 +2943,9 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                     deadline_ns=time.monotonic_ns() + 5_000_000_000,
                     expected_recipe_digest=native.recipe_digest,
                     expected_selection=selection, selection_purpose=purpose, selection_payload=original_payload,
-                    selection_route_scope=(service.route_scope.document if original_payload["model"] is None else None))
+                    selection_route_scope=(service.route_scope.document
+                        if original_payload["model"] is None or recovery_args.get("expected_route_scope_digest") is not None
+                        else None))
             except BaseException as error:
                 self._application_admission_failed(original_scope, recovery_args, error)
                 return
@@ -3041,7 +3056,9 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 payload = _application_json(raw)
                 # Original recovery is independent of today's service pool.
                 # Dispatch-specific grammar is checked only after that recovery.
-                if (set(payload) - (APPLICATION_BODY_KEYS | APPLICATION_NATIVE_BODY_KEYS)
+                if (set(payload) - (APPLICATION_EXACT_BODY_KEYS | APPLICATION_NATIVE_BODY_KEYS)
+                        or "reasoning_effort" in payload and (expected_scope_digest is None
+                            or payload.get("model") != "qwen3.8-flash")
                         or payload.get("stream", False) is not False
                         or "model" not in payload
                         or payload["model"] is not None and (not isinstance(payload["model"], str) or not payload["model"])
@@ -3054,14 +3071,18 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             scope = {"workload": service.workload, "turn_id": turn_id, "pool": service.pool, "model": payload["model"]}
             recovery_args = dict(principal_id=service.principal_id, host=service.host,
                 request_id=request_id, path=path, payload=payload, expected_recipe_digest=recipe_digest,
-                include_turn=True)
+                include_turn=True, expected_route_scope_digest=expected_scope_digest)
             try:
                 recovered = self._application_recover(scope, recovery_args)
                 if type(recovered) is not dict or recovered.get("kind") not in {
                         "turn_absent", "request_present", "turn_present_new_step"}:
                     raise ValueError("unqualified original recovery")
-            except Exception:
-                self._application_reply("effect_unknown", code="application_recovery_unavailable", status=503)
+            except Exception as error:
+                from go_lease_gateway import ApplicationSelectionRefused
+                if isinstance(error, ApplicationSelectionRefused):
+                    self._application_reply("refused", code="application_turn_scope_changed", status=409)
+                else:
+                    self._application_reply("effect_unknown", code="application_recovery_unavailable", status=503)
                 return
             if recovered["kind"] == "request_present":
                 self._application_recovered(recovered["request"])
@@ -3072,18 +3093,16 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 return
             # A new step uses its original turn. Only an absent TURN selects.
             # No live /models or /usage query precedes this original recovery.
+            scoped = payload["model"] is None or expected_scope_digest is not None
             if recovered["kind"] == "turn_present_new_step":
-                if payload["model"] is not None and scope["pool"] != recovered["turn"]["pool"]:
+                if not scoped and scope["pool"] != recovered["turn"]["pool"]:
                     self._application_reply("refused", code="application_turn_scope_changed", status=409)
                     return
-            if payload["model"] is not None and expected_scope_digest is not None:
-                self._application_reply("refused", code="application_fixed_scope_unsupported", status=400)
-                return
             original_payload = payload
             execution_scope = scope
             selected = None
             pool = service.pool
-            if payload["model"] is None:
+            if scoped:
                 if service.route_scope is None or service.selection_purpose is None:
                     self._application_reply("refused", code="application_auto_scope_unavailable", status=409)
                     return
@@ -3109,7 +3128,9 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 execution_scope = dict(scope, pool=pool, model=model)
                 payload = dict(payload, model=model)
                 recipe_digest = None if pool == "go" else lease_gateway.application_recipe(pool, model)[1]
-            allowed = APPLICATION_NATIVE_BODY_KEYS if pool in NATIVE_APPLICATION_POOLS else APPLICATION_BODY_KEYS
+            allowed = (APPLICATION_NATIVE_BODY_KEYS if pool in NATIVE_APPLICATION_POOLS
+                       else APPLICATION_EXACT_BODY_KEYS if scoped and original_payload["model"] is not None and pool == "bailian"
+                       else APPLICATION_BODY_KEYS)
             if set(payload) - allowed:
                 self._application_reply("refused", code="application_request_invalid", status=400)
                 return
@@ -3147,7 +3168,9 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                     deadline_ns=time.monotonic_ns() + 5_000_000_000,
                     expected_recipe_digest=recipe_digest,
                     expected_selection=selection, selection_purpose=purpose, selection_payload=original_payload,
-                    selection_route_scope=(service.route_scope.document if original_payload["model"] is None else None))
+                    selection_route_scope=(service.route_scope.document
+                        if original_payload["model"] is None or recovery_args.get("expected_route_scope_digest") is not None
+                        else None))
             except Exception as error:
                 self._application_admission_failed(scope, recovery_args, error)
                 return

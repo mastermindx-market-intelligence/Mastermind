@@ -105,8 +105,18 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
-def before_sparse_commit_preflight(manifest):
+def before_exact_scoped_models(manifest):
     previous = dict(manifest)
+    if any(previous.get(name) == digest
+           for name, digest in builder.EXACT_SCOPED_MODEL_DIGESTS.items()):
+        assert {name: previous[name] for name in builder.EXACT_SCOPED_MODEL_DIGESTS} == builder.EXACT_SCOPED_MODEL_DIGESTS
+        previous.update(builder.EXACT_SCOPED_MODEL_PREIMAGES)
+        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+    return previous
+
+
+def before_sparse_commit_preflight(manifest):
+    previous = before_exact_scoped_models(manifest)
     if previous.get("ext/remote_sub_exec.py") == builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST:
         previous["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
         assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256
@@ -213,7 +223,8 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     previous = before_original_artifact_recovery(default)
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
-    builder.validate_go_base_manifest(default, captured)
+    historical_captured = {name: default["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(default, historical_captured)
     builder.validate_go_base_manifest(actual_default, captured)
     assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
     historical = before_participant_cohort(default)
@@ -995,6 +1006,7 @@ def test_repaired_application_rejects_change_to_any_preserved_member(builds, mem
 @pytest.mark.parametrize("extended", ["application", "http"])
 def test_repaired_base_cannot_relabel_an_extended_namespace(builds, extended):
     manifest = json.loads((getattr(builds, extended) / "native-manifest.json").read_bytes())
+    manifest.update(builder.EXACT_SCOPED_MODEL_PREIMAGES)
     assert manifest["ext/remote_sub_exec.py"] == builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST
     manifest["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
     original = dict(manifest)
@@ -1006,9 +1018,9 @@ def test_repaired_base_cannot_relabel_an_extended_namespace(builds, extended):
 
 
 def test_sparse_preflight_is_one_exact_successor_of_the_repaired_application_parent(builds):
-    raw = (builds.default / "native-manifest.json").read_bytes()
+    current = before_exact_scoped_models(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    raw = (json.dumps(current, sort_keys=True, indent=2) + "\n").encode()
     assert g.digest(raw) == "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
-    current = json.loads(raw)
     original = dict(current)
     previous = builder.before_sparse_commit_preflight(current)
     assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
@@ -1035,7 +1047,7 @@ def test_sparse_preflight_is_one_exact_successor_of_the_repaired_application_par
     "foreign-member", "missing-member", "extra-member", "application109", "http112",
 ])
 def test_sparse_preflight_cannot_relabel_a_different_complete_parent(builds, corruption):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_exact_scoped_models(json.loads((builds.default / "native-manifest.json").read_bytes()))
     bad = dict(current)
     if corruption in {"old-task", "old-runtime"}:
         name = "ext/fabric_task.py" if corruption == "old-task" else "ext/lane_runtime.py"
@@ -1056,8 +1068,79 @@ def test_sparse_preflight_cannot_relabel_a_different_complete_parent(builds, cor
     else:
         output = builds.application if corruption == "application109" else builds.http
         bad = json.loads((output / "native-manifest.json").read_bytes())
+        bad.update(builder.EXACT_SCOPED_MODEL_PREIMAGES)
     unchanged = dict(bad)
     captured = {name: bad["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     with pytest.raises(ValueError, match="sparse commit preflight parent closure"):
         builder.validate_go_base_manifest(bad, captured)
     assert bad == unchanged
+
+
+def test_scoped_model_successor_binds_actual_dependencies_and_preserves_parent(builds):
+    raw = (builds.default / "native-manifest.json").read_bytes()
+    assert g.digest(raw) == "d416ac1611112f757d602ddc73b4ed61636a7dd53c4b66866ce302aeabd7a86f"
+    current = json.loads(raw)
+    original = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    captured_original = dict(captured)
+    builder.validate_go_base_manifest(current, captured)
+    previous = builder.before_exact_scoped_models(current)
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+    assert {name for name in current if current[name] != previous[name]} == {
+        "ext/go_lease_gateway.py", "ext/lease_broker.py",
+    }
+    previous_captured = {name: previous["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(previous, previous_captured)
+    assert builder.normalize_application_carrier_base_manifest(current) == builder.normalize_application_carrier_base_manifest(previous)
+    # Historical normalization must never stand in for captured current source.
+    for manifest, dependencies in ((current, previous_captured), (previous, captured)):
+        with pytest.raises(ValueError, match="base differs from captured application dependency"):
+            builder.validate_go_base_manifest(manifest, dependencies)
+    assert captured == captured_original
+    assert current == original
+    for output in (builds.default, builds.application, builds.http):
+        manifest = json.loads((output / "native-manifest.json").read_bytes())
+        inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+        for name, expected in builder.EXACT_SCOPED_MODEL_DIGESTS.items():
+            staged = (output / "native-code-stage" / name).read_bytes()
+            source = (ROOT / "candidate" / Path(name).name).read_bytes()
+            assert staged == source
+            assert g.digest(staged) == manifest[name] == inventory["files"][name]["sha256"] == expected
+            assert inventory["files"][name]["source"] == "candidate/" + Path(name).name
+
+
+@pytest.mark.parametrize("corruption", [
+    "old-gateway", "old-broker", "foreign-gateway", "foreign-broker",
+    "old-executor", "old-task", "changed-pool", "missing-member", "extra-member",
+    "application109", "http112", "worker-parent",
+])
+def test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent(builds, corruption):
+    bad = json.loads((builds.default / "native-manifest.json").read_bytes())
+    if corruption in {"old-gateway", "old-broker", "foreign-gateway", "foreign-broker"}:
+        key = "ext/go_lease_gateway.py" if corruption.endswith("gateway") else "ext/lease_broker.py"
+        bad[key] = builder.EXACT_SCOPED_MODEL_PREIMAGES[key] if corruption.startswith("old-") else "f" * 64
+    elif corruption == "old-executor":
+        bad["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
+    elif corruption == "old-task":
+        bad["ext/fabric_task.py"] = builder.ADMISSION_INTEGRITY_PREIMAGES["ext/fabric_task.py"]
+    elif corruption == "changed-pool":
+        bad["pool"] = "f" * 64
+    elif corruption == "missing-member":
+        del bad["ext/original_advertised_artifact.py"]
+    elif corruption == "extra-member":
+        bad["ext/foreign.py"] = "f" * 64
+    elif corruption == "worker-parent":
+        fixture = ROOT.parents[2] / "tests/fixtures/fabric-admission-integrity-worker107-3b2338d.json"
+        assert g.digest(fixture.read_bytes()) == "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+        bad = json.loads(fixture.read_bytes())
+        bad.update(builder.EXACT_SCOPED_MODEL_DIGESTS)
+    else:
+        output = builds.application if corruption == "application109" else builds.http
+        bad = json.loads((output / "native-manifest.json").read_bytes())
+    unchanged = dict(bad)
+    captured = {name: bad["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    captured_unchanged = dict(captured)
+    with pytest.raises(ValueError, match="native scoped-model (cohort|parent closure)"):
+        builder.validate_go_base_manifest(bad, captured)
+    assert bad == unchanged
+    assert captured == captured_unchanged

@@ -497,3 +497,141 @@ Current actual builder receipts:
 The current combined run passed 440 tests with zero failures, errors or skips (process 98608, pytest 122.980 seconds, terminal exit 0). It includes the full native-security and adopted sparse-preflight suites, actual index/config/rules byte preservation, refusal of unrelated stderr, unsafe contents and invalid pins, uncertainty preservation, immutable support publication, the actual inert execution seam, Go generations, historical launcher paths, exact lineage/mixed-parent refusals, packaging and source-identity review. The earlier 35/32 security result remains a retained counterexample and is superseded by this current successful source qualification, not erased.
 
 This change does not reconcile any of #2007's historical Ubuntu2 holds, alter cache or disk guards, activate APPLICATION profiles, or install a live generation. #2175 remains the final composition carrier; #2187 remains the original independent admission-repair carrier. Exact-head hosted checks, coordinated source incorporation, protected merge, existing publication/selection and authenticated live proof remain owed.
+
+## 2026-11-07 scoped-model and Brain fixture composition
+
+The isolated #2194 contribution consumes published APPLICATION source
+d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6 from its original #2175 carrier.
+The previous contribution parent is
+5c6da94136b5a139a0da10312e9af997de2e0c1a. All ten incoming scoped-model
+paths retain their exact published bytes. The incumbent branch/workspace and
+its J, shared-policy, provider and activation effects were not modified.
+This is one captured forward composition, not an open-ended chase of its
+active writer or a second final release carrier.
+
+### Exact current closure and actual dependency custody
+
+Before this composition, the real source builder refused the new gateway
+and broker at "native sparse commit preflight parent closure differs".
+The retained counterexample is /tmp/mmx-d5-composition-before.json.
+
+The existing builder now qualifies one additive two-member successor of
+the complete 1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0
+parent. Gateway changes from df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1
+to adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949;
+broker changes from 42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b
+to a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360.
+Partial pairs, foreign bytes, changed unrelated members, older executor/task
+cohorts and extended or historical namespaces refuse.
+
+The normalization order is now scoped-model pair, sparse preflight,
+admission pair, then original APPLICATION carrier. Every earlier parent
+constant and historical fixture remains frozen. The actual incoming
+manifest is retained separately for captured Go dependency equality;
+the caller's dependency map is never normalized or rewritten. The existing
+source-capture, staged-byte and composed-component checks remain intact.
+The new tests prove that correctly captured current bytes pass and a
+historical dependency map cannot authorize those new staged bytes.
+
+Actual outputs retain the bytes that were built:
+
+| Variant | Members | Manifest SHA-256 |
+| --- | ---: | --- |
+| Native base | 107 | d416ac1611112f757d602ddc73b4ed61636a7dd53c4b66866ce302aeabd7a86f |
+| Go APPLICATION | 109 | 4812aec2c4a3bffa73656a520482a55eea2445a3724b5ee1af08e0af88cb8140 |
+| APPLICATION HTTP | 112 | 0f6cc8c3fecb119fe272aca5a20e3adc346adeeec82214341b5b8c27f9667440 |
+
+The base differs from the previously observed installed APPLICATION parent
+3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9
+in exactly five explicit members: task, admission lane, sparse executor,
+gateway and broker. The other 102 members are identical. This is a
+comparison with the captured predecessor, not a fresh installation claim.
+
+The incoming Go handler stays byte-identical to d5df6b2:
+1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7.
+Its exact 53-site identity review preserves 51 unchanged mapped sites,
+moves the existing recovery-unavailable 503 within its new conditional,
+removes the deleted fixed-scope 400 and reviews the new scoped-conflict
+409. No general literal exemption was added.
+
+### Actual Brain consumer qualification
+
+Hosted CI42344753231 on the earlier 5c6da941 contribution reached the actual
+Brain composition gate and failed 8 cases with 3 errors. Its chat fixture
+only enrolled mastermind_text_fabric, while the current chat driver
+correctly requests mastermind_chat_fabric.
+
+The fixture now declares its own chat transport, mode, capability and
+credential reference through the actual Macro owner. A negative case
+proves that the text mode/grant cannot substitute, even if its allowed-lane
+list contains the chat lane. Production role selection is unchanged.
+
+The same paired proof exposed a cleanup defect after a two-second fixture
+arrival assertion failed: aclose() was called while the original
+anext task still ran. Its finally path now releases and reaps that same
+task before closing the generator, and always restores the loop exception
+handler. The two-second startup assertion and runtime timeouts are
+unchanged; the original arrival delay is not attributed to a proven cause.
+
+The exact paired Macro source is
+abab96df55f82cb5c26459a6f51b568d73a6a6f8, matching the incoming CI fixture.
+The first local attempt lacked claude_agent_sdk and is not a pass.
+An isolated proof environment uses SDK0.2.179, the exact version resolved
+by the hosted job, satisfying the source-declared >=0.2 dependency.
+It does not install or activate a company service.
+
+### Qualification receipts and retained failures
+
+- Actual source builds succeeded for all 107/109/112 variants.
+- The generation/identity run initially had 326 passes and one stale
+  historical-dependency fixture failure. The fixture now supplies its
+  own historical dependency map; the separate current-byte comparison
+  and new stale-map refusal cases remain.
+- The combined 741-case run had **734 passed, 1 failed, 6 skipped**.
+  The sole failure was the H1 packaging test's old expected changed-member
+  set. Its exact successor expectation now includes the gateway/broker
+  pair; the complete affected suite passed **4/4** afterward.
+  This is not represented as one all-green union run.
+- All six skips are explicit Linux-only initializer, memfd/fd-exec/getpath,
+  xattr or proc-FD checks on macOS. Hosted Linux CI remains their proof.
+- The actual paired Brain/Fabric composition passed **47/47**, including
+  the new role-isolation case.
+- The buffered native chat suite passed **8/8** after the cleanup repair,
+  preserving original provider observation, cancellation, usage, lease
+  close and no-reissue assertions. Its earlier 7-pass/1-error result is
+  retained separately.
+- The prior 70-case facade proof remains attached to unchanged task/lane
+  and facade source; it was not rerun or relabeled as a new receipt.
+
+Combined qualification log SHA-256: b0a034a64344ed1ff1fb43fd39f373f50722593ef373863032fd7387ed215b28;
+XML: 050a2c56fa1644f3518f09e0fcff5dda399c14b7ab40a5ca86eb269a57e69fd3. Focused packaging log:
+c4b808d34f4db00b333696dec1f3a43a2887d8bfe0cb7af07a3cb98ff43a7830; XML: eb0a79aa4b092239dad50b4a6fb864548c54afd48e5012916aff89ff5f3de105.
+Paired Brain log: a6cf325c4f2a786a027ed5feff63346faabc0c541774c9974885d6dfb18dbfd7.
+Final buffered log: 7100d11e3601bd1e46907312ae8e815c82ddf21fd39d83fd8084cdbf1dd6c6f2.
+Final disposable source-capture SHA-256:
+ce6971a18e2b220c18c1a8bba55a695f78a3e7684decd2c3497b7712a930e000.
+
+Whitespace qualification: the new delta against 5c6da941 passes
+git diff --check. The full contribution against d5df6b2 reports exactly two
+blank unified-diff context lines (11 and 12) in the byte-identical adopted
+sparse preflight patch. Its original Git blob remains
+7e4d334aa1cf4cee0056cefacb6faff74726d9a9 and SHA-256 remains
+34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9.
+All other contribution paths pass the full check. The preserved patch was
+not rewritten to erase its required context prefix, and no checker or
+repository-wide whitespace rule was relaxed.
+
+### Delivery boundary
+
+Incorporate this exact contribution through original #2175, preserving its
+active scoped-model/J/shared-policy work and paired Macro carrier. If its
+published head advances again, reconcile the subsequent delta; none of this
+proof transfers automatically to new bytes. #2187 remains its independent
+protected native repair, and #2185's source merge does not prove installed
+Hermes enrollment.
+
+Required hosted checks, protected final-source delivery, fresh installed
+predecessor/generation/sequence verification, the existing immutable
+publisher/selector and authenticated consumer acceptance remain separate.
+No live provider/account invocation, runtime selection, live enrollment, new
+scheduler or generic transition registry was introduced by this contribution.

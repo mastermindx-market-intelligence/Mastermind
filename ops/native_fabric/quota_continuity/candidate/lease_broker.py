@@ -80,7 +80,9 @@ def _application_record_scope(record):
         if set(record) != fields:
             raise ApplicationSelectionError("selection_invalid")
         return None
-    if (record.get("schema") != "mastermind.application_turn_selection.v2"
+    schema = record.get("schema")
+    if (schema not in {"mastermind.application_turn_selection.v2",
+                       "mastermind.application_turn_selection.v3"}
             or set(record) != fields | {"route_scope", "route_scope_digest"}):
         raise ApplicationSelectionError("selection_invalid")
     encoded, digest = _application_route_scope(record["route_scope"])
@@ -88,9 +90,19 @@ def _application_record_scope(record):
     if (record["route_scope_digest"] != digest or type(identity) is not dict
             or identity.get("pool") not in record["route_scope"]["pools"]
             or type(identity.get("task")) is not dict
-            or "requested_model" not in identity["task"]
-            or identity["task"]["requested_model"] is not None):
+            or "requested_model" not in identity["task"]):
         raise ApplicationSelectionError("selection_scope_invalid")
+    requested = identity["task"]["requested_model"]
+    if schema == "mastermind.application_turn_selection.v2":
+        if requested is not None:
+            raise ApplicationSelectionError("selection_scope_invalid")
+    else:
+        try:
+            _application_model(requested)
+        except ApplicationAdmissionError:
+            raise ApplicationSelectionError("selection_scope_invalid") from None
+        if requested != identity.get("model"):
+            raise ApplicationSelectionError("selection_scope_invalid")
     return encoded, digest
 
 
@@ -546,6 +558,13 @@ def _application_requested_model(turn):
         raise ApplicationAdmissionError("stored_selection_invalid") from None
 
 
+def _application_stored_scope(turn):
+    """Read a validated frozen scope; it grants no current execution authority."""
+    _application_requested_model(turn)
+    raw = dict(turn).get("selection_json")
+    return None if raw is None else _application_record_scope(json.loads(raw))
+
+
 def _application_routed_request(turn, payload):
     """Freeze the original document and substitute only its selected model."""
     if (type(payload) is not dict or "model" not in payload
@@ -645,6 +664,96 @@ def _application_auto_guards(conn):
                 WHERE r.principal_id=t.principal_id AND r.turn_id=t.turn_id
                 AND NOT (""" + _application_route_digest_sql("r") + """)))
         BEGIN SELECT RAISE(IGNORE); END""")
+
+
+def _application_exact_sql(alias):
+    # Recognize the version even when its contents are damaged: invalid v3
+    # documents must not escape the additive custody guards.
+    return ("CASE WHEN json_valid(" + alias + ".selection_json)=1 THEN "
+            "json_extract(" + alias + ".selection_json,'$.schema')="
+            "'mastermind.application_turn_selection.v3' ELSE 0 END")
+
+
+def _application_exact_guards(conn):
+    """Protect scoped concrete requests without rewriting historical triggers."""
+    exact = _application_exact_sql("t")
+    statements = {}
+    statements["application_exact_request_insert_v3"] = """CREATE TRIGGER IF NOT EXISTS application_exact_request_insert_v3
+        BEFORE INSERT ON application_requests WHEN
+        (NEW.routed_request_digest IS NOT NULL AND EXISTS (
+            SELECT 1 FROM application_turns t WHERE t.principal_id=NEW.principal_id
+            AND t.turn_id=NEW.turn_id AND (""" + exact + """)))
+        OR EXISTS (SELECT 1 FROM application_requests r JOIN application_turns t
+            ON t.principal_id=r.principal_id AND t.turn_id=r.turn_id
+            WHERE ((r.principal_id=NEW.principal_id AND r.turn_id=NEW.turn_id
+                AND r.request_id=NEW.request_id) OR r.dispatch_id=NEW.dispatch_id)
+            AND ((""" + exact + """) OR EXISTS (
+                SELECT 1 FROM application_turns incoming
+                WHERE incoming.principal_id=NEW.principal_id AND incoming.turn_id=NEW.turn_id
+                AND (""" + _application_exact_sql("incoming") + """))))
+        BEGIN SELECT RAISE(ABORT,'application_exact_request_insert_refused'); END"""
+    statements["application_exact_request_binding_v3"] = """CREATE TRIGGER IF NOT EXISTS application_exact_request_binding_v3
+        BEFORE UPDATE ON application_requests WHEN EXISTS (
+            SELECT 1 FROM application_turns t WHERE t.principal_id=OLD.principal_id
+            AND t.turn_id=OLD.turn_id AND (""" + exact + """))
+        AND (NEW.principal_id IS NOT OLD.principal_id OR NEW.turn_id IS NOT OLD.turn_id
+            OR NEW.request_id IS NOT OLD.request_id OR NEW.request_digest IS NOT OLD.request_digest
+            OR NEW.dispatch_id IS NOT OLD.dispatch_id OR NEW.created_at IS NOT OLD.created_at
+            OR NEW.recipe_digest IS NOT OLD.recipe_digest
+            OR NEW.logical_payload_digest IS NOT OLD.logical_payload_digest
+            OR NEW.wire_body_digest IS NOT OLD.wire_body_digest
+            OR NEW.invocation_json IS NOT OLD.invocation_json
+            OR NEW.invocation_digest IS NOT OLD.invocation_digest
+            OR NEW.routed_request_digest IS NOT OLD.routed_request_digest
+            OR NEW.routed_request_digest IS NOT NULL
+            OR (OLD.state='terminal' AND (NEW.state IS NOT OLD.state
+                OR NEW.terminal_receipt IS NOT OLD.terminal_receipt
+                OR NEW.unknown_reason IS NOT OLD.unknown_reason)))
+        BEGIN SELECT RAISE(IGNORE); END"""
+    statements["application_exact_request_delete_v3"] = """CREATE TRIGGER IF NOT EXISTS application_exact_request_delete_v3
+        BEFORE DELETE ON application_requests WHEN EXISTS (
+            SELECT 1 FROM application_turns t WHERE t.principal_id=OLD.principal_id
+            AND t.turn_id=OLD.turn_id AND (""" + exact + """))
+        BEGIN SELECT RAISE(IGNORE); END"""
+    statements["application_exact_turn_insert_v3"] = """CREATE TRIGGER IF NOT EXISTS application_exact_turn_insert_v3
+        BEFORE INSERT ON application_turns WHEN EXISTS (
+            SELECT 1 FROM application_turns t WHERE
+            ((t.principal_id=NEW.principal_id AND t.turn_id=NEW.turn_id) OR t.lease_id=NEW.lease_id)
+            AND ((""" + exact + """) OR (""" + _application_exact_sql("NEW") + """)))
+        BEGIN SELECT RAISE(ABORT,'application_exact_turn_insert_refused'); END"""
+    statements["application_exact_lease_insert_v3"] = """CREATE TRIGGER IF NOT EXISTS application_exact_lease_insert_v3
+        BEFORE INSERT ON leases WHEN EXISTS (SELECT 1 FROM application_turns t
+            WHERE t.lease_id=NEW.id AND (""" + exact + """))
+        BEGIN SELECT RAISE(ABORT,'application_exact_lease_insert_refused'); END"""
+    statements["application_exact_lease_release_v3"] = """CREATE TRIGGER IF NOT EXISTS application_exact_lease_release_v3
+        BEFORE UPDATE OF state ON leases WHEN OLD.purpose='APPLICATION'
+        AND OLD.state IN ('held','rented') AND NEW.state NOT IN ('held','rented')
+        AND EXISTS (SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id AND (""" + exact + """))
+        AND NOT EXISTS (SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id
+            AND (""" + exact + """) AND t.state='closed'
+            AND t.pool=OLD.pool AND t.account=OLD.account AND t.model=OLD.model
+            AND CASE WHEN json_valid(t.selection_json)=1 THEN
+                CASE WHEN json_type(t.selection_json,'$.identity.task.requested_model')='text'
+                    AND json_extract(t.selection_json,'$.identity.task.requested_model')=t.model
+                    AND json_extract(t.selection_json,'$.identity.model')=t.model
+                    AND json_extract(t.selection_json,'$.identity.pool')=t.pool
+                    AND json_extract(t.selection_json,'$.route_scope.schema')='mastermind.application_route_scope.v1'
+                    AND json_type(t.selection_json,'$.route_scope.pools')='array'
+                    AND EXISTS (SELECT 1 FROM json_each(t.selection_json,'$.route_scope.pools') p
+                        WHERE p.type='text' AND p.value=t.pool)
+                THEN 1 ELSE 0 END ELSE 0 END=1
+            AND NOT EXISTS (SELECT 1 FROM application_requests r
+                WHERE r.principal_id=t.principal_id AND r.turn_id=t.turn_id
+                AND r.routed_request_digest IS NOT NULL))
+        BEGIN SELECT RAISE(IGNORE); END"""
+    def normalized(sql):
+        return " ".join(sql.split()).replace("CREATE TRIGGER IF NOT EXISTS ", "CREATE TRIGGER ", 1)
+    for name, wanted in statements.items():
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()
+        if row is not None and normalized(row[0]) != normalized(wanted):
+            raise ApplicationAdmissionError("application_exact_trigger_unrecognized")
+        if row is None:
+            conn.execute(wanted)
 
 
 def _application_stored_terminal(request, turn):
@@ -1352,6 +1461,7 @@ class Broker:
             BEGIN SELECT RAISE(IGNORE); END""")
         _application_migrate_release_trigger(conn)
         _application_auto_guards(conn)
+        _application_exact_guards(conn)
         # The HTTP extension retains every v1 terminal condition and adds its
         # original recipe/wire binding. An old broker's release/GC cannot turn
         # a downgraded Go-shaped receipt into proof for a Bailian operation.
@@ -2710,7 +2820,8 @@ class Broker:
                     "caller_host", "workload", "admission_root", "pool", "account", "model",
                     "lease_id", "created_at", "expires_at", "max_steps", "state")}}
         automatic = _application_requested_model(turn) is None
-        if turn["pool"] in (_APPLICATION_HTTP_POOLS | _APPLICATION_NATIVE_POOLS) or automatic:
+        scoped = _application_stored_scope(turn) is not None
+        if turn["pool"] in (_APPLICATION_HTTP_POOLS | _APPLICATION_NATIVE_POOLS) or automatic or scoped:
             if disposition == "closed":
                 lease = conn.execute("SELECT state FROM leases WHERE id=?", (turn["lease_id"],)).fetchone()
                 if turn["state"] != "closed" or lease is None or lease["state"] not in {"released", "expired"}:
@@ -2893,13 +3004,14 @@ class Broker:
         if turn is None:
             return {"kind": "turn_absent"}
         requested = _application_requested_model(turn)
+        scoped = _application_stored_scope(turn) is not None
         if (turn["caller_host"] != caller_host or turn["workload"] != workload
                 or requested != model
                 or (expected_recipe_digest != turn["recipe_digest"]
-                    and not (requested is None and expected_recipe_digest is None))):
+                    and not ((requested is None or scoped) and expected_recipe_digest is None))):
             raise ApplicationAdmissionError("recovery_context_conflict")
         routed_digest = None
-        if requested is None:
+        if requested is None or scoped:
             _, original_digest, routed_digest = _application_routed_request(turn, original_payload)
             if original_digest != request_digest:
                 raise ApplicationAdmissionError("request_conflict")
@@ -2916,9 +3028,10 @@ class Broker:
         with self._application_transaction() as conn:
             turn = self._application_turn(conn, principal_id, turn_id)
             automatic = _application_requested_model(turn) is None
+            scoped = _application_stored_scope(turn) is not None
             routed_digest = None
             routed_payload = None
-            if automatic:
+            if automatic or scoped:
                 routed_payload, original_digest, routed_digest = _application_routed_request(turn, original_payload)
                 if original_digest != request_digest:
                     raise ApplicationAdmissionError("request_conflict")
@@ -2929,7 +3042,7 @@ class Broker:
                 routed_request_digest=routed_digest)
             if prior is not None:
                 return prior
-            if automatic:
+            if automatic or scoped:
                 # Original recovery above is independent of current grants and
                 # source. Only a new request must retain its frozen capability
                 # needs, including callers that use an admitted token directly.
@@ -2949,7 +3062,7 @@ class Broker:
                 if encoded != turn["recipe_json"] or digest != turn["recipe_digest"]:
                     raise ApplicationAdmissionError("recipe_changed")
                 commitment = _application_native_commitment(transport_commitment, recipe, digest)
-                if automatic and native_payload != routed_payload:
+                if (automatic or scoped) and native_payload != routed_payload:
                     raise ApplicationAdmissionError("native_routed_input_conflict")
                 input_bytes, logical_digest, output_limit = _application_native_payload(recipe, native_payload)
                 logical_request = _application_json({"path": "/v1/chat/completions", "payload": native_payload}).encode("utf-8")
@@ -2966,7 +3079,7 @@ class Broker:
                 commitment = {key: _application_digest(transport_commitment[key]) for key in fields}
                 if commitment["recipe_digest"] != turn["recipe_digest"]:
                     raise ApplicationAdmissionError("recipe_changed")
-                if automatic and hashlib.sha256(_application_json(routed_payload).encode()).hexdigest() != commitment["logical_payload_digest"]:
+                if (automatic or scoped) and hashlib.sha256(_application_json(routed_payload).encode()).hexdigest() != commitment["logical_payload_digest"]:
                     raise ApplicationAdmissionError("http_routed_input_conflict")
                 encoded, digest = _application_http_recipe(json.loads(turn["recipe_json"]),
                                                           pool=turn["pool"], model=turn["model"])

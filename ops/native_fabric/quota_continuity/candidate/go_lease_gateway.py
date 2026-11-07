@@ -449,9 +449,11 @@ class GoLeaseGateway:
             if route_scope is not None:
                 scope_json, scope_digest = _application_route_scope(route_scope)
                 scope_document = json.loads(scope_json)
-                if (requested is not None or type(transport_candidates) is not frozenset
+                if (type(transport_candidates) is not frozenset
                         or len(transport_candidates) > 128):
-                    raise ValueError("invalid AUTO transport projection")
+                    raise ValueError("invalid scoped transport projection")
+                if requested is not None:
+                    _application_model(requested)
                 for pair in transport_candidates:
                     if (type(pair) is not tuple or len(pair) != 2
                             or pair[0] not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS)):
@@ -529,10 +531,13 @@ class GoLeaseGateway:
                 connection.close()
             expected = None if scope_document is not None else {"pool": request["pool"]}
             if requested is not None:
-                bound = projections.get((request["pool"], requested))
-                if bound is None:
-                    raise ValueError("unqualified selection transport")
-                expected.update(model=requested, source=bound["source"])
+                if scope_document is not None:
+                    expected = {"model": requested}
+                else:
+                    bound = projections.get((request["pool"], requested))
+                    if bound is None:
+                        raise ValueError("unqualified selection transport")
+                    expected.update(model=requested, source=bound["source"])
             catalogue = {"schema": "mastermind.fabric_application_catalogue.v1",
                 "pool_order": list(pick._APPLICATION_POOL_ORDER), "pools": pools}
             selected = pick.select_application(task, policy=policy, catalogue=catalogue,
@@ -552,7 +557,8 @@ class GoLeaseGateway:
                 "quality_records_sha256": hashlib.sha256(_application_json(quality).encode()).hexdigest(),
                 "fresh_s": 5.0}
             if scope_document is not None:
-                result.update(schema="mastermind.application_turn_selection.v2",
+                result.update(schema=("mastermind.application_turn_selection.v2" if requested is None
+                                      else "mastermind.application_turn_selection.v3"),
                               route_scope=scope_document, route_scope_digest=scope_digest)
             return result
         except Exception:
@@ -635,7 +641,7 @@ class GoLeaseGateway:
                     caller_host=host, workload=request["workload"], turn_id=request["turn_id"],
                     model=request["model"], request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
                     expected_recipe_digest=expected_recipe_digest, connection=connection,
-                    original_payload=json.loads(raw)["payload"] if request["model"] is None else None)
+                    original_payload=json.loads(raw)["payload"])
             finally:
                 connection.close()
             return context if include_turn else context.get("request")
@@ -658,9 +664,10 @@ class GoLeaseGateway:
             connection = self._connection()
             try:
                 connection.execute("BEGIN")
-                from lease_broker import _application_routed_request
+                from lease_broker import _application_routed_request, _application_stored_scope
                 turn = self._application_turn_lookup(connection, principal_id, turn_id)
                 original_payload = json.loads(raw)["payload"]
+                scoped = _application_stored_scope(turn) is not None
                 frozen, original_digest, routed_digest = _application_routed_request(turn, original_payload)
                 if original_digest != hashlib.sha256(raw).hexdigest():
                     raise LeaseGatewayError("application original request changed")
@@ -692,7 +699,7 @@ class GoLeaseGateway:
                 request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
                 transport_commitment=transport_commitment,
                 native_payload=frozen if expected_pool in NATIVE_APPLICATION_POOLS else None,
-                original_payload=original_payload if routed_digest is not None else None)
+                original_payload=original_payload if routed_digest is not None or scoped else None)
             if prepared.get("dispatch_permitted"):
                 # The original handler sends these immutable, digest-bound bytes.
                 # They are internal dispatch material, never a public receipt/log.
