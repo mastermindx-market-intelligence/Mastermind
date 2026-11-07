@@ -6,6 +6,7 @@ on:
       - 'integrations/hermes_runtime/**'
       - '.github/workflows/hermes-runtime.yml'
       - 'requirements/executive-mcp-macos-arm64-py312.in'
+      - 'requirements/hermes-transport-observation-test.in'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +31,7 @@ jobs:
       - name: Install the reviewed edge package pins and test runner
         # Reuse package inputs for the real SDK/HTTP fixtures. This Linux test
         # matrix does not attest the production macOS runtime or its hash lock.
-        run: python -m pip install --disable-pip-version-check -r requirements/executive-mcp-macos-arm64-py312.in 'pytest==9.1.1'
+        run: python -m pip install --disable-pip-version-check -r requirements/executive-mcp-macos-arm64-py312.in -r requirements/hermes-transport-observation-test.in 'pytest==9.1.1'
       - name: Compile the runtime package
         run: python -m compileall -q integrations/hermes_runtime
       - name: Run runtime acceptance tests
