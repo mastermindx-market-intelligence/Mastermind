@@ -97,9 +97,22 @@ def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     config = render(manifest, 49152)
     for route in routes:
         assert route in config
-    assert config.count("reverse_proxy 127.0.0.1:49152") == 2
+    # Five fixed branches: OS GET, legacy OS POST (64KB), the dedicated
+    # source-operation POST branch (98304), and the two public MCP entrypoint
+    # branches (RFC 9728 metadata GET, POST /mcp). Asset names only ever widen
+    # the OS GET matcher; they cannot create or alter an MCP or source branch.
+    assert config.count("reverse_proxy 127.0.0.1:49152") == 5
     assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
-    assert "/mcp" not in config
+    assert ("path /workspace/source-operation/prepare /workspace/source-operation/submit"
+            " /workspace/source-operation/reconcile /workspace/source-operation/advance\n") in config
+    assert ("path /.well-known/oauth-protected-resource/mcp"
+            " /.well-known/oauth-protected-resource/mcp/coo\n") in config
+    assert "path /mcp /mcp/coo\n" in config
+    assert config.count("/mcp") == 4
+    assert config.count("max_size 98304") == 1
+    assert config.count("max_size 64KB") == 2
+    assert config.count("header_up Host mcp.mastermind-x.com") == 4
+    assert config.count("header_up Host 127.0.0.1") == 1
 
 
 @pytest.mark.parametrize("fault", ["extra-directory", "missing-license", "extra-source-map", "symlink-license", "index-loads-lazy-chunk", "oversize-license", "empty-license"])

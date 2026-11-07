@@ -102,9 +102,10 @@ provided are validated hard: absolute paths, existing regular non-symlink
 files (including each heartbeat at qualification time — a client that has
 never written its heartbeat cannot be qualified yet), ≤32 telemetry files
 with relative POSIX paths and a `.json` suffix, 64-hex pinned generation and
-repair digests. `heartbeat_kind` requires `heartbeat_proof_note`: without an
-operator first-party attestation, a heartbeat file's mtime is never treated
-as the tunnel-client/control-plane last-seen signal (B6).
+repair digests. `heartbeat_kind` requires `heartbeat_proof_note`: a heartbeat
+file's mtime is never treated as the tunnel-client/control-plane last-seen
+signal, with or without that operator first-party attestation (B6). The
+mtime is a diagnostic observation only.
 
 #### Heartbeat modes (strictly typed; modes are exclusive per seat)
 
@@ -113,9 +114,13 @@ exactly two spellings — anything else refuses (`facts_heartbeat_mode_unknown`)
 
 - `file_mtime_attested` — the legacy mode, also the meaning of an ABSENT mode
   on a safe legacy manifest. Requires `heartbeat_path`; the file must exist as
-  a regular non-symlink file at qualification. Per pass the file's mtime is
-  the last-seen signal, and staleness can force a restart only because of the
-  operator attestation above.
+  a regular non-symlink file at qualification. Per pass the file's mtime is a
+  DIAGNOSTIC OBSERVATION ONLY: it can never establish health, never reset the
+  attempt ladder, and never authorize a stale forced restart — NOT even with
+  the operator attestation above. The legacy mode reports
+  `heartbeat_mtime_diagnostic_only` for a fresh mtime and
+  `stale_heartbeat_unproven_alert_only` for a stale one. Health and every
+  heartbeat-derived action come from the CLI-poll mode below.
 - `first_party_cli_control_plane_poll` — the stronger first-party proof.
   Requires `heartbeat_profile_file` (the seat's own per-seat client profile,
   a JSON file) and refuses `heartbeat_path`. Qualification, before anything
@@ -266,13 +271,18 @@ bounds TRUST of the attestation, not the life of the recovery:
 
 ### Heartbeat first-party proof (B6)
 
-A heartbeat FILE's mtime is only a recovery signal when the operator
-qualified that seat with `heartbeat_kind` + `heartbeat_proof_note`. Without
-that attestation, a stale heartbeat is
-`stale_heartbeat_unproven_alert_only` (ALERT ONLY, no forced restart) and
-states the exact required host proof: an operator-correlated
-tunnel-client/control-plane last-seen attestation recorded at qualification.
-Missing-PID recovery is unaffected — that state is proven by launchd itself.
+A heartbeat FILE's mtime is DIAGNOSTIC ONLY, with or without the operator
+attestation. `heartbeat_kind` + `heartbeat_proof_note` prove that an operator
+once correlated the file with the control plane; they do NOT turn a file
+mtime into first-party control-plane evidence. So a stale mtime is
+`stale_heartbeat_unproven_alert_only` (ALERT ONLY, no forced restart) and a
+fresh mtime is `heartbeat_mtime_diagnostic_only` (never `healthy`), in both
+cases stating the exact required host proof: the seat must be qualified for
+`first_party_cli_control_plane_poll`, whose last-seen comes from the seat's
+OWN control-plane poll. A file mtime never establishes health, never resets
+the attempt ladder, and never authorizes a restart.
+Missing-PID recovery is unaffected — that state is proven by launchd itself,
+and it keeps its exact identity and policy guards.
 The user-visible error this replaces ("Tunnel-client has not been seen for
 300 seconds") is never inferred from an arbitrary file's age.
 
@@ -311,9 +321,13 @@ last-seen from a REAL control-plane poll instead of any file mtime:
    evidence-authorized kick (`last_kick_poll_value` /
    `last_kick_poll_digest` in the kick ledger) is
    `control_plane_poll_replayed_alert_only` — consumed evidence may not
-   authorize another kick or witness freshness. Advanced evidence kicks
-   again under the same 1800 s cooldown and 3-kick escalation ladder, with
-   no fourth kick, exactly like the file-mtime mode.
+   authorize another kick or witness freshness. Advanced evidence that is
+   STRICTLY newer than a seat's reservation AND FRESH at the observing pass
+   (last-seen age inside the same 300 s window the health rule uses) is a
+   bound recovery proof: it releases that acknowledged attempt and the seat
+   may act again under the same 1800 s cooldown. A newer-but-STALE
+   observation is never a recovery proof, however far it advances the
+   timestamp. A consumed attempt is never refunded by anything else.
 7. A missing PID still recovers through the launchd-proven route and NO poll
    is executed for that seat; `launchctl print` ambiguity stays alert-only.
 
@@ -326,10 +340,13 @@ Classification (distinguished exactly as the plan requires):
 | Signal | Outcome |
 | --- | --- |
 | No PID on a qualified job | `missing_pid` → plain `launchctl kickstart gui/<uid>/<label>` (either heartbeat mode; no poll is executed) |
-| No PID, 3 persisted consecutive kicks without a witnessed fresh heartbeat | `kickstart_escalated_alert`, NO fourth kick even after cooldown, until a healthy pass witnesses a fresh heartbeat |
-| PID present, last-seen older than 300 s, first-party attested (file mtime or CLI poll) | `stale_heartbeat` → `launchctl kickstart -k` |
-| PID present, last-seen older than 300 s, NOT attested | `stale_heartbeat_unproven_alert_only`, NO action, exact required proof in the alert |
-| PID present, last-seen fresh | `healthy`, no action |
+| No PID, 3 persisted attempts without a witnessed fresh heartbeat | `kickstart_escalated_alert`, NO fourth attempt even after cooldown, until a healthy pass witnesses a fresh heartbeat. The ladder is reset only by a witnessed recovery or by the bound first-party release of an acknowledged attempt |
+| PID present, CLI-poll last-seen older than 300 s, first-party attested | `stale_heartbeat` → `launchctl kickstart -k` |
+| PID present, CLI-poll last-seen older than 300 s, NOT attested | `stale_heartbeat_unproven_alert_only`, NO action, exact required proof in the alert |
+| PID present, last-seen fresh (CLI poll) | `healthy`, no action |
+| PID present, legacy file mtime fresh (file mode) | `heartbeat_mtime_diagnostic_only`, NO action, never `healthy` |
+| PID present, legacy file mtime older than 300 s (file mode, attested or not) | `stale_heartbeat_unproven_alert_only`, NO action, never a forced restart |
+| An action was invoked (or refused pre-spawn) and its outcome is not settled | `pending_effect_held_alert_only`: NO further attempt for that seat, ever — not after the cooldown, not because a healthy observation arrived. An ACKNOWLEDGED attempt is held the same way and is released only by a bound first-party poll strictly newer than its reservation AND fresh at the observing pass (last-seen age inside the 300 s window); every other outcome is held for the original owner's own reconciliation |
 | CLI poll refused/ambiguous/oversized/timeout/nonzero rc/malformed/future/nonpositive | `control_plane_poll_unproven_alert_only`, NO action, stable refusal code in the private report |
 | CLI poll byte-identical to the last kick's recorded provenance | `control_plane_poll_replayed_alert_only`, NO action and NO freshness witness |
 | Heartbeat file missing/unreadable (file mode) | `heartbeat_missing` alert, NO action |
@@ -361,13 +378,103 @@ as first use, but an existing ledger that is corrupt, unreadable, symlinked,
 non-regular, group/world-writable, or shape-invalid REFUSES the whole pass's
 recovery (`kick_ledger_refused_recovery_alert_only`) and is never rewritten —
 cooldown/escalation history can never be silently erased to re-enable
-unbounded restarts. For CLI-poll seats each evidence-authorized kick also
-records payload provenance (`last_kick_poll_value`, `last_kick_poll_digest`)
+unbounded restarts. An existing ledger that VANISHES between the lstat and
+the read is not an empty ledger either: it refuses the pass. Every persisted
+number is validated as finite and non-negative (a NaN `last_kick_at` used to
+defeat the cooldown comparison), and every pending reservation must bind its
+row's timestamp and attempt count. For CLI-poll seats each evidence-authorized
+kick also records payload provenance (`last_kick_poll_value`, `last_kick_poll_digest`)
 so byte-identical consumed evidence can never authorize the next kick; these
 fields are validated on load and absent for file-mtime kicks and legacy
 ledgers. Host-pull generation alerts never block a qualified seat's
 own crash recovery: a dead tunnel client is recoverable even while the host
 carrier needs human attention.
+
+#### The pre-effect reservation, the acknowledgement, and the ledger lock
+
+Every action this integration performs is bracketed by the SAME private
+ledger that already owned the cooldown and escalation counters. There is no
+second store, registry, coordinator, or queue.
+
+1. **Reserve (durable, BEFORE the action exists).** The attempt counter and
+   the 1800 s cooldown are consumed and written to the ledger BEFORE the
+   action is invoked, together with a `pending` record that binds the row's
+   timestamp, the row's attempt count, the trigger, whether the action was a
+   forced restart, and the pre-attempt first-party poll provenance (value
+   and digest) when the seat runs the CLI-poll mode. The write must prove
+   BOTH the file and its parent directory durable; a write that cannot prove
+   it refuses the action (`kick_ledger_reservation_failed_alert_only`) — the
+   action never runs.
+2. **Invoke.** Exactly one `launchctl kickstart`.
+3. **Acknowledge (durable, ONE write).** A rc0 means the command was
+   ACKNOWLEDGED — that is not a recovery witness, and the attempt stays
+   consumed. The reservation is **not deleted**: it MOVES to
+   `acknowledged_awaiting_recovery` in the SAME ledger and keeps holding the
+   seat. Nothing is ever removed from the ledger on acknowledgement.
+
+The acknowledgement is one write precisely because the durable writer
+replaces the target by rename BEFORE it fsyncs the parent directory: a
+failed parent-directory fsync therefore leaves the NEW bytes visible on
+disk. A transition that DELETED the reservation could leave a readable
+ledger with no reservation at all — a seat that looks free to act again
+while the acting pass still held it. A transition that only MOVES the
+reservation is conservative under every failure of that write: the disk
+holds either the previous `reserved` bytes or the new
+`acknowledged_awaiting_recovery` bytes, and both hold the seat.
+
+Every outcome that is not a clean acknowledgement stays PENDING and holds
+the seat: a generic nonzero exit, a signal exit, a timeout (rc 124, or an
+explicit `timed_out` — which holds even against a contradictory rc0), an
+OSError from the runner, and an interruption. A pre-spawn refusal (policy or
+permission) proves the action was NOT applied, but it stays held too — it is
+never auto-retried after a cooldown.
+
+**Only a bound first-party recovery proof releases a seat.** An
+acknowledged attempt is released — and its attempt ladder reset — ONLY by a
+qualified `first_party_cli_control_plane_poll` whose timestamp is STRICTLY
+later than the reservation, which advances any pre-attempt poll recorded
+with that reservation, AND whose observation is FRESH at the observing pass
+(last-seen age inside the same 300 s window the health rule uses). The proof
+must be bound to the exact seat and to the
+exact reservation (the seat's whole pinned identity is re-proved by the
+poll itself), and its evidence is kept in the SAME ledger (`last_recovery`:
+the attempt, the reservation it releases, the proof's timestamp and
+provenance). The stored proof is validated against its OWN recorded release
+time, so a legitimate historical proof never expires against the current
+clock. A fresh-but-pre-attempt timestamp, a newer-but-stale timestamp, a
+replayed payload, a wrong
+service, a file mtime, a present PID alone, and missing data never reset the
+attempt ladder; a healthy observation never clears an ambiguous, refused,
+interrupted or still-reserved outcome.
+
+The conservative holding after an acknowledgement is INTENTIONAL: it
+replaces the old promise of repeated blind kicks. An acknowledged seat is
+NOT retried automatically, not even after the cooldown, and the attempt
+ladder does not advance on its own — "no fourth attempt" is therefore a
+floor, not a ceiling. A seat whose outcome stayed ambiguous, refused or
+interrupted is held until the ORIGINAL OWNER reconciles the ledger by hand;
+there is no in-code reconciliation API, and none is added here — a prose
+mechanism never refunds budget and never clears a newer pending attempt.
+
+A write that cannot be proven durable stays BLOCKING: the reservation is
+never dropped, the pass stops writing and performing, the on-disk state
+keeps the unresolved marker, and the CLI exits nonzero
+(`kick_ledger_settlement_failed`). There is no blind retry and no automatic
+compensation.
+
+One inherited limitation is stated plainly: a ledger file that is ABSENT at
+the first `lstat` is treated as a genuine first use. That distinction is
+unproven against a real installed ledger and remains an installation
+qualification limitation, not a proven first-use signal.
+
+Every ledger-writing pass is serialized by ONE exclusive lock
+(`kick-ledger.lock`, adjacent to the ledger in the same private state root,
+never the ledger's own replaceable inode, owner/mode/inode qualified).
+Contention fails closed: the pass goes alert-only
+(`kick_ledger_lock_refused_alert_only`) and performs no action, so two
+concurrent passes can never invoke the same action twice. An observation-only
+pass NEVER writes the ledger and can therefore never overwrite a pending
+state.
 
 ### Login/session semantics (documented, never changed)
 
@@ -506,6 +613,56 @@ remains authoritative for release:
   permission change is permitted from this integration, and no operator
   setting may waive the unsafe group-write shape.
 
+### Recovery-ledger hardening (S5) — the HIGH residual is UNCHANGED
+
+The bounded recovery work below changes the health pass's DECISION
+boundaries. It does NOT touch the spawn path, the identity pins, the
+Cellar allowance, or the privilege model, so the **HIGH HOLD_SECURITY
+residual above is unchanged and still blocks unattended credentialed
+restart / CLI-poll operation**. Nothing here permits an install or a
+restart, and nothing here proves confinement.
+
+- The legacy file mtime is now DIAGNOSTIC ONLY. It can no longer establish
+  health, reset the attempt ladder, or authorize a stale forced restart —
+  not even with `heartbeat_kind` + `heartbeat_proof_note`. Health and every
+  heartbeat-derived action come from the strictly typed first-party
+  control-plane poll; the launchd-proven missing-PID route is unchanged and
+  keeps its exact identity and policy guards.
+- Every invoked action is now preceded by a DURABLE PRE-EFFECT RESERVATION
+  in the existing private kick ledger: the attempt and the 1800 s cooldown
+  are consumed before the action exists, and the reservation binds the
+  row's timestamp, attempt count, trigger, and forced flag. The reservation
+  must prove file AND parent-directory durability or the action is refused
+  before the spawn.
+- Every outcome that is not a clean acknowledgement leaves the seat HELD
+  (pending) — generic nonzero, signal, timeout (including an explicit
+  `timed_out` against a contradictory rc0), OSError, interruption, and
+  pre-spawn refusal alike — and only the original owner's own
+  reconciliation of the ledger clears it. A healthy observation can never
+  erase it.
+- A clean acknowledgement is NOT a release. The reservation is retained in
+  the SAME ledger as `acknowledged_awaiting_recovery` and keeps holding the
+  seat; nothing is deleted on acknowledgement. The acknowledgement is ONE
+  durable write, because the durable writer's rename lands before its
+  parent-directory fsync, and a deletion could therefore leave a readable
+  ledger with a FREE seat.
+- The ONLY in-band release is a bound first-party recovery proof: a
+  qualified `first_party_cli_control_plane_poll` strictly newer than the
+  reservation that advances any pre-attempt poll AND fresh at the observing
+  pass (last-seen age inside the 300 s window), bound to the exact seat
+  and reservation, with its evidence kept in the same ledger
+  (`last_recovery`). The attempt ladder is reset by that release and by
+  nothing else. A newer-but-stale observation leaves the reservation, the
+  attempt count, the cooldown anchor and the recorded recovery evidence
+  exactly as they were. The resulting holding after an acknowledgement is
+  stricter than the old repeated-kick promise and is intentional.
+- A write that cannot be proven durable stays blocking, stops the pass's
+  writes and effects, and makes the CLI exit nonzero. There is no blind
+  retry and no automatic compensation.
+- Every ledger-writing pass is serialized by one exclusive, qualified lock
+  beside the ledger, so two concurrent passes can never invoke the same
+  action twice. An observation-only pass never writes the ledger.
+
 ## Secret-safety contract
 
 - Job `EnvironmentVariables` are stored ONLY inside the private manifest and
@@ -526,10 +683,11 @@ remains authoritative for release:
 - Not a Desktop Commander carrier observer or modifier.
 - Not a pre-login service: recovery exists only inside a live logged-in GUI
   session (see "Login/session semantics").
-- Not a heartbeat truth-source by itself: an unattested file mtime is never
-  claimed as first-party tunnel-client/control-plane last-seen, and the
-  CLI-poll mode only reports what the seat's own qualified binary proved in
-  a re-verified, bounded, read-only probe this pass.
+- Not a heartbeat truth-source by itself: a file mtime is never claimed as
+  first-party tunnel-client/control-plane last-seen — not even with an
+  operator attestation, and it never establishes health or authorizes a
+  restart — and the CLI-poll mode only reports what the seat's own qualified
+  binary proved in a re-verified, bounded, read-only probe this pass.
 - Not merged/approved: one Draft PR from the branch may exist, but review is
   a separate independent non-authoring Fabric pass (FTR-5) and merge/approve
   stays out of this mission.

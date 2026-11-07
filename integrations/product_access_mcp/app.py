@@ -19,6 +19,7 @@ from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 
 from .reader import ProductReader
+from .projections import validate_projection_result
 from .schemas import SCOPE, SERVER_VERSION, TOOL_SPECS
 
 MAX_ARGUMENT_BYTES = 4096
@@ -114,7 +115,16 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
             return _error("INVALID_REQUEST")
         try:
             # Identity and bearer token never cross this port. It has no private-user selector.
-            observed = await reader.diagnostics() if name == "product_diagnostics" else await reader.market_pulse(request["symbols"])
+            if name == "product_diagnostics":
+                observed = await reader.diagnostics()
+            elif name == "product_market_pulse":
+                observed = await reader.market_pulse(request["symbols"])
+            elif name == "product_macro_overlay":
+                observed = await reader.macro_overlay()
+            elif name == "product_market_risk":
+                observed = await reader.market_risk()
+            else:
+                return _error("TOOL_NOT_AVAILABLE")
         except Exception:
             return _error("READ_UNAVAILABLE")
         try:
@@ -140,6 +150,7 @@ def create_product_server(*, authenticator: JwtAuthenticator, policy: ResourcePo
             # buffered return, including nested data, before it can leave this resource.
             result = _snapshot(observed, MAX_RESULT_BYTES)
             outputs[name].validate(result)
+            validate_projection_result(result)
             text = json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
             return CallToolResult(content=[TextContent(type="text", text=text)], structuredContent=result, isError=False)
         except Exception:

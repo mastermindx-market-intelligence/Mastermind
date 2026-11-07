@@ -435,6 +435,7 @@ async def _submit(
     workspace_root: "Path | str",
     *,
     execution_binding: Mapping[str, Any] | None = None,
+    frontier_selection: Any = ceo_intent._FRONTIER_SELECTION_UNSET,
     dialogue_source: ExecutiveDialogueSource | None = None,
     require_dialogue_source: bool = False,
     principal_context: Any = None,
@@ -442,6 +443,8 @@ async def _submit(
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
     direct_admission: Any = None,
+    fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -451,6 +454,8 @@ async def _submit(
         }
         if execution_binding is not None:
             submit_kwargs["execution_binding"] = dict(execution_binding)
+        if frontier_selection is not ceo_intent._FRONTIER_SELECTION_UNSET:
+            submit_kwargs["frontier_selection"] = copy.deepcopy(frontier_selection)
         if dialogue_source is not None:
             submit_kwargs["dialogue_source"] = dialogue_source.to_dict()
         if require_dialogue_source:
@@ -461,6 +466,10 @@ async def _submit(
                 principal_admission_guard=principal_admission_guard)
         if fresh_admission_observer is not None:
             submit_kwargs["fresh_admission_observer"] = fresh_admission_observer
+        if fresh_conversation_source is not None:
+            submit_kwargs["fresh_conversation_source"] = fresh_conversation_source
+        if project_execution_source is not ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET:
+            submit_kwargs["project_execution_source"] = project_execution_source
         if direct_admission is not None:
             submit_kwargs["direct_admission"] = direct_admission
         return await asyncio.to_thread(
@@ -510,6 +519,8 @@ def _build_envelope(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
+    if "frontier_model_alias" in normalized and (not strict_v2 or principal_context is not None):
+        raise CeoIngressError("invalid_input", "frontier selection requires strict v2 admission")
     if principal_context is not None:
         from control_plane.coo_principal_envelope import derive_principal_envelope
         try:
@@ -537,6 +548,8 @@ def _build_envelope(
             envelope["schema"] = ceo_intent.INTENT_SCHEMA_V2
             envelope["intent_kind"] = "executive_coo_cycle"
             envelope["business_impact"] = "routine"
+            if "frontier_model_alias" in normalized:
+                envelope["frontier_model_alias"] = normalized["frontier_model_alias"]
         return ceo_intent.validate_intent(envelope)
     except ceo_intent.CeoIntentError as exc:
         raise CeoIngressError("invalid_input", str(exc)) from exc
@@ -614,11 +627,14 @@ async def _handle_submit_v2(
     workspace_root: "Path | str",
     strict_v2_admission: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
     fresh_admission_observer: Any = None,
+    fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order.
 
@@ -647,9 +663,10 @@ async def _handle_submit_v2(
         workspace_root=workspace_root,
         strict_v2=strict_v2_admission,
         execution_binding_provider=execution_binding_provider,
+        frontier_selection_provider=frontier_selection_provider,
         dialogue_source_provider=dialogue_source_provider,
         admission_guard=admission_guard,
-        fresh_admission_observer=fresh_admission_observer,
+        fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source,
     )
 
 
@@ -680,6 +697,7 @@ async def _handle_normalized_submit(
     workspace_root: "Path | str",
     strict_v2: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
@@ -688,6 +706,8 @@ async def _handle_normalized_submit(
     principal_request_ref: str | None = None,
     fresh_admission_observer: Any = None,
     direct_admission_provider: Any = None,
+    fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Shared replay/grounding/sink law after version-specific validation.
 
@@ -739,7 +759,7 @@ async def _handle_normalized_submit(
             await _submit(runtime, candidate_envelope, workspace_root,
                 principal_context=principal_context, principal_request_ref=principal_request_ref,
                 principal_admission_guard=admission_guard,
-                fresh_admission_observer=fresh_admission_observer, direct_admission=direct_admission)
+                fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source, direct_admission=direct_admission)
         )
 
     with grounding_observation_scope():
@@ -761,6 +781,20 @@ async def _handle_normalized_submit(
             direct_native=direct_admission_provider is not None,
             principal_context=principal_context, principal_request_ref=principal_request_ref,
         )
+
+        selection: Any = ceo_intent._FRONTIER_SELECTION_UNSET
+        requested_alias = normalized.get("frontier_model_alias")
+        if requested_alias is not None:
+            if not callable(frontier_selection_provider):
+                raise _dependency_failure("backend_unavailable")
+            from control_plane.frontier_selection import validate_selection
+            try:
+                selection = validate_selection(
+                    await asyncio.to_thread(frontier_selection_provider, requested_alias),
+                    requested_alias=requested_alias,
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_refused") from exc
 
         execution_binding: Mapping[str, Any] | None = None
         admitted_source: ExecutiveDialogueSource | None = None
@@ -796,6 +830,17 @@ async def _handle_normalized_submit(
                 work_ref=admitted_source.work_ref,
             )
             if reobserved_source != admitted_source:
+                raise _classification_failure("operation_conflict")
+
+        if requested_alias is not None:
+            try:
+                reobserved_selection = validate_selection(
+                    await asyncio.to_thread(frontier_selection_provider, requested_alias),
+                    requested_alias=requested_alias,
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_refused") from exc
+            if reobserved_selection != selection:
                 raise _classification_failure("operation_conflict")
 
         # 10. optional host-only admission gate.  Exactly one synchronous
@@ -845,11 +890,12 @@ async def _handle_normalized_submit(
             trusted_envelope,
             workspace_root,
             execution_binding=execution_binding,
+            frontier_selection=selection,
             dialogue_source=admitted_source,
             require_dialogue_source=strict_v2,
             principal_context=principal_context, principal_request_ref=principal_request_ref,
             principal_admission_guard=principal_guard,
-            fresh_admission_observer=fresh_admission_observer,
+            fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source,
             direct_admission=direct_admission,
         )
         return _finalize_receipt(receipt)
@@ -1017,6 +1063,7 @@ async def handle_frame(
     ceo_ingress_armed: bool = False,
     strict_v2_admission: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
@@ -1024,6 +1071,8 @@ async def handle_frame(
     principal_peer_authorized: bool = False,
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
+    fresh_conversation_source: Any = None,
+    project_execution_source: Any = ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
@@ -1051,6 +1100,10 @@ async def handle_frame(
     if not isinstance(parsed, Mapping):
         raise CeoIngressError("invalid_input", "request frame must be a JSON object")
     schema = parsed.get("schema")
+    if project_execution_source is not ceo_intent._PROJECT_EXECUTION_SOURCE_UNSET and schema != SUBMIT_SCHEMA_V2:
+        raise _dependency_failure("backend_refused")
+    if fresh_conversation_source is not None and schema != SUBMIT_SCHEMA_V2:
+        raise _dependency_failure("backend_refused")
     if isinstance(schema, str) and schema in PRINCIPAL_SCHEMAS:
         # Only the service's kernel-peer selection may supply this capability.
         # It is never read from the frame. Default construction grants nothing.
@@ -1083,9 +1136,10 @@ async def handle_frame(
             workspace_root=workspace_root,
             strict_v2_admission=strict_v2_admission,
             execution_binding_provider=execution_binding_provider,
+            frontier_selection_provider=frontier_selection_provider,
             dialogue_source_provider=dialogue_source_provider,
             admission_guard=admission_guard,
-            fresh_admission_observer=fresh_admission_observer,
+            fresh_admission_observer=fresh_admission_observer, fresh_conversation_source=fresh_conversation_source, project_execution_source=project_execution_source,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(

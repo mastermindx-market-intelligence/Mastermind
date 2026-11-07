@@ -126,7 +126,7 @@ def test_portfolio_switches_paint_cached_data_before_live_revalidation() -> None
     assert "var PORTFOLIO_SNAPSHOT_MAX_AGE_MS = 30000" in HTML
     assert "Date.now() - cached.cachedAt > PORTFOLIO_SNAPSHOT_MAX_AGE_MS" in HTML
     assert "var cached = _portfolioDataCache[id]" in HTML
-    set_portfolio = HTML.index("window.setPortfolio = function(id)")
+    set_portfolio = HTML.index("window.setPortfolio = function(id, opts)")
     cached_paint = HTML.index("if (cached) _paintPortfolioSnapshot(cached, false)", set_portfolio)
     revalidate = HTML.index("fetchAll({ scopedOnly: true, showBar: !cached })", set_portfolio)
     assert cached_paint < revalidate

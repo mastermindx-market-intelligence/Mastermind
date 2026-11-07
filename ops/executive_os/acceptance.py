@@ -23,9 +23,10 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 _RELEASE_ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(_RELEASE_ROOT) not in sys.path:
@@ -47,6 +48,15 @@ from ops.executive_os.a2_agent_relay_enrollment import (
 
 
 SCHEMA_VERSION = "mastermind.executive_host_acceptance/v1"
+_PHASE_SCHEMA_VERSION = "mastermind.executive_acceptance_phase.v1"
+# Closed set of instrumented acceptance phases; nothing else may be recorded.
+_PHASE_NAMES = (
+    "maintenance_before_backup",
+    "backup_restore",
+    "maintenance_after_backup",
+    "credential_leakage_scan",
+    "maintenance_finish",
+)
 CONTROL_LABEL = "com.mastermind.executive.control"
 WORKER_LABEL = "com.mastermind.executive.worker.codex"
 CONTROL_USER = "_mastermind_exec"
@@ -861,10 +871,16 @@ def _attended_worker_membership(
     config: Mapping[str, Any], *, control_uid: int, control_gid: int,
     primary_worker_uid: int, primary_worker_gid: int, ops_gid: int,
 ) -> dict[str, Any] | None:
-    """Derive one group from the protected current finite composition, never CLI input."""
+    """Derive one group from protected active or retained finite provenance."""
     from control_plane.executive_fabric_composition import FabricBindingSource
     from control_plane.fabric_attended_canary import definition
 
+    if 'retired_finite_composition' in config:
+        from ops.executive_os.attended_control_retirement import retained_selection
+        try:
+            config = retained_selection(config)
+        except Exception as exc:
+            raise AcceptanceError("retired finite predecessor is unavailable") from exc
     stanza = config.get("fabric_attended_probe")
     if stanza is None:
         return None
@@ -1317,6 +1333,57 @@ class Acceptance:
             + "\n"
         ).encode("utf-8")
         return self._write_bytes(name, payload, replace=replace)
+
+    @contextmanager
+    def _phase_observability(self, phase: str) -> Iterator[None]:
+        """Retain write-once phase receipts around one guarded body.
+
+        ``phase-{phase}-started.json`` is written through the ordinary guarded
+        receipt path before the body runs; ``phase-{phase}-finished.json`` is
+        written only after the body returns normally, so a body that raises
+        keeps its STARTED receipt and never gains a FINISHED one. The final
+        maintenance_finish phase retains STARTED only; its canonical carry
+        owns completion. STARTED alone means neither failure nor acceptance.
+        Receipts carry only the fixed closed fields below: no job, path, payload, or
+        error detail, and no acceptance verdict; a phase receipt is progress
+        observability, never an acceptance summary or carry. A phase name
+        outside the closed set, a clock failure, or a refused receipt write
+        raises instead, so observability failures fail the run exactly like
+        every other guarded receipt write; they never soften a verdict.
+        """
+        if phase not in _PHASE_NAMES:
+            raise AcceptanceError("unknown acceptance phase name")
+        started_monotonic = time.monotonic()
+        started_cpu = time.process_time()
+        self._write_json(
+            f"phase-{phase}-started.json",
+            {
+                "schema_version": _PHASE_SCHEMA_VERSION,
+                "phase": phase,
+                "state": "STARTED",
+                "elapsed_seconds": 0.0,
+                "cpu_seconds": 0.0,
+                "observation_only": True,
+            },
+        )
+        yield
+        # The canonical carry is the final completion edge. Observability must
+        # add no fallible clock read or receipt write after that commit.
+        if phase == "maintenance_finish":
+            return
+        elapsed_seconds = max(0.0, time.monotonic() - started_monotonic)
+        cpu_seconds = max(0.0, time.process_time() - started_cpu)
+        self._write_json(
+            f"phase-{phase}-finished.json",
+            {
+                "schema_version": _PHASE_SCHEMA_VERSION,
+                "phase": phase,
+                "state": "FINISHED",
+                "elapsed_seconds": elapsed_seconds,
+                "cpu_seconds": cpu_seconds,
+                "observation_only": True,
+            },
+        )
 
     def _redact_failure_stream(self, payload: bytes) -> str:
         """Render one bounded, redacted stream for the failure artifact.
@@ -3294,10 +3361,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_pid, worker_pid
         )
         if self.maintenance is not None:
-            self.maintenance.verify([success_job_id, interrupted_job_id])
-        self.backup_restore((success_job_id, interrupted_job_id))
+            with self._phase_observability("maintenance_before_backup"):
+                self.maintenance.verify([success_job_id, interrupted_job_id])
+        with self._phase_observability("backup_restore"):
+            self.backup_restore((success_job_id, interrupted_job_id))
         if self.maintenance is not None:
-            self.maintenance.verify([success_job_id, interrupted_job_id])
+            with self._phase_observability("maintenance_after_backup"):
+                self.maintenance.verify([success_job_id, interrupted_job_id])
         control_pid = self._wait_control()
         self._wait_pid(WORKER_LABEL)
         if self._control_request("status")["result"].get("service_state") != "READY":
@@ -3313,7 +3383,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             {"sha256": nonexecutive_after, "unchanged": True, "labels_excluded": 2},
         )
         self._assert_no_public_listener()
-        self.leakage_scan(control_pid)
+        with self._phase_observability("credential_leakage_scan"):
+            self.leakage_scan(control_pid)
         final_status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="final host status",
@@ -3342,8 +3413,11 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
 
         if self.maintenance is not None:
-            self.maintenance.finish(
-                [success_job_id, interrupted_job_id], self.receipt_root / "acceptance-summary.json")
+            with self._phase_observability("maintenance_finish"):
+                self.maintenance.finish(
+                    [success_job_id, interrupted_job_id],
+                    self.receipt_root / "acceptance-summary.json",
+                )
 
     def cleanup_after_failure(self) -> None:
         try:

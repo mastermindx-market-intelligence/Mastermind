@@ -183,6 +183,12 @@ CANONICAL_HOMEBREW_CELLAR = "/opt/homebrew/Cellar"
 CELLAR_ALLOWED_MODE = stat.S_IRWXU | stat.S_IRWXG | stat.S_IROTH | stat.S_IXOTH
 
 IDENTITY_MANIFEST_SCHEMA = "mastermind.subagent-fabric-tunnels.identity-manifest.v1"
+# The kick-ledger schema stays v1 across the pre-effect-reservation change:
+# the new per-seat ``pending`` record is OPTIONAL, and a SETTLED seat keeps
+# exactly the legacy entry shape. A legacy ledger therefore still loads and
+# still bounds the cooldown and the attempt ladder — it never fails open,
+# because "no pending record" means "no unresolved effect is known", not
+# "the effect may be retried".
 KICK_LEDGER_SCHEMA = "mastermind.subagent-fabric-tunnels.kick-ledger.v1"
 PASS_REPORT_SCHEMA = "mastermind.subagent-fabric-tunnels.pass-report.v1"
 
@@ -215,6 +221,17 @@ class PolicyRefused(Exception):
 class ActionRefused(Exception):
     """A launchd action was refused (unknown/stale/unqualified target,
     cooldown suppression, or a forbidden target was requested)."""
+
+
+class DurabilityUnproven(Exception):
+    """A write could not be PROVEN durable (file fsync and/or parent-directory
+    fsync failed or was impossible).
+
+    This is deliberately NOT :class:`PolicyRefused`: nothing was refused by
+    policy, the filesystem simply refused to confirm the bytes. A caller that
+    needs a durable record before it may act (a pre-effect reservation) must
+    treat this as a hard failure — the state is READABLE at best, never
+    CRASH-DURABLE — and must not proceed with the action it was reserving."""
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +494,17 @@ def manifest_path(home: Path) -> Path:
 
 def kick_ledger_path(home: Path) -> Path:
     return state_dir(home) / "kick-ledger.json"
+
+
+def kick_ledger_lock_path(home: Path) -> Path:
+    """The exclusive lock that serializes every kick-ledger writing pass.
+
+    It is ADJACENT to the ledger inside the SAME private state root, so it
+    belongs to the existing ledger owner: no second registry, coordinator, or
+    queue is introduced. It is a DISTINCT, never-replaced inode — the JSON
+    ledger itself is replaced by rename on every write, so the lock can never
+    be the ledger's inode."""
+    return state_dir(home) / "kick-ledger.lock"
 
 
 def last_pass_path(home: Path) -> Path:
@@ -855,6 +883,15 @@ def atomic_write_bytes(path: Path, raw: bytes, mode: int) -> None:
     before the rename so a serialization fault can never replace a good
     file. The directory is fsynced so the rename is durable before any
     launchd reload is attempted.
+
+    DURABILITY CAVEAT (read before trusting this writer): the directory
+    fsync is BEST EFFORT here. If the parent directory cannot be opened for
+    fsync (or the fsync itself fails) the write returns WITHOUT error even
+    though the rename may not survive a crash. The rename has already
+    landed, so the target holds the NEW bytes; those bytes are then merely
+    READABLE, never proven CRASH-DURABLE. Any caller that must be able to
+    prove a durable record BEFORE it is allowed to act on the host MUST use
+    :func:`atomic_write_bytes_durable`, which refuses instead of degrading.
     """
     if path.suffix == ".plist":
         parsed_back = parse_plist_bytes(raw, code="atomic_write_roundtrip")
@@ -890,6 +927,70 @@ def atomic_write_bytes(path: Path, raw: bytes, mode: int) -> None:
         return
     try:
         os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def atomic_write_bytes_durable(path: Path, raw: bytes, mode: int) -> None:
+    """Write ``raw`` to ``path`` and PROVE the result is crash-durable.
+
+    Same temp-file + rename shape as :func:`atomic_write_bytes`, with one
+    decisive difference: the parent directory fsync is REQUIRED, not best
+    effort. Every failure mode raises instead of degrading:
+
+    - the temp file cannot be written/fsynced -> the target is untouched;
+    - the parent directory cannot be opened for fsync, or its fsync fails ->
+      the write is REFUSED. The rename has ALREADY LANDED at that point, so
+      the target now holds the NEW bytes; what is missing is the proof that
+      the rename survives a crash. Those bytes are READABLE but never proven
+      CRASH-DURABLE, and the caller must not treat the state as a durable
+      record. (A refusal therefore never restores the previous bytes: it
+      reports that the visible target has already changed.)
+
+    A refusal raises :class:`DurabilityUnproven`. The caller MUST NOT treat a
+    merely readable state as a durable record: a pre-effect reservation that
+    cannot prove durability has to refuse the effect, because the whole point
+    of the reservation is that it survives a crash exactly when the effect
+    does.
+    """
+    if path.suffix == ".plist":
+        parsed_back = parse_plist_bytes(raw, code="atomic_write_roundtrip")
+        if parsed_back is None:
+            raise IdentityRejected("atomic_write_roundtrip: empty serialization")
+    elif path.suffix == ".json":
+        import json as _json
+
+        try:
+            _json.loads(raw)
+        except ValueError as exc:
+            raise IdentityRejected(f"atomic_write_roundtrip: invalid JSON ({exc})") from exc
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".ftr-mutation-", dir=str(directory))
+    tmp_path = Path(tmp_name)
+    try:
+        os.fchmod(fd, mode & 0o7777)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        dir_fd = os.open(directory, os.O_RDONLY)
+    except OSError as exc:
+        raise DurabilityUnproven(
+            f"parent_directory_fsync_unavailable ({exc.strerror})"
+        ) from exc
+    try:
+        os.fsync(dir_fd)
+    except OSError as exc:
+        raise DurabilityUnproven(f"parent_directory_fsync_failed ({exc.strerror})") from exc
     finally:
         os.close(dir_fd)
 

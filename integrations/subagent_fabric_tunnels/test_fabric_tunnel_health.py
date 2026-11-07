@@ -225,7 +225,13 @@ def all_pids(pid: int = 411) -> dict[str, int]:
 
 
 class SeatClassificationTests(unittest.TestCase):
-    """Pure classification matrix (FTR-3 discriminator coverage)."""
+    """Pure classification matrix (FTR-3 discriminator coverage).
+
+    The matrix runs on the STRICTLY TYPED first-party control-plane-poll
+    mode, which is the only mode that may establish health or authorize a
+    heartbeat-derived action. The legacy file-mtime mode has its own
+    diagnostic-only matrix in :class:`LegacyFileMtimeDiagnosticTests`.
+    """
 
     def classify(self, **over):
         kwargs = dict(
@@ -239,6 +245,7 @@ class SeatClassificationTests(unittest.TestCase):
             consecutive_kicks=0,
             fresh_heartbeat_witnessed_since_kick=False,
             now=NOW,
+            heartbeat_mode=ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
         )
         kwargs.update(over)
         return fth.classify_seat(**kwargs)
@@ -434,13 +441,30 @@ class GenerationClassificationTests(unittest.TestCase):
 
 class PassExecutionTests(unittest.TestCase):
     def test_healthy_pass_kicks_nothing(self):
+        with FixtureHomeCli() as fixture:
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW + 30, poll_runner=fixture.poll
+            )
+            self.assertEqual(runner.kicks, [])
+            for label, seat in report.seats.items():
+                self.assertEqual(seat["state"], fth.ST_HEALTHY, label)
+                self.assertEqual(fixture.read_current_selection(), GEN_SELECTED)
+
+    def test_legacy_file_mtime_pass_is_diagnostic_only_and_never_healthy(self):
+        # The legacy file-mtime mode observes, it never claims health: no
+        # seat is reported HEALTHY, nothing is kicked, and the attempt
+        # ladder is never reset by a fresh mtime.
         with FixtureHome() as fixture:
             runner = FakeRunner(all_pids())
             report = fth.run_pass(fixture.home, runner, now=NOW + 30)
             self.assertEqual(runner.kicks, [])
             for label, seat in report.seats.items():
-                self.assertEqual(seat["state"], fth.ST_HEALTHY, label)
-                self.assertEqual(fixture.read_current_selection(), GEN_SELECTED)
+                self.assertEqual(seat["state"], fth.ST_MTIME_DIAGNOSTIC, label)
+                self.assertFalse(seat["kickstarted"], label)
+            ledger = fth.load_kick_ledger(fixture.home)
+            for entry in ledger["seats"].values():
+                self.assertEqual(entry.get("consecutive_kicks"), 0)
 
     def test_missing_pid_triggers_cooldown_recorded_kickstart(self):
         with FixtureHome() as fixture:
@@ -456,31 +480,87 @@ class PassExecutionTests(unittest.TestCase):
             self.assertTrue(report.seats[label]["kickstarted"])
             ledger = fth.load_kick_ledger(fixture.home)
             self.assertEqual(ledger["seats"][label]["consecutive_kicks"], 1)
+            # The acknowledgement RETAINS the reservation: the seat is HELD
+            # until a bound, strictly newer first-party recovery proof
+            # releases it. Nothing is deleted on acknowledgement.
+            self.assertEqual(
+                ledger["seats"][label]["pending"]["state"], fth.PENDING_ACKNOWLEDGED
+            )
 
     def test_stale_heartbeat_triggers_forced_kickstart(self):
+        with FixtureHomeCli() as fixture:
+            label = ftc.TUNNEL_LABEL_PREFIX + "c2-personal"
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 601))
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW, poll_runner=fixture.poll
+            )
+            self.assertEqual(len(runner.kicks), 1)
+            kicked_label, forced = runner.kicks[0]
+            self.assertEqual((kicked_label, forced), (label, True))
+            # The forced restart was ACKNOWLEDGED, and the acknowledgement
+            # retains the reservation: the seat is HELD from now on.
+            self.assertEqual(report.seats[label]["state"], fth.ST_PENDING_EFFECT)
+            self.assertEqual(
+                report.seats[label]["effect_pending_state"], fth.PENDING_ACKNOWLEDGED
+            )
+
+    def test_legacy_file_mtime_never_authorizes_a_forced_restart(self):
+        # Even with a full operator attestation (kind + proof note) a stale
+        # file mtime is DIAGNOSTIC ONLY: no forced restart, ever.
         with FixtureHome() as fixture:
             label = ftc.TUNNEL_LABEL_PREFIX + "c2-personal"
             fixture.touch_heartbeat(label, NOW - 601)
             runner = FakeRunner(all_pids())
             report = fth.run_pass(fixture.home, runner, now=NOW)
-            self.assertEqual(len(runner.kicks), 1)
-            kicked_label, forced = runner.kicks[0]
-            self.assertEqual((kicked_label, forced), (label, True))
-            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual(runner.kicks, [])
+            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT_UNPROVEN)
+            self.assertTrue(report.seats[label]["heartbeat_attested"])
+            self.assertFalse(report.seats[label]["kickstarted"])
 
     def test_second_kick_within_cooldown_is_suppressed(self):
-        with FixtureHome() as fixture:
+        with FixtureHomeCli() as fixture:
             label = ftc.TUNNEL_LABEL_PREFIX + "c1"
-            fixture.touch_heartbeat(label, NOW - 900)
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 900))
             runner = FakeRunner(all_pids())
-            first = fth.run_pass(fixture.home, runner, now=NOW)
+            first = fth.run_pass(
+                fixture.home, runner, now=NOW, poll_runner=fixture.poll
+            )
             self.assertTrue(first.seats[label]["kickstarted"])
-            second = fth.run_pass(fixture.home, runner, now=NOW + 60)
+            # The evidence ADVANCES (new payload bytes, still stale) WITHIN
+            # the cooldown. The acknowledged reservation RETAINS the seat, so
+            # the second attempt is suppressed even before the persisted
+            # cooldown is consulted.
+            fixture.set_poll_payload(label, ok_poll_payload(NOW + 60 - 900))
+            second = fth.run_pass(
+                fixture.home, runner, now=NOW + 60, poll_runner=fixture.poll
+            )
             self.assertEqual(len(runner.kicks), 1)  # still one
-            self.assertEqual(second.seats[label]["state"], fth.ST_COOLDOWN)
+            self.assertEqual(second.seats[label]["state"], fth.ST_PENDING_EFFECT)
+
+    def test_persisted_cooldown_suppresses_a_kick_without_a_reservation(self):
+        # The 1800 s cooldown is still the persisted bound for a seat that
+        # carries NO reservation: its last attempt's timestamp suppresses the
+        # next one until the cooldown has elapsed.
+        with FixtureHomeCli() as fixture:
+            label = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            ledger = fth.load_kick_ledger(fixture.home)
+            ledger["seats"][label] = {
+                "last_kick_at": NOW - 60,
+                "consecutive_kicks": 1,
+                "fresh_heartbeat_witnessed_since_kick": False,
+            }
+            fth.save_kick_ledger(fixture.home, ledger)
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 900))
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW, poll_runner=fixture.poll
+            )
+            self.assertEqual(report.seats[label]["state"], fth.ST_COOLDOWN)
+            self.assertEqual(runner.kicks, [])
 
     def test_recovery_witness_resets_escalation(self):
-        with FixtureHome() as fixture:
+        with FixtureHomeCli() as fixture:
             label = ftc.TUNNEL_LABEL_PREFIX + "c3"
             ledger = fth.load_kick_ledger(fixture.home)
             ledger["seats"][label] = {
@@ -489,23 +569,24 @@ class PassExecutionTests(unittest.TestCase):
                 "fresh_heartbeat_witnessed_since_kick": False,
             }
             fth.save_kick_ledger(fixture.home, ledger)
-            fixture.touch_heartbeat(label, NOW - 900)
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 900))
             runner = FakeRunner(all_pids())
-            report = fth.run_pass(fixture.home, runner, now=NOW)
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW, poll_runner=fixture.poll
+            )
             self.assertEqual(report.seats[label]["state"], fth.ST_ESCALATED)
             self.assertEqual(runner.kicks, [])
-            # One fresh heartbeat later, recovery is allowed again.
-            fixture.touch_heartbeat(label, NOW - 5)
-            ledger = fth.load_kick_ledger(fixture.home)
-            ledger["seats"][label] = {
-                "last_kick_at": NOW - ftc.KICKSTART_COOLDOWN_SECONDS - 10,
-                "consecutive_kicks": 3,
-                "fresh_heartbeat_witnessed_since_kick": False,
-            }
-            fth.save_kick_ledger(fixture.home, ledger)
-            report = fth.run_pass(fixture.home, runner, now=NOW + 1)
+            # One fresh first-party observation later, recovery is allowed
+            # again. A legacy file mtime can never do this.
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 5))
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW + 1, poll_runner=fixture.poll
+            )
             self.assertEqual(report.seats[label]["state"], fth.ST_HEALTHY)
             self.assertEqual(runner.kicks, [])
+            ledger = fth.load_kick_ledger(fixture.home)
+            self.assertEqual(ledger["seats"][label]["consecutive_kicks"], 0)
+            self.assertTrue(ledger["seats"][label]["fresh_heartbeat_witnessed_since_kick"])
 
     def test_observe_only_never_kicks(self):
         with FixtureHome() as fixture:
@@ -709,24 +790,32 @@ class ManifestRevalidationTests(unittest.TestCase):
             self.assertEqual(len(runner.kicks), 1)
             self.assertEqual(runner.kicks[0][0], label)
             self.assertFalse(runner.kicks[0][1])  # plain kickstart
-            self.assertEqual(report.seats[label]["state"], fth.ST_MISSING_PID)
+            self.assertEqual(report.seats[label]["state"], fth.ST_PENDING_EFFECT)
 
     def test_pass_stale_heartbeat_forced_kick_after_day_boundary(self):
-        with FixtureHome() as fixture:
+        with FixtureHomeCli() as fixture:
             fixture.age_manifest(ftc.MANIFEST_MAX_AGE_SECONDS + 3600)
             label = ftc.TUNNEL_LABEL_PREFIX + "c2-personal"
-            fixture.touch_heartbeat(label, self.OVERDAY - 601)
+            # Every other seat stays fresh; only the seat under test is
+            # stale at the (aged) pass time.
+            fixture.poll.default_value = self.OVERDAY - 8
+            fixture.set_poll_payload(label, ok_poll_payload(self.OVERDAY - 601))
             runner = FakeRunner(all_pids())
-            report = fth.run_pass(fixture.home, runner, now=self.OVERDAY)
+            report = fth.run_pass(
+                fixture.home, runner, now=self.OVERDAY, poll_runner=fixture.poll
+            )
             self.assertEqual(len(runner.kicks), 1)
             self.assertEqual(runner.kicks[0], (label, True))
-            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual(report.seats[label]["state"], fth.ST_PENDING_EFFECT)
 
     def test_pass_fresh_heartbeat_stays_healthy_after_day_boundary(self):
-        with FixtureHome() as fixture:
+        with FixtureHomeCli() as fixture:
             fixture.age_manifest(ftc.MANIFEST_MAX_AGE_SECONDS + 3600)
+            fixture.poll.default_value = self.OVERDAY - 8
             runner = FakeRunner(all_pids())
-            report = fth.run_pass(fixture.home, runner, now=self.OVERDAY)
+            report = fth.run_pass(
+                fixture.home, runner, now=self.OVERDAY, poll_runner=fixture.poll
+            )
             self.assertEqual(runner.kicks, [])
             for label, seat in report.seats.items():
                 self.assertEqual(seat["state"], fth.ST_HEALTHY, label)
@@ -791,7 +880,7 @@ class ManifestRevalidationTests(unittest.TestCase):
             pids[label] = None
             runner = FakeRunner(pids)
             report = fth.run_pass(fixture.home, runner, now=self.OVERDAY)
-            self.assertEqual(report.seats[label]["state"], fth.ST_MISSING_PID)
+            self.assertEqual(report.seats[label]["state"], fth.ST_PENDING_EFFECT)
             self.assertEqual(runner.kicks, [(label, False)])
             self.assertTrue(report.seats[label]["kickstarted"])
 
@@ -833,13 +922,31 @@ class ManifestRevalidationTests(unittest.TestCase):
             self.assertIn("heartbeat_proof_note", unproven.detail)
             self.assertIn("control-plane", unproven.detail)
 
-    def test_attested_stale_heartbeat_still_force_kicks(self):
+    def test_attested_stale_heartbeat_never_force_kicks_on_a_legacy_mtime(self):
+        # The operator attestation (kind + proof note) proves an operator
+        # once correlated the file. It does NOT turn an mtime into
+        # first-party control-plane evidence, so the legacy file-mtime
+        # route stays diagnostic only: no forced restart, ever.
         with FixtureHome() as fixture:
             label = ftc.TUNNEL_LABEL_PREFIX + "c4"
             fixture.touch_heartbeat(label, NOW - 900)
             runner = FakeRunner(all_pids())
             report = fth.run_pass(fixture.home, runner, now=NOW)
-            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT_UNPROVEN)
+            self.assertEqual(runner.kicks, [])
+            self.assertTrue(report.seats[label]["heartbeat_attested"])
+
+    def test_attested_stale_poll_still_force_kicks(self):
+        # The strictly typed first-party poll IS the proof: with the
+        # attestation it still authorizes the forced restart.
+        with FixtureHomeCli() as fixture:
+            label = ftc.TUNNEL_LABEL_PREFIX + "c4"
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 900))
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW, poll_runner=fixture.poll
+            )
+            self.assertEqual(report.seats[label]["state"], fth.ST_PENDING_EFFECT)
             self.assertEqual(runner.kicks, [(label, True)])
             self.assertTrue(report.seats[label]["heartbeat_attested"])
 
@@ -1114,6 +1221,7 @@ class MissingPidEscalationTests(unittest.TestCase):
             consecutive_kicks=0,
             fresh_heartbeat_witnessed_since_kick=False,
             now=NOW,
+            heartbeat_mode=ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
         )
         kwargs.update(over)
         return fth.classify_seat(**kwargs)
@@ -1148,38 +1256,63 @@ class MissingPidEscalationTests(unittest.TestCase):
         self.assertEqual(state, fth.ST_MISSING_PID)
         self.assertTrue(may_kick)
 
-    def test_escalation_persists_across_passes_until_healthy_witness(self):
-        with FixtureHome() as fixture:
+    def test_acknowledged_attempt_is_held_until_a_bound_first_party_recovery(self):
+        # The acknowledgement RETAINS the reservation, so a seat is HELD
+        # after its FIRST attempt: there is never a second blind kick, let
+        # alone a fourth. The stricter hold replaces the repeated-kick
+        # ladder for the acknowledged case.
+        with FixtureHomeCli() as fixture:
             no_pids = {label: None for label in ftc.TUNNEL_LABELS}
             kicks_seen = 0
             t = NOW + 10
             for _ in range(4):
-                report = fth.run_pass(fixture.home, FakeRunner(no_pids), now=t)
+                report = fth.run_pass(
+                    fixture.home, FakeRunner(no_pids), now=t, poll_runner=fixture.poll
+                )
                 t += ftc.KICKSTART_COOLDOWN_SECONDS + 30
                 kicked = sum(
                     1 for seat in report.seats.values() if seat["kickstarted"]
                 )
                 kicks_seen += kicked
-            # Exactly three per-seat kicks ever; the fourth pass escalates.
-            self.assertEqual(kicks_seen, 3 * len(ftc.TUNNEL_LABELS))
-            last = fth.run_pass(fixture.home, FakeRunner(no_pids), now=t)
+            self.assertEqual(kicks_seen, 1 * len(ftc.TUNNEL_LABELS))
+            last = fth.run_pass(
+                fixture.home, FakeRunner(no_pids), now=t, poll_runner=fixture.poll
+            )
             for label in sorted(ftc.TUNNEL_LABELS):
-                self.assertEqual(last.seats[label]["state"], fth.ST_ESCALATED)
+                self.assertEqual(last.seats[label]["state"], fth.ST_PENDING_EFFECT)
                 self.assertEqual(last.seats[label]["kickstarted"], False)
-            # A fresh heartbeat + running PID witnesses recovery: one healthy
-            # pass resets the persisted counter...
+                self.assertEqual(
+                    last.seats[label]["effect_pending_state"],
+                    fth.PENDING_ACKNOWLEDGED,
+                )
+            # A fresh FIRST-PARTY poll, strictly newer than the reservation,
+            # RELEASES the acknowledged attempt and resets its ladder.
             runner = FakeRunner(all_pids())
             healthy_t = t + 10
-            for label in ftc.TUNNEL_LABELS:
-                fixture.touch_heartbeat(label, healthy_t - 5)
-            healthy = fth.run_pass(fixture.home, runner, now=healthy_t)
+            fixture.poll.default_value = healthy_t - 5
+            healthy = fth.run_pass(
+                fixture.home, runner, now=healthy_t, poll_runner=fixture.poll
+            )
             for label in sorted(ftc.TUNNEL_LABELS):
                 self.assertEqual(healthy.seats[label]["state"], fth.ST_HEALTHY)
-            # ...after which the missing-PID route may kick again.
-            later_t = healthy_t + ftc.KICKSTART_COOLDOWN_SECONDS + 30
-            resumed = fth.run_pass(fixture.home, FakeRunner(no_pids), now=later_t)
+            ledger = fth.load_kick_ledger(fixture.home)
             for label in sorted(ftc.TUNNEL_LABELS):
-                self.assertEqual(resumed.seats[label]["state"], fth.ST_MISSING_PID)
+                self.assertNotIn("pending", ledger["seats"][label])
+                self.assertEqual(ledger["seats"][label]["consecutive_kicks"], 0)
+                self.assertTrue(
+                    ledger["seats"][label]["fresh_heartbeat_witnessed_since_kick"]
+                )
+                # The recovery evidence stays in the SAME ledger.
+                self.assertIn("last_recovery", ledger["seats"][label])
+                self.assertEqual(ledger["seats"][label]["last_recovery"]["attempt"], 1)
+            # ...after which the missing-PID route may attempt again.
+            later_t = healthy_t + ftc.KICKSTART_COOLDOWN_SECONDS + 30
+            fixture.poll.default_value = later_t - 5
+            resumed = fth.run_pass(
+                fixture.home, FakeRunner(no_pids), now=later_t, poll_runner=fixture.poll
+            )
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(resumed.seats[label]["state"], fth.ST_PENDING_EFFECT)
                 self.assertTrue(resumed.seats[label]["kickstarted"])
             # Witness + resume are visible in the persisted ledger.
             with open(ftc.kick_ledger_path(fixture.home), encoding="utf-8") as handle:
@@ -1787,7 +1920,7 @@ class CliPollClassifyTests(unittest.TestCase):
             state, may_kick = self._classify(heartbeat_age=age, poll_replayed=True)
             self.assertEqual((state, may_kick), (fth.ST_POLL_EVIDENCE_REPLAYED, False), age)
 
-    def test_file_mode_ignores_poll_flags(self):
+    def test_file_mode_ignores_poll_flags_and_never_authorizes(self):
         state, may_kick = fth.classify_seat(
             qualified=True,
             pid=4242,
@@ -1802,7 +1935,9 @@ class CliPollClassifyTests(unittest.TestCase):
             poll_refused_code="cli_poll_nonzero_rc",
             poll_replayed=True,
         )
-        self.assertEqual((state, may_kick), (fth.ST_STALE_HEARTBEAT, True))
+        # The legacy file-mtime mode is diagnostic only: a stale mtime is
+        # reported as unproven and never authorizes a forced restart.
+        self.assertEqual((state, may_kick), (fth.ST_STALE_HEARTBEAT_UNPROVEN, False))
 
 
 class CliPollPassTests(unittest.TestCase):
@@ -1844,7 +1979,10 @@ class CliPollPassTests(unittest.TestCase):
             report = self._pass(fixture, runner, NOW)
             states = {label: seat["state"] for label, seat in report.seats.items()}
             c3 = ftc.TUNNEL_LABEL_PREFIX + "c3"
-            self.assertEqual(states[c3], fth.ST_STALE_HEARTBEAT)
+            # c3 (age 301) crossed the stale boundary and was force-kicked;
+            # the acknowledgement retains the reservation, so the seat is
+            # HELD from now on.
+            self.assertEqual(states[c3], fth.ST_PENDING_EFFECT)
             for label in set(states) - {c3}:
                 self.assertEqual(states[label], fth.ST_HEALTHY, label)
             self.assertEqual([(label, forced) for label, forced in runner.kicks], [(c3, True)])
@@ -1898,7 +2036,7 @@ class CliPollPassTests(unittest.TestCase):
             pids[c1] = None
             runner = FakeRunner(pids)
             report = self._pass(fixture, runner, NOW + 30)
-            self.assertEqual(report.seats[c1]["state"], fth.ST_MISSING_PID)
+            self.assertEqual(report.seats[c1]["state"], fth.ST_PENDING_EFFECT)
             self.assertTrue(report.seats[c1]["kickstarted"])
             self.assertNotIn(c1, fixture.poll.labels_polled())
             ledger = fth.load_kick_ledger(fixture.home)
@@ -1906,6 +2044,10 @@ class CliPollPassTests(unittest.TestCase):
             self.assertEqual(entry["consecutive_kicks"], 1)
             self.assertNotIn("last_kick_poll_value", entry)  # legacy kick shape
             self.assertNotIn("last_kick_poll_digest", entry)
+            # The launchd-proven missing-PID route ran and was acknowledged;
+            # the reservation is retained, so the seat is held.
+            self.assertEqual(entry["pending"]["state"], fth.PENDING_ACKNOWLEDGED)
+            self.assertIsNone(entry["pending"]["poll_value"])
 
     def test_launchd_state_unknown_is_alert_only_without_poll(self):
         with FixtureHomeCli() as fixture:
@@ -1923,27 +2065,86 @@ class CliPollPassTests(unittest.TestCase):
             fixture.set_poll_payload(c2b, stale_stdout)
             runner = FakeRunner(all_pids())
             first = self._pass(fixture, runner, NOW)
-            self.assertEqual(first.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual(first.seats[c2b]["state"], fth.ST_PENDING_EFFECT)
             self.assertTrue(first.seats[c2b]["kickstarted"])
             ledger = fth.load_kick_ledger(fixture.home)
             entry = ledger["seats"][c2b]
             self.assertEqual(entry["last_kick_poll_value"], NOW - 301)
             self.assertEqual(entry["last_kick_poll_digest"], hashlib.sha256(stale_stdout.encode()).hexdigest())
+            # The pre-attempt provenance is bound to the reservation too.
+            self.assertEqual(entry["pending"]["poll_value"], NOW - 301)
+            self.assertEqual(
+                entry["pending"]["poll_digest"],
+                hashlib.sha256(stale_stdout.encode()).hexdigest(),
+            )
             # Keep the OTHER seats' evidence fresh as the clock advances, so
             # only c2-business is under test.
             fixture.poll.default_value = NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 1 - 8
-            # Same consumed evidence after the cooldown: replayed, NO kick.
+            # The SAME consumed evidence after the cooldown is neither a
+            # recovery proof nor an authorization: the seat stays HELD and
+            # there is NO second kick.
             second = self._pass(fixture, runner, NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 1)
-            self.assertEqual(second.seats[c2b]["state"], fth.ST_POLL_EVIDENCE_REPLAYED)
+            self.assertEqual(second.seats[c2b]["state"], fth.ST_PENDING_EFFECT)
             self.assertEqual(len(runner.kicks), 1)
             ledger = fth.load_kick_ledger(fixture.home)
             self.assertEqual(ledger["seats"][c2b]["consecutive_kicks"], 1)
             self.assertFalse(ledger["seats"][c2b]["fresh_heartbeat_witnessed_since_kick"])
-            # The client's last-seen ADVANCES (new payload bytes): kick again.
-            fixture.set_poll_payload(c2b, ok_poll_payload(NOW + ftc.KICKSTART_COOLDOWN_SECONDS - 301))
+            # A poll STRICTLY NEWER than the reservation but STALE at this
+            # pass is NOT a recovery proof: the seat stays HELD, the ladder
+            # and the cooldown anchor are untouched, and there is NO second
+            # kick — however far the observation advances the timestamp.
+            stale_newer = NOW + ftc.KICKSTART_COOLDOWN_SECONDS - 301
+            fixture.set_poll_payload(c2b, ok_poll_payload(stale_newer))
             third = self._pass(fixture, runner, NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 2)
-            self.assertEqual(third.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT)
-            self.assertEqual(len(runner.kicks), 2)
+            self.assertEqual(len(runner.kicks), 1)
+            self.assertEqual(third.seats[c2b]["state"], fth.ST_PENDING_EFFECT)
+            ledger = fth.load_kick_ledger(fixture.home)
+            self.assertNotIn("last_recovery", ledger["seats"][c2b])
+            self.assertEqual(ledger["seats"][c2b]["consecutive_kicks"], 1)
+            # A poll STRICTLY NEWER than the reservation AND FRESH at this
+            # pass IS a bound recovery proof: it releases the acknowledged
+            # attempt and resets the ladder. That very observation is
+            # classified HEALTHY, so the release authorizes no further
+            # action.
+            fresh_newer = NOW + ftc.KICKSTART_COOLDOWN_SECONDS - 8
+            fixture.set_poll_payload(c2b, ok_poll_payload(fresh_newer))
+            fourth = self._pass(fixture, runner, NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 3)
+            self.assertEqual(len(runner.kicks), 1)
+            self.assertEqual(fourth.seats[c2b]["state"], fth.ST_HEALTHY)
+            ledger = fth.load_kick_ledger(fixture.home)
+            self.assertIn("last_recovery", ledger["seats"][c2b])
+            self.assertEqual(
+                ledger["seats"][c2b]["last_recovery"]["poll_value"],
+                fresh_newer,
+            )
+            self.assertEqual(ledger["seats"][c2b]["consecutive_kicks"], 0)
+
+    def test_replayed_consumed_evidence_blocks_a_kick_without_a_reservation(self):
+        # The replay gate itself, for a seat that carries the consumed
+        # provenance but NO reservation: byte-identical evidence may not
+        # authorize another kick, while ADVANCING evidence may.
+        with FixtureHomeCli() as fixture:
+            c2b = ftc.TUNNEL_LABEL_PREFIX + "c2-business"
+            stale_stdout = ok_poll_payload(NOW - 301)
+            fixture.set_poll_payload(c2b, stale_stdout)
+            ledger = fth.load_kick_ledger(fixture.home)
+            ledger["seats"][c2b] = {
+                "last_kick_at": NOW - ftc.KICKSTART_COOLDOWN_SECONDS - 10,
+                "consecutive_kicks": 1,
+                "fresh_heartbeat_witnessed_since_kick": False,
+                "last_kick_poll_value": NOW - 301,
+                "last_kick_poll_digest": hashlib.sha256(stale_stdout.encode()).hexdigest(),
+            }
+            fth.save_kick_ledger(fixture.home, ledger)
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW)
+            self.assertEqual(report.seats[c2b]["state"], fth.ST_POLL_EVIDENCE_REPLAYED)
+            self.assertEqual(runner.kicks, [])
+            # The client's last-seen ADVANCES (new payload bytes): kick again.
+            fixture.set_poll_payload(c2b, ok_poll_payload(NOW + 1 - 301))
+            again = self._pass(fixture, runner, NOW + 2)
+            self.assertEqual(len(runner.kicks), 1)
+            self.assertTrue(runner.kicks[0][1])  # forced: stale heartbeat
 
     def test_escalation_limit_and_no_fourth_kick_with_advancing_payloads(self):
         with FixtureHomeCli() as fixture:
@@ -1968,7 +2169,7 @@ class CliPollPassTests(unittest.TestCase):
             self.assertEqual(ledger["seats"][c4]["consecutive_kicks"], 0)
             self.assertTrue(ledger["seats"][c4]["fresh_heartbeat_witnessed_since_kick"])
 
-    def test_cooldown_suppresses_second_stale_kick_for_advancing_evidence(self):
+    def test_retained_hold_suppresses_second_stale_kick_for_advancing_evidence(self):
         with FixtureHomeCli() as fixture:
             c2p = ftc.TUNNEL_LABEL_PREFIX + "c2-personal"
             fixture.set_poll_payload(c2p, ok_poll_payload(NOW - 301))
@@ -1976,13 +2177,17 @@ class CliPollPassTests(unittest.TestCase):
             first = self._pass(fixture, runner, NOW)
             self.assertTrue(first.seats[c2p]["kickstarted"])
             # Advance the evidence (new payload bytes, still stale) WITHIN the
-            # cooldown: the persisted cooldown suppresses the second kick.
+            # cooldown: the acknowledged reservation retains the seat, so
+            # there is no second kick at all.
             fixture.set_poll_payload(c2p, ok_poll_payload(NOW + 60 - 301))
             second = self._pass(fixture, runner, NOW + 60)
-            self.assertEqual(second.seats[c2p]["state"], fth.ST_COOLDOWN)
+            self.assertEqual(second.seats[c2p]["state"], fth.ST_PENDING_EFFECT)
             self.assertEqual(len(runner.kicks), 1)
 
-    def test_mixed_modes_recover_independently_in_one_pass(self):
+    def test_mixed_modes_stay_independent_in_one_pass(self):
+        # A seat still on the legacy file-mtime mode stays DIAGNOSTIC ONLY
+        # while its CLI-poll sibling is classified normally: the mtime seat
+        # is alert-only and is never polled.
         with FixtureHomeCli() as fixture:
             c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
             c2b = ftc.TUNNEL_LABEL_PREFIX + "c2-business"
@@ -1993,9 +2198,13 @@ class CliPollPassTests(unittest.TestCase):
             self.assertEqual(report.seats[c1]["heartbeat_mode"], ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL)
             self.assertEqual(report.seats[c1]["state"], fth.ST_HEALTHY)
             self.assertEqual(report.seats[c2b]["heartbeat_mode"], ftc.HEARTBEAT_MODE_FILE_MTIME)
-            self.assertEqual(report.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT)
-            self.assertEqual([label for label, _f in runner.kicks], [c2b])
+            self.assertEqual(report.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT_UNPROVEN)
+            self.assertEqual(runner.kicks, [])
             self.assertNotIn(c2b, fixture.poll.labels_polled())
+            self.assertIn(
+                c2b,
+                [a.label for a in report.alerts if a.code == fth.ST_STALE_HEARTBEAT_UNPROVEN],
+            )
 
     def test_reports_and_alerts_never_leak_url_profile_locator_or_payload(self):
         with FixtureHomeCli() as fixture:
@@ -2489,6 +2698,7 @@ class HeartbeatAttestationFactsTests(unittest.TestCase):
             consecutive_kicks=0,
             fresh_heartbeat_witnessed_since_kick=False,
             now=NOW,
+            heartbeat_mode=ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
         )
 
     def test_both_positive_facts_authorize_stale_forced_kick(self):

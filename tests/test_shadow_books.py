@@ -119,11 +119,28 @@ def test_mark_is_idempotent_per_date(sandbox):
     assert len([r for r in rows if r["date"] == "2026-06-01"]) == 1
 
 
-def test_missing_price_does_not_swing_nav(sandbox):
+def test_missing_price_preserves_prior_truth_instead_of_using_avg_cost(sandbox):
     S._rebalance("b", {"AAA": 0.5}, {"AAA": 100.0}, "2026-06-01")
-    # next mark has NO price for AAA → falls back to avg_cost, NAV unchanged (no fake swing)
-    row = S._mark("b", {}, "2026-06-02")
-    assert abs(row["nav"] - 1_000_000.0) < 1.0
+    first = S._mark("b", {"AAA": 110.0, "SPY": 400.0}, "2026-06-01")
+    assert abs(first["nav"] - 1_050_000.0) < 50.0
+
+    # No canonical price/carry for AAA on the next date: do NOT snap the line back to its 100 avg_cost
+    # and manufacture a -4.76% book return. Refuse the new mark and leave the prior dated NAV intact.
+    with pytest.raises(S.ShadowMarkUnavailable):
+        S._mark("b", {}, "2026-06-02")
+    rows = S._nav_rows("b")
+    assert [r["date"] for r in rows] == ["2026-06-01"]
+    assert rows[-1]["nav"] == pytest.approx(first["nav"])
+
+
+def test_incomplete_held_book_nav_refuses_rebalance_before_mutation(sandbox):
+    S._rebalance("b", {"AAA": 0.5}, {"AAA": 100.0}, "2026-06-01")
+    before = S._load_account("b")
+
+    with pytest.raises(S.ShadowMarkUnavailable):
+        S._rebalance("b", {"BBB": 0.5}, {"BBB": 50.0}, "2026-06-02")
+
+    assert S._load_account("b") == before
 
 
 # ── end-to-end run ────────────────────────────────────────────────────────────
