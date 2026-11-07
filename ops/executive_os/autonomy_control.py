@@ -222,7 +222,7 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE", "OS_GATEWAY_PUBLICATION", "CONTROL_COMPONENT_UPDATE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "FINITE_CONTROL_RETIRE", "PAID_CONTROL_STAGE", "OS_GATEWAY_PUBLICATION", "CONTROL_COMPONENT_UPDATE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -1279,6 +1279,11 @@ def _parser() -> argparse.ArgumentParser:
     finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
     finite_reconcile = sub.add_parser('finite-control-stage-reconcile', help='Prove an already-published finite stage without replay.')
     finite_reconcile.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+    for command in ('finite-control-retire', 'finite-control-retire-reconcile'):
+        finite_retire = sub.add_parser(command, help='Retire the fixed finite selection, retaining its protected provenance.')
+        finite_retire.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+        if command == 'finite-control-retire':
+            finite_retire.add_argument('--expected-control-sha256', type=_exact_digest, action=_StoreOnce, required=True)
     for command in ('paid-control-stage','paid-control-stage-reconcile'):
         paid=sub.add_parser(command,help='Stage or reconcile the qualified disarmed paid source.')
         paid.add_argument('--expected-sha',type=_exact_sha,action=_StoreOnce,required=True)
@@ -3794,7 +3799,7 @@ class ProductionTransactionHost(ProductionArmHost):
         elif value.get("operation") == "A2_RETURN_SOCKET_RESTORE":
             raise TransactionEffectUnknown()
         if set(value) & _FINITE_RECEIPT_FIELDS:
-            if (value.get("operation") != "FINITE_CONTROL_STAGE"
+            if (value.get("operation") not in {"FINITE_CONTROL_STAGE", "FINITE_CONTROL_RETIRE"}
                     or type(value.get("finite_prior_receipt_present")) is not bool
                     or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
                            for field in _FINITE_RECEIPT_FIELDS - {"finite_prior_receipt_present"})):
@@ -9100,6 +9105,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         )
         prior_bindings: tuple[Mapping[str, Any], ...] = ()
         prior_transports: tuple[Mapping[str, Any], ...] = ()
+        prior_secretary_conversation = None
+        prior_meta_conversation = None
         prior_raw = b""
         prior_binding_sha256 = ""
         if selector_present:
@@ -9125,7 +9132,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 prior_raw, _prior_identity = composition._read_pinned(
                     composition._absolute_path(prior_path), prior_digest
                 )
-                # The incumbent v1/v2/v3 parser qualifies the prior binding.
+                # The incumbent closed parser qualifies the complete prior binding.
                 composition._composition(prior_raw)
                 prior_document = composition._document(prior_raw)
             except (composition.FabricCompositionError, OSError, ValueError) as exc:
@@ -9134,6 +9141,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 ) from exc
             prior_bindings = tuple(prior_document.get("bindings") or ())
             prior_transports = tuple(prior_document.get("remote_transports") or ())
+            prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
+            prior_meta_conversation = prior_document.get("hermes_meta_conversation")
             prior_binding_sha256 = sha256_bytes(prior_raw)
             if "canonical_paid_fabric" in control and (
                 prior_bindings or prior_transports
@@ -9149,6 +9158,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             input_document=input_document,
             prior_bindings=prior_bindings,
             prior_remote_transports=prior_transports,
+            prior_secretary_conversation=prior_secretary_conversation,
+            prior_meta_conversation=prior_meta_conversation,
         )
         try:
             # Use the actual consumer's byte ceiling before the transaction
@@ -9158,7 +9169,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 raise composition.FabricCompositionError(
                     "Composed Fabric binding exceeds the consumer byte limit"
                 )
-            # The composed document is proved loadable by the incumbent v3
+            # The composed document is proved loadable by the incumbent
             # parser: the Control's own loader will read exactly these bytes.
             composition._composition(composed)
         except composition.FabricCompositionError as exc:
@@ -9184,6 +9195,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             "input_sha256": input_sha256,
             "prior_bindings": prior_bindings,
             "prior_remote_transports": prior_transports,
+            "prior_secretary_conversation": prior_secretary_conversation,
+            "prior_meta_conversation": prior_meta_conversation,
             "prior_raw": prior_raw,
             "prior_binding_sha256": prior_binding_sha256,
             "prior_selector_present": selector_present,
@@ -9327,6 +9340,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                     input_document=binding["input_document"],
                     prior_bindings=binding["prior_bindings"],
                     prior_remote_transports=binding["prior_remote_transports"],
+                    prior_secretary_conversation=binding["prior_secretary_conversation"],
+                    prior_meta_conversation=binding["prior_meta_conversation"],
                     input_sha256=binding["input_sha256"],
                     prior_binding_sha256=binding["prior_binding_sha256"],
                     prior_selector_present=binding["prior_selector_present"],
@@ -10628,11 +10643,15 @@ def _reconcile_control_component_update(
                 or sha256_bytes(candidate_raw) != member["candidate_sha256"]
             ):
                 raise TransactionEffectUnknown()
+            candidate_document = composition._document(candidate_raw)
+            if type(candidate_document) is not dict:
+                raise TransactionEffectUnknown()
             input_document = composition._document(input_raw)
             if type(input_document) is not dict:
                 raise composition.FabricCompositionError(
                     "Hermes host observation differs from its closed schema"
                 )
+            prior_document = {}
             if member["prior_selector_present"]:
                 if not prior_raw or sha256_bytes(prior_raw) != member["prior_binding_sha256"]:
                     raise TransactionEffectUnknown()
@@ -10648,10 +10667,35 @@ def _reconcile_control_component_update(
                     raise TransactionEffectUnknown()
                 prior_bindings = ()
                 prior_transports = ()
+            # The original sealed candidate identifies its composition policy.
+            # Historical v3 transactions retain their original bytes even when
+            # an older writer omitted a prior conversation. New v4/v5 candidates
+            # preserve the complete matching prior family; never reinterpret a
+            # claimed transaction from fresh installed selections.
+            prior_secretary_conversation = None
+            prior_meta_conversation = None
+            candidate_schema = candidate_document.get("schema_version")
+            if candidate_schema in (
+                composition.SECRETARY_CONFIG_SCHEMA_VERSION,
+                composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+            ):
+                if prior_document.get("schema_version") != candidate_schema:
+                    raise TransactionEffectUnknown()
+                prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
+                if type(prior_secretary_conversation) is not dict:
+                    raise TransactionEffectUnknown()
+                if candidate_schema == composition.CONVERSATION_CONFIG_SCHEMA_VERSION:
+                    prior_meta_conversation = prior_document.get("hermes_meta_conversation")
+                    if type(prior_meta_conversation) is not dict:
+                        raise TransactionEffectUnknown()
+            elif candidate_schema != composition.HOST_READ_CONFIG_SCHEMA_VERSION:
+                raise TransactionEffectUnknown()
             binding_payload = compiler.compose_binding_candidate(
                 input_document=input_document,
                 prior_bindings=prior_bindings,
                 prior_remote_transports=prior_transports,
+                prior_secretary_conversation=prior_secretary_conversation,
+                prior_meta_conversation=prior_meta_conversation,
             )
         except (composition.FabricCompositionError, KeyError, OSError, ValueError) as exc:
             raise TransactionEffectUnknown() from exc
@@ -10668,6 +10712,8 @@ def _reconcile_control_component_update(
             input_document=input_document,
             prior_bindings=prior_bindings,
             prior_remote_transports=prior_transports,
+            prior_secretary_conversation=prior_secretary_conversation,
+            prior_meta_conversation=prior_meta_conversation,
             input_sha256=str(member["input_sha256"]),
             prior_binding_sha256=str(member["prior_binding_sha256"]),
             prior_selector_present=bool(member["prior_selector_present"]),
@@ -11648,7 +11694,8 @@ def main(
         from ops.executive_os.a2_control_restoration import run_command
         return run_command(args, host=host)
 
-    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
+    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile',
+                        'finite-control-retire', 'finite-control-retire-reconcile'}:
         from ops.executive_os.attended_control_staging import run_command
         return run_command(args, host=host)
 

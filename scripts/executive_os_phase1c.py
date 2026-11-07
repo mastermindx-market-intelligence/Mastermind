@@ -347,6 +347,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bridge_armed",
         "canonical_paid_fabric",
         "fabric_attended_probe",
+        "retired_finite_composition",
         "native_capacity_v2",
     }
 )
@@ -390,6 +391,12 @@ def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
 
 
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
+    if 'retired_finite_composition' in raw:
+        from control_plane.fabric_attended_routing import retired_finite_selection
+        try:
+            retired_finite_selection(raw)
+        except ValueError as exc:
+            raise ServiceError(str(exc)) from None
     armed = raw.get("fabric_bridge_armed", False)
     if type(armed) is not bool:
         raise ServiceError("fabric_bridge_armed must be boolean")
@@ -2625,6 +2632,16 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+            # The SAME frozen selected-child publication the installed App
+            # reads, loaded through the installed source's fixed currentness
+            # reader. A changed, replaced or withdrawn publication refuses
+            # here instead of retargeting the running Control.
+            selected_child_target = coo_source.selected_child_target()
+            if selected_child_target is not None:
+                if "selected_child_target" not in {
+                        field.name for field in dataclasses.fields(CeoIngressAppBinding)}:
+                    raise ServiceError("installed selected child target has no composed binding owner")
+                coo_factories["selected_child_target"] = selected_child_target
             if raw.get("coo_principal_dialogue_armed", False) is True:
                 from integrations.mastermind_company_principal_app_receiver import PrincipalDialogueAppReceiver
                 from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader

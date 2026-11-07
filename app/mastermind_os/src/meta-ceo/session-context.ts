@@ -13,7 +13,7 @@ import {
 import { readSessionOwnerContext, type MountedExecutiveSessionBinding } from "../orchestration/os-executive-session-host";
 
 /** The closed canonical target-prefix union of the qualified session surface. */
-export const SESSION_TARGET_REF = /^(?:fabric_attempt|hermes_secretary):[0-9a-f]{64}$/;
+export const SESSION_TARGET_REF = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
 
 export interface OfficeSessionContext {
   readonly sessionRef: string | null;
@@ -78,7 +78,7 @@ export function qualifyExecutiveOfficeSession(
     if (typeof observation.targetRef !== "string" ||
         !SESSION_TARGET_REF.test(observation.targetRef) ||
         !observation.targetRef.startsWith(
-          observedKind === "hermes_secretary" ? "hermes_secretary:" : "fabric_attempt:",
+          observedKind + ":",
         ) ||
         binding.port.currentTargetRef() !== observation.targetRef) return UNBOUND;
     if (observation.principalScope !== owner.principalScope ||
