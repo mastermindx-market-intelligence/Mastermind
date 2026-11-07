@@ -19,7 +19,7 @@ import {
 } from './git-publish.mjs';
 
 const execFile = promisify(execFileCallback);
-const GIT = '/usr/bin/git';
+const GIT = process.env.STUDIO_DIRECT_TEST_GIT_BINARY || '/usr/bin/git';
 
 async function run(file, args, options = {}) {
   return execFile(file, args, {

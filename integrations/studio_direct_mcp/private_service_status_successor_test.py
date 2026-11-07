@@ -1716,6 +1716,7 @@ class HistoricalStatusPairTests(unittest.TestCase):
         (self.roots["state"] / owner.TRANSACTION).mkdir(mode=0o700)
         with self.assertRaisesRegex(SystemExit, "ENROLLMENT_ACCOUNT_UNQUALIFIED"):
             self.qualify()
+
 class C4InventorySourceIdentityTests(unittest.TestCase):
     def test_installed_successor_target_is_the_exact_shipped_publisher(self):
         publisher = Path(__file__).with_name("git-publish.mjs")

@@ -108,5 +108,40 @@
     "provider_called": false,
     "original_j_reconciled": false,
     "accepted": false
+  },
+  "original_carrier_join": {
+    "source": "0d8174951141b1790e6121e13202e4036d1bdc20",
+    "publication_comment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710623283",
+    "original_mutation_fence": "retained by its active root; contribution only",
+    "status_successor_test_resolution": "Both parents have identical ASTs; retain exact incoming published bytes. Prior414 emitted testcase nodes remain applicable.",
+    "new_hosted_failure": "c71 merged into bd exposes missing exact host inverse in one historical H1 fixture",
+    "repair": {
+      "baseline_h1_rc": 1,
+      "baseline_h1_log_sha256": "a5066ed0b0a06331fd69a1ffbaa681b2b4a97b60923cb7a8c5af252fef0efdd9",
+      "retained_receipt": "review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json",
+      "retained_receipt_sha256": "ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33",
+      "exact_site": [
+        61,
+        13,
+        16,
+        "int"
+      ],
+      "production_builder_changed": false,
+      "qualification": {
+        "returncode": 0,
+        "seconds": 2.249,
+        "log_sha256": "585ba42829657b9e2d56f8614be6c3365a8405474eed008559511ab50f2ffcfb",
+        "junit_sha256": "95eab22becea2b3bd11269a33babc9e01c4f7323852bdf0272317334113b4553",
+        "cases": {
+          "total": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "baseline_identity_findings": 1
+    },
+    "production_native_sources": "unchanged from the tested441ac5f composition",
+    "release_and_runtime_acceptance": false
   }
 }

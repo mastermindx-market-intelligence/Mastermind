@@ -895,3 +895,12 @@ REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualifica
     "sites": (),
     "utf8_sites": ((296, 26, 29, "int", "501"),),
 }
+
+# Exact retained readiness qualification records the observed proof parent UID.
+# This grants no runtime identity. Any source, path or token drift exposes it
+# to the incumbent guard again; the original receipt is preserved unchanged.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
+    "sha256": 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    "sites": (),
+    "utf8_sites": ((61, 13, 16, "int", "501"),),
+}
