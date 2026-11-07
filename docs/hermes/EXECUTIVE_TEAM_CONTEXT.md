@@ -75,7 +75,7 @@ second tool or call another backend.
   rooted in the human Chairman. Chief of Staff, Engineering, Reliability and
   other lead/reporting relationships are editorial guidance, not proof that
   any particular native role is enrolled, present, delegated or authorized.
-  `live_roster_joined=false` and each seat is `NOT_OBSERVED`.
+  `live_roster_state=NOT_OBSERVED` and each seat is `NOT_OBSERVED`.
 - The caller's current, already-authorized workstream and Executive root are
   shown as a read-only goal path. Company strategic goals remain
   `NOT_PROJECTED` until the original strategic owner supplies them.
@@ -83,7 +83,7 @@ second tool or call another backend.
   mission.
 - Result reference count, review verdict and original acceptance state are
   separate observations. `original_parent_consumption=NOT_ESTABLISHED` and
-  `product_accepted=false` are deliberately not manufactured from result
+  `product_acceptance=NOT_ESTABLISHED` are deliberately not manufactured from result
   availability or green CI. All original effect and permission holds survive.
 - Source schema, selected workstream/root identity, freshness, one-mission
   scope and an 8 KiB organization budget are checked. A failed qualification
