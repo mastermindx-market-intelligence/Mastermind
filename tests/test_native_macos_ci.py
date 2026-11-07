@@ -57,10 +57,16 @@ def test_frontend_build_uses_exact_app_only_production_source_closure():
         "npm ci --ignore-scripts",
         "npm run build",
         'test -s "$release_root/app/mastermind_os/dist/index.html"',
+        'PYTHONPATH="$GITHUB_WORKSPACE" python3 -c',
+        'from ops.executive_os.executive_mcp_entry import build_os_asset_manifest',
+        'build_os_asset_manifest(Path(sys.argv[1]))',
         'rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"',
         'cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"',
     ):
         assert required in command
+    assert command.index('test -s "$release_root/app/mastermind_os/dist/index.html"') < command.index(
+        'build_os_asset_manifest(Path(sys.argv[1]))'
+    ) < command.index('rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"')
     assert command.index('rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"') < command.index(
         'cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"'
     )
