@@ -263,3 +263,38 @@ P0 current #1717 owner/source/collision reconciliation
 - [Incumbent DSH PR #1717](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1717) and [harness convergence #687](https://github.com/mastermindx-market-intelligence/Mastermind/pull/687).
 
 **No code line copied from an unlicensed Grok Bot/Dot release.**
+
+
+## 8. Hermes/Fabric hardening continuation — 2026-11-07
+
+This extends existing P3/P4/P7 and the Hermes teammate research in PR #2159.
+Current Chairman intent assigns implementation and integration to the active
+principal; this entry does not change Runtime admission or accepted release holds.
+Source baseline: `e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46`.
+
+| Existing node | Next implementation and acceptance | Evidence boundary |
+| --- | --- | --- |
+| P3 / original result | Project the request observation already retained by #2176 through #2170's authenticated original-admission reader. Bind role, original session/admission, stored epoch and generation; retain bounded closed metadata and false dispatch/model proof flags. | A real one-request private-socket test must return A's outer observation, never B's; restart reads must create no admission or inference. |
+| P4 / memory and learning input | Reuse the merged Agent OS MemoryProvider and original result owner. Preserve missing, malformed, incomplete and corrected evidence distinctly; do not create another memory or task ledger. | Source projection alone does not establish memory inclusion, learning efficacy or a live first turn. |
+| P7 / reliability qualification | Add negative tests for foreign identity, malformed metadata, excessive size, sensitive extra fields and legacy absence; run affected runtime/identity tests and required CI. | Actual worker START, installed canaries, held-out skill improvement and the seven-day campaign remain owed. |
+
+Architecture remains: persistent role sessions initially on M2; substantial work
+through the existing Executive/Capacity/Fabric owners; Hermes may be a qualified
+worker harness. The attended worker, selected-child and APPLICATION inference
+contracts keep their original identities and effects. No second scheduler,
+retry owner or shared writable role profile is introduced.
+
+The first source slice is retained by the principal as `CRITICAL_PATH_SHORTCUT`:
+the required change is a bounded join between two newly merged native contracts,
+and this Web session has a verified isolated source workspace but no authenticated
+native root/parent binding for paid Fabric submission. Fabric's exposed adapter
+is available; worker admission is unprobed, not declared globally unavailable.
+A separate native reasoning advisor resolved the cross-contract ambiguity;
+routine implementation is not assigned to a native labor child.
+
+Preserve the original #2166/#2155 APPLICATION, #2175 composition, #2171 vendor,
+#2172 MCP and #2007 maintenance carriers and their actual live writers/effects.
+The M2 installation refusal and Ubuntu1 C26 journal-access hold are not cleared
+by these source edits. Source publication, merge, installation and real-path
+acceptance remain separate. No 99% availability claim is made without measured
+accepted-task outcomes.
