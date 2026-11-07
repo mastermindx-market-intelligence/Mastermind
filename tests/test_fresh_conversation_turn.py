@@ -121,6 +121,7 @@ def test_recorded_duplicate_is_read_only_while_original_finalization_is_pending(
         finalizer_entered = asyncio.Event()
         release_finalizer = asyncio.Event()
         finalizer_calls = []
+        original_dispatch_task = None
         try:
             _, preview = await post(app, "preview", request, token, wt)
             assert preview["ok"], preview
@@ -177,7 +178,13 @@ def test_recorded_duplicate_is_read_only_while_original_finalization_is_pending(
             assert adapters[0].start_calls == 1 and adapters[0].begin_turn_calls == 2
         finally:
             release_finalizer.set()
-            await cleanup(service)
+            try:
+                # A failed assertion while the gate is held must drain the
+                # original finalizer before cleanup can cancel its dispatcher.
+                if original_dispatch_task is not None and finalizer_entered.is_set():
+                    await asyncio.wait_for(asyncio.shield(original_dispatch_task), 5)
+            finally:
+                await cleanup(service)
     asyncio.run(run())
 
 
