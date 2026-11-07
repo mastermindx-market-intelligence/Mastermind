@@ -177,10 +177,10 @@ def publish_or_observe(*, stable_ext: Path, expected_generation: str, previous: 
             value["native_generation"] = expected_generation
             value["publisher_source_sha256"] = metadata["files"][_OWNER]
             return value
-    except Exception as exc:
+    except BaseException as exc:
         if attempted:
             return _outcome("EFFECT_UNKNOWN", "ORIGINAL_PUBLISHER_REPLY_UNQUALIFIED", candidate=candidate, attempted=True)
-        if isinstance(exc, PublicationUnavailable):
+        if isinstance(exc, (PublicationUnavailable, KeyboardInterrupt, SystemExit)):
             raise
         raise PublicationUnavailable("ORIGINAL_PUBLISHER_UNAVAILABLE") from None
 

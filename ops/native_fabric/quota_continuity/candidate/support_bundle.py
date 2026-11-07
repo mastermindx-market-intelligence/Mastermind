@@ -531,10 +531,18 @@ def _policy_open_scope(stable_ext):
 
 
 def _policy_close_scope(handles, lock_fd):
-    if lock_fd is not None:
-        os.close(lock_fd)
-    for _path, descriptor, _identity in reversed(handles):
-        os.close(descriptor)
+    failure = None
+    descriptors = ([lock_fd] if lock_fd is not None else []) + [row[1] for row in reversed(handles)]
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except BaseException as exc:
+            # Do not retry a close on a possibly reused descriptor. Still
+            # release the other original handles before reporting uncertainty.
+            if failure is None:
+                failure = exc
+    if failure is not None:
+        raise failure
 
 
 def _policy_public_document(raw, policy_owner):
@@ -613,7 +621,10 @@ def _policy_sync_retained(path, expected_identity):
         before = os.fstat(parent_fd)
         if before.st_uid != os.geteuid() or stat.S_IMODE(before.st_mode) & 0o022:
             raise PolicyPublicationRefused("POLICY_ROLLBACK_DIRECTORY_UNSAFE")
-        file_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent_fd)
+        # An owned writable rollback artifact permits a portable fsync; no
+        # bytes are changed. Immutable/read-only inputs must first be retained
+        # by their existing artifact owner, never chmodded here.
+        file_fd = os.open(path.name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent_fd)
         if _policy_file_identity(os.fstat(file_fd)) != expected_identity:
             raise PolicyPublicationRefused("POLICY_PREIMAGE_CHANGED")
         os.fsync(file_fd)
@@ -722,7 +733,12 @@ def _publish_compatible_policy(source, stable_ext, expected_hash, *, expected_cu
                     os.unlink(temporary, dir_fd=handles[2][1])
             except OSError:
                 pass
-        _policy_close_scope(handles, lock_fd)
+        try:
+            _policy_close_scope(handles, lock_fd)
+        except BaseException:
+            if attempted:
+                raise PolicyPublicationUnknown(candidate_hash) from None
+            raise PolicyPublicationRefused("POLICY_PUBLICATION_PREFLIGHT_REFUSED") from None
 
 
 def policy_publication_status(stable_ext, *, expected_current_hash, expected_hash):
@@ -745,7 +761,10 @@ def policy_publication_status(stable_ext, *, expected_current_hash, expected_has
     except Exception:
         raise PolicyPublicationRefused("POLICY_STATUS_UNAVAILABLE") from None
     finally:
-        _policy_close_scope(handles, lock_fd)
+        try:
+            _policy_close_scope(handles, lock_fd)
+        except BaseException:
+            raise PolicyPublicationRefused("POLICY_STATUS_UNAVAILABLE") from None
 
 
 def _cli():

@@ -378,3 +378,40 @@ def test_legacy_three_argument_policy_consumer_keeps_its_contract(installation):
     value = installation
     assert owner.ensure_policy(value.candidate, value.ext, digest(value.after)) == "POLICY_REFRESHED_IDLE"
     assert owner.ensure_policy(value.candidate, value.ext, digest(value.after)) == "POLICY_CURRENT"
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_cancelled_modifying_owner_call_stays_unknown(installation, monkeypatch, interruption):
+    value = installation
+    _store, selected = selected_generation(value)
+    calls = []
+    def cancelled(command, **kwargs):
+        calls.append(command)
+        raise interruption()
+    monkeypatch.setattr(operator.subprocess, "run", cancelled)
+    result = operator.publish_or_observe(stable_ext=value.ext, expected_generation=selected,
+        previous=digest(value.before), candidate=digest(value.after),
+        candidate_path=value.candidate, rollback_source=value.rollback)
+    assert result["state"] == "EFFECT_UNKNOWN" and result["writes_applied"] is None
+    assert result["retry_authorized"] is False and len(calls) == 1
+
+
+def test_lost_lock_close_ack_after_replace_keeps_unknown_and_original_target(installation, monkeypatch):
+    value = installation
+    actual = os.close
+    lock_identity = (value.lock.stat().st_dev, value.lock.stat().st_ino)
+    raised = []
+    def close_once(descriptor):
+        info = os.fstat(descriptor)
+        actual(descriptor)
+        if (info.st_dev, info.st_ino) == lock_identity and not raised:
+            raised.append(True)
+            raise OSError("PRIVATE_CLOSE_ACK")
+    monkeypatch.setattr(owner.os, "close", close_once)
+    with pytest.raises(owner.PolicyPublicationUnknown) as result:
+        publish(value)
+    assert str(result.value) == "POLICY_PUBLICATION_UNCERTAIN"
+    assert value.target.read_bytes() == value.after and value.rollback.read_bytes() == value.before
+    status = observe(value)
+    assert status["state"] == "CANDIDATE_BYTES_OBSERVED"
+    assert status["original_publication_proven"] is False
