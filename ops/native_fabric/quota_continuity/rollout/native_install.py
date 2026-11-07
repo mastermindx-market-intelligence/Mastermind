@@ -826,21 +826,6 @@ def _go_component(bundle, stable_ext, target_files):
     entry = _go_file(root / "candidate/native_go_entry.py")
     if generation.digest(preimage) != stage_builder.GO_INSTALLED_PREIMAGE:
         raise ValueError("Go original installed source differs")
-    dependencies = {}
-    for name in stage_builder.GO_APPLICATION_DEPENDENCIES:
-        data = _go_file(root / "candidate" / name)
-        dependencies[name] = {"sha256": generation.digest(data), "bytes": len(data), "source": "candidate/" + name}
-    expected = {"schema": "native-external-go-component.v1", "component": "go_application_handler",
-        "destination_relative_to_stable_ext": "go_shim/go_shim.py", "stable_ext": str(stable_ext),
-        "installed_preimage_sha256": stage_builder.GO_INSTALLED_PREIMAGE,
-        "candidate_sha256": generation.digest(handler), "candidate_bytes": len(handler),
-        "candidate_source": "candidate/go_shim.py", "dependencies": dependencies,
-        "native_stage_dependencies": {name: row["sha256"] for name, row in dependencies.items()},
-        "preimage_source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6646945527",
-        "installation_state": "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION"}
-    if (record != expected or _go_file(bundle / "source-go_shim.py") != preimage
-            or _go_file(bundle / "go_shim.py") != handler):
-        raise ValueError("Go component is not the exact reviewed source")
     manifest_raw = _go_file(bundle.parent / "native-manifest.json")
     manifest = generation.unique_json(manifest_raw)
     if manifest != target_files:
@@ -854,11 +839,25 @@ def _go_component(bundle, stable_ext, target_files):
             raise ValueError("Go target application HTTP differs from exact reviewed source")
     base = {key: value for key, value in manifest.items()
             if key not in {generation.GO_ENTRY, generation.GO_HANDLER} | http_members}
-    stage_builder.validate_go_base_manifest(base, {name: row["sha256"] for name, row in dependencies.items()})
+    dependencies = stage_builder.go_application_dependencies(root, staged_manifest=base)
+    staged_dependencies = stage_builder.go_staged_dependency_hashes(base,
+        {name: row["sha256"] for name, row in dependencies.items()})
+    expected = {"schema": "native-external-go-component.v1", "component": "go_application_handler",
+        "destination_relative_to_stable_ext": "go_shim/go_shim.py", "stable_ext": str(stable_ext),
+        "installed_preimage_sha256": stage_builder.GO_INSTALLED_PREIMAGE,
+        "candidate_sha256": generation.digest(handler), "candidate_bytes": len(handler),
+        "candidate_source": "candidate/go_shim.py", "dependencies": dependencies,
+        "native_stage_dependencies": staged_dependencies,
+        "preimage_source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6646945527",
+        "installation_state": "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION"}
+    if (record != expected or _go_file(bundle / "source-go_shim.py") != preimage
+            or _go_file(bundle / "go_shim.py") != handler):
+        raise ValueError("Go component is not the exact reviewed source")
+    stage_builder.validate_go_base_manifest(base, staged_dependencies)
     if (set(manifest) != set(base) | {generation.GO_ENTRY, generation.GO_HANDLER} | http_members
             or manifest[generation.GO_HANDLER] != generation.digest(handler)
             or manifest[generation.GO_ENTRY] != generation.digest(entry)
-            or any(manifest.get("ext/" + name) != row["sha256"] for name, row in dependencies.items())):
+            or any(manifest.get("ext/" + name) != digest for name, digest in staged_dependencies.items())):
         raise ValueError("Go target is not the closed reviewed B and C composition")
     for relative, wanted in manifest.items():
         if generation.digest(_go_file(bundle.parent / "native-code-stage" / relative)) != wanted:
@@ -934,6 +933,7 @@ def _go_plan(prior_successor, target, component, previous):
     if (before["entrypoints"] != generation.ENTRYPOINTS
             or after["entrypoints"] != dict(generation.ENTRYPOINTS, go=generation.GO_ENTRY)):
         raise ValueError("Go entrypoint transition differs")
+    stage_builder.validate_go_source_transition(before["files"], after["files"])
     component = Path(component)
     if component.is_relative_to(store.parent):
         raise ValueError("Go component must be outside the live owner")
@@ -1110,6 +1110,7 @@ def _retained_go_plan(prior_successor, target, component, previous):
     if (before["entrypoints"] != generation.ENTRYPOINTS
             or after["entrypoints"] != dict(generation.ENTRYPOINTS, go=generation.GO_ENTRY)):
         raise ValueError("Go entrypoint transition differs")
+    stage_builder.validate_go_source_transition(before["files"], after["files"])
     component = Path(component)
     if component.is_relative_to(store.parent):
         raise ValueError("Go component must be outside the live owner")

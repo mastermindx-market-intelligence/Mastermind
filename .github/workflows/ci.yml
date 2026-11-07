@@ -361,6 +361,9 @@ jobs:
             ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
             ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
@@ -404,7 +407,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: a577dbbf605474f97bbafa4ceeb0daf841292421
+          ref: 25ba92bb52120fae550b54c29f82929c0b77d37b
           path: .ci-production-macro
           sparse-checkout: |
             engine

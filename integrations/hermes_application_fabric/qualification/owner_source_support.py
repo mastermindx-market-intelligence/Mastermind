@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 
 OWNER_COMMIT = "a577dbbf605474f97bbafa4ceeb0daf841292421"
 CURRENT_OWNER_COMMIT = "12efe39a6b6e2f6d19f3a9893f978c55d4656681"
+COMPOSED_OWNER_COMMIT = "25ba92bb52120fae550b54c29f82929c0b77d37b"
 CHANGED = frozenset({
     "engine/provider_production_modes.py",
     "tests/test_hermes_primary_fabric_identity.py",
@@ -175,7 +176,7 @@ def prepare(original, adapter, destination):
         "original_source_unchanged": True, "runtime_enrollment": False}
 
 
-def prepare_current(original, adapter, destination):
+def prepare_current(original, adapter, destination, *, composed=False):
     """Qualify committed support without applying the historical proposal again."""
     original = Path(original).resolve(strict=True)
     adapter = Path(adapter).resolve(strict=True)
@@ -185,11 +186,33 @@ def prepare_current(original, adapter, destination):
     if destination.exists():
         raise RuntimeError("Current-source fixture must be new")
     raw_contract, contract, _ = _support_contract(adapter)
-    if git(original, "rev-parse", "HEAD").decode().strip() != CURRENT_OWNER_COMMIT:
+    owner_commit = CURRENT_OWNER_COMMIT
+    if composed:
+        path = adapter / "integrations/hermes_application_fabric/qualification/application_owner_support/attended-auto-current.json"
+        raw_composed = path.read_bytes()
+        current = json.loads(raw_composed)
+        keys = {"schema", "owner_commit", "previous_owner_commit", "historical_contract_sha256",
+                "postimages", "unchanged_inputs", "source_only", "operational_enrollment"}
+        if (type(current) is not dict or set(current) != keys
+                or current["schema"] != "mastermind.hermes_owner_committed_support.v1"
+                or current["owner_commit"] != COMPOSED_OWNER_COMMIT
+                or current["previous_owner_commit"] != CURRENT_OWNER_COMMIT
+                or current["historical_contract_sha256"] != sha256(raw_contract)
+                or type(current["postimages"]) is not dict or set(current["postimages"]) != CHANGED
+                or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                       for value in current["postimages"].values())
+                or current["unchanged_inputs"] != contract["unchanged_inputs"]
+                or current["source_only"] is not True
+                or current["operational_enrollment"] is not False):
+            raise RuntimeError("Composed current-source contract changed")
+        owner_commit = COMPOSED_OWNER_COMMIT
+        contract = {**contract, "postimages": current["postimages"]}
+        raw_contract = raw_composed
+    if git(original, "rev-parse", "HEAD").decode().strip() != owner_commit:
         raise RuntimeError("Current Macro source differs from the qualified owner")
     git(original, "diff", "--exit-code", "HEAD", "--")
     destination.mkdir()
-    materialization = export_committed(original, destination, CURRENT_OWNER_COMMIT,
+    materialization = export_committed(original, destination, owner_commit,
         ("engine", "lib", "config", "tests/__init__.py", *TESTS))
     after = inventory(destination)
     for path, expected in contract["postimages"].items():
@@ -201,12 +224,13 @@ def prepare_current(original, adapter, destination):
                             usedforsecurity=False).hexdigest()
         if blob != expected:
             raise RuntimeError("Unchanged owner input differs: " + path)
-    if git(original, "rev-parse", "HEAD").decode().strip() != CURRENT_OWNER_COMMIT:
+    if git(original, "rev-parse", "HEAD").decode().strip() != owner_commit:
         raise RuntimeError("Current source changed during fixture preparation")
     git(original, "diff", "--exit-code", "HEAD", "--")
-    return {"owner_commit": CURRENT_OWNER_COMMIT,
+    return {"owner_commit": owner_commit,
         "contract_sha256": sha256(raw_contract),
-        "accepted_patch_sha256": contract["patch_sha256"],
+        "source_context": "committed_attended_auto" if composed else "committed_current",
+        ("historical_patch_sha256" if composed else "accepted_patch_sha256"): contract["patch_sha256"],
         "patch_applied": False, "postimages": contract["postimages"],
         "fixture_files": len(after), "source_materialization": materialization,
         "original_source_unchanged": True, "runtime_enrollment": False}

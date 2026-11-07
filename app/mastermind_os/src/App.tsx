@@ -145,6 +145,7 @@ import { ControlRoomPanel } from "./ControlRoomPanel";
 import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
 import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
+import { ModelConfigurationRead } from "./resources/ModelConfigurationRead";
 import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
@@ -5846,6 +5847,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setProjectTab("Work");setActive("Projects");}}
         canOpenWork={resourcesCanOpenWork}
         onReviewSources={() => setActive("Sources")}/></div>
+      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
       <details className="reason-details"><summary>{locale === "zh-CN" ? "原始容量凭据与运行记录" : "Original capacity receipts and run records"}</summary>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,

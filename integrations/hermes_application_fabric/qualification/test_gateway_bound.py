@@ -1,9 +1,14 @@
 """Pinned native CLI/gateway composition, with real SQLite admission and fixture inference."""
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import replace
+import json
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
 import threading
+import shutil
 from types import SimpleNamespace as N
 import unittest
 from unittest.mock import patch
@@ -13,6 +18,25 @@ from engine.fabric_inference_client import FabricInferenceClient, NATIVE_PROTOCO
 from integrations.hermes_application_fabric.client import ApplicationBinding
 from integrations.hermes_application_fabric.native import PROVIDER, register_native_provider
 from integrations.hermes_application_fabric import gateway_plugin
+
+
+class FixtureSourceOwner:
+    """Only the installed-source boundary is doubled in native loopback tests."""
+    def __init__(self):
+        self.references = 0
+        self.closed = False
+        self.current = True
+
+    def check(self):
+        if self.closed or not self.current:
+            from integrations.hermes_application_fabric.errors import HermesFabricError
+            raise HermesFabricError("hermes_fabric_source_unavailable")
+
+    def close(self):
+        self.closed = True
+
+    def factory(self):
+        raise AssertionError("native loopback must select its explicit owner fixture")
 
 
 class GatewayBoundTests(unittest.TestCase):
@@ -27,6 +51,23 @@ class GatewayBoundTests(unittest.TestCase):
         from run_agent import AIAgent
         from hermes_cli.plugins import PluginContext, PluginManifest, _delivery_manager
         self.temp = tempfile.TemporaryDirectory(dir=get_hermes_home())
+        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        token = set_hermes_home_override(self.temp.name)
+        self.addCleanup(reset_hermes_home_override, token)
+        provider = Path(self.temp.name) / "plugins/mastermind-fabric"
+        shutil.copytree(Path(gateway_plugin.__file__).parent / "model_provider", provider)
+        (Path(self.temp.name) / "config.yaml").write_text("plugins:\n  enabled: [mastermind-fabric]\n")
+        from providers import refresh_bound_home
+        refresh_bound_home()
+        from integrations.hermes_application_fabric.source_context import _SourceLease
+        self.source_owners = []
+        def open_fixture_sources(**_):
+            source = FixtureSourceOwner()
+            self.source_owners.append(source)
+            return _SourceLease(source)
+        source_patch = patch.object(gateway_plugin, "open_attended_source_context", side_effect=open_fixture_sources)
+        source_patch.start()
+        self.addCleanup(source_patch.stop)
         self.db = SessionDB(Path(self.temp.name) / "state.db")
         self.db.create_session("session-1", "cli")
         self.runner = N(_draining=False, _refresh_fallback_model=lambda: None,
@@ -60,7 +101,6 @@ class GatewayBoundTests(unittest.TestCase):
                 return handle
             setattr(context, method, tracked)
         self.host = gateway_plugin.register(context)
-        register_native_provider()
         self.bind_calls = []
 
     def tearDown(self):
@@ -68,6 +108,8 @@ class GatewayBoundTests(unittest.TestCase):
         for handle in reversed(self.registrations):
             handle.dispose()
         self.db.close()
+        from hermes_logging import release_profile_log_handlers
+        release_profile_log_handlers(self.temp.name)
         self.temp.cleanup()
         fixtures.OwnerLoopbackTests.tearDown(self)
 
@@ -103,11 +145,55 @@ class GatewayBoundTests(unittest.TestCase):
         self.binding._authorized = kwargs["authorized"]
         return self.binding
 
-    def owner_fixture(self):
-        stack = ExitStack()
-        stack.enter_context(patch.object(gateway_plugin, "_original_factory", return_value=object()))
-        stack.enter_context(patch.object(ApplicationBinding, "from_factory", side_effect=self.bind_fixture))
-        return stack
+    @contextmanager
+    def owner_fixture(self, *, automatic=False):
+        with ExitStack() as stack:
+            if automatic:
+                # The real factory/client use only this disposable enrollment.
+                # Source permission and account responses remain fixtures.
+                from engine import provider_production_modes as owner
+                source = Path(owner.__file__).resolve().parents[1]
+                config_root = Path(self.temp.name) / "owner"
+                config = config_root / "config"
+                config.mkdir(parents=True, exist_ok=True)
+                (config / "provider_workloads.v1.json").write_bytes(
+                    (source / "config/provider_workloads.v1.json").read_bytes())
+                transport_id = "native_fabric_hermes_attended_auto_v1"
+                original = owner._APPLICATION_FABRIC_TRANSPORTS[transport_id]
+                self.assertTrue(original.qualified and original.application_allowed)
+                qualified = replace(original,
+                    base_url=f"http://127.0.0.1:{self.server.server_port}/v1")
+                stack.enter_context(patch.dict(owner._APPLICATION_FABRIC_TRANSPORTS,
+                                               {transport_id: qualified}))
+                row = {key: getattr(qualified, key) for key in owner._APPLICATION_IDENTITY_FIELDS}
+                row.update(transport_id=transport_id, enabled=True, application_allowed=True,
+                    qualification=owner.PROFILE_QUALIFIED_CANARY,
+                    qualification_ref="fixture:attended-auto", qualified_until=time.time() + 300,
+                    route_scope={"schema": "mastermind.application_route_scope.v1", "pools": ["go"]})
+                document = json.loads((source / "config/provider_production_modes.v1.json").read_text())
+                self.assertEqual(document["application_fabric_modes"], {})
+                document["application_fabric_modes"] = {"hermes_attended_fabric": row}
+                rendered = json.dumps(document)
+                self.assertNotIn("t" * 40, rendered)
+                (config / "provider_production_modes.v1.json").write_text(rendered)
+                (config / "capability_manifest.yml").write_text(json.dumps({"capabilities": [{
+                    "capability_id": qualified.capability_id, "secret_ref": qualified.secret_ref,
+                    "kill_state": "active", "allowed_lanes": ["hermes-attended"]}]}))
+                stack.enter_context(patch.dict(os.environ,
+                    {qualified.secret_ref: "t" * 40, "MM_PROVIDER_WORKLOAD_PROFILE": "hermes_attended"}))
+                factory = owner.make_application_fabric_factory(mode_id="shared_fabric",
+                    lane="hermes-attended", root=config_root, service_mode_id="hermes_attended_fabric",
+                    workload_cfg={"workload_profile": "hermes_attended", "provider_order": ["fabric"]})
+                observed = (factory if self.route["model"] == f"{PROVIDER}/auto"
+                            else factory.with_requested_model(self.route["model"]))
+                self.auto_inspection = observed.inspect()
+                stack.enter_context(patch.object(gateway_plugin, "_original_factory", return_value=factory))
+            else:
+                stack.enter_context(patch.object(gateway_plugin, "_original_factory",
+                                                return_value=N(inspect=lambda: {"model": "model-1"})))
+                stack.enter_context(patch.object(ApplicationBinding, "from_factory",
+                                                side_effect=self.bind_fixture))
+            yield
 
     def native_agent(self, tools=None):
         from gateway.session_execution import GatewaySessionAgentMixin
@@ -126,6 +212,9 @@ class GatewayBoundTests(unittest.TestCase):
     def test_cli_resolves_registered_keyless_provider_without_placeholder(self):
         from hermes_cli.cli_agent_setup_mixin import CLIAgentSetupMixin
         from hermes_cli.runtime_provider import resolve_runtime_provider
+        from hermes_cli.models import static_catalog, get_default_model_for_provider
+        self.assertIn(f"{PROVIDER}/auto", static_catalog(PROVIDER))
+        self.assertEqual(get_default_model_for_provider(PROVIDER), f"{PROVIDER}/auto")
         cli = N(requested_provider=PROVIDER, _explicit_api_key=None, _explicit_base_url=None,
             model="model-1", provider=PROVIDER, api_mode="chat_completions", api_key=None,
             base_url=None, acp_command=None, acp_args=[], agent=None,
@@ -220,6 +309,63 @@ class GatewayBoundTests(unittest.TestCase):
             with self.scope():
                 self.fail("A closed admission was reconstructed")
 
+    def test_native_auto_uses_original_factory_and_actual_served_model(self):
+        self.route["model"] = f"{PROVIDER}/auto"
+        with self.owner_fixture(automatic=True), self.scope():
+            agent = self.native_agent()
+            result = agent.run_conversation("Reply with fixture result.", task_id="session-1")
+            self.assertEqual(result["final_response"], "Result 世界")
+            binding = self.host._scope.get()._binding
+            self.assertTrue(binding.automatic)
+            self.assertIsNone(binding.model)
+            observation = binding._owner.application_observation.document
+            self.assertEqual(observation["routing"]["selected_model"], "model-1")
+        self.assertEqual(len(self.calls), 1)
+        self.assertIsNone(self.calls[0]["payload"]["model"])
+        self.assertEqual(self.calls[0]["turn_id"], self.row["admission_id"])
+        self.assertEqual(self.closed, 1)
+
+    def test_native_exact_model_uses_the_enrolled_auto_scope(self):
+        with self.owner_fixture(automatic=True), self.scope():
+            result = self.native_agent().run_conversation("Reply with fixture result.", task_id="session-1")
+            self.assertEqual(result["final_response"], "Result 世界")
+            binding = self.host._scope.get()._binding
+            self.assertTrue(binding.automatic)
+            self.assertEqual(binding.model, "model-1")
+            routing = binding._owner.application_observation.document["routing"]
+            self.assertEqual((routing["requested_model"], routing["selected_model"]), ("model-1",) * 2)
+        self.assertEqual(self.calls[0]["payload"]["model"], "model-1")
+        self.assertEqual((len(self.calls), self.closed), (1, 1))
+
+    def test_new_auto_turn_can_change_model_with_a_new_original_admission(self):
+        self.route["model"] = f"{PROVIDER}/auto"
+        models, operations = [], []
+        with self.owner_fixture(automatic=True):
+            for model in ("model-1", "model-2"):
+                self.serving_model = model
+                with self.scope():
+                    result = self.native_agent().run_conversation("Reply with fixture result.", task_id="session-1")
+                    self.assertEqual(result["final_response"], "Result 世界")
+                    binding = self.host._scope.get()._binding
+                    models.append(binding._owner.application_observation.document["routing"]["selected_model"])
+                    operations.append(binding.operation_id)
+                if model == "model-1":
+                    self.settle()
+                    self.admit()
+        self.assertEqual(models, ["model-1", "model-2"])
+        self.assertEqual(len(set(operations)), 2)
+        self.assertEqual([call["turn_id"] for call in self.calls], operations)
+        self.assertTrue(all(call["payload"]["model"] is None for call in self.calls))
+        self.assertEqual(self.closed, 2)
+
+    def test_native_auto_label_cannot_enable_a_fixed_owner(self):
+        self.route["model"] = f"{PROVIDER}/auto"
+        with self.owner_fixture(), self.assertRaisesRegex(Exception, "hermes_fabric_auto_owner_required"):
+            with self.scope():
+                self.fail("A native model label granted AUTO enrollment")
+        self.assertEqual(self.bind_calls, [])
+        self.assertEqual(self.calls, [])
+
     def test_current_native_stop_blocks_followup_without_another_model_call(self):
         with self.owner_fixture(), self.scope():
             agent = self.native_agent()
@@ -312,6 +458,44 @@ class GatewayBoundTests(unittest.TestCase):
         self.assertEqual((len(self.calls), self.closed), (1, 1))
 
 
+    def test_agent_construction_preserves_the_home_profile_and_catalog(self):
+        from providers import bound_profile_resolver
+        profile = bound_profile_resolver()(PROVIDER)[0]
+        catalog = profile.picker_catalog
+        with self.owner_fixture(), self.scope():
+            self.native_agent()
+            self.native_agent()
+        self.assertIs(bound_profile_resolver()(PROVIDER)[0], profile)
+        self.assertIs(profile.picker_catalog, catalog)
+        self.assertEqual(self.calls, [])
+
+    def test_catalog_is_home_scoped_and_native_unload_restores_its_slot(self):
+        from providers import bound_profile_resolver
+        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        profile = bound_profile_resolver()(PROVIDER)[0]
+        catalog = profile.picker_catalog
+        with self.owner_fixture():
+            self.assertEqual(catalog(), ["model-1"])
+            token = set_hermes_home_override(Path(self.temp.name) / "another-home")
+            try:
+                self.assertEqual(catalog(), [])
+            finally:
+                reset_hermes_home_override(token)
+        self.registrations[-1].dispose()
+        self.assertIsNone(profile.picker_catalog)
+        self.assertEqual(catalog(), [])
+        self.assertTrue(self.source_owners[0].closed)
+        self.assertEqual(self.calls, [])
+
+    def test_source_change_revokes_followup_and_preserves_original_close(self):
+        with self.owner_fixture(), self.scope():
+            agent = self.native_agent()
+            self.assertEqual(agent.run_conversation("First.", task_id="session-1")["final_response"], "Result 世界")
+            self.source_owners[0].current = False
+            result = agent.run_conversation("Late.", task_id="session-1")
+            self.assertNotEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual((len(self.calls), self.closed), (1, 1))
+
     def test_native_plugin_loader_registers_and_unloads_real_entrypoint(self):
         from hermes_cli.plugins import PluginManager
         from hermes_cli.plugins_manifest import parse_manifest_file, manifest_key
@@ -319,6 +503,7 @@ class GatewayBoundTests(unittest.TestCase):
         directory = Path(gateway_plugin.__file__).parent / "gateway_plugin_entry"
         manifest = parse_manifest_file(directory / "plugin.yaml", directory, "user", "")
         self.assertIsNotNone(manifest)
+        self.assertEqual(set(manifest.python_dependencies), {"jsonschema==4.26.0", "PyYAML==6.0.3"})
         manager = PluginManager(scope_key=str(get_hermes_home()))
         try:
             manager._load_plugin(manifest)

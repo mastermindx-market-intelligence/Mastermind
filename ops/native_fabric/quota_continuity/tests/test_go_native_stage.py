@@ -129,6 +129,8 @@ def test_native_module_namespace_restores_the_exact_foreign_owner(monkeypatch):
 def before_extended_host_pull_epoch(manifest):
     """Reconstruct an exact historical test image; never validate an extended base."""
     historical_by_current = {
+        "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f": "59e99bc523a627e72b5df97e37c9765eebe61480981b801ab6b9b4165ac469d0",
+        "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af": "8443024b1ad7982ea66747f409b27b0e69abec20af15d662854862a679a781ec",
         "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2": "acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c4677ad6cfe87f5aa8c8",
         "38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44": "7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61",
     }

@@ -5828,17 +5828,25 @@ class ExecutiveControlService:
             from common import workspace_project_archive_contract as project_archive_wire
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
+            from common import workspace_model_configuration_contract as model_configuration_wire
             from common import workspace_host_observation_contract as host_observation_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, model_configuration_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+                    ceiling = model_configuration_wire.MAX_RESPONSE_BYTES
+                    try:
+                        model_configuration_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == byok_wire.FRAME_SCHEMA:
                     ceiling = byok_wire.MAX_RESPONSE_BYTES
                     try:
                         byok_wire.validate_frame(parsed)
@@ -6088,6 +6096,10 @@ class ExecutiveControlService:
                         result = await factory(self._require_runtime()).handle_frame(parsed)
                     except Exception:
                         result = workspace_error("source_unavailable", 503)
+                if (parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA
+                        and (self._ceo_ingress_app_binding is not app_binding
+                             or app_binding.workspace_read_provider_factory is not factory)):
+                    result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 try:

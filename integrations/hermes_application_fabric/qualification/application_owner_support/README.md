@@ -107,3 +107,19 @@ authority checks against the resulting published source, plus required CI.
 Only then may the original release/enrollment owners proceed under their
 existing controls. No account authentication refusal, runtime hold, or uncertain
 effect is cleared by this source-support proposal.
+
+## Composed attended AUTO source
+
+`attended-auto-current.json` binds Macro25ba92bb52120fae550b54c29f82929c0b77d37b
+and its actual four qualification postimages through the same committed-source
+exporter. `--composed-owner-source` validates that contract, retains all original
+unchanged inputs, applies no patch and never overrides actual source-support
+flags. It adds attended AUTO/exact conversations to the original fixed,
+Secretary and meta-CEO native suites (27 cases). Historicala577 proposal/fixture
+and accepted12efe contexts retain their own pins, contracts and21-case receipts.
+The new mode is source qualification; runtime enrollment remains absent.
+
+The current original Macro carrier contains the attended AUTO contribution fff0025.
+Its four support postimages and all preserved input blobs are unchanged. The
+current source archive is rebuilt from 25ba92bb through the existing artifact
+owner; earlier fff receipts retain their original source identity.

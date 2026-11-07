@@ -1,5 +1,38 @@
 # Hermes primary inference through APPLICATION Fabric
 
+## Historical APPLICATION v10 composition at 12f57f41
+
+This section records the earlier H4 source join. Its runtime and patch hashes,
+Macro adoption state and proof counts are historical; the installed-source
+qualification and current source inputs below supersede them.
+
+That contribution consumed original #2175 at72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0.
+Its fourteen nonoverlapping changed blobs are retained unchanged; the sole shared
+identity-review registry is composed against552 from both complete sources. All
+edit spans are disjoint, the independent line composition matches Git's merge,
+and every published review entry is retained. The resulting registry blob is
+97b9b771664b978d19a0f60e7dfbfeaea47f76f3. No held implementation was read or rewritten.
+
+This also consumes the original owner's structured-provenance correction for
+the anonymous-Macro-read guard failure observed in887f general CI. The guard and
+its exemptions remain unchanged. Original v10 enrollment, namespace-isolation
+fixtures and the existing enrollment workflow are adopted intact. Current-head
+qualification remains required; the nine successful887f inference jobs do not
+claim execution of this newer native owner.
+
+The primary runtime c8bb8e02 and native patch0029f3c8 are unchanged. The exact
+four-file Macro support proposal has a qualified receiving-contribution return
+ata43c7c2c with383 passed cases and matching postimages. Final-carriercd2ba479 has
+not yet incorporated it. The existing Macro job also has a prepared two-line
+selection/trigger addition for the new93-case module; [original-owner return](https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6709710657).
+
+[Exact composition and prior proof](../../review_evidence/hermes_primary/application-v10-join-20261107.json)
+retain source attribution. Original protected release, actual service/enrollment,
+account qualification and primary/tool/usage/budget/recovery acceptance remain
+separate required receipts. The H6/v10 production-source join remains with its
+original active owner; the earlier87cc/887f registry proposal is only for those
+older exact inputs.
+
 [Canonical programme](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6695933514).
 Operation: hermes-primary-fabric-inference-20261106-sol-01.
 Compatible governing pin: e4bfd5efccc9df4d42fafedd1a75ca730de04f54.
@@ -9,8 +42,8 @@ Current composition, exact source/dependency inputs and installation predicates:
 [release inputs](RELEASE_INPUTS.md). The current branch also consumes the original
 attended #2166 source, with a native route-marker repair that keeps ordinary CLI
 turns and held secretary/meta-CEO turns on their original admission paths.
-Its fixed attended service remains held until the APPLICATION owner qualifies
-that dedicated relation. Prior installed/fixture receipts retain their exact
+Fixed and automatic attended source support is qualified in the original owner;
+actual service enrollment, installed generation and live acceptance remain owed. Prior installed/fixture receipts retain their exact
 source attribution; they are not current production acceptance.
 
 ## Implemented path
@@ -35,10 +68,11 @@ plane. Provider credentials never enter Hermes.
 | [Mastermind #2166](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166) | Original ordinary attended gateway/plugin and exact native-core extension, consumed without overwriting newer shared runtime code. |
 | [Mastermind #2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175) / [Macro #10740](https://github.com/mastermindx-market-intelligence/macro/pull/10740) | Existing final APPLICATION composition and provider/request/lease/settlement ownership. |
 
-The protected Brain consumer and attended-worker package remain unchanged.
-Hermes model production code remains unchanged; its stale catalog test is
-adopted verbatim from the quiescent #2180 owner, with provenance recorded in
-QUALIFICATION.md. Native worker delegation #2147 stays separate.
+The ordinary worker adapter continues through the existing Subagent Fabric owner.
+The complete attended package, managed model picker, home-scoped registration and
+sealed installed Macro projection are described in [attended installation](ATTENDED_INSTALLATION.md).
+The upstream core extension remains an exact reviewed patch, with release and
+installation separate from source qualification.
 
 ## Qualified native behavior
 
@@ -192,3 +226,30 @@ Fabric account, observed model/account/usage, budget denial and original-result
 recovery without duplicate effects. Keep the proposals held until those owner
 conditions are satisfied.
 
+
+## Ordinary attended AUTO selection
+
+After the ordinary plugin installation, its declared native dependencies and the
+original APPLICATION service enrollment are present, select AUTO for one session:
+
+```text
+/model mastermind-fabric/auto --provider mastermind-fabric --tui-session
+```
+
+The existing profile configuration can also select `provider: mastermind-fabric`
+and `default: mastermind-fabric/auto`. This is an explicit profile choice. It does
+not enroll a service or qualify an account. The original attended automatic
+transport is `native_fabric_hermes_attended_auto_v1`; it shares the original
+attended service identity and uses that service's qualified route scope.
+
+A concrete model selection under an AUTO enrollment narrows the existing owner
+before its inspection is frozen. A fixed enrollment refuses the AUTO label.
+A new admitted turn may choose another eligible route; one admitted turn and
+its tool continuations keep their bound route and original operation identity.
+Unknown effects never authorize a replacement request.
+
+The native inventory and TUI consume the current home-bound catalog, present
+eligible managed models without API-key prompts, and keep held/retired profiles
+unavailable. The buildable package and sealed source closure are implemented and
+qualified through the existing PM and release owners; actual selected installation
+and live account acceptance remain separate. See [attended installation](ATTENDED_INSTALLATION.md).

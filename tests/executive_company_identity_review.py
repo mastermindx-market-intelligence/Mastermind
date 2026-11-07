@@ -28,23 +28,71 @@ REVIEWED_ANCHORS = {
     # The complete ingress-method AST binds its admission, source selection
     # and release-time permission checks; a change to any of them invalidates
     # all three status sites without changing the historical Company record.
-    "_handle_ceo_ingress_connection": {
-        "node_type": "AsyncFunctionDef",
-        # Existing section-sign/em-dash prose needs an exact full-source pin
-        # in addition to the method AST; all three literal lines are ASCII.
-        # Selected-child App-peer admission changes the enclosing ingress AST.
-        # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "14f94ba9fed9378d3d05b6c99f81e5eda23ca0da7d242a81228b0cf16b374017",
-        "ast_sha256": "d3a6f3851c6ec7383739c3ad962c8fdaa8b7710d3668f112d53aeafd24e05745",
-        "sites": (
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
-        ),
-    },
+    "_handle_ceo_ingress_connection": {'node_type': 'AsyncFunctionDef',
+ 'source_sha256': '0c62c1f8cf397f27ae22dcfc2aa6eec92753e63978f50991e882f764a8874ed6',
+ 'ast_sha256': '7d8a2a072164cde3275f7e18f97eb6b96a0d2cdfe31242093daf07b858d036e3',
+ 'sites': ((('body',
+             3,
+             'body',
+             58,
+             'body',
+             3,
+             'orelse',
+             0,
+             'body',
+             2,
+             'body',
+             0,
+             'value',
+             'args',
+             1),
+            'int',
+            403,
+            '403'),
+           (('body',
+             3,
+             'body',
+             58,
+             'body',
+             3,
+             'orelse',
+             0,
+             'body',
+             2,
+             'orelse',
+             0,
+             'body',
+             4,
+             'body',
+             0,
+             'value',
+             'args',
+             1),
+            'int',
+            403,
+            '403'),
+           (('body',
+             3,
+             'body',
+             58,
+             'body',
+             3,
+             'orelse',
+             0,
+             'body',
+             2,
+             'orelse',
+             0,
+             'handlers',
+             0,
+             'body',
+             0,
+             'value',
+             'args',
+             1),
+            'int',
+            503,
+            '503'))},
 }
 
 # BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
@@ -80,3 +128,14 @@ REVIEWED_ANCHORS = {
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
+
+# H5 joins protected779fc3be: exact Company listener and Fabric response subtree
+# remain AST-identical; only the composed full-source and ingress pins change.
+
+# H6 joins current552 and H5 at exact source. The complete original Fabric
+# response subtree and Company listener AST are unchanged; only enclosing
+# source/method identity and mapped positions are requalified.
+
+# EVAL/current-primary composition preserves the complete Company listener and
+# Fabric response subtree. Only enclosing source/AST pins and mapped positions
+# change; the same six literals remain the entire reviewed allowance.

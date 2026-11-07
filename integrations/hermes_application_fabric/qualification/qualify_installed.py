@@ -76,7 +76,7 @@ def main():
 
     openai.OpenAI, openai.AsyncOpenAI = ForbiddenOpenAI, ForbiddenAsyncOpenAI
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421", "owner_source_verified": True,
+        "owner": "25ba92bb52120fae550b54c29f82929c0b77d37b", "owner_source_verified": True,
         "owner_verification_scope": "client_bytes_only",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
@@ -92,7 +92,7 @@ def main():
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and result.testsRun == 85 and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 87 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":

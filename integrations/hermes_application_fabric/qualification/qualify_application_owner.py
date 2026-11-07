@@ -21,11 +21,12 @@ from unittest.mock import patch
 
 
 def qualify(args):
-    from owner_source_support import CURRENT_OWNER_COMMIT, OWNER_COMMIT
-    source_context = ("committed_current" if args.current_owner_source else
+    from owner_source_support import COMPOSED_OWNER_COMMIT, CURRENT_OWNER_COMMIT, OWNER_COMMIT
+    source_context = ("committed_attended_auto" if args.composed_owner_source else
+                      "committed_current" if args.current_owner_source else
                       "historical_proposal" if args.source_support_proposal else
                       "historical_fixture")
-    uses_source_flags = args.current_owner_source or args.source_support_proposal
+    uses_source_flags = args.composed_owner_source or args.current_owner_source or args.source_support_proposal
     roots = {name: Path(getattr(args, name)).resolve()
              for name in ("adapter_root", "macro_root", "native_owner_root", "hermes_root")}
     candidate = subprocess.run(
@@ -34,7 +35,8 @@ def qualify(args):
     ).stdout.strip()
     expected = {
         "adapter_root": candidate,
-        "macro_root": CURRENT_OWNER_COMMIT if args.current_owner_source else OWNER_COMMIT,
+        "macro_root": (COMPOSED_OWNER_COMMIT if args.composed_owner_source else
+                       CURRENT_OWNER_COMMIT if args.current_owner_source else OWNER_COMMIT),
         "native_owner_root": candidate,
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
@@ -51,10 +53,11 @@ def qualify(args):
         support = prepare(roots["macro_root"], roots["adapter_root"], args.proposal_directory)
         support["unit_qualification"] = qualify_unit(args.proposal_directory, sys.executable)
         roots["macro_root"] = args.proposal_directory
-    elif args.current_owner_source:
+    elif args.current_owner_source or args.composed_owner_source:
         from owner_source_support import prepare_current
         committed_source = prepare_current(
-            roots["macro_root"], roots["adapter_root"], args.proposal_directory)
+            roots["macro_root"], roots["adapter_root"], args.proposal_directory,
+            composed=args.composed_owner_source)
         roots["macro_root"] = args.proposal_directory
     owner_tests = roots["native_owner_root"] / "ops/native_fabric/quota_continuity/tests"
     sys.path[:0] = [str(roots["adapter_root"]), str(roots["macro_root"]),
@@ -395,10 +398,20 @@ def qualify(args):
         profile_id = "attended"
         fixed_transport = "native_go_hermes_attended_v1"
 
+    class AttendedAutoOwnerConversation(AttendedOwnerConversation):
+        route_mode = "auto"
+        automatic_transport = "native_fabric_hermes_attended_auto_v1"
+
+    class AttendedExactOwnerConversation(AttendedAutoOwnerConversation):
+        route_mode = "exact"
+
+    contexts = (OriginalOwnerConversation, AutoOwnerConversation, ExactOwnerConversation,
+                AttendedOwnerConversation, MetaOwnerConversation,
+                MetaAutoOwnerConversation, MetaExactOwnerConversation)
+    if args.composed_owner_source:
+        contexts += (AttendedAutoOwnerConversation, AttendedExactOwnerConversation)
     suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(cls)
-        for cls in (OriginalOwnerConversation, AutoOwnerConversation, ExactOwnerConversation,
-                    AttendedOwnerConversation, MetaOwnerConversation,
-                    MetaAutoOwnerConversation, MetaExactOwnerConversation))
+                              for cls in contexts)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({"sources": expected, "source_context": source_context,
         "source_support_proposal": support, "committed_owner_source": committed_source,
@@ -408,7 +421,7 @@ def qualify(args):
         "blocked_external_connections": len(blocked), "provider_sdk_constructions": len(constructed),
         "real_application_handler": True, "real_broker": True, "provider_is_fixture": True,
         "live_provider_acceptance": False, "monetary_acceptance": False}), flush=True)
-    return 0 if (result.wasSuccessful() and result.testsRun == 21 and not result.skipped
+    return 0 if (result.wasSuccessful() and result.testsRun == (27 if args.composed_owner_source else 21) and not result.skipped
                  and not blocked and not constructed) else 1
 
 
@@ -421,6 +434,7 @@ def main():
     context = parser.add_mutually_exclusive_group()
     context.add_argument("--source-support-proposal", action="store_true")
     context.add_argument("--current-owner-source", action="store_true")
+    context.add_argument("--composed-owner-source", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="hermes-owner-support-") as temporary:
         args.proposal_directory = Path(temporary) / "macro"
