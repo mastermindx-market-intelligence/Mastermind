@@ -1,0 +1,71 @@
+{
+  "additional_pytest_subtests_passed": 30,
+  "base_commit": "885b5a4597cd1d71082313309531d1f709ecaf60",
+  "baseline": {
+    "actual_scorer_defects": [
+      {
+        "code": "DUPLICATE_ARTIFACT_DIGEST",
+        "path": "$.input.authorized_sources"
+      }
+    ],
+    "authorized_distinct_references": 2,
+    "classification": "Reproduced consumer compatibility gap; historical v1 input semantics must be preserved with an explicit new input version.",
+    "distinct_content_digests": 1,
+    "existing_graph_verification_passed": true,
+    "fixture_schema": "mastermind.hermes_memory_grounding_input.v1",
+    "run_schema": "mastermind.agent_evaluation_run.v3",
+    "run_validity": "VALID",
+    "scenario_schema": "mastermind.agent_evaluation_scenario.v2",
+    "schema": "mastermind.memory_grounding_compatibility_baseline/v1",
+    "source_sha256": "b2dd63602910983d31c3e06a9fad16f026b77b4eb66c0bc43f0cf208e0e5f0f8"
+  },
+  "baseline_receipt_sha256": "c6d16001fa6a3b58ae937a1512c48bc99187be784ca53b207469774596d4956d",
+  "changes": [
+    "Add explicit mastermind.hermes_memory_grounding_input.v2 with the same closed fields; select incumbent v_source_artifact_list only for that exact version.",
+    "Input v1 keeps historical distinct-digest semantics and remains compatible with Scenario v2 when its sources are unique. No automatic migration is inferred from a run label or duplicate values.",
+    "The retained-evidence builder permits input v2 only after binding to validated Scenario v2; input v2 with Scenario v1 refuses even when digests are distinct.",
+    "Exact source reference/digest membership, model visibility, hidden gold, raw-byte binding and original-effect vocabulary remain controlling.",
+    "Existing scorer-pass schema, scorer ID and six dimensions are preserved; input v2 uses scorer_version 2 in the existing configuration digest, while input v1 stays version 1.",
+    "Generic EVAL contracts, native producer, ArtifactStore, run validity and learning promotion owners are unchanged."
+  ],
+  "covered_journeys": [
+    "Actual Runv3/Scenario v2 to existing score envelope and graph resolution with two authorized same-byte sources",
+    "Correct words with wrong authorized source or unlisted same-byte alias fail source identity",
+    "Unlisted/mismatched source pairs, hidden or nonvisible sources, duplicate or unsorted references refuse",
+    "Historical/new fixture and scenario version boundaries remain explicit",
+    "Unavailable model/session evidence, partial coverage, unknown effect and unproven cleanup remain invalid despite passing answer dimensions",
+    "Rehashed forged VALID is rejected by the incumbent graph verifier; missing output produces no score",
+    "Exact retained input/expected/output bytes, hidden expected answer and original unknown-effect reconciliation remain required"
+  ],
+  "limits": [
+    "All cases use synthetic producer facts; no live recall, real inference, learned skill, protected skill publication or measured efficacy is claimed.",
+    "Generic score graph verification binds the original run but does not recompute these custom dimensions. Exact raw artifacts and source-qualified scorer reruns remain necessary.",
+    "Source compatibility is not corpus enrollment, complete native producer evidence, an admitted production refinement lifecycle or installed acceptance.",
+    "Committed-head release and ownership gates are attributed to the resulting commit separately."
+  ],
+  "problem": "The valid native Runv3/Scenario v2 source-identity contract permits distinct source references with identical bytes, but the existing grounding input v1 rejects duplicate digests. The compatibility defect is reproduced after successful existing run graph verification.",
+  "proof": {
+    "elapsed_seconds": 2.812,
+    "errors": 0,
+    "failed_names": [],
+    "failures": 0,
+    "junit_sha256": "3d59fa1668a9789cc34efe9a762062d004b9b3a537721b93fa6570aee30fa10d",
+    "log_sha256": "6e424a63599d01bb138b425dd02a21a85d956287a78b581d52fd6ded9470dd70",
+    "phase": "native-memory-grounding-v2-input",
+    "returncode": 0,
+    "schema": "mastermind.source_test_receipt/v1",
+    "selected_cases": 36,
+    "selectors": [
+      "tests/test_agent_eval_hermes_memory_grounding.py"
+    ],
+    "skipped": 0,
+    "source_qualification": {
+      "docs/hermes/MEMORY_LEARNING_QUALIFICATION.md": "9c0aebde258609c6c0a8215269a45ed2960005ca52bdc860e5fedeba21a8ab6c",
+      "scripts/agent_eval/hermes_memory_grounding.py": "8d0c4080eec948cb0eaed51e95504fd84db99a71b7765c3b5ef42384301a9881",
+      "tests/test_agent_eval_hermes_memory_grounding.py": "391b9e6b16611d00295c2b7fdd004b6f185c62bee1e6794e5c3dbc6a72db4772"
+    },
+    "source_stable": true
+  },
+  "proof_receipt_sha256": "be3ea209f6f5b69aab256cc95c70377e9b1493e3e5784d2a52b3d7dd51848730",
+  "schema": "mastermind.hermes_memory_grounding_native_source_pair_proof/v1"
+}

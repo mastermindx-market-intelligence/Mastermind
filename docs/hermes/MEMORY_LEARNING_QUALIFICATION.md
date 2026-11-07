@@ -69,9 +69,34 @@ The expected object has schema
 | `next_action` | `{kind, operation_ref}`; closed expected action vocabulary |
 
 The visible input object has schema
-`mastermind.hermes_memory_grounding_input.v1`, plus `scope`,
-`authorized_sources` (the existing sorted, unique artifact-pair list), and
-`original_effect`. This is a fixture inventory, never a new permission grant.
+`mastermind.hermes_memory_grounding_input.v1` or
+`mastermind.hermes_memory_grounding_input.v2`, plus the same `scope`,
+`authorized_sources` and `original_effect` fields. This is a fixture inventory,
+never a new permission grant.
+
+Input v1 retains the historical artifact-list contract: references and digests
+must both be unique. Input v2 uses the existing versioned source-list contract:
+references must be sorted and unique, while two distinct references may identify
+identical bytes. Full `{artifact_ref, digest}` identity still governs expected
+source selection, scenario allowlisting, visibility and hidden-source refusal.
+An authorized digest cannot authorize another reference.
+
+| Grounding input | Validated scenario | Result |
+|---|---|---|
+| v1 | Scenario v1 | Historical behavior; distinct digests required |
+| v1 | Scenario v2 | Historical behavior remains supported |
+| v2 | Scenario v2 | Source pairs may share content digests |
+| v2 | Scenario v1 | `INPUT_SCENARIO_SCHEMA_MISMATCH`, even with distinct digests |
+| Unknown version | Any | Closed-schema refusal |
+
+The pure structured diagnostic recognizes either explicit input version. The
+retained-evidence builder enforces the scenario binding after its existing
+run-graph and raw-byte checks. It never selects a version from duplicate values,
+a run label or a caller flag. Expected-contract and submission schemas remain
+v1, and the existing scorer-pass envelope remains v1. Input v1 emits scorer
+version `1`; input v2 emits scorer version `2`, bound into the existing scorer
+configuration digest. The six dimensions and scorer ID stay unchanged. The
+outer three-artifact evidence list retains its historical distinct-digest rule.
 
 The model answer has schema
 `mastermind.hermes_memory_grounding_submission.v1`, plus `scope`, `fact`,
@@ -108,7 +133,7 @@ heuristic in this module.
 python -m unittest -v tests.test_agent_eval_hermes_memory_grounding
 ```
 
-The 22 public synthetic tests exercise corrected/obsolete facts and sources,
+The original 22 public synthetic tests exercise corrected/obsolete facts and sources,
 foreign scope, wrong operation, retry/failover, authority claims, omitted and
 malformed evidence, duplicate JSON keys, byte mismatches, scenario substitution,
 input immutability, exact existing pass construction and validity recomputation.
@@ -116,6 +141,20 @@ An invalid served-model receipt remains invalid even when its structured answer
 passes; a forged validity block is rejected. These tests are automatically
 collected by the existing repository test path. They do not demonstrate live
 recall, an improved model, a trained skill, or production acceptance.
+
+The native compatibility cases enter through actual Run v3 / Scenario v2
+finalization, graph verification and this retained-evidence builder. They cover
+same-byte distinct references, wrong and unauthorized aliases, visibility and
+hidden sources, historical/new version boundaries, missing output, truthful
+incomplete/unknown-effect runs, forged validity, hidden gold and exact byte
+binding. Synthetic complete producer facts qualify the consumer path only;
+they are not current native observations or learning-efficacy evidence.
+
+The pre-repair reproduction established a valid Run v3 / Scenario v2 graph
+whose two authorized source references shared a digest. The existing input v1
+consumer refused it with `DUPLICATE_ARTIFACT_DIGEST`. The explicit input v2 path
+closes that compatibility gap without changing the old contract or any generic
+EVAL validator, artifact store, native producer or promotion owner.
 
 ## Prospective consumer and improvement loop
 
