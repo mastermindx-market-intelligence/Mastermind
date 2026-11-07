@@ -1,0 +1,28 @@
+{
+  "change": "Use a finite one-second scheduling budget for metadata response/redaction fixtures and assert the exact expected response plus one mock call before accounting. All admission, release, redaction and shared-quota assertions remain; the shared metadata/inference exhaustion case still expects504. Production gateway, rate limits and deadline behavior are unchanged.",
+  "file": {
+    "path": "tests/test_experiential_account_metadata_proxy.py",
+    "sha256": "f31e1bcfa4285ea9d3d4f5f70d4ed9cc4c2cfc7bbf27ebeda69be35c15a5f12f"
+  },
+  "observed_failure": {
+    "assertion": "shared_used_in_window was0; expected1",
+    "job": 128439996748,
+    "run": 42384692658,
+    "test": "test_metadata_refuses_invalid_or_unsafe_provider_reply[refusal-/api/v1/key]",
+    "uncertainty": "The prior assertion order hid the actual response and mock-call count. A pre-admission40ms deadline is supported by source but was not captured as the actual hosted cause."
+  },
+  "production_acceptance": false,
+  "proof": {
+    "log_sha256": "90a2e876b6b3d919e661dcbae1714b1b48d5a23bfedc37beb33d1d1183265007",
+    "seconds": 3.827,
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 71
+    },
+    "xml_sha256": "e9c5398a47151f3f713e16f82762ca147e82095266168360daad5e181dbf8fa5"
+  },
+  "schema": "mastermind.fabric_application.metadata_fixture_scheduling.v1",
+  "source_parent": "247c872aec77e795846dbaa9b3cdad6c14e71344"
+}
