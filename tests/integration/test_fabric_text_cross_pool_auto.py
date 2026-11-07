@@ -29,7 +29,7 @@ _spec.loader.exec_module(_helpers)
 PINS = {
     "candidate/lease_broker.py": "3c1360866b6a4fcdc2f9d72732d0439361e3d0c7",
     "candidate/go_lease_gateway.py": "9a30985f744be11b8ce3f2514baef5b494b4471a",
-    "candidate/go_shim.py": "969ffaf84e23ef2d1c0398761943093c9b5c9456",
+    "candidate/go_shim.py": "e2cadef511ae5ecd70b1c24ec35a21113bb873ea",
     "tests/test_application_cross_pool_auto.py": "a4844fa37548f31027b5041c35e540cd50e51ce3",
 }
 
