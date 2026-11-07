@@ -2,12 +2,14 @@
 
 This optional source profile starts from the complete sequence-37 generation
 `9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4`.
-It preserves all 116 payload names and changes two payloads: `ext/lease_broker.py`
+It preserves all 116 payload names and changes three payloads: `ext/lease_broker.py`
 adds the two previously reviewed static qualification/maintenance guard methods;
 `ext/pick.py` applies the fixed-parent remote-placement patch from component
 `7b1ba72f1a7159ea04278e7901f4cdd4ffc2304f`. It excludes exactly the two local-only
 plan pools from remote validation while preserving ordinary remote eligibility
-and the separate AUTO class/consent rules. The other 114 payloads stay exact.
+and the separate AUTO class/consent rules. `ext/remote_sub_exec.py` carries the previously reviewed command-scoped sparse
+Git warning suppression while retaining every current APPLICATION definition and
+strict stderr/config/read-only guard. The other 113 payloads stay exact.
 Every incumbent Broker method, application-native recipe/invocation/recovery and
 release check, module global and CLI remains unchanged. The ordinary provider-plan
 profile and its default composition remain unchanged. Both patches use the same

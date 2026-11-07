@@ -68,13 +68,13 @@ def without_guards(raw):
     return dump(tree), added
 
 
-def test_actual116_composition_preserves_every_incumbent_definition_and114_payloads(base, tmp_path):
+def test_actual116_composition_preserves_every_incumbent_definition_and113_payloads(base, tmp_path):
     target = tmp_path / "guarded"
     result = compose.compose(base, target, profile_name=PROFILE)
     profile = json.loads((compose.HERE / "maintenance_guard/profile.json").read_text())
     before, after = profile["base_files"], profile["files"]
     assert len(before) == len(after) == 116
-    assert {p for p in before if before[p] != after[p]} == {"ext/lease_broker.py", "ext/pick.py"}
+    assert {p for p in before if before[p] != after[p]} == {"ext/lease_broker.py", "ext/pick.py", "ext/remote_sub_exec.py"}
     for name, expected in after.items():
         assert sha((target / name).read_bytes()) == expected
     old_ast, old_guards = without_guards((base / "ext/lease_broker.py").read_bytes())
@@ -134,7 +134,7 @@ def test_wrong_cohort_or_nonregular_source_refused_before_output(base, tmp_path,
     assert not target.exists()
 
 
-@pytest.mark.parametrize("patch_name", ["maintenance_guard/lease_broker.py.patch", "patches/pick_remote_plan_modes.forward.patch"])
+@pytest.mark.parametrize("patch_name", ["maintenance_guard/lease_broker.py.patch", "patches/pick_remote_plan_modes.forward.patch", "maintenance_guard/remote_sub_exec.py.patch"])
 def test_changed_patch_refused_before_output(base, tmp_path, monkeypatch, patch_name):
     source = tmp_path / "source"
     shutil.copytree(compose.HERE / "maintenance_guard", source / "maintenance_guard")

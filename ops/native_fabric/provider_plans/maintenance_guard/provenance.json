@@ -5,7 +5,8 @@
   "broker_pre_plan_sha256": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
   "composition_changed_paths": [
     "ext/lease_broker.py",
-    "ext/pick.py"
+    "ext/pick.py",
+    "ext/remote_sub_exec.py"
   ],
   "first_profile_commit": "7bc8a208d5cf867fcc269d9c049d53e52445347b",
   "guard_method_ast_sha256": {
@@ -18,5 +19,12 @@
   "picker_patch_sha256": "7da90e717876c1a965b9c146298577723b733ea5e5ccec163c6269fa89e919a2",
   "runtime_effects_performed": false,
   "schema": "mastermind.current116_guard_source_provenance.v1",
-  "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b"
+  "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "sparse_git_compatibility": {
+    "accepted_common_executor_sha256": "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281",
+    "accepted_source_commit": "fafa1c9a084dcd48489f6a0d6a2c193c11b9e479",
+    "change": "Append exact command-scoped advice.sparseIndexExpanded=false; all other module AST unchanged",
+    "preserving_executor_sha256": "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
+    "selected_executor_sha256": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+  }
 }
