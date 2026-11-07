@@ -125,7 +125,9 @@ creates, sends, or automatically recovers. The explicit **Check previous request
 uses the original tuple:
 
 - Create: upstream `hermes_state_keys.local_identity(profile, uid, request_id)` locates
-  the original session; only `session.resume` is called. A missing session stays held.
+  the original session. `SessionDB(read_only=True)` must contain the exact committed
+  creation receipt and qualified owned history; recovery does not call `session.resume`.
+  Missing or mismatched receipt/history evidence leaves the original request held.
 - Send: upstream `SessionDB(read_only=True)` and `find_session_admission` locate the
   exact original `(principal_id, target_session_id, request_id)` in Hermes's ledger.
   The adapter then reads that admission through the existing gateway's `prompt.receipt`
@@ -381,7 +383,8 @@ Paperclip organization view:
   No transcript mirror, owner, SQL index or migration is introduced.
 - Original-create recovery now requires its committed exact creation receipt.
   A deterministic name without that receipt remains uncertain. List, read and
-  create recovery do not open a gateway connection or attach a viewer.
+  create recovery first perform private-control runtime identification, then use
+  read-only `SessionDB` access. They issue no session RPC and attach no viewer.
 - Stored snapshots expose live running/prompt state as unobserved and no live
   tool permission. The explicit “Check and send message” action attaches to the
   same native owner with `session.resume(omit_messages=True)`, checks live
