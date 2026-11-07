@@ -94,7 +94,11 @@ try {
   report.steps.push('isolated gateway ready; native one-use launch link acquired without logging it')
   browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', hasTouch: true, reducedMotion: 'reduce' })
-  await context.addInitScript(() => localStorage.setItem('hermes.desktop.pluginDecisions.v2', JSON.stringify({ 'mastermind-mobile': true })))
+  await context.addInitScript(expectedOrigin => {
+    // An intentionally offline reload can show a browser error document with
+    // inaccessible storage. Never seed plugin decisions outside this fixture origin.
+    if (location.origin === expectedOrigin) localStorage.setItem('hermes.desktop.pluginDecisions.v2', JSON.stringify({ 'mastermind-mobile': true }))
+  }, origin)
   page = await context.newPage()
   const frames = []
   page.on('pageerror', error => errors.push(error.message))
