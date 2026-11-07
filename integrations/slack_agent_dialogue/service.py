@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import contextlib
+import dataclasses
 import errno
 import inspect
 import json
