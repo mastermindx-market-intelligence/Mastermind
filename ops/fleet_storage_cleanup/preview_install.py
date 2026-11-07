@@ -42,7 +42,11 @@ def _identity(s):
 def _owned(s, uid, directory=False):
     if (s.st_uid != uid or s.st_mode & 0o022
             or (directory and not stat.S_ISDIR(s.st_mode))):
-        raise InstallHeld("owner_or_mode")
+        refusal = InstallHeld("owner_or_mode")
+        # Reuse the stat that rejected; never observe another path or UID.
+        refusal._custody_predicates = (
+            s.st_uid == uid, bool(s.st_mode & 0o020), bool(s.st_mode & 0o002))
+        raise refusal
 
 
 def _directory(path, uid):
