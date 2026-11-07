@@ -538,14 +538,13 @@ def _read_prompt_file(path_value: Any) -> str:
 def _reserve_native_send(context, model, run_id, root, packet_root, prompt_file):
     """Bind the sole send to the original native lease and durable run."""
     import os
-    from glm_bound_claude import validate_local_lease
-    from native_plan_worker import original_request
+    from native_plan_worker import original_request, validate_plan_lease
     env = dict(os.environ)
     if (env.get("LANE_LEASED") == "1" or env.get("POOL_RUN_ID") != run_id
             or env.get("POOL_ORCHESTRATOR_ID") != root):
         _refuse("PLAN_ORIGINAL_IDENTITY_MISMATCH")
     try:
-        account = validate_local_lease(env, model, expected_pool=POOL)
+        account = validate_plan_lease(env, model, expected_pool=POOL)
         if account != context.get("account"):
             _refuse("PLAN_SELECTED_ACCOUNT_MISMATCH")
         original_request(POOL, model, packet_root, prompt_file, env, reserve=True)

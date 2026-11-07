@@ -3,7 +3,7 @@
 This profile adds two explicit providers to the incumbent native Fabric. It
 composes over selected M2 generation `ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46`
 (sequence 35), preserves all 107 original files, and adds nine source-owned
-dependencies. Seven existing files receive exact preimage/postimage patches.
+dependencies. Six existing files receive exact preimage/postimage patches.
 
 ## Request policy
 
@@ -29,8 +29,9 @@ never changes model, retries, or falls through to another paid model.
 - Existing `slot.py` now acquires a physical `LaneLease` for these two local pools,
   then its normal provider flock, Broker lease, heartbeat and child supervisor.
 - Existing `accounts.yaml` owns account registration and operator concurrency.
-- Existing `glm_bound_claude.validate_local_lease` validates exact pool, account,
-  model, root, active state and expiry. Its GLM default is unchanged.
+- The new-provider validation adapter reads the exact original Broker account,
+  pool, model, root, state and expiry. The separately sealed GLM helper remains
+  byte-identical.
 - The one-shot send reserves the original `.task-cli-started.json` artifact.
   A restart cannot send that run again.
 - `native_plan_worker.py` composes the existing owned-process receipt, provider

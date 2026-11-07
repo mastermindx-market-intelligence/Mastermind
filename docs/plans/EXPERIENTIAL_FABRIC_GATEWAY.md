@@ -151,10 +151,10 @@ An eligible Capacity/Subagent Fabric task can consume the actual subscribed plan
 
 | ID | Depends | Action and completion evidence | Editorial state |
 | --- | --- | --- | --- |
-| P5.T1 | P2.T4 | Reconcile the merged gateway/adapter, actual installed configuration, original account holds, official API/model/usage contract and current plan ownership; persist nonsecret observations | in_progress |
-| P5.T2 | P5.T1 | Extend existing plan/catalog/admission owners only where gaps are demonstrated; preserve free/paid classes, all quota windows, shared physical-account identity, multi-plan expansion, stale/unknown refusal and no PAYG fallback; focused executable cases | ready |
-| P5.T3 | P5.T2 | Enroll the supplied credentials through the existing private owner, observe real catalog/usage and qualify one bounded provider path without exposing keys or disturbing an original denied/uncertain operation | proposed |
-| P5.T4 | P5.T3 | Publish qualified source, consume required CI/protected release, integrate the actual selected generation and prove a real admitted Fabric result with accounting and parent consumption | proposed |
+| P5.T1 | P2.T4 | Reconcile existing owners and official provider contracts; authenticated Experiential organization/wallet/catalog observed, BytePlus management telemetry remains UNKNOWN | complete |
+| P5.T2 | P5.T1 | Implement native request/lease/result integration, free/paid policy, shared subscription scope and no PAYG fallback; focused source tests pass, hosted CI repair is in progress | implemented; qualifying |
+| P5.T3 | P5.T2 | Both supplied credentials privately enrolled; candidate gateway metadata verified; native account/host enrollment and supported provider execution remain | in_progress |
+| P5.T4 | P5.T3 | Normal auto-merge armed; consume exact accepted source, CAS-select native generation, execute admitted workers and consume their results/accounting | in_progress |
 
 DONE_WHEN is actual supported-plan execution and result consumption with truthful remaining quota, paid-model reservation and no secret leakage. A plan, source alias, gateway health response, test pass or successful merge alone is insufficient. If a real provider/permission/credential/native-release hold applies, preserve its exact identity and complete independent source work; do not remove guards to manufacture enrollment.
 
@@ -164,10 +164,28 @@ Direct principal work is retained initially for PRINCIPAL_JUDGMENT and UNIQUE_AP
 ### P5 implementation checkpoint — November 7
 
 [P5 source and account evidence](../reports/provider-plan-integration-20261107.md)
-records the qualified gateway/Attempt policy and BytePlus projection changes.
-P5.T1 is recovered. P5.T2 has the executable gateway request guard, policy-bound
-Attempt route, correct null-cap metadata and account-scoped BytePlus observations;
-the native broker/ledger join and actual paid preference selection remain open.
-P5.T3 remains held on current provider-account controls and existing native
-enrollment/qualification. P5.T4 is not yet proven. The user journey remains open
-until an admitted real worker completes and its result is consumed.
+records the complete native integration in [PR #2220](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2220).
+P5.T1 is complete. P5.T2 implements original request custody, physical/provider
+leases, account-bound launch, single-send reservation, quota observation and
+result delivery, together with strict free/paid selection. Hosted qualification
+found a sealed GLM helper dependency; preserve those accepted bytes and validate
+new-pool leases through the read-only plan adapter.
+
+P5.T3 has enrolled both supplied credentials through private owners. The existing
+loopback gateway is running as an unselected candidate and authenticated account,
+wallet and catalog observations are recorded. The production catalog publishes
+base IDs; the documented `:free` request qualifier is validated against those IDs.
+A provisioning credential is not required to consume the supplied inference plan.
+BytePlus management SSO is separate from the supplied coding-plan inference key:
+unknown management quota remains UNKNOWN, with provider hard stops and the
+original broker/operator cap. Missing management telemetry alone does not create
+a new credential or human gate.
+
+P5.T4 is in progress: normal protected auto-merge is armed; required hosted CI,
+accepted-master publication, exact-current native selection, original-owner
+account/host enrollment and real native result consumption remain to be proven.
+The current Web review waiver governs this continuation; historical prose above
+about mandatory named independent reviewers is not a present gate unless the
+repository actually requires that approval. No review, merge, native activation
+or provider inference is inferred from this checkpoint. Continue through actual
+provider completion and lease/accounting settlement before acceptance.

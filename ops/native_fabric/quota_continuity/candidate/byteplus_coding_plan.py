@@ -179,8 +179,8 @@ def launch(cwd, model, prompt_file, turns, *, environ=None, accounts_path=None,
         raise BytePlusBindingRefused("BYTEPLUS_LOCAL_PROVIDER_LEASE_REQUIRED")
     if env.get("POOL_TASK_CLASS") not in CODING_TASK_CLASSES:
         raise BytePlusBindingRefused("BYTEPLUS_SUPPORTED_CODING_SCOPE_REQUIRED")
-    from glm_bound_claude import validate_local_lease
-    account = validate_local_lease(env, model, db_path=db_path, now=now, expected_pool=POOL)
+    from native_plan_worker import validate_plan_lease
+    account = validate_plan_lease(env, model, db_path=db_path, now=now, expected_pool=POOL)
     row = selected_account(account, accounts_path=accounts_path)
     plan, _ = _closed_account(row, now=now)
     provider_home = Path(plan.get("provider_home", ""))

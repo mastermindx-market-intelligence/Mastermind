@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import sqlite3
 import os
 from pathlib import Path
 import re
@@ -18,6 +20,52 @@ _effect_may_have_started = False
 
 HERE = Path(__file__).resolve().parent
 POOLS = frozenset({"byteplus", "experiential"})
+
+
+class PlanLeaseRefused(ValueError):
+    pass
+
+
+def validate_plan_lease(env, model, *, expected_pool, db_path=None, now=None):
+    """Read the incumbent Broker lease; this adapter cannot grant or mutate it.
+
+    The accepted GLM helper is embedded in a separately sealed initializer and
+    remains byte-identical. New pools validate the same original lease schema
+    without reinterpreting that GLM binding or accepting its remote shortcut.
+    """
+    if expected_pool not in POOLS or env.get("LANE_LEASED") == "1":
+        raise PlanLeaseRefused("PLAN_LOCAL_PROVIDER_LEASE_REQUIRED")
+    values = [env.get(key) for key in ("POOL_ACCOUNT", "POOL_LEASE_ID", "POOL_ORCHESTRATOR_ID")]
+    if any(type(value) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value)
+           for value in values):
+        raise PlanLeaseRefused("PLAN_LEASE_IDENTITY_REQUIRED")
+    account, lease_id, root = values
+    if db_path is None:
+        import lease_broker
+        db_path = lease_broker.DEFAULT_DB
+    path = Path(db_path).absolute()
+    if path.is_symlink() or not path.is_file():
+        raise PlanLeaseRefused("PLAN_LEASE_UNAVAILABLE")
+    conn = sqlite3.connect(path.as_uri()+"?mode=ro", uri=True, timeout=.25)
+    try:
+        row = conn.execute(
+            "SELECT account,pool,model,orchestrator_id,state,last_heartbeat,ttl,granted_at,renewable,purpose "
+            "FROM leases WHERE id=? LIMIT 1", (lease_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise PlanLeaseRefused("PLAN_LEASE_UNAVAILABLE")
+    found, pool, selected, owner, state, heartbeat, ttl, granted, renewable, purpose = row
+    stamp = time.time() if now is None else now
+    numeric = (stamp, heartbeat, ttl, granted)
+    if (any(type(value) not in (int, float) or not math.isfinite(value) for value in numeric)
+            or found != account or pool != expected_pool or selected != model or owner != root
+            or purpose != "WORKER" or state not in ("held", "rented") or heartbeat <= 0 or ttl <= 0
+            or not granted <= heartbeat <= stamp < heartbeat + ttl
+            or type(renewable) is not int or renewable not in (0, 1)
+            or (renewable == 0 and stamp >= granted + ttl)):
+        raise PlanLeaseRefused("PLAN_LEASE_BINDING_MISMATCH")
+    return account
 
 
 def original_request(pool, model, cwd, prompt, env, *, reserve=False):
@@ -83,7 +131,6 @@ def invoke(pool, model, cwd, prompt):
     import provider_outcome as outcome
     import lease_broker
     import pool_ledger
-    from glm_bound_claude import validate_local_lease
     from lane_runtime import load_runtime_config, parse_bounded_seconds, run_owned_process
 
     if pool not in POOLS or not Path(cwd).is_dir():
@@ -91,7 +138,7 @@ def invoke(pool, model, cwd, prompt):
     env = dict(os.environ)
     if env.get("LANE_LEASED") == "1":
         raise ValueError("PLAN_LOCAL_PROVIDER_LEASE_REQUIRED")
-    account = validate_local_lease(env, model, expected_pool=pool)
+    account = validate_plan_lease(env, model, expected_pool=pool)
     command = _command(pool, model, cwd, prompt, env)
     run, state = original_request(pool, model, cwd, prompt, env)
     config = load_runtime_config(env)

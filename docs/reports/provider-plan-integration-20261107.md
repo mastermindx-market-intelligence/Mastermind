@@ -45,7 +45,7 @@ unselected pending protected source delivery.
 - Physical admission uses the existing shared M2 lane markers. The two new pools
   do not bypass its physical ceiling, load gate, disk gate or cleanup holds.
 - The new source profile preserves all 107 selected native files and adds nine
-  source-owned dependencies. It patches seven exact native preimages and does
+  source-owned dependencies. It patches six exact native preimages and does
   not touch the active #2175 writer's checkout.
 
 ## Verification
@@ -111,3 +111,13 @@ then record consumed outputs and terminal quota receipts in this report.
 
 Public BytePlus request estimates conflict across documents. Neither set is used
 as current available capacity.
+
+Hosted CI found the existing paid initializer embeds the exact GLM helper bytes.
+The repair preserves that accepted helper byte-for-byte and validates new pools
+against the same original Broker records in the provider-plan adapter. No frozen
+initializer data or unrelated accepted runtime was regenerated.
+
+The repair passed 61 focused initializer/new-provider tests and all 83 exact
+native-stage tests that exercise the affected accepted closure. The latter
+reproduced the hosted shard-0 parent-integrity dependency and now passes with
+its sealed preimages unchanged. These are source checks, not live inference.

@@ -164,10 +164,10 @@ def run_bridge(tmp_path, monkeypatch, port, model):
     db = tmp_path / "leases.sqlite"
     now = time.time()
     with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE leases (id TEXT, account TEXT, pool TEXT, model TEXT, orchestrator_id TEXT, state TEXT, last_heartbeat REAL, ttl INT, granted_at REAL, renewable INT)")
-        conn.execute("INSERT INTO leases VALUES (?,?,?,?,?,?,?,?,?,?)",
+        conn.execute("CREATE TABLE leases (id TEXT, account TEXT, pool TEXT, model TEXT, orchestrator_id TEXT, state TEXT, last_heartbeat REAL, ttl INT, granted_at REAL, renewable INT, purpose TEXT)")
+        conn.execute("INSERT INTO leases VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                      ("fixture-lease", context["account"], "experiential", model,
-                      "fixture-root", "held", now, 300, now, 1))
+                      "fixture-root", "held", now, 300, now, 1, "WORKER"))
     monkeypatch.setitem(sys.modules, "lease_broker", SimpleNamespace(DEFAULT_DB=str(db)))
     for name, value in {"POOL_LEASE_ID": "fixture-lease", "POOL_ACCOUNT": context["account"],
                         "POOL_RUN_ID": args["run_id"], "POOL_ORCHESTRATOR_ID": "fixture-root",

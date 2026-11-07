@@ -17,7 +17,7 @@ import yaml
 CANDIDATE = Path(__file__).resolve().parents[1] / "ops/native_fabric/quota_continuity/candidate"
 sys.path.insert(0, str(CANDIDATE))
 import byteplus_coding_plan as plan
-from glm_bound_claude import BindingRefused
+from native_plan_worker import PlanLeaseRefused as BindingRefused
 
 
 def account(name="plan-one", scope="1" * 64):
@@ -96,9 +96,9 @@ def fixture_lease(tmp_path, monkeypatch, *, pool="byteplus", model="deepseek-v4.
     monkeypatch.setitem(sys.modules, "lease_broker", SimpleNamespace(DEFAULT_ACCOUNTS=str(registry)))
     db = tmp_path / "leases.sqlite"
     with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE leases (id TEXT, account TEXT, pool TEXT, model TEXT, orchestrator_id TEXT, state TEXT, last_heartbeat REAL, ttl INT, granted_at REAL, renewable INT)")
-        conn.execute("INSERT INTO leases VALUES (?,?,?,?,?,?,?,?,?,?)",
-                     ("lease-one", name, pool, model, "root-one", "held", 90, 30, 80, 1))
+        conn.execute("CREATE TABLE leases (id TEXT, account TEXT, pool TEXT, model TEXT, orchestrator_id TEXT, state TEXT, last_heartbeat REAL, ttl INT, granted_at REAL, renewable INT, purpose TEXT)")
+        conn.execute("INSERT INTO leases VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     ("lease-one", name, pool, model, "root-one", "held", 90, 30, 80, 1, "WORKER"))
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("Write a pure addition function.")
     env = {"POOL_ACCOUNT": name, "POOL_LEASE_ID": "lease-one", "POOL_ORCHESTRATOR_ID": "root-one", "POOL_TASK_CLASS": "fix_build",
@@ -152,3 +152,17 @@ def test_two_subscriptions_have_independent_scopes_and_two_models_share_one():
     assert first["quota_scope"] != second["quota_scope"]
     assert first["coding_plan"]["models"] == sorted(plan.MODELS)
     assert plan.account_eligible(first, now=100) and plan.account_eligible(second, now=100)
+
+
+@pytest.mark.parametrize("column,value", [
+    ("purpose", "APPLICATION"), ("pool", "experiential"), ("state", "released"),
+    ("ttl", 0), ("last_heartbeat", 101), ("model", "glm-5.3-flash"),
+    ("orchestrator_id", "other-root"), ("renewable", 3),
+])
+def test_plan_validator_cannot_borrow_other_custody(tmp_path, monkeypatch, column, value):
+    from native_plan_worker import validate_plan_lease
+    _, _, db, _, env = fixture_lease(tmp_path, monkeypatch)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE leases SET " + column + "=?", (value,))
+    with pytest.raises(BindingRefused):
+        validate_plan_lease(env, "deepseek-v4.1-flash", expected_pool="byteplus", db_path=db, now=100)
