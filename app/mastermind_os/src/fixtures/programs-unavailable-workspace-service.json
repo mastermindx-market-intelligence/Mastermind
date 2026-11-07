@@ -1,0 +1,15 @@
+{
+  "availability": "UNAVAILABLE",
+  "control_room": null,
+  "reason_codes": [
+    "source_unavailable"
+  ],
+  "schema": "mastermind.workspace_programs.v1",
+  "source_observation": {
+    "control_room": null,
+    "runtime": null,
+    "schema": "mastermind.workspace_source_observation.v1",
+    "selection": null,
+    "state": "UNKNOWN"
+  }
+}

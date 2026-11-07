@@ -1,0 +1,787 @@
+{
+ "authority": {
+  "may_escalate": false,
+  "may_gate": false,
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false,
+  "tier": "display"
+ },
+ "cohort": {
+  "bounds_note": "breadth bounds are whole-population bounds over unmeasured members, not confidence intervals",
+  "expected_n": 11,
+  "horizon": "rs_63d",
+  "measured_n": 0,
+  "missing": [
+   [
+    "XLB",
+    "missing_input"
+   ],
+   [
+    "XLC",
+    "missing_input"
+   ],
+   [
+    "XLE",
+    "missing_input"
+   ],
+   [
+    "XLF",
+    "missing_input"
+   ],
+   [
+    "XLI",
+    "missing_input"
+   ],
+   [
+    "XLK",
+    "missing_input"
+   ],
+   [
+    "XLP",
+    "missing_input"
+   ],
+   [
+    "XLRE",
+    "missing_input"
+   ],
+   [
+    "XLU",
+    "missing_input"
+   ],
+   [
+    "XLV",
+    "missing_input"
+   ],
+   [
+    "XLY",
+    "missing_input"
+   ]
+  ],
+  "outside_cohort": [],
+  "positive_breadth": {
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "bounds_kind": "identification_bounds_not_confidence_interval",
+   "coverage": 0.0,
+   "k_over_n": {
+    "reason": "no_measured_members",
+    "status": "unmeasured"
+   }
+  },
+  "window_sessions": 63
+ },
+ "confirmed_events": {
+  "as_of": null,
+  "n_active": null,
+  "reason": "missing_input",
+  "rows": [],
+  "source": "/marketdata/rotation_events.json#active",
+  "status": "unavailable",
+  "truncated": false
+ },
+ "definition_id": "leadership_rotation_context/1",
+ "early_context": {
+  "as_of": null,
+  "context_only": true,
+  "coverage": null,
+  "reason": "missing_input",
+  "reason_codes": [],
+  "source": "/marketdata/rotation_events.json#early_context",
+  "state": null,
+  "status": "unavailable"
+ },
+ "generation": {
+  "benchmark": null,
+  "cohort_id": "us_sectors_11",
+  "history_as_of": null,
+  "history_schema": null,
+  "id": null,
+  "price_basis": "total_return",
+  "session_end": null
+ },
+ "groups": [
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLB",
+   "group_kind": "sector",
+   "name_en": "Materials",
+   "name_zh": "原材料",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLC",
+   "group_kind": "sector",
+   "name_en": "Communication Services",
+   "name_zh": "通讯服务",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLE",
+   "group_kind": "sector",
+   "name_en": "Energy",
+   "name_zh": "能源",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLF",
+   "group_kind": "sector",
+   "name_en": "Financials",
+   "name_zh": "金融",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLI",
+   "group_kind": "sector",
+   "name_en": "Industrials",
+   "name_zh": "工业",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLK",
+   "group_kind": "sector",
+   "name_en": "Technology",
+   "name_zh": "科技",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLP",
+   "group_kind": "sector",
+   "name_en": "Consumer Staples",
+   "name_zh": "必需消费",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLRE",
+   "group_kind": "sector",
+   "name_en": "Real Estate",
+   "name_zh": "房地产",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLU",
+   "group_kind": "sector",
+   "name_en": "Utilities",
+   "name_zh": "公用事业",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLV",
+   "group_kind": "sector",
+   "name_en": "Health Care",
+   "name_zh": "医疗保健",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  },
+  {
+   "current": {
+    "metric": "relative_wealth_pct",
+    "rank": null,
+    "reason": "missing_input",
+    "rs_21d": null,
+    "rs_63d": null,
+    "status": "unmeasured",
+    "units": "pct",
+    "z": null
+   },
+   "group_id": "XLY",
+   "group_kind": "sector",
+   "name_en": "Consumer Discretionary",
+   "name_zh": "非必需消费",
+   "reconstruction": {
+    "first": null,
+    "last": null,
+    "mode": "reconstructed_price_history",
+    "naturally_observed": false,
+    "points": 0,
+    "reason": "missing_input",
+    "source": "/sectordata/sector_cycles.json#sectors[].rs_history",
+    "status": "unavailable"
+   }
+  }
+ ],
+ "research_estimate": {
+  "reason": "no_admitted_model",
+  "status": "unavailable"
+ },
+ "schema": "leadership_rotation_context.measured_group_read/v1",
+ "sector_dossiers": {
+  "absolute_returns": {
+   "reason": "not_supplied_by_owner",
+   "status": "unavailable"
+  },
+  "as_of": null,
+  "authority": {
+   "may_escalate": false,
+   "may_gate": false,
+   "may_rank": false,
+   "may_size": false,
+   "may_trade": false
+  },
+  "availability": {
+   "decision_cutoff": null,
+   "historically_admissible": false,
+   "mode": "dated_snapshot",
+   "original_available_at": null,
+   "reason": "original_availability_not_supplied"
+  },
+  "benchmark": null,
+  "cohort_id": "us_sectors_11",
+  "compatibility_key": null,
+  "constituent_breadth": {
+   "reason": "native_membership_not_supplied",
+   "status": "unavailable"
+  },
+  "constituent_concentration": {
+   "reason": "native_weights_not_supplied",
+   "status": "unavailable"
+  },
+  "corrections": {
+   "reason": "native_revision_selection_not_supplied",
+   "status": "unavailable"
+  },
+  "cross_sector_breadth_counts": {
+   "21": {
+    "expected_n": 11,
+    "measured_n": 0,
+    "positive_n": null
+   },
+   "63": {
+    "expected_n": 11,
+    "measured_n": 0,
+    "positive_n": null
+   }
+  },
+  "dependency_audit": {
+   "constituent_overlap": "unknown",
+   "independence": "not_established",
+   "shared_rolling_windows": true,
+   "source_family_count": 1,
+   "source_roots": [
+    "engine.sector_cycles"
+   ]
+  },
+  "diagnostics": {
+   "duplicate_groups": [],
+   "malformed_measured_rows": 0,
+   "malformed_source_rows": 0,
+   "outside_cohort": [],
+   "qualification_reasons": [
+    "source_session_missing_or_invalid",
+    "history_session_missing_or_invalid",
+    "benchmark_missing_or_invalid",
+    "return_basis_not_qualified",
+    "history_schema_not_qualified",
+    "evidence_mode_not_qualified",
+    "missing_or_invalid_rows"
+   ]
+  },
+  "forecasts": {
+   "allocation_weight": null,
+   "expected_return": null,
+   "persistence_estimate": null,
+   "status": "not_qualified"
+  },
+  "freshness": {
+   "reason": "owner_freshness_receipt_not_supplied",
+   "status": "unverified"
+  },
+  "groups": [
+   {
+    "group_id": "XLB",
+    "name_en": "Materials",
+    "name_zh": "原材料",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLC",
+    "name_en": "Communication Services",
+    "name_zh": "通讯服务",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLE",
+    "name_en": "Energy",
+    "name_zh": "能源",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLF",
+    "name_en": "Financials",
+    "name_zh": "金融",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLI",
+    "name_en": "Industrials",
+    "name_zh": "工业",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLK",
+    "name_en": "Technology",
+    "name_zh": "科技",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLP",
+    "name_en": "Consumer Staples",
+    "name_zh": "必需消费",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLRE",
+    "name_en": "Real Estate",
+    "name_zh": "房地产",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLU",
+    "name_en": "Utilities",
+    "name_zh": "公用事业",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLV",
+    "name_en": "Health Care",
+    "name_zh": "医疗保健",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   },
+   {
+    "group_id": "XLY",
+    "name_en": "Consumer Discretionary",
+    "name_zh": "非必需消费",
+    "null_reasons": {
+     "rs_21d": "source_session_missing_or_invalid",
+     "rs_63d": "source_session_missing_or_invalid"
+    },
+    "qualification_reasons": [
+     "benchmark_missing_or_invalid",
+     "evidence_mode_not_qualified",
+     "history_schema_not_qualified",
+     "history_session_missing_or_invalid",
+     "missing_group",
+     "missing_or_invalid_rows",
+     "return_basis_not_qualified",
+     "source_session_missing_or_invalid"
+    ],
+    "relative_wealth_pct": {
+     "rs_21d": null,
+     "rs_63d": null
+    },
+    "status": "unavailable"
+   }
+  ],
+  "history": {
+   "mode": "reconstructed_price_history",
+   "naturally_observed": false
+  },
+  "measurement_status": "unavailable",
+  "mechanism": {
+   "owner": "engine.theme_graph",
+   "reason": "no_qualified_evidence",
+   "status": "unavailable"
+  },
+  "population": "eleven_sector_etf_proxies",
+  "price_basis": null,
+  "risk": {
+   "owner": "engine.risk_envelope",
+   "reason": "no_qualified_risk_context",
+   "scope": null,
+   "status": "unavailable"
+  },
+  "schema": "leadership_rotation_context.sector_dossiers/v1",
+  "source_generation": {
+   "id": null,
+   "reason": "immutable_generation_not_supplied",
+   "status": "unavailable"
+  },
+  "status": "unavailable",
+  "unavailable_windows": {
+   "reason": "not_supplied_by_owner",
+   "sessions": [
+    5,
+    20
+   ]
+  },
+  "units": "pct",
+  "windows_sessions": [
+   21,
+   63
+  ]
+ },
+ "source_roots": [
+  "engine.sector_cycles"
+ ],
+ "status": "unavailable"
+}

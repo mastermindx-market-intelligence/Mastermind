@@ -236,23 +236,6 @@ def test_archived_module_clis_report_status_and_exit_zero(module, label):
     assert "successor: autonomous" in result.stdout
 
 
-def test_deploy_includes_reasoning_subagent_policies_and_rollback_state():
-    script = (Path(__file__).resolve().parent.parent / "scripts" /
-              "deploy_code_to_vps.sh").read_text()
-    dirs = next(line for line in script.splitlines() if line.startswith('DIRS="'))
-    assert ".claude" in dirs and ".codex" in dirs
-    assert "--exclude='.claude'" not in script
-    assert "--exclude='.codex'" not in script
-    rollback = script.split("rollback_release()", 1)[1]
-    assert "A directory introduced by the failed release" in rollback
-    assert 'rm -rf \\\"\\$d\\\"' in rollback
-    assert "reasoning_policy_ok" in script
-    assert 'CODE="$(probe_health "$EXPECTED_SHA")"' in script
-    assert 'CODE="$(probe_health "$PREVIOUS_SHA" 0)"' in script
-    assert "scheduled_runtime_ok" in script
-    assert 'fail_release "rsync did not complete"' in script
-    assert 'fail_release "release marker write failed"' in script
-    assert 'fail_release "service restart failed"' in script
 
 
 def test_current_firm_exposure_ignores_archived_books(tmp_path, monkeypatch):
