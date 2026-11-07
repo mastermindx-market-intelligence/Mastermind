@@ -2,7 +2,7 @@ import {useCallback,useRef,useState} from "react";
 import type {OwnerContext} from "../../orchestration/operation-controller";
 import {freshConversationTarget,parseFreshConversationTarget,type FreshConversationOriginalSelector} from "../../orchestration/fresh-conversation-target";
 import type {FreshConversationDraftStateProps} from "./useFreshConversationDraftState";
-import {decodeFreshConversationTurnResult,validateFreshConversationTurnRequest} from "./fresh-conversation-turn";
+import {attendedContractForKey,validateAttendedRequest,decodeAttendedResult,attendedReadSettled} from "./fresh-conversation-attended-contract";
 
 type Props=FreshConversationDraftStateProps;
 type Actor={host:NonNullable<Props["host"]>;epoch:number;generation:number;owner:OwnerContext;
@@ -101,7 +101,7 @@ export function useFreshConversationTurnDraftState(props:Props):FreshConversatio
   const captureSubmission=(turnKey:string,expectedMessage:string)=>{
     const value=visible();
     if(!value||value.target!==renderedTarget||!same(value.actor,actor)||value.text!==expectedMessage||!value.text.length||
-      !/^mmos-conversation-turn-[0-9a-f]{40}$/.test(turnKey))return null;
+      !/^mmos-(?:conversation|native)-turn-[0-9a-f]{40}$/.test(turnKey))return null;
     const existing=submissionFor(turnKey);if(existing)return existing;
     const token=Object.freeze({});
     record.current={...value,submission:{token,key:turnKey,text:value.text,author:value.actor}};
@@ -110,9 +110,10 @@ export function useFreshConversationTurnDraftState(props:Props):FreshConversatio
   const settleSubmission=(token:FreshConversationTurnDraftCapture,rawTurnRead:unknown)=>{
     const value=visible(),submission=value?.submission;
     if(!value||!submission||submission.token!==token||submissionFor(submission.key)!==token)return false;
-    const request=validateFreshConversationTurnRequest({...value.selection,turn_key:submission.key},"turn_read");
-    const decoded=request?decodeFreshConversationTurnResult(rawTurnRead,"turn_read",request):null;
-    if(!decoded?.ok||decoded.data.state!=="RECORDED"||decoded.data.effect!=="COMMITTED"||!decoded.data.result||
+    const contract=attendedContractForKey(submission.key);
+    const request=contract?validateAttendedRequest({...value.selection,turn_key:submission.key},"turn_read",contract):null;
+    const decoded=request&&contract?decodeAttendedResult(rawTurnRead,"turn_read",request,contract):null;
+    if(!decoded?.ok||decoded.data.state!=="RECORDED"||!attendedReadSettled(decoded.data)||!decoded.data.result||
       record.current!==value||visible()!==value||submissionFor(submission.key)!==token)return false;
     update({...value,text:"",submission:null});return true;
   };

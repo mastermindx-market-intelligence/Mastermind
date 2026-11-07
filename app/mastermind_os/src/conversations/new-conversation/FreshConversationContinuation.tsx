@@ -1,4 +1,4 @@
-import {useEffect,useLayoutEffect,useMemo} from "react";
+import {useLayoutEffect,useMemo} from "react";
 import {freshConversationTarget} from "../../orchestration/fresh-conversation-target";
 import type {OwnerContext} from "../../orchestration/operation-controller";
 import type {FreshConversationHistoryWindow as FreshConversationWindow} from "../fresh-conversation-reference";
@@ -62,8 +62,10 @@ export function FreshConversationContinuation(props:FreshConversationContinuatio
     onMessageChange:message=>{if(props.turnDraft){if(matchesDraft())props.turnDraft.onMessageChange(message);}else props.onMessageChange?.(message);},
     initialConsumption:entry.kind==="reference"?entry.window.initial_consumption:entry.initialConsumption,
     readOnly:props.readOnly||sourceReadOnly});
-  useEffect(()=>{onUnresolvedChange(view.hasUnresolvedOriginal);},[onUnresolvedChange,view.hasUnresolvedOriginal]);
-  useEffect(()=>()=>{onUnresolvedChange(false);},[onUnresolvedChange]);
+  // Close sibling actions before paint when a new read/owner scope starts its
+  // local pending-hint discovery. A passive report can expose a transient action.
+  useLayoutEffect(()=>{onUnresolvedChange(view.hasUnresolvedOriginal);},[onUnresolvedChange,view.hasUnresolvedOriginal]);
+  useLayoutEffect(()=>()=>{onUnresolvedChange(false);},[onUnresolvedChange]);
   // The existing recorded reader renders its own initial and later turns.
   // Only a genuine unresolved original contributes recovery controls here.
   return sourceReadOnly&&!view.hasUnresolvedOriginal?null:view.panel;

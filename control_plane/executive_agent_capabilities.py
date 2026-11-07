@@ -147,6 +147,7 @@ _ADAPTER_EXECUTION_SURFACES = {
     "attended-fabric": frozenset({"claude-code"}),
     PAID_FABRIC_ADAPTER_ID: frozenset({PAID_GLM_EXECUTION_SURFACE}),
     "acp": frozenset({ACP_EXECUTION_SURFACE}),
+    "dsh-native-acp": frozenset({DSH_OPERATOR_EXECUTION_SURFACE}),
 }
 # The Hermes native principal surface is deliberately absent from every
 # mapping above and from the sealed-worker and supervisor-validation fences
@@ -1215,18 +1216,18 @@ class ExecutionCapabilityProfile:
         return projection
 
     def dsh_native_config_projection(self) -> dict[str, object]:
-        """Inert candidate requirements; never installed observations or grants."""
+        """Exact native requirements; never installed observations or grants."""
         from control_plane.native_conversation_result import DSH_NATIVE_RESULT_CONTRACT
         if (self.profile_id != DSH_NATIVE_CONVERSATION_PROFILE_ID
                 or self.execution_surface != DSH_OPERATOR_EXECUTION_SURFACE
-                or self.enabled is not False or self.auth_realm != "dedicated-worker-account"
+                or type(self.enabled) is not bool or self.auth_realm != "dedicated-worker-account"
                 or self.sandbox_policy != "read-only" or self.approval_policy != "never"
                 or self.network_policy != "disabled" or self.write_capable
                 or self.native_helper_policy is not NativeHelperPolicy.DISABLED
                 or self.native_helper is not None or self.skills or self.skill_grants
                 or self.mcp_server_grants or self.resource_grants or self.validation_resource_grants
                 or self.plugins != (DSH_COMPANY_PLUGIN_ID,) or self.forbidden):
-            raise CapabilityPolicyError("DSH native candidate requires its exact disabled owner admission")
+            raise CapabilityPolicyError("DSH native profile requires its exact owner admission tuple")
         return {
             "execution_surface": self.execution_surface,
             "result_contract": DSH_NATIVE_RESULT_CONTRACT,
@@ -2392,12 +2393,12 @@ class ExecutionCapabilityRegistry:
                     f"profile {profile_id!r} references unknown resources: "
                     + ", ".join(unknown_resources)
                 )
-            inert_dsh_plugin = (
+            exact_dsh_plugin = (
                 profile_id == DSH_NATIVE_CONVERSATION_PROFILE_ID
                 and execution_surface == DSH_OPERATOR_EXECUTION_SURFACE
-                and enabled is False and plugins == (DSH_COMPANY_PLUGIN_ID,)
+                and plugins == (DSH_COMPANY_PLUGIN_ID,)
             )
-            if plugins and not inert_dsh_plugin:
+            if plugins and not exact_dsh_plugin:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant plugins before "
                     "installed-bundle attestation"
@@ -2635,14 +2636,14 @@ class ExecutionCapabilityRegistry:
                     or execution_surface == DSH_OPERATOR_EXECUTION_SURFACE):
                 if (profile_id != DSH_NATIVE_CONVERSATION_PROFILE_ID
                         or execution_surface != DSH_OPERATOR_EXECUTION_SURFACE
-                        or enabled is not False or auth_realm != "dedicated-worker-account"
+                        or auth_realm != "dedicated-worker-account"
                         or sandbox_policy != "read-only" or approval_policy != "never"
                         or network_policy != "disabled" or write_capable
                         or native_helper_policy is not NativeHelperPolicy.DISABLED
                         or native_helper is not None or skills or skill_grants or skill_capability_ids
                         or mcp_server_ids or resource_ids or validation_resource_ids
                         or plugins != (DSH_COMPANY_PLUGIN_ID,) or forbidden):
-                    raise CapabilityPolicyError("DSH native candidate requires exact disabled owner admission")
+                    raise CapabilityPolicyError("DSH native profile requires exact owner admission tuple")
             if profile_id == _PENDING_BROWSER_PROFILE_ID:
                 if (enabled or execution_surface != "codex-app-server"
                         or auth_realm != "dedicated-worker-account"

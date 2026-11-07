@@ -17,6 +17,8 @@ import importlib
 import weakref
 from typing import Protocol, Sequence, runtime_checkable
 
+from control_plane.operator_harness_contract import OPERATOR_HARNESS_INTERFACE_VERSION
+
 from control_plane.worker_execution_contract import (
     CancelReceipt,
     CollectionReceipt,
@@ -30,6 +32,7 @@ from control_plane.worker_execution_contract import (
 
 
 ADAPTER_INTERFACE_VERSION = "mastermind.worker_adapter/v1"
+DSH_NATIVE_OPERATOR_ADAPTER_ID = "dsh-native-acp"
 _CONSTRUCTED_REVIEWED_ADAPTERS: weakref.WeakSet[object] = weakref.WeakSet()
 
 
@@ -88,6 +91,14 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     "openai-compatible": AdapterDescriptor(
         adapter_id="openai-compatible", implemented=False
     ),
+    # Source implementation of the existing claimed OHF transport. This is
+    # not a sealed WorkerExecutionAdapter or an installed admission receipt.
+    DSH_NATIVE_OPERATOR_ADAPTER_ID: AdapterDescriptor(
+        adapter_id=DSH_NATIVE_OPERATOR_ADAPTER_ID,
+        interface_version=OPERATOR_HARNESS_INTERFACE_VERSION,
+        implemented=True,
+        implementation="integrations.deepseek_harness.operator_adapter.NativeOperatorAdapter",
+    ),
     "acp": AdapterDescriptor(
         adapter_id="acp",
         implemented=False,
@@ -110,6 +121,8 @@ def adapter_implementation(adapter_id: str) -> type:
     """Resolve a reviewed descriptor to its implementation class."""
 
     descriptor = adapter_descriptor(adapter_id)
+    if descriptor.interface_version != ADAPTER_INTERFACE_VERSION:
+        raise AdapterBindingError("operator harness requires its original claimed factory")
     if not descriptor.implementation:
         raise AdapterBindingError(f"worker adapter {adapter_id!r} is not implemented")
     module_name, _, class_name = descriptor.implementation.rpartition(".")
@@ -212,6 +225,8 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
         descriptor = adapter_descriptor(adapter_id)
     except ValueError as exc:
         raise AdapterBindingError(str(exc)) from exc
+    if descriptor.interface_version != ADAPTER_INTERFACE_VERSION:
+        raise AdapterBindingError("operator harness requires its original claimed factory")
     try:
         identity = _implementation_adapter_id(adapter)
         if identity != descriptor.adapter_id:

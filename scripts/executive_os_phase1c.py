@@ -1853,6 +1853,7 @@ def _service_from_config(
     fabric_worker_binding_source: Any | None = None,
     secretary_binding_source: Any | None = None,
     deepseek_native_read_source: Any | None = None,
+    native_conversation_composition: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
@@ -1979,6 +1980,17 @@ def _service_from_config(
             and (not callable(remote_operator_binding_source)
                  or claimed_operator_adapter_factory is not None)):
         raise ServiceError("remote operator binding source conflicts with factory")
+    if native_conversation_composition is not None:
+        from control_plane.native_conversation_binding import NativeConversationHostComposition
+        if type(native_conversation_composition) is not NativeConversationHostComposition:
+            raise ServiceError("native conversation requires trusted host composition")
+        if (claimed_operator_adapter_factory is None and remote_operator_binding_source is None
+                or raw.get("coo_operator_harness_armed") is not True):
+            raise ServiceError("native conversation requires the existing armed claimed factory")
+        try:
+            native_conversation_composition.require_current()
+        except Exception:
+            raise ServiceError("native conversation installed source is unavailable") from None
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -2338,6 +2350,13 @@ def _service_from_config(
             workspace_source = build_claimed_remote_workspace_identity_source(
                 runtime, remote_operator_binding_source
             )
+        if native_conversation_composition is not None:
+            # Runtime and namespace custody exist here; listeners are not accepting.
+            # This joins the original registration and never creates a Worker.
+            from control_plane.native_conversation_binding import bind_installed_native_conversation
+            bind_installed_native_conversation(service,
+                registration=native_conversation_composition.registration,
+                current=native_conversation_composition.require_current)
         return ExecutiveOperatorSupervisor(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),

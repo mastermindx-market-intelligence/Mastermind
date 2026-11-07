@@ -1,6 +1,7 @@
 """Actual native FreshConversation owner/Runtime; physical and installed policy seams are inert.
 
-This fixture substitutes installed native binding/profile observations only.
+This fixture uses the actual enabled-profile compiler and installed binding owner.
+Physical process/provider and installed artifact observations remain inert.
 Nominal original input, authenticated resource projections, source/project
 checks, creator, dispatch, OHF transactions and final-write guards stay real.
 It does not qualify production admission or an installed/provider journey.
@@ -8,6 +9,7 @@ It does not qualify production admission or an installed/provider journey.
 import asyncio
 import dataclasses
 import hashlib
+import json
 import os
 from types import SimpleNamespace
 
@@ -26,35 +28,8 @@ from test_dsh_native_runtime_binding import CANDIDATE, PROFILE
 
 
 def native_case(tmp_path, monkeypatch, principal=None):
-    service, runtime, owner, principal, request, adapters = case(tmp_path, principal)
-    base = service._require_current_coo_binding()
-    original_load = ExecutionCapabilityRegistry.load
-    registry = original_load()
-    declared = original_load(CANDIDATE).profiles[PROFILE]
-    profile = dataclasses.replace(declared, enabled=True,
-        profile_digest=hashlib.sha256(b"native fresh owner INERT POLICY fixture").hexdigest())
-    projection = declared.dsh_native_config_projection()
-    original_projection = type(declared).dsh_native_config_projection
-    monkeypatch.setattr(type(declared), "dsh_native_config_projection",
-        lambda self: dict(projection) if self.profile_id == PROFILE else original_projection(self))
-    combined = dataclasses.replace(registry, profiles={**registry.profiles, PROFILE: profile})
-    monkeypatch.setattr(ExecutionCapabilityRegistry, "load",
-        classmethod(lambda cls, *a, **k: combined if not a and not k else original_load(*a, **k)))
-    binding = {**base, "operator_eligible_quota_classes": ["dsh-native"],
-        "operator_provider": "acp", "operator_model": "deepseek-chat", "operator_effort": "default",
-        "operator_cost_class": "small", "operator_routing_policy_version": "dsh-native-owner-test-only",
-        "operator_execution_profile_id": PROFILE, "operator_execution_profile_digest": profile.profile_digest,
-        "operator_capability_policy_version": combined.policy_version,
-        "operator_capability_policy_digest": combined.policy_digest,
-        "operator_harness_binary_digest": "c"*64, "operator_harness_version": "native-test-only",
-        "operator_harness_armed": True}
-    monkeypatch.setattr(service, "_require_current_native_conversation_binding", lambda: dict(binding))
-    metadata = {key: binding["operator_" + key] for key in (
-        "routing_policy_version", "execution_profile_id", "execution_profile_digest",
-        "capability_policy_version", "capability_policy_digest", "harness_binary_digest", "harness_version")}
-    runtime.workers.register_worker("native-fixture", provider="acp", account_label="fixture-only",
-        worker_type="fixture", capabilities=["read"], quota_classes={"dsh-native": dict(provider="acp",
-            model="deepseek-chat", effort="default", cost_class="small", capabilities=["read"], metadata=metadata)})
+    from tests.test_dsh_native_installed_binding import native_binding_case
+    service, runtime, owner, principal, request, adapters = native_binding_case(tmp_path, monkeypatch, principal)
 
     class InertNative(_NativeTurnAdapter, _ActiveAdapter, RemoteOperatorHarnessAdapter):
         def __init__(self, loader, f):

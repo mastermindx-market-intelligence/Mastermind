@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import type { OperationState } from "../../orchestration/operation-controller";
-import type { FreshConversationData, FreshConversationPayload } from "./fresh-conversation";
+import type { FreshConversationPayload } from "./fresh-conversation";
+import type {FreshConversationObservedData} from "./fresh-conversation-contract";
 import "./new-conversation-outcome.css";
 
 export interface NewConversationOutcomeProps {
   locale: "en" | "zh-CN";
   /** Parent-coupled fresh server data; null until a confirmed read exists. */
-  data: FreshConversationData | null;
+  data: FreshConversationObservedData | null;
   /** Live controller observation; null when the controller holds no state here. */
   operationState: OperationState | null;
   originalMessage: string | null;
@@ -14,6 +15,9 @@ export interface NewConversationOutcomeProps {
   /** Parent-explicit read gesture; this view never opens or refreshes itself. */
   opened: boolean;
   busy: boolean;
+  contract?: "legacy-v1"|"native-v2";
+  observing?: boolean;
+  canObserveWhileCreating?: boolean;
   /** Actual caller-side await activity; never a provider state. */
   activity?: "creating" | "checking" | null;
   /** Parent permission gate: server data alone never enables the open control. */
@@ -28,14 +32,14 @@ export interface NewConversationOutcomeProps {
 }
 
 type OutcomeKey = "submitting" | "checking" | "unconfirmed" | "admitted" | "absent"
-  | "created" | "settled" | "refused" | "unavailable" | "awaiting";
+  | "created" | "settled" | "refused" | "unavailable" | "awaiting" | "active" | "idle";
 
 /** A created claim needs a real session binding AND a real locator, never either alone. */
-function createdConfirmed(data: FreshConversationData | null): boolean {
-  return data != null && data.state === "CREATED" && data.session != null && data.locator != null;
+function createdConfirmed(data: FreshConversationObservedData | null): boolean {
+  return data != null && (data.state === "CREATED"||data.schema==="mastermind.executive.fresh_conversation_data.v2"&&data.state==="IDLE") && data.session != null && data.locator != null;
 }
 
-function settledWithLocator(data: FreshConversationData | null): boolean {
+function settledWithLocator(data: FreshConversationObservedData | null): boolean {
   return data != null && data.state === "SETTLED" && data.locator != null;
 }
 
@@ -50,9 +54,14 @@ function envelopeSummary(result: FreshConversationPayload | null): string | null
 
 /** Priority-ordered outcome sentence: live controller truth outranks stale data. */
 function outcomeStatus(zh: boolean, operationState: OperationState | null,
-  data: FreshConversationData | null): { key: OutcomeKey; title: string } {
+  data: FreshConversationObservedData | null): { key: OutcomeKey; title: string } {
   const text = (en: string, cn: string) => zh ? cn : en;
   const controller = operationState?.status ?? null;
+  if(data?.schema==="mastermind.executive.fresh_conversation_data.v2"){
+    if(data.state==="ACTIVE")return {key:"active",title:text("The response is running.","正在生成回复。")};
+    if(data.state==="IDLE")return {key:"idle",title:text("The conversation is stopped. Check its recorded response before resuming.","对话已停止。请查看已记录的回复后再继续。")};
+    if(data.state==="SETTLED"&&data.result)return {key:"settled",title:text("Conversation completed","对话已完成")};
+  }
   if (controller === "submitting") {
     return { key: "submitting", title: text("Creating conversation…", "正在创建对话…") };
   }
@@ -96,7 +105,7 @@ function outcomeStatus(zh: boolean, operationState: OperationState | null,
 
 /** Bounded source rows; raw codes appear only inside the closed disclosure. */
 function sourceRows(zh: boolean, operationState: OperationState | null,
-  data: FreshConversationData | null): { label: string; value: string }[] {
+  data: FreshConversationObservedData | null): { label: string; value: string }[] {
   const text = (en: string, cn: string) => zh ? cn : en;
   const notSupplied = text("Not supplied", "未提供");
   const locator = data?.locator ?? null;
@@ -115,7 +124,9 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
     {
       label: text("Session binding", "会话绑定"),
       value: session == null ? notSupplied
-        : `attempt ${session.attempt_id} · generation ${session.generation} · binding ${session.binding_digest}`,
+        : "session_epoch_id"in session
+          ? `attempt ${session.attempt_id} · epoch ${session.session_epoch_id} · process ${session.process_generation_id} · binding ${session.binding_digest}`
+          : `attempt ${session.attempt_id} · generation ${session.generation} · binding ${session.binding_digest}`,
     },
     { label: text("Result digest", "结果摘要"), value: data?.result?.digest ?? notSupplied },
     { label: text("Parent consumed", "父级已接收"), value: flag(data?.parent_consumed) },
@@ -128,10 +139,12 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
 /** Controlled request-status/initial-result view. The parent owns the controller,
  * binding and currentness; this component only renders what it is handed. */
 export function NewConversationOutcome({ locale, data, operationState, originalMessage,
-  projectTitle, opened, busy, activity = null, canOpen, awaitingCheck = false, onCheck, onOpen, onBack, continuation }: NewConversationOutcomeProps) {
+  projectTitle, opened, busy, contract="legacy-v1", observing=false, canObserveWhileCreating=false, activity = null, canOpen, awaitingCheck = false, onCheck, onOpen, onBack, continuation }: NewConversationOutcomeProps) {
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
-  const status = activity === "creating" ? {key:"submitting" as const,title:text("Creating conversation…","正在创建对话…")}
+  const native=contract==="native-v2"||data?.schema==="mastermind.executive.fresh_conversation_data.v2";
+  const nativeActive=data?.schema==="mastermind.executive.fresh_conversation_data.v2"&&data.state==="ACTIVE";
+  const status = activity === "creating"&&!nativeActive ? {key:"submitting" as const,title:text("Creating conversation…","正在创建对话…")}
     : activity === "checking" ? {key:"checking" as const,title:text("Checking original request…","正在查看原请求…")}
     : awaitingCheck && data == null && operationState == null
       ? {key:"awaiting" as const,title:text("Check the original request to view its status.", "请查看原请求以了解其状态。")}
@@ -139,7 +152,7 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
   const result = data?.result ?? null;
   const responseOpenable = canOpen && (createdConfirmed(data) || settledWithLocator(data));
   const backAnnotated = status.key === "submitting" || status.key === "checking"
-    || status.key === "unconfirmed" || status.key === "admitted" || status.key === "absent";
+    || status.key === "unconfirmed" || status.key === "admitted" || status.key === "absent" || status.key==="active";
   return <section className="mm-new-conversation-outcome" lang={zh ? "zh-CN" : "en"}>
     <header className="mm-new-conversation-outcome-heading">
       {opened ? <>
@@ -155,14 +168,16 @@ export function NewConversationOutcome({ locale, data, operationState, originalM
       </>}
     </header>
     {opened && backAnnotated && <p role="status" className="mm-new-conversation-outcome-status">{status.title}</p>}
-    {opened && <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalMessage}
+    {opened && !native && <FreshConversationInitialResponse locale={locale} result={result&&"envelope"in result?result:null} originalMessage={originalMessage}
       caption={result != null && data?.parent_consumed === false
         ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null}
       continuation={continuation==null?<p className="mm-new-conversation-outcome-caption">{text("Further messages are not available in this view yet.", "此视图暂不支持继续发送消息。")}</p>:undefined}/>}
-    {opened&&continuation!=null?continuation:null}
+    {native&&operationState?.status==="unknown"&&data?.state!=="RECONCILIATION_REQUIRED"&&
+      <p role="status">{text("The original request is still being reconciled. Do not send it again.","原请求仍在核对中。请勿再次发送。")}</p>}
+    {(opened||native)&&continuation!=null?continuation:null}
     <footer className="mm-new-conversation-outcome-footer">
       <div className="mm-new-conversation-outcome-actions">
-        <button type="button" disabled={busy} onClick={onCheck}>
+        <button type="button" disabled={observing||busy&&!canObserveWhileCreating} onClick={onCheck}>
           {continuation==null?text("Check original request", "查看原请求状态"):text("Check initial request", "查看首次请求状态")}
         </button>
         {!opened && responseOpenable && <button type="button" className="primary" disabled={busy} onClick={onOpen}>

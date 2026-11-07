@@ -1,14 +1,11 @@
-import {validateFreshConversationRequest} from "./new-conversation/fresh-conversation";
+import {validateConversationRequest} from "./new-conversation/fresh-conversation-contract";
 import type {ConversationRequestSelection} from "./new-conversation/fresh-conversation-binding";
-import {CONVERSATION_CREATE_KEY_PREFIX} from "../orchestration/indexeddb-pending-pointer-store";
 const KEYS=["new_conversation","conversation_work_ref","conversation_operation_key"] as const;
 /** Lookup DATA only. No text, owner, permission, dispatch or persisted grant. */
 export interface FreshConversationLocation {valid:boolean;open:boolean;selection:ConversationRequestSelection|null;}
 function selection(value:unknown):ConversationRequestSelection|null{
- const checked=validateFreshConversationRequest(value,"status");
- return checked && checked.operation_key.startsWith(CONVERSATION_CREATE_KEY_PREFIX) &&
-  /^[0-9a-f]{40}$/.test(checked.operation_key.slice(CONVERSATION_CREATE_KEY_PREFIX.length))
-  ?Object.freeze({work_ref:checked.work_ref,operation_key:checked.operation_key}):null;
+ const checked=validateConversationRequest(value,"status");
+ return checked?Object.freeze({work_ref:checked.work_ref,operation_key:checked.operation_key}):null;
 }
 export function readFreshConversationLocation(input:string):FreshConversationLocation{
  try{

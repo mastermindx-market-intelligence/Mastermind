@@ -3,6 +3,7 @@ import "./new-conversation-draft.css";
 
 export interface NewConversationDraftProps {
   locale: "en" | "zh-CN";
+  contract?: "legacy-v1" | "native-v2";
   projects: readonly { workRef: string; title: string | null }[];
   projectsState: "reading" | "available" | "unavailable";
   workRef: string | null;
@@ -16,7 +17,7 @@ export interface NewConversationDraftProps {
 }
 
 /** Controlled unsent composition. This view neither creates nor previews a conversation. */
-export function NewConversationDraft({ locale, projects, projectsState, workRef,
+export function NewConversationDraft({ locale, contract="legacy-v1", projects, projectsState, workRef,
   onWorkRefChange, message, onMessageChange, readOnly, previewControl, feedback,
   onBack }: NewConversationDraftProps) {
   const zh = locale === "zh-CN";
@@ -56,7 +57,7 @@ export function NewConversationDraft({ locale, projects, projectsState, workRef,
         <textarea id={messageId} rows={6} value={message} disabled={readOnly}
           aria-describedby={helperId}
           onChange={event => onMessageChange(event.target.value)} />
-        <p id={helperId} className="mm-new-conversation-helper">{text("Use 1–700 characters.", "请输入1–700个字符。")}</p>
+        <p id={helperId} className="mm-new-conversation-helper">{contract==="native-v2"?text("Enter your message (up to 128 KiB of text).","请输入消息（最多128 KiB文本）。"):text("Use 1–700 characters.", "请输入1–700个字符。")}</p>
       </div>
       <p className="mm-new-conversation-caption">{text("Your message is a draft until you confirm creation.", "确认创建前，消息仍是草稿。")}</p>
     </div>

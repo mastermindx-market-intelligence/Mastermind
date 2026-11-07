@@ -4,11 +4,14 @@ import {freshConversationTarget, type FreshConversationOriginalSelector} from ".
 import {FreshConversationTurnPanel} from "./FreshConversationTurnPanel";
 import type {FreshConversationAttendedBinding, FreshConversationOriginalRead, PreparedFreshConversationTurn} from "./fresh-conversation-attended-binding";
 import {decodeFreshConversationTurnResult, validateFreshConversationTurnRequest, type FreshConversationTurnData, type FreshConversationTurnRequest, type FreshConversationTurnConsumption} from "./fresh-conversation-turn";
+import {validateAttendedRequest,decodeAttendedResult,attendedReadSettled,type FreshAttendedData} from "./fresh-conversation-attended-contract";
 import "./new-conversation-journey.css";
 import type {FreshConversationTurnDraftCapture,FreshConversationTurnDraftState} from "./useFreshConversationTurnDraftState";
 
 export interface FreshConversationContinuationProps {
   locale:"en"|"zh-CN";
+  /** A qualified sibling control settled; re-read only the incumbent local hint. */
+  pendingRevision?:number;
   active:boolean;
   /** A readonly source window still permits qualified original recovery. */
   readOnly?:boolean;
@@ -30,14 +33,14 @@ export interface FreshConversationContinuationProps {
   draftSubmission?:Pick<FreshConversationTurnDraftState,"captureSubmission"|"submissionFor"|"settleSubmission"|"submittedTurnKey">;
 }
 type Busy="keeping"|"sending"|"checking"|"reviewing"|null;
-type View={scope:object;data:FreshConversationTurnData|null;operation:OperationState|null;
-  pending:OperationPointer|null;discovering:boolean;busy:Busy;attempted:boolean;
+type View={scope:object;data:FreshAttendedData|null;operation:OperationState|null;
+  pending:OperationPointer|null;discovering:boolean;pendingKnown:boolean;busy:Busy;attempted:boolean;
   request:FreshConversationTurnRequest|null;prepared:PreparedFreshConversationTurn|null;
   originalTurnMessage:string|null;lastTurnKey:string|null;lastKind:"consume"|"turn"|null;
   draftCapture:FreshConversationTurnDraftCapture|null;turnSettled:boolean;recoveryHeld:boolean;historyLimited:boolean;
-  recordedTurns:readonly {data:FreshConversationTurnData;message:string|null}[];
+  recordedTurns:readonly {data:FreshAttendedData;message:string|null}[];
   error:"unavailable"|"pending"|"other"|"changed"|"readFirst"|null};
-const blank=(scope:object):View=>({scope,data:null,operation:null,pending:null,discovering:true,busy:null,
+const blank=(scope:object):View=>({scope,data:null,operation:null,pending:null,discovering:true,pendingKnown:false,busy:null,
   attempted:false,request:null,prepared:null,originalTurnMessage:null,lastTurnKey:null,lastKind:null,draftCapture:null,turnSettled:false,recoveryHeld:false,historyLimited:false,recordedTurns:[],error:null});
 const sameOwner=(a:OwnerContext|null,b:OwnerContext|null)=>!!a&&!!b&&a.principalScope===b.principalScope&&a.generation===b.generation;
 function ownerOf(binding:FreshConversationAttendedBinding|null):OwnerContext|null {
@@ -92,10 +95,10 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     let cancelled=false;
     Promise.resolve().then(()=>c.b.store.read(c.owner.principalScope)).then(pointer=>{
       if(cancelled||!valid(c))return;
-      patch({pending:pointer,discovering:false,error:pointer?(belongs(pointer,c)?"pending":"other"):null});
-    },()=>{if(!cancelled&&valid(c))patch({discovering:false,error:"unavailable"});});
+      patch({pending:pointer,discovering:false,pendingKnown:true,error:pointer?(belongs(pointer,c)?"pending":"other"):null});
+    },()=>{if(!cancelled&&valid(c))patch({discovering:false,pendingKnown:false,error:"unavailable"});});
     return()=>{cancelled=true;};
-  },[scope]);
+  },[scope,props.pendingRevision]);
   useLayoutEffect(()=>{
     const request=requestedFocus.current;if(!request||request.scope!==scope)return;
     requestedFocus.current=null;
@@ -103,10 +106,12 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   },[scope,view.prepared]);
 
   async function pending(c:Capture){
-    const pointer=await c.b.store.read(c.owner.principalScope);
-    if(!valid(c))return {held:true,pointer:null};
-    patch({pending:pointer,error:pointer?(belongs(pointer,c)?"pending":"other"):null});
-    return {held:pointer!==null,pointer};
+    try{
+      const pointer=await c.b.store.read(c.owner.principalScope);
+      if(!valid(c))return {held:true,pointer:null};
+      patch({pending:pointer,pendingKnown:true,error:pointer?(belongs(pointer,c)?"pending":"other"):null});
+      return {held:pointer!==null,pointer};
+    }catch(error){if(valid(c))patch({pendingKnown:false});throw error;}
   }
   function unsettledTurn(){
     return current.current.lastKind==="turn"&&!current.current.turnSettled||
@@ -119,27 +124,28 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   async function readBack(c:Capture,kind:"consume"|"turn",turnKey:string|null,sentMessage?:string,allowUnsubmittedAbsence=false){
     if(!valid(c)||!c.read||c.read.current()!==true){if(valid(c))patch({error:"readFirst"});return;}
     const selection=c.read.selection;
-    const request=validateFreshConversationTurnRequest(kind==="consume"
-      ?{...selection,initial_digest:c.read.result.digest}:{...selection,turn_key:turnKey},kind==="consume"?"consume_status":"turn_read");
+    const contract=c.read.contract??"legacy-v1";
+    const request=validateAttendedRequest(kind==="consume"
+      ?{...selection,initial_digest:c.read.result.digest}:{...selection,turn_key:turnKey},kind==="consume"?"consume_status":"turn_read",contract);
     if(!request)return;
     patch({recoveryHeld:true});
-    const raw=kind==="consume"?await c.b.readOriginalConsume(selection,abort.current!.signal)
+    const raw=kind==="consume"?(contract==="native-v2"?await c.b.readOriginalConsume(selection,abort.current!.signal,contract):await c.b.readOriginalConsume(selection,abort.current!.signal))
       :await c.b.readOriginalTurn(selection,turnKey!,abort.current!.signal);
     if(!valid(c)||latest.current.read!==c.read||c.read.current()!==true)return;
-    const decoded=decodeFreshConversationTurnResult(raw,kind==="consume"?"consume_status":"turn_read",request);
+    const decoded=decodeAttendedResult(raw,kind==="consume"?"consume_status":"turn_read",request,contract);
     if(!decoded?.ok){patch({error:"unavailable"});return;}
     patch({data:decoded.data,error:null});
     const settled=kind==="consume"?decoded.data.state==="CONSUMED"&&decoded.data.initial_consumption!==null
       :decoded.data.state==="RECORDED"&&decoded.data.result!==null;
     const absent=allowUnsubmittedAbsence&&kind==="consume"&&decoded.data.state==="ABSENT"&&decoded.data.effect==="NONE";
-    if(!absent&&(!settled||decoded.data.effect!=="COMMITTED"))return;
+    if(!absent&&(!settled||!attendedReadSettled(decoded.data)))return;
     // A remounted controller can be idle after its genuine accepted receipt
     // cleared the hint. The exact source read settles the original; it never
     // manufactures controller acceptance or clears a newer unresolved pointer.
     const pointer=await c.b.store.read(c.owner.principalScope);
     if(!valid(c)||latest.current.read!==c.read||c.read.current()!==true)return;
     const operation=c.b.controller.getState();
-    patch({operation,pending:pointer??null,error:pointer?(belongs(pointer,c)?"pending":"other"):pointer===null?null:"unavailable"});
+    patch({operation,pending:pointer??null,pendingKnown:true,error:pointer?(belongs(pointer,c)?"pending":"other"):pointer===null?null:"unavailable"});
     if(absent){
       // A status-only check before Keep has no original effect to recover.
       // Release only this read hold after fresh empty/idle owner observations.
@@ -255,7 +261,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   }
   const suppliedConsumption=currentConsumption();
   const consumption=view.data?.initial_consumption??suppliedConsumption;
-  const held=!!view.pending||view.operation?.status==="unknown"||view.discovering||view.recoveryHeld;
+  const held=!!view.pending||view.operation?.status==="unknown"||view.discovering||!!liveOwner&&!view.pendingKnown||view.recoveryHeld;
   const prepared=view.prepared&&"message"in view.prepared.request&&view.prepared.request.message===props.message?view.prepared:null;
   const editable=props.active&&!props.readOnly&&!!liveOwner&&readCurrent&&ownsDraft&&!view.busy&&!held;
   const errorText=view.error==="pending"?t("Check the original request before continuing. Don’t send it again.","请先查看原请求状态，再继续。请勿再次发送。")

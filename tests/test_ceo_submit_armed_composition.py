@@ -1591,6 +1591,9 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
+# Reviewed C19 source adds only nominal native host selection through the existing
+# armed claimed factory, after the original Runtime exists. No event-loop change;
+# the independent AST anchor, exact call and source-node identity remain pinned.
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Exact source review of the canonical installed wrapper. Keep a pinned
     # full-source digest; never derive it during this test. The pinned digest
@@ -1610,7 +1613,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'b1d864d50f6817801b8a0f76be77f5369691f9f6a76fc90f58f0ef3f39966b4e'):
+            '59172e6faee7a48ba7d922051024bcf97d5097fd20613b85d3339f111ce1ab25'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

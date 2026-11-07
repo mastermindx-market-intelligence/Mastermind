@@ -95,6 +95,7 @@ class _Turn:
 
 
 class NativeOperatorAdapter:
+    adapter_id = "dsh-native-acp"
     interface_version = OPERATOR_HARNESS_INTERFACE_VERSION
     result_contract = DSH_NATIVE_RESULT_CONTRACT
 

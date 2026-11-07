@@ -2,12 +2,13 @@ import { useId, type ReactNode } from "react";
 import type { OperationState } from "../../orchestration/operation-controller";
 import type { FreshConversationTurnData, FreshConversationTurnConsumption } from "./fresh-conversation-turn";
 import { FreshConversationInitialResponse } from "./NewConversationOutcome";
+import type {FreshAttendedData} from "./fresh-conversation-attended-contract";
 import "./fresh-conversation-turn-panel.css";
 
 export interface FreshConversationTurnPanelProps {
   locale: "en" | "zh-CN";
   /** Parent-decoded follow-up window; null until a confirmed read exists. */
-  data: FreshConversationTurnData | null;
+  data: FreshAttendedData | null;
   /** Actual current reader's receipt; no synthetic turn DATA is constructed. */
   initialConsumption?: FreshConversationTurnConsumption | null;
   /** A submitted turn remains held until its exact original read settles. */
@@ -17,7 +18,7 @@ export interface FreshConversationTurnPanelProps {
   /** Only an owner-confirmed absence before any submission can offer initial Keep. */
   allowInitialKeep?:boolean;
   /** Previously verified local reads, retained for this open conversation. */
-  recordedTurns?:readonly {data:FreshConversationTurnData;message:string|null}[];
+  recordedTurns?:readonly {data:FreshAttendedData;message:string|null}[];
   /** Complete older entries were omitted from the bounded local presentation. */
   historyLimited?:boolean;
   /** Live controller observation; null when the controller holds no state here. */
@@ -48,7 +49,7 @@ type TurnKey = "keeping" | "sending" | "checking" | "unresolved" | "recorded" | 
 /** Priority-ordered continuation sentence: a live controller or any
  * unresolved/effect-unknown signal dominates every green or success heading. */
 function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["activity"],
-  operationState: OperationState | null, data: FreshConversationTurnData | null):
+  operationState: OperationState | null, data: FreshAttendedData | null):
   { key: TurnKey; title: string } | null {
   const text = (en: string, cn: string) => zh ? cn : en;
   if (activity === "keeping") return { key: "keeping", title: text("Keeping response…", "正在保留回复…") };
@@ -86,7 +87,7 @@ function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["acti
 
 /** Bounded source rows; raw codes live only inside the closed disclosure. */
 function sourceRows(zh: boolean, operationState: OperationState | null,
-  data: FreshConversationTurnData | null, initialConsumption: FreshConversationTurnConsumption | null): { label: string; value: string }[] {
+  data: FreshAttendedData | null, initialConsumption: FreshConversationTurnConsumption | null): { label: string; value: string }[] {
   const text = (en: string, cn: string) => zh ? cn : en;
   const notSupplied = text("Not supplied", "未提供");
   const flag = (value: boolean | undefined) => value === undefined ? notSupplied : String(value);
@@ -162,13 +163,15 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
     </p>
     {historyLimited && <p>{text("Earlier replies remain available in project conversation history.", "更早的回复仍可在项目对话历史中查看。")}</p>}
     {recordedTurns.map(turn=><section className="mm-fresh-conversation-turn-followup" key={turn.data.turn_key}>
-      <FreshConversationInitialResponse locale={locale} result={turn.data.result} originalMessage={turn.message}
-        responseKind="followup" headingLevel={3}/>
+      {turn.data.result&&!("envelope"in turn.data.result)?<NativeTurnNotice locale={locale} message={turn.message}/>:
+       <FreshConversationInitialResponse locale={locale} result={turn.data.result&&"envelope"in turn.data.result?turn.data.result:null} originalMessage={turn.message}
+        responseKind="followup" headingLevel={3}/>}
     </section>)}
     {recorded && result != null && !recordedTurns.some(turn=>turn.data.turn_key===data?.turn_key) && <section className="mm-fresh-conversation-turn-followup">
-      <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalTurnMessage??null} responseKind="followup" headingLevel={3}
+      {!("envelope"in result)?<NativeTurnNotice locale={locale} message={originalTurnMessage??null}/>:
+       <FreshConversationInitialResponse locale={locale} result={result} originalMessage={originalTurnMessage??null} responseKind="followup" headingLevel={3}
         caption={data?.parent_consumed === false
-          ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null} />
+          ? text("Reading this result does not acknowledge it.", "查看此结果并不表示已确认接收。") : null} />}
     </section>}
     {receipt != null && (!recorded || allowNextMessage) && (messagePreview ?? <div className="mm-fresh-conversation-turn-field">
       <label className="mm-fresh-conversation-turn-label" htmlFor={inputId}>
@@ -203,4 +206,14 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
       </div>
     </details>
   </section>;
+}
+
+
+function NativeTurnNotice({locale,message}:{locale:"en"|"zh-CN";message:string|null}){
+ const zh=locale==="zh-CN";
+ return <>
+  <h3>{zh?"已记录后续回复":"Follow-up response recorded"}</h3>
+  {message!==null?<p style={{whiteSpace:"pre-wrap"}}>{message}</p>:null}
+  <p>{zh?"打开“已记录对话”以读取原始回复。":"Open Recorded conversation to read the original answer."}</p>
+ </>;
 }

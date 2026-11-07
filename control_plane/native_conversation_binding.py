@@ -8,11 +8,14 @@ launch owner; preview only claims a current registered worker.
 from __future__ import annotations
 from dataclasses import dataclass
 import re
+import inspect
+from typing import Callable
 
 from common.fresh_conversation_contract import canonical_digest
 from control_plane.executive_agent_capabilities import DSH_NATIVE_CONVERSATION_PROFILE_ID
 from control_plane.executive_capacity_join import read_remote_capacity_joins
 from control_plane.model_router import ModelRouter
+from control_plane.worker_adapter import DSH_NATIVE_OPERATOR_ADAPTER_ID
 
 _SEAL = object()
 
@@ -36,6 +39,26 @@ class NativeConversationRegistration:
 
 
 @dataclass(frozen=True, slots=True)
+class NativeConversationHostComposition:
+    """Trusted selection of the already registered Worker; no registration effect."""
+    registration: NativeConversationRegistration
+    current: Callable[[], None]
+
+    def __post_init__(self):
+        if (type(self.registration) is not NativeConversationRegistration
+                or not callable(self.current) or inspect.iscoroutinefunction(self.current)
+                or inspect.iscoroutinefunction(getattr(self.current, "__call__", None))):
+            raise ValueError("native host composition requires a synchronous installed source")
+
+    def require_current(self) -> None:
+        value = self.current()
+        if value is not None:
+            if inspect.iscoroutine(value):
+                value.close()
+            raise ValueError("native installed source is not current")
+
+
+@dataclass(frozen=True, slots=True)
 class NativeConversationBindingSource:
     _seal: object
     _service: object
@@ -56,7 +79,7 @@ class NativeConversationBindingSource:
         alias = router.model_aliases[selection.model_alias]
         # resolve(), never profiles[]: disabled declarations cannot authorize execution.
         profile = router.capability_registry.resolve(alias.execution_profile_id)
-        if (not alias.worker_eligible or alias.adapter_id != "acp" or alias.provider_alias != "acp"
+        if (not alias.worker_eligible or alias.adapter_id != DSH_NATIVE_OPERATOR_ADAPTER_ID or alias.provider_alias != "acp"
                 or profile.profile_id != DSH_NATIVE_CONVERSATION_PROFILE_ID
                 or profile.execution_surface != "dsh-native-web-acp" or profile.write_capable
                 or profile.auth_realm != "dedicated-worker-account" or profile.sandbox_policy != "read-only"
