@@ -355,20 +355,15 @@ class RuntimeCanarySubscriptionStore:
                 raise ValueError("canary delivery chain unavailable")
             if index==0:
                 if (set(p)!={"schema","subscription_id","version","event_id","outcome"}
-                        or p["schema"]!=_SCHEMA or p["outcome"] is not None
-                        or p["subscription_id"] not in ref  # replaced below
-                        ):
-                    # The subscription id is not embedded in hashed ref; validate separately.
-                    if (set(p)!={"schema","subscription_id","version","event_id","outcome"}
-                            or p.get("schema")!=_SCHEMA or p.get("outcome") is not None
-                            or type(p.get("subscription_id")) is not str
-                            or _SUB_ID.fullmatch(p["subscription_id"]) is None
-                            or type(p.get("version")) is not str
-                            or _ID.fullmatch(p["version"]) is None
-                            or type(p.get("event_id")) is not str
-                            or _EVENT_ID.fullmatch(p["event_id"]) is None
-                            or ref!="canary-delivery:"+_hash([p["subscription_id"],p["event_id"]])):
-                        raise ValueError("invalid canary delivery reservation")
+                        or p.get("schema")!=_SCHEMA or p.get("outcome") is not None
+                        or type(p.get("subscription_id")) is not str
+                        or _SUB_ID.fullmatch(p["subscription_id"]) is None
+                        or type(p.get("version")) is not str
+                        or _ID.fullmatch(p["version"]) is None
+                        or type(p.get("event_id")) is not str
+                        or _EVENT_ID.fullmatch(p["event_id"]) is None
+                        or ref!="canary-delivery:"+_hash([p["subscription_id"],p["event_id"]])):
+                    raise ValueError("invalid canary delivery reservation")
             elif (set(p)!={"schema","outcome","status"}
                   or p.get("schema")!=_SCHEMA or p.get("outcome") not in {
                       "RECEIVED","REFUSED","EFFECT_UNKNOWN"}
