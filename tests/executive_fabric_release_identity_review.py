@@ -78,9 +78,10 @@ REVIEWED_FILES = {
                    (3495, 31, 34, 'int', '400'),
                    (3502, 31, 34, 'int', '429'))},
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": '221380b249b8d4d960de4d6a5d5460338b447da603ed0f5c919c07968df744ff',
+        # v9 keeps the original private account directory permission check.
+        "sha256": '36128047df407955975392e3daffe53aa080bb7488c693154357fe6d35f1e47e',
         "sites": (
-            (739, 60, 65, 'int', '0o700'),
+            (818, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -787,6 +788,17 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
+
+# Hermes primary APPLICATION codec: fixed input-byte and conversation-count
+# bounds, never OS accounts, principals, permissions or service selection.
+# Attended source self-review under the CEO-Web waiver. Full source hash and
+# complete typed tokens remain required; any drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
+    "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
+}
+
+
 
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;

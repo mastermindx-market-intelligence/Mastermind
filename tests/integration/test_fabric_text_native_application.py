@@ -194,13 +194,17 @@ class ApplicationSelectorTests(unittest.TestCase):
                 os.environ["MM_PROVIDER_APPLICATION_MODE"] = "shared_fabric"
                 return [None]
             from brain import key_rotor
-            with patch.object(cli_bridge, "cli_path", lambda: "/claude"), \
-                    patch.object(key_rotor, "candidates", side_effect=candidates), \
+            # Ordinary unselected preparation must reach the late selector.
+            # This pure boundary fixture has no production agents.yml.
+            with patch.object(cli_bridge, "_cfg", return_value={"backend": "cli", "reasoning": {}}), \
+                    patch.object(cli_bridge, "cli_path", lambda: "/claude"), \
+                    patch.object(key_rotor, "candidates", side_effect=candidates) as selected, \
                     patch.object(cli_bridge, "_via_subprocess", side_effect=AssertionError("send")), \
                     patch.object(cli_bridge, "_SDK", False):
                 with self.assertRaisesRegex(cli_bridge.ProviderStartRefused, "fabric_tools_unavailable"):
                     asyncio.run(cli_bridge._reason(
                         "u", _backend_override="cli", log_run=False))
+                selected.assert_called_once()
 
     def test_waterfall_selected_late_refusal_does_not_fabricate_attempt(self):
         from brain import provider_waterfall
