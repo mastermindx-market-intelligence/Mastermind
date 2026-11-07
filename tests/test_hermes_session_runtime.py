@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from control_plane.executive_runtime import Runtime
-from control_plane.native_continuation import _PREFIX, _request_key
+from control_plane.native_continuation import _PREFIX, _request_key, hermes_family, HERMES_KINDS
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
 from control_plane.remote_worker_transport import TransportError, TransportEffect
 from integrations.business_mcp_auth.contracts import VerifiedPrincipal
@@ -27,7 +27,7 @@ from integrations.session_bridge.runtime_owner import (
 from integrations.session_bridge.runtime_return import RuntimeSessionReturn
 from integrations.session_bridge.schemas import BridgeError
 from tests.test_executive_fabric_composition import root_stats
-from tests.test_hermes_secretary_composition import document, source_for
+from tests.test_hermes_secretary_composition import document, dual_document, source_for
 from integrations.business_mcp_auth.contracts import AUTH_POLICY_SCHEMA, load_resource_policy
 
 
@@ -36,16 +36,20 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture
-def native(tmp_path, root_stats, monkeypatch):
+@pytest.fixture(params=HERMES_KINDS)
+def native(tmp_path, root_stats, monkeypatch, request):
+    kind = request.param
+    family = hermes_family(kind)
     runtime = Runtime.at(tmp_path / "runtime")
     job = runtime.jobs.create_job(
         "Native Secretary", command_id="test:secretary-root",
         provenance={"workstream": "WS:SECRETARY"})
-    data = document(tmp_path)
-    data["hermes_secretary_conversation"]["root_job_id"] = job.job_id
+    data = document(tmp_path) if kind == "hermes_secretary" else dual_document(tmp_path)
+    data[kind + "_conversation"]["root_job_id"] = job.job_id
+    data[kind + "_conversation"]["work_ref"] = "WS:SECRETARY"
     source = source_for(tmp_path, data)
-    selected = source.hermes_secretary_selection()
+    selected = (source.hermes_secretary_selection() if kind == "hermes_secretary"
+                else source.hermes_meta_selection())
     target = {key: getattr(selected, key) for key in ("profile_id", "session_id", "principal_id")}
     target.update(instance_id="native-instance", authority_epoch=3, revision=0, execution_generation=0)
     state = SimpleNamespace(
@@ -94,29 +98,30 @@ def native(tmp_path, root_stats, monkeypatch):
             authority_epoch=3, execution_generation=1 if status == "terminal" else None)
 
     class Client:
-        async def request_secretary(self, request, *, before_write=None):
+        async def request_conversation(self, request, *, before_write=None):
             operation = request["operation"]
             state.calls.append(operation)
             if operation == "observe":
                 if state.before_observe is not None:
                     await state.before_observe()
-                return dict(schema=NATIVE_SCHEMA, status="TARGET", target=copy.deepcopy(state.target))
+                return dict(schema=family.native_schema, status="TARGET", target=copy.deepcopy(state.target))
             if operation == "read_original":
                 assert before_write is None
                 if state.read_unavailable:
                     raise TransportError("unavailable", TransportEffect.NO_EFFECT)
                 if not state.writes:
-                    return dict(schema=NATIVE_SCHEMA, status="NOT_SUBMITTED")
+                    return dict(schema=family.native_schema, status="NOT_SUBMITTED")
                 if state.after_read is not None:
                     state.after_read()
-                return dict(schema=NATIVE_SCHEMA, status="OBSERVED", admission=admission("terminal"),
+                return dict(schema=family.native_schema, status="OBSERVED", admission=admission("terminal"),
                             answer="Actual original answer: 日本語 ✓", successful=True)
             assert operation == "submit" and callable(before_write)
             if state.before_submit is not None:
                 state.before_submit()
             assert before_write(operation, copy.deepcopy(request)) is None
             # Independent connection observes COMMIT before simulated bytes.
-            key = request["submission_id"].removeprefix("session-secretary-")
+            assert request["submission_id"].startswith(family.submission_prefix)
+            key = request["submission_id"].removeprefix(family.submission_prefix)
             commit = runtime.events.get_event_by_command_id("session-bridge-continue-commit:"+key)
             assert commit is not None and commit.event_type == "SESSION_BRIDGE_CONTINUE_COMMIT_STARTED"
             state.writes += 1
@@ -124,9 +129,11 @@ def native(tmp_path, root_stats, monkeypatch):
                 state.after_submit()
             if state.lose_submit:
                 raise TransportError("lost_response", TransportEffect.EFFECT_UNKNOWN)
-            return dict(schema=NATIVE_SCHEMA, status="ADMITTED", admission=admission("queued"))
+            return dict(schema=family.native_schema, status="ADMITTED", admission=admission("queued"))
 
-    monkeypatch.setattr(RemoteWorkerBrokerClient, "for_secretary_conversation",
+    suffix = "secretary" if kind == "hermes_secretary" else "meta"
+    setattr(Client, "request_" + suffix, Client.request_conversation)
+    monkeypatch.setattr(RemoteWorkerBrokerClient, "for_" + suffix + "_conversation",
                         lambda *a, **k: Client())
     hermes = HermesNativeSession(source, read_guard=require_read, submit_guard=require_submit)
     fabric = RuntimeFabricTargetProjector(runtime)
@@ -134,13 +141,13 @@ def native(tmp_path, root_stats, monkeypatch):
     owner = RuntimeSessionReturn(
         runtime, fabric=fabric, codex=codex, socket_path=Path("/private/tmp/hermes-test.sock"),
         authorized_policies=policies, hermes=hermes)
-    return SimpleNamespace(runtime=runtime, job=job, source=source, state=state,
+    return SimpleNamespace(runtime=runtime, job=job, source=source, state=state, kind=kind, family=family,
                            hermes=hermes, owner=owner, policies=policies, verified=verified,
                            principal=principal_projection(verified))
 
 
 async def arguments(s):
-    target, = await s.owner.hermes_targets(s.principal)
+    target, = await s.owner.hermes_targets(s.principal, kind=s.kind)
     s.state.calls.clear()
     return dict(target_ref=target["target_ref"],
                 operation_key=target["continuation_operation_key"],
@@ -306,11 +313,11 @@ async def test_installed_bridge_and_public_reader_use_original_native_contract(n
             return CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=True,
                                      result=await provider.handle_frame(frame))
     client = InstalledSessionBridgeClient("/private/tmp/hermes-ingress.sock", client=Ingress())
-    target, = await client.targets(s.verified, "hermes_secretary")
+    target, = await client.targets(s.verified, s.kind)
     args = dict(target_ref=target["target_ref"], operation_key=target["continuation_operation_key"],
                 instruction="Read the original task.", stop_condition="One answer.")
     sent = await client.send(s.verified, args)
-    assert sent["schema"] == "mastermind.session_bridge.hermes_secretary_result.v1"
+    assert sent["schema"] == s.family.result_schema
     s.state.calls.clear()
     result = await NativeReplyReadTool(client).handle(
         s.verified, "session_reply_read", {"operation_key": args["operation_key"]})

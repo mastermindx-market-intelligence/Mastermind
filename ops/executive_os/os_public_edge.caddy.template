@@ -62,7 +62,7 @@ mcp.mastermind-x.com {
     }
     @mcpmeta {
       method GET
-      path /.well-known/oauth-protected-resource/mcp
+      path /.well-known/oauth-protected-resource/mcp /.well-known/oauth-protected-resource/mcp/coo
     }
     handle @mcpmeta {
       reverse_proxy 127.0.0.1:__RELAY_PORT__ {
@@ -80,7 +80,7 @@ mcp.mastermind-x.com {
     }
     @mcp {
       method POST
-      path /mcp
+      path /mcp /mcp/coo
     }
     handle @mcp {
       request_body {

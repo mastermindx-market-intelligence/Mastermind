@@ -31,10 +31,10 @@ from control_plane.remote_worker_transport import (
     MAX_HOST_OBSERVATION_RESPONSE_BYTES,
     MAX_SECRETARY_RESPONSE_BYTES,
     build_host_observation_request,
-    build_secretary_request,
+    build_secretary_request, build_meta_request,
     decode_host_observation_response,
-    decode_secretary_request,
-    decode_secretary_response,
+    decode_secretary_request, decode_meta_request,
+    decode_secretary_response, decode_meta_response,
     secretary_request_session_id,
     validate_host_ref,
     validate_secretary_native_id,
@@ -72,6 +72,7 @@ class RemoteWorkerBrokerClient:
         self.binding = binding
         self._host_observation: tuple[str, str, str] | None = None
         self._secretary_conversation: tuple[str, str, str, str, str] | None = None
+        self._conversation_role: str | None = None
         operations = frozenset(allowed_operations)
         if not operations or any(not isinstance(value, str) for value in operations):
             raise TransportValidationError("remote broker client operations are invalid")
@@ -103,15 +104,18 @@ class RemoteWorkerBrokerClient:
         instance.bound_payload_identity = {}
         instance._host_observation = (host_ref, expected_host_binding_sha256, expected_implementation_sha)
         instance._secretary_conversation = None
+        instance._conversation_role = None
         return instance
 
     @classmethod
-    def for_secretary_conversation(
+    def _for_conversation(
         cls, binding: BrokerTransportBinding, *, host_ref: str, root_id: str,
         session_id: str, expected_host_binding_sha256: str,
-        expected_implementation_sha: str,
+        expected_implementation_sha: str, role: str,
     ) -> RemoteWorkerBrokerClient:
-        """Bind one Secretary conversation without manufacturing a Worker identity."""
+        """Bind one explicit conversation without manufacturing a Worker identity."""
+        if type(role) is not str or role not in {"mmsecretary", "mmmeta"}:
+            raise TransportValidationError("native conversation role is invalid")
         if not isinstance(binding, BrokerTransportBinding):
             raise TransportValidationError("secretary conversation binding is invalid")
         validate_host_ref(host_ref)
@@ -130,11 +134,35 @@ class RemoteWorkerBrokerClient:
         instance.allowed_operations = frozenset()
         instance.bound_payload_identity = {}
         instance._host_observation = None
+        instance._conversation_role = role
         instance._secretary_conversation = (
             host_ref, root_id, session,
             expected_host_binding_sha256, expected_implementation_sha,
         )
         return instance
+
+    @classmethod
+    def for_secretary_conversation(
+        cls, binding: BrokerTransportBinding, *, host_ref: str, root_id: str,
+        session_id: str, expected_host_binding_sha256: str,
+        expected_implementation_sha: str,
+    ) -> RemoteWorkerBrokerClient:
+        return cls._for_conversation(
+            binding, host_ref=host_ref, root_id=root_id, session_id=session_id,
+            expected_host_binding_sha256=expected_host_binding_sha256,
+            expected_implementation_sha=expected_implementation_sha, role="mmsecretary")
+
+
+    @classmethod
+    def for_meta_conversation(
+        cls, binding: BrokerTransportBinding, *, host_ref: str, root_id: str,
+        session_id: str, expected_host_binding_sha256: str,
+        expected_implementation_sha: str,
+    ) -> RemoteWorkerBrokerClient:
+        return cls._for_conversation(
+            binding, host_ref=host_ref, root_id=root_id, session_id=session_id,
+            expected_host_binding_sha256=expected_host_binding_sha256,
+            expected_implementation_sha=expected_implementation_sha, role="mmmeta")
 
     async def read_hermes_roles(self) -> dict[str, Any]:
         """Read the fixed pair once under one total, at-most-four-second budget."""
@@ -187,8 +215,8 @@ class RemoteWorkerBrokerClient:
                     if transport is not None:
                         transport.abort()
 
-    async def request_secretary(
-        self, request: Mapping[str, Any], *, before_write=None
+    async def _request_conversation(
+        self, request: Mapping[str, Any], *, role: str, before_write=None
     ) -> dict[str, Any]:
         """Send one closed Secretary request over the incumbent mTLS transport.
 
@@ -197,23 +225,31 @@ class RemoteWorkerBrokerClient:
         resent: any uncertainty after the framed write is EFFECT_UNKNOWN.
         """
         selection = self._secretary_conversation
-        if selection is None or self._host_observation is not None:
-            raise TransportError("secretary_not_bound", TransportEffect.NO_EFFECT)
+        if (type(role) is not str or role not in {"mmsecretary", "mmmeta"}
+                or selection is None or self._host_observation is not None
+                or self._conversation_role != role):
+            raise TransportError("secretary_not_bound" if role == "mmsecretary" else "meta_not_bound",
+                                 TransportEffect.NO_EFFECT)
+        build_wire, decode_request, decode_response = (
+            (build_secretary_request, decode_secretary_request, decode_secretary_response)
+            if role == "mmsecretary" else
+            (build_meta_request, decode_meta_request, decode_meta_response))
         host_ref, root_id, session_id, expected_binding, expected_implementation = selection
         try:
             operation = validate_secretary_operation(request)
             if secretary_request_session_id(operation) != session_id:
                 raise TransportValidationError("secretary session is not bound")
-            wire = build_secretary_request(
+            wire = build_wire(
                 host_ref, root_id, expected_binding, expected_implementation, operation,
             )
             sealed = self._canonical_bytes(wire)
-            wire = decode_secretary_request(sealed)
+            wire = decode_request(sealed)
             operation = wire["request"]
             frame = encode_frame(sealed)
         except TransportValidationError as exc:
             raise TransportError(
-                "secretary_request_invalid", TransportEffect.NO_EFFECT
+                "secretary_request_invalid" if role == "mmsecretary" else "meta_request_invalid",
+                TransportEffect.NO_EFFECT
             ) from exc
         modifying = operation["operation"] == "submit"
         if modifying and not callable(before_write):
@@ -264,7 +300,7 @@ class RemoteWorkerBrokerClient:
                         else TransportEffect.NO_EFFECT,
                     )
                 raw = await reader.readexactly(size)
-                response = decode_secretary_response(raw, wire)
+                response = decode_response(raw, wire)
                 if loop.time() >= deadline:
                     raise asyncio.TimeoutError()
                 if response["outcome"] == "refused":
@@ -277,7 +313,7 @@ class RemoteWorkerBrokerClient:
             # The framed write may already have reached the Secretary owner.
             # Cancellation cannot authorize another submit.
             raise TransportError(
-                "secretary_request_cancelled",
+                "secretary_request_cancelled" if role == "mmsecretary" else "meta_request_cancelled",
                 TransportEffect.EFFECT_UNKNOWN if write_started and modifying else TransportEffect.NO_EFFECT,
             ) from exc
         except (
@@ -305,6 +341,17 @@ class RemoteWorkerBrokerClient:
                     transport = getattr(writer, "transport", None)
                     if transport is not None:
                         transport.abort()
+
+    async def request_secretary(
+        self, request: Mapping[str, Any], *, before_write=None,
+    ) -> dict[str, Any]:
+        return await self._request_conversation(request, role="mmsecretary", before_write=before_write)
+
+
+    async def request_meta(
+        self, request: Mapping[str, Any], *, before_write=None,
+    ) -> dict[str, Any]:
+        return await self._request_conversation(request, role="mmmeta", before_write=before_write)
 
     @staticmethod
     def _validated_payload_identity(value: Mapping[str, str]) -> dict[str, str]:

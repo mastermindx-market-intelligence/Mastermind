@@ -189,14 +189,14 @@ def _client(binding, session_id: str = SESSION):
     )
 
 
-def _answering_pair(writer: _Writer, reply_for):
+def _answering_pair(writer: _Writer, reply_for, *, decode_request=transport.decode_secretary_request):
     """A fake peer that answers the one framed write with a built reply."""
     reader = _Reader()
     original_write = writer.write
 
     def write(data: bytes) -> None:
         original_write(data)
-        request = transport.decode_secretary_request(bytes(writer.written[4:]))
+        request = decode_request(bytes(writer.written[4:]))
         reader.data.extend(transport.encode_frame(_canonical(reply_for(request))))
 
     writer.write = write

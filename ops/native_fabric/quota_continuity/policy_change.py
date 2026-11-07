@@ -1,9 +1,9 @@
-"""Operator preflight for the incumbent native Fabric routing-policy owner.
+"""Inspect and author candidates for the incumbent native Fabric policy owner.
 
-This is a read-only compiler, not a policy publisher or another pool registry.
-It never opens account configuration, resolves credentials, acquires a lease,
-changes a generation or makes a provider request. The existing native snapshot
-owner alone defines critical-policy compatibility. A preview grants no admission.
+Inspect/preview are read-only. Stage may create one new private candidate file,
+never change live policy. No operation opens accounts, resolves credentials,
+acquires a lease, changes a generation or makes a provider request. The existing
+native owner alone defines critical-policy compatibility and activation.
 """
 from __future__ import annotations
 
@@ -234,7 +234,18 @@ def main(argv: list[str] | None = None) -> int:
     preview.add_argument("--current-policy", required=True, type=Path)
     preview.add_argument("--candidate-policy", required=True, type=Path)
     preview.add_argument("--expected-source-sha256", required=True)
+    stage = actions.add_parser("stage", help="Author a new private candidate; never modify live policy")
+    stage.add_argument("--policy", required=True, type=Path)
+    stage.add_argument("--edits", required=True, type=Path)
+    stage.add_argument("--output", required=True, type=Path)
+    stage.add_argument("--expected-source-sha256", required=True)
+    verify = actions.add_parser("verify-candidate", help="Read back an original candidate after uncertain publication")
+    verify.add_argument("--candidate", required=True, type=Path)
+    verify.add_argument("--expected-candidate-sha256", required=True)
     args = parser.parse_args(argv)
+    if args.command in {"stage", "verify-candidate"}:
+        from ops.native_fabric.quota_continuity import policy_edit
+        return policy_edit.run_cli(args)
     try:
         result = (observe_path(args.policy) if args.command == "inspect" else
                   preview_paths(args.current_policy, args.candidate_policy,

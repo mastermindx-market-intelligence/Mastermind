@@ -767,10 +767,13 @@ class DelegateBridge(unittest.TestCase):
         # Only the explicit host composition may import these existing Runtime,
         # Service and current-principal owners. Bridge/tool/package stays unbound;
         # the transport ban and exact per-module import set remain enforced.
+        # The terminal-return owner contributes only the pure, closed result
+        # capsule validator; it creates no transport or result lifecycle.
         owner_reads = {
             "control_plane.executive_runtime",
             "control_plane.executive_delegation_identity",
             "control_plane.executive_service",
+            "control_plane.executive_terminal_return",
             "control_plane.coo_principal_host",
             "control_plane.coo_principal_envelope",
         }
