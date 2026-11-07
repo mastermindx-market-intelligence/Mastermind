@@ -102,3 +102,29 @@ def test_wrong_channel_in_request_refused_without_network(tmp_path):
     with pytest.raises(Exception):
         asyncio.run(bad())
     assert not http.calls
+
+
+
+def test_real_local_A2_socket_roundtrip_with_existing_peer_identity(tmp_path,monkeypatch):
+    """Use a disposable actual AF_UNIX socket; no Slack/production token."""
+    import integrations.session_bridge.installed_dot_canary_source as installed_source
+    reader,http,service=create(tmp_path)
+    private_socket=service.config.socket_path
+    monkeypatch.setattr(installed_source,"AGENT_RELAY_SOCKET_PATH",private_socket)
+    native=installed_source.InstalledA2CanaryReader(private_socket,POLICY)
+
+    async def exercise():
+        task=asyncio.create_task(service.serve_one())
+        for _ in range(100):
+            if private_socket.exists():
+                break
+            await asyncio.sleep(.01)
+        assert private_socket.exists()
+        result=await native.observe(thread_ts=ROOT,message_ts=MESSAGE)
+        await asyncio.wait_for(task,timeout=3)
+        return result
+    observed=asyncio.run(exercise())
+    assert observed.ts==MESSAGE and observed.author_user_id==USER
+    assert observed.text.startswith("MMX_CHRIS_DOT_CANARY_V1:")
+    assert http.calls and http.calls[0][1]=="conversations.replies"
+    assert not private_socket.exists()
