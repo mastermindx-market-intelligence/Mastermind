@@ -3076,7 +3076,7 @@ class ExecutiveSupervisor:
         if outcome is None:
             raise NoEligibleWorkerCapacity(job_id)
         if (
-            (target is not None and not outcome.claimed_now)
+            not outcome.claimed_now
             or outcome.outcome == "TERMINAL"
             or outcome.attempt.status is not AttemptStatus.CLAIMED
         ):
@@ -3168,6 +3168,10 @@ class ExecutiveSupervisor:
                 )
                 if current_prompt != spec.prompt:
                     raise SupervisorError(f"{job.orchestration_role} input changed after sealing")
+            # All fresh branches use the incumbent Runtime lease fence, even
+            # ordinary native children with no target or review-input suffix.
+            # No asynchronous preparation may intervene before adapter START.
+            self.runtime.attempts.validate_fresh_launch_claim(job_id, lease)
             start_invoked = True
             if paid_supervisor.is_paid_adapter(self.adapter):
                 process_ref = await self.adapter.start(spec, lease=lease, control_recovery={
@@ -3240,6 +3244,18 @@ class ExecutiveSupervisor:
                 effective_grant=effective_grant,
             )
         except Exception as exc:
+            if not start_invoked:
+                try:
+                    self.runtime.attempts.validate_fresh_launch_claim(job_id, lease)
+                except RuntimeProofError:
+                    # Leave cancellation and a successor's assignment with the
+                    # original Runtime/recovery owner. A stale launcher cannot
+                    # seal its workspace or publish a replacement failure.
+                    if isinstance(exc, SupervisorError):
+                        raise exc
+                    raise SupervisorError(
+                        f"Codex launch failed: {type(exc).__name__}: {exc}"
+                    ) from exc
             if process_ref is not None:
                 try:
                     await self.adapter.cancel(process_ref, "supervisor launch persistence failed")
