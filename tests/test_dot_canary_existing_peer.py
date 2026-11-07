@@ -86,3 +86,47 @@ def test_existing_peer_unsubscribe_revokes_current_chris_subscription(event_case
     enrolled,stopped=asyncio.run(with_peer(s,tmp_path,short_socket_root,act))
     assert stopped=={"stopped":True,"committed":True}
     assert asyncio.run(s.host.canary_owner.store.read(enrolled["subscription_id"])) is None
+
+
+
+def test_canary_delivery_over_original_authenticated_CeoIngress_peer(
+    event_case,tmp_path,short_socket_root,monkeypatch,
+):
+    """No new listener: existing App peer -> enrolled A2 reader -> 1 callback."""
+    s=event_case
+    who,policy=admit(s)
+    from integrations.session_bridge.installed_dot_canary_source import InstalledA2CanaryReader
+    import integrations.session_bridge.installed_dot_canary_source as source_module
+    from test_dot_canary_reader import source, ROOT, MESSAGE
+    local_source,http = source(policy=policy)
+    async def a2_transport(socket_path,request,*,timeout_seconds):
+        assert request["operation"]=="read_dot_canary"
+        args=request["args"]
+        assert args["principal_digest"]==policy.principal_digest
+        observed=await local_source.observe(
+            thread_ts=args["thread_ts"],message_ts=args["message_ts"],
+        )
+        return {"ok":True,"result":{
+            "state":"OBSERVED" if observed else "NOT_ELIGIBLE",
+            "message":dataclasses.asdict(observed) if observed else None,
+        }}
+    monkeypatch.setattr(source_module,"InstalledA2CanaryReader",
+        lambda path,current:InstalledA2CanaryReader(
+            path,current,transport=a2_transport,
+        ))
+    async def exercise(client,service):
+        enrolled=await client._call("canary_subscribe",who,dataclasses.asdict(
+            CanarySubscribeRequest("C0BSBM78V1N",URL,SECRET,240000)))
+        assert enrolled["persisted"] is True
+        params={"thread_ts":ROOT,"message_ts":MESSAGE}
+        once=await client._call("canary_deliver",who,params)
+        twice=await client._call("canary_deliver",who,params)
+        return once,twice
+    once,twice=asyncio.run(with_peer(s,tmp_path,short_socket_root,exercise))
+    assert len(once)==len(twice)==1
+    assert once[0]["state"]=="RECEIVED" and once[0]["fresh_send"] is True
+    assert once[0]["dot_consumed"] is False
+    assert twice[0]["state"]=="RECEIVED" and twice[0]["fresh_send"] is False
+    assert len(s.http)==2  # one verification + one owner-authorized event
+    assert s.http[1][0]["name"]=="mastermind.slack_canary_message"
+    assert len(http.calls)==2  # each user-triggered read, no W3C/poller
