@@ -60,9 +60,11 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": 'd6705a98d6f211b38d98dc5f49514dac066cac2b2a49cc283d1d8eb910247291',
+        # The v5 service composition retains the original private account
+        # directory check verbatim. This is its unchanged complete mode token.
+        "sha256": '0dae349d2d4ee3785da52a217a30aa009a381a3833c53e667799774a7b8675dc',
         "sites": (
-            (555, 60, 65, 'int', '0o700'),
+            (624, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {

@@ -244,19 +244,49 @@ SERVICE_SELECTED_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v3"
 SERVICE_ADMIN_SCHEMA = "mastermind.native_go_application_service.v4"
 SERVICE_ADMIN_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v4"
 SERVICE_ADMIN_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v4"
+SERVICE_ROLE_SCHEMA = "mastermind.native_go_application_service.v5"
+SERVICE_ROLE_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v5"
+SERVICE_ROLE_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v5"
 SERVICE_CREDENTIAL_REF = "MACRO_FABRIC_APPLICATION_TOKEN"
+# Closed service projections owned by the existing APPLICATION installer. A
+# role's interactive session or another consumer's bearer is not this grant.
+SERVICE_ROLE_PROFILES = {
+    "hermes-secretary": ("hermes-secretary", "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN"),
+    "hermes-meta-ceo": ("hermes-meta-ceo", "HERMES_META_FABRIC_APPLICATION_TOKEN"),
+}
 SERVICE_SCOPE_FIELDS = frozenset({"principal_id", "caller_host", "native_host", "workload",
     "credential_ref", "capability_lane", "workload_profile", "account_profile"})
 SERVICE_IDENTITY_FIELDS = frozenset({"dev", "ino", "uid", "gid", "mode", "nlink", "size",
     "mtime_ns", "ctime_ns"})
 
 
-def application_enrollment_paths(startup):
+def application_enrollment_paths(startup, service_profile=None):
     """Fixed names in the original Go and finite installer owners."""
     store = Path(__file__).absolute().parent.parent.parent
+    if service_profile is not None:
+        if type(service_profile) is not str or service_profile not in SERVICE_ROLE_PROFILES:
+            raise ValueError("native application service profile refused")
+        return {"binding": startup.paths["go"] / ("application-service-" + service_profile + ".json"),
+                "intent": store / "bootstrap" / (".go-service-enrollment-" + service_profile + "-v5.json"),
+                "receipt": store / "bootstrap" / ("go-service-enrollment-" + service_profile + "-v5.json")}
     return {"binding": startup.paths["go"] / "application-service.json",
             "intent": store / "bootstrap/.go-service-enrollment-v1.json",
             "receipt": store / "bootstrap/go-service-enrollment-v1.json"}
+
+
+def validate_application_role_scope(scope):
+    """A finite source mapping, never caller-authored authority or a path."""
+    profile = scope.get("service_profile") if type(scope) is dict else None
+    if type(profile) is not str or profile not in SERVICE_ROLE_PROFILES:
+        raise ValueError("native application service profile refused")
+    lane, credential_ref = SERVICE_ROLE_PROFILES[profile]
+    if (scope.get("capability_lane") != lane or scope.get("principal_id") != lane
+            or scope.get("credential_ref") != credential_ref
+            or scope.get("workload") != "site_interactive"
+            or scope.get("workload_profile") != "site_interactive"
+            or "admin_pool_view" in scope):
+        raise ValueError("native application role mapping refused")
+    return profile
 
 
 def application_service_owners(startup, *, application_http=False):
@@ -372,11 +402,12 @@ def validate_application_service_document(startup, document):
               "scope", "owners", "credential"}
     http = type(document) is dict and document.get("schema") == SERVICE_HTTP_SCHEMA
     admin = type(document) is dict and document.get("schema") == SERVICE_ADMIN_SCHEMA
-    selected = type(document) is dict and document.get("schema") in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA)
+    role = type(document) is dict and document.get("schema") == SERVICE_ROLE_SCHEMA
+    selected = type(document) is dict and document.get("schema") in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA, SERVICE_ROLE_SCHEMA)
     if http:
         fields |= {"application_recipe", "application_accounts"}
     if (type(document) is not dict or set(document) != fields
-            or document["schema"] != (SERVICE_HTTP_SCHEMA if http else SERVICE_ADMIN_SCHEMA if admin else
+            or document["schema"] != (SERVICE_ROLE_SCHEMA if role else SERVICE_HTTP_SCHEMA if http else SERVICE_ADMIN_SCHEMA if admin else
                                       SERVICE_SELECTED_SCHEMA if selected else SERVICE_SCHEMA)
             or document["owners"] != application_service_owners(startup, application_http=http)):
         raise ValueError("native application service projection refused")
@@ -389,6 +420,8 @@ def validate_application_service_document(startup, document):
     expected_scope = SERVICE_SCOPE_FIELDS | {"selection_purpose"} if selected else SERVICE_SCOPE_FIELDS
     if admin:
         expected_scope |= {"admin_pool_view"}
+    if role:
+        expected_scope |= {"service_profile"}
     if type(scope) is not dict or set(scope) != expected_scope:
         raise ValueError("native application service scope refused")
     if admin and type(scope["admin_pool_view"]) is not bool:
@@ -396,11 +429,14 @@ def validate_application_service_document(startup, document):
     for key in ("principal_id", "caller_host", "native_host", "workload", "credential_ref"):
         if type(scope[key]) is not str or IDENTITY.fullmatch(scope[key]) is None:
             raise ValueError("native application service identity refused")
-    if (scope["capability_lane"] != "admin-orchestrator"
+    if role:
+        validate_application_role_scope(scope)
+    elif (scope["capability_lane"] != "admin-orchestrator"
             or scope["workload_profile"] != "site_interactive"
-            or scope["credential_ref"] != SERVICE_CREDENTIAL_REF
-            or type(scope["account_profile"]) is not str):
+            or scope["credential_ref"] != SERVICE_CREDENTIAL_REF):
         raise ValueError("native application service mapping refused")
+    if type(scope["account_profile"]) is not str:
+        raise ValueError("native application service profile refused")
     profile = Path(scope["account_profile"])
     if not profile.is_absolute() or ".." in profile.parts:
         raise ValueError("native application service profile refused")
@@ -425,13 +461,13 @@ def validate_application_service_document(startup, document):
     return (binding,), scope["native_host"], profile
 
 
-def load_completed_application_startup(startup):
+def _load_completed_application_startup(startup, service_profile=None):
     """Actual-main-only reader of the original finite enrollment receipt.
 
     The accounts hash is a publication receipt, not perpetual authentication
     authority. Grant expiry or later accounts updates cannot erase recovery.
     """
-    paths = application_enrollment_paths(startup)
+    paths = application_enrollment_paths(startup, service_profile)
     present = {name: os.path.lexists(path) for name, path in paths.items()}
     if not any(present.values()):
         return (), None, None
@@ -447,18 +483,22 @@ def load_completed_application_startup(startup):
     receipt_raw, receipt_identity = _service_private(paths["receipt"])
     document, intent, receipt = map(_service_json, (raw, intent_raw, receipt_raw))
     result = validate_application_service_document(startup, document)
+    if (document["scope"].get("service_profile") != service_profile
+            or (document["schema"] == SERVICE_ROLE_SCHEMA) != (service_profile is not None)):
+        raise ValueError("native application enrollment profile differs")
     http = document["schema"] == SERVICE_HTTP_SCHEMA
     admin = document["schema"] == SERVICE_ADMIN_SCHEMA
-    selected = document["schema"] in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA)
+    role = document["schema"] == SERVICE_ROLE_SCHEMA
+    selected = document["schema"] in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA, SERVICE_ROLE_SCHEMA)
     intent_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest", "bundle"}
     receipt_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
                       "scope", "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
     if http:
         receipt_fields |= {"application_recipe_digest", "source_projection_sha256", "provider_profile_identity"}
-    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_ROLE_ENROLLMENT_SCHEMA if role else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
             SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
             SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else SERVICE_ENROLLMENT_SCHEMA)
-            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_HTTP_RECEIPT_SCHEMA if http else
+            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_ROLE_RECEIPT_SCHEMA if role else SERVICE_HTTP_RECEIPT_SCHEMA if http else
                 SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
                 SERVICE_SELECTED_RECEIPT_SCHEMA if selected else SERVICE_RECEIPT_SCHEMA)
             or any(intent[key] != document[key] or receipt[key] != document[key]
@@ -489,6 +529,35 @@ def load_completed_application_startup(startup):
             or application_file_identity(paths["receipt"]) != receipt_identity):
         raise ValueError("native application enrollment changed during startup")
     return result
+
+
+def load_completed_application_startup(startup):
+    """Compose completed services in the existing handler's binding tuple.
+
+    All profiles share the original physical account/lease owners. Historical
+    receipts authenticate recovery even after another service adds its grant.
+    Any partial profile fails startup; it is never silently skipped.
+    """
+    services, host, account_profile, http_projection = (), None, None, None
+    for profile in (None, *SERVICE_ROLE_PROFILES):
+        result = _load_completed_application_startup(startup, profile)
+        if not result[0]:
+            continue
+        if services and (result[1], result[2]) != (host, account_profile):
+            raise ValueError("native application services have different physical owners")
+        for candidate in result[0]:
+            if any(candidate.principal_id == existing.principal_id
+                   or candidate.credential_ref == existing.credential_ref
+                   or candidate.credential == existing.credential for existing in services):
+                raise ValueError("native application service identity collision")
+            services += (candidate,)
+        host, account_profile = result[1:3]
+        if len(result) == 4:
+            if http_projection is not None:
+                raise ValueError("native application HTTP owner collision")
+            http_projection = result[3]
+    result = (services, host, account_profile)
+    return (*result, http_projection) if http_projection is not None else result
 
 
 def main(*, verified_root, verified_metadata, application_services=(), application_host=None,
@@ -590,3 +659,4 @@ def main(*, verified_root, verified_metadata, application_services=(), applicati
 
 if __name__ == "__main__":
     raise SystemExit("native Go entry requires the verified original ingress")
+

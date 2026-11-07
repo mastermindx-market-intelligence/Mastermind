@@ -989,6 +989,7 @@ SERVICE_SPEC_SCHEMA = "native-go-service-enrollment-specification.v1"
 SERVICE_HTTP_SPEC_SCHEMA = "native-go-service-enrollment-specification.v2"
 SERVICE_SELECTED_SPEC_SCHEMA = "native-go-service-enrollment-specification.v3"
 SERVICE_ADMIN_SPEC_SCHEMA = "native-go-service-enrollment-specification.v4"
+SERVICE_ROLE_SPEC_SCHEMA = "native-go-service-enrollment-specification.v5"
 _SERVICE_PLAN_FIELDS = frozenset({"schema", "operation_id", "go_ingress_bundle", "ingress_digest",
     "source_generation", "store", "selection", "installer_sha256", "entry_sha256", "scope",
     "owners", "owner_identities", "accounts_before", "accounts_after_sha256", "grant_sha256", "digest"})
@@ -1102,11 +1103,12 @@ def _service_specification(entry, specification, startup=None):
     fields = {"schema", "operation_id", "scope", "grant"}
     http = type(specification) is dict and specification.get("schema") == SERVICE_HTTP_SPEC_SCHEMA
     admin = type(specification) is dict and specification.get("schema") == SERVICE_ADMIN_SPEC_SCHEMA
-    selected = type(specification) is dict and specification.get("schema") in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
+    role = type(specification) is dict and specification.get("schema") == SERVICE_ROLE_SPEC_SCHEMA
+    selected = type(specification) is dict and specification.get("schema") in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
     if http:
         fields.add("application_recipe")
     if (type(specification) is not dict or set(specification) != fields
-            or specification["schema"] != (SERVICE_HTTP_SPEC_SCHEMA if http else
+            or specification["schema"] != (SERVICE_ROLE_SPEC_SCHEMA if role else SERVICE_HTTP_SPEC_SCHEMA if http else
                 SERVICE_ADMIN_SPEC_SCHEMA if admin else
                 SERVICE_SELECTED_SPEC_SCHEMA if selected else SERVICE_SPEC_SCHEMA)
             or type(specification["operation_id"]) is not str
@@ -1118,6 +1120,8 @@ def _service_specification(entry, specification, startup=None):
     scope_fields = entry.SERVICE_SCOPE_FIELDS | {"selection_purpose"} if selected else entry.SERVICE_SCOPE_FIELDS
     if admin:
         scope_fields |= {"admin_pool_view"}
+    if role:
+        scope_fields |= {"service_profile"}
     if type(scope) is not dict or set(scope) != scope_fields or type(grant) is not dict:
         raise ValueError("invalid service enrollment scope")
     if admin and type(scope["admin_pool_view"]) is not bool:
@@ -1129,9 +1133,12 @@ def _service_specification(entry, specification, startup=None):
     for name in ("principal_id", "caller_host", "native_host", "workload", "credential_ref"):
         if type(scope[name]) is not str or entry.IDENTITY.fullmatch(scope[name]) is None:
             raise ValueError("invalid service enrollment identity")
-    if (scope["capability_lane"] != "admin-orchestrator" or scope["workload_profile"] != "site_interactive"
-            or scope["credential_ref"] != entry.SERVICE_CREDENTIAL_REF
-            or type(scope["account_profile"]) is not str
+    if role:
+        entry.validate_application_role_scope(scope)
+    elif (scope["capability_lane"] != "admin-orchestrator" or scope["workload_profile"] != "site_interactive"
+            or scope["credential_ref"] != entry.SERVICE_CREDENTIAL_REF):
+        raise ValueError("service enrollment mapping differs")
+    if (type(scope["account_profile"]) is not str
             or not Path(scope["account_profile"]).is_absolute() or ".." in Path(scope["account_profile"]).parts
             or grant.get("principal_id") != scope["principal_id"]
             or grant.get("credential_ref") != scope["credential_ref"]
@@ -1187,8 +1194,9 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         specification = _service_specification(entry, specification, startup)
         http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
         admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
-        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
-        paths = entry.application_enrollment_paths(startup)
+        role = specification["schema"] == SERVICE_ROLE_SPEC_SCHEMA
+        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
+        paths = entry.application_enrollment_paths(startup, specification["scope"].get("service_profile"))
         if any(os.path.lexists(path) for path in paths.values()):
             raise ValueError("service enrollment already has an original artifact")
         profile = Path(specification["scope"]["account_profile"])
@@ -1207,7 +1215,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         if (_service_snapshot(entry, startup.paths["accounts_path"]) != (before, identity)
                 or _service_owner_identities(entry, startup, profile, application_http=http) != owners):
             raise ValueError("service owners changed during preparation")
-        plan = {"schema": entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+        plan = {"schema": entry.SERVICE_ROLE_ENROLLMENT_SCHEMA if role else entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
                 entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
                 entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA,
             "operation_id": specification["operation_id"], "go_ingress_bundle": str(go_ingress_bundle),
@@ -1368,19 +1376,20 @@ def _service_transaction(bundle, *, reconcile_only=False):
         specification = _service_specification(entry, specification, startup)
         http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
         admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
-        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
-        enrollment_schema = (entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+        role = specification["schema"] == SERVICE_ROLE_SPEC_SCHEMA
+        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
+        enrollment_schema = (entry.SERVICE_ROLE_ENROLLMENT_SCHEMA if role else entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
             entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
             entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA)
-        service_schema = (entry.SERVICE_HTTP_SCHEMA if http else
+        service_schema = (entry.SERVICE_ROLE_SCHEMA if role else entry.SERVICE_HTTP_SCHEMA if http else
             entry.SERVICE_ADMIN_SCHEMA if admin else
             entry.SERVICE_SELECTED_SCHEMA if selected else entry.SERVICE_SCHEMA)
-        receipt_schema = (entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else
+        receipt_schema = (entry.SERVICE_ROLE_RECEIPT_SCHEMA if role else entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else
             entry.SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
             entry.SERVICE_SELECTED_RECEIPT_SCHEMA if selected else entry.SERVICE_RECEIPT_SCHEMA)
         projection = ({"application_recipe": specification["application_recipe"],
             "application_accounts": specification["grant"]["accounts"]} if http else {})
-        paths = entry.application_enrollment_paths(startup)
+        paths = entry.application_enrollment_paths(startup, specification["scope"].get("service_profile"))
         profile = Path(specification["scope"]["account_profile"])
         if (plan["schema"] != enrollment_schema or ingress["digest"] != plan["ingress_digest"]
                 or startup.generation != plan["source_generation"] or selection != plan["selection"]
@@ -1930,3 +1939,4 @@ if __name__ == "__main__":
     except (OSError, ValueError) as exc:
         print("NATIVE_INGRESS_REFUSED: " + str(exc), file=sys.stderr)
         raise SystemExit(78)
+
