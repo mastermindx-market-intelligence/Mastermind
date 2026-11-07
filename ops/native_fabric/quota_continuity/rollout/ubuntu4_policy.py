@@ -392,6 +392,13 @@ def repair_orch_group_write(*, operation_id, home=None, uid=None, platform=None,
                     != identity(expected)):
                 raise storage.InstallHeld('directory_changed')
             directories_current()
+            # Ancestor/lock rejoins can block. Finish with OUR fixed leaf's
+            # fresh ACL and full held/named preimage immediately before effect.
+            no_acl()
+            if (identity(os.fstat(orch)) != identity(expected)
+                    or identity(os.stat('orch', dir_fd=lanes, follow_symlinks=False))
+                    != identity(expected)):
+                raise storage.InstallHeld('directory_changed')
         current(before)
         for name in (ORCH_REPAIR_RECORD, ORCH_REPAIR_OUTCOME):
             try:

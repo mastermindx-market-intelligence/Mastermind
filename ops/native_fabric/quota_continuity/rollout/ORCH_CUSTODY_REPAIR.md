@@ -52,6 +52,11 @@ ACL names and both held/named ORCH metadata are rechecked before mutation. Only
 all other permission/special bits, directory size/link count and mtime must remain
 unchanged; only the expected chmod ctime change is accepted. Named replacement,
 late marker/lock/ancestor change or unexpected postimage withholds verification.
+The final ancestor/lock rejoin is followed by a fresh no-ACL and full ORCH FD/name
+identity check before fchmod. Separate syscalls cannot atomically exclude arbitrary
+noncooperating same-UID mutation between that final check and fchmod; the held FD
+prevents following a replacement, and post-effect checks retain UNKNOWN/no replay
+when drift is detected. No stronger atomic namespace guarantee is claimed.
 No recursive operation, descendant open/stat, policy body, original receipt body,
 cleanup, rollback, chmod-by-name, sudo or chown exists.
 

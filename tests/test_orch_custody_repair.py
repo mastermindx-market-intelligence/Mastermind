@@ -296,6 +296,45 @@ class OrchRepair(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'effect_unknown'):self.call()
         self.assertEqual(stat.S_IMODE(self.orch.stat().st_mode),0o775)
 
+    def trailing_rejoin_change(self, replacement):
+        original_directory=policy.storage._directory;original_write=policy.storage._write_new
+        armed=[False];visits=[0];displaced=self.home/'displaced-orch'
+        def write(fd,name,raw):
+            result=original_write(fd,name,raw)
+            if name==policy.ORCH_REPAIR_RECORD:armed[0]=True
+            return result
+        def directory(path,uid):
+            fd=original_directory(path,uid)
+            if armed[0]:
+                visits[0]+=1
+                # Five first-pass ancestors, then the final STATE reopen in
+                # trailing directories_current(), after the earlier ORCH check.
+                if visits[0]==10:
+                    if replacement:
+                        self.orch.rename(displaced);self.orch.mkdir();self.orch.chmod(0o770)
+                    else:self.orch.chmod(0o770)
+            return fd
+        with mock.patch.object(policy.storage,'_write_new',side_effect=write), \
+             mock.patch.object(policy.storage,'_directory',side_effect=directory), \
+             mock.patch.object(os,'fchmod',wraps=os.fchmod) as chmod:
+            caught=None
+            try:self.call()
+            except policy.storage.InstallHeld as exc:caught=exc
+        chmod.assert_not_called()
+        self.assertIsNotNone(caught)
+        self.assertRegex(str(caught),'effect_unknown')
+        self.assertEqual(visits[0],10)
+        self.assertEqual(stat.S_IMODE(self.orch.stat().st_mode),0o770)
+        if replacement:self.assertEqual(stat.S_IMODE(displaced.stat().st_mode),0o775)
+        self.assertTrue((self.state/policy.ORCH_REPAIR_RECORD).exists())
+        self.assertFalse((self.state/policy.ORCH_REPAIR_OUTCOME).exists())
+
+    def test_trailing_ancestor_rejoin_replacement_never_reaches_fchmod(self):
+        self.trailing_rejoin_change(True)
+
+    def test_trailing_ancestor_rejoin_mode_change_never_reaches_fchmod(self):
+        self.trailing_rejoin_change(False)
+
     def test_original_inspect_operate_and_owned_AST_unchanged(self):
         old=subprocess.check_output(['git','show','f6800ba:ops/native_fabric/quota_continuity/rollout/ubuntu4_policy.py'],cwd=ROOT).decode()
         new=Path(policy.__file__).read_text()
