@@ -783,6 +783,11 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
 
+# Test-owned frozen source data, merged into this same finite review table.
+from tests.test_hermes_workspace_oauth_identity_review import (
+    REVIEWED_FILES as HERMES_WORKSPACE_OAUTH_REVIEWED_FILES,
+)
+REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
 
 # Original #852 held subscription principals, source-qualified at exact sites.
 # This fixed source evidence grants no installed identity, credential or capacity.
