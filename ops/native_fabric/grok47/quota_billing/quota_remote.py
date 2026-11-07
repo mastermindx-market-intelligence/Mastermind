@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
+from http import HTTPStatus
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -827,7 +828,7 @@ def _record_refresh_failure(cache_path: str, provider: str, account: Optional[st
                             entry: Any, binding: Any, now: float, exc: Exception) -> str:
     """Retain failure alongside the original cache, never in a second ledger."""
     terminal = (isinstance(exc, ProviderQuotaRefusal)
-                or isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403))
+                or isinstance(exc, urllib.error.HTTPError) and exc.code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN))
     if isinstance(exc, urllib.error.HTTPError):
         exc.close()
     code = "PROVIDER_REFUSED" if terminal else "REMOTE_READ_FAILED"
