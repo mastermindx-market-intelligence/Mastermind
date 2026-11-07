@@ -34,6 +34,15 @@ from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
+# Stable browser-safe failure code. Raw provider/SDK exceptions remain internal for
+# classification and telemetry but must never be streamed to the user surface.
+CHAT_ERROR_CODE = "advisor_chat_unavailable"
+CHAT_ERROR_MESSAGE = "Mastermind AI is temporarily unavailable. Please retry."
+
+
+def public_chat_error_event() -> dict[str, str]:
+    """Return the stable, browser-safe chat failure envelope."""
+    return {"type": "error", "code": CHAT_ERROR_CODE, "error": CHAT_ERROR_MESSAGE}
 
 # Headless reasoning must never open a permission prompt. Keep this adapter-level
 # invariant independent of user/project Claude settings and config drift.
@@ -1365,7 +1374,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         yield {"type": "error", "error": "claude CLI not installed (npm i -g @anthropic-ai/claude-code)"}
         return
 
-    from brain import bot_mcp
+    from brain import bot_mcp, cognition_mcp
     rc = _cfg().get("reasoning", {})
     mdl = resolve_model(role)
 
@@ -1384,7 +1393,9 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
 
     opts = _Options(
         model=mdl,
-        allowed_tools=bot_mcp.armed_allowed_tools(),
+        allowed_tools=list(dict.fromkeys(
+            [*bot_mcp.armed_allowed_tools(), *cognition_mcp.allowed_tools()]
+        )),
         add_dirs=_abs_dirs(rc.get("add_dirs", [])),
         cwd=str(_ROOT),
         max_turns=max_turns or rc.get("research_max_turns", 16),
@@ -1392,7 +1403,10 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         env=_subscription_env(_stream_env_name),
         setting_sources=["project"],
     )
-    opts.mcp_servers = {bot_mcp.SERVER_NAME: bot_mcp.build_server()}
+    opts.mcp_servers = {
+        bot_mcp.SERVER_NAME: bot_mcp.build_server(),
+        cognition_mcp.SERVER_NAME: cognition_mcp.build_server(),
+    }
     if resume:
         opts.resume = resume
     if append_system:
@@ -1483,7 +1497,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     except Exception as e:                                      # surface, don't crash the stream
         _stream_error = repr(e)[:600]
         _error_buffer = _stream_error
-        yield {"type": "error", "error": repr(e)[:300]}
+        yield public_chat_error_event()
 
     # Post-stream key-failure detection — mark_cooling so the NEXT turn rotates.
     # Always scan the TRUNCATED buffer: the final chunk can push it past 600 chars
