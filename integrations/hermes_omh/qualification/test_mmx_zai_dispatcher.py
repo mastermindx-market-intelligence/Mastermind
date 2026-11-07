@@ -141,3 +141,36 @@ def test_concurrent_conversations_are_isolated(dispatched, monkeypatch):
         values = list(executor.map(run, [("concurrent-a", "marker-low"), ("concurrent-b", "marker-max")]))
     assert values == ["low", "max"]
     assert len(scorer.calls) == 2
+
+
+def test_same_turn_endpoint_change_cannot_reuse_qualified_choice(dispatched, monkeypatch):
+    _, scorer = prepare(dispatched, monkeypatch)
+    first = dispatch(request("marker-max"), session="route-change", turn="1")
+    assert first.payload["reasoning_effort"] == "max"
+    body = request("marker-max", effort="high")
+    changed_endpoint = dispatch(body, session="route-change", turn="1",
+                                base_url="https://relay.example/v1")
+    assert not changed_endpoint.changed and changed_endpoint.payload == body
+    assert len(scorer.calls) == 1
+
+
+def test_native_zai_transport_to_effort_middleware(dispatched, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from conftest import HERMES_SOURCE_ROOT
+    from agent.transports.chat_completions import ChatCompletionsTransport
+    profile_path = Path(HERMES_SOURCE_ROOT) / "plugins/model-providers/zai/__init__.py"
+    spec = importlib.util.spec_from_file_location("mmx_qualified_zai_profile", profile_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _, scorer = prepare(dispatched, monkeypatch, Scorer(force="max"))
+    kwargs = ChatCompletionsTransport().build_kwargs(
+        model="glm-5.3", messages=[{"role": "user", "content": "marker-max"}], tools=None,
+        provider_profile=module.zai, reasoning_config={"enabled": True, "effort": "high"},
+        base_url=ROUTE["base_url"], provider_name="zai")
+    before = deepcopy(kwargs)
+    result = dispatch(kwargs, session="native-transport")
+    assert result.changed and result.payload["reasoning_effort"] == "max"
+    assert result.payload["extra_body"]["thinking"] == {"type": "enabled", "clear_thinking": False}
+    assert kwargs == before
+    assert len(scorer.calls) == 1

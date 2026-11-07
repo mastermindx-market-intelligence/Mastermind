@@ -1,6 +1,6 @@
 """Build a non-installed HAE candidate in a NEW directory from pinned source.
 
-Only effort.py is patched; HAE remains the sole middleware and scorer owner.
+Only effort.py and the exact-route request guard are patched; HAE remains the sole middleware and scorer owner.
 The native Hermes plugin installer/activation owner must consume the result.
 This builder never modifies a live profile, starts Hermes, or calls a provider.
 """
@@ -13,6 +13,7 @@ import shutil
 
 UPSTREAM = "c84f1389670cdd5ec4607b13bd32c4809878c415"
 EFFORT_BLOB = "f8b63e02f868ec7354027384585ba91ddf389738"
+MIDDLEWARE_BLOB = "0dfb76d4f8a63c61e0f5dc28dba604e3da6b2bcb"
 MANIFEST_BLOB = "4c989330a925086955a55e5bdd4eff838ed76ed2"
 ANCHOR = '''    provider_name = (provider or "").strip().lower()
     api = (api_mode or "").strip().lower()
@@ -40,6 +41,20 @@ def patched_effort(raw: bytes) -> bytes:
     return text.replace(ANCHOR, INSERTION + ANCHOR, 1).encode("utf-8")
 
 
+def patched_middleware(raw: bytes) -> bytes:
+    if blob(raw) != MIDDLEWARE_BLOB:
+        raise ValueError("HAE_MIDDLEWARE_REVISION_MISMATCH")
+    anchor = 'def _handle(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:\n'
+    guard = ('    from .mastermind_zai import direct_zai_request_allowed\n'
+             '    if not direct_zai_request_allowed(kwargs.get("provider"), kwargs.get("model"),\n'
+             '                                      kwargs.get("api_mode"), kwargs.get("base_url")):\n'
+             '        return None\n')
+    text = raw.decode("utf-8")
+    if text.count(anchor) != 1:
+        raise ValueError("HAE_MIDDLEWARE_ANCHOR_MISMATCH")
+    return text.replace(anchor, anchor + guard, 1).encode("utf-8")
+
+
 def stage(source: Path, output: Path) -> dict:
     source = source.resolve(strict=True)
     if not source.is_dir() or output.exists() or output.is_symlink():
@@ -61,12 +76,14 @@ def stage(source: Path, output: Path) -> dict:
     if blob(manifest) != MANIFEST_BLOB:
         raise ValueError("HAE_MANIFEST_REVISION_MISMATCH")
     replacement = patched_effort((source / "effort.py").read_bytes())
+    middleware = patched_middleware((source / "middleware.py").read_bytes())
     extension = Path(__file__).with_name("hae_zai_extension.py").read_bytes()
     shutil.copytree(source, output, ignore=shutil.ignore_patterns(
         ".git", ".github", "__pycache__", ".pytest_cache", ".venv", ".worktrees"))
     # Only the new, non-serving build directory is changed. A partial build is
     # left for inspection on error; never overwrite/retry an existing stage.
     (output / "effort.py").write_bytes(replacement)
+    (output / "middleware.py").write_bytes(middleware)
     (output / "mastermind_zai.py").write_bytes(extension)
     receipt = {
         "schema": "mastermind.hermes_omh.hae_candidate/v1",
@@ -74,6 +91,8 @@ def stage(source: Path, output: Path) -> dict:
         "extension": "direct-zai-glm-5.3-named-choices-v1",
         "upstream_effort_blob": EFFORT_BLOB,
         "manifest_blob": MANIFEST_BLOB,
+        "upstream_middleware_blob": MIDDLEWARE_BLOB,
+        "patched_middleware_sha256": hashlib.sha256(middleware).hexdigest(),
         "patched_effort_sha256": hashlib.sha256(replacement).hexdigest(),
         "extension_sha256": hashlib.sha256(extension).hexdigest(),
         "installed": False, "activated": False, "provider_proven": False,

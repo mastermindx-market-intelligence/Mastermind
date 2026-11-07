@@ -31,3 +31,15 @@ def direct_zai_levels(provider, model, api_mode, base_url):
     except ValueError:
         return ()
     return LEVELS
+
+
+def direct_zai_request_allowed(provider, model, api_mode, base_url):
+    """Fence every request, including a same-turn endpoint change.
+
+    HAE's existing turn identity does not include base_url. A prior native
+    decision must not authorize a different endpoint under the same model.
+    Other provider/model families keep upstream behavior.
+    """
+    if (provider, model) != ("zai", "glm-5.3"):
+        return True
+    return bool(direct_zai_levels(provider, model, api_mode, base_url))

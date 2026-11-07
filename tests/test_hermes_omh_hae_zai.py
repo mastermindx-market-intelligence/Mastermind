@@ -41,6 +41,18 @@ class ZaiContractTests(unittest.TestCase):
             with self.subTest(route=route):
                 self.assertEqual(m.direct_zai_levels(*route, "https://api.z.ai/api/paas/v4"), ())
 
+    def test_per_request_endpoint_guard_preserves_other_families(self):
+        self.assertTrue(m.direct_zai_request_allowed("zai", "glm-5.3", "chat_completions",
+                                                    "https://api.z.ai/api/paas/v4"))
+        self.assertFalse(m.direct_zai_request_allowed("zai", "glm-5.3", "chat_completions",
+                                                     "https://relay.example/v1"))
+        self.assertTrue(m.direct_zai_request_allowed("custom", "unrelated", "chat_completions",
+                                                    "https://relay.example/v1"))
+
+    def test_changed_middleware_refused_before_patch(self):
+        with self.assertRaisesRegex(ValueError, "REVISION_MISMATCH"):
+            build.patched_middleware(b"unknown newer source")
+
     def test_changed_source_refused_before_patch(self):
         with self.assertRaisesRegex(ValueError, "REVISION_MISMATCH"):
             build.patched_effort(b"unrelated or newer source")
