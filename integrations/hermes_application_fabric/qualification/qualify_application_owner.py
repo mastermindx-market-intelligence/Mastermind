@@ -27,17 +27,22 @@ def main():
     parser.add_argument("--hermes-root", required=True)
     args = parser.parse_args()
     roots = {name: Path(value).resolve() for name, value in vars(args).items()}
+    candidate = subprocess.run(
+        ["git", "-c", "gc.auto=0", "-C", str(roots["adapter_root"]), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
     expected = {
-        "macro_root": "c1647bf55ad5faf07e682f7055e3791280d6d41f",
-        "native_owner_root": "5fcb76e8274d28f37da6bb06583343c57fcdfc47",
+        "adapter_root": candidate,
+        "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+        "native_owner_root": candidate,
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
     for name, sha in expected.items():
-        actual = subprocess.run(["git", "-C", str(roots[name]), "rev-parse", "HEAD"],
+        actual = subprocess.run(["git", "-c", "gc.auto=0", "-C", str(roots[name]), "rev-parse", "HEAD"],
             check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if actual != sha:
             raise RuntimeError("Qualification source differs: " + name)
-        subprocess.run(["git", "-C", str(roots[name]), "diff", "--exit-code", "HEAD", "--"],
+        subprocess.run(["git", "-c", "gc.auto=0", "-C", str(roots[name]), "diff", "--exit-code", "HEAD", "--"],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
     owner_tests = roots["native_owner_root"] / "ops/native_fabric/quota_continuity/tests"
     sys.path[:0] = [str(roots["adapter_root"]), str(roots["macro_root"]),

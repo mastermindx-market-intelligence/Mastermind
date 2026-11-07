@@ -96,7 +96,7 @@
   "ext/qwen_exec.sh": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",
   "ext/recovery_artifacts.py": "c67db5c395403b34b2095380fd5f68dcc547c01fcce1ae85c6e78accbd8ad28f",
   "ext/remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
-  "ext/remote_sub_exec.py": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+  "ext/remote_sub_exec.py": "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc",
   "ext/remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
   "ext/run_observation.py": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
   "ext/run_observation_delivery.py": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b",

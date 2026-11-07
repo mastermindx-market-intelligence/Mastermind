@@ -112,6 +112,33 @@ def test_complete_cohort_cannot_relabel_a_different_parent(stages):
         builder.before_quota_reset_recovery(actual)
 
 
+
+def _historical_quota_reset_parent():
+    previous = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    previous["ext/remote_sub_exec.py"] = \
+        "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+    assert builder.sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == \
+        "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459"
+    return previous
+
+
+def test_historical_complete_h2_parent_retains_its_exact_inverse():
+    previous = _historical_quota_reset_parent()
+    historical = dict(previous)
+    historical.update({"ext/" + name: digest for name, digest in builder.QUOTA_RESET_DIGESTS.items()})
+    before = dict(historical)
+    assert builder.before_quota_reset_recovery(historical) == previous
+    assert historical == before
+
+
+def test_current_builder_refuses_historical_parent_before_new_emission(tmp_path):
+    previous = _historical_quota_reset_parent()
+    output = tmp_path / "must-not-be-created"
+    with pytest.raises(ValueError, match="requires exact complete APPLICATION parent"):
+        builder.compose_quota_reset_stage(ROOT, output, previous, {})
+    assert not output.exists()
+
+
 def test_stale_go_dependency_receipt_is_not_accepted_through_historical_inverse(stages):
     actual = base_manifest(stages.base)
     current = builder.go_application_dependencies(ROOT, staged_manifest=actual)

@@ -187,6 +187,53 @@ On actual M2, all **11 focused regression cases failed before and passed after**
 
 This source qualification does not install the pair, settle any original Macro action, retire its actual lock, establish CI green or prove product acceptance. The inherited Brain composition CI dependency remains with original APPLICATION #2175/#2194 and its existing package-effect fences.
 
+### Completed-parent proof correction after protected adoption
+
+The protected v4 control bundle was installed coherently, but the first installed
+publisher-pair apply refused before creating its child transaction. Same-target
+readback found all original module, manifest and config bytes unchanged, and the
+existing owner restored C4 to healthy service with its original pair. The
+[source-linked maintenance receipt](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2203#issuecomment-6706612328)
+records the exact plan, control-bundle digest, absence proof and restoration.
+
+The child had passed its modifying verb to native installation admission solely
+to obtain the publication lock. That strict reader requires the original
+historical bootstrap artifact, which has been pruned. The completed native
+parent remains verifiable through the existing retained status reader. The
+closed C4 publisher continuation now separates those two responsibilities:
+
+1. Authenticate the completed parent with the unchanged native status context
+   and retain a copy of its complete binding, including the selected pointer.
+2. Acquire the existing canonical native publication lock on the store from
+   that verified binding, inside the existing C4 lifecycle mutex.
+3. Authenticate the same binding again under the lock and require full equality.
+4. Keep that lock through the original pin/result/bridge checks, parent receipts,
+   child publication and final original-pin fingerprint check.
+
+Generic native apply/reconcile and every other enrollment caller retain their
+strict admission path. C4 preview/status remain read-only. The native proof
+owner, native lock implementation, pair payloads, v4 transaction generation,
+parent receipts, account/configuration and installation guards are unchanged.
+The continuation does not reconstruct a bootstrap artifact or select native
+code. As before, locks exclude conforming owners; they do not create atomic
+filesystem CAS against a hostile process with the same UID.
+
+The focused integration cases use the real native proof subprocess, canonical
+publication lock and C4 filesystem transactions with isolated release fixtures.
+They cover the reproduced failure, live lock contention during writes and the
+final fingerprint, selected-pointer drift, corrupt retained evidence, exceptional
+lock release, same-child reconcile, committed reconcile without replay, and
+unchanged strict native admission. The separate real retained-reader suite
+continues to verify receipt/artifact integrity. Exact commands, source hashes,
+failure-before and passing-after receipts are retained in
+[parent-proof qualification](../evidence/persistent-sector-leadership-2026-11-07/c4-publisher-pair/parent-proof-correction.json).
+
+A new protected source release and complete control-bundle adoption are required
+before another installed preview. The failed pre-preparation apply is not
+blindly retried. Confirm the original target still has no child transaction,
+retain that evidence, and use a fresh preview under the corrected installed owner. A successful source test
+does not establish pair installation, Macro action recovery or product acceptance.
+
 ### Protected adoption and recovery order
 
 The current Chairman's ChatGPT Web review waiver supersedes this runbook's historical blanket separate-review wording. Perform self-check, meaningful tests and required CI; obtain non-author GitHub approval only where the actual protected rules require it. No self-approval, self-merge, rule bypass or release-hold bypass is permitted.

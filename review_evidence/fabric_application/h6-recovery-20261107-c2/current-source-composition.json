@@ -25,6 +25,23 @@
     "observed": "terminal result consumed",
     "repair_qualification": "ci-repair-qualification.json"
   },
+  "current_final_join": {
+    "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
+    "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "governing_diff": "none",
+    "h5_baseline_incorporated": false,
+    "hosted_current_head": "NOT_YET_RUN",
+    "incoming_ci_preserved": true,
+    "native_junit_suite_counter": 542,
+    "native_receipt": "current-native-composition.json",
+    "native_testcase_records": 533,
+    "old_h2_parent": "historical inverse only",
+    "protected_source": "320611cbd7eca66af86a09d0c6f7622f229bdf73",
+    "runtime_h2_members_changed": false,
+    "source": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
+    "worker_2225_incorporated": false
+  },
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
   "h2_runtime_sources_changed": false,
   "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed",

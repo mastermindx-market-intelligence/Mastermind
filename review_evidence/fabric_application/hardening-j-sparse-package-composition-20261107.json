@@ -1,0 +1,203 @@
+{
+  "schema": "fabric-original-package-sparse-composition.v1",
+  "recorded_at_utc": "2026-11-07T09:54:49.134939+00:00",
+  "source_head": "d6fc2fe99d442816fcfb01e0c597bc1226f21403",
+  "merge_parent": "2b8343dd43d2600d4c304977b125118e7ea36348",
+  "protected_compatibility": {
+    "verified_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+    "latest_checked": "064a08b2c6360ece12999f1d7f2d712062ea0636",
+    "governing_delta": false
+  },
+  "original_patch_sha256": "a71bac2d11eefbc5b56b4b72dab432279d7e2c6de860bfbc0bf83443aaf0c307",
+  "builds_and_initial_stage_run": {
+    "schema": "mmx-j-sparse-source-qualification.v1",
+    "source_head": "d6fc2fe99d442816fcfb01e0c597bc1226f21403",
+    "merge_parent": "2b8343dd43d2600d4c304977b125118e7ea36348",
+    "build_root": "/tmp/mmx-j-sparse-package-t_d5rq07",
+    "python": "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+    "builds": [
+      {
+        "files": 107,
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/tmp/mmx-j-sparse-package-t_d5rq07/107"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/mmx-j-sparse-build-107.log",
+        "log_sha256": "ef5ecce8e496b1a3b33095a641aac742037772d0f40ec6a45faac1d001220090",
+        "manifest_sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+        "inventory_sha256": "f98a03d15d2f656e331d0b9d943321b8c1bd4384a114f619ff818dca0e647f40",
+        "manifest_files": 107,
+        "inventory_files": 107,
+        "committed_manifest_equal": true,
+        "committed_inventory_equal": true
+      },
+      {
+        "files": 109,
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/tmp/mmx-j-sparse-package-t_d5rq07/109",
+          "--include-go-application"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/mmx-j-sparse-build-109.log",
+        "log_sha256": "05ba054b43c4131724402d3f2c09ce21b99b33a7dbede2ca6474ae476e7bf96e",
+        "manifest_sha256": "ce7f661017ca993602eaefbe0a3be91df3965689eea9368394e66e9942ad5646",
+        "inventory_sha256": "1ac0e59eb24a055e5d4577cbb130b671e10dece6fdd4ee1e370ca142263a8a00",
+        "manifest_files": 109,
+        "inventory_files": 109
+      },
+      {
+        "files": 112,
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/tmp/mmx-j-sparse-package-t_d5rq07/112",
+          "--include-go-application",
+          "--include-application-http"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/mmx-j-sparse-build-112.log",
+        "log_sha256": "b4f6358447271313908f9f67b26a75f1f456c82c3132e423813cbee6af1fa7ef",
+        "manifest_sha256": "677c3b585e171a99915c764d41ad6a36cfb200aa6c91374744532e7128c1a812",
+        "inventory_sha256": "621feb88be8f9e0596ab339966f9c8832b5208e81fc6a4a29ff5883f54cc6edf",
+        "manifest_files": 112,
+        "inventory_files": 112
+      }
+    ],
+    "stage_tests": {
+      "command": [
+        "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+        "--junitxml=/tmp/mmx-j-sparse-stage.xml"
+      ],
+      "exit_code": 1,
+      "log": "/tmp/mmx-j-sparse-stage.log",
+      "log_sha256": "33d9d3d1e759a844763f79146d2ec99ff22aa9fc0d21daab62f91e41158926f2",
+      "junit": "/tmp/mmx-j-sparse-stage.xml"
+    }
+  },
+  "consumer_run": {
+    "command": [
+      "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+      "tests/test_catalog_native_release_staging.py",
+      "tests/test_host_pull_launchd_admission.py",
+      "tests/test_paid_initializer.py",
+      "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py",
+      "tests/test_fabric_native_security_composition_20261018.py",
+      "tests/test_native_pool_policy_publication.py",
+      "--junitxml=/tmp/mmx-j-sparse-consumers.xml"
+    ],
+    "exit_code": 1,
+    "log": "/tmp/mmx-j-sparse-consumers.log",
+    "log_sha256": "a09349fa6fd0f801d6567497154df6ee17478c65bf5140f2107b592db6295b7e",
+    "source_head": "d6fc2fe99d442816fcfb01e0c597bc1226f21403",
+    "junit": "/tmp/mmx-j-sparse-consumers.xml",
+    "suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "1",
+        "skipped": "6",
+        "tests": "374",
+        "time": "61.569",
+        "timestamp": "2026-11-07T02:50:31.684458-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "failures": [
+      {
+        "name": "test_operator_uses_real_selected_publisher_and_observes_same_target",
+        "message": "AssertionError: {'schema': 'mastermind.native_policy_publication.v1', 'state': 'REFUSED', 'code': 'POLICY_PUBLICATION_PREFLIGHT_REFUSED', 'writes_applied': False, ...}\nassert 'REFUSED' == 'POLICY_PUBLISHED'\n  \n  - POLICY_PUBLISHED\n  + REFUSED"
+      }
+    ]
+  },
+  "publisher_environment_correction": {
+    "dependency_command": [
+      "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+      "-m",
+      "pip",
+      "install",
+      "--disable-pip-version-check",
+      "--ignore-installed",
+      "PyYAML==6.0.3"
+    ],
+    "dependency_exit": 0,
+    "dependency_log_sha256": "0154cba6387276a82296b74b9695b156a31f2d18c84c2996c1efde1097e4d40d",
+    "isolated_yaml": "6.0.3\n/private/tmp/mmx-release-exact-proof-3k1jks3z/venv/lib/python3.14/site-packages/yaml/__init__.py",
+    "command": [
+      "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_native_pool_policy_publication.py::test_operator_uses_real_selected_publisher_and_observes_same_target",
+      "--junitxml=/tmp/mmx-j-sparse-publisher-correction.xml"
+    ],
+    "exit_code": 0,
+    "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+    "junit": "/tmp/mmx-j-sparse-publisher-correction.xml",
+    "suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "1",
+        "time": "0.713",
+        "timestamp": "2026-11-07T02:53:24.546987-07:00",
+        "hostname": "m2studio"
+      }
+    ]
+  },
+  "final_stage_cases": {
+    "tests": 188,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "interpretation": "374-case consumer run: 367 passed, one isolated publisher dependency failure, six Linux-only skips. Exact affected publisher case passed after PyYAML 6.0.3 was installed inside the disposable proof venv. This is not one 374-green run.",
+  "closure": {
+    "native107": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "after_pool": "2ebfb9435053b90e4ce3bf9dfc6780460f6b2669f070c40c16f5772e928c9608",
+    "after_sparse": "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552",
+    "after_admission": "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82",
+    "after_application": "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
+  },
+  "preserved_existing_builder_literal_assignments": 54,
+  "source_blobs": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "14ec3f63354af83d664f73c5cb2dd62e4950397c",
+    "ops/native_fabric/quota_continuity/rollout/native-manifest.json": "cb9d7df1dc320d002a8ab012a43bea04e17beab5",
+    "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json": "7f1d07eba5de9518f0239fc4a89b615264937a34",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "24b2d584b4f27a9ee92662db4d649e385728dcfb",
+    "tests/test_catalog_native_release_staging.py": "3b4b58f8da1ce1fa8d61511abe94bee3bf3a3ef9",
+    "tests/test_host_pull_launchd_admission.py": "b501d5019ecdd615aeed57cd6c219f10665a5600",
+    "tests/test_paid_initializer.py": "9f2a9a0dcf944e3767e3049758c8b799cad5ba22",
+    "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py": "be167259ddb6971606c6c10ccae2f1fd2d2011e1",
+    "tests/test_fabric_native_security_composition_20261018.py": "c73b4c7b0140b6f44aed77995d9751332f8e26fe",
+    "tests/test_native_pool_policy_publication.py": "425c588fcde730cfd297c397a81ca39f35dacdec"
+  },
+  "runtime_claims": {
+    "installed": false,
+    "selected": false,
+    "original_driver_effect_reconciled": false,
+    "uptime_proven": false
+  }
+}

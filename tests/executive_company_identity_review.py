@@ -34,8 +34,8 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "08c71c0e79126c003db57b3c3bb2c77c20858331451edd7436751dd634e4340d",
-        "ast_sha256": "597fb0de3f70a6e820946f7b64dd5712a38f66aa14d92d4c3a9482e5ee36d10c",
+        "source_sha256": "a91967f4580d25482c359d9e73233d592c3e920c5875e9f15b34e451b5ba98b7",
+        "ast_sha256": "9d076f5bd8d37e05aeeb547616e5c4aab7a698fe2a0951d3aecfd8451a0adddb",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -68,3 +68,10 @@ REVIEWED_ANCHORS = {
 # catalog branch. Removing that exact insertion reproduces the previous source
 # bytes; the Company method, all three catalog operands and their AST paths are
 # unchanged. The new whole-source/method pins qualify that bounded composition.
+
+# Current-context composition extends that same App-peer branch with an
+# independently authenticated Workspace projection and the original canonical
+# DATA binding. Parent inspected the bounded diff and checked the complete
+# Company method plus each original Fabric operand/path against protected
+# source. Only whole-source/enclosing-method pins change; no new literal site
+# or scanner exemption is added. This is source review, not host acceptance.

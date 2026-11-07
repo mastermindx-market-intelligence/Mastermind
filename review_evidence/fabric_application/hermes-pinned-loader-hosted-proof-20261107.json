@@ -1,0 +1,49 @@
+{
+  "schema": "mastermind.hermes_pinned_loader_hosted_proof.v1",
+  "source_head": "aa26c40fab5a587809485d426dcf8462a27d0f9a",
+  "tested_pr_merge": "71895a4fde5b838cb94fd7f29ed54bc5311df472",
+  "same_source_tree": "f7fb5ae9306ddf9ba3637d28380453683d8fb0ed",
+  "hermes_commit": "1c0cd667",
+  "harness_run": 42368271353,
+  "harness_conclusion": "success",
+  "real_pinned_loader_jobs": [
+    {
+      "python": "3.12",
+      "job_id": 128390872061,
+      "passed": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "python": "3.13",
+      "job_id": 128390871851,
+      "passed": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "inference_run": 42368271354,
+  "inference_conclusion": "success",
+  "actual_native_handler_broker": {
+    "job_id": 128390872052,
+    "passed": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "external_provider_dispatches": 0,
+    "sdk_constructions": 0
+  },
+  "actual_native_contract": {
+    "job_id": 128390872130,
+    "passed": 69,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "macro_commit_prefix": "9eb5cb6b28b5",
+    "live_provider": false
+  },
+  "qualification": "SOURCE_AND_HOSTED_FIXTURE_PROOF_NOT_INSTALLED_UPTIME",
+  "previous_skipped_loader_report": "Historical 454 passes plus 11 skips is retained; these are new real pinned-loader results, not rewritten earlier proof."
+}

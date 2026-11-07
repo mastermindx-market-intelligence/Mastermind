@@ -349,7 +349,7 @@ def prepare_inventory(owner, recipe, acl_check):
         closure.close()
 
 
-# Two closed source transformations, subordinate to the existing frozen recipe
+# Closed source transformations, subordinate to the existing frozen recipe
 # and inventory. They cannot be combined or supplied as arbitrary patch lists.
 # These are source identities, never runtime access grants.
 DERIVATION_KIND = "computer_env_guard"
@@ -368,6 +368,20 @@ PRIVACY_DERIVATION_POSTIMAGES = {
 }
 PRIVACY_LICENSE_SHA256 = "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6"
 _PRIVACY_PACKAGE = "integrations/hermes_qualification/diagnostic_privacy"
+WORKSPACE_OAUTH_DERIVATION_KIND = "workspace_oauth_privacy"
+WORKSPACE_OAUTH_DERIVATION_PATCH = "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce"
+WORKSPACE_OAUTH_DERIVATION_POSTIMAGES = {
+    "agent/agent_init.py": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08",
+    "agent/memory_caller_scope.py": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6",
+    "agent/redact.py": "d52ac54e1107b404c0882432a2e06b114d298f4ccd33ec16deffc0544074d935",
+    "hermes_cli/mcp_config.py": "0970c0cd3ed94a3a3986a5364c697b6b64006844b383707ea12998bd0084e70c",
+    "tools/mcp_oauth_manager.py": "b1b611725cb1f873c2b9c715eab8591ea56d8ca0c61cd832224f5ed0a21624ae",
+    "tools/mcp_oauth_provider.py": "f79aa231c90de8e483a4cb02c4c51d1cc9ba4a8838872e718b92784fcb3181b8",
+    "tools/mcp_tool_errors.py": "e71abeb9e97b0d1e97c976c709dd2fa2ccb71822626184e976dad0838d9c3c28",
+    "tools/mcp_tool_server_run.py": "89a93742b9344fa351f6b3a931a3daf5787f2d7abba6ec52695a6c52c2e37b5e",
+    "tools/mcp_tool_transport.py": "51443ff396278a8c1088b5141146f3ba53cec340b90ac04a1263c18e3ecbb8ec",
+}
+_WORKSPACE_OAUTH_PACKAGE = "integrations/hermes_qualification/workspace_oauth_privacy"
 
 
 def _derivation_policy(kind):
@@ -375,6 +389,8 @@ def _derivation_policy(kind):
         return DERIVATION_PATCH, DERIVATION_POSTIMAGES, _GUARD_PACKAGE
     if kind == PRIVACY_DERIVATION_KIND:
         return PRIVACY_DERIVATION_PATCH, PRIVACY_DERIVATION_POSTIMAGES, _PRIVACY_PACKAGE
+    if kind == WORKSPACE_OAUTH_DERIVATION_KIND:
+        return WORKSPACE_OAUTH_DERIVATION_PATCH, WORKSPACE_OAUTH_DERIVATION_POSTIMAGES, _WORKSPACE_OAUTH_PACKAGE
     _refuse()
 
 
@@ -529,8 +545,12 @@ def _guard(owner, kind):
     patch, postimages, relative = _derivation_policy(kind)
     if kind == DERIVATION_KIND:
         from integrations.hermes_qualification.computer_env_guard import qualify
-    else:
+    elif kind == PRIVACY_DERIVATION_KIND:
         from integrations.hermes_qualification.diagnostic_privacy import qualify
+    elif kind == WORKSPACE_OAUTH_DERIVATION_KIND:
+        from integrations.hermes_qualification.workspace_oauth_privacy import qualify
+    else:
+        _refuse()
     package = owner.root / relative
     if Path(qualify.ROOT) != package:
         _refuse()
@@ -544,7 +564,7 @@ def _guard(owner, kind):
             or {name: row["after_sha256"] for name, row in policy["files"].items()}
                != postimages):
         _refuse()
-    if (kind == PRIVACY_DERIVATION_KIND and hashlib.sha256(
+    if (kind in {PRIVACY_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_KIND} and hashlib.sha256(
             owner.source(f"{relative}/UPSTREAM_LICENSE")).hexdigest() != PRIVACY_LICENSE_SHA256):
         _refuse()
     owner.check()

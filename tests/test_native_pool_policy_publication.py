@@ -433,7 +433,9 @@ def test_publisher_successor_preserves_actual_manifest_and_prior_go_validator():
     previous = builder.before_application_pool_composition(manifest)
     assert previous is not manifest and manifest == before
     assert {name for name in manifest if manifest[name] != previous[name]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
-    assert digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
+    assert digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
+    before_sparse = builder.before_sparse_commit_preflight(previous)
+    assert digest((json.dumps(before_sparse, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
     dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(manifest, dependencies)
     builder.validate_go_base_manifest(previous, {name: previous["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES})
@@ -461,4 +463,6 @@ def test_unknown_publisher_never_receives_forward_compatibility():
     manifest["ext/support_bundle.py"] = "f" * 64
     dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     with pytest.raises(ValueError, match="application pool composition cohort"):
+        builder.before_application_pool_composition(manifest)
+    with pytest.raises(ValueError, match="native scoped-model parent closure"):
         builder.validate_go_base_manifest(manifest, dependencies)

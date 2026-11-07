@@ -45,20 +45,25 @@ pinned. Inventory records preserve the patch provenance.
 
 | Complete layout | Files | Native manifest SHA256 |
 | --- | ---: | --- |
-| Incumbent default | 107 | c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459 |
-| Default APPLICATION | 109 | f5064b6ede765313e2fce2e865d29d6ab9e4eb7a94acc6e61256d2c458e7325d |
-| Default APPLICATION + HTTP | 112 | 643fd74c290d3f4bb5010b5f65361dd92a7cc010d9c6289c4c02b9f4adb38f95 |
-| H2 base | 107 | d07566feab8355ecaa7f1a1e189a26de8c19242b0365c00121a76f88f773aa55 |
-| H2 APPLICATION | 109 | 057e16c39db2f1e745136e24c72d2a2511fe5c350f4774cb0fd0cd52a07c38fe |
-| H2 APPLICATION + HTTP | 112 | bdf0848bddb2aa5c57bca25a91efd767b8266e02d7661dfa8639c95895f62375 |
+| Current source default | 107 | bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e |
+| Default APPLICATION | 109 | 77109d8b3b0ee41fa892bd4fff38afb2ed918a4d89dff64c32bb85e8dfceb6bf |
+| Default APPLICATION + HTTP | 112 | 9f9bc52afa583813176b965a61c69aeb0fb92ce8c931814a16d550abf7082bfd |
+| H2 base | 107 | 58b3982f47a0edb8024199be871c9da64194c9bee88f3f1e1b05ece250c5a8fa |
+| H2 APPLICATION | 109 | 4fc68001653b57fedd9527a700169049618e74669c07894ab99239291a1885b7 |
+| H2 APPLICATION + HTTP | 112 | 5857bee1719b2254c7840a4b5ce6cda299dc579ac2cb05e5eb8b95210f2d4485 |
 
-The default 107-file manifest and source inventory remain byte-identical, as does
-the H2 base. All four APPLICATION/HTTP variants passed actual installer component
-validation. The loader fix changes both 109/112-file families; earlier Go-stage
-manifest identities are superseded by the table above and native-loader-builds.json.
+The current default 107-file manifest and inventory are byte-identical to final
+carrier552375cd. The protected sparse-commit repair changes remote_sub_exec.py,
+so all six current artifact identities differ from their earlier c40-based
+qualification. The four H2 member preimages/postimages are unchanged. New emission
+requires the exact bcfb8c parent; the former c7f5d2 parent is retained only as a
+separate exact whole-parent inverse. All four APPLICATION/HTTP variants passed
+actual installer validation. The current table and current-native-composition.json
+supersede earlier artifact identities for current-source installation preparation.
 The common builder/installer resolver checks the composed broker source, not a
 historical broker hash copied into metadata. Whole-parent validation reverses
-H2 before the existing pool, admission-integrity and APPLICATION-carrier inverses.
+H2 before the existing pool/exact-scoped, sparse-preflight, admission-integrity
+and APPLICATION-carrier inverses.
 
 ## Native entry ownership repair
 
@@ -66,7 +71,7 @@ The complete H2 APPLICATION and HTTP artifacts reproduced a repeated-inspection
 failure: quota_remote and glm_keys had loaded from the authenticated stage but
 were absent from the entry's owned-module registry. The native entry now preloads
 both through its existing byte-verified loader. Its SHA256 is
-e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721.
+45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0.
 All four H2 runtime member bytes are unchanged. Foreign module rejection and
 whole-file/inode/namespace custody remain intact.
 
@@ -117,7 +122,7 @@ the common publication/claim fence are qualified.
 
 ## Executed proof and remaining CI
 
-The six-module native qualification command exited 0: 292 testcase elements,
+The earlier a884 six-module native qualification exited0: 292 testcase elements,
 zero failures/errors/skips. Its JUnit suite counter reports 301; the raw receipt
 is retained rather than conflating the counters. This includes all sixteen H2
 reset journeys against the four emitted HTTP-stage members. The 66 original H2
@@ -141,3 +146,22 @@ production preflight guard was not changed. File-state diagnostics retain an
 actual spawn positive control.
 
 This map does not close Phase A or the original B–D acceptance rows.
+
+
+## Current final-carrier composition qualification
+
+The contribution now joins current #2175 source
+552375cd288ebe3c417d10afa17f47114c6319db and its protected320611 parent.
+Governing documents remain unchanged from the compatible4fb0d382 pin.
+Current C4 forward-original/native publication-lock composition, both Studio
+fixture files, exact-scoped/sparse native histories and the complete incoming
+CI workflow are preserved. That workflow already includes the worker plist,
+scripts, current a577 Macro runtime fixture and historical Studio acquisition.
+
+The current eight-module qualification exited0 with 533 testcase records,
+zero failures/errors/skips; the distinct JUnit suite counter542 is retained.
+It includes historical native generations, both H2 parent cases, the sealed
+loader, actual installer, release/service startup and the release-identity review.
+Current-source artifacts and raw proof are in current-native-composition.json,
+its log and XML. This qualification supersedes earlier native candidate output
+identities; it does not claim hosted CI, installation, enrollment or live use.
