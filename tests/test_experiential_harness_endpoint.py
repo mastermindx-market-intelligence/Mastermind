@@ -1085,3 +1085,26 @@ def test_a_responses_provider_error_frame_is_never_a_completion():
         assert outcomes[0].bytes_forwarded == len(frames)
     finally:
         gateway.stop()
+
+
+def test_plan_policy_is_bound_to_generation_and_sent_by_owner():
+    from control_plane.experiential_plan_policy import plan_policy_digest
+    gateway = MockGateway().start()
+    try:
+        mode = "free_only"
+        generation = gateway_route_generation(gateway.base_url, "chat/completions", mode)
+        route = ExperientialGatewayRoute(
+            ROUTE_ID, generation, gateway.base_url, "chat/completions", mode)
+        with pytest.raises(ExperientialHarnessContractError, match="generation"):
+            replace(route, plan_policy="free_and_uncensored")
+        receipt = forward_to_gateway(
+            ProviderRequest("chat/completions", "policy-session",
+                            {"Content-Type": "application/json"},
+                            b'{"model":"deepseek-v4.1-flash:free","stream":true,"messages":[]}'),
+            route=route, token_loader=lambda: PROXY_TOKEN, on_chunk=lambda chunk: None)
+        assert receipt.route_generation == generation
+        assert len(gateway.requests) == 1
+        assert gateway.requests[0]["headers"]["x-fabric-plan-policy"] == plan_policy_digest(mode)
+        assert json.loads(gateway.requests[0]["body"])["model"].endswith(":free")
+    finally:
+        gateway.stop()
