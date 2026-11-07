@@ -776,3 +776,72 @@ native producer remains invalid. A synthetic historical complete-producer
 fixture exercises the actual SQLite settlement, frozen publication, ArtifactStore,
 authenticated-reader validation and existing Harness2 baseline consumer; it is
 not proof of production refinement or learning efficacy.
+
+
+## Finite contribution scope and archive intake — 2026-11-07
+
+### Assigned-principal amendment for the existing contribution
+
+The current Chairman commission is to take leadership, finish the Hermes/Fabric
+implementation and integrate the existing work. Under that commission, the
+assigned integration principal authorizes the following exact EVAL-owned paths
+for operation `hermes-eval-producer-compose-20261107-sol-001`, on its existing
+branch and [contribution PR2255](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2255):
+
+- `docs/hermes/MEMORY_LEARNING_QUALIFICATION.md`
+- `tests/test_agent_eval_hermes_memory_grounding.py`
+- `review_evidence/hermes_eval/current-primary-context-trial-composition-20261107.json`
+- `review_evidence/hermes_eval/harness2-original-run-recovery-20261107.json`
+- `review_evidence/hermes_eval/native-history-selective-composition-20261107.json`
+- `review_evidence/hermes_eval/private-harness2-trial-handoff-20261107.json`
+- `review_evidence/hermes_eval/native-memory-grounding-source-pairs-20261107.json`
+
+These are the existing scorer qualification document/test and the five retained
+source-proof records carried by commits da171, 9ed, c48, 885 and 336. The scorer
+production path is already within the EVAL-owned allowlist. This amendment is
+recorded before editing the finite gate and grants exactly these paths, with no
+prefix, neighboring report, dependency, workflow or control-plane allowance.
+They remain EVAL-owned program surface; they are not shared-owner exemptions.
+The eventual gate edit must cite this committed amendment and exercise the
+actual fences for the added paths and unlisted neighboring paths.
+
+The core import, environment, process, network and credential prohibitions,
+`compute_pr_diff_paths`, the independent forbidden-prefix test and all original
+shared-connection ownership rules remain unchanged. In particular, this does
+not subtract accepted dependencies from a real PR delta or reinterpret its
+first parent. The hosted candidate for PR2255 at 336c contains additional
+context/discovery/control changes relative to original PR2175 at 52cb. Those
+prerequisites must be integrated through the incumbent original carrier before
+the whole-PR fence can pass. This bounded amendment cannot clear that failure.
+
+PR2255 remains the draft contribution to the existing PR2175 branch. PR2234's
+original protected release request remains separate and unchanged. No new
+release request, merge override, provider admission, deployment, installed
+acceptance or measured reliability claim is made by this source amendment.
+
+### Original archive correction composed without losing APPLICATION checks
+
+The exact two-file correction from
+`c43807ba8a816ab81547a5de3d2ae2c917419aa8`, parent
+`de966803faff6033a5d0e6b164843ab22edabe42`, was selectively adopted into the
+existing contribution. Its finite enrollment-test connection is authorized by
+section55 of the masterplan at
+`git:mastermindx-market-intelligence/Mastermind@d78673689ecd381fb9241c87626518f7460484e0`.
+The enrollment test is byte-identical to incoming blob
+`a83c30b20fe7e291e734bf3235c74deefa184710`. The inertness test is an additive
+union that preserves the existing APPLICATION connection and its unlisted
+neighbor refusal.
+
+The real Git archive/extracted isolated-import proof now requires the six exact
+OMH files, permits only the two selected licensed vendor files, excludes a
+tracked unreviewed vendor neighbor and refuses a missing DAG helper. Production
+archive selection is unchanged. The existing delegate missing-member refusals,
+`-I -S -B`, extracted-source origin checks and native entrypoint proofs remain.
+
+A focused CPython3.12.13 invocation passed **15 cases**, with zero failures,
+errors or skips: two actual archive tests and thirteen contextual fence cases.
+The source was stable during the run. Log SHA-256:
+`b3a3a1508100aea47aaaa9ea178a466d284826785016948fb5e5f14b7bcc12fb`;
+JUnit SHA-256:
+`c8ad471de5ba3e7c020795a0dd7be4fe883b35a40ef89845ea5724229bd40020`.
+This is a focused source proof, not a passing hosted whole-PR gate.
