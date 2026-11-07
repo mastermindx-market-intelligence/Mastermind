@@ -415,3 +415,53 @@ def test_lost_lock_close_ack_after_replace_keeps_unknown_and_original_target(ins
     status = observe(value)
     assert status["state"] == "CANDIDATE_BYTES_OBSERVED"
     assert status["original_publication_proven"] is False
+
+
+def _publisher_source_manifest():
+    from ops.native_fabric.quota_continuity.rollout import build_review_stage as builder
+    native = Path(builder.__file__).resolve().parent.parent
+    manifest = json.loads((native / "rollout/native-manifest.json").read_bytes())
+    current = (native / "candidate/support_bundle.py").read_bytes()
+    old = (native / "rollout/preimages/support_bundle_e5e6153.py").read_bytes()
+    assert digest(current) == builder.POLICY_PUBLISHER_SUCCESSOR
+    assert digest(old) == builder.POLICY_PUBLISHER_PREDECESSOR
+    assert manifest["ext/support_bundle.py"] == digest(current)
+    return builder, manifest
+
+
+def test_publisher_successor_preserves_actual_manifest_and_prior_go_validator():
+    builder, manifest = _publisher_source_manifest()
+    before = copy.deepcopy(manifest)
+    previous = builder._policy_publisher_predecessor(manifest)
+    assert previous is not manifest and manifest == before
+    assert {name for name in manifest if manifest[name] != previous[name]} == {"ext/support_bundle.py"}
+    assert digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.POLICY_PUBLISHER_BASE_MANIFEST
+    dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(manifest, dependencies)
+    builder.validate_go_base_manifest(previous, dependencies)
+    assert manifest == before
+    assert builder._policy_publisher_predecessor(previous) is previous
+
+
+@pytest.mark.parametrize("mutation", ["other_member", "missing_member", "renamed_member", "added_member"])
+def test_publisher_forward_transform_refuses_partial_or_mixed_closures(mutation):
+    builder, manifest = _publisher_source_manifest()
+    if mutation == "other_member":
+        manifest["ext/pick.py"] = "f" * 64
+    elif mutation == "missing_member":
+        del manifest["ext/pick.py"]
+    elif mutation == "renamed_member":
+        manifest["ext/unqualified.py"] = manifest.pop("ext/pick.py")
+    else:
+        manifest["ext/unqualified.py"] = "e" * 64
+    with pytest.raises(ValueError, match="not one exact107 closure"):
+        builder._policy_publisher_predecessor(manifest)
+
+
+def test_unknown_publisher_never_receives_forward_compatibility():
+    builder, manifest = _publisher_source_manifest()
+    manifest["ext/support_bundle.py"] = "f" * 64
+    assert builder._policy_publisher_predecessor(manifest) is manifest
+    dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="not the reviewed protected composition"):
+        builder.validate_go_base_manifest(manifest, dependencies)

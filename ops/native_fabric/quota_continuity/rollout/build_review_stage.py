@@ -218,6 +218,29 @@ GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6
 GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 
 
+# A single isolated publisher-only successor of the protected e63d8aca107
+# closure. This is not the separate APPLICATION cohort owned by its root.
+# Compare every original member before the existing Go validator sees the
+# historical copy; never rewrite emitted hashes or a caller's manifest.
+POLICY_PUBLISHER_PREDECESSOR = "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b"
+POLICY_PUBLISHER_SUCCESSOR = "bd8058657f884ee4fb7fbad1d937c24041e6d4c204fb1e3dc00953f7482bf3b3"
+POLICY_PUBLISHER_BASE_MANIFEST = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+
+
+def _policy_publisher_predecessor(manifest):
+    """Recognize only the complete reviewed publisher-only107 source change."""
+    if (type(manifest) is not dict
+            or manifest.get("ext/support_bundle.py") != POLICY_PUBLISHER_SUCCESSOR):
+        return manifest
+    previous = dict(manifest)
+    previous["ext/support_bundle.py"] = POLICY_PUBLISHER_PREDECESSOR
+    if (len(previous) != 107
+            or sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+               != POLICY_PUBLISHER_BASE_MANIFEST):
+        raise ValueError("native policy publisher successor is not one exact107 closure")
+    return previous
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
 
@@ -239,6 +262,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
+    manifest = _policy_publisher_predecessor(manifest)
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
