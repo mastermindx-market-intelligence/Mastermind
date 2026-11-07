@@ -1,8 +1,8 @@
 """Qualify a pinned generic host patch plus consumer in an isolated native source fixture.
 
-Invoke with the installed hermes_cli._launchers.runtime_command(code=...), using
-runpy.run_path(this_file, run_name="__main__") as the entry code.
-The caller supplies a GitHub-read-back manifest and exact owner source fixture;
+Invoke with an already prepared private native-PM interpreter and isolated
+Hermes home. Do not use a live launcher merely to import qualification code.
+The caller supplies a verified source manifest and exact owner source fixture;
 this runner never clones, changes the installation, or contacts a provider.
 """
 from pathlib import Path
@@ -28,11 +28,11 @@ def main():
     args = parser.parse_args()
     root, owner, hermes = (Path(p).resolve() for p in (args.adapter_root, args.owner_root, args.hermes_root))
     expected_hermes = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
-    actual = subprocess.run(["git", "-c", "gc.auto=0", "-C", str(hermes), "rev-parse", "HEAD"],
+    actual = subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(hermes), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     if actual != expected_hermes:
         raise RuntimeError("Installed Hermes source differs from the qualified ABI")
-    subprocess.run(["git", "-c", "gc.auto=0", "-C", str(hermes), "diff", "--exit-code", "HEAD", "--"],
+    subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(hermes), "diff", "--exit-code", "HEAD", "--"],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
     manifest = json.loads(Path(args.manifest).read_text())
     if manifest["candidate"] != args.candidate:

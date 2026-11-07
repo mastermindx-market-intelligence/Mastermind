@@ -1,7 +1,7 @@
 # Attended Fabric installation through existing owners
 
 This is the installation contract for ordinary Darwin Hermes at native
-`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` plus the reviewed 15-file
+`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` plus the reviewed 20-file
 `hermes_core/hermes-2bd378ed-host-bound.patch`. Final delivery remains original
 Mastermind #2175 and paired Macro #10740. The #2225 contribution supplies these
 joins; source qualification does not select an installed release or enroll a
@@ -198,7 +198,7 @@ a later newly admitted turn may select a different eligible route.
 
 | Closure | Current identity |
 | --- | --- |
-| Native 15-file patch | SHA256 f0d088d9d83311d29461161d13185aa4549f9c0ce27fcbda9fe7b0a46344e9fa |
+| Native 20-file patch | SHA256 631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541; previous 15 postimages unchanged |
 | Attended 17-file runtime list | SHA256 7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376 |
 | Original role 11-file publication | SHA256 c801409819ce3cbc2e95414d685ccc7663753bd992e81158448488fd4ac06be2 |
 | Macro source archive | SHA256 9380af04320616d210b45eb26168c20dee6967ce267153c6de521d70d2b0b99b; 75,612,290 bytes |

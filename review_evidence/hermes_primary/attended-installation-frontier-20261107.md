@@ -1,3 +1,24 @@
+# Latest frontier: passive native enrollment integrated
+
+Mission remains **MORE_WORK_EXISTS**. The current source closes the configuration-reader and multi-home dependency joins; protected delivery and live acceptance remain owed.
+
+- Source parent: `0ca1b1ca71d080ca1d10a4574592b83be01369a1`; operation/owned branch remain `hermes-native-worker-binding-20261107-c2` / `sol/web-hermes-native-worker-binding-20261107-c2`.
+- Same compatible law pin: `de6966ce1524c01ab6ac06af5461370aa79f3994`. Latest observed protected `c4ce5ca48303a8eac1658be4fd4034959d3a568a` changes portfolio evidence files, not the law scopes.
+- Native core patch: 20 exact paths, SHA256 `631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541`; original 15 postimages unchanged.
+- Worker closed runtime: `c3ce3f07017224947ea9ce28ac6744172c1fa08e767210bfbab23277d39205ee`. Existing sealed backend: `887a42fd53cc4d510c1ac9dd0a1db8d52937c342da83a5b98eac07f6ebf47075`.
+- Current native configuration is read without initialization, backups, cache/LKG, remote-backend boot, secret loading or dependency repair. Managed process values cannot be replaced by profile values. Malformed/unreadable/dangling/replaced input and unresolved permission lists refuse.
+- The fixed checker binds the served home before native PM lookup. Its Node parent preserves only existing deployment selectors; it does not forward arbitrary variables/credentials.
+- Native MCP preparation is the existing `hermes pm install --extra mcp` on the qualified install/home. Do not carry the fixture-only empty/member selection into production. The original H4 activation owns adoption of the committed generation.
+- Qualification passed: 16 native configuration, 17 cold-process, 25 actual native worker-owner, 74 offline worker, 78 Node backend, 7 preimage safety and 115 gateway/application composition cases. Native PM selected real private environments for MCP and the actual application member. Worker installation records and final command engine remain fixtures.
+- Complete bounded receipt: `review_evidence/hermes_primary/attended-native-observation-20261107.json`.
+- Historical live-wrapper failures were reconciled by read-only metadata: no new inspected dependency/launcher publication or pending startup recovery record. Exact old ambient home cannot be reconstructed; no historical zero-effect claim. Later private qualification failures were terminal and repaired at their concrete source/dependency causes. No unresolved new live mutation was found.
+- Latest original Mastermind #2175: `51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3`, active original branch. Macro #10740: `339e14b58e331a3eda16d619b3a97c324e7f4eca`; original Macro contribution `fff0025e10de394c6a297c7878518513f1dbe633` remains unabsorbed. Preserve those carriers.
+- Secretary readback: no live non-Go APPLICATION service-grant issuer/registration receipt; source v10 is the issuer of record. Existing Go 401 and J collection uncertainty remain unreplayed. Live gateway/secretary processes and held H4 reload retain their original custody.
+- Next material action: commit this source, incorporate the current original #2175 source in the owned branch, prove the actual 20-path live preimages/rollback without editing the live tree, run the committed D8 gate, and publish a source-linked final contribution for original-carrier absorption. Continue current issuer/release/activation work through its existing owners; do not finalize the mission at this source milestone.
+- Native child `integration_judgment` supplied bounded principal source judgment only; no child implementation or tests. Its judgments are not formal GitHub approval. No native labor substituted for the original refused paid Fabric request.
+
+## Earlier frontier (historical)
+
 # Hermes attended installation frontier — 2026-11-07
 
 ## Current continuation: installed consumer configuration
