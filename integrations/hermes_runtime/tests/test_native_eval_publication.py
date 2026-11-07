@@ -768,9 +768,10 @@ def test_trial_read_joins_actual_frozen_store_and_original_output(original, monk
     from integrations.hermes_runtime import native_eval_operator as operator
     recovery = {"schema": operator.RECOVERY_SCHEMA, "run_id": o.marker["run_id"],
         **{key: value for key, value in o.params.items() if key != "operation"}}
-    receipt, summary = operator._trial_response(response, recovery, o.home,
+    receipt, summary, consumed = operator._trial_response(response, recovery, o.home,
         expected_admission=response["admission"])
     assert receipt == response["admission"] and summary == response["trial_summary"]
+    assert consumed == trial
     assert trial.run == o.t.owner.store.resolve_run(o.marker["run_id"])
     assert canonical_json_bytes(o.frozen()) == frozen
     # Returned data is detached from the frozen publication and store.
@@ -826,8 +827,8 @@ def test_trial_read_preserves_valid_run_summary_when_output_cannot_be_consumed(
     from integrations.hermes_runtime import native_eval_operator as operator
     recovery = {"schema": operator.RECOVERY_SCHEMA, "run_id": o.marker["run_id"],
         **{key: value for key, value in o.params.items() if key != "operation"}}
-    _, summary = operator._trial_response(response, recovery, o.home, expected_admission=response["admission"])
-    assert summary == response["trial_summary"]
+    _, summary, consumed = operator._trial_response(response, recovery, o.home, expected_admission=response["admission"])
+    assert summary == response["trial_summary"] and consumed is None
 
 
 def test_trial_read_does_not_repair_a_frozen_but_unpublished_run(original, monkeypatch):
@@ -1003,3 +1004,229 @@ def test_actual_retry_metadata_pressure_withholds_partial_provider_evidence(wire
     unavailable = {row["path"]: row["reason"] for row in run["observation_availability"]["unavailable"]}
     assert unavailable["execution.provider"] == "NOT_OBSERVED"
     assert run["effect"]["state"] == "EFFECT_UNKNOWN" and run["validity"]["status"] != "VALID"
+
+
+@pytest.fixture
+def harness2_reader(original_reader, monkeypatch):
+    """Original SQLite/store bodies; authenticated carrier and thread are fixture edges."""
+    from contextlib import asynccontextmanager
+    from integrations.hermes_runtime import native_eval_operator as operator
+    o = original_reader.o
+    recovery = {"schema": operator.RECOVERY_SCHEMA, "run_id": o.marker["run_id"],
+        **{key: value for key, value in o.params.items() if key != "operation"}}
+    state = SimpleNamespace(calls=[], owner_checks=0, change_at=None, loss=None,
+                            exit_loss=False, closed=False, mutate=None)
+
+    def called(name):
+        state.calls.append(name)
+        if state.loss == name:
+            raise TimeoutError("fixture private read loss")
+        if state.loss == name + "-cancel":
+            raise asyncio.CancelledError()
+
+    class Client:
+        def read_original(self, **identity):
+            called("read")
+            return control._read_original(o.home,
+                {"operation": "read_original", "profile_id": str(o.home), **identity},
+                o.t.principal, role="mmmeta")
+
+        def read_evaluation_trial(self, **identity):
+            called("trial")
+            value = publication.read_original_trial(o.runner, o.home,
+                {"operation": "read_evaluation_trial", "profile_id": str(o.home), **identity},
+                o.t.principal, owner=o.t.owner, role="mmmeta")
+            if state.mutate == "binding":
+                value["evaluation_binding"]["binding_sha256"] = "0" * 64
+            elif state.mutate == "output":
+                value["trial"]["output"]["text"] += " altered"
+            elif state.mutate == "summary":
+                value["trial_summary"]["run_id"] = "not-the-original"
+            return value
+
+        def __getattr__(self, name):
+            pytest.fail("a retained Trial read cannot call " + name)
+
+    @asynccontextmanager
+    async def connected():
+        state.closed = False
+        state.owner_checks = 0
+        before = {"fixture_owner": 1}
+        async def current():
+            assert not state.closed, "the incumbent owner callback expires with its hold"
+            state.owner_checks += 1
+            return {"fixture_owner": 2 if state.owner_checks == state.change_at else 1}
+        try:
+            yield Client(), before, current
+            if await current() != before:
+                raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_CHANGED")
+        finally:
+            state.closed = True
+            if state.exit_loss:
+                raise OSError("fixture carrier close loss")
+
+    # The actual in-memory SQLite fixture is owned by this thread. These calls
+    # stand for the existing private RPC; no live socket or listener is opened.
+    async def local_rpc(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(operator.asyncio, "to_thread", local_rpc)
+    kwargs = {"profile": None, "home": o.home, "implementation": None,
+              "native_launch": None, "connected": connected}
+    def read(selector=None):
+        return asyncio.run(operator.read_harness2_trial(
+            recovery=copy.deepcopy(recovery if selector is None else selector), **kwargs))
+    def public():
+        return asyncio.run(operator.execute("trial", recovery,
+            recovery=copy.deepcopy(recovery), **kwargs))
+    return SimpleNamespace(o=o, state=state, recovery=recovery, read=read, public=public)
+
+
+def test_harness2_private_read_reaches_existing_refinement_after_valid_baseline(harness2_reader, monkeypatch):
+    from scripts.ohf.harness2_recursion import Harness2CycleError, Limits, Trial, run_refinement
+    r, o = harness2_reader, harness2_reader.o
+    answer = complete_historical_trial_fixture(o, monkeypatch)
+    frozen = canonical_json_bytes(o.frozen())
+    no_trial_writes(o, monkeypatch)
+    files = {path: text.encode() for path, text in o.marker["candidate_files"].items()}
+    calls = []
+    class Port:
+        def execute(self, task, label, candidate):
+            assert label == "base1" and candidate == files
+            calls.append("execute")
+            trial = r.read()
+            assert type(trial) is Trial and trial.output == answer.encode()
+            assert r.state.closed is True
+            return trial
+        def improve(self, *args):
+            calls.append("improve")
+            raise Harness2CycleError("FIXTURE_VALID_BASELINE_CONSUMED")
+        def select(self, *args):
+            pytest.fail("the fixture stops after the validated baseline")
+        def reflect(self, *args):
+            pytest.fail("the fixture stops after the validated baseline")
+    with pytest.raises(Harness2CycleError, match="FIXTURE_VALID_BASELINE_CONSUMED") as stopped:
+        run_refinement(task={"task_id": "private-trial", "domain": "fixture", "request": "read original"},
+            common_base=files, expected_scenario=o.marker["scenario"],
+            baseline_configuration=o.marker["configuration"], prior_experience=(),
+            allowed_edit_paths=frozenset(files), k=1, mode="agg", limits=Limits(4, 4, 7), port=Port())
+    assert stopped.value.retained_run_ids == (o.marker["run_id"],)
+    assert calls == ["execute", "improve"] and r.state.calls == ["read", "trial"]
+    assert canonical_json_bytes(o.frozen()) == frozen
+
+
+def test_harness2_private_read_does_not_expose_eligible_trial_through_public_result(harness2_reader, monkeypatch):
+    r, o = harness2_reader, harness2_reader.o
+    answer = complete_historical_trial_fixture(o, monkeypatch)
+    no_trial_writes(o, monkeypatch)
+    result = r.public()
+    assert result["status"] == "TRIAL_OBSERVED" and result["trial"]["eligible_for_consumption"] is True
+    assert set(result) == {"schema", "operation", "status", "reason", "recovery", "admission",
+                           "publication", "complete_evaluation", "trial"}
+    encoded = canonical_json_bytes(result)
+    assert answer.encode() not in encoded
+    assert b'"candidate_files"' not in encoded and b'"configuration"' not in encoded
+    assert b'"output"' not in encoded and r.state.closed is True
+    assert r.state.calls == ["read", "trial"]
+
+
+def test_harness2_private_read_stops_existing_cycle_with_original_ineligible_id(harness2_reader, monkeypatch):
+    from scripts.ohf.harness2_recursion import Harness2CycleError, Limits, run_refinement
+    r, o = harness2_reader, harness2_reader.o
+    o.finish()
+    o.publish()
+    frozen = canonical_json_bytes(o.frozen())
+    no_trial_writes(o, monkeypatch)
+    files = {path: text.encode() for path, text in o.marker["candidate_files"].items()}
+    calls = []
+    class Port:
+        def execute(self, *args):
+            calls.append("execute")
+            return r.read()
+        def __getattr__(self, name):
+            pytest.fail("an ineligible Trial cannot continue into " + name)
+    with pytest.raises(Harness2CycleError, match="NATIVE_EFFECT_REQUIRES_RECONCILIATION") as stopped:
+        run_refinement(task={"task_id": "private-trial", "domain": "fixture", "request": "read original"},
+            common_base=files, expected_scenario=o.marker["scenario"],
+            baseline_configuration=o.marker["configuration"], prior_experience=(),
+            allowed_edit_paths=frozenset(files), k=1, mode="agg", limits=Limits(4, 4, 7), port=Port())
+    assert stopped.value.retained_run_ids == (o.marker["run_id"],)
+    assert calls == ["execute"] and r.state.calls == ["read", "trial"]
+    assert canonical_json_bytes(o.frozen()) == frozen
+
+
+@pytest.mark.parametrize("boundary", ["read-loss", "trial-loss", "owner-1", "owner-2", "owner-3", "owner-4", "close-loss",
+                                      "binding", "output", "summary"])
+def test_harness2_private_read_discards_untrusted_or_lost_return(harness2_reader, monkeypatch, boundary):
+    from scripts.ohf.harness2_recursion import Harness2CycleError
+    r, o = harness2_reader, harness2_reader.o
+    complete_historical_trial_fixture(o, monkeypatch)
+    frozen = canonical_json_bytes(o.frozen())
+    no_trial_writes(o, monkeypatch)
+    if boundary.endswith("-loss"):
+        if boundary == "close-loss":
+            r.state.exit_loss = True
+        else:
+            r.state.loss = boundary.removesuffix("-loss")
+    elif boundary.startswith("owner-"):
+        r.state.change_at = int(boundary[-1])
+    else:
+        r.state.mutate = boundary
+    with pytest.raises(Harness2CycleError, match="EVALUATION_OPERATOR_UNAVAILABLE") as stopped:
+        r.read()
+    assert stopped.value.retained_run_ids == ()
+    assert r.state.calls == (["read"] if boundary in {"read-loss", "owner-1"} else ["read", "trial"])
+    assert r.state.closed is True and canonical_json_bytes(o.frozen()) == frozen
+
+
+def test_harness2_private_read_preserves_expired_output_refusal_without_republication(harness2_reader, monkeypatch):
+    from scripts.ohf.harness2_recursion import Harness2CycleError
+    r, o = harness2_reader, harness2_reader.o
+    complete_historical_trial_fixture(o, monkeypatch)
+    o.retire()
+    o.a.retirement.time.time = lambda: 3000000
+    o.a.db._execute_write(lambda conn: o.a.retirement.prune_retired_tombstones(conn))
+    no_trial_writes(o, monkeypatch)
+    with pytest.raises(Harness2CycleError, match="NATIVE_EVAL_TRIAL_OUTPUT_NOT_RETAINED") as stopped:
+        r.read()
+    assert stopped.value.retained_run_ids == (o.marker["run_id"],)
+    assert r.state.calls == ["read", "trial"] and r.state.closed is True
+
+
+def test_harness2_private_read_does_not_poll_nonterminal_original(harness2_reader, monkeypatch):
+    from scripts.ohf.harness2_recursion import Harness2CycleError
+    r, o = harness2_reader, harness2_reader.o
+    no_trial_writes(o, monkeypatch)
+    with pytest.raises(Harness2CycleError, match="ORIGINAL_NOT_TERMINAL") as stopped:
+        r.read()
+    assert stopped.value.retained_run_ids == () and r.state.calls == ["read"]
+    assert r.state.closed is True
+
+
+@pytest.mark.parametrize("change", ["profile", "run", "extra"])
+def test_harness2_private_read_validates_original_selector_before_connection(harness2_reader, monkeypatch, change):
+    from scripts.ohf.harness2_recursion import Harness2CycleError
+    r = harness2_reader
+    selector = copy.deepcopy(r.recovery)
+    if change == "profile":
+        selector["profile_id"] += "-foreign"
+    elif change == "run":
+        selector["run_id"] = "not-a-run"
+    else:
+        selector["trial"] = {"output": "caller supplied"}
+    no_trial_writes(r.o, monkeypatch)
+    with pytest.raises(Harness2CycleError, match="NATIVE_EVAL_OPERATOR_CONTRACT_INVALID") as stopped:
+        r.read(selector)
+    assert stopped.value.retained_run_ids == () and r.state.calls == []
+    assert r.state.closed is False
+
+
+@pytest.mark.parametrize("boundary", ["read", "trial"])
+def test_harness2_private_read_propagates_cancellation_and_closes_original_scope(harness2_reader, monkeypatch, boundary):
+    r, o = harness2_reader, harness2_reader.o
+    complete_historical_trial_fixture(o, monkeypatch)
+    no_trial_writes(o, monkeypatch)
+    r.state.loss = boundary + "-cancel"
+    with pytest.raises(asyncio.CancelledError):
+        r.read()
+    assert r.state.calls == (["read"] if boundary == "read" else ["read", "trial"])
+    assert r.state.closed is True

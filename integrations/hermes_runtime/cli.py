@@ -383,6 +383,11 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
             before = await owner()
             client = NativeSecretaryClient(home, expected_pid=before["child"]["pid"], role=expected_role)
             yield client, before, owner
+            # Stage the operation result through one last incumbent owner check
+            # before held source custody closes. owner() expires with this hold;
+            # it must never be called later against released descriptors.
+            if await owner() != before:
+                raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_CHANGED")
 
     return profile, home, implementation_sha, connected
 

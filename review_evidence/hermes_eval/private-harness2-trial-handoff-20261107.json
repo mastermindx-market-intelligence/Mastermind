@@ -1,0 +1,68 @@
+{
+  "base_commit": "c48d0d9706a4c3ae558d12f3049328bcbf958914",
+  "changes": [
+    "Existing native_eval_operator.read_harness2_trial freezes and validates the closed original recovery selector before connecting, reuses the existing authenticated original reader and private Trial decoder, and returns the incumbent Trial to the existing consumer contract.",
+    "The existing public execute wrapper exposes only its prior summary dictionary. Invocation-local private staging has no field representation or instance dictionary.",
+    "The existing CLI connected qualification checks the incumbent owner after normal completion of the staged body, before releasing held source descriptors. Its owner callback is not invoked after release. Exceptions and cancellation retain their original unwind behavior.",
+    "A validated ineligible original summary raises existing Harness2CycleError with its original reason and retained run reference. Current incomplete/effect-unknown evidence cannot continue into improvement.",
+    "Read loss, changed ownership, close failure and malformed private response discard staged evidence without asserting retained IDs. Nonterminal originals are not polled; expired output is not recreated."
+  ],
+  "fixture_boundaries": [
+    "Private carrier/principal qualification and the RPC thread edge are explicit test fixtures; no live socket, listener, enrollment, provider inference or service was used.",
+    "Actual pinned native admission, SQLite settlement/retirement, frozen publication, ArtifactStore graph, original result reader, Trial decoder and existing Harness2 baseline validator execute.",
+    "The eligible branch uses an explicitly synthetic historical complete producer and stops at an improver sentinel after the valid baseline. Current production native observations remain incomplete.",
+    "The actual CLI connection qualification fixture proves owner replacement after result staging is rejected at normal scope exit. Public CLI/enrollment regression modules pass."
+  ],
+  "original_carriers": [
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175"
+  ],
+  "preserved_owners": [
+    "Runtime/OHF parent and Attempt grants, resource admission and rollout lifecycle",
+    "Original native producer, SessionDB, ArtifactStore and publication",
+    "Existing Harness2 refinement, improvement, selection, reflection and recovery",
+    "Existing Agent OS/discovery/Metabolism and protected skill publication"
+  ],
+  "problem": "The authenticated original Trial reader decoded a retained incumbent Trial, but the operator discarded it and exposed only a CLI summary. An admitted Runtime/OHF port had no connected private return path.",
+  "proof": {
+    "elapsed_seconds": 19.446,
+    "errors": 0,
+    "failed_names": [],
+    "failures": 0,
+    "junit_sha256": "27c8a52a17fb9d91692714ca172155b1219961b0511ce2a19e676613acd61de1",
+    "log_sha256": "597a06bc00c4e309d8557e17eb1414d25bfe96d2a3b4bcfcc46b570c010ec8b4",
+    "phase": "private-harness2-handoff",
+    "returncode": 0,
+    "schema": "mastermind.source_test_receipt/v1",
+    "selected_cases": 97,
+    "selectors": [
+      "integrations/hermes_runtime/tests/test_native_eval_operator.py",
+      "integrations/hermes_runtime/tests/test_operator_native_enrollment.py",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_trial_read_joins_actual_frozen_store_and_original_output",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_trial_read_preserves_valid_run_summary_when_output_cannot_be_consumed",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_reaches_existing_refinement_after_valid_baseline",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_does_not_expose_eligible_trial_through_public_result",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_stops_existing_cycle_with_original_ineligible_id",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_discards_untrusted_or_lost_return",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_preserves_expired_output_refusal_without_republication",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_does_not_poll_nonterminal_original",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_validates_original_selector_before_connection",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py::test_harness2_private_read_propagates_cancellation_and_closes_original_scope"
+    ],
+    "skipped": 0,
+    "source_qualification": {
+      "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md": "60bcffdd33c5d69bb96d253d06b89e23d506f7a0eacf88dadfcbd3629f2f3aa4",
+      "integrations/hermes_runtime/cli.py": "c75d5febb6ab2d97444555a14f103a2d117e3625b7c71ea2dac37c26d763623f",
+      "integrations/hermes_runtime/native_eval_operator.py": "4f2d63485a964ca3c6accd30be7303c0ae6bee45bf477a738654e3848c2fed7e",
+      "integrations/hermes_runtime/tests/test_native_eval_operator.py": "f88965d6ea86a5de3cb20a1dfa293a7e61c6170dbd569cf93eb612c17c8b6418",
+      "integrations/hermes_runtime/tests/test_native_eval_publication.py": "86a773a6a75b6259330f1f0a9a7a0849174c1bda33b8b7d84c9af45bec9e152a"
+    },
+    "source_stable": true
+  },
+  "proof_receipt_sha256": "ce88993fb0820f83841c5432cd61758748b0cc8048083288c12f18317630a5cf",
+  "remaining_acceptance": [
+    "Committed-head D8 and finite EVAL ownership proof is attributed separately to the resulting commit.",
+    "This private result connection is not a complete production Harness2Port, complete producer, admitted refinement execution, learning efficacy, installed runtime or availability proof."
+  ],
+  "schema": "mastermind.hermes_harness2_private_handoff_source_proof/v1"
+}

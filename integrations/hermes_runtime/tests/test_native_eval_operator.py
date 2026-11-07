@@ -394,3 +394,18 @@ def test_trial_command_does_not_poll_or_publish_nonterminal_original(command):
     assert code == 0 and value["status"] == "OBSERVED"
     assert value["reason"] == "ORIGINAL_NOT_TERMINAL" and value["trial"] is None
     assert w.state.calls == ["read"] and w.state.publication_count == 0
+
+
+def test_actual_trial_handoff_rechecks_owner_when_staged_result_leaves_held_scope(command, monkeypatch):
+    """Actual connected() exit catches replacement after the in-body final check."""
+    w = command
+    original_init = operator._TrialRead.__init__
+    def staged(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        w.world.state.changed = True
+    monkeypatch.setattr(operator._TrialRead, "__init__", staged)
+    code, value = w.run("trial")
+    assert code == 2 and value["status"] == "UNAVAILABLE" and value["trial"] is None
+    assert value["recovery"]["admission_id"] == w.receipt["admission_id"]
+    assert w.state.calls == ["read", "trial"] and w.state.publication_count == 0
+    assert w.world.state.inspections == w.world.state.creations == 0

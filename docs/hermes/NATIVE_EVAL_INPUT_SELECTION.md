@@ -740,3 +740,39 @@ provider rule, retry owner or validity check changes.
 The completed Harness2 recovery correction at `9edfa7470c5a78321a101298df7c1f9a3d37d221`
 also remains in this composition. Its syntax-validated original-owner run IDs
 remain recovery references; they do not make an incomplete native Trial eligible.
+
+
+## Private retained-Trial handoff to Harness2
+
+`native_eval_operator.read_harness2_trial` is the private return path for an
+already admitted Runtime/OHF port. It freezes and validates the original closed
+recovery selector before connecting, then uses the same authenticated original
+read, admission/binding validation, private Trial decoder and owner checks as
+`eval-trial`. It returns the incumbent `Harness2Port.execute` result type,
+`Trial`; it does not implement another execution port, submitter or loop.
+
+The public `execute`/CLI boundary still exposes only the existing eligibility
+summary. The private invocation container has no field-disclosing representation
+or instance dictionary. Its detached Trial becomes available only after normal
+completion of the connection scope. The source-qualified `connected()` checks
+its original owner once more after the staged result and before releasing held
+source custody. The owner callback expires at that release and is never called
+afterward. Read loss, owner replacement, failed closure or malformed private
+response discards the staged Trial. Cancellation propagates after cleanup.
+
+A validated ineligible summary raises the existing `Harness2CycleError` with
+its original reason and retained run reference. The existing loop preserves
+that reference through its recovery path and stops before improvement,
+selection or reflection. Caller-supplied selectors and lost or malformed reads
+cannot create retained-run claims. A nonterminal original is returned as a
+finite refusal; no polling or submission follows. An original run whose output
+has expired remains retained but ineligible; this consumer does not republish
+or reconstruct it.
+
+The original Runtime/OHF owner remains responsible for parent/Attempt admission,
+resource budgets, rollout submission, and improver/selector/reflection calls.
+The handoff supplies no grant or scheduling authority. The current incomplete
+native producer remains invalid. A synthetic historical complete-producer
+fixture exercises the actual SQLite settlement, frozen publication, ArtifactStore,
+authenticated-reader validation and existing Harness2 baseline consumer; it is
+not proof of production refinement or learning efficacy.

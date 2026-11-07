@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
+from dataclasses import dataclass
 
+from scripts.ohf.harness2_recursion import Harness2CycleError, Trial
 from scripts.agent_eval import contracts
 from scripts.agent_eval.store import run_path
 
@@ -30,6 +32,14 @@ _ADMISSION = {"admission_id", "ref", "sequence", "status", "outcome",
 _OBSERVATION = {"schema", "status", "admission", "evaluation_binding", "answer", "successful",
                 "terminal_metadata", "request_observation", "request_observation_error",
                 "evaluation_inputs", "evaluation_inputs_error"}
+
+
+@dataclass(frozen=True, repr=False, slots=True)
+class _TrialRead:
+    """Invocation-local private return, never a public result or receipt store."""
+
+    outcome: dict
+    trial: Trial | None
 
 
 def _refuse():
@@ -234,6 +244,7 @@ def _trial_response(value, recovery, home, *, expected_admission):
             or summary["reason_codes"] != sorted(set(summary["reason_codes"]))):
         _refuse()
     _digest(summary["run_digest"], prefixed=True)
+    trial = None
     if status == "TRIAL_OBSERVED":
         trial = decode_trial(value["trial"], admission_id=admission["admission_id"], evaluation_binding=binding)
         if (trial.run["capabilities"]["profile_id"] != str(home)
@@ -248,10 +259,10 @@ def _trial_response(value, recovery, home, *, expected_admission):
                 or value["reason"] not in reasons or summary["eligibility_reason"] != value["reason"]
                 or value["reason"] == "NATIVE_TRIAL_INVALID" and summary["validity"] == "VALID"):
             _refuse()
-    return admission, copy.deepcopy(summary)
+    return admission, copy.deepcopy(summary), trial
 
 
-async def execute(operation, request, *, recovery, profile, home, implementation, native_launch, connected):
+async def _execute(operation, request, *, recovery, profile, home, implementation, native_launch, connected):
     entered, admission = False, None
     recovery = copy.deepcopy(recovery)
     try:
@@ -318,10 +329,10 @@ async def execute(operation, request, *, recovery, profile, home, implementation
                     evaluation_binding=recovery["evaluation_binding"])
                 await current()
                 if type(value) is dict and "trial_summary" in value:
-                    admission, summary = _trial_response(value, recovery, home, expected_admission=admission)
+                    admission, summary, trial = _trial_response(value, recovery, home, expected_admission=admission)
                     await current()
-                    return result(operation, value["status"], recovery=recovery, admission=admission,
-                        reason=value.get("reason"), trial=summary)
+                    return _TrialRead(result(operation, value["status"], recovery=recovery, admission=admission,
+                        reason=value.get("reason"), trial=summary), trial)
                 return _failure(operation, value, recovery, admission)
             if admission["status"] != "terminal" or admission["outcome"] not in _TERMINAL:
                 return result(operation, "OBSERVED", recovery=recovery, admission=admission,
@@ -347,3 +358,40 @@ async def execute(operation, request, *, recovery, profile, home, implementation
             reason="ORIGINAL_ADMISSION_RECONCILIATION_REQUIRED" if entered and operation == "submit"
             else "ORIGINAL_PUBLICATION_RECONCILIATION_REQUIRED" if entered
             else "EVALUATION_OPERATOR_UNAVAILABLE")
+
+
+async def execute(operation, request, *, recovery, profile, home, implementation, native_launch, connected):
+    """Public attended result: private Trial/output never cross this boundary."""
+    returned = await _execute(operation, request, recovery=recovery, profile=profile, home=home,
+        implementation=implementation, native_launch=native_launch, connected=connected)
+    return returned.outcome if type(returned) is _TrialRead else returned
+
+
+async def read_harness2_trial(*, recovery, profile, home, implementation, native_launch, connected):
+    """Return one retained original Trial to an already admitted Runtime/OHF port.
+
+    The caller supplies its incumbent authenticated connection and retains the
+    original recovery selector. The incumbent connected() contract performs its
+    final currentness check before releasing held source custody; its owner
+    callback must not be used after that release. This function grants no
+    execution or resource authority and never submits, publishes, reconciles,
+    retries or improves. The scope must close before private evidence returns.
+    """
+    from scripts.agent_eval.canonical import canonical_json_bytes
+    try:
+        original = recovery_for("trial", parse_request("trial", canonical_json_bytes(recovery)), home)
+    except Exception:
+        raise Harness2CycleError("NATIVE_EVAL_OPERATOR_CONTRACT_INVALID") from None
+    returned = await _execute("trial", None, recovery=original, profile=profile, home=home,
+        implementation=implementation, native_launch=native_launch, connected=connected)
+    if type(returned) is _TrialRead:
+        outcome = returned.outcome
+        if outcome["status"] == "TRIAL_OBSERVED" and type(returned.trial) is Trial:
+            return returned.trial
+        if outcome["status"] == "REFUSED" and returned.trial is None:
+            # Only the authenticated, fully checked original summary supplies
+            # a retained reference. Caller input or a lost read cannot do so.
+            raise Harness2CycleError(outcome["reason"], (outcome["trial"]["run_id"],))
+    else:
+        raise Harness2CycleError(returned.get("reason") or "EVALUATION_OPERATOR_UNAVAILABLE")
+    raise Harness2CycleError("EVALUATION_OPERATOR_UNAVAILABLE")
