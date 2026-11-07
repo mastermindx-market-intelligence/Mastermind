@@ -1188,3 +1188,41 @@ A source branch **sol/hermes-workbench-vault-fill-20261107-c3** was created at p
 3. Extend the incumbent native observation and EVAL/refinement path with actual tool-schema/invocation evidence; do not create another memory, lifecycle, authorization, retry, queue or learning control plane.
 4. The original C26 Ubuntu1/root permission denial and local AF_UNIX denial remain unretried. Restore the original authorized connection for installed activation and reconcile its retained effect. Ordinary automatically discovered CI is not an alternate manual replay of the denied action.
 5. PRs 398/409 remain held; C69/C70 and accepted source slices remain DO_NOT_REDO. Original paid Fabric refusals/failures were not replayed. Native children supply principal judgment only. No Slack/email message was sent.
+
+
+## 29. Connected vault source published; original releases preserved — 2026-11-07
+
+**MISSION_COMPLETE=false. BUILT_NOT_PROVEN.** The Chairman's implementation mission remains active. This milestone publishes a connected credential consumer and consumes original CI evidence; it does not assert installed activation, account enrollment, learning efficacy or complete teammate acceptance.
+
+### Vault and browser: original source carrier PR 2200
+
+[PR 2200](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2200), branch `sol/hermes-workbench-vault-fill-20261107-c3`, is OPEN/Draft and unarmed at **14f648d67119db2efff11ac78831602664199a30**, tree **304ed39614d006363d0c2c413055b6c508672e17**, parent protected **5199647e89166d163392905574097b2cfa16ca5b**. All 28 GitHub postimages exactly match the source checkpoint. The inherited Fabric translation fixture repair was not republished in this independent slice.
+
+- Existing WorkbenchActionRuntime alone adopts one private host-selected existing Hermes login grant. Service v3 narrows the existing caller/project/operation/generation/host/boot/resource lease; no worker/channel/profile acquires the grant automatically.
+- Public `prepare_browser_credential_fill(browser_ref, grant_ref)` freezes the full secret-free selection digest in the original signed action. Existing run/reconcile and ActionArtifactStore own the effect and replay boundary.
+- The same original relay gate first qualifies a held Page/main Document/unique login form in its owned Node child. Only then does the relay capture the selected existing vault.key and vault.json.enc through read-only descriptor-relative private-file checks.
+- The same child uses exact `fernet@0.3.3` to decode the existing Hermes v1 whole-vault format and select the exact item/account/HTTPS origin. It registers the shared native redaction map before input events, reclassifies before both field writes, checks trusted Node expiry after awaited work and immediately before writing, and verifies actual native input values. Partial/unverified writes remain uncertain. Filling does not submit/login.
+- The original B1 manifest and full closure owner extend to one fixed first-party entry and pinned npm dependencies. A held installation container survives through original Popen and anchored exec. The old v1 bootstrap bytes remain exact. There is no new auth, vault writer, process/lifecycle owner, effect store, queue, retry plane, or installed trust-on-first-use.
+- Known-value-redacted native text artifacts may persist. Binary/artifact/alias/clipboard paths are narrowed. Arbitrary website encoding and same-UID general-shell access are outside this guarantee; broad native shell tools remain disarmed.
+
+Validation observed: **82 Python tests and 3 subtests passed**, including actual JWT/FastMCP preparation, shared runtime/ledger, descriptor capture, original browser regressions and final held-container exec. **18 existing B1 tests passed, 90 unrelated deselected**. **5 Node source tests passed**. Python compilation, shell/Node syntax and unchanged legacy bootstrap checks passed. The full unmodified Hermes writer fixture executed against disposable files; its exact upstream blob is 746fbf8a771a7834e1b06a01df96a74df75477ce and MIT license is retained.
+
+The dedicated ordinary PR workflow **42352184233** is in progress. It installs the exact npm lock and disposable Chromium, then runs actual writer/Fernet/MCP/DOM/persisted-redaction tests, held-target/expiry cases and dependency-byte checks. It has **not yet been observed passing**. Generic CI **42352184068** is queued and Hermes harness **42352184002** is in progress. Linux fixture engine execution is not installed macOS/B1 or fleet qualification.
+
+Implementation and exact provenance/configuration/acceptance boundaries: [WORKBENCH_VAULT_FILL.md at this source](https://github.com/mastermindx-market-intelligence/Mastermind/blob/14f648d67119db2efff11ac78831602664199a30/docs/hermes/WORKBENCH_VAULT_FILL.md).
+
+### Auth and native memory: consume the original effects
+
+Auth PR 2188 remains at **851f250dd8ec7489b74a603d52733f8c4828f2b2**. Ordinary CI **42348279388** completed successfully, including all six repository shards and the required aggregate test. GitHub events show ready-for-review at 07:27:15Z (mastermidx4) and an added-to-queue event at 07:27:26Z (chriswong6031-creator). Current readback has one original queue entry **MQE_lQDOTotz3c8AAAABNdpVVc4ABAiKzgPMwpY**, AWAITING_CHECKS, no separate auto-merge request, and no merge commit. The observed queue ref points to **0d0aa2da3f25627138e095faab367db68af0f378**. This session did not add another release request or edit the queued head. Preserve the observed effect and reconcile its original result.
+
+Native PR 2195 remains OPEN/Draft and unarmed at **e7bd8ae23f2744f0f5294f063dc6f07351e34cb4**, MERGEABLE. Ordinary general CI **42349271151** completed its six shards and required aggregate test successfully; Hermes runtime **42349271132** and harness **42349271205** passed. Latest GitHub mergeStateStatus was UNSTABLE despite those observed workflows, so read the actual remaining rollup before release. Reconcile the original auth dependency first. No stale-head release, direct self-merge or fabricated review.
+
+Protected Mastermind advanced from 58ac65 through PRs 806 and 2199 to **5199647e89166d163392905574097b2cfa16ca5b**, tree **60fe6ef8da0373cf7a7010b87019de9e86776eb0**. The six changed paths do not affect source law or this vault slice. Compatible law pin **e37dc82f070fd391e29f0dbd0bf46b022166beea** remains usable.
+
+### Continuity and next useful source slice
+
+Macro PR 10823 remains OPEN at **1dab525093d73f415dd9a5db0ed9cf6c0ff2a68e**, with the single existing merge-on-green label and no merge commit. Its dated section-27 state and unrelated Control Room obligations remain intact. Do not edit/duplicate its pending release effect.
+
+The next bounded source slice belongs in existing `native_request_observation` and the same retained admission/`read_original` path. Observe actual post-hook tool schemas; qualify and wrap the pinned `agent/tool_executor.py::_dispatch_authorized_once` execution callback and `_commit_tool_result` flush acknowledgment. The donor's dispatched flag is set before some native refusals and is not callback-entry proof. Handler success and durable result are not effect proof. Preserve scope/adoption/currentness, explicit overflow, late-return closure and v1 reads; retain no raw tool arguments/results/exception strings. Do not add an observer registry, new ConsumerSlot, event store, partial EVAL facade or substitute placeholders for missing producer facts. Existing EVAL finalizer/ArtifactStore/refinement owners remain authoritative.
+
+Original paid Fabric refusals/failures remain unreplayed; direct parent source work proceeds in the blocked labor lane. Native children supplied principal judgment only, with no edits/tests/publication. The original C26 Ubuntu1/root connection refusal and local Control AF_UNIX denial remain unretried. Installed activation needs the original authorized connection restored and its effect reconciled. PRs 398/409 stay held; C69/C70 and accepted source slices remain DO_NOT_REDO. No Slack/email was sent.
