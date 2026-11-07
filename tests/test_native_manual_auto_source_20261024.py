@@ -28,7 +28,7 @@ PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b72666
 PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
 PRE_REFUSAL_DIAGNOSTICS_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
 PRE_ADMISSION_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
-CURRENT_TASK_SHA = "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
+CURRENT_TASK_SHA = "85bebdfd19ec5d13124608e74ebe37fd310a0d4d0fb5071a6e8fc4d87463d799"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -53,6 +53,24 @@ def _preobserver_picker():
     assert len(raw) == value["bytes"] == 118474
     assert hashlib.sha256(raw).hexdigest() == value["sha256"] == "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
     return raw
+
+
+def _pre_central_glm_task(value: bytes) -> bytes:
+    """Restore the exact pre-central epoch only in the private F1 fixture."""
+    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
+    pairs = (
+        (b'r"(?:GLM_REMOTE_AUTH_UNAVAILABLE|GLM_CENTRAL_CAPABILITY_REQUIRED) host=(?P=host)"',
+         b'r"GLM_REMOTE_AUTH_UNAVAILABLE host=(?P=host)"'),
+        (b'if pool not in ("grok", "minimax", "glm") or artifact_names or native_return or requested_model or prefer:',
+         b'if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:'),
+        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4, central GLM-Codex on Ubuntu4)',
+         b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
+    return value
 
 
 def _pre_refusal_diagnostics_task(value: bytes) -> bytes:
@@ -220,6 +238,9 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
             assert sha(source) == CURRENT_TASK_SHA
+            # Rewind only this branch's three central GLM qualification hunks.
+            # The current protected admission/diagnostic inverses still apply.
+            (stage / relative).write_bytes(_pre_central_glm_task(current))
             # Undo only the exact forward repair in this private stage, then
             # retain every historical inverse and fixture at its original hash.
             admission_patch = ROOT / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"

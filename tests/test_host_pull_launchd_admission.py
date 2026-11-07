@@ -23,7 +23,7 @@ INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-sourc
 HOST_PULL_SHA = "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
 # Combined exact current107 host-pull and Broker source image.
-MANIFEST_SHA256 = "470305e48c164563b53626967c178d8c3c5cdaff5a58308aea0a9d838eef3e6d"
+MANIFEST_SHA256 = "684b390df13df9590a22f5af5581495370606dd40cc47569f37b3f9500578c68"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",

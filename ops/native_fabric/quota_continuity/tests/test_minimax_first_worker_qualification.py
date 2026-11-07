@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 _host = ModuleType("host_pick")
 _host.load_registry = lambda: {}
 _host.evaluate_hosts = lambda *_a, **_k: []
+_host.refresh_stale = lambda _hosts: True
 _host.HOSTS_STATE_DIR = "fixture-states"
 _pick = ModuleType("pick")
 _pick.format_pick = lambda *_a, **_k: "NONE reason=fixture"
@@ -121,8 +122,20 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
 
     def test_no_widening_to_macbook_other_hosts_or_other_pools(self):
         for host, pool in (("mb", "minimax"), ("ubuntu1", "minimax"),
-                           ("ubuntu4", "glm"), ("ubuntu4", "cursor"), ("m1", "cursor"),
+                           ("mb", "glm"), ("m1", "glm"), ("ubuntu1", "glm"),
+                           ("ubuntu4", "cursor"), ("m1", "cursor"),
                            ("arbitrary", "minimax")):
+            with self.subTest(host=host, pool=pool):
+                with self.assertRaisesRegex(ValueError, "QUALIFICATION_SCOPE_REFUSED"):
+                    qualification.qualification_route(
+                        host, pool=pool, task_class="fix_build", complexity="C1_ROUTINE_BOUNDED",
+                        reason="fixture", root="root", parent="parent", registry=self.registry)
+
+    def test_glm_pool_is_not_widened_to_direct_mode_or_other_ubuntu_hosts(self):
+        # The GLM pool exists for the central GLM-Codex route on Ubuntu4 only.
+        # A direct glm-codex mode request is not an authorized qualification.
+        for host, pool in (("ubuntu4", "glm-codex"), ("mb", "glm-codex"),
+                           ("ubuntu1", "glm-codex")):
             with self.subTest(host=host, pool=pool):
                 with self.assertRaisesRegex(ValueError, "QUALIFICATION_SCOPE_REFUSED"):
                     qualification.qualification_route(
@@ -188,7 +201,7 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
     def test_candidate_task_entrypoint_routes_minimax_without_mutating_source_preimage(self):
         candidate = (ROOT / "candidate/fabric_task.py").read_text()
         source = (ROOT / "source/fabric_task.py").read_text()
-        self.assertIn('if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:', candidate)
+        self.assertIn('if pool not in ("grok", "minimax", "glm") or artifact_names or native_return or requested_model or prefer:', candidate)
         self.assertIn('qualification_host, pool=pool, task_class=task_class, complexity=complexity,', candidate)
         self.assertEqual(candidate.count('qualification_host, pool=pool, task_class=task_class, complexity=complexity,'), 1)
         self.assertIn('if pool != "grok" or artifact_names or native_return or requested_model or prefer:', source)

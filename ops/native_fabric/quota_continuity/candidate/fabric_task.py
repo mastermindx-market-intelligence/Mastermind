@@ -41,7 +41,7 @@ _GLM_AUTH_GUARD_RE = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
     r"\[remote_sub id=(?P<run>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}) "
     r"host=(?P<host>[A-Za-z0-9_.-]+)\] "
-    r"GLM_REMOTE_AUTH_UNAVAILABLE host=(?P=host)"
+    r"(?:GLM_REMOTE_AUTH_UNAVAILABLE|GLM_CENTRAL_CAPABILITY_REQUIRED) host=(?P=host)"
 )
 
 
@@ -1249,7 +1249,7 @@ def request(
         if artifact_names:
             import artifact_production
         if qualification_host:
-            if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:
+            if pool not in ("grok", "minimax", "glm") or artifact_names or native_return or requested_model or prefer:
                 raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
             import fabric_host_qualification
             route = _parse_route(fabric_host_qualification.qualification_route(
@@ -1732,7 +1732,7 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
     p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
-    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4); no provider enrollment")
+    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4, central GLM-Codex on Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
     p_request.add_argument("--root")

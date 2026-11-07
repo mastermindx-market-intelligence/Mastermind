@@ -70,7 +70,7 @@ GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
     'remote_sub_exec.py': '4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
-    'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
+    'remote_sub.sh': '2ec99c393cfd4022197978a2ed8869c44649efce8eea6a0d66f14767af8a53cc',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
@@ -327,10 +327,40 @@ SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE = "710115e08673467ce39a0322da2cf718a66e5b9
 SPARSE_INDEX_ADVICE_EXECUTOR_SHA256 = "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281"
 
 
+# Ubuntu4's closed central GLM-Codex qualification has three coupled native
+# source deltas. Normalize only this exact cohort to the protected current107
+# predecessor when proving existing historical source closure. This cannot
+# authorize an arbitrary host, remote provider token, or mixed source release.
+UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS = {
+    "ext/fabric_host_qualification.py": "ae443c6dc465733cde78cc823e523b2f00203e1f4bc5dbe166b59a4999aad8ab",
+    "ext/fabric_task.py": "85bebdfd19ec5d13124608e74ebe37fd310a0d4d0fb5071a6e8fc4d87463d799",
+    "ext/remote_sub.sh": "2ec99c393cfd4022197978a2ed8869c44649efce8eea6a0d66f14767af8a53cc",
+}
+UBUNTU4_CENTRAL_GLM_NATIVE_PREIMAGES = {
+    "ext/fabric_host_qualification.py": "f50ef3208efe97c933372eada2e26b8870ba9b9590e33766f991e3416b613aa2",
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c",
+}
+
+
+def before_ubuntu4_central_glm(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("Ubuntu4 central GLM source manifest invalid")
+    previous = dict(manifest)
+    if not any(previous.get(name) == digest
+               for name, digest in UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS.items()):
+        return previous
+    if any(previous.get(name) != digest
+           for name, digest in UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS.items()):
+        raise ValueError("Ubuntu4 central GLM source cohort incomplete or foreign")
+    previous.update(UBUNTU4_CENTRAL_GLM_NATIVE_PREIMAGES)
+    return previous
+
+
 def before_sparse_index_advice(manifest):
     if type(manifest) is not dict:
         raise ValueError("native sparse-index advice manifest invalid")
-    previous = dict(manifest)
+    previous = before_ubuntu4_central_glm(manifest)
     if previous.get("ext/remote_sub_exec.py") != SPARSE_INDEX_ADVICE_EXECUTOR_SHA256:
         return previous
     previous["ext/remote_sub_exec.py"] = SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
