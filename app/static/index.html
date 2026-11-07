@@ -5864,9 +5864,9 @@ function renderCalibrationPage() {
 }
 
 // ── DESK page ───────────────────────────────────────────────────────────────
-// Lazy-loaded observability over the multi-seat Flagship desk. Fetches the four /api/desk/*
-// endpoints in parallel, then renders four sections. Every fetch degrades to null on any error
-// (the renderers then show a graceful "building" / empty state); nothing here can break the page.
+// Lazy-loaded observability over the multi-seat Flagship desk. Fetches Desk and scheduler
+// endpoints in parallel. Failed fetches return null; the scheduler result boundary below
+// distinguishes unavailable health reads from a successful read with no job rows.
 var _deskData = { strategist: null, macroRisk: null, decisions: null, watchlist: null, scorecard: null, firm: null, scheduler: null };
 
 function _deskBuilding(msgKey) {
@@ -5895,7 +5895,10 @@ window.loadDesk = function() {
     _deskData.scorecard  = res[3];
     _deskData.firm       = res[4];
     _deskData.macroRisk  = res[5];
-    _deskData.scheduler  = res[6];
+    var scheduler = res[6];
+    _deskData.scheduler = scheduler && Array.isArray(scheduler.jobs)
+      ? scheduler
+      : { scheduler_status: 'unavailable', jobs: null, error: 'scheduler_health_unavailable' };
     renderDeskPage();
   }).catch(function(){ renderDeskPage(); });
 };
@@ -5914,8 +5917,16 @@ function renderDeskPage() {
 function renderDeskScheduler() {
   var host = E('desk-scheduler'); if (!host) return;
   var d = _deskData.scheduler;
-  if (!d || !(d.jobs || []).length) {
-    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">⊙</span>Scheduler not available (apscheduler absent or no run events yet).</div>';
+  if (!d) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>Loading scheduler health…</div>';
+    return;
+  }
+  if (d.scheduler_status === 'unavailable' || d.status === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>Scheduler health unavailable — this read did not complete.</div>';
+    return;
+  }
+  if (!(d.jobs || []).length) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>No scheduler jobs reported.</div>';
     return;
   }
   var rows = '';

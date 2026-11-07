@@ -21,8 +21,8 @@ def _no_constant(value):
     raise ProposalError("INVALID_JSON")
 
 
-def prepare_json(raw: bytes) -> dict[str, Any]:
-    """Parse and prepare one UTF-8 request without IO or user-value diagnostics."""
+def decode_plain_json(raw: bytes) -> Any:
+    """Decode bounded plain JSON without IO or caller-value diagnostics."""
     if type(raw) is not bytes or not raw:
         raise ProposalError("INVALID_JSON")
     if len(raw) > MAX_BYTES:
@@ -51,6 +51,12 @@ def prepare_json(raw: bytes) -> dict[str, Any]:
     except (ValueError, RecursionError):
         raise ProposalError("INVALID_JSON") from None
     bounded_plain(request)
+    return request
+
+
+def prepare_json(raw: bytes) -> dict[str, Any]:
+    """Parse and prepare one UTF-8 request without IO or user-value diagnostics."""
+    request = decode_plain_json(raw)
     if type(request) is not dict or set(request) != _FIELDS:
         raise ProposalError("INVALID_INPUT")
     return prepare_execution_plan(**request)
