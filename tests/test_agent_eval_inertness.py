@@ -793,6 +793,10 @@ NATIVE_EVAL_INTEGRATION_PATHS = frozenset({
     "ops/executive_os/release_manifest.py",
     "ops/executive_os/native_gateway_sources.py",
     "scripts/enroll_linux_secondary_worker.py",
+    # Assigned-principal §55 amendment, existing sol/hermes-native-eval-inputs-20261107-c3:
+    # git:mastermindx-market-intelligence/Mastermind@d78673689ecd381fb9241c87626518f7460484e0
+    # research/HERMES_TEAMMATE_EVOLUTION_MASTERPLAN_2026-11-06.md
+    "tests/test_linux_secondary_worker_enrollment.py",
     "tests/executive_fabric_release_identity_review.py",
     "ops/hermes_egress/squid.conf",
     "ops/hermes_egress/README.md",
@@ -1493,6 +1497,7 @@ def _bind_root_to_private_fixture(monkeypatch, repo: Path) -> None:
 ])
 def test_native_eval_owned_delta_reaches_real_fences_with_shared_connections(tmp_path, monkeypatch, owned):
     files = [(owned, "fixture\n"), ("integrations/hermes_runtime/supervisor.py", "fixture\n"),
+             ("tests/test_linux_secondary_worker_enrollment.py", "fixture\n"),
              ("ops/hermes_egress/squid.conf", "fixture\n")]
     repo = _standalone_prefix_delta_repo(tmp_path, "native_eval_owned", files)
     _bind_root_to_private_fixture(monkeypatch, repo)
@@ -1503,6 +1508,7 @@ def test_native_eval_owned_delta_reaches_real_fences_with_shared_connections(tmp
 
 def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, monkeypatch):
     files = [("integrations/hermes_runtime/supervisor.py", "fixture\n"),
+             ("tests/test_linux_secondary_worker_enrollment.py", "fixture\n"),
              ("ops/hermes_egress/squid.conf", "fixture\n"),
              ("integrations/hermes_runtime/unrelated_hermes_owner.py", "fixture\n")]
     repo = _standalone_prefix_delta_repo(tmp_path, "shared_native_only", files)
@@ -1518,6 +1524,7 @@ def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, mon
 
 @pytest.mark.parametrize("foreign", [
     "integrations/hermes_runtime/unlisted_native_owner.py",
+    "tests/test_linux_secondary_worker_unlisted.py",
     "integrations/hermes_qualification/native_eval_inputs/extra.py",
     "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/unlisted.source",
     "control_plane/bypass.py", "config/agent_eval.yaml", ".github/workflows/agent-eval.yml", "requirements/new.in",
