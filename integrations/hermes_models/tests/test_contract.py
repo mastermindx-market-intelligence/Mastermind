@@ -107,7 +107,7 @@ class ContractTests(unittest.TestCase):
         from control_plane.model_router import ModelRouter
 
         router = ModelRouter.load()
-        before = {alias: provider.enabled for alias, provider in router.providers.items()}
+        before = (dict(router.providers), dict(router.model_aliases))
         report = bind_model_router(router)
         self.assertFalse(report["authority_granted"])
         self.assertFalse(report["production_armed"])
@@ -116,12 +116,63 @@ class ContractTests(unittest.TestCase):
         self.assertFalse(report["personal_coding_plan_used"])
         self.assertEqual(report["minimax_attended_model"], "MiniMax-M3")
         self.assertEqual(report["personal_coding_plan_alias"], "byteplus.attended")
-        # The commercial contract is now in protected source. Presence still
-        # grants no admission and the read cannot change any provider's state.
-        self.assertEqual({row["alias"] for row in report["modelark_aliases"]},
-                         set(MODELARK_CONTRACT["aliases"]))
-        self.assertTrue(all(row["status"] == "present" for row in report["modelark_aliases"]))
-        self.assertEqual(before, {alias: provider.enabled for alias, provider in router.providers.items()})
+        rows = {row["alias"]: row for row in report["modelark_aliases"]}
+        self.assertEqual(len(report["modelark_aliases"]), len(MODELARK_CONTRACT["aliases"]))
+        self.assertEqual(set(rows), set(MODELARK_CONTRACT["aliases"]))
+        for alias, served in MODELARK_CONTRACT["aliases"].items():
+            with self.subTest(alias=alias):
+                self.assertEqual(rows[alias]["served_model"], served)
+                self.assertFalse(rows[alias]["worker_eligible"])
+                if alias in router.model_aliases:
+                    self.assertEqual(rows[alias]["status"], "present")
+                    self.assertFalse(rows[alias]["provider_enabled"])
+                    provider = router.providers[MODELARK_CONTRACT["provider_alias"]]
+                    self.assertFalse(provider.enabled)
+                    self.assertFalse(provider.autonomous_allowed)
+                else:
+                    self.assertEqual(rows[alias]["status"], "absent_until_pr_1824_merges")
+                    self.assertNotIn("provider_enabled", rows[alias])
+        self.assertEqual(before, (router.providers, router.model_aliases))
+
+    def test_catalog_presence_and_eligibility_are_not_authority(self):
+        from types import SimpleNamespace
+
+        # Exercise both sides of the source merge without depending on the
+        # checkout date. Even an eligible catalog cannot grant admission.
+        for present, eligible in ((False, False), (True, False), (True, True)):
+            with self.subTest(present=present, eligible=eligible):
+                aliases = {
+                    alias: SimpleNamespace(
+                        model=served,
+                        provider_alias="byteplus-modelark",
+                        worker_eligible=eligible,
+                    )
+                    for alias, served in MODELARK_CONTRACT["aliases"].items()
+                } if present else {}
+                providers = {
+                    "byteplus-modelark": SimpleNamespace(enabled=eligible)
+                } if present else {}
+                router = SimpleNamespace(
+                    policy_version="test", model_aliases=aliases, providers=providers
+                )
+                report = bind_model_router(router)
+                expected = []
+                for alias, served in MODELARK_CONTRACT["aliases"].items():
+                    row = {
+                        "alias": alias,
+                        "status": "present" if present else "absent_until_pr_1824_merges",
+                        "served_model": served,
+                        "worker_eligible": eligible,
+                    }
+                    if present:
+                        row["provider_enabled"] = eligible
+                    expected.append(row)
+                self.assertEqual(report["modelark_aliases"], expected)
+                for field in (
+                    "authority_granted", "production_armed", "capacity_claimed",
+                    "selection_is_commitment", "personal_coding_plan_used",
+                ):
+                    self.assertIs(report[field], False)
 
     def test_router_model_drift_is_refused(self):
         class Alias:
