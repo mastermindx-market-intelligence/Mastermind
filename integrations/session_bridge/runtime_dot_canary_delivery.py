@@ -18,6 +18,7 @@ from integrations.slack_agent_dialogue.dot_canary_event import (
 from integrations.slack_agent_dialogue.dot_canary_reader import (
     ExistingA2CanaryReader, CanarySourceUnavailable,
 )
+from .installed_dot_canary_source import InstalledA2CanaryReader
 from .installed import _principal
 from .dot_canary_webhook import (
     VerifiedCanarySubscription, prepare_canary_webhook,
@@ -51,7 +52,8 @@ class RuntimeCanaryDeliveryConsumer:
         self.resolver, self.connector = resolver, connector
 
     def _authorize(self, view: CanaryDeliveryView, reader: ExistingA2CanaryReader):
-        if type(view) is not CanaryDeliveryView or type(reader) is not ExistingA2CanaryReader:
+        if type(view) is not CanaryDeliveryView or type(reader) not in (
+            ExistingA2CanaryReader,InstalledA2CanaryReader):
             raise ValueError("original A2 source and sealed Runtime grant required")
         auth = view.authorization
         principal = _principal(auth["principal"])
@@ -101,7 +103,7 @@ class RuntimeCanaryDeliveryConsumer:
         Chris account. Any duplicate, ambiguous producer or stale resource
         is withheld. A 2xx proves only provider transport acknowledgment.
         """
-        if type(reader) is not ExistingA2CanaryReader:
+        if type(reader) not in (ExistingA2CanaryReader,InstalledA2CanaryReader):
             raise TypeError("canonical A2 source required")
         if not self.owner.enabled:
             return (CanaryDeliveryResult(None,"NOT_ARMED",False),)
