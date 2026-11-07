@@ -991,3 +991,49 @@ Compatibility decision: same Executive server/process/endpoint will eventually s
 Next: consume exact-head CI/normal releases for2170/2171, qualify2176 hosted runtime checks, implement the bounded adopted receiver directly, then same-owner catalogue/transport/native provider composition and authenticated request-observation projection. Follow with real context inclusion/window/revocation/restart proof and honest EVAL acceptance.
 
 C26 original Ubuntu1 root/admin journal access remains explicitly denied; do not retry by another carrier/account. Original service identity/installation and original Runtime Job must be reconciled on restored authorized access, not replaced. No Secretary/Meta START, model inference, credential-vault enrollment, browser account grant, fleet/endurance or overall teammate completion is claimed. Outcome Learning#398 remains held. M2 OMH and independent ControlRoom/R2 obligations are preserved.
+
+
+## 24. Adopted Agent OS receiver and original-observation release checkpoint — 2026-11-07 03:55 UTC
+
+Mission remains **BUILT_NOT_PROVEN / MISSION_COMPLETE=false**. Chairman implementation authority continues. Applicable source law remains verified at `e37dc82f070fd391e29f0dbd0bf46b022166beea`; subsequent protected master through `615146aac6a1b0c0933bc9b815517a2fd285ed4a` has no delta in the applicable bootstrap/law paths. AUTONOMY_FORCE_MULTIPLIER mapping remains the concrete canonical-context → scoped Executive/Fabric action → original evidence/continuity journey; no AUTONOMY_BASELINE claim.
+
+### Accepted source carriers reconciled
+
+- PR2170 merged as `9d1558e99615e30a0b4e47404e4b2b2e7c440083`, from repaired head `113134217efdb40a1a737a091ad5bf353e25c18c`. Original terminal metadata is now on protected source. No second release request.
+- PR2176 merged as `e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46`, from `726120186328e9ab8653c35f1de2936242636297`. The earlier preflight AssertionError occurred before any mutation. A later exact-head preflight verified required test success, zero mandatory approvals, no holds, no existing auto/queue entry and the active native queue rule. One request `hermes-observer2176-726120-20261107` returned QUEUED position 1 and matching readback; canonical PR read now proves merge.
+- PR2171 retains its original auto-merge request at `332d20b5bf03e3427a8c16a0fa0ecedf479e9e87`; no re-arm, cancellation, replacement or merge claim. Its observed auto-merge metadata says MERGE while the active queue rule says SQUASH; that difference has not been disguised or modified.
+
+### Internal receiver source delivered
+
+PR2178: https://github.com/mastermindx-market-intelligence/Mastermind/pull/2178
+
+Head `fcc92293d6f18246f2b02acf7bf01de0b15d08c2`; local and GitHub tree both `a76f99bde01da447ffcccc0f6fddd1528c4a9e7e`; six scoped files, based on e37. Draft pending hosted checks/integration with evolving protected source.
+
+The receiver uses the incumbent InstalledBootPacketCollector, opaque installed-reader binding, actual private Macro materialization, original Git/source-generation observations, real fixed isolated CLI and existing CF2 runtime attestor. CODE=DATA=adopted Macro snapshot. Active latest-DATA/project-compilation scopes are refused. It preserves all original UTF-8 bundle bytes, including mandatory over-budget content and accounting.
+
+Receipts separately identify the two permitted Macro executable files, complete materialized-input inventory, existing source-generation seals and exact CF2 commitment fields. The closure digest joins those facts; consumers must also validate the separate release and import-policy fields. Generation time does not prove source freshness.
+
+Two concrete provenance defects were closed before publication:
+
+1. Macro's sys.path insertion could expose materialized artifacts to ordinary imports. The fixed child replaces PathFinder with qualified runtime/dependency paths and latches discovery of a prohibited outside-path candidate even if the compiler catches ImportError. Truly absent optional probes remain ordinary misses.
+2. -B prevents bytecode writes but permits reads. The child refuses any lstat entry at the actual plan-helper cache_from_source candidate, with sys.pycache_prefix unset and optimization zero. It does not delete or hide selected artifacts. A valid matching-header hostile helper cache is a tested falsifier.
+
+The existing synchronous runtime verifier is checked before/after against the original deadline; late results are refused. Receipt semantics are explicitly `cooperative_result_deadline_v1`, not a hard wall-clock cancellation claim.
+
+### Validation and original labor state
+
+- **282 passed, 7 skipped** in 20.49 seconds on local Linux/Python 3.12.14 across receiver, installed readers/bindings, source materialization and boot-runtime regressions.
+- **44 new receiver tests** use actual immutable Macro compiler/helper source at `138a2c5cdc391b6319c797d9206bc66faa635cdc`, real Git, materialization, isolated child and bounded runner. Business records and CF2 host attestation are explicit fixtures, not production custody proof.
+- Covers byte preservation, actual helper execution via typed DEC, required-source absence, source/private mutate-and-restore, copied/retargeted readers, output/receipt schemas, qualified dependency shadows, caught artifact imports, valid hostile helper bytecode, first/second attestor overrun, changed runtime commitment, mandatory over-budget context and cleanup uncertainty with no retry.
+- Seven unchanged adjacent tests require an actual Macro owner checkout or CF1 interpreter absent here. They remain unproved installed paths.
+- Principal read-only judgment found no remaining blocking ownership/import defect in this source slice. No mandatory independent approval was invented.
+- Original Fabric receiver run `hermes-agentos-adopted-receiver-20261107-c3-01`, controller87331, remains REQUEST_REFUSED_BEFORE_LAUNCH / EXECUTION_NOT_ELIGIBLE. Inner execution absence is recorded; outer root verification remains false and correlation-only. No START, result, accepted labor or authorized replay. Parent completed the source work directly; unchanged refusal will not be retried as a new carrier.
+
+### Next material work and unchanged gates
+
+1. Integrate/qualify PR2178 against current protected source and move its single carrier through normal delivery.
+2. Add a closed authenticated projection of the original outer request observation in native_session_control._read_original. Match original receipt scope; preserve historical instance identity rather than compare to today's runtime. Invalid observation withholds evidence only, preserving native answer/outcome. Current implementation SHA must not be relabeled original producer provenance.
+3. Add the same-server authenticated COO/App/Control context read, explicit mission/profile permission, principal-selected compatible catalogue and strict raw-bundle/receipt cross-validation.
+4. Enroll the actual Hermes memory loader with per-admission preparation before context compaction; then prove real model-window inclusion/revocation/restart and genuine held-out EVAL through the original admitted operation.
+
+No public context tool, new profile/grant, native memory enrollment, latest-DATA capability, vault/browser credential enrollment, service install, provider dispatch, serving-model identity, valid EVAL or fleet/endurance acceptance is claimed. Original C26 Ubuntu1/root permission denial remains unretried and requires its authorized connection to be restored. Outcome Learning #398 remains held; C69/C70 and prior accepted source remain DO_NOT_REDO. No Slack transport or separate queue/daemon was created.
