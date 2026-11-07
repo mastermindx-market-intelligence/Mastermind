@@ -1,0 +1,24 @@
+{
+  "schema": "soxx.parent_v16.verified.replay",
+  "algorithm": "frozen",
+  "original_parent_arms": 34,
+  "source_instruments": 4,
+  "sidecar_snapshot_SHA256": {
+    "SOXX_15m": "9b475e94fae6a92bb4bddfa0987097ea08dbdb60ec943fafcb100326440cdf71",
+    "SOXX_30m": "4b5ed22c98cad592d0b09da4d17aff7d8898912bc1d848a9666a57cd9876c481",
+    "SMH_15m": "5e2e7c98b9ffad22ef800dec82c060241a3f5d4f7f2316f670c0d6547f505652",
+    "SMH_30m": "b8b5132a11979e3f35735d0cf8f9ffe88f5ed6fd700c19223ec5436f3567816c",
+    "QQQ_15m": "5bafcbc03fe94a944b25b0adb2583f3f12cbfa1c7beb624e46a4fc0686defed9",
+    "QQQ_30m": "978946d041c3ac029f0f45486108d803e27882e0f7e4d37d1d65d7b4a6d70530",
+    "AMD_15m": "ce19c53b2199bc4a7ffe650c1f047e7e7e1b656ab0229bbb06570fe6023dc26c",
+    "AMD_30m": "8109960dfd4f7455e2409ad46bded45876fc945b64aee20d5a10fa0613e67747"
+  },
+  "accounted_event_pairs": 164,
+  "source_bar_prefixes": 33600,
+  "baseline_independent_route_replays": 34,
+  "opposite_intrabar_returns_differ": 0,
+  "warnings": [
+    "OHLC is not historical executable quotes",
+    "Market-data source adjustment/PIT unverified"
+  ]
+}

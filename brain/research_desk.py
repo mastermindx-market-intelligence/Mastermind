@@ -31,6 +31,10 @@ _PROPOSAL_LOCAL_LOCK = threading.RLock()
 _BULLISH = {"add", "overweight", "accumulate", "constructive", "buy"}
 
 
+class _ProposalQueueNotCommittedError(OSError):
+    """This queue mutation failed before canonical replacement was invoked."""
+
+
 def _proposal_lock_path(queue: Path) -> Path:
     """Sibling lock derived from the selected queue at call time (test/alternate-root safe)."""
     return queue.with_name(f".{queue.name}.lock")
@@ -41,7 +45,8 @@ def _proposal_lock(queue: Path):
     """Serialize producer enqueue with consumer read/effect/mark across threads and processes."""
     with _PROPOSAL_LOCAL_LOCK:
         queue.parent.mkdir(parents=True, exist_ok=True)
-        with _proposal_lock_path(queue).open("a+", encoding="utf-8") as lock:
+        lock = _proposal_lock_path(queue).open("a+", encoding="utf-8")
+        try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -49,25 +54,39 @@ def _proposal_lock(queue: Path):
                 try:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
                 except OSError:
-                    # Queue effect (if any) is already decided by atomic replace. Do not turn a
-                    # known effect into an apparent failure because lock cleanup itself failed.
+                    # Canonical replacement already decided any queue effect.
                     pass
+        finally:
+            try:
+                lock.close()
+            except OSError:
+                # Cleanup preserves the committed result or original operation failure.
+                pass
 
 
 def _read_proposals_unlocked(queue: Path) -> list[dict]:
-    if not queue.exists():
+    try:
+        queue.lstat()
+    except FileNotFoundError:
         return []
-    # Proposal evidence is accountability input. Malformed rows fail closed instead of being
-    # skipped/quarantined into a second implicit queue.
-    return [json.loads(line) for line in queue.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = []
+    for line in queue.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError("proposal queue row is not a mapping")
+        rows.append(row)
+    return rows
 
 
 def _atomic_write_proposals(queue: Path, rows: list[dict]) -> None:
-    """Atomically replace the selected queue; failed replacement preserves prior bytes."""
-    queue.parent.mkdir(parents=True, exist_ok=True)
-    payload = "".join(json.dumps(row, default=str) + "\n" for row in rows)
+    """Publish a complete queue; distinguish pre-replace failure from uncertain outcome."""
     tmp_name: str | None = None
+    replacement_attempted = False
     try:
+        queue.parent.mkdir(parents=True, exist_ok=True)
+        payload = "".join(json.dumps(row, default=str) + "\n" for row in rows)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -80,8 +99,15 @@ def _atomic_write_proposals(queue: Path, rows: list[dict]) -> None:
             tmp.write(payload)
             tmp.flush()
             os.fsync(tmp.fileno())
+        replacement_attempted = True
         os.replace(tmp_name, queue)
         tmp_name = None
+    except Exception as exc:
+        if replacement_attempted:
+            raise
+        raise _ProposalQueueNotCommittedError(
+            "proposal queue replacement was not attempted"
+        ) from exc
     finally:
         if tmp_name:
             try:
@@ -91,18 +117,30 @@ def _atomic_write_proposals(queue: Path, rows: list[dict]) -> None:
 
 
 def enqueue_proposal(row: dict, *, queue_path: Path | None = None) -> dict:
-    """Append one model proposal through the same serialized queue owner used by ingestion.
+    """Append through the same serialized canonical queue owner used by ingestion.
 
-    `queue_path` exists for explicit test/alternate-root custody; production callers pass the
-    bot MCP's canonical path, which is the same file `_PROPOSALS` consumed by this module.
+    The explicit queue path supports private tests and alternate-root custody;
+    production callers pass the canonical bot MCP path.
     """
-    queue = Path(queue_path) if queue_path is not None else _PROPOSALS
-    with _proposal_lock(queue):
-        rows = _read_proposals_unlocked(queue)
-        record = {**row, "logged_at": datetime.now(timezone.utc).isoformat()}
-        rows.append(record)
-        _atomic_write_proposals(queue, rows)
-        return record
+    publication_started = False
+    try:
+        queue = Path(queue_path) if queue_path is not None else _PROPOSALS
+        with _proposal_lock(queue):
+            rows = _read_proposals_unlocked(queue)
+            record = {**row, "logged_at": datetime.now(timezone.utc).isoformat()}
+            rows.append(record)
+            publication_started = True
+            _atomic_write_proposals(queue, rows)
+            return record
+    except _ProposalQueueNotCommittedError:
+        raise
+    except Exception as exc:
+        if publication_started:
+            raise
+        raise _ProposalQueueNotCommittedError(
+            "proposal queue replacement was not attempted"
+        ) from exc
+
 
 RESEARCH_PROMPT = """You are the Brain — the decision-making reasoning layer for the Mastermind, an
 autonomous, paper-only narrative-investing bot. Today is {asof}; the macro regime is {quad} ({quad_name}).
@@ -295,7 +333,9 @@ def _engine_blocked(subject: str) -> bool | None:
             return None
         vetoes = syn.get("vetoes")
         authority = syn.get("size_authority")
-        if not isinstance(vetoes, list):
+        if not isinstance(vetoes, list) or any(
+            not isinstance(veto, str) or not veto.strip() for veto in vetoes
+        ):
             return None
         if authority not in {"up", "down", "hold", "blocked", "insufficient_data"}:
             return None
@@ -346,8 +386,8 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
                 dissent=clamp_note, sleeve="conviction",
             ).finalize()                 # engine-derives the falsifier + check_by + time_stop_by
             receipt = ledger.append_receipt(doc.to_json())
-            appended = bool(receipt["appended"])
-            thesis_id = receipt.get("thesis_id")
+            appended = receipt["appended"]
+            thesis_id = receipt["thesis_id"]
             # The SQL store is a projection of a real canonical ledger effect. Never create a row
             # for a proposed DecisionDoc that the one-open-subject ledger invariant refused.
             if con is not None and appended:
@@ -357,13 +397,18 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
                 except Exception:
                     pass
             item = {
-                "id": thesis_id, "subject": doc.subject, "lean": doc.lean,
+                "id": thesis_id, "subject": doc.subject,
                 "clamped": bool(clamp_note), "appended": appended,
-                "falsifier_kind": doc.falsifier["check"]["kind"],
             }
-            if not appended:
+            if appended:
+                item["lean"] = doc.lean
+                item["falsifier_kind"] = doc.falsifier["check"]["kind"]
+            else:
+                # These values describe the rejected proposal, not the existing canonical thesis.
                 item["deduplicated"] = True
                 item["proposed_id"] = doc.id
+                item["proposed_lean"] = doc.lean
+                item["proposed_falsifier_kind"] = doc.falsifier["check"]["kind"]
             out.append(item)
             if appended:
                 kept.append({**r, "status": "ingested", "thesis_id": thesis_id})
@@ -373,7 +418,7 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
                     "status": "deduplicated",
                     "thesis_id": thesis_id,
                     "proposed_thesis_id": doc.id,
-                    "dedup_reason": receipt.get("reason") or "open_subject_exists",
+                    "dedup_reason": receipt["reason"],
                 })
 
         ingested_count = sum(1 for o in out if o["appended"])
@@ -389,18 +434,21 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
 
         try:
             _atomic_write_proposals(queue, kept)
-        except Exception:
-            # Ledger effects above may already be committed. Do not imply that nothing happened, and
-            # do not expose backend details. The unchanged proposal queue intentionally remains
-            # retry/reconciliation evidence; ledger receipts identify real effects vs dedup refusals.
+        except Exception as exc:
+            not_committed = isinstance(exc, _ProposalQueueNotCommittedError)
+            # Preserve known ledger effects independently of queue publication.
+            # An attempted replacement without a success receipt requires reconciliation.
             return {
                 **result,
-                "proposal_queue_status": "unavailable",
-                "proposal_rows_marked": False,
-                "error": "proposal_queue_update_unavailable",
+                "proposal_queue_status": "unavailable" if not_committed else "unknown",
+                "proposal_rows_marked": False if not_committed else None,
+                "error": (
+                    "proposal_queue_update_unavailable" if not_committed
+                    else "proposal_queue_update_outcome_unknown"
+                ),
                 "note": (
-                    "Thesis-ledger effects may already be committed, but proposal queue status "
-                    "could not be advanced; reconcile before interpreting the rows as unprocessed."
+                    "Thesis-ledger effects may already be committed. Reconcile the canonical "
+                    "ledger and proposal queue before considering a retry."
                 ),
             }
         return result

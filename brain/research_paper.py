@@ -1057,21 +1057,25 @@ def render_markdown(paper: dict) -> str:
     return "\n".join(out).strip()
 
 
+class _PaperSaveNotCommittedError(OSError):
+    """This save attempt failed before canonical replacement was invoked."""
+
+
 def save_paper(paper: dict) -> Path:
-    """Atomically replace the canonical paper JSON; the legacy index is best-effort only.
+    """Atomically replace the canonical paper; keep index failures auxiliary.
 
-    All production readers (`load_papers`, web research routes, and Brain consumers) scan the
-    canonical JSON files directly.  Therefore an index append must never turn a completed
-    canonical save into an apparent failed effect.  Conversely, any exception from the atomic
-    canonical phase occurs before `os.replace`, so callers may safely report that this attempt
-    did not replace the paper.
+    A classified failure before replacement proves this attempt did not replace
+    the paper. Once replacement is invoked, an exception has an unknown outcome
+    for callers; they must reconcile the canonical file before considering retry.
+    A normal replacement return establishes the canonical save independently of
+    the legacy index. Canonical readers scan the JSON files directly.
     """
-    _PAPERS.mkdir(parents=True, exist_ok=True)
-    path = _PAPERS / f"{paper['asof']}_{paper['ticker']}.json"
-    payload = json.dumps(paper, indent=2, default=str, ensure_ascii=False)
-
     tmp_name: str | None = None
+    replacement_attempted = False
     try:
+        _PAPERS.mkdir(parents=True, exist_ok=True)
+        path = _PAPERS / f"{paper['asof']}_{paper['ticker']}.json"
+        payload = json.dumps(paper, indent=2, default=str, ensure_ascii=False)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -1084,8 +1088,15 @@ def save_paper(paper: dict) -> Path:
             tmp.write(payload)
             tmp.flush()
             os.fsync(tmp.fileno())
+        replacement_attempted = True
         os.replace(tmp_name, path)
         tmp_name = None
+    except Exception as exc:
+        if replacement_attempted:
+            raise
+        raise _PaperSaveNotCommittedError(
+            "research paper replacement was not attempted"
+        ) from exc
     finally:
         if tmp_name:
             try:
@@ -1110,27 +1121,90 @@ def save_paper(paper: dict) -> Path:
     return path
 
 
-def load_papers() -> list[dict]:
-    """All saved papers, newest first, de-duplicated on id (latest generated_at wins)."""
-    if not _PAPERS.exists():
-        return []
+def load_papers(*, strict: bool = False) -> list[dict]:
+    """Saved papers, newest first, de-duplicated on id.
+
+    Default callers retain the historical tolerant read. Decision callers may opt
+    into a complete read: unreadable or malformed canonical entries must not make
+    an older confirmed paper look like the newest available evidence.
+    """
+    if strict:
+        import stat
+
+        try:
+            # glob suppresses some scan errors; a decision requires an observed listing.
+            paths = [p for p in _PAPERS.iterdir() if p.name.endswith(".json")]
+        except FileNotFoundError as error:
+            # Only observed absence under a real directory is an empty store.
+            # A dangling link or a path appearing after the failed read stays unavailable.
+            candidate = _PAPERS
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        raise error
+                    candidate = candidate.parent
+                    continue
+                if candidate != _PAPERS and stat.S_ISDIR(info.st_mode):
+                    return []
+                raise error
+    else:
+        if not _PAPERS.exists():
+            return []
+        paths = _PAPERS.glob("*.json")
+
+    def order_key(paper: dict):
+        value = paper.get("generated_at") or ""
+        if not strict:
+            return value
+        if not isinstance(value, str) or not value:
+            raise TypeError("paper generation time is malformed")
+        stamp = datetime.fromisoformat(value)
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            raise ValueError("paper generation time has no timezone")
+        return stamp
+
     by_id: dict[str, dict] = {}
-    for p in _PAPERS.glob("*.json"):
+    for p in paths:
         try:
             paper = json.loads(p.read_text())
+            if strict:
+                if not isinstance(paper, dict):
+                    raise TypeError("paper is not a mapping")
+                if (
+                    not isinstance(paper.get("ticker"), str)
+                    or not paper["ticker"]
+                    or paper["ticker"] != paper["ticker"].strip()
+                ):
+                    raise TypeError("paper ticker is malformed")
+                if not isinstance(paper.get("id"), str) or not paper["id"].strip():
+                    raise TypeError("paper identity is malformed")
+                order_key(paper)
         except Exception:
+            if strict:
+                raise
             continue
         pid = paper.get("id") or p.stem
         cur = by_id.get(pid)
-        if cur is None or (paper.get("generated_at") or "") >= (cur.get("generated_at") or ""):
+        if strict and cur is not None:
+            if paper["ticker"].upper() != cur["ticker"].upper():
+                raise ValueError("paper identity conflicts across tickers")
+            if order_key(paper) == order_key(cur) and paper != cur:
+                raise ValueError("paper identity has conflicting same-time revisions")
+        if cur is None or order_key(paper) >= order_key(cur):
             by_id[pid] = paper
-    return sorted(by_id.values(), key=lambda x: x.get("generated_at") or "", reverse=True)
+    return sorted(by_id.values(), key=order_key, reverse=True)
 
 
-def latest_for(ticker: str) -> dict | None:
-    """The most recent saved paper for a ticker, or None."""
+def latest_for(ticker: str, *, strict: bool = False) -> dict | None:
+    """The most recent saved paper for a ticker, or None.
+
+    Strict reads require complete canonical evidence and a comparable clock.
+    """
     t = ticker.upper()
-    cands = [p for p in load_papers() if (p.get("ticker") or "").upper() == t]
+    papers = load_papers(strict=True) if strict else load_papers()
+    cands = [p for p in papers if (p.get("ticker") or "").upper() == t]
     return cands[0] if cands else None
 
 

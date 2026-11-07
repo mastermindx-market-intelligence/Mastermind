@@ -16,7 +16,7 @@ policy's SELECTION PROPENSITY at decision time, then forward-grades each name's 
     armed. See docs/design/desk/OFF_POLICY_EXPLORATION.md for the budget decision.
 
 Isolated under data/shadow/rejections/ (NEVER the prod conviction ledger); no LLM, no look-ahead.
-Best-effort throughout — never breaks the build.
+Forward labels are best-effort; canonical persistence failures remain explicit.
 """
 from __future__ import annotations
 
@@ -136,7 +136,9 @@ def _ledger_lock():
 
 
 def _load_ledger() -> list:
-    if not _LEDGER.exists():
+    try:
+        _LEDGER.lstat()
+    except FileNotFoundError:
         return []
     rows = []
     for line in _LEDGER.read_text(encoding="utf-8").splitlines():
@@ -238,10 +240,19 @@ def record(asof: str, rejected: list | None = None, held: list | None = None,
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                ticker = (item.get("ticker") or "").upper().strip()
+                ticker = item.get("ticker")
+                reason = item.get("reason")
+                stage = item.get("stage")
+                if not isinstance(ticker, str):
+                    continue
+                if reason is None:
+                    reason = ""
+                if not isinstance(reason, str) or (stage is not None and not isinstance(stage, str)):
+                    continue
+                ticker = ticker.upper().strip()
                 if not ticker or ticker in open_subj:
                     continue
-                stage = item.get("stage") or default_stage or _held_stage(item.get("reason"))
+                stage = stage or default_stage or _held_stage(reason)
                 score = item.get("combined")
                 if score is None:
                     score = item.get("confluence")
@@ -249,7 +260,7 @@ def record(asof: str, rejected: list | None = None, held: list | None = None,
                               else _propensity(stage, eps))
                 ledger.append({
                     "id": f"{asof_iso}-{ticker}-rej", "ticker": ticker, "asof": asof_iso,
-                    "action": action, "stage": stage, "reason": (item.get("reason") or "")[:200],
+                    "action": action, "stage": stage, "reason": reason[:200],
                     "score": score, "confluence": item.get("confluence"),
                     "propensity": propensity,
                     "policy": "epsilon_greedy" if eps else "deterministic",

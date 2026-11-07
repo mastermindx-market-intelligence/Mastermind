@@ -1,0 +1,30 @@
+{
+  "root": "execution-friction-repair-20261011-astra-001",
+  "reviews": [
+    {
+      "run_id": "execution-classifier-review-7ff6ca1e-001",
+      "source_candidate": "7ff6ca1ecfe1aa2c9231cf18bac483660874cd55",
+      "artifact": "research/execution_friction_20261011/reviews/classifier-7ff6ca1e.md",
+      "sha256": "e61f8b7f17c1a5d302920ac6a954cc80946f4ebb68c0544287c8aad27d699395",
+      "provider_process_exit": 0,
+      "wrapper_exit": 0,
+      "declared_verdict": "NO_BLOCKING_FINDINGS",
+      "actual_tests_run_by_reviewer": false
+    },
+    {
+      "run_id": "execution-entrypoint-review-7ff6ca1e-001",
+      "source_candidate": "7ff6ca1ecfe1aa2c9231cf18bac483660874cd55",
+      "artifact": "research/execution_friction_20261011/reviews/entrypoints-7ff6ca1e.md",
+      "sha256": "d4b700569cb99f46ee21504dc68e2ef1f45da0c6c148a54620491f9ea533616a",
+      "provider_process_exit": 0,
+      "wrapper_exit": 79,
+      "declared_verdict": "NO_BLOCKING_FINDINGS",
+      "actual_tests_run_by_reviewer": false
+    }
+  ],
+  "adjudication": {
+    "classifier": "No blocking issue found in the reviewed scope. Correct reviewer test-count/line-number inaccuracies against actual 141-pass evidence; symlink-root inputs are resolved before Codex discovery. No served-model/billing claims.",
+    "entrypoints": "Readable source review received, despite wrapper exit79 because optional exact marker format did not match the Markdown heading. Preserve exit79; do not relaunch or call it automated contract success. Upgrade its unclassified-preamble observation to a required rollout repair; two reproductions failed before retaining parts[0], all10 projection tests now pass. Atomic rename is not a compare-and-swap; the source docstring now explicitly requires excluding concurrent writers. Do not rely on the reviewer claim that post-write readback eliminates all races."
+  },
+  "remaining": "Final changed projection line and Macro document safety clarification need scoped review; all-account loading and production behavior remain unproved. Previously refused hook/native-memory effects are untouched."
+}

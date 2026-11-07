@@ -29,6 +29,63 @@ identity = _load("provider_identity_probe_test", "provider_identity_probe.py")
 readiness = _load("provider_readiness_test", "provider_readiness.py")
 
 
+def test_personal_pro_readiness_receipt_storage_is_exact_slot_readable_nonwritable() -> None:
+    uid, gid, mode = readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=454,
+    )
+    assert (uid, gid, mode) == (0, 454, 0o440)
+    assert mode & 0o040
+    assert not mode & 0o020
+    assert not mode & 0o004
+
+    assert readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+        worker_gid=451,
+    ) == (0, 0, 0o400)
+
+
+def test_personal_pro_readiness_receipt_rejects_gid_outside_reviewed_slot_catalog() -> None:
+    with pytest.raises(readiness.ReadinessError, match="readiness_receipt_reader_invalid"):
+        readiness.receipt_storage_contract(
+            workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            worker_gid=499,
+        )
+
+
+def test_personal_pro_receipt_persistence_uses_exact_slot_group_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "readiness-personal.json"
+    calls: list[tuple[str, int, int]] = []
+    real_fchmod = readiness.os.fchmod
+
+    monkeypatch.setattr(readiness, "_validate_receipt_directory", lambda _path: None)
+    monkeypatch.setattr(readiness, "_assert_no_macos_acl", lambda _path: None)
+    monkeypatch.setattr(readiness, "_fsync_directory", lambda _path: None)
+
+    def fchown(descriptor: int, uid: int, gid: int) -> None:
+        calls.append(("chown", uid, gid))
+
+    def fchmod(descriptor: int, mode: int) -> None:
+        calls.append(("chmod", mode, 0))
+        real_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(readiness.os, "fchown", fchown)
+    monkeypatch.setattr(readiness.os, "fchmod", fchmod)
+
+    readiness.persist_receipt(
+        path,
+        {"schema_version": readiness.SCHEMA_VERSION},
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=454,
+    )
+
+    assert ("chown", 0, 454) in calls
+    assert ("chmod", 0o440, 0) in calls
+    assert path.stat().st_mode & 0o777 == 0o440
+
+
 def test_readiness_receipt_is_fixed_root_only_and_exclusive_created() -> None:
     source = (
         ROOT / "ops" / "executive_os" / "provider_readiness.py"
@@ -38,8 +95,11 @@ def test_readiness_receipt_is_fixed_root_only_and_exclusive_created() -> None:
     )
     assert 'SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"' in source
     assert "os.O_EXCL" in source and 'getattr(os, "O_NOFOLLOW", 0)' in source
-    assert "os.fchown(descriptor, 0, 0)" in source
-    assert "os.fchmod(descriptor, 0o400)" in source
+    assert "receipt_storage_contract(" in source
+    assert readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+        worker_gid=451,
+    ) == (0, 0, 0o400)
     assert "_fsync_directory(path.parent)" in source
 
 
@@ -203,6 +263,16 @@ def test_exact_pinned_login_status_is_the_auth_mode_source(
 ) -> None:
     assert identity.classify_login_status(returncode=0, stderr=stderr) == expected
     assert identity.classify_login_status(returncode=1, stderr=stderr) is None
+    reviewed_warning = identity._ARG0_CLEANUP_WARNING
+    assert (
+        identity.classify_login_status(
+            returncode=0, stderr=reviewed_warning + stderr
+        )
+        == expected
+    )
+    assert identity.classify_login_status(
+        returncode=0, stderr=reviewed_warning + reviewed_warning + stderr
+    ) is None
     assert identity.classify_login_status(returncode=0, stderr=b"warning\n" + stderr) is None
     assert identity.classify_login_status(
         returncode=0, stderr=b"Logged in using an API key - redacted\n"
@@ -382,6 +452,9 @@ def _canary(passed: bool = True):
         "result_valid": passed,
         "stdout_sha256": "a" * 64,
         "stderr_sha256": "b" * 64,
+        "provider_error_message_count": 0,
+        "provider_error_message_sha256": None,
+        "provider_error_terms": [],
         "workspace_capability_outcome": "inert_untrusted_workspace",
         "workspace_selection_mechanism": "none",
         "forced_chatgpt_workspace_id_applied": False,
@@ -568,6 +641,32 @@ def test_forced_workspace_and_wrong_binary_canary_are_rejected() -> None:
         readiness.compose_receipt(
             identity=_identity(), canary=wrong, auth_identity=_auth_meta(),
             binary_identity=_binary_meta(), expected_kind="service-account",
+            workspace_binding_class=readiness.WORKSPACE_BINDING_CLASS,
+            credential_expires_at=_credential_expiry(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("terms", "error"),
+    [
+        ([{}], "canary_provider_error_terms_malformed"),
+        ([1, "stream"], "canary_provider_error_terms_malformed"),
+        (["stream", "stream"], "canary_provider_error_terms_malformed"),
+        (["not-in-the-vocabulary"], "canary_provider_error_terms_malformed"),
+        (["stream"], "canary_provider_error_terms_conflict"),
+    ],
+)
+def test_provider_error_terms_fail_closed_without_type_errors(
+    terms: list[object], error: str
+) -> None:
+    malformed = {**_canary(), "provider_error_terms": terms}
+    with pytest.raises(readiness.ReadinessError, match=error):
+        readiness.compose_receipt(
+            identity=_identity(),
+            canary=malformed,
+            auth_identity=_auth_meta(),
+            binary_identity=_binary_meta(),
+            expected_kind="service-account",
             workspace_binding_class=readiness.WORKSPACE_BINDING_CLASS,
             credential_expires_at=_credential_expiry(),
         )

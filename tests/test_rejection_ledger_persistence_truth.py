@@ -124,3 +124,81 @@ def test_empty_carried_day_remains_valid_noop(tmp_path, monkeypatch):
     out = r.record("2026-09-17")
     assert out["n_total"] == 0
     assert r._load_ledger() == []
+
+
+@pytest.mark.parametrize("batch", ("rejected", "held", "explored"))
+def test_malformed_candidate_fields_are_ignored_without_losing_valid_names(tmp_path, monkeypatch, batch):
+    r, _ = _wire(tmp_path, monkeypatch)
+    monkeypatch.setattr(r, "_grade", lambda *_args: None)
+    items = [
+        {"ticker": 7},
+        {"ticker": ["BAD"]},
+        {"ticker": "BAD_REASON", "reason": {"secret": "not a reason"}},
+        {"ticker": "BAD_ZERO_REASON", "reason": 0},
+        {"ticker": "BAD_STAGE", "stage": ["committee_drop"]},
+        {"ticker": "BAD_ZERO_STAGE", "stage": 0},
+        {"ticker": " good ", "reason": None},
+        {"ticker": "GOOD"},
+    ]
+    result = r.record("2026-09-17", **{batch: items})
+    assert result["n_total"] == 1
+    rows = r._load_ledger()
+    assert [row["ticker"] for row in rows] == ["GOOD"]
+    assert rows[0]["reason"] == ""
+    assert rows[0]["propensity"] == 0.0
+
+
+def test_missing_ledger_remains_successful_empty_evidence(tmp_path, monkeypatch):
+    r, ledger = _wire(tmp_path, monkeypatch)
+    assert not ledger.exists()
+    assert r._load_ledger() == []
+    summary = r.summary("2026-09-17")
+    assert summary["coverage"]["n_total"] == 0
+    assert summary["scorecard"]["status"] == "building"
+    assert not ledger.exists()
+
+
+def test_dangling_ledger_is_unavailable_and_not_replaced(tmp_path, monkeypatch):
+    r, ledger = _wire(tmp_path, monkeypatch)
+    target = tmp_path / "missing-target.jsonl"
+    ledger.symlink_to(target)
+    monkeypatch.setattr(r, "_grade", lambda *_args: None)
+    with pytest.raises(FileNotFoundError):
+        r._load_ledger()
+    with pytest.raises(FileNotFoundError):
+        r.summary("2026-09-17")
+    with pytest.raises(FileNotFoundError):
+        r.record("2026-09-17", held=[_held("AAPL")])
+    assert ledger.is_symlink() and ledger.readlink() == target
+    assert not target.exists()
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_ledger_lock_excludes_an_independent_process_and_releases(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    r, _ = _wire(tmp_path, monkeypatch)
+    probe = """
+import fcntl
+import sys
+with open(sys.argv[1], "a+", encoding="utf-8") as handle:
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("blocked")
+    else:
+        print("acquired")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+"""
+    def observe():
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", probe, str(r._lock_path())],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        assert not result.stderr
+        return result.stdout.strip()
+
+    with r._ledger_lock():
+        assert observe() == "blocked"
+    assert observe() == "acquired"

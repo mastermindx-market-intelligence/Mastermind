@@ -1,0 +1,7 @@
+import {expect,it} from "vitest";
+import fixture from "../fixtures/office-company-priorities-source.json";
+import {decodeCompanyPriorities} from "./company-priorities";
+const now=fixture.clock.verified_at*1000;
+it("preserves complete actual signed source DATA and freezes a detached view",()=>{const raw=structuredClone(fixture.response),got=decodeCompanyPriorities(raw,now);expect(got).toEqual(raw);expect(got).not.toBe(raw);expect(Object.isFrozen(got.phase_review_criteria)).toBe(true);expect(got.authority).toBe("advisory_and_orientation_only");expect(Object.hasOwn(got,"ready")).toBe(false)});
+it.each(["foreign","expiry","missing_criteria","unknown_key","duplicate_id","permission"])("refuses %s without inferring company facts",kind=>{const v=structuredClone(fixture.response) as any;if(kind==="foreign")v.schema="foreign";if(kind==="expiry")v.owner_context.verified_expiry=now/1000;if(kind==="missing_criteria")v.phase_review_criteria={};if(kind==="unknown_key")v.critical_path=[];if(kind==="duplicate_id")v.priorities[1].id=v.priorities[0].id;if(kind==="permission")v.authority="may_execute";expect(()=>decodeCompanyPriorities(v,now)).toThrow("COMPANY_PRIORITIES_INVALID")});
+it("refuses accessor input without invoking it",()=>{const raw=structuredClone(fixture.response);let calls=0;Object.defineProperty(raw,"north_star",{enumerable:true,get(){calls++;return []}});expect(()=>decodeCompanyPriorities(raw,now)).toThrow();expect(calls).toBe(0)});
