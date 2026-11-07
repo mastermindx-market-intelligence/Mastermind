@@ -51,7 +51,12 @@ export default defineConfig({
     const path=id.startsWith(".")&&importer?resolve(dirname(importer),id):id.startsWith("/")?id:undefined;
     if(path){const mapped=redirect(path);if(mapped!==path)return mapped;}
   }},shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_UPLOAD_REGRESSION==="1"?[resolve(donor,"packages/client/file-upload/tests/file-upload-http.host.spec.ts")]:process.env.MMX_NATIVE_ACCESS_SEARCH_REGRESSION==="1"?[resolve(donor,"packages/api/session-controller/tests/session-search.host.spec.ts")]:regression?[
+  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_UPLOAD_REGRESSION==="1"?[
+    resolve(donor,"packages/client/file-upload/tests/file-upload-http.host.spec.ts"),
+    resolve(donor,"packages/client/connection/tests/fetch-routes.host.spec.ts"),
+    resolve(donor,"packages/client/connection/tests/http-bridge.host.spec.ts"),
+    resolve(donor,"packages/client/connection/tests/binary-rpc.host.spec.ts"),
+  ]:process.env.MMX_NATIVE_ACCESS_SEARCH_REGRESSION==="1"?[resolve(donor,"packages/api/session-controller/tests/session-search.host.spec.ts")]:regression?[
     resolve(donor,"packages/api/remote-access/tests/**/*.host.spec.ts"),
     resolve(donor,"packages/api/gateway/tests/gateway*.host.spec.ts"),
   ]:["native-owner-access.test.ts","native-owner-hold.test.ts","native-owner-upload.test.ts"],

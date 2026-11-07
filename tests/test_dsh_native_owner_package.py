@@ -103,7 +103,8 @@ def test_real_package_applies_host_then_access_without_changing_the_donor(source
     donor = source[0]
     assert git(donor, "status", "--porcelain") == ""
     assert access.apply_to_owned_tree(release / "app", donor) == access.prepared_receipt(expected)
-    assert (release / "app/packages/client/connection/src/rpc-host.ts").read_text() == "export const native = 'host';\n"
+    assert (release / "app/packages/client/connection/src/rpc-host.ts").read_text() == "export const native = 'access';\n"
+    assert (release / "app/packages/core/agent/src/index.ts").read_text() == "export const native = 'host';\n"
 
 def test_access_refuses_missing_original_host_composition(source, tmp_path):
     donor, _, _, _ = source; release = owned(tmp_path, donor)
@@ -205,3 +206,27 @@ def test_v1_owner_package_retains_its_original_session_and_receipt(source, tmp_p
     assert receipt["access"]["schema"] == "mastermind.dsh_native_access_prepared.v1"
     assert "session_patch_sha256" not in receipt["access"]
     assert (release / "app/packages/api/session-controller/src/commands.ts").read_bytes() == b"export const native = 'session';\n"
+
+
+def test_v2_owner_package_retains_its_original_eight_file_composition(source, tmp_path):
+    donor, inputs, native_host, expected = source
+    legacy = dict(expected)
+    legacy["schema"] = "mastermind.dsh_native_access_source.v2"
+    for name in ("source_sha256", "base_sha256", "output_sha256"):
+        legacy[name] = {path: digest for path, digest in legacy[name].items()
+                        if path.startswith(access.PREFIXES[:4])}
+    def before(name):
+        return b"export const native = 'session';\n" if name in session.CHANGED else (
+            b"export const native = 'host';\n" if name in host.CHANGED else b"export const native = 'donor';\n")
+    patch = "".join(diff(name, before(name), b"export const native = 'access';\n")
+                    for name in sorted(access.CHANGED_V2)).encode()
+    legacy["patch_sha256"] = package.digest(patch)
+    (inputs / "native-owner-access.patch").write_bytes(patch)
+    (inputs / "native-access-source.json").write_text(json.dumps(legacy))
+    release, config, accepted, protected, head, _, _ = qualified(source, tmp_path)
+    final = package.verify(release, config, accepted, protected, head)
+    attended.verify_native_session_package(release, config, accepted, protected, head, final_source=final)
+    receipt = json.loads((release / "native-owner-access-receipt.json").read_bytes())
+    assert receipt["access"]["schema"] == "mastermind.dsh_native_access_prepared.v2"
+    assert set(receipt["access"]["output_sha256"]) == access.CHANGED_V2
+    assert (release / "app/packages/client/file-upload/src/index.ts").read_bytes() == b"export const native = 'donor';\n"

@@ -322,6 +322,25 @@ def reviewed_literal_spans(path: str, source: str):
             start = anchor.index("0o700")
             spans.append((sites[0], start, start + len("0o700"), "int"))
         return tuple(sorted(spans))
+    # Exact native upload HTTP statuses; changed source or identity data remains visible.
+    if path == "integrations/deepseek_harness/runtime_compat/native-owner-access.patch":
+        if hashlib.sha256(source.encode()).hexdigest() != (
+                "7da8eb25fe3bd1821f37970d5b573348be9016e93c9d5eb5fc32f0aeb7b29208"):
+            return ()
+        anchors = (
+            ("-          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))", '403'),
+            ("+          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))", '403'),
+            ("+      return new Response('forbidden', { status: 403 })", '403'),
+            ("     return new Response(null, { status: 405, headers: { allow: 'POST' } })", '405'),
+        )
+        lines, spans = source.splitlines(), []
+        for anchor, spelling in anchors:
+            sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+            if len(sites) != 1 or anchor.count(spelling) != 1:
+                return ()
+            start = anchor.index(spelling)
+            spans.append((sites[0], start, start + len(spelling), "int"))
+        return tuple(spans)
     # PR #2177: two exact HTTP Forbidden response statuses in the original
     # native-owner hold patch. Preserve every surrounding condition, source
     # byte and identity token; no generic HTTP or patch-file exemption.

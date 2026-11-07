@@ -16,9 +16,11 @@ from urllib.parse import urlsplit
 if __package__:
     from .runtime_compat import prepare_native_session as native_session
     from .runtime_compat import native_access_package as native_owner_access
+    from .runtime_compat import native_acp_package as native_acp_lifecycle
 else:
     from runtime_compat import prepare_native_session as native_session
     from runtime_compat import native_access_package as native_owner_access
+    from runtime_compat import native_acp_package as native_acp_lifecycle
 
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 HERE = Path(__file__).resolve().parent
@@ -213,6 +215,7 @@ def stage(args):
     host_exports = company_host_exports(company / "lib", build, required=True)
     native_session.manifest()  # Refuse changed patch inputs before creating the package.
     native_owner_access.qualify_inputs()
+    native_acp_lifecycle.qualify_inputs()
     # Inspect links before copying. Nothing is copied from a user credential store.
     for parent, dirs, files in os.walk(donor, followlinks=False):
         dirs[:] = [name for name in dirs if name not in (".git", ".cache", ".turbo")]
@@ -225,6 +228,7 @@ def stage(args):
                     ignore=shutil.ignore_patterns(".git", ".cache", ".turbo"))
     session_patch = package_native_session(release, donor)
     owner_access = native_owner_access.package(release, donor)
+    acp_patch = native_acp_lifecycle.package(release, donor)
     # Rebuild only this owned copy through the upstream dependency-aware graph.
     # The native title is a build value, not a DOM override or copied UI owner.
     build_env = {key: os.environ[key] for key in ("HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SDKROOT", "DEVELOPER_DIR") if key in os.environ}
@@ -259,6 +263,7 @@ def stage(args):
         "company_host_exports": host_exports,
         "native_session_patch": session_patch,
         "native_owner_access": owner_access,
+        "native_acp_patch": acp_patch,
         "native_client_build_sha256": sha(native_build),
         "pnpm_sha256": sha(pnpm),
         "company_patch_sha256": sha(company_patch),
@@ -406,6 +411,7 @@ def export_publication(*, release, source_repo, source_sha, out):
             or host_exports != accepted_build.get("company_host_exports")):
         raise ValueError("Company host export differs from protected build qualification")
     final_source = native_owner_access.verify(release, config, accepted_build, source_repo, source_sha)
+    native_acp_lifecycle.verify(release, config, accepted_build, source_repo, source_sha)
     verify_native_session_package(release, config, accepted_build, source_repo, source_sha,
                                   final_source=final_source)
     for name, expected in build["source_sha256"].items():
