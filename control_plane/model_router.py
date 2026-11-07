@@ -641,12 +641,17 @@ class ModelRouter:
         capability_policy_path: str | Path | None = None,
     ) -> "ModelRouter":
         source = Path(path or DEFAULT_POLICY_PATH).expanduser().resolve(strict=True)
+        # Keep the incumbent policy validator, but never compose a torn or
+        # ambiguous live configuration read. There is no last-good fallback:
+        # a missing/changed configuration must not revive removed eligibility.
+        from control_plane.model_router_configuration import (
+            ConfigurationError, read_configuration_source,
+        )
         try:
-            raw = json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RoutingPolicyError(
-                f"routing policy is unreadable: {type(exc).__name__}"
-            ) from exc
+            observed_source = read_configuration_source(source)
+            raw = observed_source.document
+        except ConfigurationError as exc:
+            raise RoutingPolicyError(str(exc)) from None
         if not isinstance(raw, dict):
             raise RoutingPolicyError("routing policy root must be an object")
         if raw.get("schema_version") != ROUTER_SCHEMA_VERSION:
@@ -792,7 +797,11 @@ class ModelRouter:
                     required_capabilities=capabilities,
                 )
             routes[task_kind] = normalized
-        return cls(
+        try:
+            observed_source.require_current()
+        except ConfigurationError as exc:
+            raise RoutingPolicyError(str(exc)) from None
+        router = cls(
             policy_version=policy_version,
             providers=providers,
             model_aliases=model_aliases,
@@ -800,6 +809,18 @@ class ModelRouter:
             capability_registry=capability_registry,
             source_path=source,
         )
+        router._configuration_source_sha256 = observed_source.source_sha256
+        return router
+
+    def configuration_snapshot(self) -> dict[str, Any]:
+        """Describe this exact loaded policy, not current live pool capacity.
+
+        Revision includes the capability owner digest. Existing Jobs/Attempts
+        retain their original bindings; observing a revision grants no reload,
+        account rotation, admission or new execution authority.
+        """
+        from control_plane.model_router_configuration import describe_configuration
+        return describe_configuration(self)
 
     def resolve_model_alias(self, model_alias: str) -> ModelAlias:
         alias = _bounded_id(model_alias, field="model_alias")

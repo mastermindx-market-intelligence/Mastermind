@@ -1,0 +1,28 @@
+............FFF......................................................... [ 12%]
+........................................................................ [ 25%]
+........................................................................ [ 38%]
+........................................................................ [ 51%]
+........................................................................ [ 64%]
+........................................................................ [ 76%]
+........................................................................ [ 89%]
+..........................................................               [100%]
+=================================== FAILURES ===================================
+_ test_http_wire_refuses_unqualified_physical_or_admission_claims[physical_account_pools-value0] _
+tests/test_h6_model_configuration_composition.py:191: in test_http_wire_refuses_unqualified_physical_or_admission_claims
+    assert response.status_code == 503
+E   assert 403 == 503
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+_ test_http_wire_refuses_unqualified_physical_or_admission_claims[live_capacity-READY] _
+tests/test_h6_model_configuration_composition.py:191: in test_http_wire_refuses_unqualified_physical_or_admission_claims
+    assert response.status_code == 503
+E   assert 403 == 503
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+_ test_http_wire_refuses_unqualified_physical_or_admission_claims[admission_authorized-True] _
+tests/test_h6_model_configuration_composition.py:191: in test_http_wire_refuses_unqualified_physical_or_admission_claims
+    assert response.status_code == 503
+E   assert 403 == 503
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+=========================== short test summary info ============================
+FAILED tests/test_h6_model_configuration_composition.py::test_http_wire_refuses_unqualified_physical_or_admission_claims[physical_account_pools-value0]
+FAILED tests/test_h6_model_configuration_composition.py::test_http_wire_refuses_unqualified_physical_or_admission_claims[live_capacity-READY]
+FAILED tests/test_h6_model_configuration_composition.py::test_http_wire_refuses_unqualified_physical_or_admission_claims[admission_authorized-True]

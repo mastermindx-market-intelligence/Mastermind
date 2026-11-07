@@ -12,11 +12,15 @@ does not authorize a new credential store, account ledger, service or retry path
 | mmmeta | hermes-meta-ceo | HERMES_META_FABRIC_APPLICATION_TOKEN | 127.0.0.3:50142 |
 | Ordinary attended | hermes-attended | HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN | 127.0.0.1:50142 |
 
-The attended row is the distinct, source-held relation from the original Macro
-owner. It uses workload `hermes_attended`; the two role rows use
-`site_interactive`. Its transport remains unqualified and application-disabled
-until the existing owners qualify and enroll it. Neither a role credential nor
-the ordinary default Hermes profile substitutes for that attended identity.
+The attended row is the distinct relation from the original Macro owner. It
+uses workload `hermes_attended`; the two role rows use `site_interactive`.
+Published a577 keeps all five Hermes fixed/AUTO descriptors source-disabled.
+The exact [source-support proposal](qualification/application_owner_support/README.md)
+supplies their missing support declarations through that same owner; adoption
+is pending. Source support alone does not enroll a service: the existing
+qualification, capability, internal credential and admission checks still apply.
+Neither a role credential nor the ordinary default Hermes profile substitutes
+for the attended identity.
 
 The numeric addresses preserve the existing Linux role network isolation.
 All three APPLICATION remotes, including the original 127.0.0.1:50142, use the

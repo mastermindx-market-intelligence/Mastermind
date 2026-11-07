@@ -1,0 +1,19 @@
+{
+  "tested_tree": "c3f86aba7123d39896977d72de8fdfeb88d2a649",
+  "results": [
+    {
+      "name": "native_historical_guard",
+      "returncode": 0,
+      "seconds": 1.773,
+      "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+      "log": "/tmp/h6-c40-focused-results/native_historical_guard.log"
+    },
+    {
+      "name": "launch_observer_selfcheck",
+      "returncode": 1,
+      "seconds": 0.068,
+      "log_sha256": "ab21541c5939ab4c81d21468d165d4c9502defd4c7d4b23b110cb4b26d876cb5",
+      "log": "/tmp/h6-c40-focused-results/launch_observer_selfcheck.log"
+    }
+  ]
+}

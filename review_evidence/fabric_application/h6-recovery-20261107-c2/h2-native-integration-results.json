@@ -1,0 +1,26 @@
+{
+  "started_at": "2026-11-07T13:54:44.387990+00:00",
+  "status": "COMPLETE",
+  "command": [
+    "python3",
+    "-m",
+    "pytest",
+    "-q",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_application_release_closure.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py",
+    "tests/test_paid_release_archive_composition.py",
+    "--junitxml=/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/review_evidence/fabric_application/h6-recovery-20261107-c2/h2-native-integration.xml"
+  ],
+  "source_hashes": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "7ebba8097b5bb465ec11974850006318755b61fce62f61f0c55a981597aebdb3",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": "ce6e6950133b7a1866ba582d3d8ec8b10185b9b4241903f696e1907a7cfc7a65",
+    "tests/test_native_fabric_glm_reset_recovery.py": "28c7da14bb6bd9c4b29cdd4640ecbe7694e90aab0c2fa112551ac8e1be6c9af4",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py": "e673593d15a32e0759c387010b5416ab1dd6248547b402fa97e3c1105cfe0037"
+  },
+  "exit_code": 0,
+  "seconds": 424.722,
+  "completed_at": "2026-11-07T14:01:49.115292+00:00"
+}

@@ -1,0 +1,327 @@
+{
+  "schema": "mastermind.shared_relay_source_qualification.v1",
+  "tested_source": {
+    "head": "238731bbcf559a34238326f9d373debe725e2d34",
+    "merged_input": "da2db3909544137ca8b0602304a9b574b18f5277",
+    "resolved_index_patch_sha256": "58a000ad6c126f7a1a9e650c1cd39b494441471775970237e27f81f36bd384fb"
+  },
+  "initial_qualification": {
+    "rc": 1,
+    "seconds": 106.11,
+    "command": [
+      "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--noconftest",
+      "-c",
+      "/dev/null",
+      "--rootdir",
+      "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+      "--basetemp",
+      "/private/tmp/mmx-brain-da2-joined-proof-sjomn6w9/pytest",
+      "--junitxml",
+      "/private/tmp/mmx-brain-da2-joined-proof-sjomn6w9/tests.xml",
+      "tests/test_a2_relay_release_rebind.py",
+      "tests/test_dot_canary_existing_a2_service.py",
+      "tests/test_dot_canary_existing_peer.py",
+      "tests/test_dot_canary_installed_config.py",
+      "tests/test_dot_canary_mcp_route.py",
+      "tests/test_dot_canary_reader.py",
+      "tests/test_dot_canary_runtime_delivery.py",
+      "tests/test_dot_canary_runtime_owner.py",
+      "tests/test_dot_canary_runtime_subscriptions.py",
+      "tests/test_dot_canary_webhook.py",
+      "tests/test_session_bridge_web_reply_event_rpc.py",
+      "tests/test_session_bridge_web_reply_callback_transport.py",
+      "tests/test_session_bridge_reply_event_host_integration.py",
+      "tests/test_session_bridge_web_reply_events.py",
+      "tests/test_session_bridge_runtime_reply_subscriptions.py",
+      "tests/test_session_bridge_web_reply_subscription_owner.py",
+      "tests/test_slack_agent_dialogue_runtime.py",
+      "tests/test_slack_agent_dialogue_service.py",
+      "tests/test_executive_mcp_session_bridge.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair"
+    ],
+    "source_sha256": {
+      "common/reply_subscription_private_contract.py": "5135b31ede8868842055e40c1d7b6d44fe6d905a807f68fecad4387cdd6bc5ea",
+      "docs/hermes/PERSISTENT_SPECIALIST_TEAM.md": "c3a446122718da9f080bf133b9d21d7aa4c4eee7a88b6258e0c956e8b39f0f6f",
+      "docs/runbooks/chris-dot-executive-slack-mcp-canary.md": "5d03e1f92c62043580d8c1a1541e3c5a3f46c597231ff44af004fcab0f9f30f9",
+      "integrations/hermes_application_fabric/gateway_plugin.py": "569c904b55c9cc43aaa03119594f240ee19a204e87f712965ed415008b0a0c13",
+      "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
+      "integrations/session_bridge/dot_canary_mcp_route.py": "0f9b3e0361d8dfc8b109e5b177a33d0b427449352a0089101f5e797ce35dd3a3",
+      "integrations/session_bridge/dot_canary_policy_selection.py": "f9ce4c22833f62be278d8be5f0224797ec87e5eb040324612bec6cc1b8743ec7",
+      "integrations/session_bridge/dot_canary_webhook.py": "7bf093874a8d0469091eb644cb2202491d69dc10793b31e72c80f220f1faace3",
+      "integrations/session_bridge/installed_dot_canary_source.py": "ffce6c0ed45c1c0374856185980af935cebf09ee7e4390fac25f8e122587033e",
+      "integrations/session_bridge/installed_reply_events.py": "f45a15089687282e1407ffa2ed2b59118837ab17137f183d1397f4fc60ecf482",
+      "integrations/session_bridge/reply_event_host_composition.py": "c5669df6bb091a6befb40ea4635042dbad4d0af28b228d842bbd405c3ec38b69",
+      "integrations/session_bridge/runtime_dot_canary_delivery.py": "384a5bc373e9ed16432004800ef48a21599fafe67c057bb0c7411617ccf87991",
+      "integrations/session_bridge/runtime_dot_canary_owner.py": "8400045c4900ed95de7f2d7ed2efb34f4c59bd30b30d09a7aae94d773e7f10f3",
+      "integrations/session_bridge/runtime_dot_canary_subscriptions.py": "8cb4fec3140bb4ee2fb36c05176b51caddbd3d79ed46c40a86606991ed220314",
+      "integrations/session_bridge/web_reply_callback_transport.py": "7c6f35d8708c581cbe0939359c437261a44eb19f073984aea187a86f91397e80",
+      "integrations/session_bridge/web_reply_event_rpc.py": "b6021063efef9d79d91a83246cb64c6043b253836e8446473ae8f82ecab2695f",
+      "integrations/slack_agent_dialogue/dot_canary_reader.py": "e00ed76aa73bec1f90dd9e36e4b3dd9b3de4ab002749d790264995e85b563b70",
+      "integrations/slack_agent_dialogue/runtime.py": "1b9af3de7bff0a90c3d4b5b4f7382c21624357a207fe4aaf84cc16b0ee1326a0",
+      "integrations/slack_agent_dialogue/service.py": "ab40ffba3926205b75762bf8b7afb01b98575d9e2c98b4b7ddbed71e10af5a89",
+      "integrations/studio_direct_mcp/private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+      "integrations/studio_direct_mcp/private_service_pin.py": "60fd884affcb9448b7c87ec9e69fb2899707df09c3f742b96886d67ca9ce2e9e",
+      "integrations/studio_direct_mcp/private_service_status_successor.py": "c23fb5655a02d9365d1709e64ba8739d3ff8bd06a1c54512b8ba25890ba865ae",
+      "ops/executive_os/a2_agent_relay_enrollment.py": "ea11e740f83f3b77b596de18b2d7a4d42907cc2ef338989d1ac0f14941b0a2e1",
+      "ops/executive_os/executive_mcp_entry.py": "ff51d660758a617da3b4a605193644ff67e3aaaad8529d42cdef943591d35e52",
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "3b804a82cce51a1c222dfd0c89154805a5065f48515bb6cf49c209ffda9301c2",
+      "ops/native_fabric/quota_continuity/rollout/native-manifest.json": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "d785d80de1df3a9435f19d39888813f54f654ea84ccb5de3d89844802e19fa81",
+      "review_evidence/fabric_application/auto-chat-paired-ci-archive-20261107.json": "e8558e3d3c613940b2d0f7a1c2b61330e5a2fc5d7f9b55a99c7a31516cb0821c",
+      "review_evidence/fabric_application/auto-paired-ci-execution-20261107.json": "fbc2db27477e5997c0ac0547f86463d8d29ccc9db685f7e6f1f3df9517a5a150",
+      "review_evidence/fabric_application/linux-original-collection-qualification-20261107.json": "1f253db374948292db2f1aaf1e88bdd05d48afaf2d11deab58496072a7ddd150",
+      "review_evidence/fabric_application/protected-native-studio-composition-20261107.json": "7c083c8921808861ee0d1dbaab441bbbc512f2d7701eb087a36feb038ec9073d",
+      "tests/test_a2_relay_release_rebind.py": "421075fb7ce477b67d9859d04f0e370d3484a0ddebb3046f4798c648c198f7ef",
+      "tests/test_dot_canary_existing_a2_service.py": "adc0746d671be23eed06e218bffe1b20b9a716de87568ffef8cfe77d1f59fb3d",
+      "tests/test_dot_canary_existing_peer.py": "b088f59d56d5a91c4fc3f76d202a1396c383c4b09434a242d956c60931a64f8b",
+      "tests/test_dot_canary_installed_config.py": "3ef3eb74c19907ad3d27e5ada2516faa19bb1ccbc2430886a861e166fa364569",
+      "tests/test_dot_canary_mcp_route.py": "b0e143e602a68480f5a671dfb2bc93ad04806b4576c4b54d5149abb1556ec29b",
+      "tests/test_dot_canary_reader.py": "0d7ff2b249f4bced9388e8331611a7b066b6696e68db966c99a882109684e38a",
+      "tests/test_dot_canary_runtime_delivery.py": "4ee0cbe17db458a9f1adcdcbb92b7528450638658ac5da35ea8e9fb76e150f01",
+      "tests/test_dot_canary_runtime_owner.py": "e5923a5a30d26ddab1138dd1a0b49954ff57956aaa4c121010cdba1e20aa0d47",
+      "tests/test_dot_canary_runtime_subscriptions.py": "dff91988cd983711e9aec2484a242a16be55ea4cd47c6bc6dcf40b764c191c96",
+      "tests/test_dot_canary_webhook.py": "711676dc712f9544167a087f82705592d6c3eb1dcf73dad5af69415d206ec287"
+    },
+    "source_unchanged": true,
+    "log": "/private/tmp/mmx-brain-da2-joined-proof-sjomn6w9/tests.log",
+    "log_sha256": "2d9190466c34d0c5e3428e4753cd5a13145662b9facad0de9a9de22e320cc05b",
+    "totals": {
+      "tests": 534,
+      "failures": 18,
+      "errors": 0,
+      "skipped": 0
+    },
+    "junit_sha256": "c69ed50f2a7c4ad6851fac11349753f11fdecbd731df73f744b1293d25ea4cbb",
+    "failures": [
+      {
+        "name": "test_existing_a2_service_and_executive_reader_preserve_exact_source",
+        "class": "tests.test_dot_canary_existing_a2_service",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_default_off_A2_cannot_supply_existing_gateway",
+        "class": "tests.test_dot_canary_existing_a2_service",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_foreign_sender_returns_no_message_even_in_approved_channel",
+        "class": "tests.test_dot_canary_existing_a2_service",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_incomplete_A2_history_is_not_treated_as_valid_remote_attestation",
+        "class": "tests.test_dot_canary_existing_a2_service",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_wrong_channel_in_request_refused_without_network",
+        "class": "tests.test_dot_canary_existing_a2_service",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_real_local_A2_socket_roundtrip_with_existing_peer_identity",
+        "class": "tests.test_dot_canary_existing_a2_service",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_A2_service_peer_read_to_existing_executive_runtime_single_callback",
+        "class": "tests.test_dot_canary_runtime_delivery",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.service.DialogueServiceError: SERVICE_UNAVAILABLE"
+      },
+      {
+        "name": "test_runtime_composes_one_client_and_serves_sequential_v1_and_v2_calls",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_private_token_file_is_exact_owner_only_single_inode",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_turn_runtime_factory_reuses_the_existing_relay_slack_client",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_build_turn_runtime_selects_real_observation_source_when_enabled",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_build_turn_runtime_refuses_parallel_candidate_authority_seams",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_slow_observation_collection_leaves_relay_v1_and_v2_responsive",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_turn_runtime_composition_refuses_missing_shared_waiter_owner",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_run_relay_keeps_af_unix_service_available_while_turn_loop_runs",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_configured_coordination_path_builds_real_remote_overlay_without_factory",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wake",
+        "class": "tests.test_slack_agent_dialogue_runtime",
+        "kind": "failure",
+        "message": "integrations.slack_agent_dialogue.runtime.RelayRuntimeError: TOKEN_FILE_UNSAFE"
+      },
+      {
+        "name": "test_static_bridge_helpers_preserve_closed_tool_surface",
+        "class": "tests.test_executive_mcp_session_bridge",
+        "kind": "failure",
+        "message": "AttributeError: 'ToolAnnotations' object has no attribute 'readOnlyHint'. Did you mean: 'read_only_hint'?"
+      }
+    ]
+  },
+  "corrected_qualification": {
+    "rc": 0,
+    "seconds": 117.6,
+    "command": [
+      "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--noconftest",
+      "-c",
+      "/dev/null",
+      "--rootdir",
+      "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+      "--basetemp",
+      "/private/tmp/mmx-d2-4p6ayyqx/p",
+      "--junitxml",
+      "/private/tmp/mmx-d2-4p6ayyqx/tests.xml",
+      "tests/test_a2_relay_release_rebind.py",
+      "tests/test_dot_canary_existing_a2_service.py",
+      "tests/test_dot_canary_existing_peer.py",
+      "tests/test_dot_canary_installed_config.py",
+      "tests/test_dot_canary_mcp_route.py",
+      "tests/test_dot_canary_reader.py",
+      "tests/test_dot_canary_runtime_delivery.py",
+      "tests/test_dot_canary_runtime_owner.py",
+      "tests/test_dot_canary_runtime_subscriptions.py",
+      "tests/test_dot_canary_webhook.py",
+      "tests/test_session_bridge_web_reply_event_rpc.py",
+      "tests/test_session_bridge_web_reply_callback_transport.py",
+      "tests/test_session_bridge_reply_event_host_integration.py",
+      "tests/test_session_bridge_web_reply_events.py",
+      "tests/test_session_bridge_runtime_reply_subscriptions.py",
+      "tests/test_session_bridge_web_reply_subscription_owner.py",
+      "tests/test_slack_agent_dialogue_runtime.py",
+      "tests/test_slack_agent_dialogue_service.py",
+      "tests/test_executive_mcp_session_bridge.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair"
+    ],
+    "source_sha256": {
+      "common/reply_subscription_private_contract.py": "5135b31ede8868842055e40c1d7b6d44fe6d905a807f68fecad4387cdd6bc5ea",
+      "docs/hermes/PERSISTENT_SPECIALIST_TEAM.md": "c3a446122718da9f080bf133b9d21d7aa4c4eee7a88b6258e0c956e8b39f0f6f",
+      "docs/runbooks/chris-dot-executive-slack-mcp-canary.md": "5d03e1f92c62043580d8c1a1541e3c5a3f46c597231ff44af004fcab0f9f30f9",
+      "integrations/hermes_application_fabric/gateway_plugin.py": "569c904b55c9cc43aaa03119594f240ee19a204e87f712965ed415008b0a0c13",
+      "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
+      "integrations/session_bridge/dot_canary_mcp_route.py": "0f9b3e0361d8dfc8b109e5b177a33d0b427449352a0089101f5e797ce35dd3a3",
+      "integrations/session_bridge/dot_canary_policy_selection.py": "f9ce4c22833f62be278d8be5f0224797ec87e5eb040324612bec6cc1b8743ec7",
+      "integrations/session_bridge/dot_canary_webhook.py": "7bf093874a8d0469091eb644cb2202491d69dc10793b31e72c80f220f1faace3",
+      "integrations/session_bridge/installed_dot_canary_source.py": "ffce6c0ed45c1c0374856185980af935cebf09ee7e4390fac25f8e122587033e",
+      "integrations/session_bridge/installed_reply_events.py": "f45a15089687282e1407ffa2ed2b59118837ab17137f183d1397f4fc60ecf482",
+      "integrations/session_bridge/reply_event_host_composition.py": "c5669df6bb091a6befb40ea4635042dbad4d0af28b228d842bbd405c3ec38b69",
+      "integrations/session_bridge/runtime_dot_canary_delivery.py": "384a5bc373e9ed16432004800ef48a21599fafe67c057bb0c7411617ccf87991",
+      "integrations/session_bridge/runtime_dot_canary_owner.py": "8400045c4900ed95de7f2d7ed2efb34f4c59bd30b30d09a7aae94d773e7f10f3",
+      "integrations/session_bridge/runtime_dot_canary_subscriptions.py": "8cb4fec3140bb4ee2fb36c05176b51caddbd3d79ed46c40a86606991ed220314",
+      "integrations/session_bridge/web_reply_callback_transport.py": "7c6f35d8708c581cbe0939359c437261a44eb19f073984aea187a86f91397e80",
+      "integrations/session_bridge/web_reply_event_rpc.py": "b6021063efef9d79d91a83246cb64c6043b253836e8446473ae8f82ecab2695f",
+      "integrations/slack_agent_dialogue/dot_canary_reader.py": "e00ed76aa73bec1f90dd9e36e4b3dd9b3de4ab002749d790264995e85b563b70",
+      "integrations/slack_agent_dialogue/runtime.py": "1b9af3de7bff0a90c3d4b5b4f7382c21624357a207fe4aaf84cc16b0ee1326a0",
+      "integrations/slack_agent_dialogue/service.py": "ab40ffba3926205b75762bf8b7afb01b98575d9e2c98b4b7ddbed71e10af5a89",
+      "integrations/studio_direct_mcp/private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+      "integrations/studio_direct_mcp/private_service_pin.py": "60fd884affcb9448b7c87ec9e69fb2899707df09c3f742b96886d67ca9ce2e9e",
+      "integrations/studio_direct_mcp/private_service_status_successor.py": "c23fb5655a02d9365d1709e64ba8739d3ff8bd06a1c54512b8ba25890ba865ae",
+      "ops/executive_os/a2_agent_relay_enrollment.py": "ea11e740f83f3b77b596de18b2d7a4d42907cc2ef338989d1ac0f14941b0a2e1",
+      "ops/executive_os/executive_mcp_entry.py": "ff51d660758a617da3b4a605193644ff67e3aaaad8529d42cdef943591d35e52",
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "3b804a82cce51a1c222dfd0c89154805a5065f48515bb6cf49c209ffda9301c2",
+      "ops/native_fabric/quota_continuity/rollout/native-manifest.json": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "d785d80de1df3a9435f19d39888813f54f654ea84ccb5de3d89844802e19fa81",
+      "review_evidence/fabric_application/auto-chat-paired-ci-archive-20261107.json": "e8558e3d3c613940b2d0f7a1c2b61330e5a2fc5d7f9b55a99c7a31516cb0821c",
+      "review_evidence/fabric_application/auto-paired-ci-execution-20261107.json": "fbc2db27477e5997c0ac0547f86463d8d29ccc9db685f7e6f1f3df9517a5a150",
+      "review_evidence/fabric_application/linux-original-collection-qualification-20261107.json": "1f253db374948292db2f1aaf1e88bdd05d48afaf2d11deab58496072a7ddd150",
+      "review_evidence/fabric_application/protected-native-studio-composition-20261107.json": "7c083c8921808861ee0d1dbaab441bbbc512f2d7701eb087a36feb038ec9073d",
+      "tests/test_a2_relay_release_rebind.py": "421075fb7ce477b67d9859d04f0e370d3484a0ddebb3046f4798c648c198f7ef",
+      "tests/test_dot_canary_existing_a2_service.py": "adc0746d671be23eed06e218bffe1b20b9a716de87568ffef8cfe77d1f59fb3d",
+      "tests/test_dot_canary_existing_peer.py": "b088f59d56d5a91c4fc3f76d202a1396c383c4b09434a242d956c60931a64f8b",
+      "tests/test_dot_canary_installed_config.py": "3ef3eb74c19907ad3d27e5ada2516faa19bb1ccbc2430886a861e166fa364569",
+      "tests/test_dot_canary_mcp_route.py": "b0e143e602a68480f5a671dfb2bc93ad04806b4576c4b54d5149abb1556ec29b",
+      "tests/test_dot_canary_reader.py": "0d7ff2b249f4bced9388e8331611a7b066b6696e68db966c99a882109684e38a",
+      "tests/test_dot_canary_runtime_delivery.py": "4ee0cbe17db458a9f1adcdcbb92b7528450638658ac5da35ea8e9fb76e150f01",
+      "tests/test_dot_canary_runtime_owner.py": "e5923a5a30d26ddab1138dd1a0b49954ff57956aaa4c121010cdba1e20aa0d47",
+      "tests/test_dot_canary_runtime_subscriptions.py": "dff91988cd983711e9aec2484a242a16be55ea4cd47c6bc6dcf40b764c191c96",
+      "tests/test_dot_canary_webhook.py": "711676dc712f9544167a087f82705592d6c3eb1dcf73dad5af69415d206ec287"
+    },
+    "source_unchanged": true,
+    "environment": {
+      "mcp": "1.28.1",
+      "proof_parent_uid": 501,
+      "proof_parent_gid": 20,
+      "proof_parent_mode": "0o700",
+      "canonical_basetemp": "/private/tmp/mmx-d2-4p6ayyqx/p"
+    },
+    "prior_run_retained": "/tmp/mmx-brain-da2-joined-proof.json",
+    "log": "/private/tmp/mmx-d2-4p6ayyqx/tests.log",
+    "log_sha256": "27592f2492f1bc0a675366f4049f9a5a3e0b3a11063b9b6ab86bdc9b14635f7b",
+    "junit_sha256": "5793284b9cb37fa152e072be24294008f7a0324abdea8bd5c0e18dc7e4343cf2",
+    "totals": {
+      "tests": 534,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "failures": []
+  },
+  "correction": {
+    "production_source_changes": false,
+    "socket_fixture": "Short canonical proof root keeps AF_UNIX addresses under the existing103-byte Darwin limit.",
+    "token_fixture": "Owned proof parent uses effective uid501/gid20 and mode0700 before pytest creates descendants.",
+    "sdk": "Use repository-declared mcp1.28.1 instead of proof-environment mcp2.3.0."
+  },
+  "successor_disposition": {
+    "adopted": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "all_ten_resolution_invariants_incorporated": true,
+    "native_payload_identical": true,
+    "classification": "534 is a qualification of its exact resolved source, not all additional protected7118/552 source."
+  },
+  "operational_enrollment": false,
+  "live_product_acceptance": false
+}

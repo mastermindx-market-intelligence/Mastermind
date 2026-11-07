@@ -1,0 +1,140 @@
+{
+  "all_reviewed_file_hashes_match": true,
+  "company_ingress_record": {
+    "ast_sha256": "baa31b823d34e36b4c1dbcc450a4966357d8e39cc72159e2b0e95008a163899e",
+    "node_type": "AsyncFunctionDef",
+    "sites": [
+      [
+        [
+          "body",
+          3,
+          "body",
+          58,
+          "body",
+          3,
+          "orelse",
+          0,
+          "body",
+          2,
+          "body",
+          0,
+          "value",
+          "args",
+          1
+        ],
+        "int",
+        403,
+        "403"
+      ],
+      [
+        [
+          "body",
+          3,
+          "body",
+          58,
+          "body",
+          3,
+          "orelse",
+          0,
+          "body",
+          2,
+          "orelse",
+          0,
+          "body",
+          4,
+          "body",
+          0,
+          "value",
+          "args",
+          1
+        ],
+        "int",
+        403,
+        "403"
+      ],
+      [
+        [
+          "body",
+          3,
+          "body",
+          58,
+          "body",
+          3,
+          "orelse",
+          0,
+          "body",
+          2,
+          "orelse",
+          0,
+          "handlers",
+          0,
+          "body",
+          0,
+          "value",
+          "args",
+          1
+        ],
+        "int",
+        503,
+        "503"
+      ]
+    ],
+    "source_sha256": "6a104ea9d843d54d80e85d68922dc018d42c7a76cdf8bdd6fb28f7ec0a7901bd"
+  },
+  "company_listener_and_original_fabric_reply_subtree": "AST-identical to parent, verified before remapping the existing three status operands",
+  "company_reviewed_sites": [
+    [
+      3669,
+      30,
+      35,
+      "int"
+    ],
+    [
+      3676,
+      29,
+      34,
+      "int"
+    ],
+    [
+      3678,
+      67,
+      72,
+      "int"
+    ],
+    [
+      6002,
+      66,
+      69,
+      "int"
+    ],
+    [
+      6015,
+      74,
+      77,
+      "int"
+    ],
+    [
+      6017,
+      75,
+      78,
+      "int"
+    ]
+  ],
+  "fabric_review_records": 89,
+  "parents": [
+    "34226c03ab4f701b55825c8423b0e8b9596992c9",
+    "4fd801e48cd3b4c6f506fd60bc5f7fc8d50b4c6e"
+  ],
+  "prepared_tree": "98433c0282264414c1a58726aeef0610eb30ae7b",
+  "preserved_history_blob": "dc190065b37ac1c10cc1614c24b01112742b4170",
+  "schema": "mastermind.h6-h5-pin-composition.v1",
+  "whitespace": {
+    "inherited_final_blank_lines_preserved": [
+      "app/mastermind_os/src/resources/ModelConfigurationRead.test.tsx",
+      "app/mastermind_os/src/resources/ModelConfigurationRead.tsx",
+      "app/mastermind_os/src/resources/model-configuration.css"
+    ],
+    "novel_resolved_source_delta": "PASS",
+    "whole_merge_check": "Inherited H5 final blank lines remain; not represented as a clean whole-merge check."
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "observed_at": "2026-11-07T13:43:11.318250+00:00",
+  "source_head": "9e9f5d370f32400b237e74b8614e2afcee256dc6",
+  "h2_source": "69ead1bdc1b7f6e1b62ef186d955d07cbd718dce",
+  "results": [
+    {
+      "name": "h2-account-quota",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_native_fabric_account_quota.py"
+      ],
+      "exit_code": 0,
+      "seconds": 1.119,
+      "tail": "...........................................\n----------------------------------------------------------------------\nRan 43 tests in 0.286s\n\nOK\n"
+    },
+    {
+      "name": "h2-reset-journeys",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_native_fabric_glm_reset_recovery.py"
+      ],
+      "exit_code": 0,
+      "seconds": 4.73,
+      "tail": "................\n----------------------------------------------------------------------\nRan 16 tests in 4.302s\n\nOK\n"
+    },
+    {
+      "name": "grok-billing",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "ops/native_fabric/grok47/quota_billing",
+        "-p",
+        "test_grok_acp_billing.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.371,
+      "tail": ".......\n----------------------------------------------------------------------\nRan 7 tests in 0.072s\n\nOK\n"
+    }
+  ]
+}

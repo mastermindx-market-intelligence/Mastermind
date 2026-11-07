@@ -74,6 +74,7 @@ class CeoIngressWorkspaceClient:
         from common import workspace_project_archive_contract as archive_wire
         from common import workspace_autonomy_read_contract as autonomy_wire
         from common import workspace_resource_capacity_contract as capacity_wire
+        from common import workspace_model_configuration_contract as model_configuration_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
         current_context = type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
@@ -100,6 +101,9 @@ class CeoIngressWorkspaceClient:
             instructions_wire.validate_frame(frame)
             ceiling = instructions_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
+        elif type(frame) is dict and frame.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+            model_configuration_wire.validate_frame(frame)
+            ceiling = model_configuration_wire.MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
             capacity_wire.validate_frame(frame)
             ceiling = capacity_wire.MAX_RESPONSE_BYTES

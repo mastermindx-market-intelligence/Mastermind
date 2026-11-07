@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import cp from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const temporary = mkdtempSync(join(tmpdir(), 'mmx-launch-observer-'));
+const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'mmx-launch-observer-')));
 const observer = new URL('./launch_observer.mjs', import.meta.url);
 observer.searchParams.set('output', temporary);
 const properties = Object.fromEntries(['exec', 'execFile'].map(api => [api, Object.getOwnPropertyDescriptors(cp[api])]));

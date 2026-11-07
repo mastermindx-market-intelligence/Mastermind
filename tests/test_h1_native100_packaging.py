@@ -46,8 +46,15 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
         assert hashlib.sha256(raw).hexdigest() == manifest['ext/' + name] == expected
         assert row['sha256'] == expected and row['bytes'] == len(raw)
         assert row['source'] == 'candidate/' + name
-    historical = m.normalize_application_carrier_base_manifest(manifest)
-    assert {key for key in manifest if historical[key] != manifest[key]} == {
+    # Undo only the separately qualified host-pull successor before traversing
+    # the existing APPLICATION history. Actual-byte checks keep the current image.
+    before_host = m.before_host_pull_integrity(manifest)
+    assert set(before_host) == set(manifest)
+    assert {key for key in manifest if before_host[key] != manifest[key]} == set(
+        m.HOST_PULL_INTEGRITY_DIGESTS
+    )
+    historical = m.normalize_application_carrier_base_manifest(before_host)
+    assert {key for key in before_host if historical[key] != before_host[key]} == {
         'ext/' + name for name in m.APPLICATION_CARRIER_DIGESTS
     } | set(m.ADMISSION_INTEGRITY_DIGESTS) | set(m.APPLICATION_POOL_COMPOSITION_DIGESTS)
     for name, expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
