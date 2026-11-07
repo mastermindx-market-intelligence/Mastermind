@@ -805,7 +805,53 @@ class ComposedPreservingMigrationTests(unittest.TestCase):
         self.assertTrue(json.loads(readback.stdout)['sealed'])
 
 
-DRIVER = """import { readFileSync } from 'node:fs';
+DRIVER = r"""import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const helperDiagnostics = [];
+for (const method of ['spawn', 'spawnSync', 'execFile', 'execFileSync']) {
+  const original = cp[method];
+  cp[method] = function (...args) {
+    const started = performance.now();
+    const options = args.find(value => value && typeof value === 'object' && !Array.isArray(value));
+    const record = { method, executable: String(args[0]),
+      flags: Array.isArray(args[1]) ? args[1].filter(value => typeof value === 'string' && value.startsWith('-')) : [],
+      ldLibraryPathPresent: !!options?.env?.LD_LIBRARY_PATH,
+      stdoutBytes: 0, stderrBytes: 0, stdout: '', stderr: '' };
+    helperDiagnostics.push(record);
+    const capture = (key, value) => {
+      const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value ?? ''));
+      record[key + 'Bytes'] += bytes.length;
+      const remaining = 4096 - Buffer.byteLength(record[key]);
+      if (remaining > 0) record[key] += bytes.subarray(0, remaining).toString('utf8');
+    };
+    let result;
+    try { result = Reflect.apply(original, this, args); }
+    catch (error) {
+      record.error = { name: error?.name, code: error?.code };
+      record.status = error?.status ?? null; record.signal = error?.signal ?? null;
+      capture('stdout', error?.stdout); capture('stderr', error?.stderr);
+      record.elapsedMs = Math.round(performance.now() - started);
+      throw error;
+    }
+    if (result && typeof result === 'object' && 'status' in result) {
+      record.status = result.status; record.signal = result.signal;
+      record.error = result.error ? { name: result.error.name, code: result.error.code } : null;
+      capture('stdout', result.stdout); capture('stderr', result.stderr);
+      record.elapsedMs = Math.round(performance.now() - started);
+    } else if (result && typeof result.once === 'function') {
+      result.stdout?.on('data', data => capture('stdout', data));
+      result.stderr?.on('data', data => capture('stderr', data));
+      result.once('error', error => { record.error = { name: error.name, code: error.code }; });
+      result.once('close', (status, signal) => {
+        record.status = status; record.signal = signal;
+        record.elapsedMs = Math.round(performance.now() - started);
+      });
+    }
+    return result;
+  };
+}
+syncBuiltinESMExports();
+import { readFileSync } from 'node:fs';
 const modulePath = process.argv[2];
 const descriptorPath = process.argv[3];
 const { createOriginalDelivery } = await import(modulePath);
@@ -820,7 +866,10 @@ const collectAfter = text(await owner.call('fabric_collect_original', { run_id: 
 const reconcile = text(await owner.call('fabric_original_collection_reconcile',
   { run_id: runId, predecessor_sha256: configuration.predecessor.receipt_sha256 }, principal));
 const parsed = JSON.parse(reconcile);
-if (parsed.state !== 'COMPLETE') throw new Error('composed reconciliation failed: ' + reconcile);
+if (parsed.state !== 'COMPLETE') {
+  process.stderr.write('MMX_SYNTHETIC_PREFLIGHT_DIAGNOSTICS ' + JSON.stringify(helperDiagnostics) + '\n');
+  throw new Error('composed reconciliation failed: ' + reconcile);
+}
 const resultText = text(await owner.call('fabric_original_collection_result',
   { run_id: runId, receipt_sha256: parsed.receipt_sha256 }, principal));
 await owner.close();

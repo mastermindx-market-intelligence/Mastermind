@@ -200,8 +200,15 @@ class BufferedNativeChatTests(unittest.TestCase):
                 self.assertFalse(loop_errors, loop_errors)
             finally:
                 self.native.block.set()
-                await stream.aclose()
-                loop.set_exception_handler(original_handler)
+                try:
+                    # A failed arrival assertion still owns the outstanding
+                    # anext task. Reap it before closing its async generator.
+                    if not waiting.done():
+                        waiting.cancel()
+                    await asyncio.gather(waiting, return_exceptions=True)
+                    await stream.aclose()
+                finally:
+                    loop.set_exception_handler(original_handler)
         asyncio.run(exercise())
         self.assertEqual(len(self.native.posts), 1)
         self.assertEqual(len(self.costs()), 1)

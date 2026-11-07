@@ -82,6 +82,11 @@ def reseal_modified_entry_for_disposable_fixtures():
 def service_owner(go_owner):
     case = go_owner
     installer.apply_go(case.go_bundle)
+    return service_owner_from_completed_go(case)
+
+
+def service_owner_from_completed_go(case):
+    """Configure the same physical service owner after an actual Go transition."""
     go = case.ext / "go_shim"
     go.chmod(0o700)
     for relative in ("glm_shim", "state", "broker"):
