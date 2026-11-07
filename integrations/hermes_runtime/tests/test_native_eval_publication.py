@@ -433,3 +433,74 @@ def test_future_wall_clock_does_not_invent_time_or_block_honest_invalid_receipt(
     assert run["timing"]["monotonic_duration_ms"] == execution["duration_ms"]
     absent = {row["path"]: row["reason"] for row in run["observation_availability"]["unavailable"]}
     assert absent["timing.started_at"] == absent["timing.completed_at"] == "OBSERVATION_CONFLICT"
+
+
+@pytest.fixture
+def original_reader(original, monkeypatch):
+    """Actual native lookup/retirement/result bodies, no private socket."""
+    o = original
+    compile_selected(o.a.patched["hermes_state_runtime.py"],
+        {"find_session_admission", "get_session_admission"}, o.a.core, "hermes_state_runtime.py")
+    runtime = __import__("hermes_state_runtime")
+    vars(runtime).update({name: o.a.core[name] for name in ("find_session_admission", "get_session_admission")})
+    source = Path(__file__).parent / "fixtures/request_observation/gateway__session_results.py.source"
+    results = module(monkeypatch, "gateway.session_results", _admission=o.a.core["_admission"],
+        _RESULT_PREFIX=o.a.terminal.RESULT_PREFIX, load_result=o.a.terminal.load_result)
+    compile_selected(source.read_bytes(), {"admission_result"}, vars(results), str(source))
+    db = SimpleNamespace(_read_ctx=o.a.db._read_ctx, close=lambda: None)
+    monkeypatch.setattr(control, "_db", lambda _: db)
+    params = {**o.params, "operation": "read_original", "admission_id": None}
+    def read():
+        return control._read_original(o.home, params, o.t.principal, role="mmmeta")
+    return SimpleNamespace(o=o, params=params, read=read)
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_lost_admission_reply_recovers_existing_identity_after_real_retirement(original_reader, expired):
+    r, o = original_reader, original_reader.o
+    o.finish()
+    o.retire()
+    if expired:
+        o.a.retirement.time.time = lambda: 3000000
+        o.a.db._execute_write(lambda conn: o.a.retirement.prune_retired_tombstones(conn))
+    statements = []
+    o.a.conn.set_trace_callback(statements.append)
+    value = r.read()
+    o.a.conn.set_trace_callback(None)
+    assert value["status"] == "OBSERVED"
+    assert value["admission"]["admission_id"] == o.row["admission_id"]
+    assert value["evaluation_binding"] == o.params["evaluation_binding"]
+    assert ("answer" not in value) if expired else value["answer"] == "original public answer"
+    assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE", "ALTER", "CREATE"))
+                   for sql in statements)
+    assert o.a.conn.execute("SELECT COUNT(*) FROM session_admissions").fetchone()[0] == 0
+    # The recovered ID can select only the same publisher/frozen run.
+    o.params["admission_id"] = value["admission"]["admission_id"]
+    assert o.publish()["status"] == "PUBLISHED"
+
+
+@pytest.mark.parametrize("bad", [None, {}, [], "", "foreign-admission", "x" * 9000])
+def test_terminal_identity_pointer_never_creates_or_substitutes_an_original(original_reader, bad):
+    r, o = original_reader, original_reader.o
+    o.finish()
+    o.retire()
+    key = o.a.terminal.identity_key(o.t.principal, o.t.session, o.params["submission_id"])
+    o.a.conn.execute("UPDATE state_meta SET value=? WHERE key=?", (json.dumps(bad), key))
+    if bad == "foreign-admission":
+        assert r.read()["status"] == "EFFECT_UNKNOWN"
+    else:
+        with pytest.raises(RuntimeRefusal, match="ORIGINAL_MISMATCH"):
+            r.read()
+    assert o.a.conn.execute("SELECT COUNT(*) FROM session_admissions").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("input_sha256", "0" * 64), ("evaluation_binding", {"run_id": "foreign", "binding_sha256": "0" * 64}),
+])
+def test_retired_recovery_still_requires_original_input_and_eval_binding(original_reader, field, bad):
+    r, o = original_reader, original_reader.o
+    o.finish()
+    o.retire()
+    r.params[field] = bad
+    with pytest.raises(RuntimeRefusal, match="ORIGINAL_MISMATCH"):
+        r.read()

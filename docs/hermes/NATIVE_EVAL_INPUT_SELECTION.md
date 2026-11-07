@@ -269,3 +269,87 @@ Result absence at first publication is `NOT_RETAINED`, not an inferred expiry.
 Malformed retained results are conflicting; results above the 2 MiB bounded
 projection budget are limited. The original owner retains/expunges those results
 normally; this publication path only freezes its bounded evidence projection.
+
+
+## Attended original-attempt operations
+
+The existing held `hermes-runtime` entry now selects three finite operator
+commands: `eval-submit`, `eval-read`, and `eval-publish`. They use the original
+mmmeta native owner. They do not enroll a session, start a gateway, invoke the
+text-turn runner, or run a polling loop.
+
+All three accept the existing `--profile` and `--hermes-bin` paths selected by
+the held installation. The JSON body is read from stdin, bounded to 60 KiB;
+there is no prompt, credential, artifact-root, callback, or observation flag.
+Invocation must already be inside the original qualified PID1 role unit and
+held release recipe. Adding these commands does not grant another host,
+account or installation permission.
+
+The original installed qualification is shared with enrollment: exact
+profile/config, held release, cgroup/network/credential policy, PID1 facts,
+native child lineage, and current native endpoint. Landlock attaches once
+during synchronous preparation before the event loop or executor exists.
+Repeated owner checks remain read-only and retain the same profile/policy.
+
+### Submit
+
+Stdin is a closed object with `schema` =
+`mastermind.hermes_native_eval_submit/v1`, `session_id`, `text`, and
+`evaluation`. The last field is the existing closed selection with
+`run_id`, exact scenario/configuration/experiment selectors and digests,
+arm/pair/replicate, candidate files, and context text. The caller fixes the
+run UUID before the command. The native owner alone resolves those artifacts
+and freezes producer/root/input identity.
+
+The command inspects the existing enrollment and requires the explicitly
+selected session. It validates the serving producer/profile descriptor,
+observes the current target, and sends one original admission. The descriptor
+is a source observation, not an execution grant. `ADMITTED` is not completion.
+No command generates a replacement run ID or retries submission.
+
+### Recovery and publication
+
+Every qualified response returns a compact `recovery` object:
+
+- `schema`: `mastermind.hermes_native_eval_recovery/v1`.
+- `profile_id`, original `session_id`, `run_id`, derived `submission_id`,
+  and `input_sha256`.
+- `admission_id` and `evaluation_binding`, initially null if the reply was
+  lost, populated only from a validated original read/admission receipt.
+
+Pass that same recovery object on stdin to `eval-read` or `eval-publish`.
+Read performs one historical lookup. Publish performs one historical lookup,
+then one publication only for a supported terminal original. Queued, started,
+unknown and steering-transfer originals return immediately. No waiting,
+enrollment, submit, provider call or alternate store occurs.
+
+When a submit reply was lost before retirement, the reader follows the
+incumbent terminal identity pointer and applies the same principal, original
+session/request, input digest and marker checks. The pointer is bounded and
+must identify exactly the returned admission. Missing/conflicting identity
+never grants permission to resubmit. Normal result expiry remains separate
+from preserved input identity.
+
+Historical read/publish never substitutes today's enrollment tip. Read remains
+available without EVAL capability. Publication requires today's qualified
+publisher while retaining the historical producer, root and run binding.
+Repeating publication reconciles the same frozen row/tombstone and exact run
+bytes through the original ArtifactStore.
+
+The operator output is a closed
+`mastermind.hermes_native_eval_operator/v1` projection. It copies no answer,
+transcript, raw error, candidate/context body, provider credential or raw
+observation. Its public outcome vocabulary and successful publication path,
+digest, disposition, invalidity and original identity are validated.
+
+Known preflight refusal remains distinct from admission/publication uncertainty.
+An outer event-loop failure after entry also returns `EFFECT_UNKNOWN` for
+submit/publish; it cannot be reported as a preflight refusal. Read-only runner
+failure returns `UNAVAILABLE`. Exit 0 means an admitted/observed/published
+operation, 2 means unavailable/refused, and 3 preserves uncertain modification.
+
+This first connected slice still publishes **invalid v2 attempt evidence**.
+It does not provide valid held-out trials, complete source/auth/environment/
+effect/cleanup coverage, or learning promotion. Tests of the held archive,
+CLI, actual SQLite retirement/readback and create-only publisher remain source
+qualification; original-carrier installed acceptance is separate.

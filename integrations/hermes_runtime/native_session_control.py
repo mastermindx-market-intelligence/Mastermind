@@ -502,6 +502,31 @@ def _project_original_result(receipt, marker, saved, *, role):
     return result
 
 
+def _retired_original_admission(db, *, principal, session_id, submission_id):
+    """Read the incumbent retirement identity after a lost admission reply.
+
+    This pointer already belongs to native retirement. It cannot authorize a
+    new admission, restore a session, or replace a missing original result.
+    """
+    from hermes_state_terminal import identity_key
+    from hermes_state_runtime import get_session_admission
+    with db._read_ctx() as conn:
+        saved = conn.execute("SELECT substr(value,1,8193) FROM state_meta WHERE key=?",
+            (identity_key(principal, session_id, submission_id),)).fetchone()
+    if saved is None:
+        return None
+    if type(saved[0]) is not str or len(saved[0].encode("utf-8")) > 8192:
+        raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+    try:
+        admission_id = _id(json.loads(saved[0]))
+    except (ValueError, TypeError, RuntimeRefusal):
+        raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH") from None
+    row = get_session_admission(db, admission_id=admission_id)
+    if row is not None and row.get("admission_id") != admission_id:
+        raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+    return row
+
+
 def _read_original(home: Path, params, principal: str, *, role: str = "mmsecretary"):
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
@@ -519,6 +544,9 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
     try:
         if params["admission_id"] is None:
             row = find_session_admission(db, principal_id=principal, session_id=sid, request_id=submission)
+            if row is None:
+                row = _retired_original_admission(db, principal=principal, session_id=sid,
+                                                  submission_id=submission)
         else:
             row = get_session_admission(db, admission_id=_id(params["admission_id"]))
         if row is None:
