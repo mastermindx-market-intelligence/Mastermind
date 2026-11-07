@@ -82,7 +82,7 @@ it('drives the actual native parent loop through submit, verified result and ret
     expect(JSON.stringify(adapter.requests.at(-1))).toContain(f.responseText)
     const history = JSON.stringify(parent.agent.session.snapshotEvents())
     expect(history).toContain(f.runId)
-    expect(history).toContain('result_verified')
+    expect(history).toContain('result_transfer_verified')
     expect(history).toContain(f.responseText)
     expect(JSON.stringify(other.agent.session.snapshotEvents())).not.toContain(f.responseText)
     expect(vi.mocked(f.host.callTool).mock.calls.map(([name]) => name))

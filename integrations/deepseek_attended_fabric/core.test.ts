@@ -154,7 +154,7 @@ describe('bounded original-parent result release', () => {
   it('verifies bytes and digest between exact terminal lineage reads without accepting', async () => {
     const f = fixture()
     const r = await f.invoke({ action: 'result', task_key: submitArgs.task_key })
-    expect(r).toMatchObject({ state: 'TERMINAL', result_verified: true,
+    expect(r).toMatchObject({ state: 'TERMINAL', result_transfer_verified: true,
       result_text: f.responseText, acceptance_changed: false, worker_started: false })
     expect(vi.mocked(f.host.callTool).mock.calls.map(([name]) => name))
       .toEqual(['fabric_status', 'fabric_result', 'fabric_status'])

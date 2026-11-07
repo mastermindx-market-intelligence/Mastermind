@@ -61,6 +61,10 @@ The callback interface is an integration boundary, not a new implementation of
 those owners. Missing callbacks fail closed. **Do not install with allow-all
 test callbacks.** The present installed native application has not supplied the
 above complete production composition; it remains an explicit integration gate.
+The original admission owner must also reconcile a durable claim acquired just
+before native currentness is lost and no request is sent. The enrolled transport
+must have its own bounded settlement/deadline behavior; this adapter will not
+abandon a pending request with an independent timeout/retry mechanism.
 
 ## Tool surface and effects
 
@@ -93,7 +97,10 @@ only; it creates no root, dispatch, consumption or replay authority.
 Result transfer is bounded to 8192 UTF-8 bytes. It requires matching original
 root/run, effective and acceptance run IDs, exact byte count and SHA-256,
 terminal lineage before and after transfer, and current native permission
-after the final read. It does not call fabric_accept or change acceptance.
+after the final read. The output flag `result_transfer_verified` covers only
+that identity/byte-count/digest/lineage/currentness transfer check. It does not
+validate worker claims or referenced artifacts, create an atomic result seal,
+call fabric_accept or change acceptance.
 
 The tool is exclusive within the native tool scheduler. Cross-process and
 cross-session duplicate prevention remains the incumbent original admission

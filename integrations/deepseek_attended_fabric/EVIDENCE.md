@@ -98,3 +98,25 @@ owner's exact-run cancellation and settled cleanup contract. No stand-in
 cancel operation is introduced.
 
 MISSION_COMPLETE: false.
+
+## Principal semantic review
+
+A distinct native principal judgment context (`/root/architecture_assessment`)
+reviewed immutable commit `4d6e53e2f037fb241805966d8d439207e77f6c4d` read-only.
+The parent accepted its return: no blocking core/native source defect found.
+This was optional architecture scrutiny, not a formal GitHub approval or a new
+mandatory release stage. The reviewer did not run the tests or claim runtime
+qualification.
+
+The parent accepted its P3 precision finding and renamed the new output flag to
+`result_transfer_verified`: verified transfer does not prove worker assertions,
+referenced artifacts, acceptance or an atomic owner seal. The README now also
+names incumbent recovery of a claimed-but-unsent request and bounded settlement
+of the original transport call. The tracked local dependency symlink found in
+parent readback was removed at `ab4685679ac3cf0660523d313e329258b2e57907`; the
+corrected ignore rule handles both symlinks and directories.
+
+After the flag clarification, Studio Direct process **22859** reran both suites:
+**39 passed / 2 files / 1.74 seconds / TEST_EXIT=0**. The actual native history
+assertion now checks `result_transfer_verified`. `git check-ignore -v` proved
+the dependency symlink ignored, and `git diff --check` exited 0.

@@ -260,7 +260,7 @@ export function createHandler<Agent extends { readonly id: string }>(
         fail('FABRIC_RESULT_LINEAGE_CHANGED')
       return projection('TERMINAL', null, {
         ...ids, effective_run_id: final.effective_run_id,
-        worker_started: final.worker_started, result_verified: true,
+        worker_started: final.worker_started, result_transfer_verified: true,
         result_digest: digest, result_text: body,
       })
     } catch (error) {
