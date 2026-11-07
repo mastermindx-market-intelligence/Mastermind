@@ -779,7 +779,24 @@ async def file_research_paper(args):
         "report_md": report_md,
     }
     rp._attach_gate(paper, confluence)          # -> engine_score, combined, confirmed, gate_reason
-    rp.save_paper(paper)
+    try:
+        rp.save_paper(paper)
+    except rp._PaperSaveNotCommittedError:
+        return _json({
+            "ticker": t,
+            "write_status": "unavailable",
+            "error": "research_paper_save_unavailable",
+            "paper_saved": False,
+            "note": "This attempt did not replace the canonical paper; an older paper may remain.",
+        })
+    except Exception:
+        return _json({
+            "ticker": t,
+            "write_status": "unknown",
+            "error": "research_paper_save_outcome_unknown",
+            "paper_saved": None,
+            "note": "Canonical save outcome is unknown. Reconcile the paper before considering retry.",
+        })
     try:
         rp.write_feed_note(paper)
     except Exception:

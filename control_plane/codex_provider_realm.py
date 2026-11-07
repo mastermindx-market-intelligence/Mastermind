@@ -63,6 +63,7 @@ class CodexProviderRealm:
     wire_api: str
     requires_codex_auth_file: bool = False
     interactive_subscription_only: bool = True
+    commercial_api_only: bool = False
     request_max_retries: int = 0
     stream_max_retries: int = 0
     def __post_init__(self) -> None:
@@ -96,8 +97,23 @@ class CodexProviderRealm:
             value = getattr(self, field_name)
             if type(value) is not int or value != 0:
                 raise ProviderRealmError(f"{field_name} must remain zero")
-        if self.interactive_subscription_only is not True:
-            raise ProviderRealmError("subscription realms must remain interactive-only")
+        # A separately licensed ModelArk commercial API route never shares
+        # the Personal Coding Plan's endpoint, identity or credential.
+        if type(self.commercial_api_only) is not bool or type(self.interactive_subscription_only) is not bool:
+            raise ProviderRealmError("provider use-policy flags must be bool")
+        if self.interactive_subscription_only:
+            if self.commercial_api_only:
+                raise ProviderRealmError("commercial API realm cannot be a subscription realm")
+        elif not (
+            self.commercial_api_only
+            and self.realm_id == "byteplus-modelark-commercial"
+            and self.provider_alias == "byteplus-modelark"
+            and self.base_url == "https://ark.ap-southeast.bytepluses.com/api/v3"
+            and self.env_key == "BYTEPLUS_MODELARK_API_KEY"
+            and self.wire_api == "responses"
+            and not self.requires_codex_auth_file
+        ):
+            raise ProviderRealmError("unreviewed autonomous commercial API realm")
 
     @property
     def codex_provider_id(self) -> str:
@@ -305,12 +321,23 @@ ALIBABA_TOKEN_PLAN = CodexProviderRealm(
     wire_api="responses",
 )
 
+BYTEPLUS_MODELARK_COMMERCIAL = CodexProviderRealm(
+    realm_id="byteplus-modelark-commercial",
+    provider_alias="byteplus-modelark",
+    display_name="BytePlus ModelArk Commercial API",
+    base_url="https://ark.ap-southeast.bytepluses.com/api/v3",
+    env_key="BYTEPLUS_MODELARK_API_KEY",
+    wire_api="responses",
+    interactive_subscription_only=False,
+    commercial_api_only=True,
+)
+
 REVIEWED_CODEX_PROVIDER_REALMS = {
     realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN,)
 }
 
 CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
-    realm.realm_id: realm for realm in (OPENCODE_GO_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (OPENCODE_GO_TOKEN_PLAN, BYTEPLUS_MODELARK_COMMERCIAL,)
 }
 
 # MiniMax Token Plan was promoted out of quarantine by the exact-head native
@@ -563,6 +590,7 @@ def verify_provider_realm_enrollment_receipt(receipt: Any) -> None:
 __all__ = [
     "ALIBABA_TOKEN_PLAN",
     "MINIMAX_TOKEN_PLAN",
+    "BYTEPLUS_MODELARK_COMMERCIAL",
     "OPENCODE_GO_TOKEN_PLAN",
     "CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY",
     "CODEX_WIRE_API_RESPONSES",
