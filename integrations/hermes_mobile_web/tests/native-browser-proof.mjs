@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:net'
 import { createRequire } from 'node:module'
-import { cp, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -50,13 +50,29 @@ const env = {
   TMPDIR: sandbox, LANG: 'en_US.UTF-8', TZ: 'UTC',
   PYTHONPATH: donor, PYTHONUNBUFFERED: '1', GIT_NO_LAZY_FETCH: '1'
 }
-let gateway, browser, gatewayExit, failure, holding
-const log = [], report = { scope: 'native renderer and gateway with isolated fixture profiles and upstream scripted provider', productionTouched: false, sandbox, origin, steps: [] }
+let gateway, browser, page, gatewayExit, failure, holding
+const log = [], errors = [], requests = []
+const report = { scope: 'native renderer and gateway with isolated fixture profiles and upstream scripted provider', productionTouched: false, sandbox, origin, steps: [] }
 const collect = chunk => { log.push(String(chunk)); while (log.reduce((n, s) => n + s.length, 0) > 100000) log.shift() }
 const within = async (promise, milliseconds, label) => {
   let timer
   try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + ' timed out')), milliseconds) })]) }
   finally { clearTimeout(timer) }
+}
+const waitForInteractive = async page => {
+  await page.locator('[data-slot="composer-root"] [contenteditable="true"]').first().waitFor({ timeout: 60000 })
+  // Same criterion as the upstream core harness: a mounted composer under a
+  // connecting/setup mask is not an interactive application. Never force-click it.
+  await page.waitForFunction(() => {
+    let node = document.elementFromPoint(innerWidth / 2, innerHeight / 2)
+    if (!node) return false
+    while (node) {
+      const rectangle = node.getBoundingClientRect()
+      if (getComputedStyle(node).position === 'fixed' && rectangle.left <= 1 && rectangle.top <= 1 && rectangle.right >= innerWidth - 1 && rectangle.bottom >= innerHeight - 1) return false
+      node = node.parentElement
+    }
+    return true
+  }, undefined, { timeout: 60000, polling: 250 })
 }
 try {
   gateway = spawn(python, ['-m', 'hermes_cli.main', 'gateway', 'run'], { cwd: donor, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -75,18 +91,22 @@ try {
   assert.ok(link, 'native CLI did not return this fixture gateway launch link')
   report.steps.push('isolated gateway ready; native one-use launch link acquired without logging it')
   browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', hasTouch: true })
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', hasTouch: true, reducedMotion: 'reduce' })
   await context.addInitScript(() => localStorage.setItem('hermes.desktop.pluginDecisions.v2', JSON.stringify({ 'mastermind-mobile': true })))
-  const page = await context.newPage(), errors = [], frames = []
+  page = await context.newPage()
+  const frames = []
   page.on('pageerror', error => errors.push(error.message))
+  page.on('response', response => { if (response.status() >= 400) requests.push({ path: new URL(response.url()).pathname, status: response.status() }) })
+  page.on('requestfailed', request => requests.push({ path: new URL(request.url()).pathname, failure: request.failure()?.errorText }))
   page.on('websocket', socket => { socket.on('framereceived', event => frames.push(String(event.payload))) })
   await page.route('**/*', route => {
     const url = new URL(route.request().url())
     return [origin, provider.url].includes(url.origin) || ['data:', 'blob:'].includes(url.protocol) ? route.continue() : route.abort()
   })
   await page.goto(link)
-  await page.locator('[data-slot="composer-root"] [contenteditable="true"]').first().waitFor({ timeout: 60000 })
-  await page.goto(origin + '/#/mastermind')
+  await waitForInteractive(page)
+  report.steps.push('native initial boot became interactive without bypassing an overlay')
+  await page.evaluate(() => { location.hash = '/mastermind' })
   await page.getByRole('heading', { name: 'Your team', exact: true }).waitFor({ timeout: 45000 })
   await page.getByRole('button', { name: /Secretary.*Connection:/ }).click()
   const draft = page.getByRole('button', { name: 'New separate chat', exact: true })
@@ -121,14 +141,19 @@ try {
   report.sessionHash = sessionHash
   report.streamFrames = frames.length
   report.providerCallsForMarker = completed.length
-  report.pageErrors = errors
   report.accepted = true
 } catch (error) {
   failure = error
   report.accepted = false
   report.error = String(error)
+  if (page) {
+    report.pageState = await page.evaluate(() => ({ route: location.hash, text: document.body.innerText.replace(/\s+/g, ' ').slice(0, 1800), host: document.documentElement.dataset.hermesDesktopHost })).catch(() => null)
+    await page.screenshot({ path: join(output, 'native-failure.png'), fullPage: true }).catch(() => {})
+  }
 } finally {
   holding?.open()
+  report.pageErrors = errors.slice(-20)
+  report.failedRequests = requests.slice(-25)
   if (browser) await browser.close()
   if (gateway && gateway.exitCode === null) {
     try { process.kill(-gateway.pid, 'SIGTERM') } catch (error) { if (error.code !== 'ESRCH') throw error }
