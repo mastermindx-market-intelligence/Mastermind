@@ -60,21 +60,26 @@ def _selections() -> dict:
     }
 
 
+def test_named_chairman_seat_contract_includes_c4():
+    assert setup.SEAT_REFS == ("chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4")
+    assert canary.CHAIRMAN_SEAT_REFS == frozenset(setup.SEAT_REFS)
+
+
 def _local_census(*additional_rows: dict) -> dict:
-    """Exact live shape: three running seats plus any explicit candidates."""
+    """Exact live shape: four running seats plus any explicit candidates."""
     def _raw(row: dict) -> dict:
         return {key: value for key, value in row.items() if key != "env_manager"}
 
     return {
         "gologin": [],
         "multilogin": [
-            *(_raw(_mlx(index)) for index in range(1, 4)),
+            *(_raw(_mlx(index)) for index in range(1, len(setup.SEAT_REFS) + 1)),
             *(_raw(row) for row in additional_rows),
         ],
     }
 
 
-def test_build_enrollment_document_is_exact_three_distinct_seats_and_preserves_unrelated():
+def test_build_enrollment_document_is_exact_four_distinct_seats_and_preserves_unrelated():
     unrelated = sb.new_binding(
         work_ref="WS:OTHER", role="worker", provider="codex",
         locator_kind="codex_session", locator={"session_id": "session-other"},
@@ -116,19 +121,19 @@ def test_build_enrollment_document_is_exact_three_distinct_seats_and_preserves_u
     assert {row["role"] for row in chatgpt_rows} == {"ceo"}
     assert work_specific_chat in chatgpt_rows
     initial_destinations = [row for row in chatgpt_rows if row["work_ref"] == setup.WORK_REF]
-    assert len(initial_destinations) == 3
+    assert len(initial_destinations) == 4
     assert all(row["observed_at"] == "2026-08-23T12:00:00Z" for row in initial_destinations)
     assert sb.find_conflicts(doc) == []
 
 
 def test_build_enrollment_document_refuses_partial_or_duplicate_mapping():
     partial = _selections()
-    partial.pop("chatgpt3")
-    with pytest.raises(setup.SetupRefusal, match="all three"):
+    partial.pop("chatgpt4")
+    with pytest.raises(setup.SetupRefusal, match="all 4"):
         setup.build_enrollment_document(None, partial, observed_at="2026-08-23T12:00:00Z")
 
     duplicate = _selections()
-    duplicate["chatgpt3"] = duplicate["chatgpt2"]
+    duplicate["chatgpt4"] = duplicate["chatgpt3"]
     with pytest.raises(setup.SetupRefusal, match="cannot be assigned"):
         setup.build_enrollment_document(None, duplicate, observed_at="2026-08-23T12:00:00Z")
 
@@ -166,17 +171,17 @@ def test_private_url_accepts_exact_project_conversation_address(monkeypatch):
     assert setup._private_url("hidden: ") == url
 
 
-def test_disposable_preflight_requires_fresh_exact_three_seat_census_and_refuses_collision():
+def test_disposable_preflight_requires_fresh_exact_four_seat_census_and_refuses_collision():
     now = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
     complete = setup.build_enrollment_document(
         None, _selections(), observed_at="2026-08-23T12:00:00Z",
     )
-    disposable = _mlx(4, running=False)
+    disposable = _mlx(5, running=False)
     setup.assert_current_nonseat(complete, disposable, now=now)
 
     partial = dict(complete)
     partial["bindings"] = partial["bindings"][:-1]
-    with pytest.raises(setup.SetupRefusal, match="all three current"):
+    with pytest.raises(setup.SetupRefusal, match="all 4 current"):
         setup.assert_current_nonseat(partial, disposable, now=now)
 
     with pytest.raises(setup.SetupRefusal, match="collides"):
@@ -216,7 +221,7 @@ def test_build_provision_requires_stopped_profile_and_exact_multilogin_core():
 
 
 def _legacy_v2_provision() -> dict:
-    stopped = _mlx(4, running=False)
+    stopped = _mlx(5, running=False)
     return {
         "schema": port_policy.LEGACY_PROVISION_SCHEMA,
         "vendor": "multilogin",
@@ -270,7 +275,7 @@ def test_legacy_migration_threads_one_live_snapshot_through_stale_bindings(
     )
     bindings_before = json.loads(json.dumps(bindings))
     snapshot = canary._seal_current_environment_snapshot(  # noqa: SLF001
-        _local_census(_mlx(4, running=False)),
+        _local_census(_mlx(5, running=False)),
     )
     assert snapshot is not None
     observed = []
@@ -517,7 +522,7 @@ def test_configure_command_migrates_then_routes_fixed_default_provision(monkeypa
     """Catches caller-selected configuration fields or a skipped legacy migration."""
     calls = []
     snapshot = canary._seal_current_environment_snapshot(  # noqa: SLF001
-        _local_census(_mlx(4, running=False)),
+        _local_census(_mlx(5, running=False)),
     )
     assert snapshot is not None
     monkeypatch.setattr(setup, "_acquire_current_environment_snapshot", lambda: snapshot)
@@ -547,7 +552,7 @@ def test_configure_command_reuses_valid_v3_without_migration(monkeypatch):
     """Catches making the idempotent configuration command v2-only."""
     calls = []
     snapshot = canary._seal_current_environment_snapshot(  # noqa: SLF001
-        _local_census(_mlx(4, running=False)),
+        _local_census(_mlx(5, running=False)),
     )
     assert snapshot is not None
     monkeypatch.setattr(setup, "_acquire_current_environment_snapshot", lambda: snapshot)
@@ -622,7 +627,7 @@ _BOOTSTRAP_EVIDENCE = object()
 
 
 def _bootstrap_coordinator_state(monkeypatch, *, running=False):
-    row = _mlx(4, running=running)
+    row = _mlx(5, running=running)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(
         None, _selections(), observed_at="2026-08-23T12:00:00Z",
@@ -707,8 +712,8 @@ def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(mon
     """A changed post-phrase census never releases bootstrap authority."""
     _row, _provision = _bootstrap_coordinator_state(monkeypatch)
     censuses = iter((
-        _local_census(_mlx(4, running=False)),
-        _local_census(_mlx(4, running=True)),
+        _local_census(_mlx(5, running=False)),
+        _local_census(_mlx(5, running=True)),
     ))
     monkeypatch.setattr(setup.chatgpt, "_strict_list_local_environments", lambda: next(censuses))
     monkeypatch.setattr(
@@ -718,8 +723,8 @@ def test_peer_setup_bootstrap_refuses_failed_post_confirmation_evidence_mint(mon
         census = setup.chatgpt._strict_list_local_environments()  # noqa: SLF001
         candidate = next(
             item for item in census["multilogin"]
-            if item["profile_id"] == _mlx(4)["profile_id"]
-            and item["folder_id"] == _mlx(4)["folder_id"]
+            if item["profile_id"] == _mlx(5)["profile_id"]
+            and item["folder_id"] == _mlx(5)["folder_id"]
         )
         assert candidate["running"] is True
         return None
@@ -793,7 +798,7 @@ def test_peer_setup_direct_vendor_cli_cannot_invoke_bootstrap():
 
 def test_peer_setup_prepare_disposable_does_not_create_a_competing_bootstrap_fence(tmp_path):
     """Ordinary new-anchor preparation keeps its existing genesis path only."""
-    provision = _peer_anchor_provision(_mlx(4, running=False))
+    provision = _peer_anchor_provision(_mlx(5, running=False))
     anchor_path = tmp_path / "anchor.json"
     state_path = tmp_path / "peer-state.json"
     peer_path = tmp_path / "peer-provision.json"
@@ -811,7 +816,7 @@ def test_peer_setup_prepare_disposable_does_not_create_a_competing_bootstrap_fen
 @pytest.mark.parametrize("deleted", ("anchor_and_state", "state_and_witness"))
 def test_peer_setup_loss_fence_never_recreates_a_consumed_genesis(tmp_path, deleted):
     """Setup does not treat missing runtime records as a fresh installation."""
-    provision = _peer_anchor_provision(_mlx(4, running=False))
+    provision = _peer_anchor_provision(_mlx(5, running=False))
     anchor_path = tmp_path / "anchor.json"
     state_path = tmp_path / "peer-state.json"
     peer_provision_path = tmp_path / "peer-provision.json"
@@ -894,7 +899,7 @@ def test_peer_setup_missing_bindings_refuses_before_provision_or_dispatch(monkey
 
 @pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
 def test_peer_setup_missing_provision_refuses_after_one_census_without_dispatch(monkeypatch, command):
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     census_calls = []
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: ({"schema": sb.SCHEMA, "bindings": []}, []))
     monkeypatch.setattr(
@@ -913,7 +918,7 @@ def test_peer_setup_missing_provision_refuses_after_one_census_without_dispatch(
 
 @pytest.mark.parametrize("command", ("create-peer-profile", "rollback-peer-profile"))
 def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monkeypatch, command):
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
@@ -943,7 +948,7 @@ def test_peer_setup_seat_collision_refuses_before_confirmation_or_dispatch(monke
     ),
 )
 def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, command, confirm_const):
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
@@ -961,7 +966,7 @@ def test_peer_setup_confirmation_mismatch_refuses_without_dispatch(monkeypatch, 
 
 
 def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch):
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
@@ -985,7 +990,7 @@ def test_peer_setup_create_happy_path_delegates_to_exact_capability(monkeypatch)
 
 
 def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation(monkeypatch):
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
@@ -1008,7 +1013,7 @@ def test_peer_setup_rollback_without_release_receipt_refuses_before_confirmation
 
 
 def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capability(monkeypatch):
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
@@ -1034,7 +1039,7 @@ def test_peer_setup_rollback_with_release_receipt_delegates_to_distinct_capabili
 def test_peer_setup_coordinator_never_touches_credential_or_http(monkeypatch):
     """The coordinator forwards only argv/exit code — it never reads a
     credential, constructs vendor HTTP, or sees a raw vendor response."""
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     complete = setup.build_enrollment_document(None, _selections(), observed_at="2026-08-23T12:00:00Z")
     monkeypatch.setattr(setup.sb, "load_bindings", lambda: (complete, []))
@@ -1067,7 +1072,7 @@ def test_atomic_private_json_has_exactly_one_implementation(tmp_path):
 
 def test_realm1_matching_local_row_seals_once_bypasses_reducer_and_threads_same_snapshot(monkeypatch):
     """The anchor check must not resample or pass through permissive candidate filtering."""
-    row = _mlx(4, running=False)
+    row = _mlx(5, running=False)
     provision = _peer_anchor_provision(row)
     bindings = setup.build_enrollment_document(
         None, _selections(), observed_at="2026-08-01T00:00:00Z",
@@ -1121,7 +1126,7 @@ def test_realm1_matching_local_row_seals_once_bypasses_reducer_and_threads_same_
 
 def test_realm1_setup_live_snapshot_uses_only_the_strict_private_producer(monkeypatch):
     """Hazardous setup gates may not fall back to capped tolerant discovery."""
-    raw = _local_census(_mlx(4, running=False))
+    raw = _local_census(_mlx(5, running=False))
     calls = []
 
     def _strict():
