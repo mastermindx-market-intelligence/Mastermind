@@ -1879,6 +1879,7 @@ def build_web_ceo_v3_mcp_app(
     session_reply_read_tool=None,
     reply_event_rpc=None,
     session_reply_references_tool=None,
+    session_web_read_tools=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1973,6 +1974,11 @@ def build_web_ceo_v3_mcp_app(
             if client is not os_session_bridge_client:
                 raise TypeError("reference discovery must share the installed Session Bridge client")
         configuration = session_reply_references_tool.extend_host_configuration(configuration)
+    if session_web_read_tools is not None:
+        from integrations.session_bridge.web_observation_tools import WebSessionReadTools
+        if type(session_web_read_tools) is not WebSessionReadTools:
+            raise TypeError("the qualified session Web read tools are required")
+        configuration = session_web_read_tools.extend_host_configuration(configuration)
     return _build_profile_mcp_app(settings, public_mcp=True, **configuration)
 
 

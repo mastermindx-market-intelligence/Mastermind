@@ -1,13 +1,13 @@
 # ChatGPT Web session visibility and continuity — implementation master plan
 
-Version: 1.0 • 2026-11-06 (America/Vancouver)
+Version: 1.1 • 2026-11-06 (America/Vancouver)
 Operation: `chatgpt-session-observability-20261106-c2`
 Workstream: `WS:CHAIRMAN-CONTROL-ROOM`; existing SC1 / active-dialogue program.
 Source/law base: `af18454f0cd2086c7976e55e16fee1d8dd70f405`.
 Agent OS source inspected: Macro `d83f26a8bfa09f2c5b2eaa932b58cd303ef6c301`,
 `agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md`.
 Carrier: `sol/web-chatgpt-session-observability-20261106-c2`.
-Status: SOURCE IMPLEMENTATION IN PROGRESS; installation and live acceptance unproven.
+Status: O1–O3 SOURCE TESTED; publication/hosted CI pending; installation and live acceptance unproven.
 
 ## Outcome and feasibility
 
@@ -108,9 +108,9 @@ content in public GitHub evidence. Test fixtures must be synthetic.
 | ID | Deliverable / named consumer | Acceptance | Initial state |
 |---|---|---|---|
 | O0 | Protected-source census and architecture | Same-pin laws; existing owners and collisions recorded | Complete |
-| O1 | Read-only session observation projection | Strict census reuse, bounded output, explicit freshness/coverage; negative tests | In progress |
-| O2 | Authenticated optional MCP composition | Real host handler tests; no SEND scope widening; default-off regression | Ready after O1 |
-| O3 | Bounded continuity read | Existing Agent OS composer plus independent authorization; no inferred tab join | Ready after O1 |
+| O1 | Read-only session observation projection | Strict census reuse, bounded output, explicit freshness/coverage; negative tests | Source tested |
+| O2 | Authenticated optional MCP composition | Real host handler tests; no SEND scope widening; default-off regression | Source tested; synthetic owner ports |
+| O3 | Bounded continuity read | Existing Agent OS composer plus independent authorization; no inferred tab join | Source tested |
 | O4 | Production owner wiring and role consumption | Enrolled sources; exact installed source/config; both roles read the same evidence | Pending current installation authority and canonical reader |
 | O5 | Cooperative checkpoint/content workflow | Existing Agent OS writer and exact original-reply reader; loss/restart/privacy proof | Pending canonical writer/identity integration |
 | O6 | Governed Web continuation | Original #836/runtime owners; exact binding, permission, ACK/START/return proofs | Held on existing browser/runtime gates |
@@ -169,7 +169,32 @@ approval. Paid Fabric capability was observed, but no worker START or admission
 was claimed. Installed Executive state returned backend_unavailable and the
 caller-scoped target list was empty; neither is proof of fleet-wide absence.
 
-Next: implement O1–O3 in this isolated registered workspace; run focused positive,
-adversarial and host-composition tests; publish exact source/test evidence. Then
-reassess current canonical reader/enrollment and installed-owner gates before any
-activation. Do not call this product complete without O4–O7 evidence.
+O1–O3 now implement `session_web_observe` and `session_continuity_read` as
+independently optional READ tools on the existing V3 host. The producer still
+accepts 128 rows/profile; presentation returns at most 64 rows across at most 8
+authorized sources with explicit omissions and a 64 KiB response bound. There is
+no tab/workstream join. The host change is six additive lines and its two exact
+hunks also match the inspected #2134 candidate `7a3160fa76ceae58726eacd27d741872273d3828`;
+that is source-composition evidence, not #2134 release or full integration testing.
+
+Verification: 177 tests passed, 15 subtests passed on the native registered source
+workspace using Python 3.12, MCP 1.28.1 and isolated temporary test dependencies.
+The pack includes 47 new tests (40 unit/negative + 7 authenticated ASGI cases) and
+130 existing session/continuity/schema regressions. The initial standard pytest
+invocation failed on missing NumPy in the development environment; it was not a
+code failure and was resolved with temporary test-only dependencies. Before code
+existed, unittest discovery reproduced a missing-module error. No test was skipped
+or exclusion added. A bounded architecture critique identified the maximum-row
+budget issue; it was repaired and covered before this passing pack.
+
+Exact command (test-only dependency prefix omitted for portability):
+```sh
+python -m pytest -o addopts='' -q tests/test_session_web_observation.py tests/test_session_web_observation_asgi.py tests/test_executive_mcp_web_ceo_v3.py tests/test_executive_mcp_web_ceo_sessions.py tests/test_session_bridge_return_tools.py tests/test_web_sol_continuation.py tests/test_web_sol_census_popup_truth.py
+```
+
+Next: publish the exact source, consume hosted CI, then qualify actual owner ports
+and role bindings described in `docs/hermes/CHATGPT_SESSION_VISIBILITY.md`.
+The current Hermes donor MCP configuration is disabled by source and retains its
+receiving-owner authenticated-release requirement. No static all-access scope,
+borrowed token, new browser reader or held-PR replacement may fill that gap.
+Do not call this product complete without O4–O7 evidence.
