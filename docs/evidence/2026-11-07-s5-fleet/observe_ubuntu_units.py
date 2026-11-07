@@ -33,6 +33,6 @@ if valid:
  out["units"]={}
  for unit,props in [("mastermind-linux-hygiene.timer",["UnitFileState","ActiveState","SubState","NextElapseUSecRealtime","LastTriggerUSec","FragmentPath","DropInPaths","Unit"]),("mastermind-linux-hygiene.service",["UnitFileState","ActiveState","SubState","Result","ExecMainStatus","ExecMainCode","FragmentPath","DropInPaths","ExecStart","ExecMainStartTimestamp","ExecMainExitTimestamp","NRestarts"])]:
   r=subprocess.run(["systemctl","--user","show",unit,"--no-pager"]+["--property="+x for x in props],env=env,capture_output=True,text=True,timeout=10)
-  out["units"][unit]={"rc":r.returncode,"properties":dict(line.split("=",1) for line in r.stdout.splitlines() if "=" in line),"diagnostic":r.stderr[:400]}
+  out["units"][unit]={"rc":r.returncode,"properties":dict(line.split("=",1) for line in r.stdout.splitlines() if "=" in line),"diagnostic":r.stderr[:256]}  # bounded stderr truncation for the evidence record
 else: out["unit_state"]="UNVERIFIED_NO_OWNER_BUS"
 print(json.dumps(out,sort_keys=True))

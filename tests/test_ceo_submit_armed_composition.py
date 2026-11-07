@@ -1595,11 +1595,17 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # PR #2151: the installed-only retirement config validator changes this
     # full-file pin. The exact installed entry AST and all ten mutation
     # refusals remain unchanged; no additional call is admitted.
+    # 2026-11-07 Fleet integration: the optional Fleet observer binding is
+    # appended to this file, so the full-file pin moves. The installed entry
+    # AST anchor (060525...) and the single reviewed asyncio.run call are
+    # unchanged, and the ten mutation refusals and the foreign-scope refusal
+    # stay. Source-only review of the Fleet composition: this grants no
+    # install, release or native-runtime authority.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'c2a07369ad481d54b494f766043386f1809fb6f075d4cac53792c792158ac25a'):
+            'cc14dcb09e181a08c4ddd018f5e6840cbd5b754c960d4f0a72ac9c135018e32d'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

@@ -138,3 +138,79 @@ upstream whitespace; it was replaced by the correct comparison to the merged
 upstream base. The successful commit separately reported Git's existing
 automatic-repack permission failure at another worktree index. That auxiliary
 operation was not repaired or replayed and no other writer's files were touched.
+
+
+## Ubuntu pressure false-green negative evidence
+
+[linux-pressure-negative-evidence.json](linux-pressure-negative-evidence.json) and
+[reproduce_linux_pressure_false_green.py](reproduce_linux_pressure_false_green.py)
+retain a disposable-fixture reproduction against the existing Linux hygiene
+source SHA256 `3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3`.
+The source is imported from its original repository owner; no implementation is
+copied into this evidence directory and no installed script is executed.
+
+With measured free space 63.05 GiB, the existing 75 GiB reserve, CRITICAL pressure
+and no allowed cache operation making progress, the current implementation can
+report `degraded=false` and CLI exit 0. Ten controls characterize this behavior
+and the calm, held, unknown-reserve and no-effect cases; all passed in the parent
+Linux fixture (0.021s) and the same repository fixture on macOS (0.244s). The
+separate desired-outcome assertion remains an intentional negative proof: one
+expected failure, because critical pressure with no recovery must not be green.
+It is not part of a claimed passing product acceptance suite.
+
+Paid run `s5-linux-pressure-receipt-repro-20261107-c1-01`, response SHA256
+`32968be709dcb6914270cb2c1fe399c4f5b9f2295c5dabc2292abc37af108069`, was accepted for
+this negative-evidence assignment after parent reproduction. This does not
+accept maintenance health or repair the executable. The original #2007 source
+publication and PR-projection holds remain. No live cleanup occurred and
+attributable reclaimed bytes remain **0**.
+
+
+The latest original storage-owner receipts in [issue #1632](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1632#issuecomment-6702452276) retain Ubuntu0's historical SNI refusal, protected live/dirty worktrees, Ubuntu3's original uncertain effects and Ubuntu4's RAM-integrity quarantine. Fresh telemetry, sufficient free disk and a ready maintenance timer do not release those exclusions. Its two earlier measured recovery operations (110.82 GiB and 117.05 GiB) remain accepted historical work and are not attributed to this S5 session or repeated.
+
+## Current-source composition repair after the first hosted run
+
+The first published evidence head `5cb19d3b49c6e9670be84b072056fa8203cc3b85`
+passed its macOS UI/native workflow, proxy checks and CodeQL, while five Python
+shards failed. The failures exposed exact source-composition dependencies of
+the new Fleet route and forward MemTotal pair. They are retained as failures
+of that head; no green-CI claim is made for it.
+
+The follow-up source changes keep all 32 protected predecessor route profiles,
+the exact legacy eight-route set, the existing POST set and non-route Caddy
+configuration. Current composition adds the one fixed Fleet GET route. The
+parent compared every retained profile to the protected source and verified
+the held cross-UID binding function remains byte-identical. The affected
+13-module edge suite passed **687 tests** on macOS in 132.41 seconds.
+
+The native stage builder admits only the exact forward MemTotal pair in the
+current closure and preserves the protected historical closures through two
+immutable fixture files. Mixed, changed and historically relabeled payloads
+remain rejected. The parent verified those fixture files against the protected
+candidate bytes and verified `source/` and `native-preimages.json` remain
+unchanged. The paid Linux qualification passed all 277 native gate tests.
+The parent macOS run passed 270 and failed seven tests in the existing
+native-generation fixture because that fixture interpolates its interpreter
+path without shell quoting and the managed workspace path contains a space.
+Using the already-installed interpreter at a path without spaces, the entire
+affected native-generation module passed **11 tests** in 10.81 seconds.
+No test expectation or production behavior was changed for that path control.
+
+Exact static identity and review-token positions now bind the composed source.
+The diagnostic stdout cap is 256 characters, within the existing scanner
+contract; no scanner exemption or token weakening was added. The existing D7
+AST identity remains unchanged. The committed-HEAD identity gate is run after
+the local commit because its D8 check reads the committed source, not dirty
+working-tree contents. Its hosted result remains a separate gate.
+
+Returned paid proposals, with parent source and focused-test verification:
+
+| Existing bounded run | Exact complete response SHA256 | Patch SHA256 |
+| --- | --- | --- |
+| `s5-memtotal-stage-composition-repair-20261107-c2-01` | `77da850f67ef5e126ee3dfb00c61f363901e019fb4c710a07a26aae482b2fe3b` | `a6abb0761f2054bef8ee319c4fe827018d361e6b7de5449dd56c90254a43b236` |
+| `s5-fleet-identity-bindings-20261107-c1-01` | `58095da433c9d8ab14e5427de1233249eabd52eb63851fab81c45f69d3f52b50` | `a7e77fcac830fe4bebf7d1a19ba2c8354cc9804c7e15cc7b377631737c6f5eae` |
+| `s5-fleet-edge-history-20261107-c1-01` | `4fe4df8741556eff779a2909050b8093e2a7fabf557c888c0030779654adb20d` | `35e3b4ed75b034f886f8866a429bc28918beaccf237958e4ec3ca88e03ca22df` |
+
+These changes are source qualification only. No collector or native release
+was installed, no host was newly admitted and the original service, storage,
+publication and permission holds remain.

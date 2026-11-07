@@ -613,7 +613,12 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '22335a6b83924ae3c28eeb8610e1b8bb2a834964e1ba99afc97ebcaa534440ac', 'sites': ((924, 71, 74, 'int', '400'), (935, 71, 74, 'int', '403'), (943, 71, 74, 'int', '400'), (949, 79, 82, 'int', '400'), (958, 71, 74, 'int', '400'), (968, 71, 74, 'int', '403'), (973, 76, 79, 'int', '503'), (979, 71, 74, 'int', '403'))}
+# 2026-11-07 Fleet integration: the action-handler AST stays identical and all
+# eight whole HTTP status tokens keep their exact byte offsets. The enclosing
+# file grows by two lines above the handler, so every site moves by 2 lines.
+# Source-only review of the Fleet composition: it grants no install, release
+# or runtime authority and blesses no new identity token.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '0a47346415559f77465ede8772902d961d10be19c4ccf0fbac07f13018cfacff', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -677,7 +682,12 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4f6aa75978f73afcdd72cc568f54062b4560f9bedc3dc5bd65bb8a81b0ae7e8e', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+# 2026-11-07 Fleet integration: the permission-handler AST stays identical and
+# all four whole '403' tokens keep their exact byte offsets. The enclosing file
+# grows by five lines above the handler, so every site moves by 5 lines.
+# Source-only review of the Fleet composition: it grants no install, release
+# or runtime authority and blesses no new identity token.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '1eda209766edbbe2f5821b9ebd8f45835b3360424f8b06522924e63b237b79e4', 'sites': ((717, 93, 96, 'int', '403'), (719, 56, 59, 'int', '403'), (726, 46, 49, 'int', '403'), (727, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -721,7 +731,12 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
+# 2026-11-07 Fleet integration: the Fleet selector and its native tests are
+# added above these three negative-test status lines. All three whole '503'
+# tokens keep their exact byte offsets and move by 50 lines.
+# Source-only review of the Fleet composition: it grants no install, release
+# or native-runtime authority and blesses no new identity token.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '836bb2fe440fd2d5c179fcfd041152c19d73422ed1a00461ae3c87b9a10cd4be', 'sites': ((3564, 68, 71, 'int', '503'), (3569, 69, 72, 'int', '503'), (3573, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}

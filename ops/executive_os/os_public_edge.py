@@ -27,9 +27,12 @@ CONTROL_ROOM_POST_ROUTES = LEGACY_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
 # Keep the historical reader profile exact. Qualified Session SEND is a separate
 # final-profile addition below; this does not change generic submit authority.
 POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
+# The historical legacy reader is the exact eight fixed GET reads. A later
+# read never joins this tuple: the legacy profile is an exact transition
+# input, so widening it would silently relabel every historical predecessor.
 LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
-    "/workspace/work/current", "/workspace/fleet/current", "/workspace/mission/current",
+    "/workspace/work/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
     "/workspace/window/current",
 )
@@ -164,6 +167,16 @@ DIRECT_NATIVE_POST_ROUTES = (
 )
 POST_ROUTES = PRE_DIRECT_NATIVE_POST_ROUTES + DIRECT_NATIVE_POST_ROUTES
 
+# One fixed Fleet Workspace health GET read extends the current profile only.
+# The complete prefleet current GET/POST pair is retained verbatim as an exact
+# transition input, so an already-current predecessor stays a legal upgrade and
+# an installed fleet config stays idempotent. No POST, source or MCP branch
+# changes here; the read grants no authority of its own.
+PRE_FLEET_GET_ROUTES = GET_ROUTES
+PRE_FLEET_POST_ROUTES = POST_ROUTES
+FLEET_READ_ROUTES = ("/workspace/fleet/current",)
+GET_ROUTES = PRE_FLEET_GET_ROUTES + FLEET_READ_ROUTES
+
 # Preserve exactly the profiles admitted by the predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -201,6 +214,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
     (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
     (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
+    (PRE_FLEET_GET_ROUTES, PRE_FLEET_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

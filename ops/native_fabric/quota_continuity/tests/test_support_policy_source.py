@@ -120,8 +120,11 @@ class CurrentGenerationClosure(unittest.TestCase):
                          (rollout/'native-source-inventory.json').read_bytes())
         manifest=json.loads(raw)
         self.assertEqual(set(manifest), {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
+        # The reviewed current native manifest. The standard-Linux MemTotal
+        # forward stage replaces exactly two installed members, so this digest
+        # moves with it.
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347')
+                         'd0eeeb81106bf27e67a63bdde971636944dea749d53f427ea9a51ed624394314')
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])

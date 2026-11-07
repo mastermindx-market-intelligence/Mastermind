@@ -25,7 +25,11 @@ ROUTE = "/os/executive/session/send"
 def test_session_send_is_one_fixed_post_in_the_complete_composed_profile():
     assert ROUTE in edge.POST_ROUTES
     assert edge.PRE_BYOK_ROLES_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
-    assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
+    # The byok read is exactly one read past the byok predecessor; that
+    # complete pair is the retained prefleet current profile, and the current
+    # profile appends the one fixed Fleet read after it.
+    assert edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",) == edge.PRE_FLEET_GET_ROUTES
+    assert edge.GET_ROUTES == edge.PRE_FLEET_GET_ROUTES + ("/workspace/fleet/current",)
     assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
     assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert edge.POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (

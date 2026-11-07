@@ -217,6 +217,21 @@ GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6
 # Older namespaces and the frozen Ubuntu4/poll generations retain their bytes.
 GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 
+# The standard-Linux MemTotal forward stage replaces exactly two installed
+# members of the complete current107 namespace. Admit only that complete pair
+# and only in that complete namespace; map it back to the reviewed 395b bytes
+# so the historical closure below stays the same reviewed composition. A mixed
+# pair, a single mutated member, or the same pair carried by a historical
+# namespace is refused; the previous valid current composition still binds.
+GO_MEMTOTAL_CURRENT_DIGESTS = {
+    "host_pull_backend.py": "6b16debe222563ff6e9e8400c410258b0b85f56258a2532392518a3d00d66aba",
+    "host_pull_probe.template": "5012c4ef8db85d9171639ac6aab5cf2b92a5cb999e58324a9505aeae60e63836",
+}
+GO_MEMTOTAL_BASE_DIGESTS = {
+    "host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+    "host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
+}
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
@@ -235,7 +250,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The two exact current107 census successors and the exact remote-cwd and
     refusal task successors are normalized without changing any historical namespace
     or the caller manifest. The task successor still requires the complete
-    Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
+    Ubuntu4 and poll cohorts. The exact standard-Linux MemTotal pair is the one
+    forward cohort that changes two installed members; it is normalized back to
+    the reviewed 395b bytes in the complete current namespace only. Every other
+    member/key stays bound to actual395b.
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
@@ -288,6 +306,19 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         normalized.update({"ext/" + name: digest
                            for name, digest in GO_UBUNTU4_PREIMAGES.items()})
     historical = dict(normalized)
+    # The current forward MemTotal stage replaces exactly two installed members.
+    # Admit only that complete pair, and only in the complete current namespace,
+    # then project it back to the reviewed 395b bytes so the closure hash below
+    # stays the same reviewed composition. A mixed pair, a single mutated member
+    # or the same pair carried by a historical namespace is refused.
+    memtotal = {name: manifest["ext/" + name] for name in GO_MEMTOTAL_CURRENT_DIGESTS}
+    if memtotal == GO_MEMTOTAL_CURRENT_DIGESTS:
+        if set(manifest) != expected:
+            raise ValueError("native Go MemTotal cohort cannot relabel historical namespace")
+    elif memtotal != GO_MEMTOTAL_BASE_DIGESTS:
+        raise ValueError("native Go MemTotal cohort is not one exact protected pair")
+    historical.update({"ext/" + name: digest
+                       for name, digest in GO_MEMTOTAL_BASE_DIGESTS.items()})
     poll_pair = {name: normalized["ext/" + name] for name in GO_COMPLETED_POLL_PREIMAGES}
     if (poll_pair != GO_COMPLETED_POLL_PREIMAGES
             and not (current_diagnostics and poll_pair == GO_COMPLETED_POLL_DIGESTS)):

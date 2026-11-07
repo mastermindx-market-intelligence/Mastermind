@@ -583,7 +583,9 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347'
+    # The reviewed current native manifest. The standard-Linux MemTotal forward
+    # stage replaces exactly two installed members, so this digest moves with it.
+    assert hashlib.sha256(current_raw).hexdigest()=='d0eeeb81106bf27e67a63bdde971636944dea749d53f427ea9a51ed624394314'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
@@ -597,7 +599,8 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
     changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
-        'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
+        'ext/host_pull.sh','ext/host_pull_backend.py','ext/host_pull_probe.template',
+        'ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
         'ext/linux_process_identity.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
@@ -626,7 +629,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert current['ext/lane_runtime.py']=='a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f'
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     # Census fallback advances exactly one additional historical member.
-    assert sum(before[p]==current[p] for p in before)==59
+    assert sum(before[p]==current[p] for p in before)==58
     for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()

@@ -16,6 +16,7 @@ from ops.executive_os.os_public_edge import (
     CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES, COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES,
     SOURCE_CONTEXT_GET_ROUTES, SOURCE_POST_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES,
     PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_FLEET_GET_ROUTES, PRE_FLEET_POST_ROUTES, TRANSITION_ROUTE_PROFILES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -140,6 +141,117 @@ def test_legacy_get_profile_is_the_exact_historical_eight():
     )
 
 
+def test_fleet_read_extends_only_the_current_profile_and_keeps_its_order():
+    """The Fleet read is one appended current read, not a historical one.
+
+    The eight historical legacy reads stay byte-exact, every preserved
+    predecessor profile keeps its complete before/after pair, and the current
+    profile keeps its real route order with the Fleet read appended last.
+    """
+    assert "/workspace/fleet/current" not in LEGACY_GET_ROUTES
+    assert GET_ROUTES == PRE_FLEET_GET_ROUTES + ("/workspace/fleet/current",)
+    assert PRE_FLEET_GET_ROUTES == PRE_DIRECT_NATIVE_GET_ROUTES
+    assert PRE_FLEET_POST_ROUTES == POST_ROUTES
+    assert set(GET_ROUTES) - set(PRE_FLEET_GET_ROUTES) == {"/workspace/fleet/current"}
+    assert set(PRE_FLEET_GET_ROUTES) - set(GET_ROUTES) == set()
+    assert GET_ROUTES.index("/workspace/fleet/current") == len(GET_ROUTES) - 1
+    assert "/workspace/fleet/current" not in POST_ROUTES + SOURCE_POST_ROUTES
+    # The retained prefleet current pair is one exact transition input and
+    # stays the second-to-last entry; the current pair remains the last.
+    assert (PRE_FLEET_GET_ROUTES, PRE_FLEET_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    assert TRANSITION_ROUTE_PROFILES[-2] == (PRE_FLEET_GET_ROUTES, PRE_FLEET_POST_ROUTES)
+    assert TRANSITION_ROUTE_PROFILES[-1] == (GET_ROUTES, POST_ROUTES)
+
+
+def test_prefleet_current_profile_upgrades_to_exactly_the_one_fleet_read():
+    """The complete prefleet current GET/POST pair is one legal upgrade input.
+
+    The observed edge holds every current fixed read except the Fleet read.
+    The plan adds exactly that one read, keeps the real route order, and
+    changes no POST, source or MCP branch.
+    """
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(PRE_FLEET_GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(PRE_FLEET_POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    before = copy.deepcopy(live)
+    planned, prepared, final = transition_values(live)
+    assert live == before
+    assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
+    assert get_paths_of(prepared) == sorted(
+        set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))
+    assert get_paths_of(final) == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
+    assert "/workspace/fleet/current" in get_paths_of(final)
+    # Only the GET path list moves; the POST, source and terminal branches
+    # keep their exact observed bytes.
+    assert inner_of(final)[1] == inner_of(before)[1]
+    assert inner_of(final)[2] == inner_of(before)[2]
+    assert inner_of(final)[3] == inner_of(before)[3]
+    assert post_paths_of(final) == list(POST_ROUTES)
+
+
+def test_already_current_fleet_profile_stays_idempotent():
+    """An installed edge that already carries the Fleet read is not rewritten."""
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    before = copy.deepcopy(live)
+    planned, prepared, final = transition_values(live)
+    assert live == before
+    assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
+    assert get_paths_of(prepared) == sorted(
+        set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))
+    assert get_paths_of(final) == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
+    # Every current fixed read survives; only the retired asset names go.
+    assert set(GET_ROUTES) <= set(get_paths_of(final))
+    assert set(GET_ROUTES) <= set(get_paths_of(prepared))
+
+
+@pytest.mark.parametrize("route", [
+    "/workspace/extra/current", "/workspace/fleet/*", "/workspace/fleet/current/",
+    "/workspace/fleet", "/workspace/fleet/current/../current",
+])
+def test_fleet_read_admits_no_foreign_wildcard_or_aliased_path(route):
+    """No foreign, wildcard or aliased path may ride in with the Fleet read."""
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD))) + [route]
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    with pytest.raises(ValueError, match="observed GET routes differ"):
+        transition_values(live)
+
+
+def test_fleet_read_cannot_be_duplicated_in_the_observed_get_branch():
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    get_paths_of(live).append("/workspace/fleet/current")
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    with pytest.raises(ValueError, match="observed GET routes differ"):
+        transition_values(live)
+
+
+def test_fleet_read_cannot_be_moved_into_the_post_branch():
+    """A mixed GET/POST pair is refused; the Fleet read is a GET read only."""
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(PRE_FLEET_GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(PRE_FLEET_POST_ROUTES) + ["/workspace/fleet/current"]
+    expect_source_upgrade(inner_of(live))
+    with pytest.raises(ValueError, match="observed POST route differs"):
+        transition_values(live)
+
+
+def test_fleet_read_cannot_be_paired_with_a_stale_post_profile():
+    """The Fleet GET read never mixes with the predecessor POST profile."""
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(PRE_DIRECT_NATIVE_POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    with pytest.raises(ValueError, match="mixed or incomplete route profile"):
+        transition_values(live)
+
+
 # Spell out representative historical and complete current pairs independently of the table.
 ADMITTED_ROUTE_PAIRS = (
     (LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
@@ -151,8 +263,19 @@ ADMITTED_ROUTE_PAIRS = (
     (COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
     (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
+    (PRE_FLEET_GET_ROUTES, PRE_FLEET_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
+
+
+def carries_source_branch(fixed):
+    """True when the profile holds the original-operation read.
+
+    The dedicated source POST branch exists exactly for the profiles that
+    admit /workspace/source-operation/operation; it is not a property of the
+    newest profile alone.
+    """
+    return "/workspace/source-operation/operation" in fixed
 
 
 @pytest.mark.parametrize("fixed,posts", ADMITTED_ROUTE_PAIRS)
@@ -164,7 +287,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
     live = mcp_fullconfig() if with_mcp else fullconfig()
     get_paths_of(live)[:] = paths
     post_paths_of(live)[:] = list(posts)
-    if fixed == GET_ROUTES:
+    if carries_source_branch(fixed):
         expect_source_upgrade(inner_of(live))
     before = copy.deepcopy(live)
     planned, prepared, final = transition_values(live)
@@ -176,7 +299,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
         post_paths_of(expected)[:] = list(POST_ROUTES)
-        if fixed != GET_ROUTES:
+        if not carries_source_branch(fixed):
             expect_source_upgrade(inner_of(expected))
         if with_mcp:
             expect_complete_mcp(inner_of(expected))
@@ -185,7 +308,8 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
         if with_mcp:
             # The public-MCP branches keep every handler and gain exactly the
             # one COO path in their two fixed path lists.
-            observed = inner_of(before)[3:5] if fixed == GET_ROUTES else inner_of(before)[2:4]
+            observed = (inner_of(before)[3:5] if carries_source_branch(fixed)
+                        else inner_of(before)[2:4])
             result_branches = inner_of(value)[3:5]
             for seen, result in zip(observed, result_branches):
                 assert result["handle"] == seen["handle"]
@@ -195,7 +319,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
                     list(COMPLETE_MCP_METADATA_ROUTES)
                     if seen["match"][0]["method"] == ["GET"] else list(COMPLETE_MCP_ROUTES))
         else:
-            assert inner_of(value)[3:] == inner_of(before)[3 if fixed == GET_ROUTES else 2:]
+            assert inner_of(value)[3:] == inner_of(before)[3 if carries_source_branch(fixed) else 2:]
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
     assert planned["bindings"]["observed_fullconfig_sha256"] == module._sha256(before)
 
@@ -214,7 +338,7 @@ INCOMPATIBLE_ROUTE_PAIRS = tuple(
 @pytest.mark.parametrize("fixed,posts", INCOMPATIBLE_ROUTE_PAIRS)
 @pytest.mark.parametrize("with_mcp", [False, True])
 def test_complete_but_incompatible_os_profiles_refuse(fixed, posts, with_mcp):
-    assert len(INCOMPATIBLE_ROUTE_PAIRS) == 27
+    assert len(INCOMPATIBLE_ROUTE_PAIRS) == 28
     live = mcp_fullconfig() if with_mcp else fullconfig()
     get_paths_of(live)[:] = sorted(set(fixed) | set(asset_routes(OLD)))
     post_paths_of(live)[:] = list(posts)

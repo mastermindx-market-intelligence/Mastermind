@@ -57,7 +57,9 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+# The reviewed current native manifest. The standard-Linux MemTotal forward
+# stage replaces exactly two installed members, so this digest moves with it.
+NATIVE_MANIFEST_SHA = "d0eeeb81106bf27e67a63bdde971636944dea749d53f427ea9a51ed624394314"
 
 
 def _sha(raw):

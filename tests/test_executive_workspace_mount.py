@@ -637,5 +637,19 @@ def test_fleet_outer_mount_query_and_public_edge_are_fixed(settings):
             assert (await client.get('/workspace/fleet/current?window=24h')).status_code == 404
     asyncio.run(check())
     assert '/workspace/fleet/current' in GET_ROUTES
+    # The public edge admits the Fleet read exactly once, appended to the
+    # current profile only. The eight historical legacy reads stay exact, so
+    # no historical predecessor is relabelled by this later read.
+    from ops.executive_os.os_public_edge import LEGACY_GET_ROUTES, PRE_FLEET_GET_ROUTES
+    assert '/workspace/fleet/current' not in LEGACY_GET_ROUTES
+    assert len(LEGACY_GET_ROUTES) == 8
+    assert GET_ROUTES == PRE_FLEET_GET_ROUTES + ('/workspace/fleet/current',)
+    assert GET_ROUTES.count('/workspace/fleet/current') == 1
     template = Path(__file__).resolve().parents[1] / 'ops/executive_os/os_public_edge.caddy.template'
     assert '/workspace/fleet/current' in template.read_text().split()
+    # The rendered template carries the same fixed set in the same order.
+    from ops.executive_os.os_public_edge import _TEMPLATE
+    get_block = _TEMPLATE.read_text(encoding='utf-8').split('@get {', 1)[1].split('handle @get', 1)[0]
+    path_line = next(line for line in get_block.splitlines() if line.strip().startswith('path '))
+    fixed = [path for path in path_line.split()[1:] if path != '__ASSET_PATHS__']
+    assert fixed == list(GET_ROUTES)
