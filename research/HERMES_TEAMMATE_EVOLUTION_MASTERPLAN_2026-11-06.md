@@ -1562,3 +1562,47 @@ The accepted vault fill APPLIED/FILLED receipt does not prove login or account e
 ### 36.8 Agent OS continuity publication
 
 The existing canonical handoff was rewritten with its stale frontline statements removed, preserving independent Control Room/R2 and original M2/C26 obligations. **Macro PR10836**, original branch **sol/hermes-teammate-continuity-20261107-v4**, is Ready at **a4875436d58a4b232fa88f597c44e98d07bdc2b1**, blob **c063f177bdc1de6f579da11429cf128ae71abe17**, based on protected main eb326523fb4ff55840b64450b336e8dad5596abf. The actual canonical check_handoff validator reported zero problems and exact complete bytes were read back. This source-linked continuation is not yet adopted main state and does not complete the mission; ordinary Macro CI/merge-on-green gates remain. No label/merge effect was issued. Primary foreground continuation is original #2204 source composition while the recorded release queues/CI run.
+
+
+## 37. Original tool-observation source qualified and release-armed — 2026-11-07
+
+**MISSION_COMPLETE: false. Overall: BUILT_NOT_PROVEN.** This supersedes section36's remaining #2204 composition task and the Macro #10831 Draft state. The runtime lane remains **EXACT_HUMAN_GATE: original Ubuntu1/root connection restoration**; ordinary protected CI/queue dependencies remain active release gates, not another installed runner or mission-completion receipt.
+
+### 37.1 Exact original source composition
+
+Original Mastermind #2204 is Ready at **7df8f907711a8ad4a8ac4ba927d8525f80b99b50**, tree **bbab5fb183cd8748058c4a56768dae692115ea39**, parents original **5e3eb48154dfb33c25008909938d418036079e21** and protected **4fb0d3825b5b4b4439e65e7382660112b7c2ef8c**. Its same branch is sol/hermes-native-tool-observation-20261107-c3. The full tree preserves current protected source and only11 observation-owned postimages; complete Git tree and clean source checkout readbacks verified all11. GitHub's changed-path count is now11, resolving the historical75-file stacked diff without dropping current accepted source.
+
+The original producer and _request_observation reader are composed together. Current native memory/readback ownership and all unrelated current identity-review rows/imports remain preserved. The single unchanged512 ceiling token at23:17–20 is bound to composed native_session_control SHA256 **7531a99e59e878aecc1df9d0bf0b6a388a8b1af3dfd5f8d3035a9beb5c91edf6**; no scanner exemption.
+
+Principal review found a shared-helper compatibility edge: new whole-value tool hashing was counting the prompt projection root/keys and starting content one level deeper. The content helper now preserves its historical per-value depth/node accounting, while tools retain independent whole-value bounds. A new boundary regression proves the prior prompt-receipt input remains admissible at its exact node/depth ceiling and is still refused beyond it.
+
+### 37.2 Executed integration and release effect
+
+- **293 local cases passed**, with the original two denied socket tests explicitly excluded.
+- **293 cases passed on the complete clean exact7df8f907 source checkout**, same two socket cases excluded. C3 process84600 exited0; JUnit **2836888f1f60d6e95b67949620ce946799edca853d00d847716ebb3e56419105**,293tests/0failures/0errors/0skips,160.229s. These overlapping groups are not summed.
+- **2 targeted identity-review cases passed** for the composed native-session-control pin and drift refusal. Changed-source D8 has no findings.
+- C3 source workspace: **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/observation-reconciled-source**. Source/library testing only; no Control socket, model, account, native runtime service or C26 substitute.
+- Fresh exact-head GitHub preflight verified OPEN/Ready, master base, MERGEABLE, no reviews/holds/comments/labels, required test check, zero mandatory formal approvals and no existing auto/queue effect. Checks were pending, with no failed check. The source-complete candidate was armed once by head-leased request **5762**, exit0.
+- Original readback **6585**: **autoMergeRequest enabledAt2026-11-07T13:51:31Z**, no mergeQueueEntry, OPEN/unmerged. Preserve this effect; do not rearm or call it queued/merged. Exact-head workflows: CI42378556575, harness42378556581, runtime42378556662.
+
+Observation v2 is aggregate evidence. Original callback return and commit-tuple return do not prove durable flush, correction publication, provider dispatch or model identity, and cannot resolve v4 discovery uncertainty or refund its reservations. The original native observer/scope, registry/dispatcher and source owners keep those distinct responsibilities.
+
+### 37.3 Other original release frontiers
+
+**#2207** remains original e5280ecdc7e021b5c8f8e9cd83f2b62329d4eb75 with five head workflows SUCCESS and active queue **MQE_lQDOTotz3c8AAAABNfXFds4ABAiKzgPNdDc**; last queue observation AWAITING_CHECKS/position4. No merge receipt exists yet. Preserve its existing effect.
+
+**#2217** remains Ready at bbbbe6a02084f95230b1a2b314b7b4f9689a1fb5, stacked on #2207. Mastermind OS42377406919, runtime42377406928, OAuth engine42377406946 and harness42377407000 have passed. General CI42377406948 has six running shards; no failure observed at this boundary. No #2217 queue request. Qualify/retarget its original carrier only after #2207's actual protected merge receipt.
+
+**Macro #10831** at a9906c9d5aaf816048d6467fa39d895034180c87 is now **Ready**. Its natural agentos-knowledge-contracts job128417377711 in run42376966339 passed: actual store2233records/0errors/107warnings; three knowledge commands606/66/752passes (not an aggregate). This consumes the malformed-backlink source finding's requested natural proof. Other required packs/final ci-gate remain pending. Fences42376966235 passed. No merge-on-green or native auto-merge effect.
+
+**Macro #10836**, the update of the existing canonical Hermes handoff, remains a Ready continuity candidate, not adopted main truth. Its original a4875436d58a4b232fa88f597c44e98d07bdc2b1 run42378110244 is pending; fences42378110166 passed. Refresh that same carrier with this new original-source/auto-merge state, then consume its new exact-head gates. No merge-on-green effect exists.
+
+### 37.4 Exact remaining control and continuation
+
+The human control needed for live work is restoration of the **original Ubuntu1/root administrative connection that returned C26 PermissionError**. Existing Chairman authorization covers the intended implementation; it does not repair that connection's access. Do not retry the denied operation under unchanged access or use C3/another account/carrier for it. After observed original-connection recovery, reconcile the original M2/C26 runtime operation before any enrolled v4 activation or acceptance journey.
+
+Use the original operation **meta-ceo-byok-followon-parent-20261106-c35-01**, original M2 workspace **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01**. Preserve the earlier denied local AF_UNIX path, original Fabric refusals, accepted work and Outcome Learning398/PR409 holds. No credentials should be embedded in source or passed through memory.
+
+The qualified source/profile/contract and exact releases are concrete reviewable artifacts. Live same-resource grants, serving readback, original correction-to-context feedback, website account/browser journeys, actual provider/model dispatch, genuine held-out EVAL and restart/revocation/endurance/fleet proof still determine full completion. No profile activation, live-account success or always-running teammate is claimed.
+
+Next source actions are consumption of the existing protected effects and natural CI; repair actual failed gates on original carriers, and use Macro's existing controller only after all required checks and holds qualify. No duplicate observer, polling daemon, source release or speculative feature is needed while these gates run.
