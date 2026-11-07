@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/opt/homebrew/bin/npm",
+    "ci",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund"
+  ],
+  "rc": 0,
+  "seconds": 2.045,
+  "lock_sha256": "2caae8997e5e79218183a0acc4ae4e14a2a6379ad33b7694f9f052c9b2af5d39",
+  "lock_unchanged": true,
+  "log_sha256": "2a06483e20ac51e90e137590ff5d36779d45ff3ea770dae43b9bfff04badf3f7"
+}

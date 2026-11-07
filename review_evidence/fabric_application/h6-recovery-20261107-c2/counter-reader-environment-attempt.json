@@ -1,0 +1,25 @@
+{
+  "source_head": "debb50ddecb47c21d6859069d1e3d8cec975fb97",
+  "scope": "Added deterministic regression, original reader unchanged",
+  "node": "/opt/homebrew/opt/node@22/bin/node",
+  "node_version": "v26.5.0",
+  "command": [
+    "/opt/homebrew/opt/node@22/bin/node",
+    "--test",
+    "--test-name-pattern=fixture counters",
+    "--test-reporter=tap",
+    "--test-reporter-destination=stdout",
+    "--test-reporter=junit",
+    "--test-reporter-destination=/tmp/h6-counter-regression-q0ux_2du/baseline.xml",
+    "private-tunnel-auth.test.mjs"
+  ],
+  "rc": 1,
+  "seconds": 0.114,
+  "log_sha256": "223e30a31422c9ff411d608780384e242bceb3373a25f04f03e44cc9b3e48d55",
+  "test_file_sha256": "b021843cb4691c2e0849e0ed5048f3c69a79980c531c2fea587b2ac80ee16d2a",
+  "cases": 1,
+  "failures": 1,
+  "errors": 0,
+  "skips": 0,
+  "xml_sha256": "22be5b5f0e6a3019f9be9cd8e71d715e83b15b4287c2ddb2251b918224ecabd7"
+}

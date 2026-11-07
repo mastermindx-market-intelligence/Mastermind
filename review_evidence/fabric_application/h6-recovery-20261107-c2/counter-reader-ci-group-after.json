@@ -1,0 +1,31 @@
+{
+  "source_head": "debb50ddecb47c21d6859069d1e3d8cec975fb97",
+  "scope": "Exact hosted Node file group with only reader synchronization and two regressions changed",
+  "node_version": "v26.5.0",
+  "command": [
+    "/opt/homebrew/opt/node@22/bin/node",
+    "--test",
+    "--test-reporter=tap",
+    "--test-reporter-destination=stdout",
+    "--test-reporter=junit",
+    "--test-reporter-destination=/tmp/h6-counter-regression-q0ux_2du/candidate-ci-group.xml",
+    "gateway-modern-fabric.test.mjs",
+    "gateway-fleet-git-failure.test.mjs",
+    "gateway.test.mjs",
+    "gateway-shared-backend.test.mjs",
+    "gateway-owner-lifecycle-regression.test.mjs",
+    "gateway-output-budget.test.mjs",
+    "fabric-backend.test.mjs",
+    "private-cli.test.mjs",
+    "private-tunnel-auth.test.mjs"
+  ],
+  "rc": 0,
+  "seconds": 68.669,
+  "cases": 164,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "test_file_sha256": "9f5d683be6771494150e7859897bbe074ca2195a480535eda7cac874e714f37f",
+  "log_sha256": "fb675bd43ff01e275c2a81a2e7df682c5d31e7d414635e67c9e3a4e85e7e9365",
+  "xml_sha256": "67d82534294a288befb0d79074d5a34886905f57c7612fbb5fdc8fa578fed93a"
+}

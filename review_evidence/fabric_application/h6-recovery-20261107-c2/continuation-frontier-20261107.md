@@ -1,0 +1,149 @@
+# H6 continuation after the current source return
+
+## Durable source and effects
+
+The completed integration contribution is published at
+`debb50ddecb47c21d6859069d1e3d8cec975fb97`, tree
+`7ecd312c9d6d6d8718c3eaaf492f7f1db23dea84`.
+The exact-head committed identity guard passed with clean unchanged head.
+
+The full source-linked return is
+https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711012115 .
+Its complete body was read back exactly: 8,658 characters,
+SHA256 `7ff51ca731946d4e7c91128bfb1685ff39cb5d1c343b7eb97fbc5594dd28c7c8`.
+Delivery is proven; incorporation/pickup and runtime acceptance are separate.
+
+A proposed duplicate return to issue #983 was explicitly rejected by automatic
+approval review because that separate destination was not authorized by the
+user's identified PR handoff. It was NOT_SENT. Do not retry, shorten, change
+carrier/account or otherwise replay that action. Continue delivery on the
+authorized original PR #2175. No Slack or email was sent.
+
+One hosted run, 42398870463, was dispatched for exact debb source. At the last
+job read, shard 0 failed its Node gateway step; the other five shards were still
+running. No hosted success, cancellation, successor dispatch or daemon is claimed.
+The original d833 run is separately terminal FAILURE. Do not relabel either run.
+
+## Concrete CI repair
+
+`counter-reader-ci-repair.json` records the new failure and focused repair.
+The private-tunnel fixture's marker timer can append its JSONL effect record after
+a tool reply. The old test reader could parse an unfinished record. A deterministic
+two-case regression with the original reader reproduced one failure. The fix
+uses the existing bounded observation wait, requires a completed trailing record
+and still parses every record; malformed complete records remain failures.
+
+The exact nine-file hosted Node group passed 164 cases with no failures, errors or
+skips on local Node v26.5.0. The command path's name contains node@22, but its
+observed binary version is v26.5.0; do not claim the hosted Node version was used.
+The first local attempt could not import the SDK and executed no behavior cases.
+Installing from the unchanged repository lock in this isolated workspace resolved
+that dependency issue. No global/live-service environment or production source
+changed. The preimage and postimage hashes, failure, repair and all final JUnit
+cases are retained.
+
+Publish this exact test-only repair with committed guard proof and return it on
+#2175. Reconcile the original running CI before any new hosted dispatch; avoid a
+superseding run that cancels unfinished source evidence.
+
+## Next H6 source cohort
+
+A disposable exact current-source assembly exists at
+`/tmp/h6-common-fence-source-1jky3u6l`.
+`common-fence-source-preparation.json` contains every baseline source hash and
+the four authenticated H3 patch applications. Its starting artifact is the
+current H2 HTTP 112-file emission with manifest
+`01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d`.
+The final H3 Broker is
+`93531372cf343cd92e47fd430acf949b141759ca8cf2b4a5c86b1be4c56246c2`,
+quota reader
+`a1a9ab24d502aad6a3a6edd38f2cb8a781be1175e9715eb36c2ddcea475c88c1`,
+and current combined entry
+`41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc`.
+Only the prior H3 Broker/quota deltas have been applied. **No new fence
+implementation or accepted artifact metadata has been produced.**
+This source remains unselectable.
+
+### Existing owners and accepted order
+
+The order remains **publication → physical admission → Broker → SQLite**.
+Native selection must enter the physical fence from the shared
+`native_generation._select_locked` boundary, including direct installer calls.
+Both service enrollment transactions already hold publication and must enter
+physical admission before their Broker lock. Broker acquire/application
+transactions enter admission before Broker; quota publication enters admission
+before its cache lock. Provider I/O stays outside both.
+
+Reuse `support_bundle._policy_open_scope`, `_policy_handles_current` and
+`_policy_close_scope`; they are the existing physical custody owner.
+Policy publication already uses this scope. Do not recursively take the same
+flock with a second descriptor. Other holders include lane admission, recovery
+artifacts and routing-policy snapshots; check their actual call order before
+joining any caller.
+
+A later advisory suggestion to invert selection to admission→publication was
+rejected: it conflicts with the accepted order and existing enrollment nesting.
+This bounded cohort does not perform an order migration.
+
+### Authenticated helper closure
+
+- The helper is already a native payload. Add it to the existing native Go
+  preload before business modules; retain held-byte compilation and foreign-module
+  refusal. Do not populate the ordinary module slot with a different loader.
+- Native selection obtains a fixed verified helper from the target release via
+  its existing verified-release owner and a private handle, not ambient sys.path.
+- The remote closure must advance together through support_bundle source
+  generations, remote_sub's actual hashed manifest, paid_provider_entry's closed
+  support set/import owner, and **paid_model_owner's independent closed set**.
+  Preserve historical sets; do not replace equality with subset acceptance.
+- For remote physical state use paid_model_owner.canonical_state_ext and its
+  committed lane context. native_runtime_bindings.owner_path intentionally does
+  not authenticate remote-support aliases; resolving arbitrary symlinks is not
+  a substitute.
+- First lock creation remains with the existing policy/lane owner. The new
+  helper/selector must not create, chmod, repair or silently bypass a missing
+  physical installation.
+
+### Source currentness and recovery
+
+The existing native_runtime_bindings adapter authenticates immutable RELEASE
+metadata and aliases but does not read CURRENT. A bounded pure selection reader
+in that adapter may bind **new claims** to the canonical existing 0600 CURRENT
+record and the executing immutable generation while the common fence is held.
+Its current JSON reader expects 0444 metadata and cannot be reused unchanged
+for the selector record. Environment labels are not selection authority.
+
+Keep current-selection enforcement out of unconditional owner_path validation and
+original recovery/settlement. New claims from a stale running service must refuse;
+original pending/unknown/terminal effects must remain recoverable without resend.
+A reread alone does not serialize an unfenced selector.
+
+### Writer census and proof still owed
+
+The bounded lexical census found code readers and candidate writers; it is not a
+complete writer closure. The two native service/account enrollment writers,
+existing policy publisher and H2 quota publisher are identified. Provider
+configuration/credential rotation behind GLM_CONFIG/MINIMAX_CONFIG, other account
+registration writers and legacy already-running writers still require closure.
+Do not read or disclose credential contents. The accepted provider-plan source
+7bc8a208 documents the original account owner but does not itself establish every
+registration mutation's fence participation.
+
+The actual H2 quota source is the grok47 quota_billing replacement and the Broker
+is its exact forward composition; do not patch the older uncomposed candidate
+quota source and claim current behavior.
+
+Use actual staged owners, separate processes and deterministic barriers to prove
+positive serialization: claim-first versus selection/quota/enrollment publication,
+publication-first stale-choice refusal and coherent success, two generations
+sharing the same physical lock, competing claims for last capacity, existing-owner
+bootstrap, changed lock/directory/source custody refusal, and original
+recovery/settlement after selection change. Do not replace these with more
+unsupported-envelope refusal-only tests.
+
+The unresolved external writer/credential closure, actual quantities, billable
+meter vector, non-Go APPLICATION issuer/envelope and original Go401 hold remain
+separate gates. H3 remains outside selectable artifacts. Root retains protected
+delivery/native/C3/J recovery; H4/H5 and provider-plan/AUTO writers retain their
+effects. No new permission request is justified by these source gaps.
+MISSION_COMPLETE=false.

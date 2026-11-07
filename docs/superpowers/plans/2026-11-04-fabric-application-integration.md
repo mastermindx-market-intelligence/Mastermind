@@ -450,3 +450,20 @@ Reported native sequence 36 supersedes the old sequence-35 planning observation;
 no fresh selector CAS is claimed here. Worker/J receipts do not create APPLICATION
 grants. The non-Go issuer/envelope and product journey remain open. H6 continues
 its original common-fence/whole-operation contract; H3 is still unselectable.
+
+
+### Hosted Node fixture observation repair
+
+The published debb source passed its exact committed guard and returned on #2175
+comment 6711012115 with exact readback. One hosted run 42398870463 was dispatched.
+Shard 0 exposed an incomplete JSONL read in the private-tunnel test fixture; the
+actual repository pytest shard did not run in that job. The existing bounded
+observation wait now requires a complete record and retains malformed-record
+refusal. Its deterministic baseline reproduced one failure; the exact nine-file
+Node group then passed 164 with all original gateway assertions. This is a test-only
+repair, not a production transport change or hosted green claim. See
+counter-reader-ci-repair.json and continuation-frontier-20261107.md.
+
+The next H6 common-fence source has been assembled from exact current H2 bytes
+plus the four prior H3 deltas; implementation and positive concurrency proof are
+still owed. Current runtime/effect fences remain unchanged. MISSION_COMPLETE=false.

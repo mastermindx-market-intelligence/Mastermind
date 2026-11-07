@@ -1,0 +1,23 @@
+{
+  "source_head": "debb50ddecb47c21d6859069d1e3d8cec975fb97",
+  "scope": "Deterministic regression with locked dependencies; original reader unchanged",
+  "node_version": "v26.5.0",
+  "command": [
+    "/opt/homebrew/opt/node@22/bin/node",
+    "--test",
+    "--test-name-pattern=fixture counters",
+    "--test-reporter=tap",
+    "--test-reporter-destination=stdout",
+    "--test-reporter=junit",
+    "--test-reporter-destination=/tmp/h6-counter-regression-q0ux_2du/baseline-ready.xml",
+    "private-tunnel-auth.test.mjs"
+  ],
+  "rc": 1,
+  "seconds": 0.315,
+  "cases": 2,
+  "failures": 1,
+  "errors": 0,
+  "skips": 0,
+  "log_sha256": "eda34175ab9f704094c424f2823c4717bed0455f3a72ba8ade09fbfecb046be0",
+  "xml_sha256": "d7a8ae1a17a76c5f83f8d3a7e7ad293916b83ac4e19ae07cdf9b8c8ca15bdd0a"
+}

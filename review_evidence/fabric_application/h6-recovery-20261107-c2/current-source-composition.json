@@ -42,6 +42,7 @@
     "receipt": "final-handoff-source.json",
     "tree": "21a7b056a8da8e596ff4a208bf87fe1ba1ba295e"
   },
+  "continuation_frontier": "continuation-frontier-20261107.md",
   "current_final_join": {
     "completed_hermes_incorporated": "c71cc56c3631183efed8eccdb6a6c5060b1050a5",
     "current_native_parent": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
@@ -128,6 +129,12 @@
     "physical_account_join": "NOT_JOINED",
     "qualification": "h5-composition-qualification.json"
   },
+  "handoff_return": {
+    "body_sha256": "7ff51ca731946d4e7c91128bfb1685ff39cb5d1c343b7eb97fbc5594dd28c7c8",
+    "exact_readback": true,
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711012115"
+  },
+  "hosted_node_fixture_repair": "counter-reader-ci-repair.json",
   "housekeeping": "Commit applied and read back; automatic Git housekeeping reported a permission refusal against an unrelated worktree index. No housekeeping retry or permission mutation was attempted.",
   "incoming_ci_script_blob": "7eb889d42f46724c939f1d7e62b3655ebc84c0f9",
   "incoming_hermes": "c40f58b42383684e0ded1db7a7cb48741ddb7abf",

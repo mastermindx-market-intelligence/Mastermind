@@ -1,0 +1,38 @@
+TAP version 13
+# Subtest: fixture counters wait for a complete JSONL append without dropping rows
+not ok 1 - fixture counters wait for a complete JSONL append without dropping rows
+  ---
+  duration_ms: 23.445666
+  type: 'test'
+  location: '/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/studio_direct_mcp/private-tunnel-auth.test.mjs:165:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    an incomplete append is not a complete counter snapshot
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/studio_direct_mcp/private-tunnel-auth.test.mjs:177:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: fixture counters still reject a persistently malformed completed record
+ok 2 - fixture counters still reject a persistently malformed completed record
+  ---
+  duration_ms: 1.8645
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 1
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 262.393042

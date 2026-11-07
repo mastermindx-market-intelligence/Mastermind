@@ -1,0 +1,54 @@
+{
+  "schema": "mastermind.h6.ci_counter_reader_repair.v1",
+  "failed_ci": {
+    "run": 42398870463,
+    "job": 128482114242,
+    "head": "debb50ddecb47c21d6859069d1e3d8cec975fb97",
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42398870463/job/128482114242",
+    "step": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+    "case": "fifth concurrent backend op on one session is refused as busy",
+    "exception": "SyntaxError: Unterminated string in JSON at position 106 (line 1 column 107)",
+    "stack_owner": "private-tunnel-auth.test.mjs:162 readCounters, called at639",
+    "repository_pytest_shard_executed": false,
+    "other_shards_at_observation": "IN_PROGRESS"
+  },
+  "source": {
+    "path": "integrations/studio_direct_mcp/private-tunnel-auth.test.mjs",
+    "preimage_sha256": "55941b3caf9c20758d6344c09396cef25480530a296e47323993a2d87bafc212",
+    "postimage_sha256": "9f5d683be6771494150e7859897bbe074ca2195a480535eda7cac874e714f37f",
+    "production_source_changed": false,
+    "gateway_assertions_weakened": false
+  },
+  "cause": "The fixture marker timer can append JSONL after its tool response; a concurrent read can observe an unfinished trailing record. The original reader parsed that snapshot immediately.",
+  "repair": "Reuse the existing bounded observation wait, require the trailing newline and parse every record. No record is skipped or discarded. Permanent malformed complete records still fail.",
+  "before": {
+    "behavior_cases": 2,
+    "failures": 1,
+    "errors": 0,
+    "skips": 0,
+    "receipt": "counter-reader-regression-before.json"
+  },
+  "after": {
+    "same_nine_hosted_node_files": true,
+    "cases": 164,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "seconds": 68.669,
+    "node_version": "v26.5.0",
+    "receipt": "counter-reader-ci-group-after.json",
+    "raw_log_sha256": "fb675bd43ff01e275c2a81a2e7df682c5d31e7d414635e67c9e3a4e85e7e9365",
+    "raw_log_retained_at": "/tmp/h6-counter-regression-q0ux_2du/candidate-ci-group.log",
+    "junit_all_case_records": "counter-reader-ci-group-after.xml"
+  },
+  "environment_attempt": {
+    "behavior_cases_executed": 0,
+    "cause": "Missing SDK in the isolated H6 workspace",
+    "repair": "npm ci from unchanged repository lock, ignore scripts; no global or live-service environment modified",
+    "lock_sha256": "2caae8997e5e79218183a0acc4ae4e14a2a6379ad33b7694f9f052c9b2af5d39",
+    "lock_unchanged": true
+  },
+  "hosted_success_claimed": false,
+  "dispatch_repeated": false,
+  "mission_complete": false
+}
