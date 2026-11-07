@@ -113,19 +113,107 @@ empty list, and the installed Executive reader returned backend_unavailable on
 2026-11-07. Control, Codex worker and MCP launchd services are running against
 release `b4a5a8925c6c1412dac67ba296cf65ee81c4d4c8`; that release still declares
 ACP `implemented=False`. The currently accepted paid GLM profile is one sealed
-model-only request with `stream=false`, not a native history/tool/stream loop.
-The next source investigation is the native session/admission adapter, retaining
-one turn execution owner and existing ACP/MCP identity/cancellation contracts.
+model-only worker request with `stream=false`. That restriction governs paid
+worker execution; it is not a prerequisite for ordinary attended native chat.
+The complete donor already contains native DeepSeek account/API-key providers,
+streaming, history and model settings. Preserve those owners. The current-donor
+Agent/ACP adapter is separately qualified below; no worker route is enabled.
 
 Original paid Fabric operation `deepseek-mmos-multiturn-20261106-c2-r1` (root
-`deepseek-mastermind-chat-20261106-c2`, controller PID 27072) has no verified
-START or return. Its latest status is ACTIVE_OR_WAITING / UNVERIFIED with
-CONTROLLER_RETURN_UNCONFIRMED and retry_authorized=false. It owns only the
-separately assigned fresh-conversation paths. Do not duplicate or rehome it;
-reconcile the original controller/result before consuming or replacing its work.
+`deepseek-mastermind-chat-20261106-c2`, controller PID 27072) had no verified
+START while waiting. At 04:43 UTC its original controller became VERIFIED_TERMINAL with rc=1.
+The exact retained response reports `unrecognized_model` for `MiniMax-M3` during
+`generate_session_title`, followed by `PROVIDER_TERMINAL kind=permission rc=1`.
+No accepted source result was returned; retry remains false and execution
+absence is not established by the projection. Do not replay that provider action
+on another model/carrier or treat it as an accepted implementation. Its separately
+assigned fresh-conversation paths remain outside this source tranche.
 This does not qualify as durable execution running or as completed DSH chat.
 
-Next: publish this concrete UI integration, resolve required CI at its exact head,
-and continue the existing native Send/admission source and installed route. Final
-acceptance still requires an admitted useful response, same-conversation follow-up,
+This UI tranche is published in PR #2177. The continuation adds the persistent
+native package and current-donor runtime compatibility below. Final acceptance
+still requires a useful provider response, same-conversation follow-up,
 stop/reconnect behavior and the signed-in deployed desktop/mobile journey.
+
+## 2026-11-07 native runtime and attended package milestone
+
+The full-app source at donor `687f282e8625c6b8d11ff58211a90524be2e4317`
+now has reproducible, hash-bound compatibility patches outside the clean donor.
+Strict dispatch retains native staged scheduling and original result ownership;
+governed MCP generations retire before replacement, refuse stale/rich results
+before materialization, and disable the SDK schema retry. The known fixed Python
+ACP reader uses explicit legacy negotiation without a speculative sibling.
+
+`dsh_native_agent.mjs` mounts the admitted tools into the actual existing native
+Agent. The original inherited-FD v2 ACK completes before model work. Agent-owned
+restrictions remain after MCP revocation. It creates no second Agent, provider,
+session, retry, execution, result or process owner.
+
+Verification at this milestone:
+
+| Check | Result |
+| --- | --- |
+| Current-donor dispatch/MCP compatibility | 42 passed |
+| Real current native Agent → ACP v2 → source workspace reader → common result | Read and observed-query search passed; three deterministic model rounds, actual returned bytes |
+| Revocation and owner abort | Second call refused; inherited sentinel stayed hidden and unexecutable |
+| Cancellation | Original native child and adapter tasks settled |
+| Wrong tool contract | Refused before model work; conservative adapter classification preserved; child cleanup proved |
+| Native process suite | 5 passed |
+| Persistent attended package | Staged 116,144 file/link entries; complete native app rebuilt with Mastermind title and company plugin |
+| Package identity check | Passed with exact Node and internal dependency closure |
+| Generated public Caddy candidate | Adapted and validated by installed Caddy 2.11.4; no route installed |
+
+The native fixture uses a deterministic provider and explicit ephemeral test
+persistence, with a synthetic registry projection. It does not qualify a paid
+provider, durable native JSONL persistence, the missing fixed installed MCP
+launcher, dedicated UID containment, or installed ACP activation. The attended
+package instead retains the complete app's actual native persistence, credential
+and provider implementation.
+
+Staged release:
+`/Users/chriswong/Library/Application Support/Mastermind/DeepSeek/releases/dsh-687f282e-company-20261107-c2`.
+Persistent state:
+`/Users/chriswong/Library/Application Support/Mastermind/DeepSeek/state-20261107-c2`.
+Package manifest SHA-256:
+`6de31eb746e98b32c6f0a7af3f94cff22befd6e6d93f7dcc1a19f7ee4d075448`.
+
+The package provides a native launcher, launchd definition, public-edge candidate,
+and matching sealed OS build input. Its immutable company CLI overlay is separate
+from editable native profiles, so normal model/settings changes survive restart.
+The package has not been installed into launchd or connected to public ingress.
+The candidate `chat.mastermind-x.com` had no DNS address in the observed lookup.
+A separate DSH listener grant must use the incumbent transport/publication owners,
+rather than reusing the closed OS or Fabric application slots.
+
+The first hosted PR run passed ordinary build/test/native checks, but CodeQL
+identified a URL substring assertion in the CSP test. The assertion now compares
+parsed directive tokens exactly. No check suppression or rule change is used.
+
+The owned package then completed all seven native artifact-build stages using
+pnpm 11.28.5, with 325 client artifacts and the supported `DSH_CLIENT_TITLE`
+value `Mastermind`. The native package manager relinked the copied dependency
+tree from its unchanged lockfile before building. The original donor was not
+rebuilt or edited. The company hero now uses its supported brand-mark slot.
+Company client SHA-256:
+`9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3`.
+Native client build record SHA-256:
+`c7c7f3b387231d72e42b0d9addbbc7b6ed00f1752405c9c04dc177fb4d829439`.
+
+A real local Chromium visit to the packaged app proved the native launch-token
+exchange, clean redirected URL, unauthenticated 401, authenticated 200, loaded
+Mastermind company plugin, native session composer/workspaces/model controls,
+and no page exceptions. Desktop and mobile screenshots were captured privately.
+The original app process stopped with exit 130. This is local browser evidence;
+it makes no claim about public DNS/TLS, a provider response or installed service.
+
+The branded rebuild was visited again in Chromium at desktop 1440×1000 and
+mobile 390×844. Its document title is `Mastermind`, both native branding slots
+are mounted, the preview acknowledgement saved through native settings, and the
+actual provider setup UI offers `Add API Key` and `Sign in`. No account was
+signed in and no provider request was sent. The new process again settled at 130.
+The final company-plugin native-render test passed after the hero-slot addition.
+
+A further native process restart preserved the saved preview acknowledgement
+(`firstRunNotice=false`) with the same persistent state, reauthenticated cleanly,
+rendered the Mastermind title without page exceptions, and stopped at exit 130.
+Provider setup remained explicitly unconfigured; no successful answer is inferred.

@@ -1,8 +1,10 @@
 # DeepSeek Harness full-application adoption: developer pilot
 
-**State: full-app OS consumer and company plugin implemented; local donor boot and native plugin rendering verified. Governed provider chat and production installation remain open.**
+**State: full-app OS consumer, company plugin, persistent attended package and current-donor governed Agent adapter implemented. Local rendering and five native Agent/ACP journeys are verified. Public installation and signed-in provider acceptance remain open.**
 
-See [company plugin implementation and build](company_plugin/README.md) and
+See [company plugin implementation and build](company_plugin/README.md),
+[persistent attended deployment](ATTENDED_DEPLOYMENT.md),
+[current full-app runtime compatibility](runtime_compat/README.md), and
 [delivery evidence and continuation](IMPLEMENTATION.md). The existing local launcher
 and earlier pilot evidence below remain applicable; the external donor volume was
 available again and its original pinned checkout was verified clean on 2026-11-07.

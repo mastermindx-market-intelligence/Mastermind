@@ -93,6 +93,7 @@ export function apply(ctx: CompanyContext): void {
   }), "mastermind: Noir palette");
   ctx.slots.inject("sidebar.brand.mark", () => ctx.slots.register({name:"sidebar.brand.mark"},BrandMark));
   ctx.slots.inject("sidebar.brand.name", () => ctx.slots.register({name:"sidebar.brand.name"},BrandName));
+  ctx.slots.inject("conversation.hero.brand.mark", () => ctx.slots.register({name:"conversation.hero.brand.mark"},BrandMark));
   ctx.slots.inject("main", () => ctx.slots.register({
     name:"main",key:"mastermind-projects",inject:()=>({store:company.state,onOpenProject:company.openProject}),
   },CompanyPanel));

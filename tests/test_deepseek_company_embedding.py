@@ -50,8 +50,13 @@ def test_sealed_static_owner_adds_only_the_exact_frame_origin():
     })
     shell = asyncio.run(response(app, "/os/"))["content-security-policy"]
     callback = asyncio.run(response(app, "/os/auth/callback"))["content-security-policy"]
-    assert "https://chat.mastermind-x.com" in shell.split("frame-src ")[1].split(";")[0]
-    assert "https://chat.mastermind-x.com" not in shell.split("connect-src ")[1].split(";")[0]
-    assert "frame-ancestors 'none'" in shell
-    assert "https://chat.mastermind-x.com" not in callback
-    assert "frame-ancestors 'self'" in callback
+    def directives(policy):
+        return {tokens[0]: tokens[1:] for row in policy.split(";") if (tokens := row.split())}
+    shell_policy, callback_policy = directives(shell), directives(callback)
+    existing = ["'self'", "https://dev-eo0jf8us5mup7wd5.us.auth0.com"]
+    assert shell_policy["frame-src"] == [*existing, "https://chat.mastermind-x.com"]
+    assert shell_policy["connect-src"] == existing
+    assert callback_policy["frame-src"] == existing
+    assert callback_policy["connect-src"] == existing
+    assert shell_policy["frame-ancestors"] == ["'none'"]
+    assert callback_policy["frame-ancestors"] == ["'self'"]

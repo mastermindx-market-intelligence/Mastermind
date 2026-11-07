@@ -1,4 +1,5 @@
 import { createAdmittedPlugin } from '@deepseek-ai/dsh-mcp-client'
+import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { compileDshMcpGrant } from './dsh_mcp_grant.mjs'
 import { compileDshAttemptOverlay } from './dsh_attempt_overlay.mjs'
 import { qualifyLoadedDispatchRuntime } from './dsh_dispatch_preflight.mjs'
@@ -25,15 +26,15 @@ export function createDshToolProfile(options) {
 
 // Private composition hook: a grant-bound host rechecks after asynchronous
 // preflight, immediately before the existing plugin can start its transport.
-function composeDshToolProfile({ admitGeneration, signal }, assertBeforeTransport) {
-  const admitted = createAdmittedPlugin(admitGeneration, signal)
+function composeDshToolProfile({ admitGeneration, signal, protocolMode = 'auto' }, assertBeforeTransport) {
+  const admitted = createAdmittedPlugin(admitGeneration, signal, protocolMode)
   return Object.freeze({
     ...admitted,
     name: 'mastermind-dsh-tool-profile',
     async apply(ctx, config) {
       signal.throwIfAborted()
       const snapshot = structuredClone(config)
-      await qualifyLoadedDispatchRuntime(ctx, { signal })
+      await qualifyLoadedDispatchRuntime(ctx, { signal, agent: scopeOf(ctx) })
       signal.throwIfAborted()
       assertBeforeTransport?.(snapshot)
       signal.throwIfAborted()
@@ -67,7 +68,9 @@ export function createDshGrantedToolProfile({
     bound?.assertConfig(config)
   }
   const profile = composeDshToolProfile(
-    { admitGeneration: grant.admitGeneration, signal }, assertBeforeTransport,
+    // The fixed ACP reader uses pinned Python MCP1.28.1. Declare its known
+    // protocol to the native SDK; do not spawn a speculative discovery sibling.
+    { admitGeneration: grant.admitGeneration, signal, protocolMode: bound ? 'legacy' : 'auto' }, assertBeforeTransport,
   )
   return Object.freeze({
     ...profile,
