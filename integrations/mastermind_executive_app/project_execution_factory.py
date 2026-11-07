@@ -299,6 +299,13 @@ class ProjectExecutionAppFactory:
                     state="ACCEPTED" if receipt is not None else "NOT_FOUND", receipt=receipt)
             return dict(schema=wire.RESULT_SCHEMA, operation=operation, ok=True, data=data, error=None)
         except Exception as exc:
+            if operation == "status":
+                # This read cannot resolve a retained submission when authority
+                # or storage is unavailable. Do not probe historical effects
+                # again, or let their existence change the read's refusal.
+                code = exc.code if isinstance(exc, ProjectExecutionRefusal) else "refused"
+                return dict(schema=wire.RESULT_SCHEMA, operation=operation, ok=False, data=None,
+                            error=dict(code=code, message="Project execution is unavailable for this request"))
             current = current_foreground_operation()
             existing = self.service._require_runtime().store.find_event_by_command_id(current._command)
             code = ("previous_workspace_unavailable" if isinstance(exc, source_owner.PreviousWorkspaceUnavailable) and existing is None

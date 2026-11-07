@@ -232,6 +232,58 @@ def test_core_source_issuer_rejects_fake_and_subclass_services(tmp_path, monkeyp
         source_owner.bind_issuer(object.__new__(OtherService))
 
 
+def test_status_distinguishes_authorized_absence_from_refused_lookup(tmp_path, monkeypatch):
+    factory, principal, args, _, prepared = fixture(tmp_path, monkeypatch)
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    absent = asyncio.run(invoke(factory, principal, lookup, "status"))
+    assert absent["ok"] and absent["data"]["state"] == "NOT_FOUND"
+    assert absent["data"]["receipt"] is None
+
+    factory.planning._test_bindings[0]["profiles"]["member-0"]["enabled"] = False
+    refused = asyncio.run(invoke(factory, principal, lookup, "status"))
+    assert not refused["ok"] and refused["data"] is None
+    assert refused["error"] == {
+        "code": "refused",
+        "message": "Project execution is unavailable for this request",
+    }
+    runtime = factory.service._require_runtime()
+    assert runtime.jobs.list_jobs() == [] and runtime.attempts.list_attempts() == []
+    assert prepared == []
+
+
+def test_failed_status_read_returns_opaque_refusal_without_another_store_read(tmp_path, monkeypatch):
+    factory, principal, args, _, prepared = fixture(tmp_path, monkeypatch)
+    runtime = factory.service._require_runtime()
+    reads = []
+
+    def unavailable(command):
+        reads.append(command)
+        raise ConnectionError("private storage failure must not escape the response")
+
+    async def read_status():
+        p = dataclasses.asdict(principal); p["scopes"] = list(p["scopes"])
+        w = dataclasses.asdict(factory.planning._test_workspace_principal)
+        w["scopes"] = list(w["scopes"])
+        frame = dict(schema=wire.SCHEMA, operation="status",
+            arguments={key: args[key] for key in ("operation_key", "work_ref")},
+            principal=p, workspace_principal=w)
+        async with _project_execution_foreground_dispatch(runtime, frame, lambda: None):
+            # The existing foreground owner has admitted this read. Fail the
+            # original-status lookup, not its earlier authorization boundary.
+            monkeypatch.setattr(runtime.store, "find_event_by_command_id", unavailable)
+            return await factory.handle_frame(frame)
+
+    refused = asyncio.run(read_status())
+    assert not refused["ok"] and refused["data"] is None
+    assert refused["error"] == {
+        "code": "refused",
+        "message": "Project execution is unavailable for this request",
+    }
+    assert len(reads) == 1
+    assert runtime.jobs.list_jobs() == [] and runtime.attempts.list_attempts() == []
+    assert prepared == []
+
+
 @pytest.mark.parametrize("authority_change", [
     "unchanged", "execution_disarmed", "workspace_revoked", "expired_token",
 ])
@@ -328,6 +380,19 @@ def test_lost_submit_reopens_original_durable_job_without_fresh_plan_or_dispatch
         else:
             assert not status["ok"] and not replay["ok"]
             assert status["data"] is None and replay["data"] is None
+            assert status["error"] == {
+                "code": "refused",
+                "message": "Project execution is unavailable for this request",
+            }
+            # The failed read does not resolve the earlier submission. Its
+            # original effect remains uncertain until authority is restored.
+            assert replay["error"]["code"] == "effect_unknown"
+            old_planning._test_bindings[0]["profiles"]["member-0"]["enabled"] = True
+            for selected, operation in ((lookup, "status"), (args, "submit")):
+                restored = asyncio.run(invoke(recovered, principal, selected, operation))
+                assert restored["ok"], restored
+                assert restored["data"]["receipt"]["job_id"] == original_job.job_id
+                assert restored["data"]["receipt"]["intent_id"] == original_source["intent_id"]
 
     runtime = restored_service._require_runtime()
     assert runtime is not original_runtime and runtime.store is not original_runtime.store
