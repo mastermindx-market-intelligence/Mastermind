@@ -248,3 +248,66 @@ The current Chairman's ChatGPT Web review waiver supersedes this runbook's histo
 A source preview from the candidate `/Volumes` checkout already refused before installation because the frozen private reader's HOME ancestry guard applies there. Preserve that refusal. The existing control-bundle owner is the legitimate installed-source adoption path; there is no alternate installer invocation or guard exception.
 
 No installed action or consumer acceptance is implied by this source procedure. C2's held source, credentials, profiles, grants, config, Node, backend, dependencies, plist and all retained parent transactions remain bound to their existing owners.
+
+### Exact committed-v4 inventory successor
+
+The first original-workspace recovery preview under installed v4 refused with
+`INDEX_RECOVERY_STATE_UNAVAILABLE` before any recovery effect. The bounded
+diagnostic isolated `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`: both exact `ls-files`
+inventories exceeded the ordinary 1 MiB command-output buffer. HEAD, tree,
+real index and lock identities remained readable and unchanged.
+
+The corrected publisher hashes all stdout bytes of the four fixed, read-only
+recovery inventories as binary streams. It preserves their NUL delimiters and
+existing receipt fingerprints, enforces a separate 64 MiB ceiling per inventory,
+retains the configured command deadline and 1 MiB stderr ceiling, and refuses
+on limit, timeout, stream/process error or nonzero exit. An abort requests
+`SIGKILL` and allows at most one further second for confirmed child closure.
+If closure cannot be confirmed, cleanup uncertainty settles as an unavailable
+observation without claiming the reader exited. No partial digest is admitted.
+Ordinary command-output limits and every index/lock/HEAD/tree/custody fence stay
+unchanged. The tests include an actual Git index exceeding both old buffers,
+all four binary inventories, tail sensitivity, the exact ceiling and failures.
+
+This publisher is one exact child within the existing
+`native-pool-pin-enrollment` owner. It preserves the committed v4 transaction:
+
+- Parent plan: `7d0112d29668a3bb4ef26790387d1010fedd638895088cd08a34d9d893a12301`.
+- Parent manifest: `8af46ae3e2ffea1ed0af23c78f9ed11dedb3411f05118937679fb535c5048d76`.
+- Parent publisher: `a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e`.
+- Corrected publisher: `6b50521c6d94c83a2f68a700f6f658c4d52ec91cd7fc29bedb00a9d4f6647f05`.
+- Unchanged adapter: `290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c`.
+- Unchanged config: `f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df`.
+
+The child journal is
+`native-pool-pin-enrollment-publisher-inventory`, generation
+`c4-publisher-inventory-20261107-v1`. Its plan binds the full nine-file v4
+fingerprint, all earlier parent proofs and the retained v4 modes. Only the
+publisher and projected manifest change, in the order
+`OLD -> PUBLISHER_ONLY -> COMMITTED`; the adapter is an invariant. The manifest
+projection changes only `files["git-publish.mjs"]`. A committed byte state without
+the durable child result remains `EFFECT_UNKNOWN`. Once a child exists,
+incomplete or foreign child evidence blocks startup without v4 fallback.
+
+After this source is qualified and protected, install the complete control
+bundle through its existing CAS owner. Stage the exact corrected publisher
+under the permitted HOME-owned source directory, and use the same enrollment
+command with the **parent manifest** above. Fresh preview binds the new child
+plan; quiesce and stop only C4, apply once, retain/read back that child, and start
+through the incumbent owner. Preserve v4 and earlier receipts byte-for-byte.
+Reconciliation always uses the same child and original plan, with no replay of
+completed module writes. The real native proof context and publication lock
+remain held through writes, result settlement and the final parent fingerprint.
+
+Only actual installed-source/client proof permits a new original-Macro recovery
+preview. The previous pre-effect refusal is retained as evidence; this source
+repair does not itself move its lock, commit source, publish a branch, deploy a
+consumer or establish Sector acceptance.
+
+Qualification: the final publisher suite passed 142 tests; the enrollment and
+real native-parent suites passed 110, control/closure/source identity passed 63,
+and retained native-reader coverage passed 12. The final publisher digest was
+then rechecked against the source-fixed enrollment target. Earlier runs overlap;
+they are not additive. Initial fixture-only failures and the bounded-cleanup
+review correction remain in the
+[source receipt](../evidence/persistent-sector-leadership-2026-11-07/c4-publisher-pair/inventory-streaming-correction.json).
