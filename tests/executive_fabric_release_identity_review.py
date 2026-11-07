@@ -740,7 +740,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "44eef790fb1af899e2ddd24df561c7e6a909550f6e030d6b3494df8070587593",
+    "sha256": "7531a99e59e878aecc1df9d0bf0b6a388a8b1af3dfd5f8d3035a9beb5c91edf6",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -775,3 +775,7 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
+
+# Native Agent OS v2 adds private readback and projects an optional real child.
+# Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
+# the same sole 512 operand remains at (23, 17, 20), with no new identity mask.

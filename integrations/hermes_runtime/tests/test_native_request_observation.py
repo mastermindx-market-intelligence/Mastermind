@@ -16,7 +16,7 @@ from pathlib import Path
 import threading
 import textwrap
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Callable, Optional
 
 import pytest
 
@@ -43,6 +43,9 @@ def definitions(monkeypatch, vendor, path, names, *, values=None, methods=None):
     item = MANIFEST["files"][path]
     data = (FIXTURES / item["fixture"]).read_bytes()
     assert hashlib.sha256(data).hexdigest() == item["sha256"]
+    if "blob" in item:
+        assert hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() == item["blob"]
+        assert len(data) == item["bytes"]
     target = vendor / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
@@ -110,6 +113,12 @@ def native(tmp_path, monkeypatch):
                 "sanitize_outbound_kwargs": lambda *args: calls.append("sanitize"),
                 "strip_images_for_rejecting_model": lambda *args: None,
                 "observe_request_tools": lambda *args: None})
+    tool_executor = definitions(monkeypatch, vendor, "agent/tool_executor.py",
+        {"_ToolCallRef", "_ManagedToolResult", "_dispatch_authorized_once", "_commit_tool_result",
+         "_run_agent_tool_execution_middleware", "_flush_session_db_after_tool_progress"},
+        values={"dataclass": dataclass, "Any": Any, "Callable": Callable, "Optional": Optional,
+                "BudgetConfig": object, "_ConcurrentToolAuthorizationGate": object,
+                "threading": threading, "json": json, "logging": logging, "logger": logging.getLogger(__name__)})
     authority_module = definitions(monkeypatch, vendor, "gateway/session_authority.py", {"SessionAuthority"},
         methods={"_handle", "_stamp_claim", "adopt_agent", "check_approval_generation", "_execute_claimed"},
         values={"contextlib": contextlib, "asyncio": asyncio, "RuntimeStoreError": NativeStoreError,
@@ -190,7 +199,8 @@ def native(tmp_path, monkeypatch):
         return requests.build_api_request(agent, **args)
     return SimpleNamespace(vendor=vendor, home=home, calls=calls, publications=publications, requests=requests, results=results,
                            terminal=terminal, ingress=ingress, finite=finite, authority=authority, runner=runner,
-                           launch=launch, binding=binding, rows=rows, claim=claim, build=build, lifecycle=lifecycle)
+                           launch=launch, binding=binding, rows=rows, claim=claim, build=build, lifecycle=lifecycle,
+                           tool_executor=tool_executor)
 
 
 def run_admission(native, *, behavior=None, text="question"):
