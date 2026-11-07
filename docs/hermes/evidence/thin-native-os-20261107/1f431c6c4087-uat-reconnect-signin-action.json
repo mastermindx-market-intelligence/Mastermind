@@ -1,0 +1,26 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "observation": {
+    "before": {
+      "at": "2026-11-07T09:05:04.479Z",
+      "pid": 75264,
+      "windows": 1,
+      "names": [
+        null,
+        "Your company,\nin focus.",
+        null,
+        null,
+        null,
+        "Welcome back.",
+        null,
+        "Sign in",
+        "Display settings",
+        null,
+        null
+      ]
+    },
+    "pressedAt": "2026-11-07T09:05:04.553Z",
+    "action": "One reconnect sign-in after normal process reopen"
+  },
+  "credentialCeremonyActor": "not_attributed"
+}

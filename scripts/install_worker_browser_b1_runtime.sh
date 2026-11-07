@@ -211,6 +211,14 @@ browser_root="$runtime_root/browsers"
     --no-audit \
     --no-fund
 
+# Fixed first-party credential receiver. It is inert for v1 browser launches.
+# The original install manifest inventories this node_modules subtree; adding
+# it requires a newly ratified manifest before a v3 credential launch can run.
+/usr/bin/install -d -m 0700 "$runtime_root/node_modules/@mastermind/workbench-vault"
+/usr/bin/install -m 0600 \
+  "$repo_root/integrations/worker_browser_runtime/vault/child.cjs" \
+  "$runtime_root/node_modules/@mastermind/workbench-vault/child.cjs"
+
 /usr/bin/env -i \
   HOME="$runtime_root/home" \
   LANG=C \

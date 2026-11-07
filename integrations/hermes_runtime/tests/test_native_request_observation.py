@@ -424,6 +424,25 @@ def test_content_depth_cycle_and_work_bounds(monkeypatch):
     with pytest.raises(observation._ObservationLimit): observation._content_digest({"messages": "é" * 12})
 
 
+def test_shared_prompt_digest_preserves_historical_value_budget(monkeypatch):
+    # This helper is also used by the accepted native Agent OS prompt receipt.
+    # Two nested lists plus their leaf have exactly three value nodes, depth 2.
+    value = {"messages": [["kept"]]}
+    monkeypatch.setattr(observation, "MAX_DEPTH", 2)
+    monkeypatch.setattr(observation, "MAX_NODES", 3)
+    raw = b'{"messages":[["kept"]]}'
+    got = observation._content_digest(value)
+    assert got["content_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert got["content_bytes"] == len(raw)
+    # The tools digest deliberately includes its supplied object's root/keys.
+    assert observation._tools_digest({"tools": value}) == {"status": "unavailable", "reason": "content_limit"}
+    monkeypatch.setattr(observation, "MAX_NODES", 2)
+    with pytest.raises(observation._ObservationLimit): observation._content_digest(value)
+    monkeypatch.setattr(observation, "MAX_NODES", 3)
+    monkeypatch.setattr(observation, "MAX_DEPTH", 1)
+    with pytest.raises(observation._ObservationLimit): observation._content_digest(value)
+
+
 def test_source_mutation_or_duplicate_install_refuses_before_rebinding(native):
     wrapper = native.ingress.execute_admission
     with pytest.raises(RuntimeRefusal, match="ALREADY_BOUND"):

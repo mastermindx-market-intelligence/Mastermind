@@ -155,9 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
         child = commands.add_parser(name)
         child.add_argument("--expected-bot-user-id", required=True)
         child.add_argument("--enable-w3c", action="store_true")
+        if name != "enroll":
+            child.add_argument("--enable-dot-canary", action="store_true")
     child = commands.add_parser("rebind-release")
     child.add_argument("--expected-bot-user-id", required=True)
     child.add_argument("--enable-w3c", action="store_true")
+    child.add_argument("--enable-dot-canary", action="store_true")
     reverse = commands.add_parser("reverse-rebind-release")
     reverse.add_argument("--expected-bot-user-id", required=True)
     reverse.add_argument("--expected-current-release-sha", required=True)
@@ -192,6 +195,7 @@ def build_config_document(
     release_sha: str,
     scopes: tuple[str, ...] = REQUIRED_SCOPES,
     w3c_enabled: bool = False,
+    dot_canary_enabled: bool = False,
 ) -> dict[str, object]:
     if scopes not in ALLOWED_A2_SCOPE_SETS:
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
@@ -207,7 +211,12 @@ def build_config_document(
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED") from None
     if _RELEASE_RE.fullmatch(release_sha or "") is None:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
-    if type(w3c_enabled) is not bool:
+    if type(w3c_enabled) is not bool or type(dot_canary_enabled) is not bool:
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+    if w3c_enabled and dot_canary_enabled:
+        # The exact W3C review pin currently attests only the original
+        # W3C launch arguments. Refuse a combined mode until that separate
+        # signed permission contract is deliberately updated and accepted.
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
     document: dict[str, object] = {
         "schema": "mastermind.agent_relay_enrollment.v1",
@@ -228,6 +237,10 @@ def build_config_document(
             DIALOGUE_COORDINATION_SOCKET_PATH
         ),
     }
+    if dot_canary_enabled:
+        # Preserve the exact pre-existing enrollment bytes on the default path.
+        # True is an explicit, release-bound extra read operation on the same A2.
+        document["dot_canary_enabled"] = True
     return document
 
 
@@ -249,11 +262,13 @@ def render_plist(
     bot_user_id: str,
     release_sha: str,
     w3c_enabled: bool = False,
+    dot_canary_enabled: bool = False,
 ) -> bytes:
     build_config_document(
         bot_user_id=bot_user_id,
         release_sha=release_sha,
         w3c_enabled=w3c_enabled,
+        dot_canary_enabled=dot_canary_enabled,
     )
     release_root = SYSTEM_RELEASE_ROOT / release_sha
     template_path = _ROOT / "ops" / "executive_os" / (
@@ -297,6 +312,8 @@ def render_plist(
         ]
         if w3c_enabled:
             arguments.append("--enable-w3c")
+        if dot_canary_enabled:
+            arguments.append("--enable-dot-canary")
         encoded = plistlib.dumps(document, fmt=plistlib.FMT_XML, sort_keys=False)
     except Exception:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
@@ -930,6 +947,7 @@ def _validate_existing(
     scopes: tuple[str, ...] = REQUIRED_SCOPES,
     expected_token: bytes | None = None,
     w3c_enabled: bool = False,
+    dot_canary_enabled: bool = False,
 ) -> None:
     expected_config = _canonical_json_bytes(
         build_config_document(
@@ -937,12 +955,14 @@ def _validate_existing(
             release_sha=release_sha,
             scopes=scopes,
             w3c_enabled=w3c_enabled,
+            dot_canary_enabled=dot_canary_enabled,
         )
     )
     expected_plist = render_plist(
         bot_user_id=bot_user_id,
         release_sha=release_sha,
         w3c_enabled=w3c_enabled,
+        dot_canary_enabled=dot_canary_enabled,
     )
     if (
         (
@@ -1020,6 +1040,7 @@ async def _enroll_with_token_source(
     action: str,
     scopes: tuple[str, ...],
     w3c_enabled: bool = False,
+    dot_canary_enabled: bool = False,
 ) -> dict[str, object]:
     release_sha = _assert_host_prepared()
     binding = _open_bound_config_directory()
@@ -1055,6 +1076,7 @@ async def _enroll_with_token_source(
                         release_sha=release_sha,
                         scopes=scopes,
                         w3c_enabled=w3c_enabled,
+                        dot_canary_enabled=dot_canary_enabled,
                     )
                 ),
                 uid=RELAY_UID,
@@ -1069,6 +1091,7 @@ async def _enroll_with_token_source(
                     bot_user_id=bot_user_id,
                     release_sha=release_sha,
                     w3c_enabled=w3c_enabled,
+                    dot_canary_enabled=dot_canary_enabled,
                 ),
                 uid=PLIST_UID,
                 gid=PLIST_GID,
@@ -1082,6 +1105,7 @@ async def _enroll_with_token_source(
             scopes=scopes,
             expected_token=(token + "\n").encode("ascii"),
             w3c_enabled=w3c_enabled,
+            dot_canary_enabled=dot_canary_enabled,
         )
         _assert_disarmed()
         _assert_bound_config_current(binding)
@@ -1123,6 +1147,7 @@ async def _enroll_shared(
     *,
     bot_user_id: str,
     w3c_enabled: bool = False,
+    dot_canary_enabled: bool = False,
 ) -> dict[str, object]:
     return await _enroll_with_token_source(
         bot_user_id=bot_user_id,
@@ -1130,10 +1155,12 @@ async def _enroll_shared(
         action="enrolled-shared",
         scopes=SHARED_A2_SCOPES,
         w3c_enabled=w3c_enabled,
+        dot_canary_enabled=dot_canary_enabled,
     )
 
 
-async def _verify(*, bot_user_id: str, w3c_enabled: bool = False) -> dict[str, object]:
+async def _verify(*, bot_user_id: str, w3c_enabled: bool = False,
+                  dot_canary_enabled: bool = False) -> dict[str, object]:
     release_sha = _assert_host_prepared()
     binding = _open_bound_config_directory()
     try:
@@ -1150,6 +1177,7 @@ async def _verify(*, bot_user_id: str, w3c_enabled: bool = False) -> dict[str, o
             release_sha=release_sha,
             scopes=scopes,
             w3c_enabled=w3c_enabled,
+            dot_canary_enabled=dot_canary_enabled,
         )
         token = _existing_token(binding)
         qualification = await qualify_token(
@@ -1429,13 +1457,14 @@ class _A2Rebind:
         raise A2EnrollmentError("A2_REBIND_MIXED_GENERATION") from failure
 
 
-async def _rebind(*, bot_user_id: str, enable_w3c: bool = False) -> dict[str, object]:
-    """Bind an existing enrollment; only an explicit flag enables W3C.
+async def _rebind(*, bot_user_id: str, enable_w3c: bool = False,
+                  enable_dot_canary: bool = False) -> dict[str, object]:
+    """Bind an existing enrollment; explicit flags enable W3C or canary reads.
 
     Token, scopes, bot, disabled/unloaded admission and descriptor-bound pair
     ownership remain unchanged. This does not activate the relay.
     """
-    if type(enable_w3c) is not bool:
+    if type(enable_w3c) is not bool or type(enable_dot_canary) is not bool:
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
     release_sha = _assert_host_prepared()
     binding = _open_bound_config_directory()
@@ -1446,11 +1475,16 @@ async def _rebind(*, bot_user_id: str, enable_w3c: bool = False) -> dict[str, ob
                 old_sha = config["release_sha"]
                 scopes = tuple(config["slack_scopes"])
                 w3c_enabled = config["w3c_enabled"]
+                dot_canary_enabled = config.get("dot_canary_enabled", False)
+                if type(dot_canary_enabled) is not bool:
+                    raise ValueError("noncanonical canary selection")
                 old = _canonical_json_bytes(build_config_document(
                     bot_user_id=bot_user_id, release_sha=old_sha,
-                    scopes=scopes, w3c_enabled=w3c_enabled))
+                    scopes=scopes, w3c_enabled=w3c_enabled,
+                    dot_canary_enabled=dot_canary_enabled))
                 old_plist = render_plist(bot_user_id=bot_user_id, release_sha=old_sha,
-                                         w3c_enabled=w3c_enabled)
+                                         w3c_enabled=w3c_enabled,
+                                         dot_canary_enabled=dot_canary_enabled)
                 current_socket = (
                     old == tx.preimages[CONFIG_PATH].payload
                     and old_plist == tx.preimages[PLIST_PATH].payload
@@ -1484,15 +1518,18 @@ async def _rebind(*, bot_user_id: str, enable_w3c: bool = False) -> dict[str, ob
                 raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
             tx.check()
             desired_w3c = w3c_enabled or enable_w3c
-            if old_sha == release_sha and desired_w3c == w3c_enabled and current_socket:
+            desired_canary = dot_canary_enabled or enable_dot_canary
+            if (old_sha == release_sha and desired_w3c == w3c_enabled
+                    and desired_canary == dot_canary_enabled and current_socket):
                 return {"action": "already-current", "bot_user_id": bot_user_id,
                         "release_sha": release_sha}
             target = {
                 PLIST_PATH: render_plist(bot_user_id=bot_user_id, release_sha=release_sha,
-                                        w3c_enabled=desired_w3c),
+                                        w3c_enabled=desired_w3c, dot_canary_enabled=desired_canary),
                 CONFIG_PATH: _canonical_json_bytes(build_config_document(
                     bot_user_id=bot_user_id, release_sha=release_sha,
-                    scopes=scopes, w3c_enabled=desired_w3c)),
+                    scopes=scopes, w3c_enabled=desired_w3c,
+                    dot_canary_enabled=desired_canary)),
             }
             try:
                 for path, payload in target.items():
@@ -1718,11 +1755,15 @@ def _run_invocation(
             shared_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
                 shared_kwargs["w3c_enabled"] = True
+            if args.enable_dot_canary:
+                shared_kwargs["dot_canary_enabled"] = True
             receipt = asyncio.run(_enroll_shared(**shared_kwargs))
         elif args.command == "rebind-release":
             rebind_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
                 rebind_kwargs["enable_w3c"] = True
+            if args.enable_dot_canary:
+                rebind_kwargs["enable_dot_canary"] = True
             receipt = asyncio.run(_rebind(**rebind_kwargs))
         elif args.command == "reverse-rebind-release":
             receipt = asyncio.run(_reverse_rebind(
@@ -1737,6 +1778,8 @@ def _run_invocation(
             verify_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
                 verify_kwargs["w3c_enabled"] = True
+            if args.enable_dot_canary:
+                verify_kwargs["dot_canary_enabled"] = True
             receipt = asyncio.run(_verify(**verify_kwargs))
         else:  # pragma: no cover
             raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")

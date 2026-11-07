@@ -64,7 +64,7 @@ def _integer(value):
     return type(value) is int and 0 <= value <= 2**53 - 1
 
 
-def _json_digest(value):
+def _json_digest(value, *, project_content=False):
     """Detach one exact, bounded JSON value; never retain its body."""
     nodes = 0
     raw_bytes = 0
@@ -106,7 +106,11 @@ def _json_digest(value):
             return result
         finally:
             active.remove(id(value))
-    selected = copy(value, 0)
+    # Historical content observes each selected value at depth zero; its fixed
+    # projection keys are encoded but do not consume the value traversal budget.
+    # Whole tools values retain independent root/key accounting.
+    selected = ({key: copy(value[key], 0) for key in CONTENT_FIELDS if key in value}
+                if project_content else copy(value, 0))
     digest, size = hashlib.sha256(), 0
     encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=False, allow_nan=False,
                                check_circular=False, separators=(",", ":"))
@@ -124,7 +128,7 @@ def _content_digest(api_kwargs):
     if type(api_kwargs) is not dict:
         raise ValueError("unsupported_content")
     selected = {key: api_kwargs[key] for key in CONTENT_FIELDS if key in api_kwargs}
-    digest, size = _json_digest(selected)
+    digest, size = _json_digest(api_kwargs, project_content=True)
     return {"fields": list(selected), "content_sha256": digest, "content_bytes": size,
             "canonicalization": CANONICALIZATION}
 
