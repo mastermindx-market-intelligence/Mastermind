@@ -1,7 +1,6 @@
 --- a/pick.py
 +++ b/pick.py
-@@ -2043,6 +2043,15 @@
-                              task_complexity=complexity, escalation_reason=escalation_reason,
+@@ -2044,4 +2044,13 @@
                               route_key=route_key)
      if is_judgment_class(tc, doc):
 +        # A capped opt-in share of Grok-class judgment work may consume
@@ -15,11 +14,7 @@
 +                return same + " ROUTE_ALLOC=cursor_grok_monthly_share"
          return _pick_scored(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                               task_complexity=complexity, escalation_reason=escalation_reason)
- 
-@@ -2161,6 +2170,64 @@
-     return same
- 
- 
+@@ -2164,1 +2173,59 @@
 +def _cursor_grok_monthly_share(tc, doc, route_key, prefer, complexity):
 +    """Opt-in deterministic judgment cohort, not quota or worker admission."""
 +    cfg = _routing(doc).get("cursor_grok_monthly_share")
@@ -79,5 +74,3 @@
 +
 +
  EXECUTOR_PROMOTABLE_R31 = frozenset({"minimax", "glm", "bailian"})
- 
- 
