@@ -11,7 +11,7 @@ def source_bytes(path):
     assert fixture['schema']=='mastermind.test_discovery_correction_source.v1'
     assert fixture['repository']=='mastermindx-market-intelligence/macro'
     assert fixture['base_commit']=='5c8d02f78ca2fe317e861d69169733e56237cbcc'
-    assert fixture['source_commit']=='b4b08673508bb0aafe2aa729666f1aefab23911c'
+    assert fixture['source_commit']=='a9906c9d5aaf816048d6467fa39d895034180c87'
     assert fixture['source_status']=='PUBLISHED_SOURCE_CANDIDATE'
     assert fixture['pull_request']=='https://github.com/mastermindx-market-intelligence/macro/pull/10831'
     item=fixture['files'][path]

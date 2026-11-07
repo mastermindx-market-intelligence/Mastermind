@@ -179,13 +179,14 @@ def _consumer_trust_gate(publication):
     """The incumbent MCP trust gate, consulted before a model-facing call."""
     from integrations.hermes_delegate.policy import TOOL_NAME
 
-    def gate() -> str | None:
+    def gate(tool_name=TOOL_NAME, booked=None, arguments=None) -> str | None:
         try:
             from tools.mcp_tool_handlers import _trust_gate_check
         except Exception:
             return "NATIVE_CONSUMER_TRUST_GATE_UNAVAILABLE"
         try:
-            return _trust_gate_check(publication.mcp.server, TOOL_NAME, [], {})
+            return _trust_gate_check(publication.mcp.server, tool_name,
+                                     [] if booked is None else booked, {} if arguments is None else arguments)
         except Exception:
             return "NATIVE_CONSUMER_TRUST_GATE_UNAVAILABLE"
 
@@ -425,10 +426,13 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
     slot = install_consumer_slot(manager, ConsumerSlot(
         owner=owner, profile_id=get_active_profile_name(), source=CONSUMER_PLUGIN_SOURCE,
         plugin_id=CONSUMER_PLUGIN_NAME, publication=publication))
+    from common.coo_discovery_contract import TOOLS as discovery_tools
+    provided = [] if selected_child_publication(publication) is None else ["mmx_delegate"]
+    if getattr(publication, "discovery", False):
+        provided.extend(discovery_tools)
     manifest = PluginManifest(
         name=CONSUMER_PLUGIN_NAME, version="1.0.0", source=CONSUMER_PLUGIN_SOURCE,
-        path=str(package), provides_tools=([] if selected_child_publication(publication) is None
-                                          else ["mmx_delegate"]), key=CONSUMER_PLUGIN_NAME)
+        path=str(package), provides_tools=provided, key=CONSUMER_PLUGIN_NAME)
     if slot.package_path is not None:
         raise RuntimeRefusal("NATIVE_CONSUMER_LOADER_ALREADY_BOUND")
     slot.package_path, slot.package_check = str(package), package_check

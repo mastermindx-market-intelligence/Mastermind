@@ -166,3 +166,44 @@ def validate_sources(selection, principal_scope, sources):
     prefix = "agentos/discoveries/DSC-"
     if not old.startswith(prefix) or not old.endswith(".md") or not valid_ref("DSC:" + old[len(prefix):-3], "DSC:"):
         _fail()
+
+
+def validate_preview(value, *, request, principal_scope):
+    """The same pure correction Review validator for HTTP and native callers."""
+    from common.workspace_source_operation_wire import validate_witness
+    request = validate_request(request)
+    _hex(principal_scope, 64)
+    keys = {"schema", "selection", "owner_context", "request_sha256", "recipe_fingerprint_sha256", "preview_witness", "preview"}
+    if (type(value) is not dict or set(value) != keys
+            or value["schema"] != "mastermind.workspace_source_operation_preview.v1"
+            or value["selection"] != {"action": ACTION, "request_id": request["request_id"], "work_ref": request["work_ref"]}
+            or value["owner_context"] != {"principal_scope": principal_scope}
+            or value["request_sha256"] != request_lookup(request)["request_sha256"]):
+        _fail()
+    _hex(value["recipe_fingerprint_sha256"], 64)
+    validate_witness(value["preview_witness"])
+    if (value["recipe_fingerprint_sha256"] == value["request_sha256"]
+            or value["preview_witness"]["recipe_fingerprint_sha256"] != value["recipe_fingerprint_sha256"]):
+        _fail()
+    preview = value["preview"]
+    if (type(preview) is not dict
+            or set(preview) != {"schema", "state", "action", "work_ref", "source_commit", "change", "postimages"}
+            or preview["schema"] != "mastermind.project_knowledge_preview.v1" or preview["state"] != "DRAFT_ONLY"
+            or preview["action"] != ACTION or preview["work_ref"] != request["work_ref"]
+            or preview["source_commit"] != request["source_commit"]
+            or preview["change"] != preview_change(request, principal_scope)):
+        _fail()
+    images, preimages = preview["postimages"], expected_preimages(request, principal_scope)
+    if (type(images) is not list or len(images) != 3
+            or any(type(item) is not dict or type(item.get("path")) is not str for item in images)
+            or {item.get("path") for item in images} != set(preimages)):
+        _fail()
+    for image in images:
+        if (set(image) != {"path", "content_sha256", "expected_preimage_sha256"}
+                or image["expected_preimage_sha256"] != preimages[image["path"]]):
+            _fail()
+        _hex(image["content_sha256"], 64)
+    encoded = canonical(value)
+    if len(encoded) > 32 * 1024:
+        _fail()
+    return json.loads(encoded)

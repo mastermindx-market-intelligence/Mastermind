@@ -4,7 +4,7 @@
 
 This slice lets a qualified Workspace principal correct an existing project discovery without losing its original evidence. It uses the existing Project Knowledge compiler, private original-input custody, source-operation Events, Git publisher and canonical-data observation. Agent OS remains the durable knowledge owner; the UI and Hermes do not acquire a parallel memory store or publication queue.
 
-The Macro compiler is introduced by Macro PR 10831 at `b4b08673508bb0aafe2aa729666f1aefab23911c`. The Workspace implementation requires that compiler in its installed CODE closure. A source PR, test fixture or current read is not an installed correction grant.
+The Macro compiler is introduced by Macro PR 10831, currently pinned at `a9906c9d5aaf816048d6467fa39d895034180c87`. This includes bounded validation of malformed sibling correction metadata before reference membership. The Workspace implementation requires that compiler in its installed CODE closure. A source PR, test fixture or current read is not an installed correction grant.
 
 ## One original operation
 
@@ -65,8 +65,31 @@ The frontend's recorded owner fixture contains actual temporary-Git bytes and re
 
 The existing CI owns full-checkout Python, Rust and frontend qualification. Local source results are not a production enrollment or live publication receipt.
 
-## Remaining teammate integration
+## Explicit native v4 integration
 
-The native v2/v3 consumer meanings remain unchanged in this slice. A separately reviewed v4 catalogue must expose the correction lifecycle through the same paired Executive/Workspace OAuth connection, same audited Workspace handlers, mission grants and ConsumerSlot. It must not route durable preparation/submission through a read-only E1 envelope.
+`mastermind.hermes_native_executive_consumer/v4` selects the finite `coo.discovery_correction.v1` catalogue. The disabled `principal.hermes-native.executive-coo.discovery-correction.v1` profile uses the existing single COO OAuth connection and its independently authenticated Workspace companion. Enrollment requires the exact Workspace privacy derivation. Earlier v2/v3 catalogues retain their closed meanings and digests.
 
-The current catalogue-sampled source selector remains exact. Direct current discovery reads, omitted records and original historical preimage views require explicit closed selectors under the existing reader/private-input owners. Arbitrary historical paths/commits and a second note store are not supported. Installed permission, native serving readback, actual publication/current-context feedback and held-out learning efficacy remain acceptance work.
+The catalogue adds two tools:
+
+| Tool | Closed operations and original owner |
+|---|---|
+| `executive_project_discovery_source` | `current` reads the selected DSC at an exact current DATA commit; `original` opens the pre-correction note retained by the exact eight-field original operation. |
+| `executive_project_discovery_correction` | `prepare`, `read`, `submit`, `reconcile` call the original audited Workspace source-operation handlers with their existing grants, private input, Events and publisher. |
+
+The current-read route is `/workspace/project-discovery-source/current`; it needs the distinct `read_latest_project_data` grant and the actual installed canonical DATA binding. It cannot fall back to adopted CODE. It bypasses catalogue sampling only: record validity, selected WS association, immutable blobs, size limits and owner/permission fences still apply. The returned Git blob revision and the two SHA-256 preimage digests have distinct fields.
+
+The original-read route is `/workspace/source-operation/original`. It uses the retained Event/private-input custody and the current correction grant. Its explicit retained-original schema has no invented current DATA observation, Git blob revision or commit timestamp. It does not compile, prepare, restore, reconcile or publish. Loss of current note/compiler availability does not by itself erase verified retained history.
+
+Signed COO forwarding authenticates both resources and rechecks the captured audited App/router and actual authority. Prepare/submit/reconcile use their own typed discovery result, not the read-only E1 result. Submission first inspects the full original lookup; only the original INTENT can enter its single submission. Already-progressed operations return their canonical status.
+
+The native plugin registers two actual native registry leases under the existing replacement transaction. Both names are checked before registration. Partial failure disposes only captured leases; an unreturned lease remains uncertain on the original ConsumerSlot. Parent session/route, actual loaded plugin/entry/schema, release/package custody, current mandate and the incumbent trust/spend owner all remain live gates. Raw MCP exposure stays excluded, and no parent Job or child authority is manufactured.
+
+The original SDK lock and in-flight set own transport. A positively proved refusal before `session.call_tool` is NOT_DISPATCHED; a timeout or malformed post-invocation mutation result retains the exact original lookup. A timed-out future and its uncertainty become visible together under the slot lock. The original future is neither cancelled nor replayed. Matching canonical read/reconcile can resolve uncertainty; a retained owner NOT_DISPATCHED result can prove no effect, while absence of a receipt alone cannot. A failed cost refund retains the original reservation and blocks replacement.
+
+V4 serving readback includes the two observed tool-schema digests, any original uncertain operation and unresolved reservation state. The finite secondary-worker archive includes the original COO descriptor and Agent OS helper import closure; the held release loader still authenticates imported files.
+
+## Acceptance still required
+
+Source tests execute real temporary Git, compiler, Event/private-input, signed App/MCP, installed collector and held-source import paths with declared credential/host edges. Pinned native PluginContext/registry cases require the exact Hermes checkout and are not credited when skipped. Source qualification does not enable the profile.
+
+Installed permission, serving v4 readback, original publication/current-context feedback, live browser/account/fleet journeys and held-out learning efficacy remain acceptance work. The original denied runtime action must be recovered through its original authorized connection; another host or test runner does not substitute for it.

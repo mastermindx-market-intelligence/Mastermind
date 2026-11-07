@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--work-ref", required=True)
     parser.add_argument("--source-ref")
     parser.add_argument("--expected-revision")
+    parser.add_argument("--discovery-ref")
+    parser.add_argument("--expected-source-commit")
     parser.add_argument("--code-root")
     parser.add_argument("--code-commit")
     parser.add_argument("--timeout", type=float, default=10)
@@ -28,10 +30,12 @@ def main():
     selected = {"work_ref": args.work_ref}
     if args.source_ref is not None: selected["source_ref"] = args.source_ref
     if args.expected_revision is not None: selected["expected_revision"] = args.expected_revision
+    if args.discovery_ref is not None: selected["discovery_ref"] = args.discovery_ref
+    if args.expected_source_commit is not None: selected["expected_source_commit"] = args.expected_source_commit
     selection(selected, operation=args.operation)
     from control_plane.agentos_project_knowledge import (
         read_project_knowledge_catalogue, read_project_communication_preference,
-        read_project_knowledge_source)
+        read_project_knowledge_source, read_project_discovery_source)
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         kwargs = dict(macro_root=Path(args.macro_root), expected_macro_sha=args.expected_macro_sha,
             timeout=args.timeout, **selected)
@@ -39,6 +43,7 @@ def main():
             kwargs.update(code_root=Path(args.code_root), code_commit=args.code_commit)
         if args.operation == "project_knowledge_catalogue": value = read_project_knowledge_catalogue(**kwargs)
         elif args.operation == "project_knowledge_memory": value = read_project_communication_preference(**kwargs)
+        elif args.operation == "project_discovery_source": value = read_project_discovery_source(**kwargs)
         else: value = read_project_knowledge_source(**kwargs)
         value = validate_body(value, operation=args.operation)
     print(json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")))

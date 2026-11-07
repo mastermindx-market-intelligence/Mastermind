@@ -157,6 +157,57 @@ class ProjectKnowledgeSourceOwner:
         selected, permission = self._inspection(lookup, principal)
         return self._events.read_status(selected, permission.principal_scope, guard=permission.check)
 
+    def read_original(self, lookup, principal):
+        """Read only the original Event's retained note, without a compilation.
+
+        Missing custody never proves no effect. Status/reconciliation remain
+        independent and body-free when this projection cannot be opened.
+        """
+        from common import workspace_discovery_original_contract as original_wire
+        checked = correction.validate_lookup(lookup)
+        selected, permission = self._inspection(checked, principal)
+        original, binding = self._original(selected, permission)
+        private, events, permissions = self._private, self._events, self._permissions
+        read, method = private.read, self.read_original
+        def current():
+            return (self._private is private and self._events is events and self._permissions is permissions
+                and private.read == read and type(private).__dict__.get("read") is read.__func__
+                and self.read_original == method and type(self).__dict__.get("read_original") is method.__func__
+                and permission.check())
+        if (binding != checked or original["permission_binding_digest"] != permission.permission_binding_digest
+                or not current()):
+            raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
+        payload = read(selected, permission.principal_scope,
+            original_input=original["original_input"],
+            trusted_recipe_fingerprint=original["recipe_fingerprint_sha256"],
+            trusted_request_sha256=original["request_sha256"])
+        if not current():
+            raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
+        if (correction.request_lookup(payload["request"]) != checked
+                or payload["action"] != correction.ACTION
+                or payload["actor"] != {"principal_scope": permission.principal_scope,
+                    "actor_ref": "workspace:" + permission.principal_scope,
+                    "permission_binding_digest": original["permission_binding_digest"]}):
+            raise SourceOperationConflict()
+        snapshot = payload["initial_snapshot"]
+        if (type(snapshot) is not dict
+                or set(snapshot) != {"workstream_text", "discovery_text", "reference_closure", "decision_date"}
+                or type(snapshot["workstream_text"]) is not str
+                or len(snapshot["workstream_text"].encode("utf-8")) > 128 * 1024
+                or hashlib.sha256(snapshot["workstream_text"].encode("utf-8")).hexdigest() != checked["base_revision"]):
+            raise SourceOperationConflict()
+        result = original_wire.validate({"schema": original_wire.SCHEMA,
+            "selection": checked, "owner_context": {"principal_scope": permission.principal_scope},
+            "custody": {"kind": "ORIGINAL_CORRECTION_INPUT", "original_input": original["original_input"],
+                "recipe_fingerprint_sha256": original["recipe_fingerprint_sha256"]},
+            "original": {"source_commit": checked["source_commit"], "discovery_ref": checked["discovery_ref"],
+                "content_sha256": checked["expected_discovery_revision"], "workstream_sha256": checked["base_revision"],
+                "media_type": "text/markdown", "content_utf8": snapshot["discovery_text"]}},
+            lookup=checked, principal_scope=permission.principal_scope)
+        if not current():
+            raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
+        return result
+
     def _restore(self, selected, principal, permission):
         original, binding = self._original(selected, permission)
         if original["permission_binding_digest"] != permission.permission_binding_digest:

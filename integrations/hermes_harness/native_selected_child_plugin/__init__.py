@@ -73,6 +73,13 @@ def register(ctx: Any):
                 or not slot.memory_factory.loader_ready() or slot.context_registration is not None):
             raise NativeToolRegistrationError("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
         slot.context_registration = ctx
+        if slot.publication.discovery:
+            from integrations.hermes_harness.native_discovery_tools import register_discovery_tools
+            try:
+                register_discovery_tools(ctx, slot)
+            except Exception as error:
+                slot.retain_registration_error(error)
+                raise
         if selected_child_publication(slot.publication) is None:
             return None
     slot.begin_registration(ctx)

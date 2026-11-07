@@ -22,8 +22,10 @@ from control_plane.executive_agent_capabilities import (
     HERMES_NATIVE_PRINCIPAL_PROFILE_ID,
     HERMES_NATIVE_CONTEXT_PROFILE_ID,
     HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID,
+    HERMES_NATIVE_DISCOVERY_PROFILE_ID,
     PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
     PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -180,7 +182,7 @@ class CooInstalledSource:
                     CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE}
                 or (profile.execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
                     and profile.profile_id not in {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
-                                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID})
+                                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID})
                 or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         self._profile_catalogue(profile)
@@ -198,6 +200,7 @@ class CooInstalledSource:
         context_profiles = {
             wire.CATALOGUE: (HERMES_NATIVE_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID),
             wire.CURRENT_CATALOGUE: (HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID),
+            wire.DISCOVERY_CATALOGUE: (HERMES_NATIVE_DISCOVERY_PROFILE_ID, PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID),
         }
         for catalogue in (wire.LEGACY_CATALOGUE, *context_profiles):
             specs = {s.name: {"name": s.name, "inputSchema": s.input_schema, "annotations": s.annotations}
@@ -243,7 +246,8 @@ class CooInstalledSource:
             # AuthorityFact's generation deliberately excludes enabled.
             scoped = [row for row in selected if row["work_ref"] == work_ref]
             actions = {HERMES_NATIVE_CONTEXT_PROFILE_ID: wire.ACTION,
-                       HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: wire.CURRENT_ACTION}
+                       HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: wire.CURRENT_ACTION,
+                       HERMES_NATIVE_DISCOVERY_PROFILE_ID: wire.CURRENT_ACTION}
             if (not _check_work_ref(work_ref) or len(scoped) != 1
                     or scoped[0]["capability_profile_id"] not in actions
                     or actions[scoped[0]["capability_profile_id"]] not in _authority(scoped[0]).principal_actions):
@@ -278,7 +282,8 @@ class CooInstalledSource:
         found = False
         for row in validate_missions(coo.get("missions", [])):
             alternatives = {HERMES_NATIVE_CONTEXT_PROFILE_ID: (wire.ACTION, wire.CATALOGUE),
-                            HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: (wire.CURRENT_ACTION, wire.CURRENT_CATALOGUE)}
+                            HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: (wire.CURRENT_ACTION, wire.CURRENT_CATALOGUE),
+                            HERMES_NATIVE_DISCOVERY_PROFILE_ID: (wire.CURRENT_ACTION, wire.DISCOVERY_CATALOGUE)}
             if (row["enabled"] and row["capability_profile_id"] in alternatives):
                 _, fact, authority = self._snapshot(row["work_ref"], coo)
                 principal = {"policy_id": fact.policy_id, "issuer_digest": fact.issuer_digest,

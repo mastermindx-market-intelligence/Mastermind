@@ -59,6 +59,7 @@ __all__ = [
 
 CATALOGUE_SCHEMA = "mastermind.workspace_project_knowledge.v1"
 SOURCE_SCHEMA = "mastermind.workspace_project_source.v1"
+DISCOVERY_SOURCE_SCHEMA = "mastermind.workspace_project_discovery_source.v1"
 PREFERENCE_SCHEMA = "mastermind.workspace_project_preference.v1"
 PREFERENCE_PAYLOAD_SCHEMA = "agentos.project_preference.v1"
 
@@ -595,6 +596,53 @@ def validate_source(value):
         if check["source"]["content_sha256"] != check["document"]["content_sha256"]:
             _fail("source.source.content_sha256 must equal source.document.content_sha256")
     return _read_context(check)
+
+
+def validate_discovery_source(value):
+    """An exact current DSC, independent of catalogue sampling.
+
+    The WS content hash is captured at the same DATA commit. This read proves
+    association and bytes, never correction eligibility or a complete graph.
+    """
+    from common.workspace_discovery_correction_contract import valid_ref
+    check = _copy(value)
+    _read_context_keys(check, ("availability", "document", "reason_codes", "schema", "selection", "source"), "discovery_source")
+    if check["schema"] != DISCOVERY_SOURCE_SCHEMA:
+        _fail("invalid discovery source schema")
+    _keys(check["selection"], ("work_ref", "discovery_ref"), "discovery_source.selection")
+    validate_selection(check["selection"]["work_ref"])
+    if not valid_ref(check["selection"]["discovery_ref"], "DSC:"):
+        _fail("invalid discovery reference")
+    availability = _flag(check["availability"], "discovery_source.availability", AVAILABILITY)
+    _reason_codes(check["reason_codes"], "discovery_source.reason_codes", nonempty=availability == "UNAVAILABLE")
+    if availability == "UNAVAILABLE":
+        if check["source"] is not None or check["document"] is not None:
+            _fail("unavailable discovery source must withhold its body")
+        return _read_context(check)
+    source, document = check["source"], check["document"]
+    _keys(source, ("commit", "committed_at", "content_sha256", "path", "repository", "revision", "workstream_sha256"), "discovery_source.source")
+    _source_object({key: item for key, item in source.items() if key != "workstream_sha256"}, "discovery_source.source")
+    _sha(source["workstream_sha256"], "discovery_source.source.workstream_sha256", 64)
+    if source["path"] != "agentos/discoveries/DSC-" + check["selection"]["discovery_ref"][4:] + ".md":
+        _fail("discovery source path mismatch")
+    _keys(document, ("title", "media_type", "content_utf8", "content_sha256"), "discovery_source.document")
+    _text(document["title"], "discovery_source.document.title", max_len=MAX_TITLE)
+    if document["media_type"] != "text/markdown":
+        _fail("discovery source media type mismatch")
+    _text(document["content_utf8"], "discovery_source.document.content_utf8", max_len=MAX_SOURCE_BODY)
+    raw = document["content_utf8"].encode("utf-8")
+    content_sha = hashlib.sha256(raw).hexdigest()
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+    if source["revision"] != blob or source["content_sha256"] != content_sha or document["content_sha256"] != content_sha:
+        _fail("discovery source exact bytes mismatch")
+    return _read_context(check)
+
+
+def unavailable_discovery_source(work_ref, discovery_ref, *reason_codes):
+    return validate_discovery_source({"schema": DISCOVERY_SOURCE_SCHEMA,
+        "selection": {"work_ref": work_ref, "discovery_ref": discovery_ref},
+        "availability": "UNAVAILABLE", "reason_codes": list(reason_codes),
+        "source": None, "document": None})
 
 
 def _memory_block(value, field):

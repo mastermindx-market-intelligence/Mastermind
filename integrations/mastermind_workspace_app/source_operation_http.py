@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, Response
 from common.executive_workspace_contract import canonical
 from common.workspace_source_operation_contract import validate_status, validate_lookup
 from common.workspace_source_operation_wire import (
-    FRAME_SCHEMA, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, validate_frame, operation_request_limit)
+    FRAME_SCHEMA, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, validate_frame, operation_request_limit, operation_response_limit)
 from control_plane.workspace_owned_task import await_owned
 from integrations.mastermind_workspace_app.contract import principal_frame
 from common import workspace_discovery_correction_contract as correction
@@ -29,6 +29,8 @@ def _unique(pairs):
 
 
 def _preview(body, request, scope):
+    if request.get("action") == correction.ACTION:
+        return correction.validate_preview(body, request=request["request"], principal_scope=scope)
     keys = {"schema", "selection", "owner_context", "request_sha256", "recipe_fingerprint_sha256", "preview_witness", "preview"}
     if (type(body) is not dict or set(body) != keys
             or body["schema"] != "mastermind.workspace_source_operation_preview.v1"
@@ -84,22 +86,6 @@ def _knowledge_preview(preview, request, selected, scope):
             or preview["work_ref"] != request.get("work_ref") or preview["source_commit"] != request.get("source_commit")):
         raise ValueError()
     ws_path = "agentos/workstreams/WS-" + selected["work_ref"][3:] + ".md"
-    if selected["action"] == correction.ACTION:
-        if preview["change"] != correction.preview_change(request, scope):
-            raise ValueError()
-        expected = correction.expected_preimages(request, scope)
-        images = preview["postimages"]
-        if (type(images) is not list or len(images) != 3
-                or any(type(image) is not dict for image in images)
-                or {image.get("path") for image in images} != set(expected)):
-            raise ValueError()
-        for image in images:
-            if (set(image) != {"path", "content_sha256", "expected_preimage_sha256"}
-                    or image["expected_preimage_sha256"] != expected[image["path"]]
-                    or type(image["content_sha256"]) is not str
-                    or re.fullmatch(r"[0-9a-f]{64}", image["content_sha256"]) is None):
-                raise ValueError()
-        return
     if selected["action"] == "add_project_file":
         file = request["file"]
         change = {"kind": "FILE_ADD", "display_name": file["display_name"],
@@ -135,7 +121,7 @@ async def source_operation_http(request, *, config, operation):
     if factory is None or factory.policy != config.authenticator.policy:
         return _refuse_json(503, "source_unavailable")
     try:
-        if operation in {"read", "options"}:
+        if operation in {"read", "read_original", "options"}:
             refused = await _reject_any_body(request)
             if refused is not None: return refused
             raw_query = request.scope.get("query_string", b"")
@@ -208,12 +194,15 @@ async def source_operation_http(request, *, config, operation):
                     or re.fullmatch(r'[a-f0-9]{40}',result['expected_macro_sha']) is None
                     or type(result['profiles']) is not list or not 1<=len(result['profiles'])<=8):raise ValueError()
         elif operation == "prepare": result = _preview(result, value, scope)
+        elif operation == "read_original":
+            from common.workspace_discovery_original_contract import validate as validate_original
+            result = validate_original(result, lookup=value, principal_scope=scope)
         else:
             result = validate_status(result)
             if (result["selection"] != {k: value[k] for k in ("action", "request_id", "work_ref")}
                     or result["owner_context"] != {"principal_scope": scope}): raise ValueError()
         raw = canonical(result)
-        if len(raw) + 1 > MAX_RESPONSE_BYTES: raise ValueError()
+        if len(raw) + 1 > operation_response_limit(operation): raise ValueError()
         return Response(raw, status_code=200, media_type="application/json", headers={"Cache-Control": "no-store"})
     except (Exception, asyncio.CancelledError):
         # No transport exception proves no effect. The durable original hint

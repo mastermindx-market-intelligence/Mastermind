@@ -112,6 +112,13 @@ def operation_request_limit(operation, value):
         return MAX_CONTROL_REQUEST_BYTES
 
 
+def operation_response_limit(operation):
+    if operation == "read_original":
+        from common.workspace_discovery_original_contract import MAX_RESPONSE_BYTES as original_limit
+        return original_limit
+    return MAX_RESPONSE_BYTES
+
+
 def validate_operation_request(operation, request):
     value = _tree(request)
     if operation == "options":
@@ -129,6 +136,8 @@ def validate_operation_request(operation, request):
         else:
             validate_lookup({"schema": "mastermind.workspace_source_operation_lookup.v1", "action": action,
                              "request_id": body["request_id"], "work_ref": body.get("work_ref")})
+    elif operation == "read_original":
+        correction.validate_lookup(value)
     elif operation in {"read", "reconcile"}:
         if type(value) is not dict: _fail()
         if value.get("action") in _KNOWLEDGE: validate_knowledge_lookup(value)

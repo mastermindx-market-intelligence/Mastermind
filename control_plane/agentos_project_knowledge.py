@@ -1145,6 +1145,86 @@ def read_project_knowledge_source(
     return _emit(value, validate_source, lambda reason: unavailable_source(session.work_ref, source_ref, reason))
 
 
+def read_project_discovery_source(*, macro_root, expected_macro_sha, work_ref,
+        discovery_ref, expected_source_commit, runner=None, timeout=10,
+        _canonical_data_view=None, code_root=None, code_commit=None):
+    """Open one current associated DSC without a catalogue-sample dependency."""
+    from common.workspace_project_knowledge_read_contract import selection
+    from common.workspace_project_knowledge_contract import (
+        DISCOVERY_SOURCE_SCHEMA, validate_discovery_source, unavailable_discovery_source)
+    selected = selection({"work_ref": work_ref, "discovery_ref": discovery_ref,
+        "expected_source_commit": expected_source_commit}, operation="project_discovery_source")
+    def unavailable(reason):
+        return unavailable_discovery_source(work_ref, discovery_ref, reason)
+    try:
+        session = _Session(macro_root, expected_macro_sha, work_ref, runner, timeout,
+            _canonical_data_view, code_root, code_commit)
+        if session.commit != expected_source_commit or session.head() != session.commit:
+            raise _CaptureFailure("SOURCE_CHANGED")
+        path = "agentos/discoveries/DSC-" + discovery_ref[4:] + ".md"
+        parser = session.captured("scripts/agentos.py", limit=_PARSER_LIMIT, soft=True)
+        if parser is None or _ulen(parser) > _PARSER_LIMIT:
+            raise _CaptureFailure("CONTENT_OVER_BUDGET")
+        captured = {}
+        for name, limit in ((session.ws_path, _WS_LIMIT), (path, MAX_SOURCE_BODY)):
+            blob = session.member(name)
+            if blob is None:
+                raise _CaptureFailure("RECORD_NOT_FOUND")
+            if blob is _IRREGULAR:
+                raise _CaptureFailure("SOURCE_INVALID")
+            size = _blob_size(session, blob)
+            if size is None or size > limit:
+                raise _CaptureFailure("CONTENT_OVER_BUDGET")
+            text = session.captured(name, limit=limit + 1, soft=True)
+            if text is None or _ulen(text) > limit:
+                raise _CaptureFailure("CONTENT_OVER_BUDGET")
+            if _CONTROL.search(text) or _ulen(text) != size:
+                raise _CaptureFailure("SOURCE_INVALID")
+            raw = text.encode("utf-8")
+            if hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest() != blob:
+                raise _CaptureFailure("SOURCE_MISMATCH")
+            captured[name] = (text, blob)
+        ws_text, ws_blob = captured[session.ws_path]
+        text, blob = captured[path]
+        with _parser_session(session, parser) as module:
+            # The pinned canonical parser owns duplicate/alias and record laws.
+            # No complete-reference qualification is implied by this read.
+            parse = getattr(module, "parse_project_discovery_reference_text", None)
+            if not callable(parse):
+                raise _CaptureFailure("SOURCE_INVALID")
+            try:
+                ws, record = parse(ws_text), parse(text)
+            except (*_PARSE_FAULTS, module.yaml.YAMLError):
+                raise _CaptureFailure("SOURCE_INVALID") from None
+            if (ws.get("key") != session.key or record.get("key") != discovery_ref[4:]
+                    or type(ws.get("repos")) is not list or "macro" not in ws["repos"]
+                    or not _names_work(record.get("scope"), session.key, bare=False)
+                    or any(problem.hard for problem in module.check_workstream(ws, session.root / session.ws_path, None))
+                    or any(problem.hard for problem in module.check_discovery(record, session.root / path))):
+                raise _CaptureFailure("SOURCE_INVALID")
+            title = _clean_title(record.get("claim")) or _clean_title(record["key"])
+            if title is None:
+                raise _CaptureFailure("SOURCE_INVALID")
+        committed_at = session.committed_at(path)
+        if (session.head() != session.commit or session.member(path) != blob
+                or session.member(session.ws_path) != ws_blob or session.head() != session.commit):
+            raise _CaptureFailure("SOURCE_CHANGED")
+        content_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        value = {"schema": DISCOVERY_SOURCE_SCHEMA,
+            "selection": {"work_ref": work_ref, "discovery_ref": discovery_ref},
+            "availability": "AVAILABLE", "reason_codes": [],
+            "source": {"repository": REPOSITORY, "commit": session.commit, "path": path,
+                "revision": blob, "content_sha256": content_sha, "committed_at": committed_at,
+                "workstream_sha256": hashlib.sha256(ws_text.encode("utf-8")).hexdigest()},
+            "document": {"title": title, "media_type": "text/markdown", "content_utf8": text,
+                "content_sha256": content_sha}}
+        return _emit(value, validate_discovery_source, unavailable)
+    except _CaptureFailure as failure:
+        return unavailable(_reason(failure))
+    except _PARSE_FAULTS:
+        return unavailable("SOURCE_INVALID")
+
+
 def read_project_communication_preference(
     *,
     macro_root: Path,
