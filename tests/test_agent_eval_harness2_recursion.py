@@ -272,6 +272,125 @@ def test_effect_unknown_is_retained_and_stops_without_retry(tmp_path):
     assert port.native.resolve_run(port.trials["inv1"].run["run_id"])["validity"]["status"] == "INVALID_EFFECT_UNKNOWN"
 
 
+@pytest.mark.parametrize("stop_label,defect", [
+    ("base1", "effect"), ("base2", "effect"),
+    ("base1", "cleanup"), ("base2", "cleanup"),
+])
+def test_structured_owner_refusal_preserves_retained_original_runs(tmp_path, stop_label, defect):
+    class RefusingPort(FixturePort):
+        def adjust_draft(self, label, draft):
+            if label != stop_label:
+                return
+            if defect == "effect":
+                draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:uncertain",
+                                   "reconciliation_ref": None}
+            else:
+                draft["cleanup"] = {"status": "UNPROVEN", "proof": None}
+
+        def execute(self, task, label, files):
+            trial = super().execute(task, label, files)
+            if label == stop_label:
+                self.retained_before_error = {
+                    key: copy.deepcopy(value.run) for key, value in self.trials.items()
+                }
+                original_ids = tuple(value.run["run_id"] for value in self.trials.values())
+                code = ("NATIVE_EFFECT_REQUIRES_RECONCILIATION" if defect == "effect"
+                        else "NATIVE_TRIAL_INVALID")
+                # Original-owner refs may repeat an already observed baseline.
+                self.owner_error = Harness2CycleError(code, original_ids[::-1] + original_ids)
+                raise self.owner_error
+            return trial
+
+    port = RefusingPort(tmp_path)
+    with pytest.raises(Harness2CycleError) as caught:
+        invoke(port, k=2)
+    expected_ids = tuple(run["run_id"] for run in port.retained_before_error.values())
+    assert caught.value.code == port.owner_error.code
+    assert caught.value.retained_run_ids == expected_ids
+    assert caught.value.__cause__ is port.owner_error
+    expected_labels = ["base1"] if stop_label == "base1" else ["base1", "base2"]
+    assert [(call[0], call[1]) for call in port.calls] == [
+        ("execute", label) for label in expected_labels
+    ]
+    assert not port.contexts and not port.selected_views
+    for run in port.retained_before_error.values():
+        assert port.native.resolve_run(run["run_id"]) == run
+    refused = port.retained_before_error[stop_label]
+    assert refused["validity"]["status"] == (
+        "INVALID_EFFECT_UNKNOWN" if defect == "effect" else "INVALID_CLEANUP"
+    )
+
+
+@pytest.mark.parametrize("bad", [
+    "none", "list", "text", "iterator", "tuple_subclass", "oversize",
+    "mixed_before", "mixed_after", "invalid_only",
+])
+def test_structured_owner_refusal_rejects_malformed_recovery_ids(tmp_path, bad):
+    class MustNotIterate:
+        def __iter__(self):
+            raise AssertionError("wrong-type recovery envelope was iterated")
+
+    class TupleSubclass(tuple):
+        def __iter__(self):
+            raise AssertionError("tuple subclass recovery envelope was iterated")
+
+    class RefusingPort(FixturePort):
+        def adjust_draft(self, label, draft):
+            if label == "base2":
+                draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:uncertain",
+                                   "reconciliation_ref": None}
+
+        def execute(self, task, label, files):
+            trial = super().execute(task, label, files)
+            if label == "base2":
+                run_id = trial.run["run_id"]
+                supplied = {
+                    "none": None, "list": [run_id], "text": run_id,
+                    "iterator": MustNotIterate(), "tuple_subclass": TupleSubclass((run_id,)),
+                    "oversize": (run_id,) * 129,
+                    "mixed_before": ([], run_id), "mixed_after": (run_id, []),
+                    "invalid_only": (True, "not-a-run-id", []),
+                }[bad]
+                self.retained_before_error = copy.deepcopy(trial.run)
+                self.owner_error = Harness2CycleError("NATIVE_EFFECT_REQUIRES_RECONCILIATION",
+                                                     supplied)
+                raise self.owner_error
+            return trial
+
+    port = RefusingPort(tmp_path)
+    with pytest.raises(Harness2CycleError) as caught:
+        invoke(port, k=2)
+    expected = (port.trials["base1"].run["run_id"],)
+    if bad.startswith("mixed_"):
+        expected += (port.trials["base2"].run["run_id"],)
+    assert caught.value.code == "OWNER_RETAINED_RUN_IDS_INVALID"
+    assert caught.value.retained_run_ids == expected
+    assert caught.value.__cause__ is port.owner_error
+    assert [(call[0], call[1]) for call in port.calls] == [
+        ("execute", "base1"), ("execute", "base2"),
+    ]
+    assert not port.contexts and not port.selected_views
+    assert port.native.resolve_run(port.retained_before_error["run_id"]) == port.retained_before_error
+    assert port.retained_before_error["validity"]["status"] == "INVALID_EFFECT_UNKNOWN"
+
+
+def test_structured_owner_refusal_without_recovery_ids_invents_none(tmp_path):
+    class RefusingPort(FixturePort):
+        def execute(self, task, label, files):
+            if label == "base2":
+                self.calls.append(("execute", label))
+                raise Harness2CycleError("ORIGINAL_OWNER_UNAVAILABLE")
+            return super().execute(task, label, files)
+
+    port = RefusingPort(tmp_path)
+    with pytest.raises(Harness2CycleError, match="ORIGINAL_OWNER_UNAVAILABLE") as caught:
+        invoke(port, k=2)
+    assert caught.value.retained_run_ids == (port.trials["base1"].run["run_id"],)
+    assert [(call[0], call[1]) for call in port.calls] == [
+        ("execute", "base1"), ("execute", "base2"),
+    ]
+
+
 def test_ambiguous_owner_call_is_not_replayed(tmp_path):
     class TimeoutPort(FixturePort):
         def execute(self, task, label, files):

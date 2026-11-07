@@ -359,5 +359,22 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
         # Includes an owner-returned invalid/effect-unknown run, not only valid probes.
         retained = tuple(observed_ids)
         if isinstance(exc, Harness2CycleError):
-            raise Harness2CycleError(exc.code, retained) from exc
+            # A port can retain its original run and refuse before returning a
+            # Trial. Preserve its bounded recovery references without accepting
+            # them as retention, validity, admission or retry evidence.
+            supplied = exc.retained_run_ids
+            if type(supplied) is not tuple or len(supplied) > 128:
+                raise Harness2CycleError("OWNER_RETAINED_RUN_IDS_INVALID", retained) from exc
+            recovered = list(retained)
+            invalid = False
+            for run_id in supplied:
+                try:
+                    contracts.v_run_id(run_id, "$.retained_run_ids")
+                except contracts.ContractError:
+                    invalid = True
+                    continue
+                if run_id not in recovered:
+                    recovered.append(run_id)
+            code = "OWNER_RETAINED_RUN_IDS_INVALID" if invalid else exc.code
+            raise Harness2CycleError(code, tuple(recovered)) from exc
         raise Harness2CycleError("OWNER_CALL_OR_EVIDENCE_FAILED", retained) from exc

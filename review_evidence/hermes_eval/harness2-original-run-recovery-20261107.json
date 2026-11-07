@@ -1,0 +1,67 @@
+{
+  "base_commit": "da1713d77eeaa24e34b42cb53f1a0cf942a327a6",
+  "behavior": {
+    "authority_limit": "Syntax-valid owner references are recovery leads, not independent proof of retention, provenance, validity, admission or retry permission.",
+    "empty_or_generic_failure": "No invented run ID; no retry, alternate carrier, improver continuation or promotion.",
+    "invalid_envelope": "Wrong type, tuple subclass or more than 128 entries: reject without iterating or retaining a supplied prefix; keep previously observed IDs.",
+    "mixed_envelope": "Preserve individually valid recovery references from the bounded exact tuple; stop with OWNER_RETAINED_RUN_IDS_INVALID.",
+    "valid_envelope": "Exact tuple with at most 128 IDs; validate each using incumbent contracts.v_run_id; prior observed IDs first, then valid owner IDs, with stable deduplication. Preserve the original refusal code."
+  },
+  "changed_source": [
+    "scripts/ohf/harness2_recursion.py",
+    "tests/test_agent_eval_harness2_recursion.py"
+  ],
+  "coverage": [
+    "Refusal on first and second baseline with original stored EFFECT_UNKNOWN or UNPROVEN cleanup run",
+    "Original refusal code, cause and original retained run bytes preserved",
+    "Earlier and newly refused IDs, duplicate refs, malformed siblings before and after a valid ref",
+    "Wrong-type and tuple-subclass iterators never consumed; oversized tuples not prefix-salvaged",
+    "No further execute, improve, select or reflect call after refusal; no mutation of original stored run",
+    "All existing aggregate/sequential refinement, factor lock, artifact retention, context and failure cases pass"
+  ],
+  "limits": [
+    "Synthetic incumbent ArtifactStore and finalizer fixtures; no production Harness2Port",
+    "No provider inference, runtime activation, account enrollment, learning efficacy or promotion proof",
+    "Other source cohorts in current-primary-context-trial-composition-20261107.json are unchanged and are not recounted here"
+  ],
+  "original_carrier": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234",
+  "problem": "A structured original-port refusal before returning a Trial discarded the original owner supplied retained_run_ids, preventing exact recovery of an already retained invalid or effect-unknown run.",
+  "proofs": [
+    {
+      "elapsed_seconds": 2.429,
+      "errors": 0,
+      "failures": 13,
+      "junit_sha256": "729abeb8dbd19aef4adc1fe7c9d4eb4e53c2c5c2a3e320a6a7c23a103c33ff87",
+      "log_sha256": "6d2fb501bb9aec5278155c64d20ba852e46b959beb1db14478737c74946d6495",
+      "phase": "before_source_repair",
+      "returncode": 1,
+      "selected_cases": 14,
+      "selectors": [
+        "tests/test_agent_eval_harness2_recursion.py",
+        "-k",
+        "structured_owner_refusal"
+      ],
+      "skipped": 0,
+      "source_sha256": "0a33ce9d9c57ffb132bf7acff9d0bb0eef05a837aca49d9b8da65c23c763b60c",
+      "test_sha256": "b6797c424a25eb3855f027bb76a47567a9103a650c10e7d7a3bfc691299097f8"
+    },
+    {
+      "elapsed_seconds": 3.989,
+      "errors": 0,
+      "failures": 0,
+      "junit_sha256": "f473763324cc95271ff5498e663cbf60cb95bb11798919e463313e2488badfd2",
+      "log_sha256": "b53866f7a853267d7eca16c2faa2f71689f462d5b06ee572ef078a18d6b0409a",
+      "phase": "after_source_repair_full_existing_consumer_module",
+      "returncode": 0,
+      "selected_cases": 58,
+      "selectors": [
+        "tests/test_agent_eval_harness2_recursion.py"
+      ],
+      "skipped": 0,
+      "source_sha256": "88b4b8407ddbfbb585e24b63a46d3fae8c441242730e329a3394015061e33ddb",
+      "test_sha256": "b6797c424a25eb3855f027bb76a47567a9103a650c10e7d7a3bfc691299097f8"
+    }
+  ],
+  "schema": "mastermind.hermes_harness2_original_run_recovery_source_proof/v1",
+  "scope": "Existing Harness2 consumer exception boundary only; no native producer or protected-native composition change"
+}
