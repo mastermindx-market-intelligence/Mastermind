@@ -113,7 +113,10 @@ def test_teardown(bad_teardown): pass
         teardown = ["teardown", "failed" if name == "test_teardown" else "passed", False]
         expected.append([nodeid, [setup, teardown] if name == "test_setup"
                          else [setup, call, teardown]])
-    assert row["outcomes_sha256"] == item_digest(sorted(expected, key=timing.ModuleCaseEvidence._canonical))
+    ordered = sorted(expected, key=lambda value: json.dumps(
+        value, ensure_ascii=True, separators=(",", ":"),
+    ))
+    assert row["outcomes_sha256"] == item_digest(ordered)
 
 
 def test_same_count_changed_identity_or_outcome_never_matches(tmp_path):
@@ -253,6 +256,40 @@ def test_overflow_is_unavailable_and_never_hashes_a_truncated_subset(tmp_path, m
     assert not row["complete"] and "evidence_overflow" in row["errors"]
     for key in ("collected", "finished", "outcomes_sha256", "collected_sha256", "finished_sha256"):
         assert row[key] is None
+
+
+
+def test_real_observer_keeps_invocation_primitives_during_test_patches(tmp_path):
+    root = _project(tmp_path, {"tests/test_cases.py": """
+import json
+import pytest
+from scripts import ci_pytest_timing as timing
+
+def test_shared_serializer_patch(monkeypatch):
+    calls = []
+    def forbidden(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("test subject must reject before serialization")
+    monkeypatch.setattr(json, "dumps", forbidden)
+    assert calls == []
+
+@pytest.mark.parametrize("limit", [
+    "_CASE_MAX_COUNT", "_CASE_MAX_NODE_BYTES",
+    "_CASE_MAX_PHASE_BYTES", "_CASE_MAX_TOTAL_BYTES",
+])
+def test_shared_limit_patch(monkeypatch, limit):
+    monkeypatch.setattr(timing, limit, 1)
+
+def test_after_patches():
+    assert json.dumps(["ordinary"]) == '["ordinary"]'
+"""})
+    result, rows = _invoke(root, ["tests/test_cases.py"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    row = _evidence(rows)
+    assert row["complete"] and row["errors"] == [], row
+    assert row["collected"] == row["finished"] == row["case_invocations"] == 6
+    assert row["phase_reports"] == 18
+    assert row["collected_sha256"] == row["finished_sha256"]
 
 
 def test_real_subtest_reports_remain_attached_to_their_invocation(tmp_path):

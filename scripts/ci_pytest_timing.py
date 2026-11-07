@@ -456,6 +456,15 @@ class ModuleCaseEvidence:
         from pathlib import Path
 
         self.reporter = reporter
+        # Tests may patch shared serializers or these module constants until
+        # fixture teardown. Their call reports arrive before that restoration.
+        # Keep this invocation's original serializer and finite bounds; a new
+        # observer still receives the configured bounds at its construction.
+        self._json_dumps = json.dumps
+        self._max_count = _CASE_MAX_COUNT
+        self._max_node_bytes = _CASE_MAX_NODE_BYTES
+        self._max_phase_bytes = _CASE_MAX_PHASE_BYTES
+        self._max_total_bytes = _CASE_MAX_TOTAL_BYTES
         self.states = {}
         self.errors = set()
         self.collection_completed = False
@@ -473,7 +482,7 @@ class ModuleCaseEvidence:
             except ValueError:
                 self.errors.add("non_file_selection")
                 continue
-            if len(path.encode("utf-8")) > _CASE_MAX_NODE_BYTES:
+            if len(path.encode("utf-8")) > self._max_node_bytes:
                 self.errors.add("selection_overflow")
                 continue
             self.states.setdefault(path, dict(
@@ -483,13 +492,12 @@ class ModuleCaseEvidence:
         if not self.states:
             self.errors.add("empty_selection")
 
-    @staticmethod
-    def _canonical(value):
-        return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    def _canonical(self, value):
+        return self._json_dumps(value, ensure_ascii=True, separators=(",", ":"))
 
     def _state(self, nodeid):
         try:
-            valid = type(nodeid) is str and len(nodeid.encode("utf-8")) <= _CASE_MAX_NODE_BYTES
+            valid = type(nodeid) is str and len(nodeid.encode("utf-8")) <= self._max_node_bytes
         except UnicodeError:
             valid = False
         if not valid:
@@ -505,7 +513,7 @@ class ModuleCaseEvidence:
         if self.overflow:
             return False
         size = len(self._canonical(value).encode("ascii"))
-        if len(state[field]) >= _CASE_MAX_COUNT or self.bytes + size > _CASE_MAX_TOTAL_BYTES:
+        if len(state[field]) >= self._max_count or self.bytes + size > self._max_total_bytes:
             self.overflow = True
             self.errors.add("evidence_overflow")
             return False
@@ -585,8 +593,8 @@ class ModuleCaseEvidence:
             phase = [report.when, report.outcome, hasattr(report, "wasxfail")]
             phases = self.active[2]
             size = len(self._canonical(phase).encode("ascii"))
-            if (size > _CASE_MAX_PHASE_BYTES or state["phase_reports"] >= _CASE_MAX_COUNT
-                    or self.bytes + size > _CASE_MAX_TOTAL_BYTES):
+            if (size > self._max_phase_bytes or state["phase_reports"] >= self._max_count
+                    or self.bytes + size > self._max_total_bytes):
                 self.overflow = True
                 self.errors.add("evidence_overflow")
                 return
@@ -674,7 +682,7 @@ class ModuleCaseEvidence:
         for module, state in self.states.items():
             try:
                 row = self._row(module, state)
-                self.reporter.write_line("\nCI_MODULE " + json.dumps(row, sort_keys=True))
+                self.reporter.write_line("\nCI_MODULE " + self._json_dumps(row, sort_keys=True))
             except Exception:
                 # Absence is not a valid evidence row; never replace pytest's exit.
                 pass
