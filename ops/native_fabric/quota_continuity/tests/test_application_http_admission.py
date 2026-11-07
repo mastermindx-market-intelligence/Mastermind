@@ -6,7 +6,9 @@ import json
 import sqlite3
 import unittest
 
-from test_application_turn_admission import ApplicationFixture, offline_acquire, offline_release
+from test_application_turn_admission import (ApplicationFixture, NativeApplicationFixture,
+    HistoricalApplicationSchema, historical_application_database, offline_acquire, offline_release)
+from unittest.mock import patch
 import lease_broker
 import go_lease_capability as codec
 from go_lease_gateway import GoLeaseGateway, LeaseGatewayError
@@ -62,6 +64,24 @@ class HTTPAdmissionFixture(ApplicationFixture):
 
 
 class HTTPAdmissionTests(HTTPAdmissionFixture):
+    def test_exact_pre_native_schema_migrates_without_changing_bailian_release(self):
+        historical_application_database(self)
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            before = conn.execute("SELECT sql FROM sqlite_master WHERE name='application_http_lease_release_v2'").fetchone()[0]
+            self.assertNotIn("transport_kind", {row[1] for row in conn.execute("PRAGMA table_info(application_turns)")})
+        self.broker = self.new_broker()
+        self.gateway = self.http_gateway()
+        binding = self.http_begin()
+        prepared = self.http_prepare(binding)
+        self.gateway.close_application_turn(principal_id="macro", turn_id="turn-1")
+        self.gateway.complete_application(prepared["dispatch_id"], terminal_receipt=self.http_receipt(prepared))
+        self.assertEqual(self.rows("leases")[0]["state"], "released")
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            after = conn.execute("SELECT sql FROM sqlite_master WHERE name='application_http_lease_release_v2'").fetchone()[0]
+            self.assertEqual(before, after)
+        self.assertIsNone(self.rows("application_turns")[0]["transport_kind"])
+        self.assertTrue(binding["token"].startswith("app2."))
+
     def test_same_owner_atomic_identity_and_terminal_release(self):
         binding = self.http_begin()
         self.assertTrue(binding["token"].startswith("app2."))
@@ -182,6 +202,88 @@ class HTTPAdmissionTests(HTTPAdmissionFixture):
                 self.gateway.authorize(token, model="qwen3.8-flash", run_id="fixture", host="vps")
         self.assertEqual(self.gateway._models, frozenset({"fixture-model", "other-model"}))
         self.assertNotIn("qwen3.8-flash", self.gateway._models)
+
+
+class NativeMigrationTests(NativeApplicationFixture):
+    def schema(self):
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            return {"turn_columns": list(conn.execute("PRAGMA table_info(application_turns)")),
+                "request_columns": list(conn.execute("PRAGMA table_info(application_requests)")),
+                "release": conn.execute("SELECT sql FROM sqlite_master WHERE name='application_lease_release_v1'").fetchone()[0],
+                "http_release": conn.execute("SELECT sql FROM sqlite_master WHERE name='application_http_lease_release_v2'").fetchone()[0],
+                "leases": list(conn.execute("SELECT * FROM leases"))}
+
+    def test_exact_old_application_owner_cannot_reinstall_its_release_trigger(self):
+        old = historical_application_database(self)
+        before = self.schema()
+        self.assertNotIn("transport_kind", {row[1] for row in before["turn_columns"]})
+        self.broker = self.new_broker()
+        self.gateway = self.native_gateway()
+        migrated = self.schema()
+        self.assertNotEqual(migrated["release"], before["release"])
+        self.assertEqual(migrated["http_release"], before["http_release"])
+        prepared = self.native_prepare(self.native_begin())
+        # Reopen through the exact previous APPLICATION schema method, rather
+        # than pretending the much older worker broker owns these triggers.
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            old._ensure_schema(conn)
+        self.assertEqual(self.schema()["release"], migrated["release"])
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            conn.execute("UPDATE application_turns SET state='closed'")
+            conn.execute("UPDATE leases SET state='released'")
+            self.assertEqual(conn.execute("SELECT state FROM leases").fetchone()[0], "held")
+        self.gateway.complete_application(prepared["dispatch_id"], terminal_receipt=self.native_receipt(prepared))
+        self.assertEqual(self.rows("leases")[0]["state"], "released")
+
+    def test_failure_after_drop_rolls_back_columns_trigger_and_existing_data(self):
+        historical_application_database(self)
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            conn.execute("INSERT INTO leases(id,orchestrator_id,pool,account,task_class,model,host,pid,granted_at,ttl,last_heartbeat,state) "
+                "VALUES('existing-worker','old-root','go','account-a','mechanical','fixture-model','vps',1,1000,300,1000,'held')")
+        before = self.schema()
+        observed = []
+        class FailNativeTrigger(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                if sql.startswith("DROP TRIGGER application_lease_release_v1"):
+                    observed.append("dropped")
+                if sql.startswith("CREATE TRIGGER IF NOT EXISTS application_lease_release_v1") and "native_cli_operation_v1" in sql:
+                    observed.append("create_refused")
+                    raise sqlite3.OperationalError("fixture after old trigger drop")
+                return super().execute(sql, parameters)
+        with patch.object(lease_broker, "_connect", side_effect=lambda path: sqlite3.connect(path, factory=FailNativeTrigger)):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "after old trigger drop"):
+                self.new_broker()
+        self.assertEqual(observed, ["dropped", "create_refused"])
+        self.assertEqual(self.schema(), before)
+
+    def test_unfamiliar_release_definition_is_not_silently_replaced(self):
+        historical_application_database(self)
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            conn.execute("DROP TRIGGER application_lease_release_v1")
+            conn.execute("CREATE TRIGGER application_lease_release_v1 BEFORE UPDATE OF state ON leases BEGIN SELECT 1; END")
+        before = self.schema()
+        with self.assertRaisesRegex(lease_broker.ApplicationAdmissionError, "trigger_unrecognized"):
+            self.new_broker()
+        self.assertEqual(self.schema(), before)
+
+    def test_reopen_native_trigger_is_idempotent_and_legacy_turn_cannot_be_relabelled(self):
+        before = self.schema()
+        self.new_broker()
+        self.assertEqual(self.schema(), before)
+        legacy = {key: value for key, value in self.grant.items()
+                  if key in lease_broker._APPLICATION_GRANT_FIELDS}
+        legacy.update(grant_id="legacy-go", pool="go", models=["fixture-model"])
+        self.document["application_grants"].append(legacy)
+        self.save()
+        binding = self.begin()
+        with sqlite3.connect(self.directory / "leases.sqlite") as conn:
+            conn.execute("UPDATE application_turns SET transport_kind='native_cli_operation_v1'")
+        self.assertIsNone(self.rows("application_turns")[0]["transport_kind"])
+        prepared = self.prepare(binding)
+        self.gateway.complete_application(prepared["dispatch_id"], terminal_receipt=self.receipt(prepared))
+        self.gateway.close_application_turn(principal_id="macro", turn_id="turn-1")
+        self.assertEqual(self.rows("leases")[0]["state"], "released")
 
 
 if __name__ == "__main__":

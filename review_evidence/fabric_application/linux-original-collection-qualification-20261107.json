@@ -1,0 +1,20 @@
+{
+  "archive_bytes": 45106348,
+  "archive_sha256": "93604ae781c12b1f344468cac5770837cfdc77e753953e9b1831033c30a9b113",
+  "host": "authorized-vps",
+  "log_sha256": "dec352b07268f7647fa053eeae15985d1eb0f3d9de5bc1c653076922b410d768",
+  "node": "v20.20.2",
+  "passed": 1,
+  "proof_limit": "Synthetic installed-control/native-closure preserving migration only; not reconciliation or replay of the real original J, not live application inference, not whole-CI acceptance.",
+  "python": "3.12.3",
+  "rc": 0,
+  "real_provider_or_original_j_effects": false,
+  "retained_log": "/tmp/mmx-fabric-linux-j-cd557-20261107-root-v1/composed-original-linux-v1.log",
+  "retained_receipt": "/tmp/mmx-fabric-linux-j-cd557-20261107-root-v1/composed-original-linux-v1.json",
+  "runtime_changed": false,
+  "schema": "mastermind.linux_original_collection_fixture_proof.v1",
+  "seconds": 4.344,
+  "source_commit": "cd557dc05e26b70f2d8f56ad0da2df76a15d74ca",
+  "test": "private_service_original_delivery_test.ComposedPreservingMigrationTests.test_composed_preserving_migration_imports_then_observes_once",
+  "test_source_sha256": "27a2bcc542e9d34be8225040e8c923b1bb3f9114d142048e4e5ba0c7016e25bd"
+}

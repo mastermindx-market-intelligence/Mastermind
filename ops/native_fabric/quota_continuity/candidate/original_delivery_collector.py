@@ -1150,7 +1150,7 @@ def collect(path,*,run_id,root,parent,destination):
         revalidate=lambda: load_binding(path,run_id=run_id,root=root,parent=parent))
 
 
-def _collect_validated(bound, *, destination, revalidate):
+def _collect_validated(bound, *, destination, revalidate, transport_start=None):
     value,binding_raw,source,contract,alias,registry,original_validator,plain_binding=bound
     run_id,root,parent=(value[k] for k in ('run_id','root','parent'))
     if run_id in PLAIN_SCOPES and str(destination)!=PLAIN_SCOPES[run_id]['destination']:
@@ -1161,6 +1161,8 @@ def _collect_validated(bound, *, destination, revalidate):
     with delivery.reserve_destination(destination) as chain:
         delivery.write_exclusive(chain.fd,'read-request.json',canonical(request))
         try:
+            if transport_start is not None:
+                transport_start()
             response=delivery.transport(alias,request)
         except (OSError,ValueError) as error:
             allowed={'transport_timeout','transport_output_limit','transport_unavailable'}
@@ -1433,6 +1435,56 @@ def _gateway_collection_status(run_id):
             reason='original_collection_evidence_unqualified')
 
 
+def _gateway_reconcile(run_id):
+    """One explicitly typed, collection-only subordinate observation.
+
+    The same fixed final leaf, the same names:[] read and the same existing
+    DirectoryChain reservation and fsync fences as an ordinary collection.
+    An existing leaf, a replaced or unsafe parent and a scope mismatch all
+    refuse with zero transport. No launch, lease, controller, retry or
+    acceptance effect is implied by the observation.
+    """
+    plain = _gateway_scope(run_id)
+    result = {'run_id': run_id, 'retry_authorized': False,
+        'lease_settlement': 'UNKNOWN', 'controller_state': 'UNKNOWN',
+        'acceptance': 'NOT_RECORDED', 'original_operation_mutated': False}
+    try:
+        bound = _gateway_binding(run_id)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(result, state='REFUSED', effect_state='NOT_APPLIED',
+            failure_phase='original_local_binding',
+            this_invocation_remote_read_started=False,
+            reason='original_binding_unconfirmed')
+    remote_started = False
+    def transport_start():
+        nonlocal remote_started
+        remote_started = True
+    try:
+        _collect_validated(bound, destination=plain['destination'],
+            revalidate=lambda: _gateway_binding(run_id), transport_start=transport_start)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+        if not remote_started:
+            return dict(result, state='REFUSED', effect_state='NOT_APPLIED',
+                failure_phase='before_remote_read', this_invocation_remote_read_started=False,
+                reason=('original_reconciliation_destination_exists' if isinstance(error, FileExistsError)
+                        else 'original_reconciliation_refused'))
+        # A later exception or missing leaf cannot retract this invocation's
+        # transport attempt. No status probe can turn it into NOT_APPLIED.
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            failure_phase='after_remote_read_started', this_invocation_remote_read_started=True,
+            reason='original_reconciliation_outcome_unqualified')
+    observed = _gateway_collection_status(run_id)
+    if remote_started and (
+            observed.get('state') != 'COMPLETE'
+            or observed.get('delivery_verified') is not True):
+        # A completed transport can lose its local evidence before this final
+        # status read. Retain this invocation's uncertainty in that race too.
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            failure_phase='after_remote_read_started', this_invocation_remote_read_started=True,
+            reason='original_reconciliation_outcome_unqualified')
+    return observed
+
+
 def _gateway_original_delivery(action, run_id, receipt_sha256=None):
     """Fixed internal machine-owner operation, never a public native CLI mode.
 
@@ -1441,7 +1493,7 @@ def _gateway_original_delivery(action, run_id, receipt_sha256=None):
     with native delivery. Same-UID access is the existing service trust model.
     """
     plain = _gateway_scope(run_id)
-    if (action not in ('collect', 'status', 'result')
+    if (action not in ('collect', 'status', 'result', 'reconcile')
             or (action == 'result' and (type(receipt_sha256) is not str
                                        or not HEX.fullmatch(receipt_sha256)))
             or (action != 'result' and receipt_sha256 is not None)):
@@ -1456,6 +1508,8 @@ def _gateway_original_delivery(action, run_id, receipt_sha256=None):
             'stdout_bytes': len(stdout), 'stdout_sha256': sha(stdout),
             'stdout_base64': base64.b64encode(stdout).decode('ascii'),
             'acceptance': 'NOT_RECORDED'}
+    if action == 'reconcile':
+        return _gateway_reconcile(run_id)
     observed = _gateway_collection_status(run_id)
     if observed['state'] != 'ABSENT':
         return observed

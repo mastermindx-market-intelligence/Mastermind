@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import os
+import sys
 import time
 import uuid
 
@@ -40,13 +41,231 @@ def _bind(operation_id):
 
     owner, shared, root = _owner()
     chosen, factory = owner.configured_application_fabric(
-        lane=_LANE, workload_profile=_PROFILE, root=root)
+        lane=_LANE, workload_profile=_PROFILE, root=root,
+        service_mode_id="mastermind_chat_fabric")
     if chosen is not True or type(factory) is not owner.ApplicationFabricFactory:
         raise advisor.FabricConversationError("fabric_binding_unavailable")
     provider = shared.build_fabric_provider(factory, request_id=operation_id,
         workload_cfg={"provider_order": ["fabric"], "workload_profile": _PROFILE})
     provider.update(usage_lane=_LANE, usage_stage="advisor", usage_cycle_id=operation_id)
     return shared, provider
+
+_AUTO_TURN_SCHEMA = "mastermind.advisor.fabric_turn.v2"
+
+
+def _auto_transport_owner():
+    # Import the pinned shared owner without inspecting current selection.
+    from brain.fabric_inference import _owner
+    _owner()
+    from engine import fabric_inference_client
+    return fabric_inference_client
+
+
+def _auto_step_request(provider, step, kwargs):
+    transport = _auto_transport_owner()
+    _, body = transport._request(dict(kwargs, model=None, request_id=step["request_id"]), None, False)
+    original = transport._load_json(body, unknown=False)
+    step.update(normalized_request_digest=transport._auto_request_digest(original),
+                max_tokens=kwargs["max_tokens"])
+    return original
+
+
+def _retain_auto_observation(shared, provider, turn, step, original):
+    """Keep only this step's original observation under the conversation lock."""
+    if turn.get("schema") != _AUTO_TURN_SCHEMA:
+        return
+    value = shared._fabric_routed_observation(
+        provider, shared.fabric_observation(provider), step["request_id"])
+    observed = provider.get("_fabric_last_observation")
+    if type(observed) is dict and observed.get("request_id") == step["request_id"]:
+        step["observed_usage"] = copy.deepcopy(observed)
+    if value is None:
+        return
+    transport = _auto_transport_owner()
+    document = value.document
+    routed = transport._auto_request_digest(
+        dict(original, model=document["routing"]["selected_model"]))
+    prior = next((item["observation"]["routing"] for item in turn["steps"]
+                  if item is not step and "observation" in item), None)
+    document = transport.validate_auto_observation(document, turn["inspection"],
+        operation_id=turn["operation_id"], request_id=step["request_id"],
+        request_digest=step["normalized_request_digest"], routed_request_digest=routed,
+        max_tokens=step["max_tokens"],
+        expected_route=transport.auto_route_identity(prior) if prior is not None else None)
+    step.update(observation=document, observation_hash=_digest(document),
+                normalized_routed_request_digest=routed)
+
+
+def _auto_identity(turn, step=None):
+    if turn.get("schema") != _AUTO_TURN_SCHEMA:
+        return {"provider": turn["provider"], "model": turn["model"]}
+    step = step or turn["steps"][-1]
+    observation = step.get("observation")
+    if observation is None:
+        raise advisor.FabricConversationError("fabric_response_route_invalid")
+    return {"provider": observation["routing"]["pool"], "model": observation["serving_model"]}
+
+
+def _valid_close(value):
+    return (type(value) is dict
+        and set(value) == {"disposition", "closed", "effect_unknown", "attempted"}
+        and type(value["disposition"]) is str
+        and value["disposition"] in {"local_only", "refused", "pending", "effect_unknown", "closed"}
+        and all(type(value[key]) is bool for key in ("closed", "effect_unknown", "attempted"))
+        and value["closed"] == (value["disposition"] == "closed")
+        and value["effect_unknown"] == (value["disposition"] in {"pending", "effect_unknown"})
+        and value["attempted"] == (value["disposition"] != "local_only"))
+
+
+def _save_chat(doc, provider):
+    if provider.get("_fabric_conversation_persistence_failed"):
+        raise advisor.FabricConversationError("fabric_conversation_persistence_failed")
+    try:
+        advisor.save_fabric_conversation(doc)
+    except Exception:
+        provider["_fabric_conversation_persistence_failed"] = True
+        raise
+
+
+async def _close_auto_turn(shared, provider, doc, turn):
+    """Persist original close while the incumbent conversation lock is held."""
+    prior_error = sys.exc_info()[1]
+    try:
+        if not provider.get("_fabric_closed"):
+            await _observe_thread(lambda: _close_binding(shared, provider))
+    except BaseException:
+        if prior_error is None:
+            raise
+    finally:
+        value = provider.get("_fabric_close")
+        turn["close"] = copy.deepcopy(value) if _valid_close(value) else {
+            "disposition": "effect_unknown", "closed": False, "effect_unknown": True, "attempted": True}
+        if turn["state"] != "complete":
+            turn["state"] = "held"
+        if not provider.get("_fabric_conversation_persistence_failed"):
+            original_error = prior_error or sys.exc_info()[1]
+            try:
+                _save_chat(doc, provider)
+            except BaseException:
+                if original_error is None:
+                    raise
+
+
+def validate_auto_turn(turn):
+    """Closed new receipt variant; historical fixed-model turns are unchanged."""
+    if type(turn) is not dict:
+        raise advisor.FabricConversationError("fabric_conversation_invalid")
+    if "schema" not in turn:
+        if (set(turn) & {"inspection", "close", "held_result"}
+                or turn.get("provider") is None or turn.get("model") is None):
+            raise advisor.FabricConversationError("fabric_conversation_invalid")
+        return
+    try:
+        required = {"schema", "id", "operation_id", "prompt_hash", "state", "steps",
+                    "tool_effects", "provider", "model", "inspection"}
+        if (set(turn) - required - {"close", "held_result", "result"} or not required <= set(turn)
+                or turn["schema"] != _AUTO_TURN_SCHEMA or turn["provider"] is not None
+                or turn["model"] is not None or turn["state"] not in {"active", "held", "complete"}
+                or type(turn["steps"]) is not list or len(turn["steps"]) > _MAX_STEPS
+                or type(turn["tool_effects"]) is not list or len(turn["tool_effects"]) > _MAX_TOOL_CALLS):
+            raise ValueError()
+        advisor.validate_conversation_id(turn["id"])
+        transport = _auto_transport_owner()
+        transport.validate_native_operation_id(turn["operation_id"])
+        transport.validate_auto_inspection(turn["inspection"])
+        def digest(value):
+            return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+        if not digest(turn["prompt_hash"]):
+            raise ValueError()
+        selection = None
+        successful = {}
+        pending_seen = False
+        for index, step in enumerate(turn["steps"]):
+            fields = {"request_id", "request_hash", "state", "normalized_request_digest", "max_tokens"}
+            if (type(step) is not dict or not fields <= set(step)
+                    or set(step) - fields - {"observation", "observation_hash",
+                        "normalized_routed_request_digest", "observed_usage"}
+                    or step["request_id"] != f'{turn["operation_id"]}:brain:{index}'
+                    or not digest(step["request_hash"]) or not digest(step["normalized_request_digest"])
+                    or step["state"] not in {"pending", "complete"}
+                    or step["max_tokens"] != _MAX_OUTPUT_TOKENS):
+                raise ValueError()
+            if pending_seen:
+                raise ValueError()
+            pending_seen = step["state"] == "pending"
+            if "observed_usage" in step:
+                observed = step["observed_usage"]
+                if (type(observed) is not dict
+                        or set(observed) != {"request_id", "serving_model", "input_tokens", "output_tokens"}
+                        or observed["request_id"] != step["request_id"]
+                        or observed["serving_model"] is not None and not transport._safe_id(observed["serving_model"])
+                        or any(observed[key] is not None and (type(observed[key]) is not int
+                            or not 0 <= observed[key] <= transport.MAX_NATIVE_TOKENS)
+                            for key in ("input_tokens", "output_tokens"))):
+                    raise ValueError()
+            observation_fields = set(step) & {"observation", "observation_hash", "normalized_routed_request_digest"}
+            if observation_fields:
+                if len(observation_fields) != 3 or step["observation_hash"] != _digest(step["observation"]):
+                    raise ValueError()
+                observed = transport.validate_auto_observation(step["observation"], turn["inspection"],
+                    operation_id=turn["operation_id"], request_id=step["request_id"],
+                    request_digest=step["normalized_request_digest"],
+                    routed_request_digest=step["normalized_routed_request_digest"],
+                    max_tokens=step["max_tokens"], expected_route=selection,
+                    require_success=step["state"] == "complete")
+                selection = transport.auto_route_identity(observed["routing"])
+                if "observed_usage" in step and step["observed_usage"] != {
+                        "request_id": step["request_id"], "serving_model": observed["serving_model"],
+                        **observed["usage"]}:
+                    raise ValueError()
+            elif step["state"] == "complete":
+                raise ValueError()
+            if step["state"] == "complete":
+                successful[step["request_id"]] = step
+        ids = set()
+        for effect in turn["tool_effects"]:
+            if (type(effect) is not dict
+                    or set(effect) != {"id", "name", "input_hash", "state", "request_id"}
+                    or not transport._safe_id(effect["id"]) or effect["id"] in ids
+                    or not transport._safe_id(effect["name"]) or not digest(effect["input_hash"])
+                    or effect["request_id"] not in successful or effect["state"] not in {"pending", "complete"}):
+                raise ValueError()
+            ids.add(effect["id"])
+        if "close" in turn and not _valid_close(turn["close"]):
+            raise ValueError()
+        if "result" in turn and turn["state"] != "complete" or "result" in turn and "held_result" in turn:
+            raise ValueError()
+        result = turn.get("result", turn.get("held_result"))
+        if ("result" in turn or "held_result" in turn) and result is None:
+            raise ValueError()
+        if result is not None:
+            if (not turn["steps"] or len(successful) != len(turn["steps"])
+                    or any(effect["state"] != "complete" for effect in turn["tool_effects"])
+                    or type(result) is not dict
+                    or set(result) != {"text", "tools_used", "papers", "cost_usd", "usage",
+                                      "model", "provider", "truncated"}
+                    or type(result["text"]) is not str or len(result["text"]) > 1_000_000
+                    or type(result["tools_used"]) is not list or type(result["papers"]) is not list
+                    or result["cost_usd"] is not None or type(result["truncated"]) is not bool
+                    or {key: result[key] for key in ("model", "provider")} != _auto_identity(turn)):
+                raise ValueError()
+            usages = [item["observation"]["usage"] for item in turn["steps"]]
+            complete = all(all(type(value) is int for value in usage.values()) for usage in usages)
+            inp = sum(usage["input_tokens"] for usage in usages
+                      if all(type(value) is int for value in usage.values()))
+            out = sum(usage["output_tokens"] for usage in usages
+                      if all(type(value) is int for value in usage.values()))
+            expected_usage = {"input_tokens": inp if complete else None,
+                "output_tokens": out if complete else None, "usage_state": "known" if complete else "unknown",
+                "completed_input_tokens": inp, "completed_output_tokens": out}
+            if result["usage"] != expected_usage:
+                raise ValueError()
+        if turn["state"] == "complete" and ("result" not in turn
+                or turn.get("close") != {"disposition": "closed", "closed": True,
+                    "effect_unknown": False, "attempted": True}):
+            raise ValueError()
+    except Exception:
+        raise advisor.FabricConversationError("fabric_conversation_invalid") from None
 
 
 def _plain_response(response) -> list[dict]:
@@ -134,14 +353,25 @@ async def _step_response(shared, provider, kwargs):
     return await _observe_thread(run)
 
 
-def _log_turn(provider, shared, *, prompt, text, error, operation_id, started, role):
+def _log_turn(provider, shared, *, prompt, text, error, operation_id, started, role, turn=None):
     from brain import thinking_log
     from portfolio import registry
 
     usage = shared.fabric_usage(provider)
+    model, pool = provider["model"], provider["provider"]
+    if provider.get("_fabric_auto_inspection") is not None:
+        identities = set()
+        for step in (turn or {}).get("steps", []):
+            observation = step.get("observation")
+            observed_usage = step.get("observed_usage")
+            if observation is not None:
+                identities.add((observation["serving_model"], observation["routing"]["pool"]))
+            elif observed_usage is not None:
+                identities.add((observed_usage["serving_model"], "unknown"))
+        model, pool = next(iter(identities)) if len(identities) == 1 else (None, "unknown")
     try:
-        thinking_log.log_turn_async(question=prompt, answer=text, model=provider["model"],
-            provider=provider["provider"], mode="shared_fabric", backend="fabric", seat=role,
+        thinking_log.log_turn_async(question=prompt, answer=text, model=model,
+            provider=pool, mode="shared_fabric", backend="fabric", seat=role,
             book=registry.DASHBOARD_DEFAULT_ID, role=role, armed=True, run_id=operation_id, key_id=provider["cap_id"],
             input_tokens=usage["input_tokens"], output_tokens=usage["output_tokens"],
             latency_ms=int((time.monotonic()-started)*1000),
@@ -202,74 +432,103 @@ async def chat_stream(prompt: str, *, conversation_id: str, turn_id: str | None 
             turn = {"id": turn_id, "operation_id": operation_id, "prompt_hash": digest,
                     "state": "active", "steps": [], "tool_effects": [],
                     "provider": provider["provider"], "model": provider["model"]}
-            doc["turns"].append(turn)
-            doc["messages"].append({"role": "user", "content": prompt})
-            doc["rendered"].append(advisor.rendered_turn("user", prompt))
-            advisor.save_fabric_conversation(doc)
-            prior_ids = {effect["id"] for effect in turn["tool_effects"]}
-            for step_number in range(limit):
-                kwargs = {"system": system, "messages": copy.deepcopy(doc["messages"]),
-                          "tools": tools, "max_tokens": _MAX_OUTPUT_TOKENS}
-                step = {"request_id": f"{operation_id}:brain:{step_number}",
-                        "request_hash": _digest({"model": provider["model"], **kwargs}), "state": "pending"}
-                turn["steps"].append(step)
-                advisor.save_fabric_conversation(doc)  # Before any provider bytes.
-                response = await _step_response(shared, provider, kwargs)
-                calls = bot_mcp.validate_inference_calls(
-                    [block for block in response.content if block.type == "tool_use"], used_ids=prior_ids)
-                if len(turn["tool_effects"]) + len(calls) > _MAX_TOOL_CALLS:
-                    raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
-                step_text = "".join(block.text for block in response.content if block.type == "text")
-                if len(text) + len(step_text) > 1_000_000:
-                    raise advisor.FabricConversationError("fabric_conversation_limit")
-                doc["messages"].append({"role": "assistant", "content": _plain_response(response)})
-                step["state"] = "complete"
-                advisor.save_fabric_conversation(doc)  # Complete terminal response before tools.
-                # No last-step tool effects or prose when the driver cannot
-                # report the tool result in a following model response.
-                if calls and step_number + 1 == limit:
-                    raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
-                text += step_text
-                if not calls:
-                    result = {"text": text, "tools_used": [item["name"] for item in used], "papers": papers,
-                              "cost_usd": None, "usage": shared.fabric_usage(provider),
-                              "model": provider["model"], "provider": provider["provider"],
-                              "truncated": response.stop_reason == "max_tokens"}
-                    doc["rendered"].append(advisor.rendered_turn("brain", text, tools=used, papers=papers))
-                    doc["rendered"] = doc["rendered"][-200:]
-                    turn.update(state="complete", result=result)
-                    advisor.save_fabric_conversation(doc)
-                    if step_text:
+            if provider.get("_fabric_auto_inspection") is not None:
+                turn.update(schema=_AUTO_TURN_SCHEMA,
+                            inspection=json.loads(provider["_fabric_auto_inspection"]))
+            try:
+                doc["turns"].append(turn)
+                doc["messages"].append({"role": "user", "content": prompt})
+                doc["rendered"].append(advisor.rendered_turn("user", prompt))
+                _save_chat(doc, provider)
+                prior_ids = {effect["id"] for effect in turn["tool_effects"]}
+                for step_number in range(limit):
+                    kwargs = {"system": system, "messages": copy.deepcopy(doc["messages"]),
+                              "tools": tools, "max_tokens": _MAX_OUTPUT_TOKENS}
+                    step = {"request_id": f"{operation_id}:brain:{step_number}",
+                            "request_hash": _digest({"model": provider["model"], **kwargs}), "state": "pending"}
+                    original = (_auto_step_request(provider, step, kwargs)
+                                if turn.get("schema") == _AUTO_TURN_SCHEMA else None)
+                    turn["steps"].append(step)
+                    _save_chat(doc, provider)  # Before any provider bytes.
+                    try:
+                        response = await _step_response(shared, provider, kwargs)
+                    finally:
+                        if turn.get("schema") == _AUTO_TURN_SCHEMA:
+                            original_error = sys.exc_info()[1]
+                            try:
+                                _retain_auto_observation(shared, provider, turn, step, original)
+                                _save_chat(doc, provider)
+                            except BaseException:
+                                if original_error is None:
+                                    raise
+                    calls = bot_mcp.validate_inference_calls(
+                        [block for block in response.content if block.type == "tool_use"], used_ids=prior_ids)
+                    if len(turn["tool_effects"]) + len(calls) > _MAX_TOOL_CALLS:
+                        raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+                    step_text = "".join(block.text for block in response.content if block.type == "text")
+                    if len(text) + len(step_text) > 1_000_000:
+                        raise advisor.FabricConversationError("fabric_conversation_limit")
+                    doc["messages"].append({"role": "assistant", "content": _plain_response(response)})
+                    step["state"] = "complete"
+                    _save_chat(doc, provider)  # Complete terminal response before tools.
+                    # No last-step tool effects or prose when the driver cannot
+                    # report the tool result in a following model response.
+                    if calls and step_number + 1 == limit:
+                        raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+                    text += step_text
+                    if not calls:
+                        result = {"text": text, "tools_used": [item["name"] for item in used], "papers": papers,
+                                  "cost_usd": None, "usage": shared.fabric_usage(provider),
+                                  **_auto_identity(turn, step),
+                                  "truncated": response.stop_reason == "max_tokens"}
+                        if turn.get("schema") == _AUTO_TURN_SCHEMA:
+                            turn["held_result"] = result
+                            await _close_auto_turn(shared, provider, doc, turn)
+                            if not turn["close"]["closed"]:
+                                raise advisor.FabricConversationError("fabric_close_unsettled")
+                            del turn["held_result"]
+                        doc["rendered"].append(advisor.rendered_turn("brain", text, tools=used, papers=papers))
+                        doc["rendered"] = doc["rendered"][-200:]
+                        turn.update(state="complete", result=result)
+                        _save_chat(doc, provider)
+                        published_text = text if turn.get("schema") == _AUTO_TURN_SCHEMA else step_text
+                        if published_text:
+                            yield {"type": "text", "text": published_text}
+                        yield {"type": "done", **result, "session_id": None, "replayed": False,
+                               "conversation_id": conversation_id, "turn_id": turn_id, "backend": "fabric"}
+                        return
+                    if step_text and turn.get("schema") != _AUTO_TURN_SCHEMA:
                         yield {"type": "text", "text": step_text}
-                    yield {"type": "done", **result, "session_id": None, "replayed": False,
-                           "conversation_id": conversation_id, "turn_id": turn_id, "backend": "fabric"}
-                    return
-                if step_text:
-                    yield {"type": "text", "text": step_text}
-                result_blocks = []
-                doc["messages"].append({"role": "user", "content": result_blocks})
-                for call in calls:
-                    effect = {"id": call["id"], "name": call["name"],
-                              "input_hash": _digest(call["input"]), "state": "pending"}
-                    turn["tool_effects"].append(effect)
-                    advisor.save_fabric_conversation(doc)  # Before the handler can write.
-                    yield {"type": "tool", "name": call["name"], "args": call["input"]}
-                    # Cancellation at the yielded event cannot run a later tool.
-                    result = await bot_mcp.invoke_inference_tool(call, provenance={
-                        "provider": provider["provider"], "model": provider["model"], "turn_id": turn_id})
-                    raw = json.dumps(result, ensure_ascii=False, allow_nan=False)
-                    if len(raw) > 128_000:
-                        raise advisor.FabricConversationError("fabric_tool_result_invalid")
-                    result_blocks.append({"type": "tool_result", "tool_use_id": call["id"], "content": raw})
-                    effect["state"] = "complete"
-                    prior_ids.add(call["id"])
-                    used.append({"name": call["name"], "args": call["input"]})
-                    event = bot_mcp.tool_result_event(result, tool_name=call["name"])
-                    if event["type"] == "paper":
-                        papers.append({key: value for key, value in event.items() if key != "type"})
-                    advisor.save_fabric_conversation(doc)  # Result before continuation.
-                    yield event
-            raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+                    result_blocks = []
+                    doc["messages"].append({"role": "user", "content": result_blocks})
+                    for call in calls:
+                        effect = {"id": call["id"], "name": call["name"],
+                                  "input_hash": _digest(call["input"]), "state": "pending"}
+                        if turn.get("schema") == _AUTO_TURN_SCHEMA:
+                            effect["request_id"] = step["request_id"]
+                        turn["tool_effects"].append(effect)
+                        _save_chat(doc, provider)  # Before the handler can write.
+                        yield {"type": "tool", "name": call["name"], "args": call["input"]}
+                        # Cancellation at the yielded event cannot run a later tool.
+                        result = await bot_mcp.invoke_inference_tool(call, provenance={
+                            **_auto_identity(turn, step), "turn_id": turn_id})
+                        raw = json.dumps(result, ensure_ascii=False, allow_nan=False)
+                        if len(raw) > 128_000:
+                            raise advisor.FabricConversationError("fabric_tool_result_invalid")
+                        result_blocks.append({"type": "tool_result", "tool_use_id": call["id"], "content": raw})
+                        effect["state"] = "complete"
+                        prior_ids.add(call["id"])
+                        used.append({"name": call["name"], "args": call["input"]})
+                        event = bot_mcp.tool_result_event(result, tool_name=call["name"])
+                        if event["type"] == "paper":
+                            papers.append({key: value for key, value in event.items() if key != "type"})
+                        _save_chat(doc, provider)  # Result before continuation.
+                        yield event
+                raise advisor.FabricConversationError("fabric_tool_budget_exhausted")
+            finally:
+                if turn.get("schema") == _AUTO_TURN_SCHEMA and "close" not in turn:
+                    await _close_auto_turn(shared, provider, doc, turn)
+
     except (asyncio.CancelledError, GeneratorExit):
         error = "fabric_effect_unknown" if turn is not None else "fabric_chat_cancelled"
         # Do not rewrite a pending effect as cancelled or resume it on restart.
@@ -290,10 +549,11 @@ async def chat_stream(prompt: str, *, conversation_id: str, turn_id: str | None 
     finally:
         if provider is not None:
             try:
-                await _observe_thread(lambda: _close_binding(shared, provider))
+                if not provider.get("_fabric_closed"):
+                    await _observe_thread(lambda: _close_binding(shared, provider))
             finally:
                 _log_turn(provider, shared, prompt=prompt, text=text, error=error,
-                          operation_id=operation_id, started=started, role=role)
+                          operation_id=operation_id, started=started, role=role, turn=turn)
 
 
 async def research(prompt: str, *, role="deep", max_turns=None, resume=None,

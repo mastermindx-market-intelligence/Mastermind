@@ -30,6 +30,26 @@ def tool_call(ident="proposal-1", name="propose_thesis", args=None):
         "name": "mcp__bot__" + name, "arguments": json.dumps(THESIS if args is None else args)}}
 
 
+# The seven read objects the cognition owner already publishes, under the
+# cognition owner's own namespace. The Fabric inference view joins them to the
+# incumbent bot roster; it does not create a second authority.
+COGNITION_NAMES = [
+    "mcp__cognition__get_market_packet",
+    "mcp__cognition__get_prophet_board",
+    "mcp__cognition__get_sector_rotation",
+    "mcp__cognition__get_technical_lab",
+    "mcp__cognition__get_context_catalog",
+    "mcp__cognition__get_surface_packet",
+    "mcp__cognition__get_neural_web_packet",
+]
+
+
+def cognition_call(ident="cognition-1", name="get_context_catalog", args=None):
+    return {"id": ident, "type": "function", "function": {
+        "name": "mcp__cognition__" + name,
+        "arguments": json.dumps({} if args is None else args)}}
+
+
 def packet(text="Grounded response.", *, calls=(), usage=True):
     message = {"role": "assistant", "content": text}
     if calls:
@@ -42,13 +62,68 @@ def packet(text="Grounded response.", *, calls=(), usage=True):
 class ToolBoundaryTests(unittest.TestCase):
     def test_catalog_is_exact_incumbent_roster_and_system_is_honest(self):
         catalog = bot_mcp.inference_tool_catalog()
-        self.assertEqual({row["name"] for row in catalog}, set(bot_mcp.TOOL_NAMES))
-        self.assertEqual(len(catalog), 25)
+        # The exact intended roster: the 25 incumbent bot tools plus the seven
+        # cognition reads, in the derived view's order.
+        self.assertEqual({row["name"] for row in catalog},
+                         set(bot_mcp.TOOL_NAMES) | set(COGNITION_NAMES))
+        self.assertEqual(len(catalog), 32)
+        self.assertEqual(len(bot_mcp.TOOL_NAMES), 25)
+        self.assertEqual(len(bot_mcp._ALL), 25)
         for name in ("recommend_action", "WebSearch", "WebFetch", "Read", "Grep", "Glob"):
             self.assertNotIn(name, {row["name"] for row in catalog})
             self.assertNotIn("mcp__bot__" + name, {row["name"] for row in catalog})
         self.assertNotIn("WebSearch", advisor.inference_system())
         self.assertNotIn("WebFetch", advisor.inference_system())
+
+    def test_cognition_namespace_adds_no_authority_and_cannot_file_a_paper(self):
+        names = {row["name"] for row in bot_mcp.inference_tool_catalog()}
+        self.assertEqual(len(names), 32)
+        for forbidden in ("mcp__cognition__submit_book",
+                          "mcp__cognition__request_context_upgrade",
+                          "mcp__cognition__get_my_book",
+                          "mcp__bot__get_market_packet",
+                          "mcp__bot__get_context_catalog"):
+            self.assertNotIn(forbidden, names)
+        # The incumbent filing handler stays the sole paper-event owner.
+        marker = {"content": [{"type": "text",
+                               "text": bot_mcp.PAPER_MARKER + ' {"paper_id":"x"}'}]}
+        for name in COGNITION_NAMES:
+            self.assertEqual(bot_mcp.tool_result_event(marker, tool_name=name),
+                             {"type": "tool_result"})
+
+    def test_cognition_calls_keep_the_published_argument_contract(self):
+        def block(args, ident="valid-1", name="mcp__cognition__get_technical_lab"):
+            return SimpleNamespace(id=ident, name=name, input=args)
+        for args in ({}, {"ticker": "AAPL", "source": "trusted"},
+                     {"ticker": "AAPL", "limit": 1.0}, {"ticker": 7}):
+            with self.subTest(args=args), self.assertRaises(bot_mcp.InferenceToolError):
+                bot_mcp.validate_inference_calls([block(args)])
+        calls = bot_mcp.validate_inference_calls([block({"ticker": "AAPL"})])
+        self.assertEqual(calls[0]["name"], "mcp__cognition__get_technical_lab")
+        self.assertEqual(calls[0]["input"], {"ticker": "AAPL"})
+        # An integer argument stays integer-exact for the cognition reads too.
+        with self.assertRaises(bot_mcp.InferenceToolError):
+            bot_mcp.validate_inference_calls([SimpleNamespace(
+                id="valid-2", name="mcp__cognition__get_prophet_board",
+                input={"limit": 1.0})])
+        # A non-finite argument and an unsupported cognition name are refused.
+        with self.assertRaises(bot_mcp.InferenceToolError):
+            bot_mcp.validate_inference_calls([SimpleNamespace(
+                id="valid-3", name="mcp__cognition__get_sector_rotation",
+                input={"limit": float("inf")})])
+        for unsupported in ("mcp__cognition__submit_book",
+                            "mcp__cognition__request_context_upgrade",
+                            "mcp__cognition__get_my_book",
+                            "mcp__cognition__unknown_read"):
+            with self.subTest(name=unsupported), self.assertRaises(bot_mcp.InferenceToolError):
+                bot_mcp.validate_inference_calls([SimpleNamespace(
+                    id="valid-4", name=unsupported, input={})])
+        # One id ledger spans both namespaces: a repeated id is refused.
+        with self.assertRaises(bot_mcp.InferenceToolError):
+            bot_mcp.validate_inference_calls([
+                block({"ticker": "AAPL"}, ident="shared-id"),
+                SimpleNamespace(id="shared-id", name="mcp__cognition__get_context_catalog",
+                                input={})])
 
     def test_strict_full_argument_schema_and_ids(self):
         def block(args, ident="valid-1", name="mcp__bot__propose_thesis"):
@@ -87,8 +162,29 @@ class ChatCompositionTests(unittest.TestCase):
 
     def setUp(self):
         _text_fixture.FabricCompositionTests.setUp(self)
-        self.manifest["capabilities"][0]["allowed_lanes"].append("mastermind-chat")
+        self.text_mode = dict(self.mode)
+        self.text_capability = dict(self.manifest["capabilities"][0])
+        text_transport = self.owner._APPLICATION_FABRIC_TRANSPORTS[self.transport_id]
+        transport = self.owner._ApplicationFabricTransport(
+            text_transport.base_url, "TEST_FABRIC_CHAT_TOKEN",
+            "actual-fixture-provider", MODEL, "unknown",
+            "fabric:chat-fixture", "chat_fixture",
+            qualified=True, application_allowed=True,
+        )
+        self.transport_id = self.owner._SERVICE_FABRIC_RELATIONS["mastermind_chat_fabric"].transport_id
+        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {self.transport_id: transport}))
+        self.mode = {key: getattr(transport, key) for key in self.owner._APPLICATION_IDENTITY_FIELDS}
+        self.mode.update(transport_id=self.transport_id, enabled=True, application_allowed=True,
+                         qualification=self.owner.PROFILE_QUALIFIED_CANARY,
+                         qualification_ref="fixture:source-only",
+                         qualified_until=self.text_mode["qualified_until"])
+        self.document["application_fabric_modes"] = {"mastermind_chat_fabric": self.mode}
+        self.manifest = {"capabilities": [{
+            "capability_id": "chat_fixture", "secret_ref": "TEST_FABRIC_CHAT_TOKEN",
+            "kill_state": "active", "allowed_lanes": ["mastermind-chat"],
+        }]}
         self.save()
+        os.environ["TEST_FABRIC_CHAT_TOKEN"] = _text_fixture.PROXY_TOKEN
         os.environ["MM_PROVIDER_WORKLOAD_PROFILE"] = "site_interactive"
         self.start(patch.object(advisor, "_ROOT", self.root))
         self.start(patch.object(advisor, "_HISTORY", self.root / "history"))
@@ -109,6 +205,16 @@ class ChatCompositionTests(unittest.TestCase):
     def conversation_document(self, conv="chat-1"):
         return json.loads(advisor._hist_path(conv).read_text())
 
+    def test_text_service_grant_cannot_substitute_for_chat_identity(self):
+        self.document["application_fabric_modes"] = {"mastermind_text_fabric": self.text_mode}
+        text_capability = dict(self.text_capability, allowed_lanes=["mastermind-text", "mastermind-chat"])
+        self.manifest = {"capabilities": [text_capability]}
+        self.save()
+        events = self.events()
+        self.assertEqual(events[-1]["error"], "fabric_chat_unavailable", events)
+        self.assertEqual(self.dispatches, [])
+        self.assertFalse(advisor._hist_path("chat-1").exists())
+
     def test_tool_only_round_and_final_response_use_real_owner_and_handler_once(self):
         plans = [packet(None, calls=[tool_call()]), packet("Proposal queued; no trade was executed.")]
         self.response = lambda: plans.pop(0)
@@ -117,7 +223,7 @@ class ChatCompositionTests(unittest.TestCase):
         self.assertEqual(len(self.dispatches), 2)
         first, second = [row["body"] for row in self.dispatches]
         self.assertEqual(first["model"], MODEL)
-        self.assertEqual(len(first["tools"]), 25)
+        self.assertEqual(len(first["tools"]), 32)
         self.assertFalse(first["stream"])
         self.assertEqual(second["messages"][-1]["role"], "tool")
         self.assertEqual(second["messages"][-1]["tool_call_id"], "proposal-1")
@@ -170,6 +276,75 @@ class ChatCompositionTests(unittest.TestCase):
         self.assertFalse(bot_mcp._PROPOSALS.exists())
         self.assertEqual(len(self.dispatches), 1)
         self.assertEqual(self.conversation_document()["turns"][0]["tool_effects"], [])
+
+    def test_cognition_read_round_uses_the_real_cognition_owner_and_frozen_route(self):
+        from brain import portfolio_intelligence
+
+        catalog = {"schema": "mastermind.portfolio_intelligence.catalog/v1",
+                   "surfaces": [{"id": "radar", "status": "fresh"}]}
+        plans = [packet(None, calls=[cognition_call()]),
+                 packet("Catalog read; it carries no trade authority.")]
+        self.response = lambda: plans.pop(0)
+        with patch.object(portfolio_intelligence, "context_catalog", lambda: catalog):
+            events = self.events()
+        self.assertEqual(events[-1]["type"], "done", events)
+        self.assertEqual(len(self.dispatches), 2)
+        first, second = [row["body"] for row in self.dispatches]
+        self.assertEqual(first["model"], MODEL)
+        self.assertEqual(len(first["tools"]), 32)
+        self.assertIn("mcp__cognition__get_context_catalog",
+                      {row["function"]["name"] for row in first["tools"]})
+        self.assertEqual(second["messages"][-1]["role"], "tool")
+        self.assertEqual(second["messages"][-1]["tool_call_id"], "cognition-1")
+        # The cognition owner's own decorated handler produced the result.
+        returned = json.loads(
+            json.loads(second["messages"][-1]["content"])["content"][0]["text"])
+        self.assertEqual(returned, catalog)
+        self.assertEqual([event["name"] for event in events if event["type"] == "tool"],
+                         ["mcp__cognition__get_context_catalog"])
+        self.assertEqual([event for event in events if event["type"] == "paper"], [])
+        doc = self.conversation_document()
+        self.assertEqual(doc["turns"][0]["tool_effects"][0]["state"], "complete")
+        self.assertEqual(doc["turns"][0]["tool_effects"][0]["name"],
+                         "mcp__cognition__get_context_catalog")
+        self.assertEqual(len(self.costs()), 2)
+        self.assertEqual(self.rows[-1]["provider"], "actual-fixture-provider")
+
+    def test_late_invalid_cognition_call_prevents_the_earlier_business_handler(self):
+        from brain import portfolio_intelligence
+
+        self.response = packet(None, calls=[
+            tool_call(),
+            cognition_call("bad-2", args={"source": "forged"}),
+        ])
+        with patch.object(portfolio_intelligence, "context_catalog",
+                          lambda: {"surfaces": []}):
+            events = self.events()
+        self.assertEqual(events[-1]["type"], "error", events)
+        self.assertEqual(events[-1]["error"], "fabric_tool_arguments_invalid")
+        # The whole completed batch is refused before any handler side effect.
+        self.assertFalse(bot_mcp._PROPOSALS.exists())
+        self.assertEqual(len(self.dispatches), 1)
+        self.assertEqual(self.conversation_document()["turns"][0]["tool_effects"], [])
+
+    def test_completed_cognition_replay_adds_no_model_or_handler_execution(self):
+        from brain import portfolio_intelligence
+
+        plans = [packet(None, calls=[cognition_call()]), packet("Catalog read.")]
+        self.response = lambda: plans.pop(0)
+        with patch.object(portfolio_intelligence, "context_catalog",
+                          lambda: {"surfaces": []}):
+            original = self.events()
+        self.assertEqual(original[-1]["type"], "done", original)
+        with patch.object(fabric_chat, "_bind", side_effect=AssertionError("new admission")), \
+                patch.object(bot_mcp, "invoke_inference_tool",
+                             side_effect=AssertionError("replayed handler")):
+            replay = self.events(recover_only=True)
+        self.assertTrue(replay[-1]["replayed"])
+        self.assertEqual(replay[-1]["text"], original[-1]["text"])
+        # The completed receipt replays: no additional model or handler run.
+        self.assertEqual(len(self.dispatches), 2)
+        self.assertEqual(len(self.conversation_document()["turns"][0]["tool_effects"]), 1)
 
     def test_provider_tool_ids_may_repeat_in_a_distinct_completed_turn(self):
         plans = [packet(None, calls=[tool_call()]), packet("First proposal queued."),

@@ -540,3 +540,20 @@ def test_paper_cancellation_propagates_without_a_false_failure_response(
     assert target.read_bytes() == previous_bytes
     assert feed_calls == []
     assert not list(papers.glob(".*.tmp"))
+
+
+def test_existing_index_owner_failure_is_auxiliary_to_canonical_save(tmp_path, monkeypatch):
+    from brain import research_paper as rp
+
+    _wire_paths(monkeypatch, rp, tmp_path)
+    attempts = []
+
+    def fail_append(row):
+        attempts.append(dict(row))
+        raise OSError("index publication unavailable")
+
+    monkeypatch.setattr(rp, "_paper_index_append", fail_append)
+    path = rp.save_paper(_paper(summary="canonical survives its index owner"))
+    assert len(attempts) == 1
+    assert json.loads(path.read_text())["summary"] == "canonical survives its index owner"
+    assert rp.latest_for("AAPL")["summary"] == "canonical survives its index owner"
