@@ -1,0 +1,167 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "originalRequestId": "5226a1441f084477a0fc523796fbe55f",
+  "originalAdmissionId": "d901546607d64c1e9c7cd195e4ddf532",
+  "observation": {
+    "at": "2026-11-07T09:02:43.852Z",
+    "pid": 80261,
+    "names": [
+      null,
+      null,
+      null,
+      "New conversation",
+      "Local history",
+      "Local Hermes conversations",
+      null,
+      "Mastermind OS \u00b7 Meta-CEO",
+      "Read original conversation",
+      null,
+      "Native conversation messages",
+      null,
+      "The message is sent exactly as written. No automatic resend.",
+      "Check and send message"
+    ],
+    "enabled": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ],
+    "selected": [
+      {
+        "index": 0,
+        "name": null,
+        "names": [
+          null,
+          "Hermes v0.23.0",
+          "Connect local Hermes"
+        ],
+        "groups": [
+          {
+            "index": 0,
+            "names": [
+              "LOCAL NATIVE RUNTIME"
+            ]
+          },
+          {
+            "index": 1,
+            "names": [
+              "Hermes ",
+              "v0.23.0"
+            ]
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "name": null,
+        "names": [
+          "Your existing local conversations, one native runtime. Worker dispatch is not enabled by this connection."
+        ],
+        "groups": []
+      },
+      {
+        "index": 2,
+        "name": null,
+        "names": [
+          "Conversation purpose",
+          "Conversation purpose"
+        ],
+        "groups": []
+      },
+      {
+        "index": 6,
+        "name": null,
+        "names": [
+          "Native admission",
+          ": ",
+          null,
+          " \u00b7 ",
+          "terminal",
+          " \u00b7 completed"
+        ],
+        "groups": [
+          {
+            "index": 2,
+            "names": [
+              "d901546607d64c1e9c7cd195e4ddf532"
+            ]
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "name": null,
+        "names": [
+          "Configured model",
+          ": ",
+          "qwen3:14b",
+          " \u00b7 ",
+          "Saved history \u00b7 current send access is checked when you send"
+        ],
+        "groups": []
+      },
+      {
+        "index": 10,
+        "name": "Native conversation messages",
+        "names": [
+          null,
+          null
+        ],
+        "groups": [
+          {
+            "index": 0,
+            "names": [
+              "YOU",
+              null
+            ],
+            "groups": [
+              {
+                "index": 1,
+                "names": [
+                  "Turn these Hermes integration acceptance requirements into a concise five-bullet internal checklist: use the existing local runtime and original conversation; recover an original request without automatic resend; reopen saved history; clear the displayed conversation on logout and reconnect safely; keep public Apple signing, notarization and updater distribution on hold until separately qualified. Mark these as requirements, not proven results. Do not use tools."
+                ],
+                "groups": []
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "names": [
+              "HERMES",
+              null
+            ],
+            "groups": [
+              {
+                "index": 1,
+                "names": [
+                  "- **Session Context Preservation**: Maintain original local runtime and conversation state; avoid automatic request resends or session resets.  \n- **Request Recovery**: Support reopening and verifying saved history without relying on resent requests or external triggers.  \n- **Logout Security**: Clear all displayed conversation data upon logout; ensure safe reconnection to the same session without\u6b8b\u7559.  \n- **Apple Ecosystem Hold**: Suspend public Apple signing, notarization, and updater distribution until separately approved by authorized channels.  \n- **Runtime Isolation**: Use the original conversation context and local runtime strictly; prohibit dynamic tool invocation for validation."
+                ],
+                "groups": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "index": 11,
+        "name": null,
+        "names": [
+          "Message Hermes",
+          "Message Hermes"
+        ],
+        "groups": []
+      }
+    ]
+  }
+}

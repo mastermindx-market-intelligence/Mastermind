@@ -20,6 +20,7 @@ import bot  # noqa: F401
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
 from brain import bot_mcp
+from brain import portfolio_intelligence
 
 SERVER_NAME = "desk"
 PORTFOLIO_ID = "autonomous"
@@ -232,15 +233,24 @@ async def get_prophet_board(args):
     return bot_mcp._json(portfolio_intelligence.prophet_board(limit=int(args.get("limit") or 24)))
 
 
-@tool("get_sector_rotation", "Sector Central context. Default returns legacy leaders; projection=sector_dossiers returns the dated all-eleven dossier with source qualifications and no trade authority.",
+@tool("get_sector_rotation", "Sector Central context. Default returns legacy leaders; projection=sector_dossiers returns the dated all-eleven dossier with source qualifications and no trade authority; projection=sector_windows returns one explicitly selected sector's exact 5/20/63-session measurements with every other identity kept as status-only.",
       {"type": "object", "properties": {
           "limit": {"type": "integer"},
-          "projection": {"type": "string", "enum": ["legacy", "sector_dossiers"]},
+          "projection": {"type": "string", "enum": ["legacy", "sector_dossiers", "sector_windows"]},
+          "sector": {"type": "string", "enum": list(portfolio_intelligence.PSL_SECTOR_IDS)},
       }})
 async def get_sector_rotation(args):
-    from brain import portfolio_intelligence
-    if "projection" in args and args["projection"] != "legacy":
-        return bot_mcp._json(portfolio_intelligence.sector_rotation(projection=args["projection"]))
+    projection = args.get("projection")
+    if "projection" in args and projection != "legacy":
+        if "sector" in args:
+            return bot_mcp._json(portfolio_intelligence.sector_rotation(
+                projection=projection, sector=args["sector"]))
+        return bot_mcp._json(portfolio_intelligence.sector_rotation(projection=projection))
+    if "sector" in args:
+        # A sector selector only means something for projection=sector_windows; never fall
+        # back to legacy-ranked values.
+        return bot_mcp._json(portfolio_intelligence.sector_rotation(
+            projection="legacy", sector=args["sector"]))
     return bot_mcp._json(portfolio_intelligence.sector_rotation(limit=int(args.get("limit") or 12)))
 
 

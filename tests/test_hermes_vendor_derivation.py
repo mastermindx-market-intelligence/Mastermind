@@ -18,6 +18,9 @@ import pytest
 from ops.executive_os import native_gateway_sources as source
 from ops.executive_os import release_manifest as manifest
 from integrations.hermes_qualification.computer_env_guard import qualify as guard
+from integrations.hermes_qualification.diagnostic_privacy import qualify as privacy_guard
+from integrations.hermes_qualification.workspace_oauth_privacy import qualify as workspace_guard
+from tests.test_hermes_diagnostic_privacy import privacy_sources
 from integrations.hermes_runtime import install as installer
 from integrations.hermes_runtime.errors import RuntimeRefusal
 
@@ -30,15 +33,25 @@ def git(root, *args):
     return result.stdout.strip()
 
 
-@pytest.fixture
-def world(tmp_path, monkeypatch):
+@pytest.fixture(params=["computer_env_guard", "diagnostic_privacy", "workspace_oauth_privacy"])
+def world(tmp_path, monkeypatch, request):
+    kind = request.param
+    patch, postimages, _ = source._derivation_policy(kind)
+    selected_guard = {source.DERIVATION_KIND: guard, source.PRIVACY_DERIVATION_KIND: privacy_guard,
+                      source.WORKSPACE_OAUTH_DERIVATION_KIND: workspace_guard}[kind]
     base = tmp_path / "base"
     base.mkdir(mode=0o755)
     git(base, "init", "--quiet")
-    for name in source.DERIVATION_POSTIMAGES:
+    originals = {name: (guard.ROOT / "fixtures" / (name + ".source")).read_bytes()
+                 for name in source.DERIVATION_POSTIMAGES}
+    originals.update(privacy_sources("upstream"))
+    provenance = json.loads((workspace_guard.ROOT / "fixtures/provenance.json").read_bytes())
+    originals.update({name: (workspace_guard.ROOT / "fixtures" / provenance["files"][name]["fixture"]).read_bytes()
+                      for name in workspace_guard.PATHS})
+    for name, data in originals.items():
         target = base / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes((guard.ROOT / "fixtures" / (name + ".source")).read_bytes())
+        target.write_bytes(data)
     (base / "plain.txt").write_text("exact base\n", encoding="utf-8")
     (base / ".gitignore").write_text("ignored.tmp\n", encoding="utf-8")
     (base / "run.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -95,12 +108,12 @@ def world(tmp_path, monkeypatch):
     owner, acl = Owner(), lambda *args: None
     recipe = {"vendor_root": str(destination), "import_roots": [str(destination)],
               "dependency_inventory": {"path": str(tmp_path / "inventory.json"), "sha256": "", "size": 0},
-              "vendor_derivation": {"kind": source.DERIVATION_KIND, "base_sha": sha,
-                  "patch_sha256": source.DERIVATION_PATCH, "source_root": str(base)}}
+              "vendor_derivation": {"kind": kind, "base_sha": sha,
+                  "patch_sha256": patch, "source_root": str(base)}}
     def freeze():
         document = json.loads(source.candidate_inventory(owner, [str(base)], acl))
         document["roots"][0]["path"] = str(destination)
-        patched = guard.prepare_sources({name: (base / name).read_bytes() for name in source.DERIVATION_POSTIMAGES})
+        patched = selected_guard.prepare_sources({name: (base / name).read_bytes() for name in postimages})
         for row in document["roots"][0]["entries"]:
             if row["path"] in patched:
                 data = patched[row["path"]]
@@ -110,7 +123,8 @@ def world(tmp_path, monkeypatch):
         return frozen
     frozen = freeze()
     yield SimpleNamespace(base=base, destination=destination, recipe=recipe, owner=owner,
-                          acl=acl, sha=sha, wrong_owner=wrong_owner, freeze=freeze, frozen=frozen)
+                          acl=acl, sha=sha, wrong_owner=wrong_owner, freeze=freeze, frozen=frozen,
+                          kind=kind, patch=patch, postimages=postimages, guard=selected_guard)
     for fd in fds:
         real_os.close(fd)
 
@@ -122,7 +136,8 @@ def test_materialize_exact_repair_preserves_git_base_and_freezes_full_namespace(
     assert git(world.destination, "rev-parse", "HEAD") == world.sha
     assert source.candidate_inventory(world.owner, [str(world.base)], world.acl) == original
     assert Path(world.recipe["dependency_inventory"]["path"]).read_bytes() == world.frozen
-    assert receipt["postimages"] == source.DERIVATION_POSTIMAGES
+    assert receipt["postimages"] == world.postimages
+    assert receipt["kind"] == world.kind
     assert receipt["base_sha"] == world.sha
     # Git diff can refresh a caller-owned fixture index. The real runtime role
     # cannot write the root-owned artifact; use the actual immutable closure to
@@ -181,10 +196,10 @@ def test_wrong_frozen_inventory_prevents_any_publication(world):
     assert not world.destination.exists()
 
 
-@pytest.mark.parametrize("name", ["plain.txt", "tools/computer_use/permissions.py", ".git/HEAD"])
+@pytest.mark.parametrize("name", ["plain.txt", "patched", ".git/HEAD"])
 def test_existing_wrong_artifact_is_never_repaired(world, name):
     source.prepare_vendor_derivation(world.owner, world.recipe, world.acl)
-    target = world.destination / name
+    target = world.destination / (next(iter(world.postimages)) if name == "patched" else name)
     target.write_text("wrong\n")
     identity = (target.stat().st_ino, target.stat().st_mtime_ns)
     with pytest.raises(source.NativeSourceRefusal):
@@ -244,7 +259,7 @@ def test_installer_uses_real_frozen_closure_and_original_recipe(world, monkeypat
     monkeypatch.setattr(manifest, "_linux_source_acl", world.acl)
     with ExitStack() as lifetime:
         receipt, check = installer._qualify_native_derivation(world.recipe, profile, lifetime)
-        assert receipt["patch_sha256"] == source.DERIVATION_PATCH
+        assert receipt["patch_sha256"] == world.patch
         check()
         (world.destination / "plain.txt").write_text("changed after qualification\n")
         with pytest.raises(source.NativeSourceRefusal):
@@ -254,7 +269,8 @@ def test_installer_uses_real_frozen_closure_and_original_recipe(world, monkeypat
         installer._qualify_native_derivation(world.recipe, profile, lifetime)
 
 
-def test_actual_installed_receipt_and_launch_compare_explicit_derivation(tmp_path):
+@pytest.mark.parametrize("kind", ["computer_env_guard", "diagnostic_privacy", "workspace_oauth_privacy"])
+def test_actual_installed_receipt_and_launch_compare_explicit_derivation(tmp_path, kind):
     from integrations.hermes_harness.stack import compose_profile
     state = tmp_path / "state"
     profile = replace(compose_profile("mmsecretary", state_dir=state,
@@ -266,9 +282,10 @@ def test_actual_installed_receipt_and_launch_compare_explicit_derivation(tmp_pat
     release.mkdir(parents=True)
     launcher = installer.repo_root() / "integrations/hermes_runtime/native/hermes"
     native = native_recipe()
-    native["vendor_derivation"] = derivation()
-    proof = {"kind": source.DERIVATION_KIND, "base_sha": derivation()["base_sha"],
-             "patch_sha256": source.DERIVATION_PATCH, "postimages": dict(source.DERIVATION_POSTIMAGES),
+    native["vendor_derivation"] = derivation(kind)
+    patch, postimages, _ = source._derivation_policy(kind)
+    proof = {"kind": kind, "base_sha": derivation(kind)["base_sha"],
+             "patch_sha256": patch, "postimages": dict(postimages),
              "vendor_root": native["vendor_root"], "license_sha256": "c" * 64}
     installer._write_release(profile, release, launcher, True,
                              native_installation=native, native_derivation=proof)
@@ -311,9 +328,10 @@ def native_recipe():
             "dependency_inventory": {"path": "/opt/hermes/inventory.json", "sha256": "b" * 64, "size": 100}}
 
 
-def derivation():
-    return {"kind": "computer_env_guard", "base_sha": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
-            "patch_sha256": "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f",
+def derivation(kind="computer_env_guard"):
+    patch, _, _ = source._derivation_policy(kind)
+    return {"kind": kind, "base_sha": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+            "patch_sha256": patch,
             "source_root": "/opt/hermes/base"}
 
 
@@ -373,3 +391,44 @@ def test_matching_native_tuple_can_roll_back_without_claiming_service_restart(tm
     result = installer.rollback(state)
     assert result["release"] == "1" and "service_started" not in result
     assert os.readlink(state / "current") == "releases/1"
+
+
+@pytest.mark.parametrize("change", ["cross_variant", "combined"])
+def test_selected_derivation_refuses_other_or_combined_postimages(world, change):
+    source.prepare_vendor_derivation(world.owner, world.recipe, world.acl)
+    other = "diagnostic_privacy" if world.kind == "computer_env_guard" else "computer_env_guard"
+    patch, postimages, _ = source._derivation_policy(other)
+    if change == "cross_variant":
+        world.recipe["vendor_derivation"].update(kind=other, patch_sha256=patch)
+    else:
+        qualifier = privacy_guard if other == "diagnostic_privacy" else guard
+        patched = qualifier.prepare_sources({name: (world.base / name).read_bytes() for name in postimages})
+        for name, data in patched.items():
+            (world.destination / name).write_bytes(data)
+    with pytest.raises(source.NativeSourceRefusal):
+        source.verify_vendor_derivation(world.owner, world.recipe, world.acl)
+
+
+@pytest.mark.parametrize("kind", ["computer_env_guard", "diagnostic_privacy", "workspace_oauth_privacy"])
+def test_closed_recipe_admits_only_matching_fixed_patch(kind):
+    native = native_recipe()
+    native["vendor_derivation"] = derivation(kind)
+    assert manifest._hermes_native_gateway(native) == native
+    other = "diagnostic_privacy" if kind == "computer_env_guard" else "computer_env_guard"
+    native["vendor_derivation"]["patch_sha256"] = derivation(other)["patch_sha256"]
+    with pytest.raises(manifest.ReleaseManifestError):
+        manifest._hermes_native_gateway(native)
+
+
+def test_rollback_refuses_variant_drift_before_changing_current(tmp_path):
+    state = tmp_path / "state"
+    for number, kind in (("1", "computer_env_guard"), ("2", "diagnostic_privacy")):
+        folder = state / "releases" / number
+        folder.mkdir(parents=True)
+        native = native_recipe()
+        native["vendor_derivation"] = derivation(kind)
+        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": native}))
+    (state / "current").symlink_to("releases/2")
+    with pytest.raises(RuntimeRefusal, match="MATCHING_RELEASE_RECIPE"):
+        installer.rollback(state)
+    assert os.readlink(state / "current") == "releases/2"

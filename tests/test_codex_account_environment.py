@@ -796,3 +796,75 @@ def test_six_seat_account_locks_are_independent_and_release_without_provider(tmp
             assert lock.is_file()
             assert stat.S_IMODE(lock.stat().st_mode) == 0o600
     assert all(not (target / "auth.json").exists() for target in homes)
+
+
+@pytest.mark.parametrize("account,auth_state,expected_state", [
+    ({"account": None}, "LOGIN_REQUIRED", "LOGIN_REQUIRED"),
+    ({"account": {"type": "apiKey", "email": "not-exported.invalid"}},
+     "NATIVE_CHATGPT_AUTH_REQUIRED", "LOGIN_REQUIRED"),
+    ({}, "UNKNOWN", "NATIVE_READ_UNAVAILABLE"),
+])
+@pytest.mark.parametrize("close_fails", [False, True])
+def test_native_probe_stops_at_unavailable_managed_auth(
+    tmp_path, monkeypatch, account, auth_state, expected_state, close_fails
+):
+    """Known login absence must not turn into a misleading quota-read failure."""
+    from scripts.ohf import laboratory
+
+    calls = []
+
+    class Environment:
+        home = tmp_path
+
+        def auth_metadata(self):
+            return {"auth_mode": "chatgpt", "has_refresh_token": True}
+
+        def process_environment(self):
+            return {"HOME": str(self.home), "CODEX_HOME": str(self.home),
+                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+
+    class Client:
+        def __init__(self, argv, *, env, cwd, start_new_session):
+            assert start_new_session and cwd == tmp_path
+            assert env["CODEX_HOME"] == str(tmp_path)
+            calls.append("construct")
+
+        def start(self):
+            calls.append("start")
+
+        def request(self, method, *args, **kwargs):
+            calls.append(method)
+            if method == "initialize":
+                return {"userAgent": "fixture-only"}
+            if method == "account/read":
+                assert args[0] == {"refreshToken": False}
+                return account
+            raise AssertionError("quota/model RPC after unavailable native auth")
+
+        def notify(self, *args):
+            calls.append("notify")
+
+        def graceful_close(self):
+            calls.append("close")
+            if close_fails:
+                raise RuntimeError("provider-private-detail")
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=True, leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture")
+
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    result = account_environment.probe_native_account(
+        Environment(), Path("/not-launched"), include_models=True)
+
+    assert result["state"] == (
+        "NATIVE_CLEANUP_UNPROVEN" if close_fails else expected_state)
+    assert result["account"]["auth_state"] == auth_state
+    assert result["account"]["capacity_state"] == "UNKNOWN"
+    assert result["account"]["admission_granted"] is False
+    assert result["api_fallback"] is False
+    assert result["stop"]["private_group_empty"] is (not close_fails)
+    assert calls == ["construct", "start", "initialize", "notify", "account/read", "close"]
+    assert "not-exported.invalid" not in json.dumps(result)
+    assert "provider-private-detail" not in json.dumps(result)

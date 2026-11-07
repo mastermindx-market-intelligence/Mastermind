@@ -2,7 +2,8 @@
  * ProjectPlanningJourney — the one explicit new-project journey in the existing
  * {@link NewProjectDraft} shell: goal → source options → profile choice →
  * verified preview → explicit publish → observed source record → explicit
- * initial planning → read result → explicit keep.
+ * initial planning → read result → explicit keep → separately publish its
+ * qualified planning proposal → current Plan/Compare.
  *
  * OWNERSHIP. The parent owns the backend, the mount point, App selection and
  * URL navigation. This module owns only the composition of existing pieces:
@@ -16,7 +17,9 @@
  * the verified preview, dispatch the composed initial planning, keep a read
  * result) plus the explicit observational reconcile behind "Check
  * publication". Reads never reconcile, never publish and never consume.
- * Nothing runs on mount: every effect is behind a clicked button, and
+ * The separately composed proposal workflow uses the fixed SAME-S19 preparation
+ * action and distinct Workspace source-write owner; it never consumes/adopts
+ * automatically. Nothing runs on mount: every effect is behind a clicked button, and
  * `onSelection` is called synchronously BEFORE any async prepare or planning
  * dispatch, never from a private prompt.
  *
@@ -36,6 +39,8 @@
  * preview/publish action and an explicit phase note, never a conversation claim.
  */
 
+import {ProjectPlanProposalWorkflow} from "../planning/ProjectPlanProposalWorkflow";
+import type {PlanProposalOriginal} from "../planning/project-plan-proposal";
 import { decodeSourceOperationContext } from "../source-operations/context";
 import { useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { NewProjectDraft } from "./NewProjectDraft";
@@ -105,7 +110,7 @@ export interface ProjectPlanningJourneyProps {
   host: MissionHost | null;
   /** Genuine current owner identity from the existing command binding. */
   executiveOwner: () => OwnerContext | null;
-  /** The existing durable pending-pointer store; shared by all three effects. */
+  /** The existing durable pending-pointer store; shared by the existing effects. */
   store: PendingPointerStore;
   onSelection: (value: ProjectJourneySelection) => void;
   /** Accepted creation supplies only a navigation hint. App must re-read its
@@ -121,6 +126,9 @@ export interface ProjectPlanningJourneyProps {
   onDraftFilesChange?:(files:readonly ProjectDraftFile[])=>void;
   originalFileLookup?:ProjectDraftFileLookup|null;
   onOriginalFileLookupChange?:(value:ProjectDraftFileLookup|null)=>void;
+  proposalOriginal?: PlanProposalOriginal|null;
+  currentProposalOriginal?: ()=>PlanProposalOriginal|null;
+  onProposalOriginalChange?: (original:PlanProposalOriginal)=>void;
   /** Parent-qualified proposal controls; rendered only for a readable project. */
   proposalControls?: ReactNode;
   /** Parent-qualified compare panel; rendered only for a readable project. */
@@ -1959,6 +1967,15 @@ export function ProjectPlanningJourney(props: ProjectPlanningJourneyProps) {
         </section>
       )}
       {authorized && result !== null && result.selection.work_ref === selection?.workRef && result.selection.job_id === observedJobId && result.result === null && <p>{copy(NOTICE_COPY.RESULT_UNAVAILABLE)}</p>}
+      {authorized && selection?.workRef && selection.planningOperationKey && props.onProposalOriginalChange &&
+        props.currentProposalOriginal && (returnedDeclaration !== null || props.proposalOriginal) && <ProjectPlanProposalWorkflow
+          key={`proposal:${selection.workRef}:${selection.planningOperationKey}`}
+          host={props.host} store={props.store} workRef={selection.workRef}
+          planningOperationKey={selection.planningOperationKey} result={result}
+          consumed={!!result?.result && (record.current.keptDigest === result.result.result_digest || result.consumption?.state === "CONSUMED")}
+          hasDeclaration={returnedDeclaration !== null} executiveOwner={props.executiveOwner}
+          isCurrent={callerCurrent} original={props.proposalOriginal ?? null}
+          onOriginalChange={props.onProposalOriginalChange} currentOriginal={props.currentProposalOriginal} locale={locale}/>}
       {proposal !== null && <p>{copy(["Project creation is still pending. Check the original request.", "项目仍在创建中。请查询原始请求。"])}</p>}
       {readable && (proposalControls !== undefined || comparePanel !== undefined) && (
         <>

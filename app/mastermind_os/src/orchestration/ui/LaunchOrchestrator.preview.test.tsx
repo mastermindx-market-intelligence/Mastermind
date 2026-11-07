@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { LaunchOrchestrator, type LaunchForm, type LaunchOrchestratorProps } from "./LaunchOrchestrator";
+import { LaunchOrchestrator, type LaunchForm, type LaunchOrchestratorProps, composeAcceptanceGoal } from "./LaunchOrchestrator";
 
 afterEach(cleanup);
 function mount(overrides: Partial<LaunchOrchestratorProps> = {}) {
@@ -57,4 +57,27 @@ describe("Launch request preview integration", () => {
     mount({previewRequest:undefined});
     expect(screen.queryByRole("button", {name:"Preview requested scope"})).toBeNull();
   });
+});
+
+it('renders only the same frozen user goal and criteria while mapper and submit keep exact wire bytes',()=>{
+ const x=mount({presentation:'composer'});
+ const goal='  First\tparagraph\n保持原文  ',criteria='First useful proof\n 第二个验收条件 ';
+ fireEvent.change(screen.getByLabelText('Goal'),{target:{value:goal}});
+ fireEvent.change(screen.getByLabelText(/Acceptance criteria/),{target:{value:criteria}});
+ fireEvent.click(screen.getByRole('button',{name:'Preview requested scope'}));
+ expect(document.querySelector('.launch-request-preview-goal')?.textContent).toBe(goal);
+ expect(screen.getByText('First useful proof')).toBeTruthy();expect(screen.getByText('第二个验收条件')).toBeTruthy();
+ expect(document.querySelector('.launch-request-preview')?.textContent).not.toContain('MASTERMIND_ACCEPTANCE_CRITERIA_V1');
+ expect(x.previewRequest.mock.calls[0][0].goal).toBe(composeAcceptanceGoal(goal,criteria));
+ expect(x.onSubmit).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'Launch'}));
+ expect(x.onSubmit.mock.calls[0][0]).toEqual(x.previewRequest.mock.calls[0][0]);
+});
+it('a raw form edit that preserves normalized wire still invalidates the old presentation without any effect',()=>{
+ const x=mount();fireEvent.click(screen.getByRole('button',{name:'Preview requested scope'}));
+ const wire=x.previewRequest.mock.calls[0][0].goal;
+ fireEvent.change(screen.getByLabelText('Goal'),{target:{value:'  Review the actual source  '}});
+ expect(composeAcceptanceGoal('  Review the actual source  ','')).toBe(wire);
+ expect(screen.queryByText('Requested scope preview')).toBeNull();
+ expect(x.previewRequest).toHaveBeenCalledTimes(1);expect(x.onSubmit).not.toHaveBeenCalled();
 });

@@ -6475,6 +6475,59 @@ class ExecutiveControlService:
                     )
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            from common import coo_agentos_context_contract as context_wire
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA}:
+                if not app_peer or not callable(app_binding.principal_facts_factory):
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
+                    return
+                try:
+                    parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
+                    current_context = parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    (context_wire.validate_current_frame if current_context else context_wire.validate_frame)(parsed)
+                    factory = app_binding.principal_facts_factory
+                    runtime = self._require_runtime()
+                    arms = (app_binding.armed, app_binding.principal_admission_armed)
+                    def require_context_host_current():
+                        if (self._closing or not self._ceo_ingress_ready
+                                or self._service_state not in {"READY", "AWAITING_CANARY"}
+                                or self._ceo_ingress_app_binding is not app_binding
+                                or app_binding.principal_facts_factory is not factory
+                                or (app_binding.armed, app_binding.principal_admission_armed) != arms
+                                or self._require_runtime() is not runtime
+                                or writer.get_extra_info("socket") is not connection
+                                or _peer_uid(connection) != app_binding.peer_uid or reader.at_eof()
+                                or writer.is_closing() or writer.transport.is_closing()):
+                            raise ValueError("COO context source changed")
+                        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+                        if type(self._namespace_custody) is not ServiceRuntimeNamespaceCustody:
+                            raise ValueError("COO context Runtime namespace unavailable")
+                        self._namespace_custody.bound_runtime(runtime)
+                    require_context_host_current()
+                    provider = factory(runtime)
+                    if type(provider) is not CooHostProvider or provider.workspace.runtime is not runtime:
+                        raise ValueError("COO context owner unavailable")
+                    source, workspace, context_reader = provider.source, provider.workspace, provider.agentos_context_reader
+                    data_binding = workspace._canonical_project_data
+                    require_context_host_current()
+                    from control_plane.workspace_owned_task import await_owned
+                    context_read = provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
+                    require_context_host_current()
+                    if (provider.source is not source or provider.workspace is not workspace
+                            or provider.agentos_context_reader is not context_reader or workspace.runtime is not runtime
+                            or workspace._canonical_project_data is not data_binding):
+                        raise ValueError("COO context owner changed")
+                    validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                    validator(result, expected_context=parsed["principal_context"],
+                        capability_profile_digest=parsed["capability_profile_digest"],
+                        **({"expected_workspace_principal": parsed["workspace_principal"]} if current_context else {}))
+                    response = {"ok": True, "result": result}
+                    context_wire.encode(response, limit=context_wire.MAX_RESPONSE_BYTES - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503),
+                        response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                return
             if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")

@@ -1013,3 +1013,16 @@ test('parent attention: malformed or contradictory claims stay untrusted',()=>{
   assert.throws(()=>api.projectFabricParentRecovery(bad,id.root_id),/FABRIC_PARENT_RECOVERY_STATUS_INVALID/);
  }
 });
+
+test('fresh backend generations cannot redispatch an original run with orphan evidence',async()=>{
+ const orphan={...absent,state:'STATUS_UNREADABLE',rc:null,signal:null,result_bytes:null,
+   accepted_by:null,acceptance_state:'UNVERIFIED',acceptance_reason:'ARTIFACT_UNVERIFIED'};
+ for(const generation of [1,2]){
+   const e=engine([capturedJSON(orphan)]);
+   const out=unwrap(await facade(e).call('fabric_request',packet));
+   assert.equal(out.error,'RUN_EXISTS','generation '+generation);
+   assert.equal(e.calls.length,1);
+   assert.match(e.calls[0].arguments.command,/'status'/);
+   assert.doesNotMatch(e.calls[0].arguments.command,/'request'/);
+ }
+});

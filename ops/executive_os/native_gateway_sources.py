@@ -349,8 +349,9 @@ def prepare_inventory(owner, recipe, acl_check):
         closure.close()
 
 
-# A single admitted source transformation, subordinate to the existing frozen
-# recipe/inventory. These are source identities, never runtime access grants.
+# Closed source transformations, subordinate to the existing frozen recipe
+# and inventory. They cannot be combined or supplied as arbitrary patch lists.
+# These are source identities, never runtime access grants.
 DERIVATION_KIND = "computer_env_guard"
 DERIVATION_BASE = "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
 DERIVATION_PATCH = "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"
@@ -359,14 +360,48 @@ DERIVATION_POSTIMAGES = {
     "tools/computer_use/cua_backend.py": "b106ce6b1086a932648c141a517821fd503a54b75d52e7cf5b127c94df1de78f",
 }
 _GUARD_PACKAGE = "integrations/hermes_qualification/computer_env_guard"
+PRIVACY_DERIVATION_KIND = "diagnostic_privacy"
+PRIVACY_DERIVATION_PATCH = "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"
+PRIVACY_DERIVATION_POSTIMAGES = {
+    "agent/agent_init.py": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08",
+    "agent/memory_caller_scope.py": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6",
+}
+PRIVACY_LICENSE_SHA256 = "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6"
+_PRIVACY_PACKAGE = "integrations/hermes_qualification/diagnostic_privacy"
+WORKSPACE_OAUTH_DERIVATION_KIND = "workspace_oauth_privacy"
+WORKSPACE_OAUTH_DERIVATION_PATCH = "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce"
+WORKSPACE_OAUTH_DERIVATION_POSTIMAGES = {
+    "agent/agent_init.py": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08",
+    "agent/memory_caller_scope.py": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6",
+    "agent/redact.py": "d52ac54e1107b404c0882432a2e06b114d298f4ccd33ec16deffc0544074d935",
+    "hermes_cli/mcp_config.py": "0970c0cd3ed94a3a3986a5364c697b6b64006844b383707ea12998bd0084e70c",
+    "tools/mcp_oauth_manager.py": "b1b611725cb1f873c2b9c715eab8591ea56d8ca0c61cd832224f5ed0a21624ae",
+    "tools/mcp_oauth_provider.py": "f79aa231c90de8e483a4cb02c4c51d1cc9ba4a8838872e718b92784fcb3181b8",
+    "tools/mcp_tool_errors.py": "e71abeb9e97b0d1e97c976c709dd2fa2ccb71822626184e976dad0838d9c3c28",
+    "tools/mcp_tool_server_run.py": "89a93742b9344fa351f6b3a931a3daf5787f2d7abba6ec52695a6c52c2e37b5e",
+    "tools/mcp_tool_transport.py": "51443ff396278a8c1088b5141146f3ba53cec340b90ac04a1263c18e3ecbb8ec",
+}
+_WORKSPACE_OAUTH_PACKAGE = "integrations/hermes_qualification/workspace_oauth_privacy"
+
+
+def _derivation_policy(kind):
+    if kind == DERIVATION_KIND:
+        return DERIVATION_PATCH, DERIVATION_POSTIMAGES, _GUARD_PACKAGE
+    if kind == PRIVACY_DERIVATION_KIND:
+        return PRIVACY_DERIVATION_PATCH, PRIVACY_DERIVATION_POSTIMAGES, _PRIVACY_PACKAGE
+    if kind == WORKSPACE_OAUTH_DERIVATION_KIND:
+        return WORKSPACE_OAUTH_DERIVATION_PATCH, WORKSPACE_OAUTH_DERIVATION_POSTIMAGES, _WORKSPACE_OAUTH_PACKAGE
+    _refuse()
 
 
 def _derivation(recipe):
     value = recipe.get("vendor_derivation")
     if (type(value) is not dict
             or set(value) != {"kind", "base_sha", "patch_sha256", "source_root"}
-            or value["kind"] != DERIVATION_KIND or value["base_sha"] != DERIVATION_BASE
-            or value["patch_sha256"] != DERIVATION_PATCH):
+            or type(value["kind"]) is not str or value["base_sha"] != DERIVATION_BASE):
+        _refuse()
+    patch, _, _ = _derivation_policy(value["kind"])
+    if value["patch_sha256"] != patch:
         _refuse()
     source, destination = Path(value["source_root"]), Path(recipe["vendor_root"])
     if (not source.is_absolute() or not destination.is_absolute()
@@ -394,7 +429,7 @@ def _git(root, *arguments):
     return result.stdout
 
 
-def _base_members(root):
+def _base_members(root, postimages):
     if (_git(root, "rev-parse", "--verify", "HEAD").strip() != DERIVATION_BASE.encode()
             or _git(root, "rev-parse", "--show-object-format").strip() != b"sha1"):
         _refuse()
@@ -415,7 +450,7 @@ def _base_members(root):
                 or relative in result or len(result) >= MAX_MEMBERS):
             _refuse()
         result[relative] = (mode == "100755", digest)
-    if not result or not set(DERIVATION_POSTIMAGES) <= result.keys():
+    if not result or not set(postimages) <= result.keys():
         _refuse()
     return result
 
@@ -472,7 +507,7 @@ def _member_hash(root_fd, entry, acl_check, *, git_blob=False):
         os.close(fd)
 
 
-def _checkout_snapshot(owner, root, acl_check, *, patched):
+def _checkout_snapshot(owner, root, acl_check, *, patched, postimages):
     # Complete actual membership is examined, including ignored/untracked files
     # and Git metadata; index flags cannot conceal changes in tracked bytes.
     snapshot = json.loads(candidate_inventory(owner, [str(root)], acl_check))["roots"][0]
@@ -482,7 +517,7 @@ def _checkout_snapshot(owner, root, acl_check, *, patched):
             or any(name in entries for name in (".git/commondir", ".git/gitdir",
                        ".git/objects/info/alternates", ".git/objects/info/http-alternates"))):
         _refuse()
-    members = _base_members(root)
+    members = _base_members(root, postimages)
     files = {name for name, row in entries.items()
              if row["type"] == "file" and not name.startswith(".git/")}
     directories = set()
@@ -497,8 +532,8 @@ def _checkout_snapshot(owner, root, acl_check, *, patched):
         row = entries[name]
         if bool(row["mode"] & 0o111) != executable:
             _refuse()
-        if patched and name in DERIVATION_POSTIMAGES:
-            if row["sha256"] != DERIVATION_POSTIMAGES[name]:
+        if patched and name in postimages:
+            if row["sha256"] != postimages[name]:
                 _refuse()
         elif _member_hash(root_fd, row, acl_check, git_blob=True) != blob:
             _refuse()
@@ -506,20 +541,31 @@ def _checkout_snapshot(owner, root, acl_check, *, patched):
     return snapshot
 
 
-def _guard(owner):
-    from integrations.hermes_qualification.computer_env_guard import qualify
-    package = owner.root / _GUARD_PACKAGE
+def _guard(owner, kind):
+    patch, postimages, relative = _derivation_policy(kind)
+    if kind == DERIVATION_KIND:
+        from integrations.hermes_qualification.computer_env_guard import qualify
+    elif kind == PRIVACY_DERIVATION_KIND:
+        from integrations.hermes_qualification.diagnostic_privacy import qualify
+    elif kind == WORKSPACE_OAUTH_DERIVATION_KIND:
+        from integrations.hermes_qualification.workspace_oauth_privacy import qualify
+    else:
+        _refuse()
+    package = owner.root / relative
     if Path(qualify.ROOT) != package:
         _refuse()
     # The existing held first-party importer owns executable source; its fixed
     # data files are held too. No path, patch, or postimage is discovered online.
     for name in ("manifest.json", "guard.patch", "UPSTREAM_LICENSE"):
-        if owner.source(f"{_GUARD_PACKAGE}/{name}") != (package / name).read_bytes():
+        if owner.source(f"{relative}/{name}") != (package / name).read_bytes():
             _refuse()
     policy = qualify.manifest()
-    if (policy["patch_sha256"] != DERIVATION_PATCH
+    if (policy["patch_sha256"] != patch
             or {name: row["after_sha256"] for name, row in policy["files"].items()}
-               != DERIVATION_POSTIMAGES):
+               != postimages):
+        _refuse()
+    if (kind in {PRIVACY_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_KIND} and hashlib.sha256(
+            owner.source(f"{relative}/UPSTREAM_LICENSE")).hexdigest() != PRIVACY_LICENSE_SHA256):
         _refuse()
     owner.check()
     return qualify
@@ -528,13 +574,15 @@ def _guard(owner):
 def verify_vendor_derivation(owner, recipe, acl_check):
     """Verify the named repair, separate from the base HEAD and frozen closure."""
     _, destination = _derivation(recipe)
-    _guard(owner)
-    snapshot = _checkout_snapshot(owner, destination, acl_check, patched=True)
+    kind = recipe["vendor_derivation"]["kind"]
+    patch, postimages, package = _derivation_policy(kind)
+    _guard(owner, kind)
+    snapshot = _checkout_snapshot(owner, destination, acl_check, patched=True, postimages=postimages)
     _expected_derived_inventory(owner, recipe, snapshot, {}, acl_check)
-    return {"kind": DERIVATION_KIND, "base_sha": DERIVATION_BASE,
-            "patch_sha256": DERIVATION_PATCH, "postimages": dict(DERIVATION_POSTIMAGES),
+    return {"kind": kind, "base_sha": DERIVATION_BASE,
+            "patch_sha256": patch, "postimages": dict(postimages),
             "license_sha256": hashlib.sha256(
-                owner.source(f"{_GUARD_PACKAGE}/UPSTREAM_LICENSE")).hexdigest(),
+                owner.source(f"{package}/UPSTREAM_LICENSE")).hexdigest(),
             "vendor_root": str(destination)}
 
 
@@ -554,7 +602,7 @@ def _expected_derived_inventory(owner, recipe, snapshot, patched, acl_check):
         _refuse()
 
 
-def _copy_derivation(root_fd, staging, snapshot, patched, acl_check):
+def _copy_derivation(root_fd, staging, snapshot, patched, acl_check, *, postimages):
     # Copy Git metadata too: native version_info must still identify the base
     # commit. The inventory binds those bytes; no clone, hooks or Git writes run.
     for entry in sorted(snapshot["entries"], key=lambda row: (row["path"].count("/"), row["path"])):
@@ -591,7 +639,7 @@ def _copy_derivation(root_fd, staging, snapshot, patched, acl_check):
                 if replacement is not None:
                     break
             expected_size = len(replacement) if replacement is not None else entry["size"]
-            expected_hash = DERIVATION_POSTIMAGES.get(entry["path"], entry["sha256"])
+            expected_hash = postimages.get(entry["path"], entry["sha256"])
             if count != expected_size or digest.hexdigest() != expected_hash:
                 _refuse()
             if source is not None and _identity(os.fstat(source)) != _identity(before):
@@ -645,17 +693,19 @@ def prepare_vendor_derivation(owner, recipe, acl_check):
     if os.getuid() != 0 or os.geteuid() != 0:
         _refuse()
     source, destination = _derivation(recipe)
+    kind = recipe["vendor_derivation"]["kind"]
+    _, postimages, _ = _derivation_policy(kind)
     if any(root == owner.root or root in owner.root.parents or owner.root in root.parents
            for root in (source, destination)):
         _refuse()
     parent = _readable_path(owner, destination.parent, acl_check, directory=True)
     if os.path.lexists(destination):
         return verify_vendor_derivation(owner, recipe, acl_check)
-    guard = _guard(owner)
-    snapshot = _checkout_snapshot(owner, source, acl_check, patched=False)
+    guard = _guard(owner, kind)
+    snapshot = _checkout_snapshot(owner, source, acl_check, patched=False, postimages=postimages)
     source_fd = _readable_path(owner, source, acl_check, directory=True)
     sources = {}
-    for name in DERIVATION_POSTIMAGES:
+    for name in postimages:
         fd = _member_fd(source_fd, name, acl_check)
         try:
             sources[name] = os.read(fd, guard.MAX_SOURCE_BYTES + 1)
@@ -665,7 +715,7 @@ def prepare_vendor_derivation(owner, recipe, acl_check):
     _expected_derived_inventory(owner, recipe, snapshot, patched, acl_check)
     staging = Path(tempfile.mkdtemp(prefix=".hermes-derivation-", dir=destination.parent))
     try:
-        _copy_derivation(source_fd, staging, snapshot, patched, acl_check)
+        _copy_derivation(source_fd, staging, snapshot, patched, acl_check, postimages=postimages)
         os.chmod(staging, 0o755)
         os.chown(staging, 0, 0)
         _sync_derivation(staging, snapshot)
