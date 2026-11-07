@@ -297,3 +297,15 @@ def test_native_absent_control_cannot_smuggle_attached_evidence(field):
     value[field] = "foreign-attached-evidence"
     with pytest.raises(ValueError, match="absent native control"):
         wire.validate_native_response(response(value, "stop_status"), request("stop_status"), operation="stop_status")
+
+@pytest.mark.parametrize("operation", ["recover", "turn_recover"])
+def test_signed_original_recovery_responses_cannot_claim_a_new_provider_effect(operation):
+    from pathlib import Path
+    fixture = json.loads((Path(__file__).parents[1] /
+        "app/mastermind_os/src/fixtures/native-fresh-recovery-owner.json").read_text())
+    sample = next(value for value in fixture["samples"] if value["operation"] == operation)
+    assert wire.validate_native_response(sample["response"], sample["arguments"], operation=operation)
+    changed = copy.deepcopy(sample["response"])
+    changed["data"]["effect"] = "COMMITTED"
+    with pytest.raises(ValueError, match="new effect"):
+        wire.validate_native_response(changed, sample["arguments"], operation=operation)

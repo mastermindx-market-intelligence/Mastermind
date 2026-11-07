@@ -41,6 +41,7 @@ class _Prompt:
     wire_terminal: bool = False
     cancel_task: asyncio.Task[dict[str, Any]] | None = None
     cancel_status: str | None = None
+    dispatch_binding: tuple[Any, ...] | None = None
 
 
 class NativeClient(ProbeClient):
@@ -343,9 +344,13 @@ class NativeAcpProcess:
         if self._closing is not None or self.connection is None or not isinstance(text, str) or not 0 < len(text.encode()) <= 128*1024:
             raise NativeProtocolError("NATIVE_PROMPT_REFUSED")
         from acp.schema import TextContentBlock
-        current = self.client.begin_native_prompt(operation_id)
+        client, connection, session_id = self.client, self.connection, self.provider_session_id
+        current = client.begin_native_prompt(operation_id)
         async def run():
-            response = await self.connection.prompt(session_id=self.provider_session_id,
+            if (self.client is not client or self.connection is not connection
+                    or self.provider_session_id != session_id or client.current is not current):
+                raise NativeProtocolError("NATIVE_PROMPT_OWNER_CHANGED")
+            response = await connection.prompt(session_id=session_id,
                 prompt=[TextContentBlock(type="text", text=text)], mastermindNative={"operationId": operation_id})
             result = NativeResult.parse(response)
             if (self.client.violation or result.terminal.operation_id != current.operation_id
@@ -357,6 +362,7 @@ class NativeAcpProcess:
             self.client.seal()
             return result
         current.task = self._own(run())
+        current.dispatch_binding = (self, client, connection, current, current.task, current.claim_ready, session_id)
         done, _ = await asyncio.wait({current.claim_ready, current.task}, timeout=timeout_seconds,
                                      return_when=asyncio.FIRST_COMPLETED)
         if current.claim_ready in done:
@@ -367,6 +373,42 @@ class NativeAcpProcess:
             current.task.result()
             raise NativeProtocolError("NATIVE_PROMPT_NOT_CLAIMED")
         raise NativeEffectUnknown("NATIVE_CLAIM_UNOBSERVED")
+
+    def observe_prompt_claim(self, operation_id: str) -> NativeClaim | None:
+        """Read the retained callback claim, including after terminal sealing."""
+        native_id(operation_id)
+        client, current = self.client, self.client.current
+        binding = current.dispatch_binding if current is not None else None
+        if (current is None or current.operation_id != operation_id
+                or type(binding) is not tuple or len(binding) != 7
+                or any(observed is not expected for observed, expected in zip(
+                    binding[:6], (self, client, self.connection, current, current.task, current.claim_ready)))
+                or binding[6] != self.provider_session_id
+                or not client.advertised or client.violation or current.task is None
+                or self._closing is not None or self.connection is None
+                or self.provider_session_id is None
+                or client.session_id != self.provider_session_id
+                or asyncio.get_running_loop() is not current.claim_ready.get_loop()):
+            raise NativeProtocolError("NATIVE_RETAINED_CLAIM_OWNER_MISMATCH")
+        if current.request_id is None:
+            return None
+        checked_request_id(current.request_id)
+        if not current.claim_ready.done():
+            if current.claim is not None:
+                raise NativeProtocolError("NATIVE_RETAINED_CLAIM_STATE_MISMATCH")
+            return None
+        if current.claim_ready.cancelled() or current.claim_ready.exception() is not None:
+            raise NativeProtocolError("NATIVE_RETAINED_CLAIM_UNAVAILABLE")
+        claim = current.claim_ready.result()
+        if (type(claim) is not NativeClaim or current.claim != claim
+                or claim.operation_id != operation_id
+                or claim.session_id != self.provider_session_id
+                or type(claim.request_id) is not type(current.request_id)
+                or claim.request_id != current.request_id):
+            raise NativeProtocolError("NATIVE_RETAINED_CLAIM_OWNER_MISMATCH")
+        # _active and wire_terminal gate incoming callbacks, not reads of a
+        # claim already accepted before the original prompt was sealed.
+        return claim
 
     async def result(self, claim: NativeClaim, *, timeout_seconds: float = 30) -> NativeResult:
         current = self.client.current

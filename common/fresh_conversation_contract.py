@@ -243,13 +243,14 @@ NATIVE_ROUTES = {
     "/os/executive/conversation/v2/" + path: operation
     for path, operation in (
         ("preview", "preview"), ("create", "create"), ("status", "status"), ("read", "read"),
+        ("recover", "recover"),
         ("consume", "consume"), ("consume/status", "consume_status"),
         ("turn/preview", "turn_preview"), ("turn", "turn"),
-        ("turn/status", "turn_status"), ("turn/read", "turn_read"),
+        ("turn/status", "turn_status"), ("turn/read", "turn_read"), ("turn/recover", "turn_recover"),
         ("resume/preview", "resume_preview"), ("resume", "resume"), ("resume/status", "resume_status"),
         ("stop", "stop"), ("stop/status", "stop_status"))
 }
-NATIVE_MODIFYING = frozenset({"create", "consume", "turn", "resume", "stop"})
+NATIVE_MODIFYING = frozenset({"create", "consume", "turn", "resume", "stop", "recover", "turn_recover"})
 NATIVE_DUAL_RESOURCE = NATIVE_MODIFYING | {"preview", "turn_preview", "resume_preview"}
 NATIVE_PASSIVE = frozenset({"status", "read", "consume_status", "turn_status", "turn_read", "resume_status", "stop_status"})
 
@@ -336,7 +337,7 @@ def validate_native_request(value, *, operation):
         keys.add("message")
     if operation in {"consume", "consume_status", "turn_preview", "turn"}:
         keys.add("initial_digest")
-    if operation in {"turn_preview", "turn", "turn_status", "turn_read"}:
+    if operation in {"turn_preview", "turn", "turn_status", "turn_read", "turn_recover"}:
         keys.add("turn_key")
     if operation in {"resume_preview", "resume", "resume_status"}:
         keys.add("resume_key")
@@ -634,7 +635,7 @@ def validate_native_response(value, request, *, operation):
         if value["error"] is not None:
             raise ValueError("unexpected native error")
         data = validate_native_data(value["data"], request)
-        expected = (NATIVE_DATA_SCHEMA if operation in {"preview", "create", "status", "read"}
+        expected = (NATIVE_DATA_SCHEMA if operation in {"preview", "create", "status", "read", "recover"}
             else NATIVE_TURN_PREVIEW_SCHEMA if operation == "turn_preview"
             else NATIVE_CONTROL_DATA_SCHEMA if operation.startswith(("resume", "stop"))
             else NATIVE_TURN_DATA_SCHEMA)
@@ -645,6 +646,7 @@ def validate_native_response(value, request, *, operation):
             "turn": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
             "turn_status": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
             "turn_read": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
+            "turn_recover": {"ABSENT", "RECONCILIATION_REQUIRED", "RECORDED"},
             "turn_preview": {"TURN_READY"}, "resume_preview": {"RESUME_READY"},
             "resume": {"RECONCILIATION_REQUIRED", "INTENT", "APPLIED", "EFFECT_UNKNOWN"},
             "stop": {"RECONCILIATION_REQUIRED", "INTENT", "APPLIED", "EFFECT_UNKNOWN"},
@@ -653,13 +655,13 @@ def validate_native_response(value, request, *, operation):
         }
         if operation in states and data["state"] not in states[operation]:
             raise ValueError("native response state differs from operation")
-        if operation in {"consume_status", "turn", "turn_status", "turn_read"} and data["can_send"]:
+        if operation in {"consume_status", "turn", "turn_status", "turn_read", "turn_recover"} and data["can_send"]:
             raise ValueError("native original recovery cannot authorize another Send")
         if ((operation == "preview") != (data["state"] == "PREVIEW_READY")
                 or (operation == "turn_preview") != (data["state"] == "TURN_READY")
                 or (operation == "resume_preview") != (data["state"] == "RESUME_READY")):
             raise ValueError("native preview response differs from operation")
-        if operation in NATIVE_PASSIVE | {"preview", "turn_preview", "resume_preview"} and data["effect"] != "NONE":
+        if operation in NATIVE_PASSIVE | {"preview", "turn_preview", "resume_preview", "recover", "turn_recover"} and data["effect"] != "NONE":
             raise ValueError("native passive response cannot claim a new effect")
         if expected == NATIVE_CONTROL_DATA_SCHEMA and data["kind"] != operation.split("_", 1)[0]:
             raise ValueError("native control kind differs")

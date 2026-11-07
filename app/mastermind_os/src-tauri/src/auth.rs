@@ -2667,7 +2667,7 @@ where
             token.expires,
             inner.executive_generation,
             inner.executive_changed.subscribe(),
-            if planning.is_some() || execution.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn"|"turn_preview")) || native_fresh && matches!(fresh,Some("resume_preview"|"resume"|"stop")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
+            if planning.is_some() || execution.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn"|"turn_preview")) || native_fresh && matches!(fresh,Some("resume_preview"|"resume"|"stop"|"recover"|"turn_recover")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
                 Some((workspace.value.clone(),inner.generation,workspace.expires))} else {None},
         )
     };
@@ -4148,6 +4148,8 @@ mod tests {
         vec![
             ("preview",fixture["request"].clone(),true),("create",create,true),
             ("status",selected.clone(),false),("read",selected.clone(),false),
+            ("recover",selected.clone(),true),
+            ("turn_recover",with(serde_json::json!({"turn_key":fixture["send"]["turn_key"]})),true),
             ("consume",with(serde_json::json!({"initial_digest":fixture["send"]["initial_digest"]})),true),
             ("consume_status",with(serde_json::json!({"initial_digest":fixture["send"]["initial_digest"]})),false),
             ("turn_preview",preview,true),("turn",fixture["send"].clone(),true),
@@ -4161,7 +4163,8 @@ mod tests {
         ]
     }
     #[test]
-    fn native_v2_fifteen_routes_preserve_exact_bytes_and_auth_resource_split() {
+    fn native_v2_seventeen_routes_preserve_exact_bytes_and_auth_resource_split() {
+        assert_eq!(native_v2_transport_cases().len(),17);
         for (operation, arguments, dual) in native_v2_transport_cases() {
             let path=crate::fresh_conversation::path_for(operation,Some("native-v2")).unwrap();
             assert_eq!(path,format!("/os/executive/conversation/v2/{}",operation.replace('_',"/")));

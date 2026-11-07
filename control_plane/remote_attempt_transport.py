@@ -784,7 +784,7 @@ def build_claimed_remote_operator_factory(
                 or _operator_native_binding(runtime, job.job_id, recovery=recovery) != native_binding):
             raise RemoteAttemptTransportError("STATE_MOVED")
         operations = {
-            "ohf-identity", "ohf-materialization-status", "ohf-begin-turn",
+            "ohf-identity", "ohf-materialization-status", "ohf-native-begin-status", "ohf-begin-turn",
             "ohf-collect-turn", "ohf-interrupt", "ohf-stop", "ohf-cancel",
             "ohf-reconcile", "ohf-reconcile-absence",
         }

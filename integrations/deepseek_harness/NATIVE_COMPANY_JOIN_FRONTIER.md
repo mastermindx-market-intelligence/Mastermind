@@ -487,3 +487,66 @@ original facts and strict turn-result/predecessor validators must be preserved.
 Installed native factory/source closure, actual account/restriction observations
 and the signed-in packaged end-to-end journey remain explicit production holds.
 No service was restarted, no live provider was called, and Hermes was not rerun.
+
+
+## C24 — original native send and answer recovery (2026-11-07)
+
+Parent source: `dfe4cef89637381115fe655065c2d34042b1d7c0`.
+Evidence: [original-call recovery](../../research/evidence/deepseek-native-original-call-recovery-20261107.json).
+
+The original native connection now exposes the actual retained claim after an
+inner claim timeout. Its process, client, connection, prompt, task, claim future,
+operation and original Session identities must still match. The broker's new
+`ohf-native-begin-status` is a read of that original call, with exact pending
+dispatch, generation, profile and attestation joins. It cannot resend.
+
+Runtime keeps the original INTENT, dispatch and EFFECT_UNKNOWN. An actual
+owner-qualified ACK appends RECONCILED; recovered answers use the closed v2 seal
+and its explicit acknowledgement source. Ordinary APPLIED/v1 validation remains.
+The entire NativeClaim binds the recovered result. A failed uncertainty journal
+write retains custody; only a locally retained exact dispatch with no outcome
+may use the existing UNKNOWN writer before strict reconciliation. Existing
+UNKNOWN is never replaced, and missing sources of an existing RECONCILED remain
+corruption. Candidate/seal recovery reads the original receipt first.
+
+The same Control dispatch, Supervisor, adapter, lease, Attempt, Session and
+request source own recovery. No-effect pre-write refusal preserves its original
+cleanup path. Potentially written sends survive closed readers, late ACKs,
+collection/source/lease failures and missing or lost journal returns. Recovery
+does not create another session, begin, queue or lifecycle owner.
+
+The fixed native-v2 `recover` and `turn_recover` routes require fresh Executive
+and Workspace authority through the original public fence, private socket and
+authenticated owner. Their selectors contain only the original operation/turn.
+Ordinary reads and post-control UI refreshes remain passive. An explicit Check
+gesture is pinned to its captured operation key, kind and target before the
+controller can invoke recovery. Owner/transport drift withholds late answers;
+recovery refusals retain the pointer, and an unresolved subordinate Stop prevents
+parent compare-clear.
+
+Final qualified results:
+
+- **207** owner, signed HTTP/private Unix, recovery and original OHF/native lifecycle tests.
+- **874** native protocol/broker/proxy, ordinary Runtime/Supervisor/conversation,
+  public route/auth and protected source compatibility tests.
+- **817** frontend tests and zero TypeScript diagnostics.
+- **267** Rust tests passed, **8 ignored**; source-bound test build, not a release.
+
+The actual signed recovery fixture is
+`app/mastermind_os/src/fixtures/native-fresh-recovery-owner.json`,
+SHA-256 `659f25e340567c9b317bc36bd7ed23b33f9505434bdfbde07a639c7edf908821`.
+It proves two original inputs with exactly one adapter/start/Attempt, two Jobs,
+and two provider-turn fixture calls. RS256 authentication, private Unix framing,
+kernel peer, Control/Supervisor/Runtime and persisted receipts are real; installed
+policy, provider process/model/account are explicitly inert. No external provider
+or signed-in packaged DeepSeek acceptance is claimed.
+
+The remaining implementation is the explicit DeepSeek worker factory and realm,
+qualified immutable same-process entrypoint, truthful original capability/account/
+confinement observation, and their existing installed policy/router/binding join.
+The candidate remains disabled until those original owners qualify it. The
+18:51:29 backend-unavailable observation and closed live-config/Fabric lanes are
+unchanged. Source tests do not resolve those installed holds. The signed-in
+packaged DeepSeek journey, actual eligible tool settlement and release/routing
+evidence remain owed. Hermes #2180 and accepted native physical canaries were
+preserved without rerunning them; no service was restarted.

@@ -133,6 +133,55 @@ async def read_native_status(owner, principal, request, *, effect="NONE"):
         result=initial, head_result=head, can_send=can_send, can_resume=can_resume, can_stop=can_stop)
 
 
+
+async def recover_original_native_call(owner, principal, workspace, request, *, operation, current):
+    """Join one retained call; ordinary status/history remain provider-free."""
+    from control_plane.executive_operator_supervisor import PendingNativeOperatorTurn
+    from control_plane import fresh_conversation_turn as turns
+    current()
+    root, original, material = select_original(owner, principal, request, for_write=True)
+    if root is None:
+        raise ValueError("NATIVE_CONVERSATION_ORIGINAL_ROOT_UNAVAILABLE")
+    binding = owner._fresh(principal, schema=wire.NATIVE_SCHEMA)
+    project = owner._project(principal, workspace, original["work_ref"])
+    dispatch = owner._service._native_operator_dispatch
+    pending = None if dispatch is None else dispatch.pending_turn
+    if type(pending) is PendingNativeOperatorTurn:
+        child = owner._runtime.jobs.get_job(dispatch.job_id)
+        if (child is None or child.parent_job_id != root.job_id or child.root_job_id != root.job_id
+                or pending.job.job_id != child.job_id or child.current_attempt_id != pending.session.attempt_id
+                or pending.owner is not owner._service._require_operator_supervisor()):
+            raise ValueError("NATIVE_CONVERSATION_RECOVERY_OWNER_CHANGED")
+        source = getattr(dispatch, "_fresh_turn_source", None)
+        if operation == "turn_recover":
+            command = turns._command("turn", turns._scope(principal), root.job_id, original["turn_key"])
+            if source is None or source._command != command:
+                raise ValueError("NATIVE_CONVERSATION_RECOVERY_TURN_CHANGED")
+            event, payload = source.check_record()
+            if (source._owner._runtime is not owner._runtime or source._owner._service is not owner._service
+                    or payload["turn_key"] != original["turn_key"]
+                    or payload["operation_id"] != pending.operation_id.command_id
+                    or payload["identity"]["principal"] != turns._scope(principal)
+                    or payload["identity"]["work_ref"] != original["work_ref"]):
+                raise ValueError("NATIVE_CONVERSATION_RECOVERY_SOURCE_CHANGED")
+        elif source is not None:
+            raise ValueError("NATIVE_CONVERSATION_RECOVERY_REQUIRES_ORIGINAL_TURN")
+        def qualified():
+            current()
+            if (owner._service._native_operator_dispatch is not dispatch or dispatch.pending_turn is not pending
+                    or owner._fresh(principal, schema=wire.NATIVE_SCHEMA) != binding
+                    or owner._project(principal, workspace, original["work_ref"]) != project
+                    or select_original(owner, principal, original, for_write=True) != (root, original, material)):
+                raise ValueError("NATIVE_CONVERSATION_RECOVERY_CONTEXT_CHANGED")
+            if source is not None and source.check_record() != (event, payload):
+                raise ValueError("NATIVE_CONVERSATION_RECOVERY_SOURCE_CHANGED")
+        qualified()
+        await owner._service.recover_native_operator_turn(dispatch, current=qualified)
+    current()
+    if operation == "turn_recover":
+        return await turns.read_turn(owner, principal, original, schema=wire.NATIVE_SCHEMA)
+    return await read_native_status(owner, principal, original)
+
 async def handle_native_followup(owner, principal, workspace, request, *, operation, host_current, reader):
     root, original, _material = select_original(owner, principal, request,
         for_write=operation in wire.NATIVE_DUAL_RESOURCE)
@@ -151,7 +200,10 @@ async def handle_native_followup(owner, principal, workspace, request, *, operat
                 raise ValueError("NATIVE_CONVERSATION_REQUEST_CLOSED")
             owner._current(principal, read_only=operation in wire.NATIVE_PASSIVE)
         current()
-        if operation == "consume":
+        if operation in {"recover", "turn_recover"}:
+            value = await recover_original_native_call(owner, principal, workspace, original,
+                operation=operation, current=current)
+        elif operation == "consume":
             value = await turns.consume_initial(owner, principal, workspace, original,
                 host_current=current, schema=wire.NATIVE_SCHEMA)
         elif operation == "consume_status":

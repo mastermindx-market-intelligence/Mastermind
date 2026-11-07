@@ -5,6 +5,8 @@ import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/reac
 import {useState} from 'react';
 import {IDBFactory} from 'fake-indexeddb';
 import fixture from '../../fixtures/native-fresh-action-owner.json';
+import recoveryFixture from '../../fixtures/native-fresh-recovery-owner.json';
+import type {NativeControlTransport} from './native-conversation-controls';
 import {createFreshConversationBinding,type FreshConversationTransport} from './fresh-conversation-command-binding';
 import {useFreshConversationJourney,type NativeFreshConversationObservation} from './useFreshConversationJourney';
 import {createIndexedDbPendingPointerStore} from '../../orchestration/indexeddb-pending-pointer-store';
@@ -14,7 +16,7 @@ const samples=fixture.samples,request=samples[10].arguments;
 const selection={work_ref:request.work_ref,operation_key:request.operation_key!};
 const scope='e'.repeat(64),HOST={},PROJECTS=[{workRef:selection.work_ref,title:'Native project'}];
 function defer<T>(){let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
-function rig(){
+function rig(native=false){
  const store=createIndexedDbPendingPointerStore(new IDBFactory());
  let owner:OwnerContext|null={principalScope:scope,generation:'native-ui-1'};
  const create=defer<unknown>(),entered=defer<void>();let signal:AbortSignal|undefined;
@@ -24,8 +26,9 @@ function rig(){
   status:vi.fn(async()=>samples[9].response),read:vi.fn(async()=>samples[12].response),
  };
  vi.stubGlobal('crypto',{getRandomValues:(bytes:Uint8Array)=>{bytes.fill(0xaa);return bytes;}});
- const binding=createFreshConversationBinding({newContract:'native-v2',owner:()=>owner,canPreviewCreate:()=>true,transport,store});
- return {store,binding,transport,create,entered,get signal(){return signal;},withdraw:()=>{owner=null;},get owner(){return owner;}};
+ const nativeTransport:NativeControlTransport={request:vi.fn(async()=>recoveryFixture.samples[0].response)};
+ const binding=createFreshConversationBinding({newContract:'native-v2',owner:()=>owner,canPreviewCreate:()=>true,transport,store,...(native?{nativeTransport}:{})});
+ return {store,binding,transport,nativeTransport,create,entered,get signal(){return signal;},withdraw:()=>{owner=null;},get owner(){return owner;}};
 }
 let journey:ReturnType<typeof useFreshConversationJourney>|null=null,shown:NativeFreshConversationObservation|null=null;
 const selected=vi.fn();
@@ -141,4 +144,18 @@ it('a different actual initial result retires the previous sealed initial witnes
  await act(async()=>{await first.refresh();});
  expect(first.current()).toBe(false);expect(first.initialCurrent()).toBe(false);
  expect(e.transport.create).toHaveBeenCalledTimes(1);
+});
+
+it('post-control refresh stays passive until the user explicitly checks the original request',async()=>{
+ const e=rig(true),pointer:OperationPointer={kind:'conversation_create',operationKey:selection.operation_key,targetKey:selection.work_ref};
+ await e.store.reserve(scope,pointer);render(<Harness e={e}/>);
+ await waitFor(()=>expect(shown).not.toBeNull());
+ await act(async()=>{await shown!.refresh();});
+ expect(e.transport.read).toHaveBeenCalledTimes(1);expect(e.transport.status).not.toHaveBeenCalled();
+ expect(e.nativeTransport.request).not.toHaveBeenCalled();expect(await e.store.read(scope)).toEqual(pointer);
+ fireEvent.click(screen.getByRole('button',{name:'Check initial request'}));
+ await waitFor(()=>expect(e.nativeTransport.request).toHaveBeenCalledTimes(1));
+ expect(e.nativeTransport.request).toHaveBeenCalledWith('recover',selection,expect.any(AbortSignal));
+ await waitFor(async()=>expect(await e.store.read(scope)).toBeNull());
+ expect(e.transport.create).not.toHaveBeenCalled();
 });

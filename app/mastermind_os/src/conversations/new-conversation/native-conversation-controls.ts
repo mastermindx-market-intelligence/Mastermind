@@ -1,4 +1,5 @@
-/** Stateless native Stop/resume methods composed into incumbent command ports. */
+/** Stateless native Stop/resume/recovery methods on incumbent command ports. */
+import {conversationCreateSettled} from './fresh-conversation-contract';
 import type {CommandIntent,EffectReceipt,OperationPointer,OwnerContext} from '../../orchestration/operation-controller';
 import {freshConversationTarget,parseFreshConversationTarget,mintFreshConversationCommandKey,type FreshConversationOriginalSelector} from '../../orchestration/fresh-conversation-target';
 import {decodeNativeFreshResult,type NativeFreshData,type NativeFreshControlData} from './native-fresh-result';
@@ -156,8 +157,31 @@ export function createNativeControlAdapter(options:NativeControlOptions){
    return result(pointer,!!data&&data.state==='APPLIED'&&data.receipt?.kind==='OPERATOR_OPERATION_APPLIED');
   }catch{return result(pointer);}
  }
+
+ async function reconcileNativeOperation(pointer:OperationPointer,signal:AbortSignal):Promise<EffectReceipt>{
+  try{
+   const create=pointer.kind==='conversation_create'&&/^mmos-native-create-[0-9a-f]{40}$/.exec(pointer.operationKey)?.[0]===pointer.operationKey;
+   const turn=pointer.kind==='conversation_turn'&&/^mmos-native-turn-[0-9a-f]{40}$/.exec(pointer.operationKey)?.[0]===pointer.operationKey;
+   if(!create&&!turn)return result(pointer);
+   const selection=create?{work_ref:pointer.targetKey??'',operation_key:pointer.operationKey}:parseFreshConversationTarget(pointer.targetKey);
+   if(!selection||!nativeSelector(selection))return result(pointer);
+   const operation=create?'recover':'turn_recover';
+   const args=validateNativeFreshRequest({...selection,...(turn?{turn_key:pointer.operationKey}:{})},operation);
+   const owner=options.owner();if(!owner)return result(pointer);
+   const captured=ownerCopy(owner);
+   // This observes an existing effect. New-draft eligibility is not recovery authority.
+   const raw=await request(operation,args,signal);
+   if(!same(captured,options.owner()))return result(pointer);
+   const decoded=decodeNativeFreshResult(raw,operation,args);
+   const accepted=!!decoded?.ok&&(create?
+    decoded.data.schema==='mastermind.executive.fresh_conversation_data.v2'&&conversationCreateSettled(decoded.data):
+    decoded.data.schema==='mastermind.executive.fresh_conversation_turn_data.v2'&&decoded.data.state==='RECORDED'&&
+      decoded.data.effect!=='UNKNOWN'&&!!decoded.data.initial_consumption&&!!decoded.data.result);
+   return result(pointer,accepted);
+  }catch{return result(pointer);}
+ }
  const binding:NativeControlBinding={readCurrent,makeStopIntent,makeResumeRequest,previewResume,makeResumeIntent,readOriginalControl};
- return {binding,prepare,submit,readOperation,
+ return {binding,prepare,submit,readOperation,reconcileNativeOperation,
   prepareControl(parent:OperationPointer,intent:CommandIntent){const child=prepare(intent);if(!parentMatches(parent,child))throw closed();return child;},
   submitControl(parent:OperationPointer,child:OperationPointer,intent:CommandIntent,signal:AbortSignal){
    return parentMatches(parent,child)?submit(child,intent,signal):Promise.resolve(result(child));},

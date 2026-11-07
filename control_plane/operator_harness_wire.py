@@ -28,6 +28,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.native_conversation_result import (
     NativeConversationResultError, NativeConversationResultObservation,
+    NativeConversationBeginObservation,
 )
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
@@ -82,7 +83,7 @@ T = TypeVar("T")
 def to_wire(value: Any) -> Any:
     """Return recursively JSON-compatible data without changing semantics."""
 
-    if isinstance(value, NativeConversationResultObservation):
+    if isinstance(value, (NativeConversationResultObservation, NativeConversationBeginObservation)):
         return value.to_wire()
     if dataclasses.is_dataclass(value):
         return {

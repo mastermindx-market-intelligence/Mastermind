@@ -6,12 +6,14 @@ covers the native claim and flushed terminal facts actually observed by ACP.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import re
 from typing import Any, Protocol, runtime_checkable
 
 from control_plane.executive_orchestration_result import RESULT_SCHEMA
-from control_plane.operator_harness_contract import RequestedExecutionProfile, TurnRef
+from control_plane.operator_harness_contract import (
+    OperationId, ProcessGenerationRef, RequestedExecutionProfile, TurnRef, TurnStartObservation,
+)
 from integrations.deepseek_harness.native_protocol import (
     NativeClaim, NativeProtocolError, NativeResult, NativeTerminal, native_id,
 )
@@ -35,6 +37,72 @@ def result_contract_for_profile(requested: RequestedExecutionProfile) -> str:
 
 class NativeConversationResultError(ValueError):
     """The closed native observation is absent, inconsistent or substituted."""
+
+
+NATIVE_CONVERSATION_BEGIN_SCHEMA = "mastermind.dsh_native_conversation_begin/v1"
+NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA = "mastermind.dsh_native_begin_status/v1"
+
+
+@dataclass(frozen=True)
+class NativeConversationBeginObservation:
+    """Original accepted claim and source seals; never a new dispatch grant."""
+    turn: TurnRef
+    generation: ProcessGenerationRef
+    native_claim: NativeClaim
+    requested_profile_digest: str
+    observed_attestation_digest: str
+    schema_version: str = field(default=NATIVE_CONVERSATION_BEGIN_SCHEMA, init=False)
+
+    def __post_init__(self):
+        if (type(self.turn) is not TurnRef or type(self.generation) is not ProcessGenerationRef
+                or type(self.native_claim) is not NativeClaim
+                or self.turn.session_epoch_id != self.generation.session_epoch_id
+                or self.turn.process_generation_id != self.generation.process_generation_id
+                or type(self.generation.generation_number) is not int
+                or not 1 <= self.generation.generation_number <= 2**53-1):
+            raise NativeConversationResultError("original native begin identities required")
+        try:
+            for value in (*asdict(self.turn).values(), self.generation.worker_id):
+                native_id(value)
+            NativeClaim.parse(self.native_claim.to_wire())
+        except (NativeProtocolError, TypeError) as exc:
+            raise NativeConversationResultError("native begin identity is invalid") from exc
+        for value in (self.requested_profile_digest, self.observed_attestation_digest):
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise NativeConversationResultError("native begin source seal is invalid")
+
+    @property
+    def start(self) -> TurnStartObservation:
+        return TurnStartObservation(str(self.native_claim.native_turn), True)
+
+    def require_origin(self, operation_id, turn, generation, provider_session_id=None):
+        if (type(operation_id) is not OperationId or self.native_claim.operation_id != operation_id.command_id
+                or self.turn != turn or self.generation != generation
+                or (provider_session_id is not None and self.native_claim.session_id != provider_session_id)):
+            raise NativeConversationResultError("native begin belongs to another original operation")
+
+    def to_wire(self):
+        return {"schema_version": self.schema_version, "turn": asdict(self.turn),
+                "generation": asdict(self.generation), "native_claim": self.native_claim.to_wire(),
+                "requested_profile_digest": self.requested_profile_digest,
+                "observed_attestation_digest": self.observed_attestation_digest}
+
+    @classmethod
+    def from_wire(cls, value):
+        if (type(value) is not dict or set(value) != {
+                "schema_version", "turn", "generation", "native_claim",
+                "requested_profile_digest", "observed_attestation_digest"}
+                or value["schema_version"] != NATIVE_CONVERSATION_BEGIN_SCHEMA):
+            raise NativeConversationResultError("closed native begin observation required")
+        from control_plane.operator_harness_wire import (
+            OperatorHarnessWireError, process_generation_ref, turn_ref,
+        )
+        try:
+            return cls(turn_ref(value["turn"]), process_generation_ref(value["generation"]),
+                       NativeClaim.parse(value["native_claim"]), value["requested_profile_digest"],
+                       value["observed_attestation_digest"])
+        except (OperatorHarnessWireError, NativeProtocolError, TypeError) as exc:
+            raise NativeConversationResultError("native begin observation is invalid") from exc
 
 
 @dataclass(frozen=True)
@@ -113,6 +181,7 @@ class NativeConversationResultAdapter(Protocol):
 
 NATIVE_CONVERSATION_REF_SCHEMA = "mastermind.dsh_native_conversation_result_ref/v1"
 NATIVE_CONVERSATION_SEAL_SCHEMA = "mastermind.dsh_native_conversation_result_seal/v1"
+NATIVE_CONVERSATION_RECOVERED_SEAL_SCHEMA = "mastermind.dsh_native_conversation_result_seal/v2"
 NATIVE_CONVERSATION_TERMINAL_SCHEMA = "mastermind.dsh_native_conversation_terminal/v1"
 
 

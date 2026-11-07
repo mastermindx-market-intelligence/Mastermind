@@ -2774,13 +2774,20 @@ def _interactive_in_flight_turn_id(
         turn_id = str(payload.get("turn_id"))
         receipts.setdefault(turn_id, set()).add(event["event_type"])
     for turn_id, states in receipts.items():
+        if OperationReceiptKind.RECONCILED.value in states:
+            attempt = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+            if attempt is None:
+                raise StateConflict("native recovered turn has no original Attempt")
+            OperatorHarnessRegistry._validated_tx5_receipts(connection, row=attempt,
+                turn=TurnRef(turn_id, session_epoch_id, generation_id, attempt_id))
+    for turn_id, states in receipts.items():
         if states == {OperationReceiptKind.INTENT.value}:
             return turn_id
     for turn_id, states in receipts.items():
         if OperationReceiptKind.EFFECT_UNKNOWN.value in states:
             return turn_id
     for turn_id, states in receipts.items():
-        if OperationReceiptKind.APPLIED.value in states:
+        if states.intersection({OperationReceiptKind.APPLIED.value, OperationReceiptKind.RECONCILED.value}):
             turn_operation_applied = connection.execute(
                 """
                 SELECT 1
@@ -21298,8 +21305,9 @@ class OperatorHarnessRegistry:
             raise StateConflict("attempt has no valid sealed OPERATOR_HARNESS profile")
         return row
 
+    @staticmethod
     def _event(
-        self, connection: sqlite3.Connection, command_id: str
+        connection: sqlite3.Connection, command_id: str
     ) -> sqlite3.Row | None:
         return connection.execute(
             "SELECT * FROM events WHERE command_id=?", (command_id,)
@@ -22793,10 +22801,213 @@ class OperatorHarnessRegistry:
             )
             return True
 
+
+    @staticmethod
+    def _native_operation_event(connection, *, row, operation, kind, command_id=None):
+        command = command_id or operation_receipt_command_id(operation, kind)
+        event = OperatorHarnessRegistry._event(connection, command)
+        if (event is None or event["command_id"] != command
+                or event["aggregate_type"] != "operator_operation"
+                or event["aggregate_id"] != operation.command_id
+                or event["event_type"] != (kind.value if isinstance(kind, OperationReceiptKind) else kind)
+                or event["actor"] != "supervisor"
+                or any(event[key] != row[key] for key in ("attempt_id", "job_id", "worker_id", "quota_class"))):
+            raise StateConflict("native begin original operation provenance differs")
+        payload = _strict_canonical_json_loads(str(event["payload_json"]), name="native original operation")
+        return event, payload
+
+    @classmethod
+    def _native_begin_sources(cls, connection, *, row, turn, operation, observation):
+        """Historical source joins only; current write authority is checked separately."""
+        from control_plane.native_conversation_result import (
+            NativeConversationBeginObservation, result_contract_for_profile,
+        )
+        from control_plane.operator_harness_wire import requested_execution_profile
+        if type(observation) is not NativeConversationBeginObservation:
+            raise StateConflict("native begin requires its closed original observation")
+        job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+        binding = None if job is None else _validated_native_result_binding(connection, job)
+        if binding is None or row["attempt_id"] != turn.attempt_id:
+            raise StateConflict("native begin requires its original native creator")
+        profile_json = str(row["requested_execution_profile_json"])
+        if (row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+                or hashlib.sha256(profile_json.encode()).hexdigest() != row["requested_execution_profile_digest"]
+                or observation.requested_profile_digest != row["requested_execution_profile_digest"]):
+            raise StateConflict("native begin differs from its original requested profile")
+        try:
+            requested = requested_execution_profile(_strict_canonical_json_loads(
+                profile_json, name="native begin sealed profile"))
+            constraints = _strict_canonical_json_loads(str(job["constraints_json"]), name="native begin constraints")
+            if (result_contract_for_profile(requested) != DSH_NATIVE_RESULT_CONTRACT
+                    or requested.worker_id != row["worker_id"]
+                    or requested.requested_model != constraints["model"]
+                    or requested.harness_binary_digest != constraints["harness_binary_digest"]
+                    or requested.harness_version != constraints["harness_version"]):
+                raise ValueError("native sealed profile differs")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise StateConflict("native begin immutable creator profile differs") from exc
+        profiles = connection.execute(
+            "SELECT * FROM events WHERE event_type='OHF_PROFILE_SEALED' AND attempt_id=?",
+            (turn.attempt_id,)).fetchall()
+        if len(profiles) != 1:
+            raise StateConflict("native begin requires one original TX-1 profile seal")
+        profile = profiles[0]
+        profile_payload = _strict_canonical_json_loads(str(profile["payload_json"]), name="native begin TX-1")
+        if (profile["aggregate_type"] != "attempt" or profile["aggregate_id"] != turn.attempt_id
+                or any(profile[key] != row[key] for key in ("job_id", "worker_id", "quota_class"))
+                or profile_payload != {"profile_digest": observation.requested_profile_digest}):
+            raise StateConflict("native begin original profile seal differs")
+        generation = connection.execute(
+            """SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,e.provider_session_id AS epoch_session
+               FROM process_generations g JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+               WHERE g.process_generation_id=? AND g.session_epoch_id=?""",
+            (turn.process_generation_id, turn.session_epoch_id)).fetchone()
+        if (generation is None or generation["attempt_id"] != turn.attempt_id
+                or generation["worker_id"] != row["worker_id"] or generation["epoch_worker"] != row["worker_id"]
+                or generation["provider_session_id"] != generation["epoch_session"]
+                or generation["observed_attestation_digest"] != observation.observed_attestation_digest
+                or not generation["observed_attestation_json"]
+                or hashlib.sha256(str(generation["observed_attestation_json"]).encode()).hexdigest()
+                   != observation.observed_attestation_digest):
+            raise StateConflict("native begin original generation or attestation differs")
+        ref = ProcessGenerationRef(turn.process_generation_id, turn.session_epoch_id,
+                                   int(generation["generation_number"]), str(row["worker_id"]))
+        try:
+            observation.require_origin(operation, turn, ref, generation["provider_session_id"])
+        except ValueError as exc:
+            raise StateConflict("native begin original claim or generation differs") from exc
+        intent, intent_payload = cls._native_operation_event(connection, row=row, operation=operation,
+            kind=OperationReceiptKind.INTENT, command_id=operation.command_id)
+        if intent_payload != {
+                "schema_version": "mastermind.operator_harness_turn_intent/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value, "attempt_id": turn.attempt_id,
+                "session_epoch_id": turn.session_epoch_id, "process_generation_id": turn.process_generation_id,
+                "worker_id": str(row["worker_id"]), "provider_session_id": generation["provider_session_id"],
+                "turn_id": turn.turn_id}:
+            raise StateConflict("native begin original TX-5 INTENT differs")
+        duplicate = connection.execute(
+            """SELECT COUNT(*) FROM events WHERE event_type=? AND attempt_id=?
+               AND json_extract(payload_json,'$.operation_kind')=?
+               AND json_extract(payload_json,'$.turn_id')=?""",
+            (OperationReceiptKind.INTENT.value, turn.attempt_id, OperationKind.BEGIN_TURN.value, turn.turn_id)
+        ).fetchone()[0]
+        if duplicate != 1:
+            raise StateConflict("native begin original TX-5 INTENT is ambiguous")
+        admission = cls._event(connection, f"ohf-work-admit:{turn.process_generation_id}")
+        if (admission is None or admission["event_type"] != "ORCHESTRATION_WORK_ADMITTED"
+                or admission["aggregate_type"] != "process_generation"
+                or admission["aggregate_id"] != turn.process_generation_id
+                or any(admission[key] != row[key] for key in ("attempt_id", "job_id", "worker_id", "quota_class"))):
+            raise StateConflict("native begin original work admission differs")
+        admission_payload = _strict_canonical_json_loads(str(admission["payload_json"]), name="native begin admission")
+        principal = _validated_admission_principal(row, admission_payload)
+        if (any(admission_payload.get(key) != row[key] for key in (
+                "attempt_id", "job_id", "worker_id", "quota_class", "execution_principal_snapshot_digest",
+                "placement_snapshot_digest", "effective_grant_digest"))
+                or admission_payload.get("process_generation_id") != turn.process_generation_id
+                or admission_payload.get("provider_session_id") != generation["provider_session_id"]
+                or admission_payload.get("observed_attestation_digest") != observation.observed_attestation_digest
+                or admission_payload.get("launch_decision") != LaunchDecision.ALLOW.value
+                or base_process_identity(principal["process_identity"]) != {
+                    "pid": generation["pid"], "pgid": generation["pgid"],
+                    "process_start_identity": generation["process_start_identity"], "boot_id": generation["boot_id"]}):
+            raise StateConflict("native begin original principal or admission differs")
+        if not int(profile["event_id"]) < int(admission["event_id"]) < int(intent["event_id"]):
+            raise StateConflict("native begin original source order differs")
+        return intent, intent_payload, generation, admission, admission_payload, profile, profile_payload
+
+    @classmethod
+    def _native_begin_reconciled_payload(cls, connection, *, row, turn, operation, observation):
+        intent, intent_payload, _generation, admission, admission_payload, profile, profile_payload = (
+            cls._native_begin_sources(connection, row=row, turn=turn, operation=operation, observation=observation))
+        for kind in (OperationReceiptKind.APPLIED, OperationReceiptKind.REFUSED):
+            if cls._event(connection, operation_receipt_command_id(operation, kind)) is not None:
+                raise StateConflict("native begin cannot reconcile another terminal operation")
+        dispatch, dispatch_payload = cls._native_operation_event(connection, row=row, operation=operation,
+            kind="OHF_PROVIDER_DISPATCH_COMMITTED", command_id=operation.command_id+":dispatch")
+        unknown, unknown_payload = cls._native_operation_event(connection, row=row, operation=operation,
+            kind=OperationReceiptKind.EFFECT_UNKNOWN)
+        if (dispatch_payload != {"schema_version": "mastermind.operator_harness_provider_dispatch/v1",
+                                 "operation_kind": OperationKind.BEGIN_TURN.value}
+                or set(unknown_payload) != {"schema_version", "phase", "detail"}
+                or unknown_payload["schema_version"] != "mastermind.operator_harness_effect_unknown/v1"
+                or type(unknown_payload["phase"]) is not str
+                or unknown_payload["phase"] not in {"begin_turn", "begin_turn_ack", "bind_turn_result", "begin_turn_dispatch"}
+                or type(unknown_payload["detail"]) is not str or len(unknown_payload["detail"]) > 512
+                or not int(intent["event_id"]) < int(dispatch["event_id"]) < int(unknown["event_id"])):
+            raise StateConflict("native begin original unknown dispatch evidence differs")
+        def reference(event, payload):
+            return {"command_id": str(event["command_id"]), "event_id": int(event["event_id"]),
+                    "payload_digest": orchestration_digest(payload)}
+        return {
+            "schema_version": "mastermind.dsh_native_begin_reconciled/v1",
+            "operation_kind": OperationKind.BEGIN_TURN.value,
+            "attempt_id": turn.attempt_id, "session_epoch_id": turn.session_epoch_id,
+            "process_generation_id": turn.process_generation_id, "turn_id": turn.turn_id,
+            "provider_native_turn_id": observation.start.provider_native_turn_id,
+            "acknowledged": True, "resolution": "ACKNOWLEDGED",
+            "observation": observation.to_wire(),
+            "original_intent": reference(intent, intent_payload),
+            "original_dispatch": reference(dispatch, dispatch_payload),
+            "original_unknown": reference(unknown, unknown_payload),
+            "original_profile_seal": reference(profile, profile_payload),
+            "original_work_admission": reference(admission, admission_payload),
+        }
+
+    @classmethod
+    def _validated_native_begin_reconciled(cls, connection, *, row, turn, operation):
+        from control_plane.native_conversation_result import NativeConversationBeginObservation
+        event, payload = cls._native_operation_event(connection, row=row, operation=operation,
+                                                     kind=OperationReceiptKind.RECONCILED)
+        try:
+            observation = NativeConversationBeginObservation.from_wire(payload.get("observation"))
+            expected = cls._native_begin_reconciled_payload(connection, row=row, turn=turn,
+                                                           operation=operation, observation=observation)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise StateConflict("native begin reconciliation evidence is invalid") from exc
+        if payload != expected or int(event["event_id"]) <= expected["original_unknown"]["event_id"]:
+            raise StateConflict("native begin reconciliation differs from original sources")
+        return event, payload
+
+    def reconcile_native_begin(self, *, turn, operation_id, observation, fence_generation, lease_token):
+        """Record one observed original ACK; never dispatch, replay or erase UNKNOWN."""
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(connection, attempt_id=turn.attempt_id,
+                fence_generation=fence_generation, lease_token=lease_token, timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED})
+            self._native_begin_sources(connection, row=row, turn=turn, operation=operation_id, observation=observation)
+            self._require_active_orchestration_generation(connection, row=row,
+                                                         generation_id=turn.process_generation_id)
+            self._require_no_native_close_intent(connection, generation=observation.generation)
+            applied = self._event(connection, operation_receipt_command_id(operation_id, OperationReceiptKind.APPLIED))
+            if applied is not None:
+                operation, _intent, _intent_payload, event, payload = self._validated_tx5_receipts(
+                    connection, row=row, turn=turn)
+                if (operation != operation_id or payload["provider_native_turn_id"] != observation.start.provider_native_turn_id
+                        or self._event(connection, operation_receipt_command_id(operation_id, OperationReceiptKind.EFFECT_UNKNOWN))
+                        is not None):
+                    raise StateConflict("native begin original APPLIED receipt differs")
+                return str(event["command_id"])
+            payload = self._native_begin_reconciled_payload(connection, row=row, turn=turn,
+                                                            operation=operation_id, observation=observation)
+            command = operation_receipt_command_id(operation_id, OperationReceiptKind.RECONCILED)
+            existing = self._event(connection, command)
+            if existing is not None:
+                _event, previous = self._validated_native_begin_reconciled(
+                    connection, row=row, turn=turn, operation=operation_id)
+                if previous != payload:
+                    raise StateConflict("native begin already reconciled differently")
+                return command
+            _finite_existing_effect(self.store, connection, str(row["job_id"]))
+            self._receipt(connection, op=operation_id, kind=OperationReceiptKind.RECONCILED, row=row, payload=payload)
+            return command
+
+    @classmethod
     def _validated_tx5_receipts(
-        self, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
+        cls, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
     ) -> tuple[OperationId, sqlite3.Row, dict[str, Any], sqlite3.Row, dict[str, Any]]:
-        """Read the original exact INTENT/APPLIED chain; create no new effect."""
+        """Read the original ACK chain; ordinary APPLIED and native recovery stay distinct."""
         matching_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
         for intent in connection.execute(
             """SELECT * FROM events
@@ -22836,10 +23047,17 @@ class OperatorHarnessRegistry:
         ):
             raise StateConflict("candidate TX-5 INTENT provenance mismatch")
         operation = OperationId(str(intent["command_id"]))
-        applied = self._event(
+        applied = cls._event(
             connection,
             operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
         )
+        reconciled = cls._event(connection, operation_receipt_command_id(operation, OperationReceiptKind.RECONCILED))
+        if reconciled is not None:
+            if applied is not None:
+                raise StateConflict("TX-5 has competing acknowledgement receipts")
+            event, payload = cls._validated_native_begin_reconciled(
+                connection, row=row, turn=turn, operation=operation)
+            return operation, intent, intent_payload, event, payload
         applied_payload = (
             _json_loads(applied["payload_json"], fallback={}) if applied else {}
         )
@@ -23017,7 +23235,7 @@ class OperatorHarnessRegistry:
         """Join historical native evidence; this helper grants no current effect."""
         from control_plane.native_conversation_result import (
             NativeConversationResultObservation, NATIVE_CONVERSATION_SEAL_SCHEMA,
-            result_contract_for_profile,
+            NATIVE_CONVERSATION_RECOVERED_SEAL_SCHEMA, result_contract_for_profile,
         )
         from control_plane.operator_harness_wire import requested_execution_profile
         if type(observation) is not NativeConversationResultObservation:
@@ -23107,13 +23325,17 @@ class OperatorHarnessRegistry:
                 or admission.get("placement_snapshot_digest") != row["placement_snapshot_digest"]
                 or admission.get("effective_grant_digest") != row["effective_grant_digest"]):
             raise StateConflict("native observation differs from its original turn and work admission")
+        recovered = applied["event_type"] == OperationReceiptKind.RECONCILED.value
+        if recovered and observation.native_claim.to_wire() != applied_payload["observation"]["native_claim"]:
+            raise StateConflict("native result claim differs from original recovered ACK")
         prior_ref = None
         prior_applied = connection.execute(
             """SELECT payload_json FROM events
-               WHERE event_type=? AND aggregate_type='operator_operation' AND attempt_id=?
+               WHERE event_type IN (?,?) AND aggregate_type='operator_operation' AND attempt_id=?
                  AND event_id<? AND json_extract(payload_json,'$.operation_kind')=?
                ORDER BY event_id DESC LIMIT 1""",
-            (OperationReceiptKind.APPLIED.value, turn.attempt_id, intent["event_id"], OperationKind.BEGIN_TURN.value),
+            (OperationReceiptKind.APPLIED.value, OperationReceiptKind.RECONCILED.value,
+             turn.attempt_id, intent["event_id"], OperationKind.BEGIN_TURN.value),
         ).fetchone()
         if prior_applied is not None:
             prior = _strict_canonical_json_loads(str(prior_applied["payload_json"]),
@@ -23130,7 +23352,7 @@ class OperatorHarnessRegistry:
                 raise StateConflict("native successor does not extend its original persisted prefix")
             prior_ref = self._native_result_ref(prior_event, prior_payload).to_wire()
         return {
-            "schema_version": NATIVE_CONVERSATION_SEAL_SCHEMA,
+            "schema_version": NATIVE_CONVERSATION_RECOVERED_SEAL_SCHEMA if recovered else NATIVE_CONVERSATION_SEAL_SCHEMA,
             "predecessor_result": prior_ref,
             "job_id": str(row["job_id"]), "attempt_id": turn.attempt_id,
             "worker_id": str(row["worker_id"]), "quota_class": str(row["quota_class"]),
@@ -23142,8 +23364,11 @@ class OperatorHarnessRegistry:
             "observation_digest": orchestration_digest(observation.to_wire()),
             "tx5_intent_command_id": str(intent["command_id"]),
             "tx5_intent_digest": orchestration_digest(intent_payload),
-            "tx5_applied_command_id": str(applied["command_id"]),
-            "tx5_applied_digest": orchestration_digest(applied_payload),
+            **({"tx5_ack_kind": OperationReceiptKind.RECONCILED.value,
+                "tx5_ack_command_id": str(applied["command_id"]),
+                "tx5_ack_digest": orchestration_digest(applied_payload)} if recovered else {
+                "tx5_applied_command_id": str(applied["command_id"]),
+                "tx5_applied_digest": orchestration_digest(applied_payload)}),
             "candidate_command_id": str(candidate["command_id"]),
             "candidate_digest": orchestration_digest(candidate_payload),
             "work_admission_command_id": str(admission_event["command_id"]),
@@ -23173,8 +23398,8 @@ class OperatorHarnessRegistry:
         self, connection: sqlite3.Connection, *, row: sqlite3.Row, epoch: SessionEpochRef,
     ) -> None:
         for event in connection.execute(
-            "SELECT * FROM events WHERE event_type=? AND aggregate_type='operator_operation' AND attempt_id=?",
-            (OperationReceiptKind.APPLIED.value, row["attempt_id"]),
+            "SELECT * FROM events WHERE event_type IN (?,?) AND aggregate_type='operator_operation' AND attempt_id=?",
+            (OperationReceiptKind.APPLIED.value, OperationReceiptKind.RECONCILED.value, row["attempt_id"]),
         ):
             value = _strict_canonical_json_loads(str(event["payload_json"]), name="native prior operation")
             if value.get("operation_kind") != OperationKind.BEGIN_TURN.value:
@@ -25328,29 +25553,9 @@ class OperatorHarnessRegistry:
                 """,
                 (turn.session_epoch_id, turn.process_generation_id),
             ).fetchone()
-            source = None
-            for event in connection.execute(
-                "SELECT * FROM events WHERE event_type=? AND attempt_id=?",
-                (OperationReceiptKind.INTENT.value, turn.attempt_id),
-            ):
-                payload = _json_loads(event["payload_json"], fallback={})
-                if (
-                    payload.get("operation_kind") == OperationKind.BEGIN_TURN.value
-                    and payload.get("turn_id") == turn.turn_id
-                ):
-                    source = (event, payload)
-                    break
-            source_applied = (
-                None
-                if source is None
-                else self._event(
-                    connection,
-                    operation_receipt_command_id(
-                        OperationId(str(source[0]["command_id"])),
-                        OperationReceiptKind.APPLIED,
-                    ),
-                )
-            )
+            _operation, source_event, source_payload, source_applied, _ack = self._validated_tx5_receipts(
+                connection, row=row, turn=turn)
+            source = (source_event, source_payload)
             if (
                 durable is None
                 or durable["attempt_id"] != row["attempt_id"]

@@ -22,10 +22,11 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from control_plane.codex_worker import ProcessIdentityError, _process_group_exists
 from control_plane.executive_orchestration_principal import (
-    OSProcessCredentialObservation, ProviderHomeIdentityObservation,
+    OSProcessCredentialObservation, ProviderHomeIdentityObservation, digest as source_digest,
 )
 from control_plane.native_conversation_result import (
     DSH_NATIVE_HARNESS_KIND, DSH_NATIVE_RESULT_CONTRACT, NativeConversationResultObservation,
+    NativeConversationBeginObservation,
 )
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION, AdapterFailureClass, CandidateResult,
@@ -364,24 +365,49 @@ class NativeOperatorAdapter:
         with self.pending_lock:
             return any(not future.done() for future in self.pending_calls)
 
+    def observe_native_begin(self, *, operation_id, turn, generation):
+        return self._call(self._observe_native_begin(operation_id, turn, generation))
+
     def observe_begin_result(self, *, operation_id, turn, generation):
-        if generation != self.generation:
-            raise NativeOperatorError("original begin generation differs")
+        observed = self.observe_native_begin(operation_id=operation_id, turn=turn, generation=generation)
+        return observed.start if observed is not None else None
+
+    async def _observe_native_begin(self, operation, turn, generation):
+        native = self._require_generation(generation)
+        epoch, attestation = self.epoch, self.attestation
         with self.pending_lock:
             owned = self.begin_calls.get(turn)
-        if owned is None or owned[0] != operation_id:
+        if (owned is None or owned[0] != operation or self.close_operation is not None
+                or attestation is None):
             raise NativeOperatorError("original begin observation differs")
         future = owned[1]
-        if not future.done():
-            return None
-        if future.cancelled() or future.exception() is not None or self.close_operation is not None:
-            raise NativeOperatorError("original begin did not succeed", effect_unknown=True)
-        observed = future.result()
+        if future.cancelled():
+            raise NativeOperatorError("original begin outcome is unavailable", effect_unknown=True)
+        if future.done():
+            failure = future.exception()
+            if failure is not None and not (
+                    type(failure) is NativeEffectUnknown and str(failure) == "NATIVE_CLAIM_UNOBSERVED"):
+                raise NativeOperatorError("original begin did not reach an observable claim", effect_unknown=True)
         state = self._require_turn(turn)
-        if (not isinstance(observed, TurnStartObservation) or state is None or state.claim is None
-                or observed.provider_native_turn_id != str(state.claim.native_turn)):
-            raise NativeOperatorError("original begin result changed", effect_unknown=True)
-        return observed
+        if state is None:
+            return None  # The original call may still be observing admission.
+        if state is not self.current or state.operation != operation:
+            raise NativeOperatorError("original begin turn changed")
+        claim = native.observe_prompt_claim(operation.command_id)
+        if claim is None:
+            return None
+        if state.claim is not None and state.claim != claim:
+            raise NativeOperatorError("original native claim changed", effect_unknown=True)
+        if (self.native is not native or self.epoch is not epoch
+                or self.attestation is not attestation or self.current is not state
+                or self.close_operation is not None):
+            raise NativeOperatorError("original begin owner changed", effect_unknown=True)
+        # A late callback joins this same retained turn. No input, prompt task,
+        # request id or provider Session is reconstructed or replayed.
+        state.claim = claim
+        from control_plane.operator_harness_wire import to_wire
+        return NativeConversationBeginObservation(turn, generation, claim,
+            source_digest(to_wire(self.requested)), source_digest(to_wire(attestation)))
 
     async def _begin(self, operation, turn, generation, launch, text):
         native = self._require_generation(generation)

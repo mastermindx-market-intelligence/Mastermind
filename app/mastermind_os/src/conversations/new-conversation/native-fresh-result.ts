@@ -186,21 +186,21 @@ export function decodeNativeFreshResult(raw:unknown,operation:NativeFreshOperati
     }
     if(v.error!==null)fail();
     let data:NativeFreshSuccessData;
-    if(['preview','create','status','read'].includes(operation))data=decodeBase(v.data,request);
+    if(['preview','create','status','read','recover'].includes(operation))data=decodeBase(v.data,request);
     else if(operation.startsWith('resume')||operation.startsWith('stop'))data=decodeControl(v.data,request);
     else data=decodeTurn(v.data,request,operation==='turn_preview');
     const states:Partial<Record<NativeFreshOperation,readonly string[]>>={
       consume:['CONSUMED'],consume_status:['ABSENT','CONSUMED'],
       turn:['ABSENT','RECONCILIATION_REQUIRED','RECORDED'],turn_status:['ABSENT','RECONCILIATION_REQUIRED','RECORDED'],
-      turn_read:['ABSENT','RECONCILIATION_REQUIRED','RECORDED'],turn_preview:['TURN_READY'],resume_preview:['RESUME_READY'],
+      turn_read:['ABSENT','RECONCILIATION_REQUIRED','RECORDED'],turn_recover:['ABSENT','RECONCILIATION_REQUIRED','RECORDED'],turn_preview:['TURN_READY'],resume_preview:['RESUME_READY'],
       resume:['RECONCILIATION_REQUIRED','INTENT','APPLIED','EFFECT_UNKNOWN'],stop:['RECONCILIATION_REQUIRED','INTENT','APPLIED','EFFECT_UNKNOWN'],
       resume_status:['ABSENT','RECONCILIATION_REQUIRED','INTENT','APPLIED','EFFECT_UNKNOWN'],
       stop_status:['ABSENT','RECONCILIATION_REQUIRED','INTENT','APPLIED','EFFECT_UNKNOWN']};
     if(states[operation]&&!states[operation]!.includes(data.state))fail();
-    if(['consume_status','turn','turn_status','turn_read'].includes(operation)&&'can_send'in data&&data.can_send)fail();
+    if(['consume_status','turn','turn_status','turn_read','turn_recover'].includes(operation)&&'can_send'in data&&data.can_send)fail();
     if((operation==='preview')!==(data.state==='PREVIEW_READY')||(operation==='turn_preview')!==(data.state==='TURN_READY')||
       (operation==='resume_preview')!==(data.state==='RESUME_READY'))fail();
-    if(['status','read','consume_status','turn_status','turn_read','resume_status','stop_status','preview','turn_preview','resume_preview'].includes(operation)&&data.effect!=='NONE')fail();
+    if(['status','read','consume_status','turn_status','turn_read','resume_status','stop_status','preview','turn_preview','resume_preview','recover','turn_recover'].includes(operation)&&data.effect!=='NONE')fail();
     if(data.schema===CONTROL&&data.kind!==operation.split('_')[0])fail();
     return frozen({ok:true,data});
   }catch{return null;}

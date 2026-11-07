@@ -1,7 +1,7 @@
 /** Native-v2 data syntax on the existing fresh-conversation carrier. */
 import type {FreshConversationReference} from '../fresh-conversation-reference';
 export const NATIVE_FRESH_OPERATIONS = ['preview','create','status','read','consume','consume_status',
-  'turn_preview','turn','turn_status','turn_read','resume_preview','resume','resume_status','stop','stop_status'] as const;
+  'turn_preview','turn','turn_status','turn_read','turn_recover','recover','resume_preview','resume','resume_status','stop','stop_status'] as const;
 export type NativeFreshOperation = typeof NATIVE_FRESH_OPERATIONS[number];
 export type NativeFreshSelector = Readonly<{work_ref:string;operation_key:string;reference?:never} |
   {work_ref:string;reference:FreshConversationReference;operation_key?:never}>;
@@ -61,7 +61,7 @@ export function validateNativeFreshRequest(value:unknown,operation:NativeFreshOp
   const keys=['work_ref',referenceMode?'reference':'operation_key'];
   if(['preview','create','turn_preview','turn'].includes(operation))keys.push('message');
   if(['consume','consume_status','turn_preview','turn'].includes(operation))keys.push('initial_digest');
-  if(['turn_preview','turn','turn_status','turn_read'].includes(operation))keys.push('turn_key');
+  if(['turn_preview','turn','turn_status','turn_read','turn_recover'].includes(operation))keys.push('turn_key');
   if(['resume_preview','resume','resume_status'].includes(operation))keys.push('resume_key');
   if(['stop','stop_status'].includes(operation))keys.push('stop_key');
   if(['create','turn','resume'].includes(operation))keys.push('preview_digest');

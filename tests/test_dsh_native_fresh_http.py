@@ -229,3 +229,73 @@ def test_native_route_and_authority_faults_do_not_admit(tmp_path, rsa_key, monke
             assert code in {400, 401, 403, 404}, result
             assert not runtime.jobs.list_jobs() and not adapters and runtime.events.list_events() == before
     asyncio.run(run())
+
+
+def test_native_signed_recovery_rejoins_original_call_with_fresh_auth_only(tmp_path, rsa_key, monkeypatch):
+    from tests.test_dsh_native_fresh_recovery import delay_original
+    async def run():
+        async with native_mount(tmp_path, rsa_key, monkeypatch) as (
+                app, token, workspace, service, runtime, request, adapters, client, sink):
+            state = delay_original(service, monkeypatch, ordinal=1)
+            request = {**request, "operation_key": "mmos-native-create-"+"a"*40}
+            selected = {key: request[key] for key in ("work_ref", "operation_key")}
+            code, preview = await native_post(app, "preview", request, token, workspace)
+            assert code == 200 and preview["ok"]
+            code, unknown = await native_post(app, "create",
+                {**request, "preview_digest": preview["data"]["preview"]["digest"]}, token, workspace)
+            assert code == 202 and not unknown["ok"], unknown
+            original = service._native_operator_dispatch
+            assert original is not None and original.pending_turn is not None and service._service_state == "READY"
+            before = state["observations"]
+            code, refused = await native_post(app, "recover", selected, token)
+            assert code == 400 and refused["error"]["code"] == "invalid_input", refused
+            assert state["observations"] == before
+            code, passive = await native_post(app, "read", selected, token)
+            assert code == 200 and passive["data"]["state"] == "RECONCILIATION_REQUIRED"
+            assert state["observations"] == before
+            state["ready"] = True
+            code, recovered = await native_post(app, "recover", selected, token, workspace)
+            assert code == 200 and recovered["ok"] and recovered["data"]["state"] == "CREATED", recovered
+            assert service._native_operator_dispatch is original and original.pending_turn is None
+            assert len(adapters) == adapters[0].start_calls == adapters[0].calls == 1
+            initial = recovered["data"]["result"]
+            consume = {**selected, "initial_digest": initial["digest"]}
+            code, kept = await native_post(app, "consume", consume, token, workspace)
+            assert code == 200 and kept["data"]["can_send"]
+            state.update(ready=False, ordinal=2)
+            send = {**consume, "turn_key": "mmos-native-turn-"+"b"*40, "message": "The original second input."}
+            code, preview = await native_post(app, "turn_preview", send, token, workspace)
+            assert code == 200 and preview["ok"]
+            send["preview_digest"] = preview["data"]["preview_digest"]
+            code, pending = await native_post(app, "turn", send, token, workspace)
+            assert code == 200 and pending["data"]["state"] == "RECONCILIATION_REQUIRED", pending
+            target = {**selected, "turn_key": send["turn_key"]}
+            before = state["observations"]
+            code, refused = await native_post(app, "turn_recover", target, token)
+            assert code == 400 and refused["error"]["code"] == "invalid_input", refused
+            assert state["observations"] == before
+            code, still = await native_post(app, "turn_read", target, token)
+            assert code == 200 and still["data"]["result"] is None and state["observations"] == before
+            state["ready"] = True
+            code, answer = await native_post(app, "turn_recover", target, token, workspace)
+            assert code == 200 and answer["ok"] and answer["data"]["state"] == "RECORDED", answer
+            assert service._native_operator_dispatch is original and original.pending_turn is None
+            assert original.retained.native_result.seal_digest == answer["data"]["result"]["digest"]
+            assert adapters[0].calls == 2 and adapters[0].prompts == [request["message"], send["message"]]
+            assert adapters[0].stop_calls == adapters[0].cancel_calls == 0
+            assert len(runtime.attempts.list_attempts()) == 1 and len(runtime.jobs.list_jobs()) == 2
+            destination = os.environ.get("MMX_NATIVE_RECOVERY_EXPORT")
+            if destination:
+                payload = {"schema": "mastermind.native_fresh_recovery_fixture.v1",
+                    "seams": ["inert installed policy, provider and process",
+                        "actual signed RS256 Executive and Workspace authentication",
+                        "actual private Unix socket, kernel peer, original Control/Supervisor/Runtime",
+                        "original begin timeout followed by explicit claim/answer recovery; no second send"],
+                    "samples": [
+                        {"test": "signed-original-initial-recovery", "operation": "recover", "arguments": selected, "response": recovered},
+                        {"test": "signed-original-followup-recovery", "operation": "turn_recover", "arguments": target, "response": answer}],
+                    "counts": {"jobs": 2, "attempts": 1, "adapters": 1, "starts": 1, "provider_turns": 2}}
+                with Path(destination).open("x", encoding="utf-8") as output:
+                    json.dump(payload, output, ensure_ascii=False, indent=2)
+                    output.write("\n")
+    asyncio.run(run())

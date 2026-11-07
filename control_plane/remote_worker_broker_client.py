@@ -52,6 +52,7 @@ _READ_ONLY_OPERATIONS = frozenset(
         "attended-secret-canary",
         "ohf-identity",
         "ohf-materialization-status",
+        "ohf-native-begin-status",
     }
 )
 _BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})

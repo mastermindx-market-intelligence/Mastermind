@@ -242,7 +242,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    if(!pointer&&!v.lookup&&!v.data&&v.operation?.status!=="accepted")return;
    latest.current.onOriginalKeySelected(selected);if(!valid())return;
    if(recover&&pointer?.kind==="conversation_create"&&v.busy!=="operation"){
-    const state=await c.binding.controller.recover();if(!valid())return;
+    const state=await c.binding.controller.recover({reconcileNative:true,expectedPointer:pointer});if(!valid())return;
     if(state.pointer&&!samePointer(state.pointer,pointer)){patch({other:true,retained:state.pointer});return;}
     patch({operation:state,retained:state.pointer});
    }else if(pointer)patch({retained:pointer});
@@ -395,7 +395,7 @@ export function useFreshConversationJourney(props:FreshConversationJourneyProps)
    !current.current.other&&!current.current.discovering&&current.current.phase==="outcome"&&
    !!current.current.original&&sameSelection(current.current.original,selection);
   return {selection,data,binding:c.binding,pendingParent:view.retained?.kind==="conversation_create"?view.retained:null,
-   creating:view.busy==="operation",observing:view.observing,refresh:()=>check(),current:()=>ownerCurrent()&&current.current.data===data,
+   creating:view.busy==="operation",observing:view.observing,refresh:()=>observeNative(false,false),current:()=>ownerCurrent()&&current.current.data===data,
    initialCurrent:()=>{
     const next=current.current.data,locator=data?.locator;
     // A newly decoded status object retires control facts, but not the same

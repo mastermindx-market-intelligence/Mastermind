@@ -253,7 +253,7 @@ def require_native_initial_record(runtime, active, operation):
     """Validate only custody of an already acknowledged original native input.
 
     This is not admission: the exact active handle must independently resolve
-    TX5 APPLIED. Request expiry/EOF cannot erase that existing effect's result.
+    the original validated TX5 ACK. Request expiry/EOF cannot erase its result.
     """
     from control_plane.executive_runtime import Runtime
     from control_plane.executive_operator_supervisor import ActiveNativeOperatorTurn, ExecutiveOperatorSupervisor

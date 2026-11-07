@@ -257,6 +257,8 @@ class _NativeOperatorDispatch:
     retained: Any = None
     source: Any = None
     active_turn: Any = None
+    pending_turn: Any = None
+    recovery_waiter: Any = None
 
 
 _NATIVE_CONTINUATION_WAIT_SECONDS = 300.0
@@ -8999,12 +9001,73 @@ class ExecutiveControlService:
             return receipt.result(timeout=_NATIVE_ACTIVE_OBSERVATION_WAIT_SECONDS)
         return observe
 
-    async def _run_native_operator_dispatch(self, dispatch: _NativeOperatorDispatch) -> None:
+    async def recover_native_operator_turn(self, dispatch, *, current):
+        """One authenticated recovery attempt on the same retained dispatch."""
+        from control_plane.executive_operator_supervisor import PendingNativeOperatorTurn
+        async with self._dispatch_lock:
+            if (self._closing or self._service_state != "READY" or self._native_operator_dispatch is not dispatch
+                    or not callable(current) or current() is not None):
+                raise StateConflict("native recovery lost its current authenticated dispatch")
+            pending = dispatch.pending_turn
+            if type(pending) is not PendingNativeOperatorTurn:
+                return False
+            task = self._dispatch_tasks.get(dispatch.job_id)
+            if task is not None and not task.done() and dispatch.recovery_waiter is None:
+                # The original source may wake HTTP just before its caller
+                # observes the same pending outcome. Join that caller first.
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                except asyncio.TimeoutError:
+                    return False
+                if (current() is not None or self._native_operator_dispatch is not dispatch
+                        or dispatch.pending_turn is not pending):
+                    raise StateConflict("native pending caller changed while joining")
+                task = self._dispatch_tasks.get(dispatch.job_id)
+            if task is not None and not task.done():
+                waiter = dispatch.recovery_waiter
+                if waiter is None:
+                    return False
+            else:
+                waiter = asyncio.get_running_loop().create_future()
+                dispatch.recovery_waiter = waiter
+                task = asyncio.create_task(self._run_native_operator_dispatch(
+                    dispatch, recovery=pending, recovery_current=current),
+                    name=f"executive-native-recover-{dispatch.job_id}")
+                self._dispatch_tasks[dispatch.job_id] = task
+        await asyncio.shield(waiter)
+        return dispatch.pending_turn is None
+
+    async def _run_native_operator_dispatch(self, dispatch: _NativeOperatorDispatch, *,
+                                            recovery=None, recovery_current=None) -> None:
+        from control_plane.executive_operator_supervisor import NativeOperatorRecoveryPending
         supervisor = self._require_operator_supervisor()
         try:
-            observer = self._native_initial_turn_observer(dispatch, supervisor)
-            dispatch.retained = await self._run_owned_coroutine(supervisor.start_retained_native_job(
-                dispatch.job_id, command_id=dispatch.command_id, _active_turn_observer=observer))
+            if recovery is None:
+                observer = self._native_initial_turn_observer(dispatch, supervisor)
+                dispatch.retained = await self._run_owned_coroutine(supervisor.start_retained_native_job(
+                    dispatch.job_id, command_id=dispatch.command_id, _active_turn_observer=observer))
+            else:
+                try:
+                    if dispatch.pending_turn is not recovery or self._native_operator_dispatch is not dispatch:
+                        raise StateConflict("native recovery original pending call changed")
+                    retained, receipt = await self._run_owned_coroutine(asyncio.to_thread(
+                        supervisor.recover_pending_native_turn, recovery, current=recovery_current,
+                        timeout_seconds=30.0))
+                    dispatch.retained = retained
+                    source = getattr(dispatch, "_fresh_turn_source", None)
+                    if source is not None:
+                        from control_plane.fresh_conversation_turn import record_native_turn_result
+                        event, payload = source.check_record()
+                        if payload["operation_id"] != recovery.operation_id.command_id:
+                            raise StateConflict("native recovery original request changed")
+                        record_native_turn_result(self, dispatch, source, retained, event, payload,
+                                                  recovery.operation_id, receipt)
+                        dispatch._fresh_turn_source = None
+                    dispatch.pending_turn = None
+                    dispatch.continuation = asyncio.get_running_loop().create_future()
+                    self._dispatch_errors.pop(dispatch.job_id, None)
+                except Exception as exc:
+                    raise NativeOperatorRecoveryPending(recovery) from exc
             supervisor.retain_native_wait_window(dispatch.retained)
             lease = dispatch.retained.lease
             native_conversation = dispatch.retained.native_result is not None
@@ -9015,9 +9078,13 @@ class ExecutiveControlService:
             current_attempt = self._require_runtime().attempts.get_attempt(lease.attempt.attempt_id)
             if current_attempt is None:
                 raise StateConflict("native dispatch lost its exact Attempt")
-            dispatch.started.set_result(OrchestrationDispatchOutcome(
-                command_id=dispatch.command_id, job_id=dispatch.job_id,
-                attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
+            if not dispatch.started.done():
+                dispatch.started.set_result(OrchestrationDispatchOutcome(
+                    command_id=dispatch.command_id, job_id=dispatch.job_id,
+                    attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
+            if dispatch.recovery_waiter is not None and not dispatch.recovery_waiter.done():
+                dispatch.recovery_waiter.set_result(None)
+            dispatch.recovery_waiter = None
             from control_plane.fresh_conversation_admission import read_creation_restriction
             from control_plane.fresh_conversation_turn import FreshConversationTurnSource, execute_attended_turn
             root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
@@ -9085,6 +9152,14 @@ class ExecutiveControlService:
                 await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)
+        except NativeOperatorRecoveryPending as exc:
+            # The same dispatch keeps the original call and source. No send,
+            # lifecycle cleanup, background retry or service-wide quarantine.
+            dispatch.pending_turn = exc.pending
+            dispatch.native_phase = "RECONCILIATION_REQUIRED"
+            if not dispatch.started.done():
+                dispatch.started.set_exception(exc)
+            self._dispatch_errors[dispatch.job_id] = "original native turn requires authenticated recovery"
         except (Exception, asyncio.CancelledError) as exc:
             if not dispatch.started.done():
                 dispatch.started.set_exception(exc)
@@ -9107,7 +9182,9 @@ class ExecutiveControlService:
                 if source is not None and not source._completion.done():
                     # Delivery settlement only; the original journal decides outcome.
                     source._completion.set_result(None)
-            if self._native_operator_dispatch is dispatch:
+            if dispatch.recovery_waiter is not None and not dispatch.recovery_waiter.done():
+                dispatch.recovery_waiter.set_result(None)
+            if self._native_operator_dispatch is dispatch and dispatch.pending_turn is None:
                 self._native_operator_dispatch = None
             if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
                 self._dispatch_tasks.pop(dispatch.job_id, None)

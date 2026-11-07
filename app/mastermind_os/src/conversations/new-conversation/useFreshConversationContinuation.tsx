@@ -4,7 +4,7 @@ import {freshConversationTarget, type FreshConversationOriginalSelector} from ".
 import {FreshConversationTurnPanel} from "./FreshConversationTurnPanel";
 import type {FreshConversationAttendedBinding, FreshConversationOriginalRead, PreparedFreshConversationTurn} from "./fresh-conversation-attended-binding";
 import {decodeFreshConversationTurnResult, validateFreshConversationTurnRequest, type FreshConversationTurnData, type FreshConversationTurnRequest, type FreshConversationTurnConsumption} from "./fresh-conversation-turn";
-import {validateAttendedRequest,decodeAttendedResult,attendedReadSettled,type FreshAttendedData} from "./fresh-conversation-attended-contract";
+import {validateAttendedRequest,decodeAttendedResult,attendedReadSettled,attendedContractForKey,type FreshAttendedData} from "./fresh-conversation-attended-contract";
 import "./new-conversation-journey.css";
 import type {FreshConversationTurnDraftCapture,FreshConversationTurnDraftState} from "./useFreshConversationTurnDraftState";
 
@@ -242,7 +242,8 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
       const kind=held.pointer?.kind==="conversation_turn"?"turn":held.pointer?.kind==="conversation_consume"?"consume":submitted?"turn":current.current.lastKind??"consume";
       const key=kind==="turn"?(held.pointer?.operationKey??submitted??current.current.lastTurnKey??null):null;
       if(held.pointer){
-        const state=await c.b.controller.recover();if(!valid(c))return;
+        const native=held.pointer.kind==="conversation_turn"&&attendedContractForKey(held.pointer.operationKey)==="native-v2";
+        const state=await c.b.controller.recover(native?{reconcileNative:true,expectedPointer:held.pointer}:undefined);if(!valid(c))return;
         const sameTurn=current.current.lastKind==="turn"&&current.current.lastTurnKey===key;
         patch({operation:state,pending:state.pointer,lastKind:kind,lastTurnKey:key,
           ...(kind==="turn"&&!sameTurn?{originalTurnMessage:null,draftCapture:null,turnSettled:false}:{})});

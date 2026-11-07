@@ -1,12 +1,15 @@
 import {describe,expect,it,vi} from 'vitest';
 import fixture from '../../fixtures/native-fresh-action-owner.json';
+import recoveryFixture from '../../fixtures/native-fresh-recovery-owner.json';
 import {decodeNativeFreshResult} from './native-fresh-result';
 import {NATIVE_FRESH_OPERATIONS,type NativeFreshOperation} from './native-fresh-request';
 const choose=(operation:string)=>fixture.samples.find(s=>s.operation===operation)!;
 const copy=(sample:typeof fixture.samples[number])=>JSON.parse(JSON.stringify(sample.response));
 describe('native-v2 original-owner action receipts',()=>{
- it('covers all fifteen operations from actual signed HTTP and private Unix owner calls',()=>{
-  expect(new Set(fixture.samples.map(s=>s.operation))).toEqual(new Set(NATIVE_FRESH_OPERATIONS));
+ it('preserves all fifteen original operation samples and joins both signed recovery routes',()=>{
+  expect(new Set(fixture.samples.map(s=>s.operation))).toEqual(new Set(NATIVE_FRESH_OPERATIONS.filter(op=>op!=='recover'&&op!=='turn_recover')));
+  expect(new Set(recoveryFixture.samples.map(s=>s.operation))).toEqual(new Set(['recover','turn_recover']));
+  expect(new Set([...fixture.samples,...recoveryFixture.samples].map(s=>s.operation))).toEqual(new Set(NATIVE_FRESH_OPERATIONS));
  });
  it.each(fixture.samples)('$test / $operation preserves actual DATA without legacy envelope conversion',sample=>{
   const result=decodeNativeFreshResult(sample.response,sample.operation as NativeFreshOperation,sample.arguments);
@@ -90,5 +93,23 @@ describe('native-v2 original-owner action receipts',()=>{
   bound.data.preview.grounding.padding='x'.repeat(32760-current);
   expect(new TextEncoder().encode(JSON.stringify(bound)).length).toBeLessThan(32768);
   expect(decodeNativeFreshResult(bound,'preview',sample.arguments)).toBeNull();
+ });
+
+ it.each(recoveryFixture.samples)('$test preserves the recovered original answer and current-call effect semantics',sample=>{
+  const operation=sample.operation as NativeFreshOperation;
+  const result=decodeNativeFreshResult(sample.response,operation,sample.arguments);
+  expect(result?.ok).toBe(true);if(result?.ok)expect(result.data).toEqual(sample.response.data);
+  expect(sample.response.data.effect).toBe('NONE');expect(sample.response.data.can_send).toBe(false);
+  for(const mutate of [
+   ...(operation==='turn_recover'?[(v:any)=>{v.data.can_send=true;}]:[]),
+   (v:any)=>{v.data.effect='COMMITTED';},
+   (v:any)=>{v.data.extra='unrecognized';},
+   (v:any)=>{v.data.operation_key='mmos-native-create-'+'f'.repeat(40);},
+   (v:any)=>{v.data.result=null;},
+   (v:any)=>{v.data.schema='mastermind.executive.fresh_conversation_control_data.v2';},
+  ]){
+   const value:any=structuredClone(sample.response);mutate(value);
+   expect(decodeNativeFreshResult(value,operation,sample.arguments)).toBeNull();
+  }
  });
 });

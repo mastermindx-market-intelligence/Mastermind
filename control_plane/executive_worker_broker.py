@@ -63,11 +63,13 @@ from control_plane.worker_adapter import (
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
+    digest as source_digest,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
 from control_plane.native_conversation_result import (
     DSH_NATIVE_RESULT_CONTRACT, NativeConversationResultAdapter,
+    NativeConversationBeginObservation, NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
     NativeConversationResultError, NativeConversationResultObservation, result_contract_for_profile,
 )
 from control_plane.operator_harness_contract import (
@@ -182,6 +184,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-validate",
         "ohf-identity",
         "ohf-materialization-status",
+        "ohf-native-begin-status",
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
@@ -1738,6 +1741,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_start(payload, resume=True)
         if operation == "ohf-begin-turn":
             return await self._ohf_begin_turn(payload)
+        if operation == "ohf-native-begin-status":
+            return await self._ohf_native_begin_status(payload)
         if operation == "ohf-deliver-attention":
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
@@ -2707,6 +2712,66 @@ class ExecutiveWorkerBroker:
             return {"observation": operator_to_wire(observation)}
         finally:
             await self._operator_release_busy(state)
+
+    async def _ohf_native_begin_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Read the original accepted native claim; never invoke begin again."""
+        if set(payload) != {"operation_id", "turn", "generation"}:
+            raise BrokerProtocolError("native begin status fields are invalid")
+        try:
+            operation = wire_operation_id(payload["operation_id"])
+            turn = wire_turn_ref(payload["turn"])
+            generation = wire_process_generation_ref(payload["generation"])
+        except OperatorHarnessWireError as exc:
+            raise BrokerProtocolError(str(exc)) from exc
+        pair = (operation, turn)
+        pending = {"schema_version": NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
+                   "status": "PENDING", "observation": None}
+        async with self._state_lock:
+            state = self._operator_run
+            if (state is None or state.generation != generation
+                    or state.epoch.attempt_id != turn.attempt_id
+                    or turn.session_epoch_id != generation.session_epoch_id
+                    or turn.process_generation_id != generation.process_generation_id
+                    or state.materialization_receipt is None
+                    or result_contract_for_profile(state.requested) != DSH_NATIVE_RESULT_CONTRACT
+                    or pair not in (state.current_begin, state.pending_begin)
+                    or state.native_connection is None
+                    or state.native_connection is not getattr(state.adapter, "native", None)
+                    or not callable(getattr(state.adapter, "observe_native_begin", None))):
+                raise BrokerStateError("original native begin owner is unavailable")
+            if state.busy or (state.begin_task is not None and not state.begin_task.done()):
+                return pending
+            receipt = state.materialization_receipt
+        observed = await self._operator_call(
+            "native begin status", state.adapter.observe_native_begin,
+            operation_id=operation, turn=turn, generation=generation)
+        async with self._state_lock:
+            if (self._operator_run is not state or state.generation != generation
+                    or state.materialization_receipt is not receipt
+                    or pair not in (state.current_begin, state.pending_begin)
+                    or state.native_connection is not getattr(state.adapter, "native", None)
+                    or getattr(state.adapter, "close_operation", None) is not None):
+                raise BrokerStateError("original native begin owner changed")
+            if state.busy:
+                return pending
+            if observed is None:
+                return pending
+            if type(observed) is not NativeConversationBeginObservation:
+                raise BrokerStateError("original native begin evidence is untyped")
+            try:
+                observed.require_origin(operation, turn, generation, state.provider_session_id)
+            except NativeConversationResultError as exc:
+                raise BrokerStateError("original native begin evidence differs") from exc
+            if (observed.requested_profile_digest != receipt.requested_profile_digest
+                    or observed.observed_attestation_digest != source_digest(receipt.observed_attestation)):
+                raise BrokerStateError("original native begin source seals differ")
+            if state.pending_begin == pair:
+                state.current_begin, state.pending_begin = pair, None
+                state.current_interrupt = None
+            if operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX):
+                state.retained_plain_turns[turn] = generation
+            return {"schema_version": NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
+                    "status": "ACKNOWLEDGED", "observation": observed.to_wire()}
 
     async def _ohf_observer_lifecycle(self, operation, payload):
         payload = dict(payload)

@@ -109,6 +109,7 @@ _OS_FRESH_CONVERSATION_ROUTES = (
     "/os/executive/conversation/consume/status", "/os/executive/conversation/turn/preview",
     "/os/executive/conversation/v2/preview", "/os/executive/conversation/v2/create",
     "/os/executive/conversation/v2/status", "/os/executive/conversation/v2/read",
+    "/os/executive/conversation/v2/recover", "/os/executive/conversation/v2/turn/recover",
     "/os/executive/conversation/v2/consume", "/os/executive/conversation/v2/consume/status",
     "/os/executive/conversation/v2/turn/preview", "/os/executive/conversation/v2/turn",
     "/os/executive/conversation/v2/turn/status", "/os/executive/conversation/v2/turn/read",

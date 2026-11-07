@@ -10,7 +10,7 @@ function request(operation:NativeFreshOperation){
   if(operation==='consume'||operation==='consume_status')return {...selector,initial_digest:fixture.send.initial_digest};
   if(operation==='turn_preview'){const {preview_digest,...preview}=fixture.send;return preview;}
   if(operation==='turn')return fixture.send;
-  if(operation==='turn_status'||operation==='turn_read')return {...selector,turn_key:fixture.send.turn_key};
+  if(operation==='turn_status'||operation==='turn_read'||operation==='turn_recover')return {...selector,turn_key:fixture.send.turn_key};
   if(operation==='stop')return {...selector,stop_key:'original-stop',turn_id:'original-native-turn',binding_digest:hex};
   if(operation==='stop_status')return {...selector,stop_key:'original-stop'};
   if(operation==='resume_status')return {...selector,resume_key:'original-resume'};
@@ -24,7 +24,7 @@ describe('native-v2 closed syntax on the incumbent carrier',()=>{
   expect(copy).toEqual(raw);expect(copy).not.toBe(raw);expect(Object.isFrozen(copy)).toBe(true);
   expect(freshConversationPath(operation,'native-v2')).toBe('conversation/v2/'+operation.replaceAll('_','/'));
   expect(freshConversationNeedsWorkspace(operation,'native-v2')).toBe(
-   ['preview','create','consume','turn_preview','turn','resume_preview','resume','stop'].includes(operation));
+   ['preview','create','consume','turn_preview','turn','resume_preview','resume','stop','recover','turn_recover'].includes(operation));
   for(const extra of ['principal','auth','can_send','source_generation'])
    expect(()=>validateNativeFreshRequest({...raw,[extra]:'foreign'},operation)).toThrow();
  });
@@ -58,4 +58,11 @@ describe('native-v2 closed syntax on the incumbent carrier',()=>{
   expect(()=>validateNativeFreshRequest({work_ref:selector.work_ref,reference:{...reference,work_ref:'WS:Foreign'}},'read')).toThrow();
   expect(()=>validateNativeFreshRequest({work_ref:selector.work_ref,reference,message:'original'},'preview')).toThrow();
  });
+});
+
+it.each(['recover','turn_recover'] as const)('recovery %s accepts only its original selector',operation=>{
+ const original=request(operation);
+ for(const field of ['message','preview_digest','initial_digest','binding_digest','turn_id','replacement_key'])
+  expect(()=>validateNativeFreshRequest({...original,[field]:'not-original'},operation)).toThrow();
+ expect(()=>freshConversationPath(operation,'legacy-v1')).toThrow();
 });

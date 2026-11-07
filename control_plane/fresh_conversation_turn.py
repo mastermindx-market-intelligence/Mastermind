@@ -525,7 +525,10 @@ async def execute_attended_turn(service, dispatch, source):
 
 async def _execute_native_turn(service, dispatch, source, supervisor, retained, event, payload, operation):
     """Use the same waiter/TX5 collector with exact input and a typed native seal."""
-    from control_plane.executive_operator_supervisor import ActiveNativeOperatorTurn
+    from control_plane.executive_operator_supervisor import (
+        ActiveNativeOperatorTurn, PendingNativeOperatorTurn, NativeOperatorRecoveryPending,
+    )
+    from control_plane.operator_harness_orchestrator import NativeTurnPending
     from control_plane.native_conversation_result import NativeConversationResultRef
     from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
     owner = source._owner
@@ -536,8 +539,12 @@ async def _execute_native_turn(service, dispatch, source, supervisor, retained, 
     retained.adapter.bind_native_continuation_guard(source.check,
         attempt_id=retained.session.attempt_id, operation_id=operation, expected_input=payload["message"])
     def load_turn(_turn):
-        source.check()
-        return payload["message"]
+        try:
+            source.check()
+            return payload["message"]
+        except Exception as exc:
+            from control_plane.remote_worker_transport import TransportError, TransportEffect
+            raise TransportError("native_input_source_refused", TransportEffect.NO_EFFECT) from exc
     retained.adapter.turn_input_loader = load_turn
     observer = service._native_initial_turn_observer(dispatch, supervisor, continuation_source=source)
     active = None
@@ -553,10 +560,23 @@ async def _execute_native_turn(service, dispatch, source, supervisor, retained, 
         receipt = await asyncio.to_thread(supervisor._orchestrator(retained.lease, retained.adapter).run_turn,
             retained.session, operation_id=operation,
             timeout_seconds=min(300.0, source._deadline - time.monotonic()), _on_turn_applied=expose_active)
+    except NativeTurnPending as exc:
+        pending = PendingNativeOperatorTurn(supervisor, retained.job, retained.lease,
+            retained.session, retained.adapter, exc.turn, exc.operation_id, exc.cursor, active_observer=observer)
+        # Publish custody before the original request completion can wake.
+        dispatch.pending_turn, dispatch.native_phase = pending, "RECONCILIATION_REQUIRED"
+        raise NativeOperatorRecoveryPending(pending) from exc
     finally:
         if active is not None:
             active.withdraw()
             observer(active, False)
+    record_native_turn_result(service, dispatch, source, retained, event, payload, operation, receipt)
+
+
+def record_native_turn_result(service, dispatch, source, retained, event, payload, operation, receipt):
+    """Finish the same original request projection after its Runtime seal."""
+    from control_plane.native_conversation_result import NativeConversationResultRef
+    owner = source._owner
     # After the physical write, recovery is based on its immutable Runtime
     # receipts. A closed reader must not discard an already sealed answer.
     if receipt.start.acknowledged is not True or type(receipt.native_result) is not NativeConversationResultRef:

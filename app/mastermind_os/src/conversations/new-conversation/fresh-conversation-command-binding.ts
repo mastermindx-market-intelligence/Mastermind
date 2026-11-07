@@ -418,8 +418,8 @@ export function createFreshConversationBinding(
   options: FreshConversationBindingOptions,
 ): FreshConversationBinding {
   const port = new FreshConversationCommandPort(options);
-  const native=options.nativeTransport?createNativeControlAdapter({owner:options.owner,canModify:options.canPreviewCreate,transport:options.nativeTransport}):null;
-  if(native)Object.assign(port,{prepareControl:native.prepareControl,submitControl:native.submitControl,readControlOperation:native.readControlOperation});
+  const native=options.nativeTransport?createNativeControlAdapter({owner:options.owner,canModify:options.canPreviewCreate,get transport(){if(!options.nativeTransport)throw closedError();return options.nativeTransport;}}):null;
+  if(native)Object.assign(port,{reconcileNativeOperation:native.reconcileNativeOperation,prepareControl:native.prepareControl,submitControl:native.submitControl,readControlOperation:native.readControlOperation});
   const controller = new OperationController(port, options.store);
 
   function makePreviewRequest(

@@ -84,6 +84,7 @@ from control_plane.operator_harness_contract import (
 from control_plane.operator_harness_orchestrator import (
     OperatorHarnessOrchestrator,
     OperatorEffectUnknown,
+    NativeTurnPending,
     OperatorOperationApplied,
     OperatorSessionReceipt,
     OperatorStartHandle,
@@ -124,6 +125,30 @@ class RetainedNativeOperatorSession:
         if (role == native or (not role and self.canonical_plan_json is not None)
                 or (not native and self.native_result is not None)):
             raise StateConflict("retained result requires exactly one typed result contract")
+
+
+
+@dataclass(frozen=True)
+class PendingNativeOperatorTurn:
+    """Original call custody on the existing dispatch; neither ACK nor result proof."""
+    owner: Any = field(repr=False)
+    job: Job
+    lease: AttemptLease = field(repr=False)
+    session: OperatorSessionReceipt
+    adapter: Any = field(repr=False)
+    turn: TurnRef
+    operation_id: OperationId
+    cursor: EventCursor | None = None
+    foreground_operation: Any = field(default=None, repr=False)
+    active_observer: Any = field(default=None, repr=False)
+
+
+class NativeOperatorRecoveryPending(ExecutiveOperatorSupervisorError):
+    def __init__(self, pending):
+        if type(pending) is not PendingNativeOperatorTurn:
+            raise TypeError("original pending native call required")
+        super().__init__("original native turn requires bounded recovery")
+        self.pending = pending
 
 
 @dataclass(frozen=True)
@@ -1625,11 +1650,17 @@ class ExecutiveOperatorSupervisor:
                 prompt_by_turn["pending"] = continuation.prepare(session)
 
             def bound_prompt(turn: Any) -> str:
-                value = prompt_by_turn.pop("pending")
-                if native and native_initial_message() != value:
-                    raise ExecutiveOperatorSupervisorError("original native input changed before dispatch")
-                prompt_by_turn[turn.turn_id] = value
-                return value
+                try:
+                    value = prompt_by_turn.pop("pending")
+                    if native and native_initial_message() != value:
+                        raise ExecutiveOperatorSupervisorError("original native input changed before dispatch")
+                    prompt_by_turn[turn.turn_id] = value
+                    return value
+                except Exception as exc:
+                    if native:
+                        from control_plane.remote_worker_transport import TransportError, TransportEffect
+                        raise TransportError("native_input_refused", TransportEffect.NO_EFFECT) from exc
+                    raise
 
             adapter.turn_input_loader = bound_prompt
             active = None
@@ -1684,6 +1715,12 @@ class ExecutiveOperatorSupervisor:
                 canonical_result_json=raw.canonical_result_json,
                 stop_operation=stop_operation,
             )
+        except NativeTurnPending as exc:
+            if not native or not retain_native or session is None:
+                raise
+            raise NativeOperatorRecoveryPending(PendingNativeOperatorTurn(
+                self, job, lease, session, adapter, exc.turn, exc.operation_id, exc.cursor,
+                foreground_operation, _active_turn_observer)) from exc
         except OperatorStartRefused as exc:
             if native:
                 stop_operation = OperationId(f"ohf-op:stop:{attempt_id}:{exc.handle.generation.process_generation_id}")
@@ -1811,6 +1848,68 @@ class ExecutiveOperatorSupervisor:
             **({"foreground_operation": foreground_operation} if foreground_operation is not None else {}))
         assert isinstance(retained, RetainedNativeOperatorSession)
         return retained
+
+
+    def recover_pending_native_turn(self, pending, *, current, timeout_seconds=30.0):
+        """A failed recovery check retains the same original pending owner."""
+        if type(pending) is not PendingNativeOperatorTurn or pending.owner is not self:
+            raise StateConflict("pending native turn belongs to another owner")
+        try:
+            return self._recover_pending_native_turn(pending, current=current, timeout_seconds=timeout_seconds)
+        except NativeOperatorRecoveryPending:
+            raise
+        except Exception as exc:
+            raise NativeOperatorRecoveryPending(pending) from exc
+
+    def _recover_pending_native_turn(self, pending, *, current, timeout_seconds=30.0):
+        """Use this same supervisor/lease/adapter to collect its retained call."""
+        from control_plane.operator_harness_orchestrator import NativeTurnPending
+        if (type(pending) is not PendingNativeOperatorTurn or pending.owner is not self
+                or not callable(current) or current() is not None
+                or pending.job.job_id != pending.lease.attempt.job_id
+                or pending.turn.attempt_id != pending.session.attempt_id
+                or pending.turn.attempt_id != pending.lease.attempt.attempt_id
+                or pending.turn.session_epoch_id != pending.session.epoch.session_epoch_id
+                or pending.turn.process_generation_id != pending.session.generation.process_generation_id
+                or self.runtime.jobs.get_native_conversation_binding(pending.job.job_id) is None):
+            raise StateConflict("pending native turn lost its original owner")
+        self._require_adapter_contract(pending.job, pending.adapter)
+        orchestrator = self._orchestrator(pending.lease, pending.adapter)
+        if orchestrator.runtime.original_operator_native_turn(
+                pending.session.attempt_id, pending.session.generation, pending.operation_id) != pending.turn:
+            raise StateConflict("pending native target changed")
+        active = None
+        def expose(turn):
+            nonlocal active
+            if current() is not None:
+                raise StateConflict("native recovery authentication changed")
+            active = ActiveNativeOperatorTurn(self, pending.job, pending.lease,
+                pending.session, pending.adapter, turn, pending.operation_id)
+            self._require_active_native_turn(active)
+            if pending.foreground_operation is not None:
+                from control_plane.fresh_conversation_admission import require_native_initial_record
+                require_native_initial_record(self.runtime, active, pending.foreground_operation)
+            if pending.active_observer is not None and pending.active_observer(active, True) is not None:
+                raise StateConflict("native recovery observer returned authority")
+        try:
+            if current() is not None:
+                raise StateConflict("native recovery request changed")
+            receipt = orchestrator.recover_native_turn(pending.session, operation_id=pending.operation_id,
+                expected_turn=pending.turn, cursor=pending.cursor, timeout_seconds=timeout_seconds,
+                _on_turn_applied=expose)
+        except NativeTurnPending as exc:
+            raise NativeOperatorRecoveryPending(pending) from exc
+        finally:
+            if active is not None:
+                active.withdraw()
+                if pending.active_observer is not None:
+                    pending.active_observer(active, False)
+        if type(receipt.native_result) is not NativeConversationResultRef:
+            raise StateConflict("native recovery did not seal its original answer")
+        retained = RetainedNativeOperatorSession(self, pending.job, pending.lease,
+            pending.session, pending.adapter, native_result=receipt.native_result)
+        self._require_retained_native(retained)
+        return retained, receipt
 
     def _require_active_native_turn(self, active: ActiveNativeOperatorTurn):
         if (type(active) is not ActiveNativeOperatorTurn or active.owner is not self

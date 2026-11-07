@@ -136,6 +136,11 @@ export interface FiniteCommandPort {
     pointer: OperationPointer,
     signal: AbortSignal,
   ): Promise<EffectReceipt>;
+  /** Explicit original native-call observation; no reserve, submit or new key. */
+  reconcileNativeOperation?(
+    pointer: OperationPointer,
+    signal: AbortSignal,
+  ): Promise<EffectReceipt>;
 }
 
 /**
@@ -723,10 +728,18 @@ export class OperationController {
    * through the existing exact compare-clear.
    */
   async recover(
-    options?: { readonly reconcileSource?: boolean },
+    options?: { readonly reconcileSource?: boolean; readonly reconcileNative?: boolean; readonly expectedPointer?: OperationPointer },
   ): Promise<OperationState> {
     const ctx = this._port.context();
     if (!ctx) return this._idle("OWNER_ABSENT");
+    // An explicit gesture may already have selected an original hint. Capture
+    // that identity before awaiting the durable store, so a later hint cannot
+    // become the target of the earlier gesture.
+    const selected = options?.expectedPointer;
+    if (selected !== undefined && !isValidPointer(selected)) return this._idle("MALFORMED_POINTER");
+    const expected = selected === undefined ? null : Object.freeze({
+      operationKey: selected.operationKey, kind: selected.kind, targetKey: selected.targetKey,
+    });
 
     if (this._inflight) {
       const tracked = this._tracked;
@@ -753,6 +766,10 @@ export class OperationController {
       if (!read.pointer) return this._idle("RECOVER_NO_POINTER");
 
       const pointer = read.pointer;
+      if (expected !== null && (pointer.operationKey !== expected.operationKey ||
+          pointer.kind !== expected.kind || pointer.targetKey !== expected.targetKey)) {
+        return this._retain(this._track(pointer, scope, generation, epoch, abort), "PENDING_POINTER");
+      }
       // Recovery is read-only unless the caller explicitly asked for a source
       // reconcile, the stored kind is in the closed source set, and the port
       // actually exposes the optional observer. Everything else — a default
@@ -763,6 +780,15 @@ export class OperationController {
       if (options?.reconcileSource === true && RECONCILABLE_SOURCE_KINDS.has(pointer.kind)) {
         try {
           const candidate = this._port.reconcileOperation;
+          if (typeof candidate === "function") reconcile = candidate;
+        } catch {
+          reconcile = null;
+        }
+      }
+      if (options?.reconcileNative === true &&
+          (pointer.kind === "conversation_create" || pointer.kind === "conversation_turn")) {
+        try {
+          const candidate = this._port.reconcileNativeOperation;
           if (typeof candidate === "function") reconcile = candidate;
         } catch {
           reconcile = null;

@@ -13,7 +13,7 @@ export const NATIVE_FRESH_PATHS=Object.freeze({preview:'conversation/v2/preview'
   consume_status:'conversation/v2/consume/status',turn_preview:'conversation/v2/turn/preview',turn:'conversation/v2/turn',
   turn_status:'conversation/v2/turn/status',turn_read:'conversation/v2/turn/read',
   resume_preview:'conversation/v2/resume/preview',resume:'conversation/v2/resume',resume_status:'conversation/v2/resume/status',
-  stop:'conversation/v2/stop',stop_status:'conversation/v2/stop/status'} as const);
+  stop:'conversation/v2/stop',stop_status:'conversation/v2/stop/status',recover:'conversation/v2/recover',turn_recover:'conversation/v2/turn/recover'} as const);
 
 /** Version selects closed syntax and routes; it confers no admission. */
 export interface FreshConversationTransport {
@@ -40,5 +40,6 @@ export function freshConversationNeedsWorkspace(operation: FreshConversationTran
   contract:FreshConversationContract='legacy-v1'): boolean {
   freshConversationPath(operation,contract);
   return operation === "preview" || operation === "create" || operation==='consume' || operation==='turn' ||
-    operation==='turn_preview'||operation==='resume_preview'||operation==='resume'||operation==='stop';
+    operation==='turn_preview'||operation==='resume_preview'||operation==='resume'||operation==='stop'||
+    contract==='native-v2'&&(operation==='recover'||operation==='turn_recover');
 }

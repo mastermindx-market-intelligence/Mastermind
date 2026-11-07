@@ -18,7 +18,8 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.native_conversation_result import (
     DSH_NATIVE_RESULT_CONTRACT, ROLE_RESULT_CONTRACT, NativeConversationResultError,
-    NativeConversationResultObservation,
+    NativeConversationResultObservation, NativeConversationBeginObservation,
+    NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA,
 )
 from control_plane.executive_worker_broker import (
     BrokerProtocolError,
@@ -174,6 +175,17 @@ class RemoteOperatorHarnessAdapter:
         self._foreground_attempt_id = attempt_id
 
     def _fresh_write_options(self, operation, payload):
+        # These options are constructed before the original transport is called.
+        # A local input/identity refusal cannot have written provider bytes.
+        try:
+            return self._checked_fresh_write_options(operation, payload)
+        except Exception as exc:
+            if operation == "ohf-begin-turn" and self.result_contract == DSH_NATIVE_RESULT_CONTRACT:
+                from control_plane.remote_worker_transport import TransportError, TransportEffect
+                raise TransportError("native_before_write_refused", TransportEffect.NO_EFFECT) from exc
+            raise
+
+    def _checked_fresh_write_options(self, operation, payload):
         guard = self._fresh_effect_guard
         attempt_id = self._foreground_attempt_id
         continuation = getattr(self, "_native_continuation_guard", None)
@@ -200,13 +212,19 @@ class RemoteOperatorHarnessAdapter:
             raise BrokerProtocolError("foreground request differs from original Attempt")
         frozen = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         def before_write(actual_operation, actual_payload):
-            if (actual_operation != operation or json.dumps(actual_payload,
-                    sort_keys=True, separators=(",", ":"), ensure_ascii=False) != frozen):
-                raise BrokerProtocolError("foreground request bytes changed")
-            if selected_control:
-                guard(actual_operation, actual_payload)
-            else:
-                guard()
+            try:
+                if (actual_operation != operation or json.dumps(actual_payload,
+                        sort_keys=True, separators=(",", ":"), ensure_ascii=False) != frozen):
+                    raise BrokerProtocolError("foreground request bytes changed")
+                if selected_control:
+                    guard(actual_operation, actual_payload)
+                else:
+                    guard()
+            except Exception as exc:
+                if operation == "ohf-begin-turn" and self.result_contract == DSH_NATIVE_RESULT_CONTRACT:
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("native_before_write_refused", TransportEffect.NO_EFFECT) from exc
+                raise
         return {"before_write": before_write}
 
     def bind_native_continuation_guard(self, guard, *, attempt_id, operation_id, expected_input=None):
@@ -470,6 +488,32 @@ class RemoteOperatorHarnessAdapter:
                 )
             self._retained_plain_turns[turn] = (generation, observation)
         return observation
+
+    def observe_native_begin(self, *, operation_id, turn, generation):
+        if self._result_contract != DSH_NATIVE_RESULT_CONTRACT:
+            raise BrokerProtocolError("native begin observation requires its original contract")
+        if (generation.process_generation_id != turn.process_generation_id
+                or generation.session_epoch_id != turn.session_epoch_id):
+            raise BrokerProtocolError("native begin observation identity differs")
+        result = self.client.request_sync("ohf-native-begin-status", {
+            "operation_id": to_wire(operation_id), "turn": to_wire(turn),
+            "generation": to_wire(generation),
+        }, timeout_seconds=30)
+        if (type(result) is not dict or set(result) != {"schema_version", "status", "observation"}
+                or result["schema_version"] != NATIVE_CONVERSATION_BEGIN_STATUS_SCHEMA):
+            raise BrokerProtocolError("native begin status is invalid")
+        if result["status"] == "PENDING" and result["observation"] is None:
+            return None
+        if result["status"] != "ACKNOWLEDGED":
+            raise BrokerProtocolError("native begin status is unresolved")
+        try:
+            observed = NativeConversationBeginObservation.from_wire(result["observation"])
+            observed.require_origin(operation_id, turn, generation)
+        except NativeConversationResultError as exc:
+            raise BrokerProtocolError("native begin evidence is invalid") from exc
+        if operation_id.command_id.startswith(CONTINUATION_OPERATION_PREFIX):
+            self._retained_plain_turns[turn] = (generation, observed.start)
+        return observed
 
     def deliver_attention(
         self,

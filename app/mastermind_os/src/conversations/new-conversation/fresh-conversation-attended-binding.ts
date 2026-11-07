@@ -736,9 +736,9 @@ function classifyEffect(
 export function createFreshConversationAttendedBinding(
   options: FreshConversationAttendedBindingOptions,
 ): FreshConversationAttendedBinding {
-  const native=options.nativeTransport?createNativeControlAdapter({owner:options.owner,canModify:options.canModify,transport:options.nativeTransport}):null;
+  const native=options.nativeTransport?createNativeControlAdapter({owner:options.owner,canModify:options.canModify,get transport(){if(!options.nativeTransport)throw closedError();return options.nativeTransport;}}):null;
   const port = new FreshConversationAttendedCommandPort(options,native);
-  if(native)Object.assign(port,{prepareControl:native.prepareControl,submitControl:native.submitControl,readControlOperation:native.readControlOperation});
+  if(native)Object.assign(port,{reconcileNativeOperation:native.reconcileNativeOperation,prepareControl:native.prepareControl,submitControl:native.submitControl,readControlOperation:native.readControlOperation});
   const controller = new OperationController(port, options.store);
 
   /** New-action gate: issued current witness + live owner + Workspace. */

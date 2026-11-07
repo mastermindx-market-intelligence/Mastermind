@@ -122,11 +122,15 @@ def test_claim_timeout_retains_original_prompt_and_refuses_replay():
         await entered.wait()
         physical = client.current.task
         assert not physical.done() and not physical.cancelled() and len(calls) == 1
+        assert owner.observe_prompt_claim("op-1") is None
         with pytest.raises(NativeProtocolError, match="NOT_READY"):
             await owner.begin_prompt("op-2", "must not replay", timeout_seconds=0.01)
         release.set()
         result = await physical
         assert result.terminal.claim == NativeClaim.parse(claim_wire()) and len(calls) == 1
+        assert not client._active
+        assert owner.observe_prompt_claim("op-1") == result.terminal.claim
+        assert client.current.task is physical and len(calls) == 1
     asyncio.run(exercise())
 
 

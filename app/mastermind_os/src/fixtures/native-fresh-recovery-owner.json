@@ -1,0 +1,130 @@
+{
+  "schema": "mastermind.native_fresh_recovery_fixture.v1",
+  "seams": [
+    "inert installed policy, provider and process",
+    "actual signed RS256 Executive and Workspace authentication",
+    "actual private Unix socket, kernel peer, original Control/Supervisor/Runtime",
+    "original begin timeout followed by explicit claim/answer recovery; no second send"
+  ],
+  "samples": [
+    {
+      "test": "signed-original-initial-recovery",
+      "operation": "recover",
+      "arguments": {
+        "work_ref": "WS:ONE",
+        "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "response": {
+        "data": {
+          "active_turn": null,
+          "can_resume": false,
+          "can_send": false,
+          "can_stop": false,
+          "effect": "NONE",
+          "head_result": {
+            "contract": "mastermind.dsh_native_conversation/v1",
+            "digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332",
+            "reference": {
+              "command_id": "ohf-native-result:ohf-turn-7dad4f0bd73a4d78b971aa87ea376148",
+              "event_id": 23,
+              "observation_digest": "6210a145dae49aa3eb000304161a4a5e707f1d7cd6732e7886c3153cd99a4e93",
+              "schema_version": "mastermind.dsh_native_conversation_result_ref/v1",
+              "seal_digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332"
+            }
+          },
+          "locator": {
+            "attempt_id": "ATT-cba9b9374b1d4133978fc40f2ea72cf6",
+            "job_id": "JOB-002",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:ONE"
+          },
+          "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "parent_consumed": false,
+          "preview": null,
+          "reference": null,
+          "result": {
+            "contract": "mastermind.dsh_native_conversation/v1",
+            "digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332",
+            "reference": {
+              "command_id": "ohf-native-result:ohf-turn-7dad4f0bd73a4d78b971aa87ea376148",
+              "event_id": 23,
+              "observation_digest": "6210a145dae49aa3eb000304161a4a5e707f1d7cd6732e7886c3153cd99a4e93",
+              "schema_version": "mastermind.dsh_native_conversation_result_ref/v1",
+              "seal_digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332"
+            }
+          },
+          "schema": "mastermind.executive.fresh_conversation_data.v2",
+          "session": {
+            "attempt_id": "ATT-cba9b9374b1d4133978fc40f2ea72cf6",
+            "binding_digest": "61a35a512637a0645a7a0993d66e85e95c7054d2286a444b8b9884a935f97dac",
+            "process_generation_id": "ohf-generation-9f18fb221cc948eaa0fe9ca16f6ad8a3",
+            "provider_session_id": "SESSION-ACTIVE",
+            "session_epoch_id": "ohf-epoch-fce9455082ef4d5b916805b068bc3444"
+          },
+          "state": "CREATED",
+          "work_ref": "WS:ONE"
+        },
+        "error": null,
+        "ok": true,
+        "operation": "recover",
+        "schema": "mastermind.executive.fresh_conversation_result.v2"
+      }
+    },
+    {
+      "test": "signed-original-followup-recovery",
+      "operation": "turn_recover",
+      "arguments": {
+        "work_ref": "WS:ONE",
+        "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "turn_key": "mmos-native-turn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "response": {
+        "data": {
+          "can_send": false,
+          "effect": "NONE",
+          "initial_consumption": {
+            "event_id": 25,
+            "event_sha256": "d71af8fa9bdb257d24d32fb03160653ea530fc71ab4d04f42a28d27ebbbf0294",
+            "initial_digest": "9c3a26fb92293a1355a6ac10bc3fb0852435341b8a3c627ab663da05c6f21332",
+            "state": "CONSUMED"
+          },
+          "locator": {
+            "attempt_id": "ATT-cba9b9374b1d4133978fc40f2ea72cf6",
+            "job_id": "JOB-002",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:ONE"
+          },
+          "operation_key": "mmos-native-create-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "parent_consumed": false,
+          "reference": null,
+          "result": {
+            "contract": "mastermind.dsh_native_conversation/v1",
+            "digest": "01434dc57549b820b6439ce0fbec365681bbaacb964186b66895f561f1c702ab",
+            "reference": {
+              "command_id": "ohf-native-result:ohf-turn-05cc988db45942c6933aa5f7f2ae699b",
+              "event_id": 38,
+              "observation_digest": "e823753aab761a118b7ed14cd3e79633722d61d72adba4af825f14429b6f2daf",
+              "schema_version": "mastermind.dsh_native_conversation_result_ref/v1",
+              "seal_digest": "01434dc57549b820b6439ce0fbec365681bbaacb964186b66895f561f1c702ab"
+            }
+          },
+          "schema": "mastermind.executive.fresh_conversation_turn_data.v2",
+          "state": "RECORDED",
+          "turn_key": "mmos-native-turn-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:ONE"
+        },
+        "error": null,
+        "ok": true,
+        "operation": "turn_recover",
+        "schema": "mastermind.executive.fresh_conversation_result.v2"
+      }
+    }
+  ],
+  "counts": {
+    "jobs": 2,
+    "attempts": 1,
+    "adapters": 1,
+    "starts": 1,
+    "provider_turns": 2
+  }
+}

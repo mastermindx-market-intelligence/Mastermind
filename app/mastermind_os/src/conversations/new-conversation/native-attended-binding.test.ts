@@ -142,3 +142,94 @@ it('native consume recovery explicitly reuses the native initial reader and does
  expect(e.readInitial).toHaveBeenCalledWith(selection,expect.any(AbortSignal),'native-v2');
  expect(e.transport.consume).not.toHaveBeenCalled();expect(e.transport.consumeStatus).toHaveBeenCalledTimes(1);
 });
+
+it('explicit native recovery joins the original turn pointer without another send',async()=>{
+ const e=setup(2),preview=await prepared(e,4);
+ expect((await e.binding.controller.begin(e.binding.makeTurnIntent(preview)!)).status).toBe('unknown');
+ const pending=(await e.store.read(scope))!;
+ e.nativeTransport.request=vi.fn(async(op)=>{
+  expect(op).toBe('turn_recover');return {...structuredClone(item(7).response),operation:op};
+ });
+ e.unavailable();
+ const remount=createFreshConversationAttendedBinding(e.options);
+ expect((await remount.controller.recover({reconcileNative:true})).status).toBe('accepted');
+ expect(e.nativeTransport.request).toHaveBeenCalledWith('turn_recover',
+  {...selection,turn_key:pending.operationKey},expect.any(AbortSignal));
+ expect(e.transport.turnStatus).not.toHaveBeenCalled();
+ expect(e.transport.turn).toHaveBeenCalledTimes(1);expect(await e.store.read(scope)).toBeNull();
+});
+it('unresolved native acknowledgement and refusal retain the exact original pointer',async()=>{
+ for(const refused of [false,true]){
+  const e=setup(2),preview=await prepared(e,4);
+  await e.binding.controller.begin(e.binding.makeTurnIntent(preview)!);
+  const pending=(await e.store.read(scope))!;
+  e.nativeTransport.request=vi.fn(async(op)=>{
+   if(refused)return {schema:'mastermind.executive.fresh_conversation_result.v2',operation:op,ok:false,data:null,
+    error:{code:'access_denied',message:'Original request remains unresolved.'}};
+   const raw:any=structuredClone(item(7).response);raw.operation=op;raw.data.state='RECONCILIATION_REQUIRED';raw.data.result=null;
+   return raw;
+  });
+  expect((await e.binding.controller.recover({reconcileNative:true})).status).toBe('unknown');
+  expect(await e.store.read(scope)).toEqual(pending);expect(e.transport.turn).toHaveBeenCalledTimes(1);
+ }
+});
+it('a changed owner or native transport withholds the late recovery receipt',async()=>{
+ for(const change of ['owner','transport']){
+  const e=setup(2),preview=await prepared(e,4);
+  await e.binding.controller.begin(e.binding.makeTurnIntent(preview)!);
+  const pending=(await e.store.read(scope))!;
+  e.nativeTransport.request=vi.fn(async(op)=>{
+   if(change==='owner')e.withdraw();
+   else e.options.nativeTransport={request:vi.fn()};
+   return {...structuredClone(item(7).response),operation:op};
+  });
+  expect((await e.binding.controller.recover({reconcileNative:true})).status).not.toBe('accepted');
+  expect(await e.store.read(scope)).toEqual(pending);expect(e.transport.turn).toHaveBeenCalledTimes(1);
+ }
+});
+it('original create recovery uses its existing pointer despite new-create unavailability',async()=>{
+ const e=setup(),parent:OperationPointer={kind:'conversation_create',operationKey:selection.operation_key,targetKey:selection.work_ref};
+ await e.store.reserve(scope,parent);
+ e.nativeTransport.request=vi.fn(async(op)=>({...structuredClone(item(2).response),operation:op}));
+ const transport={preview:vi.fn(),create:vi.fn(),read:vi.fn(),status:vi.fn()};
+ const create=createFreshConversationBinding({newContract:'native-v2',owner:e.options.owner,canPreviewCreate:()=>false,
+  store:e.store,nativeTransport:e.nativeTransport,transport});
+ expect((await create.controller.recover({reconcileNative:true})).status).toBe('accepted');
+ expect(e.nativeTransport.request).toHaveBeenCalledWith('recover',selection,expect.any(AbortSignal));
+ expect(transport.create).not.toHaveBeenCalled();expect(await e.store.read(scope)).toBeNull();
+});
+it('recovered answer cannot clear an unresolved subordinate Stop',async()=>{
+ const e=setup(),parent:OperationPointer={kind:'conversation_turn',
+  operationKey:(item(14).arguments as NativeFreshRequest).turn_key!,targetKey:freshConversationTarget(selection)};
+ await e.store.reserve(scope,parent);mint((item(16).arguments as NativeFreshRequest).stop_key!);
+ e.nativeTransport.request=vi.fn(async(op)=>{
+  if(op==='stop')throw Error('original Stop return lost');
+  return {...structuredClone(item(17).response),operation:op};
+ });
+ expect((await e.binding.controller.beginControl(parent,e.binding.native!.makeStopIntent(observation(15))!)).status).toBe('unknown');
+ const child=await e.store.readControl!(scope,parent);
+ expect(child.matched&&child.control).not.toBeNull();
+ expect((await e.binding.controller.recover({reconcileNative:true})).status).not.toBe('accepted');
+ expect(await e.store.read(scope)).toEqual(parent);expect(await e.store.readControl!(scope,parent)).toEqual(child);
+ expect(e.transport.turn).not.toHaveBeenCalled();
+});
+
+it('an explicit recovery gesture cannot recover a replacement pending pointer',async()=>{
+ for(const field of ['operationKey','kind','targetKey'] as const){
+  const e=setup(2),preview=await prepared(e,4);
+  await e.binding.controller.begin(e.binding.makeTurnIntent(preview)!);
+  const original=(await e.store.read(scope))!;
+  const replacement:OperationPointer={...original,
+   ...(field==='operationKey'?{operationKey:'mmos-native-turn-'+'f'.repeat(40)}:
+      field==='kind'?{kind:'conversation_create',operationKey:'mmos-native-create-'+'f'.repeat(40),targetKey:selection.work_ref}:
+      {targetKey:freshConversationTarget({...selection,work_ref:'WS:OTHER'})})};
+  expect(await e.store.clearIfEqual(scope,original)).toBe(true);
+  expect(await e.store.reserve(scope,replacement)).toEqual({reserved:true});
+  const result=await e.binding.controller.recover({reconcileNative:true,expectedPointer:original});
+  expect(result.status).toBe('unknown');expect(result.pointer).toEqual(replacement);
+  expect(await e.store.read(scope)).toEqual(replacement);
+  expect(e.nativeTransport.request).not.toHaveBeenCalled();
+  expect(e.transport.turnStatus).not.toHaveBeenCalled();
+  expect(e.transport.turn).toHaveBeenCalledTimes(1);
+ }
+});
