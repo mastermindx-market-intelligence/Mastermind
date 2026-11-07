@@ -1,6 +1,7 @@
 /** Closed owner-observed CODE/DATA provenance. No permission, currentness,
  * clock acquisition, network, source selection or operation effect lives here. */
-export type SourceObservedAction='add_project_file'|'set_project_communication_preference'|'publish_project_proposal'|'publish_project_plan_proposal'|'ADOPT_PLAN';
+import {discoveryReplacementRef,validDiscoveryReference} from './project-discovery-correction';
+export type SourceObservedAction='add_project_file'|'set_project_communication_preference'|'publish_project_proposal'|'publish_project_plan_proposal'|'ADOPT_PLAN'|'correct_project_discovery';
 export interface CanonicalProjectDataObservation{
  readonly schema:'mastermind.canonical_project_data_observation.v1';
  readonly repository:'mastermindx-market-intelligence/macro'; readonly default_ref:string;
@@ -82,11 +83,11 @@ export function validateProjectDataObservation(raw:unknown,expected:{workRef?:st
    if(Object.hasOwn(value,'data_continuity'))invalid();
    const op=record(value.source_operation,['selection','principal_scope','request_sha256','recipe_fingerprint_sha256','event_id','receipt_sha256','recorded_at_ms','sources']);
    const selected=record(op.selection,['action','request_id','work_ref']);
-   const prefix=selected.action==='add_project_file'?'mmos-project-file-add-':selected.action==='set_project_communication_preference'?'mmos-project-preference-set-':selected.action==='publish_project_proposal'?'mmos-project-create-':selected.action==='publish_project_plan_proposal'?'mmos-project-plan-proposal-':selected.action==='ADOPT_PLAN'?'mmos-project-adopt-':invalid();
+   const prefix=selected.action==='correct_project_discovery'?'mmos-project-discovery-correct-':selected.action==='add_project_file'?'mmos-project-file-add-':selected.action==='set_project_communication_preference'?'mmos-project-preference-set-':selected.action==='publish_project_proposal'?'mmos-project-create-':selected.action==='publish_project_plan_proposal'?'mmos-project-plan-proposal-':selected.action==='ADOPT_PLAN'?'mmos-project-adopt-':invalid();
    if(typeof selected.request_id!=='string'||!selected.request_id.startsWith(prefix)||!/^[0-9a-f]{40}$/.test(selected.request_id.slice(prefix.length))||selected.request_id.length!==prefix.length+40||typeof selected.work_ref!=='string'||/^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.exec(selected.work_ref)?.[0]!==selected.work_ref||selected.work_ref.length<5||selected.work_ref.length>67||(expected.workRef!==undefined&&selected.work_ref!==expected.workRef))invalid();
    if(!Array.isArray(op.sources)||Object.getPrototypeOf(op.sources)!==Array.prototype)invalid();
    const listed=(op.sources as unknown[]).length;
-   const count=selected.action==='publish_project_proposal'?1:selected.action==='ADOPT_PLAN'?(listed===2||listed===3?listed:invalid()):2;
+   const count=selected.action==='correct_project_discovery'?3:selected.action==='publish_project_proposal'?1:selected.action==='ADOPT_PLAN'?(listed===2||listed===3?listed:invalid()):2;
    if(listed!==count||Reflect.ownKeys(op.sources).length!==count+1)invalid();
    const sources=[];
    for(let i=0;i<count;i++){
@@ -99,6 +100,13 @@ export function validateProjectDataObservation(raw:unknown,expected:{workRef?:st
    // the DATA commit, and a candidate/READY/receipt artifact is never accepted
    // as adoption: DEC-PLAN-ADOPTION-<TAILUPPER>.md must itself be present.
    const work=selected.work_ref.slice(3),tail=selected.request_id.slice(prefix.length);
+   if(selected.action==='correct_project_discovery'){
+    const replacement=discoveryReplacementRef({request_id:selected.request_id,work_ref:selected.work_ref},hex(op.principal_scope,64));
+    const paths=new Set(sources.map(entry=>entry.path));
+    if(!paths.delete('agentos/workstreams/WS-'+work+'.md')||!paths.delete('agentos/discoveries/DSC-'+replacement.slice(4)+'.md')||paths.size!==1)invalid();
+    const old=[...paths][0]!,prefix='agentos/discoveries/DSC-';
+    if(!old.startsWith(prefix)||!old.endsWith('.md')||!validDiscoveryReference('DSC:'+old.slice(prefix.length,-3)))invalid();
+   }
    if(selected.action==='publish_project_proposal'||selected.action==='publish_project_plan_proposal'){
     const expectedPaths=new Set(['agentos/workstreams/WS-'+work+'.md']);
     if(count===2)expectedPaths.add('research/project-plans/PLAN-'+work+'-'+tail+'.md');

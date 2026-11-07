@@ -41,19 +41,22 @@ def validate(value):
    if value['publication_recorded_at_ms']!=operation['recorded_at_ms']:_fail()
    selected=operation['selection']
    if type(selected) is not dict or set(selected)!={'action','request_id','work_ref'}:_fail()
-   prefixes={'add_project_file':'mmos-project-file-add-','set_project_communication_preference':'mmos-project-preference-set-', 'publish_project_proposal':'mmos-project-create-','publish_project_plan_proposal':'mmos-project-plan-proposal-','ADOPT_PLAN':'mmos-project-adopt-'}
+   prefixes={'add_project_file':'mmos-project-file-add-','set_project_communication_preference':'mmos-project-preference-set-', 'correct_project_discovery':'mmos-project-discovery-correct-', 'publish_project_proposal':'mmos-project-create-','publish_project_plan_proposal':'mmos-project-plan-proposal-','ADOPT_PLAN':'mmos-project-adopt-'}
    prefix=prefixes.get(selected['action'])
    if prefix is None or type(selected['request_id']) is not str or re.fullmatch(re.escape(prefix)+r'[a-f0-9]{40}',selected['request_id']) is None or type(selected['work_ref']) is not str or re.fullmatch(r'WS:[A-Z0-9]+(?:-[A-Z0-9]+)*',selected['work_ref']) is None or not 2<=len(selected['work_ref'][3:])<=64:_fail()
    if selected['action']=='ADOPT_PLAN' and (type(operation['sources']) is not list or len(operation['sources']) not in (2,3)):_fail()
    count=(len(operation['sources']) if selected['action']=='ADOPT_PLAN'
-          else 1 if selected['action']=='publish_project_proposal' else 2)
+          else 3 if selected['action']=='correct_project_discovery' else 1 if selected['action']=='publish_project_proposal' else 2)
    if type(operation['sources']) is not list or len(operation['sources'])!=count:_fail()
    for source in operation['sources']:
     if type(source) is not dict or set(source)!={'repository','commit','path','content_sha256'} or source['repository']!='macro':_fail()
     _hex(source['commit'],40);_hex(source['content_sha256'],64)
     if type(source['path']) is not str or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,511}',source['path']) is None or any(part in ('','.','..') for part in source['path'].split('/')):_fail()
    if len({s['path'] for s in operation['sources']})!=count or len({s['commit'] for s in operation['sources']})!=1:_fail()
-   if selected['action']=='ADOPT_PLAN':
+   if selected['action']=='correct_project_discovery':
+    from common.workspace_discovery_correction_contract import validate_sources
+    validate_sources(selected,operation['principal_scope'],operation['sources'])
+   elif selected['action']=='ADOPT_PLAN':
     from common.plan_adoption_publication_contract import validate_adoption_sources
     validate_adoption_sources(selected,operation['sources'])
    elif selected['action'] in {'publish_project_proposal','publish_project_plan_proposal'}:

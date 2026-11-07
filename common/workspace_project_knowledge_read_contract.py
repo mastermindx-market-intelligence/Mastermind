@@ -10,14 +10,28 @@ from common import executive_workspace_contract as workspace
 from common.workspace_project_journal_contract import validate_selection as _work
 
 FRAME_SCHEMA = "mastermind.workspace_project_knowledge_read.v1"
-OPERATIONS = ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source")
+DISCOVERY_FRAME_SCHEMA = "mastermind.workspace_project_discovery_read.v1"
+OPERATIONS = ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source")
 MAX_RESPONSE_BYTES = 131072
+
+
+def frame_schema(operation):
+    if operation not in OPERATIONS:
+        raise ValueError("invalid_input")
+    return DISCOVERY_FRAME_SCHEMA if operation == "project_discovery_source" else FRAME_SCHEMA
+
+
+def result_selection(selected):
+    return {key: item for key, item in selected.items()
+            if key not in {"expected_revision", "expected_source_commit"}}
 
 
 def selection(value, *, operation):
     if operation not in OPERATIONS or type(value) is not dict:
         raise ValueError("invalid_input")
-    expected = {"work_ref", "source_ref", "expected_revision"} if operation == "project_knowledge_source" else {"work_ref"}
+    expected = ({"work_ref", "source_ref", "expected_revision"} if operation == "project_knowledge_source"
+                else {"work_ref", "discovery_ref", "expected_source_commit"} if operation == "project_discovery_source"
+                else {"work_ref"})
     if set(value) != expected:
         raise ValueError("invalid_input")
     _work({"work_ref": value["work_ref"]})
@@ -27,12 +41,18 @@ def selection(value, *, operation):
                 or type(value["expected_revision"]) is not str
                 or re.fullmatch(r"[0-9a-f]{40}", value["expected_revision"]) is None):
             raise ValueError("invalid_input")
+    if operation == "project_discovery_source":
+        from common.workspace_discovery_correction_contract import valid_ref
+        if (not valid_ref(value["discovery_ref"], "DSC:")
+                or type(value["expected_source_commit"]) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", value["expected_source_commit"]) is None):
+            raise ValueError("invalid_input")
     return dict(value)
 
 
 def validate_frame(value):
     if (type(value) is not dict or set(value) != {"schema", "operation", "selection", "principal"}
-            or value["schema"] != FRAME_SCHEMA):
+            or value["schema"] != frame_schema(value["operation"])):
         raise ValueError("invalid_input")
     selected = selection(value["selection"], operation=value["operation"])
     workspace.validate_frame({"schema": workspace.FRAME_SCHEMA, "operation": "programs",
@@ -51,6 +71,8 @@ def validate_body(value, *, operation):
         return body.validate_memory(value)
     if operation == "project_knowledge_source":
         return body.validate_source(value)
+    if operation == "project_discovery_source":
+        return body.validate_discovery_source(value)
     raise ValueError("invalid_input")
 
 
@@ -59,5 +81,7 @@ def unavailable(selected, *, operation, reason="SOURCE_UNAVAILABLE"):
     selected = selection(selected, operation=operation)
     if operation == "project_knowledge_source":
         return body.unavailable_source(selected["work_ref"], selected["source_ref"], reason)
+    if operation == "project_discovery_source":
+        return body.unavailable_discovery_source(selected["work_ref"], selected["discovery_ref"], reason)
     factory = body.unavailable_memory if operation == "project_knowledge_memory" else body.unavailable_catalogue
     return factory(selected["work_ref"], reason)

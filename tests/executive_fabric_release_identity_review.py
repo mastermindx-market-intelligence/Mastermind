@@ -724,7 +724,14 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
+# Correction transport changes only the containing source and line positions;
+# these same three fixture HTTP-status operands have no principal semantics.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'c6d6589fed23633189e2556662cb02261f7b6f94519932d32c9b868d25cfb315', 'sites': ((3677, 68, 71, 'int', '503'), (3682, 69, 72, 'int', '503'), (3686, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
+    # Inert PR number from the actual temporary-Git test owner, not a UID.
+    'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
+    'sites': ((163, 18, 21, 'int', '401'),),
+}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}

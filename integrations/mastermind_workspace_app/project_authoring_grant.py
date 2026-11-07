@@ -30,6 +30,8 @@ from common.workspace_project_journal_contract import validate_selection as vali
 
 SCHEMA = "mastermind.workspace_acquisition_bindings.v4"
 SCHEMA_V5 = "mastermind.workspace_acquisition_bindings.v5"
+SCHEMA_V6 = "mastermind.workspace_acquisition_bindings.v6"
+CORRECT_DISCOVERY_ACTION = "correct_project_discovery"
 PLAN_PROPOSAL_ACTION = "publish_project_plan_proposal"
 LATEST_DATA_READ_ACTION = "read_latest_project_data"
 PROJECT_AUTHOR_ACTION = "publish_project_proposal"
@@ -56,10 +58,11 @@ _ACTION_FIELDS = {PROJECT_AUTHOR_ACTION: "project_authoring", PROJECT_SUSPEND_AC
                   INSTRUCTION_SUSPEND_ACTION: "instruction_admission_suspend"}
 _V5_ACTION_FIELDS = {PLAN_PROPOSAL_ACTION: "project_plan_proposal_publish",
                      LATEST_DATA_READ_ACTION: "project_canonical_data_read"}
-_ALL_ACTION_FIELDS = {**_ACTION_FIELDS, **_V5_ACTION_FIELDS}
+_V6_ACTION_FIELDS = {CORRECT_DISCOVERY_ACTION: "project_discovery_correct"}
+_ALL_ACTION_FIELDS = {**_ACTION_FIELDS, **_V5_ACTION_FIELDS, **_V6_ACTION_FIELDS}
 
 _SCOPED_ACTIONS = {PROJECT_SUSPEND_ACTION, PROJECT_RESUME_ACTION, PLAN_ADOPT_ACTION, ACCEPT_DIRECTION_ACTION,
-                   ADD_PROJECT_FILE_ACTION, SET_PROJECT_PREFERENCE_ACTION, PLAN_PROPOSAL_ACTION}
+                   ADD_PROJECT_FILE_ACTION, SET_PROJECT_PREFERENCE_ACTION, PLAN_PROPOSAL_ACTION, CORRECT_DISCOVERY_ACTION}
 _INSTRUCTION_SCOPED_ACTIONS = {INSTRUCTION_SUSPEND_ACTION}
 _SCOPED_FIELDS = {_ALL_ACTION_FIELDS[action] for action in _SCOPED_ACTIONS}
 _INSTRUCTION_SCOPED_FIELDS = {_ACTION_FIELDS[action] for action in _INSTRUCTION_SCOPED_ACTIONS}
@@ -70,7 +73,8 @@ _STAMP_SCHEMAS = {PROJECT_AUTHOR_ACTION: PROJECT_PERMISSION_SCHEMA, PROJECT_SUSP
                   SET_PROJECT_PREFERENCE_ACTION: SET_PROJECT_PREFERENCE_PERMISSION_SCHEMA,
                   INSTRUCTION_SUSPEND_ACTION: INSTRUCTION_SUSPEND_PERMISSION_SCHEMA}
 _STAMP_SCHEMAS.update({PLAN_PROPOSAL_ACTION: "mastermind.workspace_project_plan_proposal_publish_permission.v1",
-                      LATEST_DATA_READ_ACTION: "mastermind.workspace_project_canonical_data_read_permission.v1"})
+                      LATEST_DATA_READ_ACTION: "mastermind.workspace_project_canonical_data_read_permission.v1",
+                      CORRECT_DISCOVERY_ACTION: "mastermind.workspace_project_discovery_correct_permission.v1"})
 
 _TOP_KEYS = frozenset({"schema", "profiles", "primary_profile"})
 _SLOT_KEYS = frozenset({"enabled", "binding", "control_room_actions", "project_authoring", "project_admission_suspend",
@@ -101,6 +105,8 @@ def project_action_fields(schema):
     if schema == SCHEMA:
         return dict(_ACTION_FIELDS)
     if schema == SCHEMA_V5:
+        return {**_ACTION_FIELDS, **_V5_ACTION_FIELDS}
+    if schema == SCHEMA_V6:
         return dict(_ALL_ACTION_FIELDS)
     raise ValueError("access_denied")
 
@@ -151,12 +157,12 @@ def validate_project_bindings(value, policy):
     pair. Unknown or malformed fields fail closed and the input is never
     mutated.
     """
-    if type(value) is not dict or value.get("schema") not in {SCHEMA, SCHEMA_V5}:
+    if type(value) is not dict or value.get("schema") not in {SCHEMA, SCHEMA_V5, SCHEMA_V6}:
         return validate_workspace_bindings(value, policy)
     if set(value) != _TOP_KEYS or type(value["profiles"]) is not dict:
         raise ValueError("access_denied")
     fields = project_action_fields(value["schema"])
-    slot_keys = _SLOT_KEYS | (set(_V5_ACTION_FIELDS.values()) if value["schema"] == SCHEMA_V5 else set())
+    slot_keys = _SLOT_KEYS | set(fields.values())
     slots = value["profiles"]
     for slot in slots.values():
         if (type(slot) is not dict or set(slot) != slot_keys
@@ -193,7 +199,7 @@ def legacy_workspace_document(value, policy):
     deliberately bind this wrapper to its actual loader.
     """
     validated = validate_project_bindings(value, policy)
-    if validated["schema"] not in {SCHEMA, SCHEMA_V5}:
+    if validated["schema"] not in {SCHEMA, SCHEMA_V5, SCHEMA_V6}:
         return validated
     return validate_workspace_bindings({"schema": ACTION_BINDINGS_SCHEMA,
         "primary_profile": validated["primary_profile"],
@@ -240,7 +246,7 @@ def workspace_project_authorizers(*, policy, load_bindings, action=PROJECT_AUTHO
             if set(principal) != PRINCIPAL_KEYS:
                 return None
             bindings = validate_project_bindings(load_bindings(), policy)
-            if bindings["schema"] not in {SCHEMA, SCHEMA_V5}:
+            if bindings["schema"] not in {SCHEMA, SCHEMA_V5, SCHEMA_V6}:
                 return None
             matches = [slot for slot in bindings["profiles"].values()
                        if slot["enabled"] and slot["binding"] is not None

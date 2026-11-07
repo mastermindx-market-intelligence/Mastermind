@@ -14,7 +14,7 @@ from integrations.executive_mcp.schemas import MAX_RESPONSE_BYTES, RESULT_SCHEMA
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from .agentos_memory_provider import AgentOsBinding, DEFAULT_BUDGET
 from .native_executive_consumer import (
-    CONTEXT_TOOLS_SCHEMA_DIGEST, CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST,
+    CONTEXT_TOOLS_SCHEMA_DIGEST, CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST, DISCOVERY_TOOLS_SCHEMA_DIGEST,
     ExecutiveContextConsumerPublication, _NativeMcpCaller, workspace_principal_frame)
 
 MAX_MCP_RESULT_BYTES = MAX_RESPONSE_BYTES - 4096
@@ -38,20 +38,11 @@ def _no_extras(value):
     return extra is None or (type(extra) is dict and not extra)
 
 
-def decode_context_result(raw, publication, *, sdk_types=None):
-    """Accept only the actual reviewed SDK producer shape; retain raw bytes.
-
-    SDK parsing has already consumed the outer JSON-RPC framing. Duplicate
-    keys are proved absent in the surviving text and decoded bundle, not in
-    outer framing that the SDK may have discarded before this boundary.
-    """
+def decode_native_tool_result(raw, *, limit=MAX_MCP_RESULT_BYTES, sdk_types=None):
+    """One complete, bounded native SDK text result; no transport or owner."""
     if sdk_types is None:
         from mcp import types as sdk_types
     try:
-        if type(publication) is not ExecutiveContextConsumerPublication:
-            _refuse()
-        current = publication.workspace_principal is not None
-        tool = wire.CURRENT_TOOL if current else wire.TOOL
         if type(raw) is not sdk_types.CallToolResult or not _no_extras(raw):
             _refuse()
         fields = set(sdk_types.CallToolResult.model_fields)
@@ -72,16 +63,37 @@ def decode_context_result(raw, publication, *, sdk_types=None):
         block = raw.content[0]
         if (type(block) is not sdk_types.TextContent or not _no_extras(block)
                 or block.type != "text" or block.meta is not None or block.annotations is not None
-                or type(block.text) is not str or not 0 < len(block.text) <= MAX_MCP_RESULT_BYTES):
+                or type(block.text) is not str or not 0 < len(block.text) <= limit):
             _refuse()
         encoded = block.text.encode("utf-8", "strict")
-        if len(encoded) > MAX_MCP_RESULT_BYTES:
+        if len(encoded) > limit:
             _refuse()
         # The outer bound includes SDK text escaping and the real result fields.
         # All fields/extras have been checked before invoking the serializer.
-        if len(raw.model_dump_json(by_alias=True).encode("utf-8", "strict")) > MAX_MCP_RESULT_BYTES:
+        if len(raw.model_dump_json(by_alias=True).encode("utf-8", "strict")) > limit:
             _refuse()
-        value = wire.decode(encoded, limit=MAX_MCP_RESULT_BYTES)
+        return wire.decode(encoded, limit=limit)
+    except RuntimeRefusal:
+        raise
+    except Exception:
+        _refuse()
+
+
+def decode_context_result(raw, publication, *, sdk_types=None):
+    """Accept only the actual reviewed SDK producer shape; retain raw bytes.
+
+    SDK parsing has already consumed the outer JSON-RPC framing. Duplicate
+    keys are proved absent in the surviving text and decoded bundle, not in
+    outer framing that the SDK may have discarded before this boundary.
+    """
+    if sdk_types is None:
+        from mcp import types as sdk_types
+    try:
+        if type(publication) is not ExecutiveContextConsumerPublication:
+            _refuse()
+        current = publication.workspace_principal is not None
+        tool = wire.CURRENT_TOOL if current else wire.TOOL
+        value = decode_native_tool_result(raw, sdk_types=sdk_types)
         if (type(value) is not dict or set(value) != _E1_KEYS
                 or value["schema"] != RESULT_SCHEMA
                 or value["tool"] != tool or value["ok"] is not True
@@ -98,7 +110,8 @@ def decode_context_result(raw, publication, *, sdk_types=None):
         if parsed.tzinfo is None or parsed.utcoffset().total_seconds() != 0:
             _refuse()
         if current:
-            return wire.validate_current_result(value["data"], expected_context=expected_context(publication),
+            validator = wire.validate_discovery_result if publication.discovery else wire.validate_current_result
+            return validator(value["data"], expected_context=expected_context(publication),
                 capability_profile_digest=publication.capability_profile_digest,
                 expected_workspace_principal=workspace_principal_frame(publication))
         return wire.validate_result(value["data"], expected_context=expected_context(publication),
@@ -121,7 +134,7 @@ class NativeAgentOsContextRead:
                  server: Any, session: Any, loop: Any, currentness: Callable[[], bool],
                  binding_current: Callable[[AgentOsBinding], bool] | None = None):
         if (type(publication) is not ExecutiveContextConsumerPublication
-                or publication.tools_schema_digest != (CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+                or publication.tools_schema_digest != (DISCOVERY_TOOLS_SCHEMA_DIGEST if publication.discovery else CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
                     if publication.workspace_principal is not None else CONTEXT_TOOLS_SCHEMA_DIGEST)
                 or not callable(currentness)):
             _refuse()
