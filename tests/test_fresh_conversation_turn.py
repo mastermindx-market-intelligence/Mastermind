@@ -82,14 +82,17 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             turn_selected = {**selected,"turn_key":turn_request["turn_key"]}
             _, read = await post(app,"turn_read",turn_selected,token)
             assert read["ok"] and read["data"]["result"] == second["data"]["result"],(read,diagnostics,service._dispatch_errors)
+            # The original result may be durable before its background job
+            # appends JOB_COMPLETED. Finish that original dispatch before
+            # measuring whether the duplicate itself adds any event.
+            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
+            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
             events = runtime.events.list_events()
             _, repeated = await post(app,"turn",turn_request,token,wt)
             assert repeated["ok"] and repeated["data"]["result"] == second["data"]["result"],repeated
             assert runtime.events.list_events() == events and adapters[0].begin_turn_calls == 2
             _, status = await post(app,"turn_status",turn_selected,token)
             assert status["ok"] and status["data"]["result"] == second["data"]["result"]
-            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
-            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
             archived=FreshConversationOwner(service,expected_policy=expected,authorized_policies=policies).read_reference(read_principal,reference)
             assert archived["epoch"] is None and archived["state"]=="SETTLED"
             assert archived["initial_result"]["digest"]==initial_digest

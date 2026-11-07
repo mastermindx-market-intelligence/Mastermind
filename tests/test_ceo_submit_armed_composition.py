@@ -360,7 +360,10 @@ class _BindingScope:
 
 def _scope_language(path: str) -> str:
     suffix = Path(path).suffix.lower()
-    if suffix == ".py":
+    # Pinned donor archives are still Python source for this identity audit.
+    # Parse their strings/aliases exactly as executable .py postimages; this
+    # does not exempt them from changed-source or literal-identity checking.
+    if suffix == ".py" or path.lower().endswith(".py.source"):
         return "py"
     if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
         return "js"
@@ -1596,14 +1599,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # static literal freezes the combined candidate, not independent review or
     # release authority, and grants no native SEND or installed-release
     # approval.
-    # PR #2151: the installed-only retirement config validator changes this
-    # full-file pin. The exact installed entry AST and all ten mutation
-    # refusals remain unchanged; no additional call is admitted.
+    # The adopted-context read composition changes this full-file pin. The
+    # exact installed entry AST and all ten mutation refusals remain unchanged;
+    # no additional event loop or execution call is admitted.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'c2a07369ad481d54b494f766043386f1809fb6f075d4cac53792c792158ac25a'):
+            '8208bae9f1af55cc313f176f73740182db89ecd4578572c11f79d131055f7803'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -1847,6 +1850,18 @@ def _d8_frozen_source_diff(path: str, source: str) -> str:
             *(f"+{line}" for line in lines),
         ]
     )
+
+
+@pytest.mark.parametrize("suffix", [".py", ".py.source"])
+def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
+    path = "integrations/hermes_runtime/tests/fixtures/native_donor" + suffix
+    prose = 'def reserve_context():\n    """Reserving 0 lets the provider 400 before compaction."""\n    return None\n'
+    assert _identity_guard_source_path(path)
+    assert _scope_language(path) == "py"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, prose), source_postimages={path: prose}) == []
+    for executable in ("new_peer_uid = 471\n", "value = 471\npeer_uid = value\n", 'message = f"""peer {os.setuid(471)}"""\n'):
+        source = prose + executable
+        assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
 
 
 _D8_PR1572_CSS = "\n".join([

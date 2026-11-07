@@ -38,13 +38,15 @@ export function ProjectExecutionHistory(props:ProjectExecutionHistoryProps){
     const ownRefresh=pending.current!==null&&refreshing.current===pending.current;
     if(!ownRefresh)cancel();clear();if(!ownRefresh)setPhase('idle');
   }),[props.owner]);
-  useLayoutEffect(()=>{
-    if(focus.current==='reader'&&selected&&visible){heading.current?.focus();focus.current=null;}
-    if(focus.current==='list'&&!selected){if(opener.current?.isConnected)opener.current.focus();else heading.current?.focus();focus.current=null;}
-  },[selected,visible]);
   function back(){cancel();selectedRef.current=null;setSelected(null);setNotice(null);setPhase('ready');focus.current='list';}
-  useEffect(()=>{if(!selected)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();back();}};
+  // Listen before focusing the reader; a focus handler may immediately send Escape.
+  useLayoutEffect(()=>{if(!selected)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();back();}};
     document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape);},[selected]);
+  useLayoutEffect(()=>{
+    // Consume the intent before focus handlers can request a return to the list.
+    if(focus.current==='reader'&&selected&&visible){focus.current=null;heading.current?.focus();}
+    if(focus.current==='list'&&!selected){focus.current=null;if(opener.current?.isConnected)opener.current.focus();else heading.current?.focus();}
+  },[selected,visible]);
   async function read(){
     if(busy.current)return;
     const owner=live.current.owner,workRef=live.current.workRef;if(!owner)return;
