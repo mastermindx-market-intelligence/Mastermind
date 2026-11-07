@@ -76,8 +76,31 @@ def bind_native_mcp_client(ctx: Any) -> Callable[[str, Mapping[str, Any]], Mappi
                 or document.get("schema") != FABRIC_SCHEMA
                 or document.get("action") != action):
             raise FabricNativeRefusal("HERMES_FABRIC_MCP_SCHEMA_INVALID")
+        # The native client's admission check precedes transport. Consent may
+        # change while that call runs, so it must also govern response release.
+        after_error = None
+        try:
+            current = allowlist_reader(plugin_id)
+            if type(current) is not list or EXECUTION_SERVER not in current:
+                after_error = "HERMES_FABRIC_EXECUTION_NOT_ENROLLED"
+        except Exception:
+            after_error = "HERMES_NATIVE_MCP_ENROLLMENT_UNKNOWN"
+        if after_error:
+            if action != "fabric_request" or document.get("error") is not None:
+                raise FabricNativeRefusal(after_error)
+            # Preserve only the recorded submit control receipt for the typed
+            # port to authenticate against its original run/root/parent. An
+            # incomplete receipt still becomes EFFECT_UNKNOWN there; it is
+            # never labelled NOT_APPLIED. No returned result/diagnostic passes.
+            receipt = {key: document[key] for key in (
+                "schema", "action", "run_id", "root_id", "parent_id",
+                "delivery", "controller_pid", "worker_start_proven",
+            ) if key in document}
+            receipt["response_withheld"] = True
+            return receipt
         # The incumbent typed port performs full run/root/parent/response
         # attestation; no field transformation or invented witness here.
         return dict(document)
 
     return call_tool
+

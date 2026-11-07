@@ -30,7 +30,61 @@ At 2026-11-07 03:47 UTC, Studio gateway ping succeeded, generation `488ea6e7-0da
 The new M2 binding request returned `FLEET_ROUTE_PREFLIGHT_REFUSED`, effect `NOT_APPLIED`. No host command or installation ran. Preserve this original refusal; do not retry the host action through another carrier. Source inspection is permitted and independent.
 The Fabric capabilities reader succeeded: admission/start UNPROBED; no native parent wake/background execution claim. A new properly scoped source worker may be admitted independently through its normal Fabric owner; this is not a replacement for the refused M2 host binding.
 
-## Verification and continuity
+## Implementation and verification
 
-Record exact commands, candidate revision and results here after material progress. Runtime proof remains pending until actual installed receipts exist. A failed independent source-worker request stays at its original run/root/PID; no duplicate worker.
-Status at initial save: implementation in progress; no code change, hosted-green claim, host installation, worker START or programme completion.
+D.1 and D.2 are source-qualified. Native read/preview/submit-preflight and
+post-submit release recheck the original grant. The existing Hermes client
+also rechecks its original per-plugin execution allowlist after transport.
+Known recorded submissions retain only a minimal control outcome if response
+authority changes; uncertain/malformed returns retain the same original run
+and EFFECT_UNKNOWN. A result receives a second original-lineage observation
+after fetch before its bytes/digest are released.
+
+The bridge now projects the incumbent retained prelaunch refusal as request
+correlation only. It does not infer a worker root/parent, exact failure cause,
+result consumption, fresh admission, retry or wake. The tests execute the real
+Fabric facade with a fixture command engine and no host/provider effects.
+They cover one original submit, a simulated native restart, retained result,
+existing successor, lost-response/no-duplicate recovery, correlation drift,
+oversized output, revoked permission and changed root/parent/effective run.
+
+Qualification on this candidate's bytes in the local selected-source
+materialization:
+
+- Baseline package suite: 53 tests passed before changes.
+- New currentness regressions on unchanged product code: 19 failing subcases
+  reproduced the missing post-call fences and lineage checks.
+- `python3 -m unittest discover -s integrations/hermes_attended_fabric/tests -p 'test_*.py' -q`:
+  67 tests passed after the repairs and facade composition cases.
+- `python3 -m pytest -q -o addopts= --noconftest tests/test_hermes_attended_fabric.py tests/test_hermes_fabric_native_identity_review.py`:
+  69 tests and 63 subtests passed (pytest 9.1.1 supplied from the isolated test dependency directory).
+- Existing protected pytest discovery now imports these same bridge cases via
+  `tests/test_hermes_attended_fabric.py`; no new CI, scheduler or review plane.
+- Author exact-source review of the two unchanged 500-character reason-limit
+  literals updates only their finite digest/line-location pin and its regression.
+  This is SELF_REVIEWED, not independent technical review or GitHub APPROVED.
+
+Native architecture judgment was returned and consumed; that child is STOP.
+The independently commissioned paid Fabric audit did not launch:
+`hermes-fabric-return-contract-audit-20261106-c2-01`, root/parent
+`hermes-fabric-integration-20261106-c2`, controller PID `87883`.
+Original status reported `REQUEST_REFUSED_BEFORE_LAUNCH`, retained request,
+controller return RECORDED and owner execution-absence evidence. The outer
+facade kept root_verified=false and retry_allowed=false. One original
+controller read ended with MMX_FABRIC_EXIT=75. No worker START, result, replay
+or alternate audit carrier is claimed. The refusal cause remains unresolved.
+
+## Remaining actions and original custody
+
+D.3: publish this same branch, consume exact-head diff and required CI, and
+use the existing protected merge queue only after applicable gates.
+D.4-D.5: the original M2 route preflight refusal is still NOT_APPLIED.
+No enrollment, native plugin installation, gateway restart, provider call,
+real worker START/return or fleet recovery proof ran. The authenticated
+native session/admission owner and execution-MCP enrollment remain required.
+The last published starting checkpoint is commit
+`6e0ff0f29728e5f6410bc189aa7c1cb55000a1a4`; the next code commit carries
+these source results. Preserve both refused operations and all neighboring
+active source/host carriers. No programme completion or production SLA is
+claimed from this source qualification.
+

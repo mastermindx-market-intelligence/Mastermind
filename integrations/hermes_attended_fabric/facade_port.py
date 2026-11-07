@@ -98,6 +98,37 @@ class FabricFacadePort:
             raise FabricNativeRefusal("FABRIC_STATUS_FOREIGN_ROOT")
         if parent is not None and parent != grant.parent_id:
             raise FabricNativeRefusal("FABRIC_STATUS_FOREIGN_PARENT")
+        recovery = raw.get("parent_recovery")
+        continuation = status.get("continuation")
+        if (status["state"] == "REQUEST_REFUSED_BEFORE_LAUNCH"
+                and root is None and parent is None
+                and raw.get("root_verified") is False
+                and status.get("run_id") == run_id
+                and raw.get("effective_run_id") == run_id
+                and status.get("request_root_id") == grant.root_id
+                and status.get("request_parent_run_id") == grant.parent_id
+                and status.get("request_retained") is True
+                and status.get("execution_absence_proven") is True
+                and status.get("result_available") is False
+                and status.get("same_run_replay_allowed") is False
+                and isinstance(continuation, Mapping)
+                and continuation.get("controller_return") == "RECORDED"
+                and continuation.get("requested_run_id") == run_id
+                and continuation.get("effective_run_id") == run_id
+                and isinstance(recovery, Mapping)
+                and recovery.get("schema") == "mastermind.fabric_parent_recovery_projection.v1"
+                and recovery.get("requested_run_id") == run_id
+                and recovery.get("effective_run_id") == run_id
+                and recovery.get("request_correlation_only") is True
+                and recovery.get("disposition") == "RECONCILE_PRELAUNCH_REFUSAL"):
+            # Diagnose the retained ORIGINAL request without upgrading its
+            # correlation into ledger lineage, execution or replay authority.
+            return {**self._identity(grant, run_id),
+                    "state": "REQUEST_REFUSED_BEFORE_LAUNCH",
+                    "reason": "PRELAUNCH_REFUSAL_CAUSE_UNRESOLVED",
+                    "worker_started": False, "request_correlation_only": True,
+                    "root_verified": False, "retry_authorized": False,
+                    "result_consumption_authorized": False}
         if (raw.get("root_verified") is not True
                 or root != grant.root_id or parent != grant.parent_id):
             # The incumbent native status intentionally has no root/parent
@@ -158,8 +189,14 @@ class FabricFacadePort:
                 or raw.get("controller_pid") <= 0
                 or raw.get("worker_start_proven") is not False):
             raise FabricNativeRefusal("FABRIC_REQUEST_RECEIPT_UNVERIFIED")
-        return {**self._identity(grant, run_id), "state": "CONTROLLER_CREATED",
-                "reason": "WORKER_START_NOT_YET_PROVEN", "worker_started": False}
+        receipt = {**self._identity(grant, run_id), "state": "CONTROLLER_CREATED",
+                   "reason": "WORKER_START_NOT_YET_PROVEN", "worker_started": False}
+        if raw.get("response_withheld") is True:
+            # The native client retained only a canonical matching control
+            # receipt after its permission changed. No result bytes survive.
+            receipt.update(response_withheld=True,
+                           reason="HERMES_FABRIC_RESPONSE_WITHHELD")
+        return receipt
 
     def result(self, grant: SessionGrant, run_id: str) -> Mapping[str, Any]:
         observed = self.status(grant, run_id)
@@ -186,6 +223,14 @@ class FabricFacadePort:
         data = body.encode("utf-8")
         if len(data) != count or hashlib.sha256(data).hexdigest() != digest:
             raise FabricNativeRefusal("FABRIC_RESULT_DIGEST_MISMATCH")
+        current = self.status(grant, run_id)
+        if (current["state"] != "TERMINAL"
+                or current.get("effective_run_id") != observed["effective_run_id"]):
+            raise FabricNativeRefusal("FABRIC_RESULT_LINEAGE_CHANGED")
+        # status() re-verifies the original root and parent. The native caller
+        # separately rechecks its original grant AFTER this final remote read.
+        # These observations do not invent an atomic owner seal or acceptance.
         return {**self._identity(grant, run_id), "state": "TERMINAL",
                 "result_digest": digest, "result_text": body,
                 "worker_started": False}
+

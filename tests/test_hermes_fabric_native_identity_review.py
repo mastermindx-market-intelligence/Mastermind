@@ -6,7 +6,7 @@ from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = "integrations/hermes_attended_fabric/native.py"
-EXPECTED = ((48, 65, 68, "int"), (216, 60, 63, "int"))
+EXPECTED = ((48, 65, 68, "int"), (250, 60, 63, "int"))
 
 
 def _source():
@@ -44,3 +44,4 @@ def test_modified_source_or_limit_cannot_inherit_review():
         assert _scan_added_identity_diff(
             _added_diff(changed), source_postimages={PATH: changed}
         ), "changed or identity-bearing source must remain guarded"
+

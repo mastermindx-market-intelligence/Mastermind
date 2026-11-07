@@ -148,6 +148,23 @@ unparseable or post-send reply retains `EFFECT_UNKNOWN`, the original run ID
 and one original carrier. Native registration uses Hermes's incumbent profile
 scope, collision lock, registered-entry readback and exact disposal lease.
 
+The original session grant and the existing plugin MCP allowlist are checked
+again after remote calls, before response release. A revoked or unreadable
+grant withholds the returned output. If a matching submit control receipt was
+already recorded, the parent receives only that fact with
+`response_withheld=true` and `retry_authorized=false`; revocation cannot
+turn a recorded effect into absence. A malformed or lost submit receipt stays
+`EFFECT_UNKNOWN`. Result delivery also rechecks the original root, parent and
+effective run after fetching the bytes. These observations do not create an
+atomic owner seal or a new acceptance operation.
+
+A retained `REQUEST_REFUSED_BEFORE_LAUNCH` is shown when the original request
+run/root/parent and recorded controller return match. Its
+`request_correlation_only=true`, `root_verified=false` and explicit false
+retry/result-consumption flags prevent correlation from becoming worker
+lineage or permission. The refusal cause remains unresolved unless the
+incumbent owner supplies separate evidence. No replacement submit follows.
+
 ## Verification
 
 Source tests (hermetic doubles, no provider execution):
@@ -157,9 +174,20 @@ python3 -m unittest discover -s integrations/hermes_attended_fabric/tests -p 'te
 python3 -m compileall -q integrations/hermes_attended_fabric
 ```
 
-M1 isolated source workspace:
-`/tmp/mmx-hermes-fabric-native-tests-20261106-c1`.
-Latest source qualification: **53 tests passed**, including the installed-M2 native client contract; no provider calls.
+The return-recovery continuation adds regression coverage and exercises the
+actual Node Fabric facade through the native Python handler, Hermes MCP client
+and typed port. Only the final command engine and durable admission are
+fixtures; no generated command is executed. Cases cover original-result
+recovery across a simulated native restart, incumbent successors, lost submit
+responses, refusal correlation, result size and permission/lineage changes.
+The same cases are imported by `tests/test_hermes_attended_fabric.py` into the
+existing protected pytest suite, including integrated merge-group CI.
+
+Source qualification: **67 package tests passed**; **69 pytest tests and
+63 subtests passed**, including the unchanged two escalation-length literal
+sites under an updated exact-source review pin. This is author self-review,
+not an independent reviewer or live M2 qualification. See
+[the continuation](CONTINUATION.md) for the owning operation and exact commands.
 Re-run on the exact final head in GitHub CI; fixture tests alone do not
 establish live M2 native admission. Fixture tests are not proof that an
 actual authorized M2 host connection exists.
@@ -187,3 +215,4 @@ actual authorized M2 host connection exists.
 Do not claim `PROVEN_LIVE`, make a model key visible to Hermes, create a
 shadow router, bypass a safety refusal, or mark a controller PID as a
 successful worker until those exact installed receipts exist.
+

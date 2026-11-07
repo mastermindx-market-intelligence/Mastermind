@@ -162,6 +162,24 @@ def _attest_reply(raw: Any, grant: SessionGrant, run_id: str) -> dict[str, Any]:
                 or hashlib.sha256(body.encode("utf-8")).hexdigest() != digest):
             raise FabricNativeRefusal("FABRIC_OWNER_RESULT_INVALID")
         projected["result_text"] = body
+    if raw.get("response_withheld") is True:
+        # A recorded submit receipt is not undone by loss of response access.
+        # Only this minimal control outcome may cross that boundary.
+        if state != "CONTROLLER_CREATED" or body is not None or digest is not None:
+            raise FabricNativeRefusal("FABRIC_WITHHELD_RECEIPT_INVALID")
+        projected.pop("result_digest", None)
+        projected.update(response_withheld=True, submission_recorded=True,
+                         retry_authorized=False)
+    if raw.get("request_correlation_only") is True:
+        if (state != "REQUEST_REFUSED_BEFORE_LAUNCH"
+                or raw.get("root_verified") is not False
+                or raw.get("retry_authorized") is not False
+                or raw.get("result_consumption_authorized") is not False
+                or raw.get("worker_started") is not False
+                or body is not None or digest is not None):
+            raise FabricNativeRefusal("FABRIC_REQUEST_CORRELATION_INVALID")
+        projected.update(request_correlation_only=True, root_verified=False,
+                         retry_authorized=False, result_consumption_authorized=False)
     return projected
 
 
@@ -174,6 +192,22 @@ def native_handler(
         raise FabricNativeRefusal("NATIVE_HOST_BINDING_INVALID")
     if not isinstance(port, FabricOwnerPort):
         raise FabricNativeRefusal("FABRIC_OWNER_PORT_UNBOUND")
+
+    def current_failure(grant: SessionGrant) -> tuple[str, str] | None:
+        # Recheck the ORIGINAL grant; a replacement generation cannot authorize
+        # disclosure of the preceding generation's response.
+        try:
+            if currentness_guard(grant) is not True:
+                return "REFUSED", "NATIVE_SESSION_REVOKED"
+        except Exception:
+            return "UNAVAILABLE", "NATIVE_SESSION_CURRENTNESS_UNAVAILABLE"
+        return None
+
+    def release_read(raw: Any, grant: SessionGrant, run_id: str) -> str:
+        failure = current_failure(grant)
+        if failure:
+            return _project(grant, run_id, *failure)
+        return _project(grant, run_id, **_attest_reply(raw, grant, run_id))
 
     def handle(arguments: Any, *, session_id: Any = None,
                task_id: Any = None) -> str:
@@ -203,7 +237,7 @@ def native_handler(
             try:
                 raw = (port.status(grant, run_id) if action == "status"
                        else port.result(grant, run_id))
-                return _project(grant, run_id, **_attest_reply(raw, grant, run_id))
+                return release_read(raw, grant, run_id)
             except Exception:
                 return _project(grant, run_id, "UNAVAILABLE",
                                 "FABRIC_ORIGINAL_OBSERVATION_UNAVAILABLE")
@@ -220,7 +254,7 @@ def native_handler(
         if action == "preview":
             try:
                 raw = port.preview(grant, run_id, task_class, complexity, reason)
-                return _project(grant, run_id, **_attest_reply(raw, grant, run_id))
+                return release_read(raw, grant, run_id)
             except Exception:
                 return _project(grant, run_id, "UNAVAILABLE",
                                 "FABRIC_PREVIEW_UNAVAILABLE")
@@ -243,18 +277,20 @@ def native_handler(
                 or len(packet.encode("utf-8")) > 32768):
             return _project(grant, run_id, "REFUSED", "PACKET_INVALID")
         try:
-            observed = _attest_reply(port.status(grant, run_id), grant, run_id)
+            raw_observation = port.status(grant, run_id)
+            failure = current_failure(grant)
+            if failure:
+                return _project(grant, run_id, *failure)
+            observed = _attest_reply(raw_observation, grant, run_id)
         except Exception:
             return _project(grant, run_id, "UNAVAILABLE",
                             "FABRIC_ORIGINAL_OBSERVATION_UNAVAILABLE")
         if observed["state"] != "NOT_FOUND":
             return _project(grant, run_id, **observed)
         # Recheck native authority immediately before the only possible write.
-        try:
-            if currentness_guard(grant) is not True:
-                raise FabricNativeRefusal("NATIVE_SESSION_REVOKED")
-        except Exception:
-            return _project(grant, run_id, "REFUSED", "NATIVE_SESSION_REVOKED")
+        failure = current_failure(grant)
+        if failure:
+            return _project(grant, run_id, *failure)
         try:
             raw = port.submit(grant, run_id, task_class, complexity, packet,
                               reason, pool=pool, model=model)
@@ -265,7 +301,20 @@ def native_handler(
             return _project(grant, run_id, "EFFECT_UNKNOWN",
                             "FABRIC_SUBMIT_ORIGINAL_EFFECT_UNKNOWN")
         try:
-            return _project(grant, run_id, **_attest_reply(raw, grant, run_id))
+            attested = _attest_reply(raw, grant, run_id)
+            failure = current_failure(grant)
+            if failure:
+                if attested["state"] != "CONTROLLER_CREATED":
+                    return _project(grant, run_id, "EFFECT_UNKNOWN",
+                                    "FABRIC_SUBMIT_ORIGINAL_EFFECT_UNKNOWN")
+                # The owner recorded this original submission. Withhold its
+                # ordinary response, but never turn revocation into absence,
+                # cancellation, or authority to repeat the task.
+                return _project(
+                    grant, run_id, "CONTROLLER_CREATED", failure[1],
+                    response_withheld=True, submission_recorded=True,
+                    retry_authorized=False, worker_started=False)
+            return _project(grant, run_id, **attested)
         except Exception:
             return _project(grant, run_id, "EFFECT_UNKNOWN",
                             "FABRIC_SUBMIT_ORIGINAL_EFFECT_UNKNOWN")
@@ -337,3 +386,4 @@ def register_native_tool(ctx: Any, *, authorize_session: Callable[[str], Session
                 raise
             raise FabricNativeRefusal("HERMES_REGISTRATION_READBACK_UNAVAILABLE") from None
         return handle
+

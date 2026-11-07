@@ -766,6 +766,7 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
-    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+    "sha256": "085af083e719ba2f195efbd320ce4e22f74ec94ffc4b1a17808868cf3080f4d9",
+    "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
+
