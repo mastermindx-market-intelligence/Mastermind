@@ -25,7 +25,7 @@ const projection = JSON.parse(projectionBytes)
 const config = JSON.parse(readFileSync(input + '/config.json'))
 const expectedTools = JSON.parse(readFileSync(input + '/tools.json'))
 const mode = process.env.MMX_FULLAPP_FIXTURE_MODE ?? 'ok'
-assert.ok(['ok', 'revoked', 'owner-revoked', 'hang', 'wrong-tool-contract', 'durable'].includes(mode))
+assert.ok(['ok', 'revoked', 'owner-revoked', 'hang', 'wrong-tool-contract', 'durable', 'abort-before-ready'].includes(mode))
 const state = { ready: false, allowed: true, attempt: undefined, calls: 0 }
 const owner = new AbortController()
 
@@ -132,10 +132,16 @@ try {
     artifactDigest: sha(readFileSync(new URL(import.meta.url))),
     projection, config, expectedTools: [...expectedTools].reverse(),
     isCurrentBinding(binding, request) {
-      return state.allowed && JSON.stringify(binding.source) === JSON.stringify(projection.source)
+      const current = state.allowed && JSON.stringify(binding.source) === JSON.stringify(projection.source)
         && request.attempt?.env.MMX_ACP_JOB_ID === 'fullapp-job'
+      if (current && mode === 'abort-before-ready' && request.phase === 'discovery')
+        queueMicrotask(() => owner.abort('fixture abort after native discovery'))
+      return current
     },
-    onAdmitted({agent, attemptOverlay}) { state.agent = agent; state.attempt = attemptOverlay; state.ready = true },
+    onAdmitted({agent, attemptOverlay}) {
+      state.agent = agent; state.attempt = attemptOverlay; state.ready = true
+      process.stderr.write('FULLAPP_NATIVE_SESSION ' + JSON.stringify({session_id: agent.session.id}) + '\n')
+    },
   }))
   await ctx.plugin(Acp, {provider: 'fixture', model: 'fixture-model'})
   await new Promise((resolve, reject) => {

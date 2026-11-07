@@ -6,7 +6,8 @@ import { createDshGrantedToolProfile } from './dsh_tool_profile.mjs'
 const refused = () => new Error('DSH_NATIVE_AGENT_ADMISSION_REFUSED')
 
 /**
- * Join the incumbent native v2 channel to ONE already-created DSH Agent.
+ * Join the incumbent native channel to ONE already-created DSH Agent.
+ * Native readiness v3 observes that exact Session before the original ACK.
  * This programmatic host plugin creates no Agent, prompt, provider, process,
  * session identity, retry, or result owner. Stock ACP still owns prompt/cancel.
  *
@@ -52,10 +53,23 @@ export function createNativeDshAgentAdmission({
         // fiber. Revocation must never reveal inherited tools on a live Agent.
         agent.ctx.tools.presentAs('native')
         agent.ctx.tools.restrict({ allow: [] })
+        const nativeSession = agent.session
+        const nativeSessionId = nativeSession.id
+        let discoveryEvidence
+        const observeNativeSession = () => {
+          if (!live || active.aborted || !discoveryEvidence
+            || discoveryEvidence.signal.aborted || scopeOf(agent.ctx) !== agent
+            || ctx.agents.get(agent.id) !== agent || agent.session !== nativeSession
+            || nativeSession.id !== nativeSessionId
+            || isCurrentBinding(discoveryEvidence.binding, discoveryEvidence.request) !== true)
+            throw refused()
+          return nativeSessionId
+        }
         let activation
         try {
           const accepted = await acceptNativeDshAttempt({
             fd, signal: active, projectionDigest, artifactDigest,
+            nativeSessionRequired: true, observeNativeSession,
             async activate(overlay, observedTools, activationSignal) {
               if (agent.session.header.cwd !== overlay.cwd
                 || !isDeepStrictEqual(orderedTools(observedTools), orderedTools(tools))) throw refused()
@@ -64,7 +78,10 @@ export function createNativeDshAgentAdmission({
                 const valid = live && !activationSignal.aborted
                   && ctx.agents.get(agent.id) === agent
                   && isCurrentBinding(binding, request) === true
-                if (valid && request.phase === 'discovery') discovery = true
+                if (valid && request.phase === 'discovery') {
+                  discovery = true
+                  discoveryEvidence = { binding, request, signal: activationSignal }
+                }
                 return valid
               }
               const granted = createDshGrantedToolProfile({
@@ -89,6 +106,7 @@ export function createNativeDshAgentAdmission({
             },
           })
           activation = accepted.activation
+          if (accepted.nativeSessionId !== observeNativeSession()) throw refused()
           // Synchronous host observation after the real ACK; no admission or
           // result is inferred from an allocation, callback or UI handshake.
           onAdmitted?.({ agent, attemptOverlay: accepted.attemptOverlay })

@@ -529,7 +529,15 @@ class AcpNativeProcessOwner:
                 admission_settled = False
 
         if not run.wait_task.done():
-            done, _ = await asyncio.wait({run.wait_task}, timeout=max(0.0, min(0.25, deadline - loop.time())))
+            remaining = max(0.0, deadline - loop.time())
+            natural_exit_budget = min(0.25, remaining)
+            if reason is None:
+                # A completed native turn still owns MCP/Session teardown after
+                # stdin EOF. Use its existing finish deadline, retaining time
+                # for the original signal escalation and capture settlement.
+                # Explicit cancellation retains its short initial wait.
+                natural_exit_budget = remaining - min(0.5, remaining / 2)
+            done, _ = await asyncio.wait({run.wait_task}, timeout=natural_exit_budget)
             if not done and self._identity_matches(run.ref):
                 try:
                     os.killpg(run.ref.pgid, signal.SIGTERM)

@@ -939,3 +939,18 @@ def test_profile_widening_refuses_construction_and_native_preflight(
                 spec, spec.workspace_path.resolve(strict=True),
                 spec.run_dir.resolve(strict=True),
             )
+
+
+def test_native_session_requirement_has_distinct_installed_packet_digest(tmp_path):
+    packet = _confined_packet(tmp_path)
+    legacy = packet.security_projection()
+    assert packet.tool_gate.native_session_required is False
+    assert "native_session_required" not in legacy["tool_gate"]
+    native = dataclasses.replace(
+        packet, tool_gate=dataclasses.replace(packet.tool_gate, native_session_required=True))
+    expected = {**legacy, "tool_gate": {**legacy["tool_gate"], "native_session_required": True}}
+    assert native.security_projection() == expected
+    assert native.digest != packet.digest
+    assert dataclasses.replace(
+        native, tool_gate=dataclasses.replace(native.tool_gate, native_session_required=False)
+    ).digest == packet.digest

@@ -58,6 +58,41 @@ The new executive-read-port bundle is
 The existing native command cancellation patch remains independently qualified;
 the finite reader never calls prompt/cancel/follow to retrieve history.
 
+## Exact ACP Session observation qualified
+
+The actual native-Agent entry now requires the explicitly selected v3 startup
+exchange on the original ACP descriptor. After real governed discovery, the
+child captures and rechecks its original Agent, Session object and Session ID.
+The parent accepts only the closed v3 reply under its original process, artifact,
+Attempt and deadline fences. A standard ACP session ID that differs from that
+observation refuses before prompt; there is no version fallback or second
+session. Generic v1/v2 compositions and their default packet digests remain
+unchanged. The descriptor still closes after the original ACK.
+
+**126 parent/startup/installed-source cases** passed in process 63274, exit 0;
+log `82a0220f5ede6c363e744cfb264f175b400ac6ccccd4a480ce2f8615ae080cc0`.
+**Nine actual native Agent/history cases** passed in process 63411, exit 0;
+log `84c6d49bb57030c1b32eb4ff6b751126716322d4ca91f9204ad8e751ae5403a8`.
+They include actual Agent-to-ACP ID equality, governed source read/search,
+foreign-session refusal, pre-readiness abort, revocation, cancellation and cold
+history under the original writer lock. The fixture uses a deterministic model
+and synthetic grant; these are not provider/account or installed OHF receipts.
+
+The initial real run exposed SIGTERM during normal native teardown after a valid
+`end_turn`. The original 250 ms exit wait also failed a 450 ms cooperative-child
+regression with exit -15. The incumbent process owner now allocates normal
+teardown within its existing finish deadline while retaining bounded escalation
+and the original explicit-cancellation wait. Nonzero exit remains failure. The
+preimage failure log is
+`7be07102f19339ee2e62de541bad0cc010beee24a1b85284f51e8973de23ec10`.
+The completed current-donor fixture bundle is
+`9101d34223b0b650241feb9a9ef2b77661113c2523db5b7765adb0fccaeb7489`.
+
+This observation belongs to an ACP Attempt. It does not create a Runtime session
+identity, durable company writer, live-web adoption or dispatch authority.
+The existing Runtime `provider_session_id`, epoch and generation remain the
+required durable owners.
+
 ## Missing original-owner producer
 
 At published predecessor `0f01a4e3dfe3bcd1510feda46e1da711bc5d0f4f`:

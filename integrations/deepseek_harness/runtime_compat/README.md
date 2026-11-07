@@ -21,9 +21,12 @@ native provider/auth/session owners and does not depend on paid worker admission
   protocol to SDK 2.2.0. Other MCP connections keep native automatic negotiation.
   This avoids a speculative discovery sibling for that fixed target.
 - `integrations/acp_worker/dsh_native_agent.mjs` joins the existing inherited-FD
-  v2 admission channel to one already-created native Agent. MCP discovery and
-  the original owner ACK precede model work. Agent-owned restrictions survive
-  MCP-fiber revocation. ACP remains the prompt/cancel/result lifecycle owner.
+  admission channel to one already-created native Agent. Its opted-in v3
+  exchange observes that exact Agent/Session and binds the standard ACP session
+  result before prompt admission. MCP discovery and the original owner ACK
+  precede model work. Agent-owned restrictions survive MCP-fiber revocation.
+  ACP remains the prompt/cancel/result lifecycle owner. Generic v1/v2 hosts
+  retain their original contracts; the actual-Agent entry requires a v3 gate.
 
 No donor checkout is edited. `prepare.py` verifies the clean pin, lockfile,
 15 source inputs, patch identities and output hashes, then creates ignored
@@ -47,7 +50,7 @@ MMX_DSH_FULLAPP_NATIVE_SUPPLY="$PWD/integrations/deepseek_harness/runtime_compat
 ```
 
 The Python environment needs the repository test dependencies and MCP 1.28.1.
-Without the explicit native supply, the seven real-process tests skip; a skip is
+Without the explicit native supply, the nine real-process tests skip; a skip is
 not successful native-path evidence. The builder uses the donor TypeScript
 decorator transform and verifies a single shared scheduler identity across the
 native Agent and the admitted tool runtime.
@@ -63,6 +66,44 @@ original-owner cancellation; wrong-contract refusal before model work; and
 owner abort without inherited-tool reappearance. The refusal preserves the
 adapter's conservative original-operation classification while independently
 proving child and task cleanup.
+
+## Exact native Session observation and normal shutdown
+
+The existing fixed `AcpNativeToolGate` selects v3 only with
+`native_session_required=True` and an exact sealed Attempt overlay. The original
+child observes the actual Agent's Session object and ID after governed discovery,
+checks the same object/current binding before readiness and after ACK, and sends
+only that ID as the additional closed reply field. The parent rechecks the
+original process, artifacts and Attempt deadline and rejects a different standard
+ACP session before prompt. The descriptor still closes after its original ACK.
+The false/default gate preserves the historical installed packet digest; opting
+in changes that digest. A v2 helper cannot negotiate or echo its way into v3.
+
+Qualification on 2026-11-07: **126 parent/startup/installed-source cases passed**
+(process 63274 rc0), and **nine actual current-donor Agent/history cases passed**
+(process 63411 rc0). The latter bind the actual Agent ID to the original ACP
+result, exercise real granted read/search, refuse a foreign selected session
+before model work, cancel startup before readiness, and retain original cold
+history and writer-lock behavior. Model responses remain deterministic fixtures.
+
+The real run also exposed a normal-shutdown defect: the existing native owner
+sent SIGTERM 250 ms after stdin EOF although its configured finish budget still
+had time. A child with 450 ms cooperative cleanup reproduced exit -15 against
+the original owner. Successful completion now uses the remaining original finish
+budget with a bounded reserve for the same signal/capture settlement; explicit
+cancellation retains its short initial wait. Nonzero exit remains a failed
+result. No retry, extra process owner or extended deadline was added.
+
+| Receipt | SHA-256 |
+|---|---|
+| Parent/startup/installed-source qualification | `82a0220f5ede6c363e744cfb264f175b400ac6ccccd4a480ce2f8615ae080cc0` |
+| Actual Agent/history qualification | `84c6d49bb57030c1b32eb4ff6b751126716322d4ca91f9204ad8e751ae5403a8` |
+| Shutdown regression on original source | `7be07102f19339ee2e62de541bad0cc010beee24a1b85284f51e8973de23ec10` |
+| Current native fixture manifest | `0faa36be36ade0de420c41a52bd86c5fc7244064d4a329d883a4b178b9da6411` |
+
+The observed ID is startup evidence for the original ACP Attempt. It does not
+activate an operator-harness epoch, adopt a standalone web session, or make the
+current-authority evidence-only contract dispatchable.
 
 ## Native command admission and cancellation
 

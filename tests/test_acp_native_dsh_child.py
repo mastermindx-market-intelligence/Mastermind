@@ -24,7 +24,8 @@ from test_acp_native_startup import launch
 
 
 def _build(launch, tmp_path, *, bad_digest=False, false_ready=False,
-           abort_during_activation=False, late_dispose=False, expire_during_activation=False):
+           abort_during_activation=False, late_dispose=False, expire_during_activation=False,
+           native_required=False):
     profile, spec = launch
     node_cmd = shutil.which("node")
     assert node_cmd is not None, "Node is required for native DSH child proof"
@@ -94,6 +95,7 @@ try {
         "a" * 64, bootstrap_sha,
         (AcpObservedTool("mcp__granted__read_file", "c" * 64),),
         ((str(script), bootstrap_sha), (str(helper), helper_sha)),
+        native_session_required=native_required,
     )
     effective = AcpNativeProfile(
         "native-v2-node-fixture", attested, (str(node), str(script)),

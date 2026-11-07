@@ -1,4 +1,4 @@
-"""Real current-donor Agent + native ACP v2 + workspace reader, test grant only.
+"""Real current-donor Agent + native ACP v3 + workspace reader, test grant only.
 
 The synthetic target launches the actual source server in a test environment.
 It is not an installed canonical target, dedicated-UID proof or paid provider.
@@ -103,7 +103,8 @@ async def exercise(tmp_path, mode="ok"):
     files = [root / ".cache/build" / path for path in manifest["output_sha256"]]
     files += list(inputs.iterdir())
     gate = AcpNativeToolGate(digest(projection_path), digest(bundle), tools,
-                            tuple((str(path), digest(path)) for path in files))
+                            tuple((str(path), digest(path)) for path in files),
+                            native_session_required=True)
     native = AcpNativeProfile(
         "fullapp-native-fixture", _binary(node), (str(node), str(bundle)), private_startup=True,
         allowed_environment_keys=("PATH", "MMX_FULLAPP_FIXTURE_INPUT", "MMX_FULLAPP_FIXTURE_MODE"),
@@ -119,13 +120,31 @@ async def exercise(tmp_path, mode="ok"):
     owner = AcpNativeProcessOwner(
         native, environment_loader=lambda: {
             "PATH": "/usr/bin:/bin", "MMX_FULLAPP_FIXTURE_INPUT": str(inputs),
-            "MMX_FULLAPP_FIXTURE_MODE": mode,
+            "MMX_FULLAPP_FIXTURE_MODE": "ok" if mode == "wrong-native-session" else mode,
         }, tool_gate=gate, launch_argv_builder=lambda *_: native.argv,
         attempt_overlay_builder=overlay,
     )
+    admissions = []
+
+    async def open_original(row):
+        resources = await owner.open_run(row)
+        original = resources.prepare_prompt
+        assert original is not None
+
+        async def prepare_prompt(session_id, model):
+            # Fault injection at the existing pre-prompt boundary: an ACP
+            # selected ID cannot borrow this actual Agent's readiness receipt.
+            selected = "foreign-acp-session" if mode == "wrong-native-session" else session_id
+            admitted = await original(selected, model)
+            assert admitted.native_session_id == session_id
+            admissions.append(admitted)
+            return admitted
+
+        return dataclasses.replace(resources, prepare_prompt=prepare_prompt)
+
     adapter = AcpWorkerAdapter(
         AcpProfile("deepseek-harness-acp", "0.0.1", model_option_provider="fixture"),
-        inspector=owner.inspector, open_run=owner.open_run,
+        inspector=owner.inspector, open_run=open_original,
     )
     spec = WorkerLaunchSpec(
         "fullapp-run", "fullapp-job", "fullapp-worker", workspace, run_dir,
@@ -145,7 +164,7 @@ async def exercise(tmp_path, mode="ok"):
                 pytest.fail("native model did not enter cancellable turn: " + Path(ref.stderr_path).read_text())
             await asyncio.wait_for(adapter.cancel(ref, "native fixture cancellation"), 12)
             receipt = adapter._runs[spec.run_id].receipt
-        elif mode == "wrong-tool-contract":
+        elif mode in ("wrong-tool-contract", "wrong-native-session", "abort-before-ready"):
             # Refusal before prompt has no successful result. Keep the existing
             # adapter's conservative classification; independently prove cleanup.
             with pytest.raises(BrokerEffectUnknownError, match="original operation is unresolved"):
@@ -162,12 +181,22 @@ async def exercise(tmp_path, mode="ok"):
         assert owner._active is None
         assert adapter.unsettled_tasks == ()
         assert not owner._identity_matches(ref)
+    if receipt is not None:
+        assert len(admissions) == 1
+        native_id = owner._runs[spec.run_id].admission_channel.native_session_id
+        assert admissions[0].native_session_id == native_id == receipt.result.provider_session_id
+        observations = [json.loads(line.removeprefix("FULLAPP_NATIVE_SESSION "))
+                        for line in Path(ref.stderr_path).read_text().splitlines()
+                        if line.startswith("FULLAPP_NATIVE_SESSION ")]
+        assert observations == [{"session_id": native_id}]
+    else:
+        assert admissions == []
     assert _git(workspace, "status", "--porcelain") == ""
     assert (workspace / "memo.txt").read_text() == memo
     return receipt, ref, memo
 
 
-def test_current_fullapp_native_v2_read_search_returns_actual_result(tmp_path):
+def test_current_fullapp_native_v3_read_search_returns_actual_result(tmp_path):
     receipt, ref, memo = asyncio.run(exercise(tmp_path))
     assert receipt.result.status is WorkerRunStatus.SUCCEEDED, Path(ref.stderr_path).read_text()
     envelope = receipt.result.structured_output
@@ -208,3 +237,19 @@ def test_current_fullapp_owner_abort_keeps_inherited_tools_hidden(tmp_path):
     assert value["read"]["ok"] is True and value["search"]["error"] is True
     assert receipt.result.structured_output["status"] == "FAILED"
     assert b"INHERITED_SENTINEL_EXECUTED" not in Path(ref.stderr_path).read_bytes()
+
+
+def test_current_fullapp_foreign_acp_session_never_reaches_model(tmp_path):
+    receipt, ref, _ = asyncio.run(exercise(tmp_path, "wrong-native-session"))
+    assert receipt is None
+    log = Path(ref.stderr_path).read_bytes()
+    assert b"FULLAPP_NATIVE_SESSION " in log
+    assert b"FULLAPP_MODEL_CALL" not in log
+
+
+def test_current_fullapp_abort_before_readiness_never_reaches_model(tmp_path):
+    receipt, ref, _ = asyncio.run(exercise(tmp_path, "abort-before-ready"))
+    assert receipt is None
+    log = Path(ref.stderr_path).read_bytes()
+    assert b"FULLAPP_NATIVE_SESSION " not in log
+    assert b"FULLAPP_MODEL_CALL" not in log

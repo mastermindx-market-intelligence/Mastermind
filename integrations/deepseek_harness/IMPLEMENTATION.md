@@ -357,8 +357,9 @@ The existing attended packager now applies that patch in its owned app copy
 before the upstream build and binds its receipt, manifest and compiled private
 host reader. Eleven focused real-file packaging/export cases passed, covering
 partial effects, redirected paths, exact protected source and stale host output.
-The old `attended-build.json` still identifies only the earlier staged package;
-a new build has not yet earned a replacement qualification.
+The package qualification at this phase remained tied to its earlier staged
+bytes. The later independently qualified package is recorded below and in the
+[exact join frontier](NATIVE_COMPANY_JOIN_FRONTIER.md).
 
 ## Exact-original recovery and bounded presentation
 
@@ -413,12 +414,44 @@ OAuth or production acceptance.
 The private host bundle now resolves the original packaged native scope module
 through one fixed internal link. The original company client and company-peer
 bundle stay byte-identical. New package staging requires both host exports;
-historical qualification remains tied to its exact old export set. The0f01
-attended-build publication is consumed as the original qualified cancellation-
-patch package and is not relabeled as a build containing this new port.
+historical qualification remains tied to its exact old export set. The 0f01
+publication remains its original snapshot. A separate package from 6d40 source
+qualified both exports and was published with the 81b0 source composition.
 
 Default installed source is still unavailable. The original native launcher has
 not supplied an endpoint/association handoff; stock browser-owner bypass,
 authenticated native foreground/ACP admission, production sign-in and the full
 Send/resume/Stop/restart/revocation journey remain open engineering and installed
 acceptance work. Source publication or CI green does not close those requirements.
+
+
+## Qualified attended package and exact native ACP Session observation
+
+Published composition `81b0f5fe39251fb3f041fc18f9d5c95922f26747` preserves the
+incumbent realm-pin repair and accepted protected source, including both the
+DeepSeek history method and the new Hermes-family continuation behavior.
+The composed bridge/Runtime/Hermes gate passed 118 cases; four actual App
+integration suites passed 62 tests; the OS typecheck had zero diagnostics.
+
+The separate attended build from 6d40 source passed all seven native build gates,
+its complete 116,148-entry launcher closure check, and a compiled host-export
+import using the original native scope. `attended-build.json` records the actual
+new manifest `1e2248382dcd64e5c7b19eae709d0be8ee57e7525d3cd208290b52146b4357b5`.
+The original company client and company-peer bytes are unchanged. The package
+has not been installed or relabeled as a later ACP application composition.
+
+The following source slice adds a closed, explicitly selected v3 observation to
+the original ACP startup exchange. The actual Agent supplies its original
+Session ID after governed discovery and rechecks its object identity/lifetime
+around ACK. The parent requires that same ID from standard ACP before prompt.
+Legacy v1/v2 packet identities are preserved; the actual-Agent entry requires a
+v3 gate and has no downgrade fallback. Existing evidence-only current-authority
+fields remain evidence-only.
+
+The real native run found and reproduced an early normal-shutdown SIGTERM. The
+incumbent owner now permits cooperative cleanup within the existing finish
+deadline, while preserving original signal identity checks, explicit-cancel
+behavior and nonzero-exit failure. Final qualification passed **126 parent,
+startup and installed-source cases** and **nine real current-donor Agent/history
+cases**. Exact retained receipts and remaining production work are in
+[NATIVE_COMPANY_JOIN_FRONTIER.md](NATIVE_COMPANY_JOIN_FRONTIER.md).
