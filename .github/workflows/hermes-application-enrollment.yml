@@ -6,6 +6,8 @@ on:
       - 'tests/test_hermes_primary_application_enrollment.py'
       - 'tests/test_hermes_primary_retained_enrollment.py'
       - 'ops/native_fabric/quota_continuity/tests/test_go_native_install.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py'
       - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
       - 'ops/native_fabric/quota_continuity/rollout/native_install.py'
       - '.github/workflows/hermes-application-enrollment.yml'
@@ -39,6 +41,7 @@ jobs:
             tests/test_hermes_primary_application_enrollment.py \
             tests/test_hermes_primary_retained_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_set_composition.py \
