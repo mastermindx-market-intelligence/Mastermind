@@ -1427,3 +1427,62 @@ Merged native-privacy #2195, vault #2200 and Agent OS continuity #10823 remain D
 5. Publish and qualify the Mastermind source carrier, reconcile #10831's canonical CI and drive its original existing delivery controller; reconcile #2207's original queue. Then complete outstanding actual provider/model/EVAL identity, installed account, browser/vault/fleet and always-on return-path acceptance.
 
 Protected law pin remains `e37dc82f070fd391e29f0dbd0bf46b022166beea`. Principal native children supplied judgment only; no native delegated implementation or fabricated formal GitHub review occurred. No Slack/email message was sent. No newly enrolled grant, live vault credential, provider/model dispatch, fleet execution or daemon acceptance is claimed. **More useful authorized source work exists; proceed.**
+
+
+## 35. Canonical discovery correction published and interface/native transport qualified — 2026-11-07 12:28:50 UTC
+
+**MISSION_COMPLETE=false; BUILT_NOT_PROVEN.** Continuing implementation on the same owners. This milestone is source, build and controlled owner evidence. It does not activate a native profile, enroll a credential, create a daemon, admit a runtime root or prove installed learning efficacy.
+
+### New source carrier and exact composition
+
+[Mastermind PR2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217), branch `sol/hermes-discovery-correction-20261107-c3`, is a draft at **d543f414dd3f9313fcf28d1b3fffa3f86ebcc54f**, tree **9cf60b72d7ab5d57ce6f7659739c660cdd3f2b71**. Its parent is the reconciled original native-current head e5280ecdc7e021b5c8f8e9cd83f2b62329d4eb75. It targets that original branch until the prerequisite lands. All **47 owned blobs** were read back against the complete immutable Git tree before publication.
+
+The three overlapping App/Rust-auth/IndexedDB postimages were three-way composed with current protected source. The accepted thin native app, exact auth-transaction expiry and native conversation pending-pointer variants remain intact. The correction keeps the existing v5 Knowledge pointer slot, with an explicit v2 target codec; it adds no database or operation controller.
+
+Canonical compiler remains [Macro PR10831](https://github.com/mastermindx-market-intelligence/macro/pull/10831), exact **b4b08673508bb0aafe2aa729666f1aefab23911c**. Its five published postimages and source fixture pin remain unchanged. Original fences passed; ordinary full-checkout CI remains in progress at this boundary. No Macro merge-on-green action has been issued.
+
+### User and recovery path now joined
+
+The Library issues a correction source only from an actual full, hash-checked opened DSC under its original read handle, current catalogue, DATA, CODE and fixed owner/method identities. A metadata row or same-coordinate copied object cannot become the source witness. The distinct v6 `project_discovery_correct` permission supplies the new action; legacy grants do not.
+
+The form begins with blank evidence, date and confidence. It freezes one detached request and its original ID when preparation starts. Review displays reason, replacement claim/falsifier/consequence, evidence, confidence, actual evidence date/expiry, preserved original and the three paths. Publishing uses the existing private-input/Events/Git publisher and one incumbent durable pointer.
+
+Preparation can persist before its response is lost. The editor now retains the exact body-free eight-field lookup before dispatch and uses the existing inspection route for that case, without reserving a command, preparing again, minting a replacement ID or reading an unrelated pointer. Source withdrawal redacts the editable body while preserving original inspection. Late inspection rechecks its exact context ticket and action-specific permission; a still-valid file grant cannot authorize a correction response.
+
+Before any terminal acceptance, the receipt must contain the selected OLD DSC, independently derived NEW DSC and selected WS, with no duplicate and one publication commit. A retained prepared Review additionally requires its exact three postimage hashes. Original status/reconcile can work with current source/compiler/private body unavailable. The publication commit is not forced to equal a later DATA observation commit.
+
+### Verification at the actual published Mastermind head
+
+The isolated source-only C3 worktree `/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/composed-source` was fetched from the original new branch, detached at d543f414dd3f9313fcf28d1b3fffa3f86ebcc54f, and verified clean. Offline dependencies use the committed lockfiles.
+
+- **165 focused frontend tests passed, zero failures/skips** on that exact tree: 31 new correction cases plus 134 selected incumbent cases. The full App journey opens the actual original record, reviews explicit evidence, publishes once, reconciles the original, and refreshes genuine canonical history. Lost preparation, permission-ticket change, changed source, another pending operation and old file/preference recovery are included.
+- **TypeScript typecheck and production Vite build passed** on the same exact tree. Existing bundle/dynamic-import warnings remain non-failing; no bundle-size improvement is claimed.
+- **7 Rust fixed-source-operation transport tests passed**, zero failures, on the same exact Git head, with `MM_SOURCE_REVISION=d543f414dd3f9313fcf28d1b3fffa3f86ebcc54f` and explicit source-test build identity. These are pure request/response/route/UTF-8/limit tests. No Control socket, credential enrollment or account login occurs. The first build stopped before application compilation for missing mandatory provenance; that setup omission was repaired using the actual published source.
+- **20 actual Python owner cases passed** across the prior 19-case compiler/private-input/Events/Git run and new recorded owner journey. The latter reads genuine before/after temporary-Git records and proves original text retention, supersession and the replacement. The native auth, Programs orientation and initial installed CODE seam in the UI fixture are explicitly synthetic; its refreshed catalogue is a genuine legacy read-only frame, not a fabricated current-DATA runtime receipt.
+- **29 exact source-guard/anonymous-read checks passed.** The final 47-path changed-source D8 scan is clean. The finite table binds one actual fixture PR number and the same three moved Rust HTTP-status test operands by whole-source hash and exact sites. Nine incumbent full-Rust findings remain visible; there is no broad numeric/directory exception.
+- Macro's **125 focused cases** remain the canonical parser/recipe evidence. Full reference-graph acceptance still belongs to its ordinary unscoped validation in complete CI.
+
+The initial frontend failures were new-test navigation/scheduling assumptions and were repaired before the exact-head rerun. No partial group is reported as a complete pass.
+
+Design and contracts: [DISCOVERY_CORRECTIONS.md at d543f414](https://github.com/mastermindx-market-intelligence/Mastermind/blob/d543f414dd3f9313fcf28d1b3fffa3f86ebcc54f/docs/hermes/DISCOVERY_CORRECTIONS.md).
+
+### Original native release reconciled
+
+PR2207's original b7 queue entry disappeared with an actual DIRTY state after protected master advanced. Its exact-head checks had succeeded. The original effect was reconciled; it was not blindly re-armed.
+
+The same original branch now carries **e5280ecdc7e021b5c8f8e9cd83f2b62329d4eb75**, tree **6c0c45db0f87f0ec195e3f96796a5b8f809466ad**, parents b7de24d7fb238598af8638f183a9fc187e3070ee and protected 3c304387aca34ace97ba1cb2d061061321ccada3. All 64 owned blobs were read back before CAS. Sixty-one are unchanged; the three overlaps preserve protected Claude-helper semantics, cancellation propagation during read cleanup, and both disjoint finite-review table additions. The only textual conflict was an independent append.
+
+The local composition run had **209 passes and 2 AF_UNIX permission failures**. Those two original socket-bearing cases were accidentally included despite the earlier exclusion. This is an execution mistake, not successful socket evidence; the local path has been stopped and no alternate-host socket test was used. Do not repeat or re-label it. This supersedes the older statement that the local AF_UNIX action remained entirely unretried. The original C26 Ubuntu1/root denial and paid Fabric refusals remain unretried.
+
+New exact-e528 ordinary OAuth engine, qualification, runtime and harness workflows have passed; its general CI remains in progress at this boundary. Direct readback showed neither a queue entry nor auto-merge request after composition. No second queue request has been issued. Consume actual current CI/protection before any subsequent release action.
+
+### Next execution, same mission
+
+1. Finish ordinary exact-head CI and delivery on original Macro10831, Mastermind2207 and Mastermind2217. Do not equate a build, PR, queue or merge with installed acceptance. Preserve all intervening writers.
+2. Add the explicit native v4 correction catalogue through the SAME ConsumerSlot, plugin, paired Executive/Workspace OAuth connection, mission grant, audited Workspace handlers, private-input/Events and publisher. The current decoder branches on Workspace-principal presence, so v4 needs an explicit discriminator; historical v2 and current-read v3 must not widen silently.
+3. Give the new tool an explicit durable source-operation result branch. Generic E1 readonly envelopes cannot describe prepare/submit/reconcile effects. Keep original request/lookup and uncertainty after possible dispatch; no automatic resubmit.
+4. Extend the existing Knowledge reader with a closed current DSC selector to reach omitted records and retained superseded DSC identities at current DATA. Keep the old opaque source-ref selector exact. Historical preimage bytes require original correction/private-input receipt qualification; do not substitute a current old record or arbitrary commit/path.
+5. Compose and release original tool-observation PR2204; finish actual provider dispatch/model identity and technically valid held-out EVAL. Preserve PR398/409 holds, accepted C69/C70 and existing learning-promotion owners.
+6. Complete installed original-owner authorization, secret-safe account/browser/vault/fleet and always-on restart/return-path acceptance when the genuine original host access is available. No denied action may be replayed on another host/account/carrier.
+
+Merged PR2195, PR2200, Macro10823 and all earlier accepted source remain DO_NOT_REDO. Native children supplied principal judgment only; parent-direct implementation is explicit because the original eligible paid Fabric lanes failed/refused. No Slack/email send, handoff ACK, worker START or durable daemon is asserted.
