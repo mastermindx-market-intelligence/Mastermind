@@ -232,10 +232,15 @@ async def get_prophet_board(args):
     return bot_mcp._json(portfolio_intelligence.prophet_board(limit=int(args.get("limit") or 24)))
 
 
-@tool("get_sector_rotation", "Current Sector Central leaders, laggards and rotation state in a bounded packet.",
-      {"type": "object", "properties": {"limit": {"type": "integer"}}})
+@tool("get_sector_rotation", "Sector Central context. Default returns legacy leaders; projection=sector_dossiers returns the dated all-eleven dossier with source qualifications and no trade authority.",
+      {"type": "object", "properties": {
+          "limit": {"type": "integer"},
+          "projection": {"type": "string", "enum": ["legacy", "sector_dossiers"]},
+      }})
 async def get_sector_rotation(args):
     from brain import portfolio_intelligence
+    if "projection" in args and args["projection"] != "legacy":
+        return bot_mcp._json(portfolio_intelligence.sector_rotation(projection=args["projection"]))
     return bot_mcp._json(portfolio_intelligence.sector_rotation(limit=int(args.get("limit") or 12)))
 
 

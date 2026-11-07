@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from common import workspace_project_plan_contract as project_plan_wire
 from common.executive_workspace_contract import _check_job_id, v2_selection
 from common.executive_workspace_fabric_contract import selection as native_selection
 from control_plane.coo_principal_mandate import DecisionPosture, NewEffectGate
@@ -37,6 +38,7 @@ from integrations.secretary_team_access.projection import (
 
 OUTCOME_SCHEMA = "mastermind.secretary_team_access_outcome.v1"
 _READ_MISSION = "/workspace/mission/v3/current"
+_READ_PROJECT_PLAN = "/workspace/project-plan/current"
 _NATIVE_CATALOG = "/workspace/fabric/catalog/current"
 _NATIVE_STATUS = "/workspace/fabric/status/current"
 _COO_MANDATE = "/v1/tools/executive_mandate"
@@ -167,6 +169,7 @@ class SecretaryAccessClient:
         if path == _RULING:
             headers.update({"accept": "application/json, text/event-stream",
                             "mcp-protocol-version": "2025-06-18"})
+        status = None
         try:
             async with client.stream(method, path, params=params, content=encoded,
                                      headers=headers, follow_redirects=False) as response:
@@ -178,6 +181,8 @@ class SecretaryAccessClient:
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
                     if size > max_bytes:
+                        if status in (401, 403):
+                            return "REFUSED", status, None
                         return ("EFFECT_UNKNOWN" if modifying else "UNAVAILABLE",
                                 status, None)
                     chunks.append(chunk)
@@ -196,6 +201,11 @@ class SecretaryAccessClient:
                 raise MutationEffectUnknown("one attempted action has unknown effect") from None
             raise
         except Exception:
+            # An observed authorization refusal remains a refusal even if its
+            # body is empty, malformed, oversized or interrupted. Do not let an
+            # optional second read release earlier facts after revocation.
+            if status in (401, 403):
+                return "REFUSED", status, None
             return ("EFFECT_UNKNOWN" if modifying else "UNAVAILABLE", None, None)
 
     async def read_mission(self, *, previous_fingerprint: str | None = None,
@@ -213,6 +223,32 @@ class SecretaryAccessClient:
                                      limit=limit)
         except (TypeError, ValueError, KeyError):
             return _outcome("mission", "UNAVAILABLE", reason_code="invalid_owner_document")
+
+    async def read_project_plan(self) -> dict[str, Any]:
+        """One bounded read for the host's workstream, not caller-chosen scope."""
+        try:
+            selected = project_plan_wire.validate_selection(
+                {"work_ref": self.selection["work_ref"]})
+        except (TypeError, ValueError, KeyError):
+            return _outcome("project_plan", "UNAVAILABLE",
+                            reason_code="invalid_host_selection")
+        code, status, payload = await self._request(
+            self._workspace, "GET", _READ_PROJECT_PLAN, params=selected,
+            max_bytes=project_plan_wire.MAX_RESPONSE_BYTES)
+        if code != "OK":
+            return _outcome("project_plan", code, reason_code=(
+                _refusal_code(payload) if code == "REFUSED" else "source_unavailable"))
+        try:
+            if status != 200:
+                raise ValueError("invalid_read_status")
+            value = project_plan_wire.validate_body(payload)
+            if (value["selection"] != selected
+                    or self.selection["work_ref"] != selected["work_ref"]):
+                raise ValueError("source_selection_mismatch")
+            return value
+        except (TypeError, ValueError, KeyError, OverflowError, RecursionError, UnicodeError):
+            return _outcome("project_plan", "UNAVAILABLE",
+                            reason_code="invalid_owner_document")
 
     async def read_native_catalog(self, *,
                                   previous_fingerprint: str | None = None,

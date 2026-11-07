@@ -353,9 +353,11 @@ def validate_go_base_manifest(manifest, dependency_hashes):
 def application_http_sources(root):
     """Compile immutable metadata from the exact three historical inputs.
 
-    The H preimage is explicitly mapped as AST evidence only. The independently
-    sealed CURRENT H is the sole transport code in the flat runtime closure.
-    No Git history, credential, provider or repository import is consulted.
+    Realm and H preimages are explicitly mapped as AST evidence only. New
+    candidate realms must not rewrite the accepted two-driver metadata or
+    invalidate its historical input closure. The independently sealed CURRENT
+    H is the sole transport code in the flat runtime closure. No preimage is
+    imported or staged; no Git history, credential or provider is consulted.
     """
     root = Path(root)
     reader = root / "rollout/application_http_realm_projection.py"
@@ -368,8 +370,11 @@ def application_http_sources(root):
     # same-path module in a reused builder process is not source evidence.
     compiler = {"__name__": "mastermind_http_projection_compiler", "__file__": str(reader)}
     exec(compile(reader_raw, str(reader), "exec"), compiler)
-    inputs = {row["path"]: read(root / "source/application_http_transports.py.preimage"
-        if row["path"] == compiler["TRANSPORT_SOURCE_PATH"] else root.parents[2] / row["path"])
+    evidence = {
+        compiler["REALM_SOURCE_PATH"]: root / "source/codex_provider_realm.py.preimage",
+        compiler["TRANSPORT_SOURCE_PATH"]: root / "source/application_http_transports.py.preimage",
+    }
+    inputs = {row["path"]: read(evidence.get(row["path"], root.parents[2] / row["path"]))
         for row in compiler["INPUT_SOURCES"]}
     payload = compiler["compile_projection_bytes"](inputs)
     compiler["validate_projection"](payload, expected_sha256=sha(payload))

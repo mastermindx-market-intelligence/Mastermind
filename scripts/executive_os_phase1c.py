@@ -2632,6 +2632,16 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+            # The SAME frozen selected-child publication the installed App
+            # reads, loaded through the installed source's fixed currentness
+            # reader. A changed, replaced or withdrawn publication refuses
+            # here instead of retargeting the running Control.
+            selected_child_target = coo_source.selected_child_target()
+            if selected_child_target is not None:
+                if "selected_child_target" not in {
+                        field.name for field in dataclasses.fields(CeoIngressAppBinding)}:
+                    raise ServiceError("installed selected child target has no composed binding owner")
+                coo_factories["selected_child_target"] = selected_child_target
             if raw.get("coo_principal_dialogue_armed", False) is True:
                 from integrations.mastermind_company_principal_app_receiver import PrincipalDialogueAppReceiver
                 from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader

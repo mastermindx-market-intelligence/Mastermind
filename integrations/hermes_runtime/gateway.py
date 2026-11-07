@@ -12,7 +12,7 @@ import socket
 import threading
 import urllib.parse
 
-from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST, SECRETARY_PATH
+from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST, SECRETARY_PATH, conversation_contract
 from .egress import ROLE_PROXY_HOST
 
 ALLOWED_LOOPBACK_HOSTS = frozenset((LOOPBACK_HOST, *ROLE_PROXY_HOST.values()))
@@ -45,7 +45,9 @@ class _LoopbackServer(ThreadingHTTPServer):
 
 class Gateway:
     def __init__(self, host: str, port: int, token: str, snapshot: Callable[[], tuple[int, dict]], *,
-                 conversation_token: str | None = None, conversation_handler: Callable | None = None):
+                 conversation_token: str | None = None, conversation_handler: Callable | None = None,
+                 role: str = "mmsecretary"):
+        self._conversation_contract = conversation_contract(role)
         if host not in ALLOWED_LOOPBACK_HOSTS:
             raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
         if not token:
@@ -92,7 +94,8 @@ class Gateway:
                     or channel.getsockname() != (self.host, self.port)):
                 raise ValueError()
             return validate_gateway_listener({"host": self.host, "port": self.port,
-                                              "inode": str(identity.st_ino)})
+                                              "inode": str(identity.st_ino)},
+                                             role=self._conversation_contract.role)
         except Exception:
             raise RuntimeRefusal("SECRETARY_LISTENER_UNQUALIFIED") from None
 
@@ -109,6 +112,7 @@ class Gateway:
 def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
     token = gateway._token
     snapshot = gateway._snapshot
+    contract = gateway._conversation_contract
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "hermes-runtime"
@@ -154,7 +158,7 @@ def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802
             self.close_connection = True
             parsed = urllib.parse.urlsplit(self.path)
-            if parsed.path != SECRETARY_PATH or gateway._conversation_handler is None:
+            if parsed.path != contract.path or gateway._conversation_handler is None:
                 self._send(405, b'{"status":"method_refused"}', "application/json")
                 return
             if parsed.query or parsed.fragment or parsed.scheme or parsed.netloc:
