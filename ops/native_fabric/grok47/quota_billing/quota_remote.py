@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import selectors
 import shutil
@@ -15,9 +16,10 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Resolve the fixed native-generation alias before atomic cache replacement.
@@ -47,6 +49,24 @@ class ProviderQuotaState:
     observed_at: str
     confidence: float
     detail: str
+    # Optional v1-compatible provenance. These identify the original owner;
+    # they are not credentials, provider account attestation or admission.
+    account: Optional[str] = None
+    config_generation: Optional[str] = None
+    account_generation: Optional[str] = None
+    allowance_scope: Optional[str] = None
+    endpoint: Optional[str] = None
+    units: str = "provider_percent"
+    refresh_error: Optional[str] = None
+    failure_config_generation: Optional[str] = None
+
+
+class ProviderQuotaRefusal(RuntimeError):
+    """Terminal account observation refusal, reconciled by the existing owner."""
+
+
+class QuotaCacheWriteError(RuntimeError):
+    """Original cache persistence failed; the owner must reconcile before retry."""
 
 
 def _utc_now() -> datetime:
@@ -57,10 +77,12 @@ def _iso(value: Any) -> Optional[str]:
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return None
         return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if isinstance(value, (int, float)):
-        seconds = float(value)
-        if seconds <= 0:
+    if type(value) in (int, float):
+        seconds = _num(value)
+        if seconds is None or seconds <= 0:
             return None
         if seconds > 10_000_000_000:
             seconds /= 1000.0
@@ -68,7 +90,9 @@ def _iso(value: Any) -> Optional[str]:
             return _iso(datetime.fromtimestamp(seconds, tz=timezone.utc))
         except (OverflowError, OSError, ValueError):
             return None
-    text = str(value).strip()
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
     if not text or text.lower() in ("none", "null", "unknown"):
         return None
     try:
@@ -82,9 +106,227 @@ def _num(value: Any) -> Optional[float]:
     if isinstance(value, bool):
         return None
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _public_endpoint(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or len(value) > 512:
+        return None
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                or parsed.password or parsed.query or parsed.fragment
+                or any(ord(c) < 33 for c in value)):
+            return None
+        return value.rstrip("/")
+    except ValueError:
+        return None
+
+
+def _config_binding(provider: str) -> Optional[Dict[str, Any]]:
+    """Fence the existing credential owner's file revision without hashing a key.
+
+    This is a local configuration generation, NOT a provider account identity.
+    Only file metadata and public endpoint fields enter the digest. A key change
+    or atomic file replacement invalidates previous observations. Nothing here
+    writes configuration or creates another credential/entitlement store.
+    """
+    if provider not in ("glm", "minimax"):
+        return None
+    path = os.environ.get(provider.upper() + "_CONFIG") or os.path.expanduser(
+        "~/." + provider + "/config.json")
+    try:
+        before = os.stat(path)
+        with open(path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+        after = os.stat(path)
+        def identity(st):
+            return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if not isinstance(raw, dict) or identity(before) != identity(after):
+            return None
+        endpoint = _public_endpoint(raw.get("openai_base_url"))
+        # Default endpoints are not inferred from a key or a plan label.
+        public = {"stat": identity(after), "endpoint": endpoint,
+                  "anthropic_endpoint": _public_endpoint(raw.get("anthropic_base_url"))}
+        digest = hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
+        return {"config_generation": "config-" + digest, "endpoint": endpoint}
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _bind_states(states: Iterable[ProviderQuotaState], account: str,
+                 binding: Optional[Dict[str, Any]]) -> List[ProviderQuotaState]:
+    return [replace(state, account=account,
+                    config_generation=(binding or {}).get("config_generation"),
+                    endpoint=(binding or {}).get("endpoint")) for state in states]
+
+
+def _binding_generation(binding: Any) -> Optional[str]:
+    value = binding.get("config_generation") if isinstance(binding, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _cache_fresh(entry: Any, now: float, binding: Any = None) -> bool:
+    if not isinstance(entry, dict) or not isinstance(entry.get("states"), list):
+        return False
+    if entry.get("refresh_error") or entry.get("terminal_refusal"):
+        return False
+    stamp = _num(entry.get("refreshed_at"))
+    if stamp is None or not 0 <= now - stamp < REFRESH_INTERVAL_S:
+        return False
+    if binding is not None and entry.get("binding") != binding:
+        return False
+    for row in entry["states"]:
+        if not isinstance(row, dict):
+            return False
+        age = _cache_age(row, now)
+        reset = _iso(row.get("reset_at"))
+        if age is None or age > FRESH_S:
+            return False
+        if row.get("reset_at") is not None and reset is None:
+            return False
+        if reset and datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp() <= now:
+            return False
+    return bool(entry["states"])
+
+
+def parse_go_usage_payload(payload: Any, observed_at: Any, *, account: str,
+                           config_generation: Optional[str] = None,
+                           endpoint: Optional[str] = None) -> List[ProviderQuotaState]:
+    """Normalize the incumbent Go /usage response; do not poll or cache it.
+
+    The Go owner supplies its *original* successful-refresh clock and binding.
+    Legacy /status without that clock is unknown, even when read right now.
+    Each percentage belongs to its own shared account window, never a model
+    wallet. Model-equivalent dollar allowances are not balance observations.
+    """
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    out = []
+    for native, window in (("rolling", "5h"), ("weekly", "weekly"), ("monthly", "monthly")):
+        row = usage.get(native) if isinstance(usage, dict) else None
+        pct = _num(row.get("percent")) if isinstance(row, dict) else None
+        valid = (isinstance(row, dict) and row.get("status") == "ok"
+                 and pct is not None and 0 <= pct <= 100)
+        reset = row.get("resetsAt") if isinstance(row, dict) else None
+        if reset is not None and _iso(reset) is None:
+            valid = False
+        state = _state("go", window, pct if valid else None, 100.0 if valid else None,
+                       100.0 - pct if valid else None, reset,
+                       "PROVIDER_AUTHORITATIVE" if valid else "UNKNOWN", observed_at,
+                       0.98 if valid else 0.0, "OpenCode Go /usage" if valid else "Go window unavailable")
+        out.append(replace(state, account=account, config_generation=config_generation,
+                           endpoint=_public_endpoint(endpoint)))
+    return out
+
+
+def parse_go_response_allowance(payload: Any, observed_at: Any, *, account: str) -> ProviderQuotaState:
+    """Normalize one complete API response or its usage block, never a balance.
+
+    Chat/Responses/Messages use usage; Gemini uses usageMetadata. Missing final
+    usage or price is unknown, even when a different response reports cost=0.
+    """
+    usage = payload
+    if isinstance(payload, dict):
+        containers = [payload[key] for key in ("usage", "usageMetadata") if key in payload]
+        if containers:
+            usage = containers[0] if len(containers) == 1 else None
+    opencode = usage.get("opencode") if isinstance(usage, dict) else None
+    debit = _num(opencode.get("allowance")) if isinstance(opencode, dict) else None
+    if debit is not None and debit < 0:
+        debit = None
+    state = _state("go", "request", debit, None, None, None,
+                   "PROVIDER_RESPONSE_USAGE" if debit is not None else "UNKNOWN",
+                   observed_at, 0.98 if debit is not None else 0.0, "response debit; not a balance")
+    return replace(state, account=account, units="monthly_allowance_usd")
+
+
+def account_quota_view(provider: str, account: str, states: Iterable[ProviderQuotaState], *,
+                       config_generation: Optional[str], endpoint: Optional[str],
+                       allowance_scope: Optional[str] = None,
+                       account_generation: Optional[str] = None,
+                       required_windows: Optional[Iterable[str]] = None,
+                       now_ts: Optional[float] = None,
+                       refresh_error: Optional[str] = None,
+                       failure_config_generation: Optional[str] = None) -> Dict[str, Any]:
+    """Secret-free read projection for H3/H4/H5 over existing owner observations.
+
+    A true quota_ready means only current allowance evidence. The existing
+    entitlement, budget, no-overage, lease and provider refusal gates still decide
+    whether an actual model/workload may run. This helper owns no admission.
+    """
+    now = _utc_now().timestamp() if now_ts is None else _num(now_ts)
+    if now is None or now <= 0:
+        raise ValueError("invalid observation time")
+    defaults = {"glm": ("5h", "weekly"), "minimax": ("5h", "weekly"),
+                "go": ("5h", "weekly", "monthly")}
+    required = tuple(required_windows if required_windows is not None else defaults.get(provider, ()))
+    if not required or len(required) != len(set(required)):
+        raise ValueError("applicable quota windows required")
+    if not set(defaults.get(provider, ())).issubset(required):
+        raise ValueError("provider windows cannot be omitted")
+    rows = [state for state in states if isinstance(state, ProviderQuotaState)]
+    own_rows = [s for s in rows if s.provider == provider and s.account == account]
+    failures = {s.refresh_error for s in own_rows if s.refresh_error}
+    if refresh_error is None and failures:
+        refresh_error = next(iter(failures)) if len(failures) == 1 else "WINDOW_REFRESH_FAILED"
+    generations = {s.failure_config_generation for s in own_rows if s.failure_config_generation}
+    if failure_config_generation is None and len(generations) == 1:
+        failure_config_generation = next(iter(generations))
+    windows = []
+    binding_endpoint = _public_endpoint(endpoint)
+    for window in required:
+        candidates = [s for s in rows if s.provider == provider and s.account == account and s.window == window]
+        reason = None
+        state = candidates[0] if len(candidates) == 1 else None
+        age = _cache_age(asdict(state), now) if state else None
+        reset = _iso(state.reset_at) if state else None
+        reset_ts = datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp() if reset else None
+        pct = _num(state.remaining_pct) if state else None
+        confidence = _num(state.confidence) if state else None
+        if refresh_error or state is not None and state.refresh_error:
+            reason = "REFRESH_FAILED"
+        elif state is None:
+            reason = "WINDOW_MISSING" if not candidates else "WINDOW_AMBIGUOUS"
+        elif not config_generation or state.config_generation != config_generation:
+            reason = "CONFIG_GENERATION_UNQUALIFIED"
+        elif not binding_endpoint or state.endpoint != binding_endpoint:
+            reason = "ENDPOINT_UNQUALIFIED"
+        elif account_generation is not None and state.account_generation != account_generation:
+            reason = "ACCOUNT_GENERATION_CHANGED"
+        elif allowance_scope is not None and state.allowance_scope != allowance_scope:
+            reason = "ALLOWANCE_SCOPE_CHANGED"
+        elif state.source != "PROVIDER_AUTHORITATIVE":
+            reason = "NON_AUTHORITATIVE"
+        elif confidence is None or not 0 < confidence <= 1:
+            reason = "CONFIDENCE_INVALID"
+        elif age is None or age > FRESH_S:
+            reason = "OBSERVATION_STALE_OR_INVALID"
+        elif state.reset_at is not None and reset is None:
+            reason = "RESET_INVALID"
+        elif reset_ts is not None and reset_ts <= now:
+            reason = "RESET_REQUIRES_OBSERVATION"
+        elif pct is None or not 0 <= pct <= 100:
+            reason = "BALANCE_UNKNOWN"
+        elif pct == 0:
+            reason = "EXHAUSTED"
+        windows.append({"window": window, "remaining_pct": pct, "reset_at": reset,
+                        "observed_at": _iso(state.observed_at) if state else None,
+                        "source": state.source if state else "UNKNOWN", "age_s": age,
+                        "confidence": confidence if confidence is not None else 0.0,
+                        "units": state.units if state else "provider_percent",
+                        "reset_state": "UNKNOWN" if reset is None else "DUE" if reset_ts <= now else "FUTURE",
+                        "ready": reason is None, "reason": reason})
+    return {"provider": provider, "account": account, "allowance_scope": allowance_scope,
+            "account_generation": account_generation, "config_generation": config_generation,
+            "endpoint": binding_endpoint, "windows": windows,
+            "refresh_error": refresh_error,
+            "failure_config_generation": failure_config_generation,
+            "quota_ready": all(row["ready"] for row in windows),
+            "entitlement": "NOT_EVALUATED", "no_overage": "NOT_EVALUATED",
+            "admission": "NOT_EVALUATED"}
 
 
 def _state(
@@ -100,29 +342,34 @@ def _state(
     detail: str,
 ) -> ProviderQuotaState:
     observed = _iso(observed_at)
+    reset = _iso(reset_at)
+    if source == "PROVIDER_AUTHORITATIVE" and reset_at is not None and reset is None:
+        source, remaining_pct, confidence = "UNKNOWN", None, 0.0
     return ProviderQuotaState(
         provider=provider,
         window=window,
         used=used,
         cap=cap,
         remaining_pct=remaining_pct,
-        reset_at=_iso(reset_at),
+        reset_at=reset,
         source=source,
-        observed_at=observed or _iso(_utc_now()) or "",
-        confidence=max(0.0, min(1.0, confidence)),
+        # An absent/invalid producer clock must never acquire read-time freshness.
+        observed_at=observed or "",
+        confidence=max(0.0, min(1.0, _num(confidence) or 0.0)),
         detail=detail,
     )
 
 
 def parse_glm_payload(payload: Dict[str, Any], observed_at: Any) -> List[ProviderQuotaState]:
     """Parse Z.ai quota limits; numbers are normalized to percentage credits."""
-    observed = observed_at or _utc_now()
+    observed = observed_at
+    if not isinstance(payload, dict):
+        return []
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     limits = data.get("limits") if isinstance(data, dict) else None
     if not isinstance(limits, list):
         return []
     classified: List[Tuple[str, Dict[str, Any]]] = []
-    fallback: List[Dict[str, Any]] = []
     for item in limits:
         if not isinstance(item, dict):
             continue
@@ -134,22 +381,18 @@ def parse_glm_payload(payload: Dict[str, Any], observed_at: Any) -> List[Provide
             elif unit == 6:
                 window = "weekly"
             else:
-                window = ""
-                fallback.append(item)
+                # Array order is not evidence of a 5h or weekly window.
                 continue
         elif kind == "TIME_LIMIT":
             window = "monthly"
         else:
             continue
         classified.append((window, item))
-    for item in fallback:
-        if not any(window == "5h" for window, _ in classified):
-            classified.append(("5h", item))
-        elif not any(window == "weekly" for window, _ in classified):
-            classified.append(("weekly", item))
     out: List[ProviderQuotaState] = []
     for window, item in classified:
         pct = _num(item.get("percentage"))
+        if pct is not None and not 0 <= pct <= 100:
+            pct = None
         detail = "z.ai quota/limit"
         if window == "monthly":
             current = _num(item.get("currentValue"))
@@ -174,18 +417,18 @@ def parse_glm_payload(payload: Dict[str, Any], observed_at: Any) -> List[Provide
 
 
 def parse_minimax_payload(payload: Dict[str, Any], observed_at: Any) -> List[ProviderQuotaState]:
-    observed = observed_at or _utc_now()
+    observed = observed_at
+    if not isinstance(payload, dict):
+        return []
     rows = payload.get("model_remains")
     if not isinstance(rows, list):
         return []
-    row = next(
-        (candidate for candidate in rows
+    general = [candidate for candidate in rows
          if isinstance(candidate, dict)
-         and str(candidate.get("model_name") or "").lower() == "general"),
-        None,
-    )
-    if row is None:
+         and str(candidate.get("model_name") or "").lower() == "general"]
+    if len(general) != 1:
         return []
+    row = general[0]
     out: List[ProviderQuotaState] = []
     fields = (
         ("5h", "current_interval_remaining_percent",
@@ -197,16 +440,18 @@ def parse_minimax_payload(payload: Dict[str, Any], observed_at: Any) -> List[Pro
         remaining_pct = _num(row.get(remaining_key))
         used = _num(row.get(used_key))
         cap = _num(row.get(cap_key))
-        if remaining_pct is None:
-            if used is not None and cap:
-                remaining_pct = max(0.0, 100.0 * (cap - used) / cap)
-            else:
-                continue
-        out.append(_state(
+        counts_valid = cap is not None and cap > 0 and used is not None and 0 <= used <= cap
+        if remaining_key not in row and counts_valid:
+            remaining_pct = 100.0 * (cap - used) / cap
+        if remaining_pct is not None and not 0 <= remaining_pct <= 100:
+            remaining_pct = None
+        state = _state(
             "minimax", window, used, cap, remaining_pct, row.get(reset_key),
-            "PROVIDER_AUTHORITATIVE", observed, 0.98,
+            "PROVIDER_AUTHORITATIVE" if remaining_pct is not None else "UNKNOWN",
+            observed, 0.98 if remaining_pct is not None else 0.0,
             "minimax token_plan/remains general",
-        ))
+        )
+        out.append(replace(state, units="provider_usage_count"))
     return out
 
 
@@ -258,8 +503,8 @@ def _live_glm(account_name: str, key: str) -> List[ProviderQuotaState]:
     """Per-account Z.ai quota read (W4-G9).
 
     ``account_name`` is informational (used in error messages); ``key`` is
-    the api_key to authenticate with. The Bearer/raw header retry strategy
-    is unchanged from the legacy single-account reader.
+    the api_key to authenticate with. A terminal authentication/permission
+    refusal ends the observation: do not retry it with another header shape.
     """
     if not key:
         raise RuntimeError(
@@ -282,6 +527,11 @@ def _live_glm(account_name: str, key: str) -> List[ProviderQuotaState]:
             if states:
                 return states
             errors.append("no quota windows")
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if exc.code in (401, 403):
+                raise ProviderQuotaRefusal("provider refused quota observation") from None
+            errors.append(type(exc).__name__)
         except Exception as exc:
             errors.append(type(exc).__name__)
     raise RuntimeError(
@@ -516,9 +766,10 @@ def _cache_age(entry: Dict[str, Any], now_ts: float) -> Optional[float]:
     if not observed:
         return None
     try:
-        return max(0.0, now_ts - datetime.fromisoformat(
+        age = now_ts - datetime.fromisoformat(
             observed[:-1] + "+00:00"
-        ).timestamp())
+        ).timestamp()
+        return age if math.isfinite(age) and age >= 0 else None
     except (OSError, ValueError):
         return None
 
@@ -539,11 +790,18 @@ def _from_cache_entry(entry: Dict[str, Any], error: str,
     except TypeError:
         return None
     age = _cache_age(entry, _utc_now().timestamp())
-    if keep_authoritative:
-        state.confidence = max(0.25, float(state.confidence))
+    confidence = _num(state.confidence)
+    if confidence is None or not 0 <= confidence <= 1:
+        return None
+    state.used, state.cap = _num(state.used), _num(state.cap)
+    state.remaining_pct = _num(state.remaining_pct)
+    if state.remaining_pct is not None and not 0 <= state.remaining_pct <= 100:
+        state.remaining_pct = None
+    if keep_authoritative and age is not None and age <= FRESH_S:
+        state.confidence = confidence
     else:
         state.source = "LOCAL_RECONSTRUCTION"
-        state.confidence = _confidence_for_age(float(state.confidence), age)
+        state.confidence = _confidence_for_age(confidence, age)
         state.detail = "stale cache after remote read failure: " + error
     return state
 
@@ -553,12 +811,42 @@ def _cache_states(entry: Any, reason: str,
     rows = entry.get("states") if isinstance(entry, dict) else None
     if not isinstance(rows, list):
         return []
-    return [
+    failure = entry.get("refresh_error")
+    states = [
         state for state in (
-            _from_cache_entry(row, reason, keep_authoritative)
+            _from_cache_entry(row, reason, keep_authoritative and not failure)
             for row in rows if isinstance(row, dict)
         ) if state is not None
     ]
+    failure_generation = _binding_generation(entry.get("failure_binding"))
+    return [replace(state, refresh_error=failure,
+                    failure_config_generation=failure_generation) for state in states]
+
+
+def _record_refresh_failure(cache_path: str, provider: str, account: Optional[str],
+                            entry: Any, binding: Any, now: float, exc: Exception) -> str:
+    """Retain failure alongside the original cache, never in a second ledger."""
+    terminal = (isinstance(exc, ProviderQuotaRefusal)
+                or isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403))
+    if isinstance(exc, urllib.error.HTTPError):
+        exc.close()
+    code = "PROVIDER_REFUSED" if terminal else "REMOTE_READ_FAILED"
+    row = dict(entry) if isinstance(entry, dict) else {"states": [], "binding": binding}
+    row.update(refresh_error=code, refresh_failed_at=now, failure_binding=binding,
+               terminal_refusal=bool(terminal or row.get("terminal_refusal")))
+    cache = _load_cache(cache_path)
+    if account is None:
+        cache[provider] = row
+    else:
+        provider_entry = cache.get(provider)
+        provider_entry = dict(provider_entry) if isinstance(provider_entry, dict) else {}
+        accounts = provider_entry.get("accounts")
+        accounts = dict(accounts) if isinstance(accounts, dict) else {}
+        accounts[account] = row
+        provider_entry["accounts"] = accounts
+        cache[provider] = provider_entry
+    _atomic_write(cache_path, cache)
+    return code
 
 
 def _load_cache(path: Optional[str] = None) -> Dict[str, Any]:
@@ -572,17 +860,20 @@ def _load_cache(path: Optional[str] = None) -> Dict[str, Any]:
 
 def _atomic_write(path: str, value: Dict[str, Any]) -> None:
     directory = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(prefix=".quota_cache.", dir=directory)
+    tmp = None
     try:
+        fd, tmp = tempfile.mkstemp(prefix=".quota_cache.", dir=directory)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True)
+            json.dump(value, handle, indent=2, sort_keys=True, allow_nan=False)
             handle.write("\n")
         os.replace(tmp, path)
     except Exception:
         try:
-            os.unlink(tmp)
+            if tmp is not None:
+                os.unlink(tmp)
         except OSError:
             pass
+        raise QuotaCacheWriteError("quota cache publication failed; owner reconciliation required") from None
 
 
 def read_provider(provider: str, force: bool = False,
@@ -618,15 +909,8 @@ def read_provider(provider: str, force: bool = False,
         if _legacy_glm_mode():
             cache = _load_cache(path)
             entry = cache.get("glm")
-            refreshed_at = (
-                float((entry or {}).get("refreshed_at") or 0)
-                if isinstance(entry, dict) else 0.0
-            )
             cached_states = _cache_states(entry, "cached", keep_authoritative=True)
-            if (
-                not force and refreshed_at
-                and now - refreshed_at < REFRESH_INTERVAL_S
-            ):
+            if not force and _cache_fresh(entry, now):
                 return [state for state in cached_states if state is not None]
             try:
                 live = READERS["glm"]()
@@ -637,6 +921,8 @@ def read_provider(provider: str, force: bool = False,
                 }
                 _atomic_write(path, cache)
                 return live
+            except QuotaCacheWriteError:
+                raise
             except Exception as exc:
                 if isinstance(entry, dict) and isinstance(
                     entry.get("states"), list
@@ -656,9 +942,12 @@ def read_provider(provider: str, force: bool = False,
         return flat
     cache = _load_cache(path)
     entry = cache.get(provider)
-    refreshed_at = float((entry or {}).get("refreshed_at") or 0) if isinstance(entry, dict) else 0.0
+    binding = _config_binding(provider) if provider == "minimax" else None
+    same_binding = binding is not None and isinstance(entry, dict) and entry.get("binding") == binding
     cached_states = _cache_states(entry, "cached", keep_authoritative=True)
-    if not force and refreshed_at and now - refreshed_at < REFRESH_INTERVAL_S:
+    if isinstance(entry, dict) and entry.get("terminal_refusal"):
+        return cached_states if same_binding else []
+    if not force and same_binding and _cache_fresh(entry, now, binding):
         return [state for state in cached_states if state is not None]
     live: List[ProviderQuotaState]
     if provider == "bailian":
@@ -675,28 +964,41 @@ def read_provider(provider: str, force: bool = False,
             )]
     try:
         live = READERS[provider]()
+        after = _config_binding(provider)
+        if binding != after:
+            return []
+        live = _bind_states(live, "default", binding)
+        cache = _load_cache(path)
         cache[provider] = {
             "refreshed_at": int(now),
+            "binding": binding,
             "states": [asdict(state) for state in live],
         }
         _atomic_write(path, cache)
         return live
+    except QuotaCacheWriteError:
+        raise
     except Exception as exc:
-        if isinstance(entry, dict) and isinstance(entry.get("states"), list):
+        code = _record_refresh_failure(path, provider, None, entry, binding, now, exc)
+        if same_binding and isinstance(entry.get("states"), list):
             stale = [
                 _from_cache_entry(row, type(exc).__name__)
                 for row in entry["states"]
             ]
-            return [state for state in stale if state is not None]
+            return [replace(state, refresh_error=code,
+                            failure_config_generation=(binding or {}).get("config_generation"))
+                    for state in stale if state is not None]
         return []
 
 
 def cached_glm_account_parked(account: str, *, now_ts: Optional[float] = None,
-                              cache_path: Optional[str] = None) -> bool:
+                              cache_path: Optional[str] = None,
+                              config_generation: Optional[str] = None) -> bool:
     """Narrow existing admission from a fresh authoritative account observation.
 
-    No network, credential access, cache refresh or lease mutation. Unknown data
-    preserves the incumbent decision; a passed reset never retains an old hold.
+    No network, credential access, cache refresh or lease mutation. The caller
+    must supply its current configuration generation. Unknown data cannot
+    establish this narrow account hold; it also cannot establish quota readiness.
     Use the same 95-percent park threshold as glm_quota_decision, per account.
     """
     if not isinstance(account, str) or not account:
@@ -707,6 +1009,10 @@ def cached_glm_account_parked(account: str, *, now_ts: Optional[float] = None,
     try:
         cache = _load_cache(cache_path or CACHE_PATH)
         entry = cache["glm"]["accounts"][account]
+        if (not config_generation or not isinstance(entry.get("binding"), dict)
+                or entry["binding"].get("config_generation") != config_generation
+                or entry.get("refresh_error") or entry.get("terminal_refusal")):
+            return False
         refreshed = entry.get("refreshed_at")
         if (type(refreshed) not in (int, float)
                 or not 0 <= now - refreshed <= FRESH_S):
@@ -773,7 +1079,10 @@ def glm_accounts_state(
         accounts_block = {}
     new_accounts_block = dict(accounts_block)
 
+    binding = _config_binding("glm")
     accounts = _glm_accounts_dict()
+    if binding != _config_binding("glm"):
+        return []
     out: List[Dict[str, Any]] = []
     changed = False
 
@@ -782,23 +1091,30 @@ def glm_accounts_state(
         if isinstance(info, dict):
             key = str(info.get("api_key") or "")
         cached = new_accounts_block.get(name)
-        cached_refresh = (
-            float(cached.get("refreshed_at") or 0)
-            if isinstance(cached, dict) else 0.0
-        )
-        cached_age = now - cached_refresh if cached_refresh else None
+        same_binding = binding is not None and isinstance(cached, dict) and cached.get("binding") == binding
 
         states: List[ProviderQuotaState] = []
         source = "UNKNOWN"
         observed_at: Optional[str] = None
         error: Optional[str] = None
 
+        if isinstance(cached, dict) and cached.get("terminal_refusal"):
+            states = _cache_states(cached, "provider refused") if same_binding else []
+            failed_binding = cached.get("failure_binding")
+            refusal = ("PROVIDER_REFUSED" if failed_binding == binding else
+                       "PRIOR_GENERATION_REFUSAL_UNRECONCILED")
+            out.append({"name": name, "states": states, "source": "UNKNOWN",
+                        "observed_at": states[0].observed_at if states else None,
+                        "error": refusal,
+                        "failure_config_generation": _binding_generation(failed_binding),
+                        "config_generation": (binding or {}).get("config_generation"),
+                        "endpoint": (binding or {}).get("endpoint")})
+            continue
+
         fresh_cache = (
             not force
-            and isinstance(cached, dict)
-            and cached_age is not None
-            and cached_age < REFRESH_INTERVAL_S
-            and isinstance(cached.get("states"), list)
+            and same_binding
+            and _cache_fresh(cached, now, binding)
         )
         if fresh_cache:
             cached_states = _cache_states(cached, "cached", keep_authoritative=True)
@@ -809,19 +1125,25 @@ def glm_accounts_state(
 
         if not states:
             try:
-                states = _live_glm(name, key)
+                states = _bind_states(_live_glm(name, key), name, binding)
+                if binding != _config_binding("glm"):
+                    # A changed credential/configuration cannot inherit a read
+                    # begun with its predecessor. Keep the retained evidence.
+                    return []
                 source = "PROVIDER_AUTHORITATIVE"
                 observed_at = states[0].observed_at if states else None
                 new_accounts_block[name] = {
                     "refreshed_at": int(now),
+                    "binding": binding,
                     "states": [asdict(state) for state in states],
                 }
                 changed = True
             except Exception as exc:
-                error = type(exc).__name__
+                error = _record_refresh_failure(path, "glm", name, cached, binding, now, exc)
+                new_accounts_block[name] = _load_cache(path).get("glm", {}).get("accounts", {}).get(name, {})
                 # Stale-cache fallback: keep the previous authoritative
                 # reading, demoted to LOCAL_RECONSTRUCTION.
-                if isinstance(cached, dict) and isinstance(
+                if same_binding and isinstance(
                     cached.get("states"), list
                 ):
                     stale = [
@@ -832,7 +1154,9 @@ def glm_accounts_state(
                         ) if s is not None
                     ]
                     if stale:
-                        states = stale
+                        states = [replace(state, refresh_error=error,
+                                          failure_config_generation=(binding or {}).get("config_generation"))
+                                  for state in stale]
                         source = stale[0].source
                         observed_at = stale[0].observed_at
 
@@ -842,24 +1166,31 @@ def glm_accounts_state(
             "source": source,
             "observed_at": observed_at,
             "error": error,
+            "failure_config_generation": (binding or {}).get("config_generation") if error else None,
+            "config_generation": (binding or {}).get("config_generation"),
+            "endpoint": (binding or {}).get("endpoint"),
         })
 
+    if binding != _config_binding("glm"):
+        return []
     if changed:
+        # Preserve other providers refreshed by the incumbent owner meanwhile.
+        cache = _load_cache(path)
+        glm_entry = cache.get("glm") if isinstance(cache.get("glm"), dict) else {}
         glm_entry["accounts"] = new_accounts_block
         cache["glm"] = glm_entry
-        try:
-            _atomic_write(path, cache)
-        except Exception:
-            pass
+        _atomic_write(path, cache)
     return out
 
 
 def fresh_authoritative(provider: str, window: str,
                         now_ts: Optional[float] = None,
-                        cache_path: Optional[str] = None) -> Optional[ProviderQuotaState]:
+                        cache_path: Optional[str] = None,
+                        account: Optional[str] = None) -> Optional[ProviderQuotaState]:
     now = _utc_now().timestamp() if now_ts is None else float(now_ts)
+    eligible = []
     for state in read_provider(provider, now_ts=now, cache_path=cache_path):
-        if state.window != window:
+        if state.window != window or account is not None and state.account != account:
             continue
         observed = _iso(state.observed_at)
         try:
@@ -868,9 +1199,17 @@ def fresh_authoritative(provider: str, window: str,
             ).timestamp() if observed else None
         except (OSError, ValueError):
             age = None
-        if state.source == "PROVIDER_AUTHORITATIVE" and age is not None and age <= FRESH_S:
-            return state
-    return None
+        reset = _iso(state.reset_at)
+        reset_ts = datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp() if reset else None
+        pct = _num(state.remaining_pct)
+        if (state.source == "PROVIDER_AUTHORITATIVE" and age is not None and 0 <= age <= FRESH_S
+                and not state.refresh_error
+                and pct is not None and 0 <= pct <= 100
+                and (state.reset_at is None or reset is not None)
+                and (reset_ts is None or reset_ts > now)):
+            eligible.append(state)
+    # A provider-wide flattened account list is not one physical allowance.
+    return eligible[0] if len(eligible) == 1 else None
 
 
 def glm_quota_decision(now_ts: Optional[float] = None,
@@ -881,11 +1220,11 @@ def glm_quota_decision(now_ts: Optional[float] = None,
     """R29 GLM quota decision (W4-G9 multi-account).
 
     State rules:
-      * ``PARKED`` when EVERY account's weekly pct >= 95 % (or every 5h pct
-        >= 95 %).
-      * ``SPILL`` only when EVERY account's 5h pct >= 90 % (no single account
-        has spare capacity).
-      * ``OK`` otherwise (at least one account has headroom).
+      * ``PARKED`` when every account has qualified evidence and EACH is
+        exhausted in at least one required window (95-percent park threshold).
+      * ``SPILL`` when every otherwise usable account's 5h pct >= 90 %.
+      * ``OK`` only when at least one account has paired, qualified headroom.
+      * ``UNKNOWN`` when no usable account exists and evidence is incomplete.
 
     Returns the BEST account's quota fields at the top level (so callers
     like ``pool_ledger.glm_burn`` keep working) plus a per-account
@@ -930,18 +1269,36 @@ def glm_quota_decision(now_ts: Optional[float] = None,
             }
         estimate = dict(local_estimate)
         estimate["source"] = "LOCAL_RECONSTRUCTION"
-        estimate["observed_at"] = estimate.get("observed_at") or _iso(now)
-        estimate.setdefault("state", "OK")
+        estimate["observed_at"] = _iso(estimate.get("observed_at"))
+        # Historical reconstruction is useful telemetry, not live allowance.
+        estimate["state"] = "UNKNOWN"
         estimate.setdefault("detail", "W4-G7 calibrated local reconstruction")
-        estimate["confidence"] = min(0.80, float(estimate.get("confidence", 0.70)))
+        estimate["confidence"] = max(0.0, min(0.80, _num(estimate.get("confidence")) or 0.0))
         estimate.setdefault("accounts", [])
         return estimate
 
     breakdown: List[Dict[str, Any]] = []
     best_idx = -1
     best_score: Optional[Tuple[float, float, int]] = None
+    usable_indices = []
+    evidence_complete = []
+    parked_accounts = []
     for idx, entry in enumerate(per_account):
         states = entry.get("states") or []
+        qualified = account_quota_view(
+            "glm", entry["name"], states,
+            config_generation=entry.get("config_generation"),
+            endpoint=entry.get("endpoint"), now_ts=now,
+            refresh_error=entry.get("error"),
+            failure_config_generation=entry.get("failure_config_generation"),
+        )
+        complete = all(row["reason"] in (None, "EXHAUSTED") for row in qualified["windows"])
+        parked = complete and any(row["remaining_pct"] <= 5 for row in qualified["windows"])
+        usable = qualified["quota_ready"] and not parked
+        evidence_complete.append(complete)
+        parked_accounts.append(parked)
+        if usable:
+            usable_indices.append(idx)
         s_5h = next((s for s in states if s.window == "5h"), None)
         s_wk = next((s for s in states if s.window == "weekly"), None)
         pct_5h = (
@@ -967,10 +1324,11 @@ def glm_quota_decision(now_ts: Optional[float] = None,
             "source": entry["source"],
             "observed_at": entry["observed_at"],
             "error": entry.get("error"),
+            "qualified_quota": qualified,
         })
         score = (
-            pct_5h if pct_5h is not None else float("inf"),
-            pct_week if pct_week is not None else float("inf"),
+            (pct_5h if pct_5h is not None else float("inf")) if usable else float("inf"),
+            (pct_week if pct_week is not None else float("inf")) if usable else float("inf"),
             idx,
         )
         if best_score is None or score < best_score:
@@ -985,30 +1343,16 @@ def glm_quota_decision(now_ts: Optional[float] = None,
             "accounts": breakdown,
         }
 
-    pct_5h_values = [b["pct_5h"] for b in breakdown if b["pct_5h"] is not None]
-    pct_week_values = [b["pct_week"] for b in breakdown if b["pct_week"] is not None]
-    all_5h_at_or_above_95 = bool(pct_5h_values) and all(
-        p >= 95.0 for p in pct_5h_values
-    )
-    all_5h_at_or_above_90 = bool(pct_5h_values) and all(
-        p >= 90.0 for p in pct_5h_values
-    )
-    all_week_at_or_above_95 = bool(pct_week_values) and all(
-        p >= 95.0 for p in pct_week_values
-    )
-    if all_5h_at_or_above_95 or all_week_at_or_above_95:
+    if usable_indices:
+        state = "SPILL" if all(breakdown[i]["pct_5h"] >= 90 for i in usable_indices) else "OK"
+    elif all(evidence_complete) and all(parked_accounts):
         state = "PARKED"
-    elif all_5h_at_or_above_90:
-        state = "SPILL"
     else:
-        state = "OK"
+        state = "UNKNOWN"
 
     best = breakdown[best_idx]
     observed = best.get("observed_at") or ""
-    confidence = min(
-        best["remaining_pct_5h"] if best["remaining_pct_5h"] is not None else 1.0,
-        best["remaining_pct_week"] if best["remaining_pct_week"] is not None else 1.0,
-    )
+    confidence = min(row["confidence"] for row in best["qualified_quota"]["windows"])
     return {
         "state": state,
         "source": best["source"],
@@ -1105,6 +1449,43 @@ def _print_glm_accounts(
         )
 
 
+def qualified_provider_view(provider: str, *, force: bool = False,
+                            now_ts: Optional[float] = None,
+                            cache_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Join the incumbent GLM/MiniMax refresh to its per-account read view.
+
+    This does not perform Go authentication or replace the GoRouter refresh
+    owner. That owner must supply its original observation clock and binding to
+    parse_go_usage_payload/account_quota_view before publishing Go readiness.
+    """
+    now = _utc_now().timestamp() if now_ts is None else _num(now_ts)
+    if provider == "glm":
+        entries = glm_accounts_state(force=force, now_ts=now, cache_path=cache_path)
+    elif provider == "minimax":
+        before = _config_binding(provider)
+        states = read_provider(provider, force=force, now_ts=now, cache_path=cache_path)
+        after = _config_binding(provider)
+        retained = _load_cache(cache_path or CACHE_PATH).get(provider)
+        retained = retained if isinstance(retained, dict) else {}
+        failure_binding = retained.get("failure_binding")
+        error = retained.get("refresh_error")
+        if retained.get("terminal_refusal") and failure_binding != after:
+            error = "PRIOR_GENERATION_REFUSAL_UNRECONCILED"
+        entries = [{"name": "default", "states": states if before == after else [],
+                    "config_generation": (after or {}).get("config_generation"),
+                    "endpoint": (after or {}).get("endpoint"),
+                    "failure_config_generation": _binding_generation(failure_binding),
+                    "error": error if before == after else "CONFIG_CHANGED"}]
+    else:
+        raise ValueError("qualified live reader only available for glm/minimax")
+    return [account_quota_view(provider, entry["name"], entry.get("states") or [],
+                               config_generation=entry.get("config_generation"),
+                               endpoint=entry.get("endpoint"), now_ts=now,
+                               refresh_error=entry.get("error"),
+                               failure_config_generation=entry.get("failure_config_generation"))
+            for entry in entries]
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1112,7 +1493,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     show.add_argument("--provider", choices=("glm", "minimax", "bailian", "grok"))
     show.add_argument("--force", action="store_true")
     show.add_argument("--json", action="store_true")
+    show.add_argument("--qualified", action="store_true",
+                      help="per-account freshness/binding view; does not grant admission")
     args = parser.parse_args(argv)
+    if args.qualified:
+        if args.provider not in ("glm", "minimax"):
+            parser.error("--qualified requires --provider glm or minimax")
+        print(json.dumps(qualified_provider_view(args.provider, force=args.force),
+                         indent=2, sort_keys=True, allow_nan=False))
+        return 0
     providers = (args.provider,) if args.provider else ("glm", "minimax", "bailian")
     now_ts = _utc_now().timestamp()
     for provider in providers:

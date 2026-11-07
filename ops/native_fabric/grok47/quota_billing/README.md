@@ -1,4 +1,4 @@
-# Grok Build ACP billing extension (source-only)
+# Native quota reader successor (source-only)
 
 This directory provides a **reviewable replacement source** for the existing
 native Fabric runtime file `ext/quota_remote.py`. It does **not** create
@@ -23,9 +23,41 @@ The `grok47/qualify_installed_generation.py` historical stage owner
 has a fixed nine-file overlay set and is **not** extended or used for this
 separate follow-up.
 
-The reader only performs authenticated first-party ACP `initialize` and
+The Grok branch only performs authenticated first-party ACP `initialize` and
 `_x.ai/billing` calls, never model prompts. It reports a missing
 usage percent as UNKNOWN. It never clears `GROK_EXHAUSTED`, grants a
 lease, caches optimistic quota, or attests a paid Grok 4.7 result.
 A positive same-account/window provider entitlement and incumbent
 broker-owned safe marker reconciliation are separate future gates.
+
+## H2 account evidence
+
+The same successor now adds account/configuration-bound GLM and MiniMax observations,
+Go usage/debit normalization, and the original reader's `show --qualified` projection.
+See [H2 coverage and qualification](../../../../docs/HERMES_POOL_H2_ACCOUNT_COVERAGE.md)
+for exact account/model/workload coverage, installed refresh evidence and remaining joins.
+
+A reset boundary invalidates cached readiness until the original reader observes the
+provider again. Every required window must be usable on the same account. Missing,
+malformed, future, stale and failed observations cannot establish headroom. Local
+estimates remain telemetry. Terminal provider refusal is retained in the existing
+cache with the attempted configuration generation; `--force` does not clear it.
+
+The cache-only `cached_glm_account_parked` call now requires the caller's current
+`config_generation` to establish an account-specific hold. H3 must compose that
+argument and consume qualified paired windows before this successor is selected.
+A false narrow park result is not permission to dispatch. Go's existing GoRouter
+must export its original successful snapshot clock and binding; this module does
+not start a second collector. Existing admission, grants, no-overage controls,
+physical-account attestation and budget owners remain authoritative.
+
+Qualification:
+
+```bash
+python -m unittest discover -s tests -p 'test_native_fabric_account_quota.py'
+python -m unittest discover -s ops/native_fabric/grok47/quota_billing -p 'test_grok_acp_billing.py'
+```
+
+The frozen preimages, candidate, manifests and selected runtime are unchanged.
+Protected source acceptance and final native-generation composition/selection are
+separate gates; merging this source does not install the H2 behavior.
