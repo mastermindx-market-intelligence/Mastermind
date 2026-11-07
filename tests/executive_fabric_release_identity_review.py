@@ -784,8 +784,8 @@ REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
 # Exact historical root_identity["mode"] comparison, not a selected UID/GID.
 # Whole-source drift and any neighboring identity literal restore ordinary D8.
 REVIEWED_FILES["integrations/hermes_runtime/native_eval_inputs.py"] = {
-    "sha256": "16351afb482bc0b2551a5e5ad0ac73898881d8a4192df9e4cf8ce3a92aa1ca67",
-    "sites": ((91, 61, 66, "int", "0o700"),),
+    "sha256": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+    "sites": ((96, 61, 66, "int", "0o700"),),
 }
 
 # HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,

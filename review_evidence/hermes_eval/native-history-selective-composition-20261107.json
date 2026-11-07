@@ -1,0 +1,157 @@
+{
+  "adoption": {
+    "composition_choice": "Retain the real APPLICATION public parser and its four refusal cases. Add unit, renderer and filesystem ordering sentinels. Do not import the EVAL-only earlier unsupported-profile expectation.",
+    "exact_production_blobs": {
+      "integrations/hermes_runtime/native_agentos_memory.py": "006981f728d44b01281c7a1850d64bb2f2449d7c",
+      "integrations/hermes_runtime/native_eval_inputs.py": "8ab824e90d61e14faf067e2f41f5ca3b1ee46064",
+      "integrations/hermes_runtime/native_eval_publication.py": "568606e0c8db653f67e71052623d2e149bd2152a"
+    },
+    "fixture_source": "de966803faff6033a5d0e6b164843ab22edabe42",
+    "history_source": "5f9664c140b433ff961e4a9af49e7ea6be7624d7",
+    "identity_registry": "Only native_eval_inputs.py source hash and the same root_identity mode literal location move from line 91 to 96; all other composed registry rows are preserved.",
+    "method": "Selective source postimages and composition-specific hunks; does not adopt either complete source ancestry or claim protected-native composition delivery.",
+    "publication_test_blob": "2f3e59b3677597f0d94b531d1fa78e0bfe483137"
+  },
+  "base_commit": "9edfa7470c5a78321a101298df7c1f9a3d37d221",
+  "behavior": [
+    "Count-only prior conversation observation at the original qualified build_turn_context to _hydrate_from_history boundary, before appending the current user; no history content, digest or additional store retained.",
+    "Exact original LOCAL admission, source object, claim, turn, runner, private owner and physical session bindings are required. Original helper return and exception behavior are preserved.",
+    "Fully joined positive prior conversation history permits resume_used=true and fresh_session_observed=false. Empty or missing history proves neither reuse absence nor freshness.",
+    "Historical v1/v2 stay closed and readable; v2 and v3 preserve the strong six-field request/content joins and selected record sources.",
+    "The original shared 16 KiB budget is unchanged. Both complete three-attempt retention and actual metadata overflow are exercised; partial witnesses leave provider NOT_OBSERVED and the run invalid with EFFECT_UNKNOWN."
+  ],
+  "original_carriers": [
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175"
+  ],
+  "preserved_contributions": [
+    "Qualified APPLICATION parser, launch/configuration/environment/TCP and primary publication propagation in da1713d77eeaa24e34b42cb53f1a0cf942a327a6.",
+    "Original selected-child interpreter/site/version fixture repair and original seven primary fixture corrections.",
+    "Harness2 original-owner recovery references at 9edfa7470c5a78321a101298df7c1f9a3d37d221; recovery leads do not establish Trial validity."
+  ],
+  "proof_accounting": "These are separately attributed cohorts and one interrupted baseline, not one summed all-green run. No full native_session_control listener suite was invoked.",
+  "proofs": [
+    {
+      "attribution": "Completed 266 identity/review-pin cases before the test-only de966 fixture composition; all production source and identity registry hashes remain identical.",
+      "elapsed_seconds": 21.384,
+      "errors": 0,
+      "failed_names": [],
+      "failures": 0,
+      "junit_sha256": "a58028a442f1307d87d90f7aee0b8c4b13a931e7dd3a74ceda7cbf5d83a1d8fc",
+      "log_sha256": "07079b599945360868a01e8935fd30d1f98026f8f782c51330b5b576bb99d782",
+      "phase": "identity",
+      "receipt_sha256": "57fe6519fe44f872fbabb9c4bc614f62f73bd0bdddf975c04802e97f5ec0d944",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "selected_cases": 266,
+      "selector_count": 2,
+      "selectors_sha256": "077380dcfcc31593182ef428a22316f21b3d790ca76bb8e9d9e3d0a2d85dc891",
+      "skipped": 0,
+      "source_qualification": {
+        "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md": "cfa683d128dbdcdbb478221223add5dcc236f0f6bb7370c1f98ec5e2f2131953",
+        "integrations/hermes_runtime/native_agentos_memory.py": "57b6e231e84cd72088affe9a1b3b952b2b741a03e70a16f91ce37d8aa355b6d2",
+        "integrations/hermes_runtime/native_eval_inputs.py": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+        "integrations/hermes_runtime/native_eval_publication.py": "bdf916370dd6e936d1d1a6ca1c0c6a014cac763fbd50dc9f8a13bdefce63db48",
+        "integrations/hermes_runtime/tests/test_native_eval_inputs.py": "dd694bfeaa8d04c1f48f3941d85f302c70fd2c580c0ef8927faa07936a365336",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py": "cd6727b93f78f33991fa5be2c9b2a91fb25560ecc8be3602587574f8440509d7",
+        "tests/executive_fabric_release_identity_review.py": "5d3bf55d91416c13adfd150012b59aa08e865eee5e428d21fc5e344b0496b394"
+      }
+    },
+    {
+      "attribution": "Interrupted baseline; not a completed green suite. 215 completed JUnit cases (83 native memory and 132 native inputs), no recorded case failure/error/skip, returncode 1 with KeyboardInterrupt and teardown internal KeyError. Publication module had not begun. Original proof was reconciled before applying the newer fixture correction.",
+      "elapsed_seconds": 824.047,
+      "errors": 0,
+      "failed_names": [],
+      "failures": 0,
+      "junit_sha256": "93bb990a88d88f724d9f9f63a2a81bb6cb5d31a67dbbf6f2add2676f959b0847",
+      "log_sha256": "894384c336560b440e3b1f8e5dd30a2fc4e5b968074610091ffc9e9cdd2369f5",
+      "phase": "behavior",
+      "receipt_sha256": "b4ad39683194cb6a94703772e28a17f8c9d48b6ce37d6af0774c78ac54295f9c",
+      "returncode": 1,
+      "schema": "mastermind.source_test_receipt/v1",
+      "selected_cases": 215,
+      "selector_count": 3,
+      "selectors_sha256": "69d2f7372aff7f2bdbecff0e1ac71b0e7c52b99c5d82f8ebce8842c73849be0f",
+      "skipped": 0,
+      "source_qualification": {
+        "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md": "cfa683d128dbdcdbb478221223add5dcc236f0f6bb7370c1f98ec5e2f2131953",
+        "integrations/hermes_runtime/native_agentos_memory.py": "57b6e231e84cd72088affe9a1b3b952b2b741a03e70a16f91ce37d8aa355b6d2",
+        "integrations/hermes_runtime/native_eval_inputs.py": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+        "integrations/hermes_runtime/native_eval_publication.py": "bdf916370dd6e936d1d1a6ca1c0c6a014cac763fbd50dc9f8a13bdefce63db48",
+        "integrations/hermes_runtime/tests/test_native_eval_inputs.py": "dd694bfeaa8d04c1f48f3941d85f302c70fd2c580c0ef8927faa07936a365336",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py": "cd6727b93f78f33991fa5be2c9b2a91fb25560ecc8be3602587574f8440509d7",
+        "tests/executive_fabric_release_identity_review.py": "5d3bf55d91416c13adfd150012b59aa08e865eee5e428d21fc5e344b0496b394"
+      }
+    },
+    {
+      "attribution": "Completed 23 not-yet-completed input cases plus four strengthened APPLICATION guard cases; four cases overlap the baseline. Source stable at beginning/end.",
+      "elapsed_seconds": 200.623,
+      "errors": 0,
+      "failed_names": [],
+      "failures": 0,
+      "junit_sha256": "d8dd3e0b0388c9bad337226b3ac16ec914b893688ab9346a4565647e7f31bea0",
+      "log_sha256": "a82a0b51cd86fa0131904e08c34ef556963104f0e3677f688117e093ebf2d3fe",
+      "phase": "remaining-inputs",
+      "receipt_sha256": "e1b5ecb91276278cde83bab795e747255d7bcde5762a43d15715795be09a9ea0",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "selected_cases": 27,
+      "selector_count": 27,
+      "selectors_sha256": "715f76572ce03f62f84638d93cf293c9f2666b571a7aad1211acf3bc9a751728",
+      "skipped": 0,
+      "source_qualification": {
+        "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md": "cda58be22333bfae2a4f4b853ee4d1a138652b6ca9e876afe2bedc25f7e1a1cc",
+        "integrations/hermes_runtime/native_agentos_memory.py": "57b6e231e84cd72088affe9a1b3b952b2b741a03e70a16f91ce37d8aa355b6d2",
+        "integrations/hermes_runtime/native_eval_inputs.py": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+        "integrations/hermes_runtime/native_eval_publication.py": "bdf916370dd6e936d1d1a6ca1c0c6a014cac763fbd50dc9f8a13bdefce63db48",
+        "integrations/hermes_runtime/tests/test_native_eval_inputs.py": "30855926787b0265e8380d01e6f0e3cf41d27ed01c2a4b0b586779312a94f9de",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py": "f9e9b5c94dcd76d73ec9d73e48909cb120ae1ac61bc05572400a826e0d7aa9d4",
+        "tests/executive_fabric_release_identity_review.py": "5d3bf55d91416c13adfd150012b59aa08e865eee5e428d21fc5e344b0496b394"
+      },
+      "source_stable": true
+    },
+    {
+      "attribution": "Completed all 109 current publication cases including actual three-request retry retention and genuine metadata pressure. Source stable at beginning/end.",
+      "elapsed_seconds": 404.767,
+      "errors": 0,
+      "failed_names": [],
+      "failures": 0,
+      "junit_sha256": "799aad9b9a32594cbaca96fc149d4fb54e0e5a222584f2697dd06dd4fc61473d",
+      "log_sha256": "4d23f7b2ccdb158ce92d66f7d94e2c5474e021483f72ddb1bc5310dc592e66eb",
+      "phase": "publication-final",
+      "receipt_sha256": "476ed7d4e05a64d85857c810100fa97aca8b150b9d773a486033764b0301eaab",
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "selected_cases": 109,
+      "selector_count": 109,
+      "selectors_sha256": "611cc520220b59ca392febd83ab3869d5e5b10cea14dd2ca074f84e2d0efaf72",
+      "skipped": 0,
+      "source_qualification": {
+        "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md": "cda58be22333bfae2a4f4b853ee4d1a138652b6ca9e876afe2bedc25f7e1a1cc",
+        "integrations/hermes_runtime/native_agentos_memory.py": "57b6e231e84cd72088affe9a1b3b952b2b741a03e70a16f91ce37d8aa355b6d2",
+        "integrations/hermes_runtime/native_eval_inputs.py": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+        "integrations/hermes_runtime/native_eval_publication.py": "bdf916370dd6e936d1d1a6ca1c0c6a014cac763fbd50dc9f8a13bdefce63db48",
+        "integrations/hermes_runtime/tests/test_native_eval_inputs.py": "30855926787b0265e8380d01e6f0e3cf41d27ed01c2a4b0b586779312a94f9de",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py": "f9e9b5c94dcd76d73ec9d73e48909cb120ae1ac61bc05572400a826e0d7aa9d4",
+        "tests/executive_fabric_release_identity_review.py": "5d3bf55d91416c13adfd150012b59aa08e865eee5e428d21fc5e344b0496b394"
+      },
+      "source_stable": true
+    }
+  ],
+  "remaining_acceptance": [
+    "Committed-head D8 and finite EVAL ownership gates must be attributed to the resulting commit separately.",
+    "Complete native producer still lacks required observed auth/model/sampling/environment/freshness/coverage, effects and cleanup facts; invalid evidence must remain ineligible.",
+    "Original protected-native composer, release integration and installed runtime/provider/account acceptance remain with their existing owners and effects.",
+    "No production Harness2 execution, learning efficacy, promotion, installation or measured availability claim follows from this source proof."
+  ],
+  "schema": "mastermind.hermes_native_history_composition_source_proof/v1",
+  "source_sha256": {
+    "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md": "cda58be22333bfae2a4f4b853ee4d1a138652b6ca9e876afe2bedc25f7e1a1cc",
+    "integrations/hermes_runtime/native_agentos_memory.py": "57b6e231e84cd72088affe9a1b3b952b2b741a03e70a16f91ce37d8aa355b6d2",
+    "integrations/hermes_runtime/native_eval_inputs.py": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+    "integrations/hermes_runtime/native_eval_publication.py": "bdf916370dd6e936d1d1a6ca1c0c6a014cac763fbd50dc9f8a13bdefce63db48",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py": "30855926787b0265e8380d01e6f0e3cf41d27ed01c2a4b0b586779312a94f9de",
+    "integrations/hermes_runtime/tests/test_native_eval_publication.py": "f9e9b5c94dcd76d73ec9d73e48909cb120ae1ac61bc05572400a826e0d7aa9d4",
+    "tests/executive_fabric_release_identity_review.py": "5d3bf55d91416c13adfd150012b59aa08e865eee5e428d21fc5e344b0496b394"
+  }
+}
