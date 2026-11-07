@@ -175,9 +175,14 @@ def _read_jsonl(path: Path) -> list[dict]:
     than an invitation to reason from a thinner ledger.
     """
     strict = path.name in _TRACE_JSONL_NAMES
-    if not path.exists():
-        return []
     try:
+        if strict:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return []
+        elif not path.exists():
+            return []
         lines = path.read_text(encoding="utf-8").splitlines()
     except Exception:
         if strict:
@@ -202,7 +207,7 @@ def _read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def _fsync_parent(path: Path) -> None:
+def _fsync_parent(path: Path, *, strict: bool = False) -> None:
     try:
         dir_fd = os.open(path.parent, os.O_RDONLY)
         try:
@@ -210,7 +215,8 @@ def _fsync_parent(path: Path) -> None:
         finally:
             os.close(dir_fd)
     except OSError:
-        pass
+        if strict:
+            raise
 
 
 def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
@@ -238,7 +244,7 @@ def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
             os.fsync(tmp.fileno())
         os.replace(tmp_name, path)
         tmp_name = None
-        _fsync_parent(path)
+        _fsync_parent(path, strict=True)
     finally:
         if tmp_name:
             try:

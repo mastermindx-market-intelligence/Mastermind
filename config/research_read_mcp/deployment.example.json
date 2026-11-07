@@ -1,0 +1,23 @@
+{
+  "schema": "mastermind.research_read_mcp.deployment.v1",
+  "mode": "production",
+  "mastermind_release": "/opt/mastermind-research/releases/0000000000000000000000000000000000000000",
+  "mastermind_commit": "0000000000000000000000000000000000000000",
+  "mastermind_tree": "0000000000000000000000000000000000000000",
+  "macro_release": "/opt/macro-research/releases/0000000000000000000000000000000000000000",
+  "macro_commit": "0000000000000000000000000000000000000000",
+  "macro_tree": "0000000000000000000000000000000000000000",
+  "bind_host": "127.0.0.1",
+  "bind_port": 8767,
+  "policy_path": "/etc/mastermind/research-read-policy.json",
+  "grant_path": "/etc/mastermind/research-read-grant.json",
+  "policy_id": "mastermind-research-read-v1",
+  "server_contract": "mastermind.research_read_mcp.v1.1",
+  "read_port_contract": "research_vault.read.v1",
+  "allowed_hosts": [
+    "research-mcp.example.invalid",
+    "127.0.0.1",
+    "127.0.0.1:8767"
+  ],
+  "allowed_origins": []
+}

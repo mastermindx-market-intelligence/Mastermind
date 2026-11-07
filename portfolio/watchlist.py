@@ -101,10 +101,12 @@ def _path() -> Path:
 
 def _read_jsonl(path: Path) -> list[dict]:
     """Read canonical JSONL strictly; missing is absence, malformed evidence is a failure."""
-    if not path.exists():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return []
     rows: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -263,7 +265,8 @@ def all_rows() -> list[dict]:
 # caller-supplied predicate whether the withhold reason still holds; if it CLEARED the name is
 # marked for PROMOTION (re-entry into the desk funnel), else it ages by one trading day and EXPIRES
 # past its TTL. ``MAX_WATCH`` is enforced by evicting the lowest-``combined`` active name.
-# Everything here is best-effort and NEVER raises — a logging/IO failure must never break the build.
+# Mutations remain best-effort; canonical reads raise on unavailable or corrupt evidence.
+# A failed read must not become an empty state or authorize replacement of prior bytes.
 # ─────────────────────────────────────────────────────────────────────────────
 def _read_state() -> list[dict]:
     return _read_jsonl(_STATE)

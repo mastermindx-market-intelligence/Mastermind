@@ -1,0 +1,52 @@
+{
+  "schema": "mastermind.source_validation_evidence.v1",
+  "operation": "self-healing-bootstrap-unification-20261106",
+  "pr": 2131,
+  "procedure_pin": "1d1b5368b394345486dfcc6226c971d628cd9ebc",
+  "source_qualified_commit": "24a7f61cbeeafffcfefe8f9d2ab77895b2d4b444",
+  "kernel": {
+    "chars": 7939,
+    "utf8_bytes": 7939,
+    "sha256": "b81762b77deabd92b81e60d2a8ea016f84a2922257676644b34204ce85cc5770",
+    "normalization": "ASCII/UTF-8, LF, includes one final LF"
+  },
+  "backend_tests": {
+    "source": "0b5258db223e5bda0635baeb6fb92c9cabc9f48e",
+    "passed": 126,
+    "failed": 0,
+    "skipped": 0,
+    "suites": [
+      "fabric-backend.test.mjs",
+      "fabric-diagnostics.test.mjs",
+      "fabric-result-paging.test.mjs"
+    ],
+    "backend_sha256": "af7ea6acf24ef7c8d546888a81992698046a39b21ee35ec585f5ddc1209bc1b9",
+    "output_sha256": "8a34357b9e4e372c47bda9fc49f1597b9e3096a09abe5a3d8ee273cdb52d34ca",
+    "runtime_seconds": 21.994,
+    "method": "Node v26.5.0 exact-source in-memory modules, original Python fixture only; no host checkout or worker dispatch"
+  },
+  "policy_tests": {
+    "source": "24a7f61cbeeafffcfefe8f9d2ab77895b2d4b444",
+    "suite": "tests/test_delivery_procedure_compaction_contract.py",
+    "passed": 212,
+    "failed": 0,
+    "source_files_read": 24,
+    "seven_file_bytes": 99958,
+    "limit_bytes": 100000,
+    "original_baseline_bytes": 167799,
+    "result_sha256": "e13927d6aec9c26564d101c0fd3082bef793eab71bcd2448c28ac3a1d91a9505",
+    "test_source_sha256": "318f18087f59f9f03f8ad1c9f50b4d6a9172e79bece794d810007419dd0bc189",
+    "method": "unchanged pytest assertions/functions over exact immutable source bytes and actual independent blocker helper; read-only virtual filesystem"
+  },
+  "adoption": {
+    "protected_merge_proven": false,
+    "gateway_install_proven": false,
+    "project_installs_verified": 0,
+    "secretary_thread": "1793950540.362079"
+  },
+  "preserved_parallel_work": [
+    2129,
+    2065,
+    2121
+  ]
+}

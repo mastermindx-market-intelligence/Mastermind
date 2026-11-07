@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -97,3 +98,143 @@ def test_non_trace_jsonl_keeps_existing_best_effort_read_contract(tmp_path, monk
     path.write_text(json.dumps({"id": "ctx-good"}) + "\n{broken\n", encoding="utf-8")
 
     assert pl._read_jsonl(path) == [{"id": "ctx-good"}]
+
+
+def test_context_request_stat_failure_keeps_actual_consumer_best_effort(tmp_path, monkeypatch):
+    pl = _wire(tmp_path, monkeypatch)
+    path = pl._DIR / "context_requests.jsonl"
+    original_exists = Path.exists
+
+    def fail_target_exists(self):
+        if self == path:
+            raise OSError("context-history-stat-unavailable")
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fail_target_exists)
+
+    assert pl.context_requests() == []
+
+
+@pytest.mark.parametrize("name", ["applications.jsonl", "presentations.jsonl"])
+def test_existing_trace_read_failure_is_not_empty(tmp_path, monkeypatch, name):
+    pl = _wire(tmp_path, monkeypatch)
+    path = pl._book_dir("autonomous") / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    original_read = Path.read_text
+
+    def fail_target_read(self, *args, **kwargs):
+        if self == path:
+            raise OSError("trace-read-unavailable")
+        return original_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_target_read)
+
+    with pytest.raises(OSError, match="trace-read-unavailable"):
+        if name == "applications.jsonl":
+            pl.applications("autonomous")
+        else:
+            pl._record_presentation("autonomous", "2026-09-18", [])
+
+
+@pytest.mark.parametrize("name", ["applications.jsonl", "presentations.jsonl"])
+def test_dangling_trace_is_not_absent_and_is_not_replaced(tmp_path, monkeypatch, name):
+    pl = _wire(tmp_path, monkeypatch)
+    path = pl._book_dir("autonomous") / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    missing = path.parent / "missing-trace.jsonl"
+    path.symlink_to(missing)
+
+    with pytest.raises(FileNotFoundError):
+        if name == "applications.jsonl":
+            pl.applications("autonomous")
+        else:
+            pl._record_presentation("autonomous", "2026-09-18", [])
+
+    assert path.is_symlink()
+    assert path.readlink() == missing
+    assert not missing.exists()
+    assert pl._append_jsonl(path, {"schema": "unaccepted.v1"}) is False
+    assert path.is_symlink()
+    assert not missing.exists()
+
+
+@pytest.mark.parametrize("name", ["applications.jsonl", "presentations.jsonl"])
+def test_trace_directory_fsync_failure_reports_unconfirmed_visible_effect(tmp_path, monkeypatch, name):
+    pl = _wire(tmp_path, monkeypatch)
+    path = pl._book_dir("autonomous") / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prior = {"schema": "prior.v1", "id": "old"}
+    added = {"schema": "new.v1", "id": "new"}
+    path.write_text(json.dumps(prior) + "\n", encoding="utf-8")
+    real_fsync = os.fsync
+    attempts = []
+
+    def fail_directory_fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            attempts.append("directory")
+            raise OSError("trace-directory-durability-unconfirmed")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory_fsync)
+
+    assert pl._append_jsonl(path, added) is False
+    assert attempts == ["directory"]
+    assert [json.loads(line) for line in path.read_text().splitlines()] == [prior, added]
+    assert not list(path.parent.glob(f".{path.name}.*.tmp"))
+
+
+def test_context_request_directory_fsync_retains_existing_best_effort(tmp_path, monkeypatch):
+    pl = _wire(tmp_path, monkeypatch)
+    real_fsync = os.fsync
+    attempts = []
+
+    def fail_directory_fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            attempts.append("directory")
+            raise OSError("context-directory-durability-unavailable")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory_fsync)
+
+    result = pl.request_context("autonomous", "terminal.flow", "Need verified flow context", "AAPL")
+
+    assert result["ok"] is True
+    assert attempts == ["directory"]
+    assert pl.context_requests() == [result["request"]]
+
+
+def test_real_presentation_publication_is_stable_and_deduplicated(tmp_path, monkeypatch):
+    pl = _wire(tmp_path, monkeypatch)
+    lesson = {"id": "lesson.v1.US_ONLY.persistence_truth", "scope": "US_ONLY",
+              "status": "active", "authority": pl.LESSON_AUTHORITY}
+
+    first = pl._record_presentation("autonomous", "2026-09-18", [lesson])
+    second = pl._record_presentation("autonomous", "2026-09-18", [lesson])
+
+    assert first == second
+    assert first["lesson_ids"] == [lesson["id"]]
+    assert first["authority"] == pl.APPLICATION_AUTHORITY
+    path = pl._book_dir("autonomous") / "presentations.jsonl"
+    assert [json.loads(line) for line in path.read_text().splitlines()] == [first]
+
+
+def test_valid_application_trace_round_trips_through_verified_reader(tmp_path, monkeypatch):
+    pl = _wire(tmp_path, monkeypatch)
+    row = _application_row(pl)
+    row["executed_at"] = None
+    row["material_difference"] = {}
+    row["decision_id"] = "decision.v1." + pl._sha256([
+        row["book"], row["accepted_asof"], row["presentation_id"], row["submission_sha256"],
+    ])[:24]
+    row["application_id"] = "application.v1." + pl._sha256([
+        row["decision_id"], row["presentation_id"], row["lesson_ids"],
+    ])[:24]
+    assert pl._valid_initial_application(row, "autonomous", row["application_id"]) is True
+    path = pl._book_dir("autonomous") / "applications.jsonl"
+
+    with pl._trace_lock("autonomous"):
+        assert pl._append_jsonl(path, row) is True
+
+    assert pl.applications("autonomous") == [row]
+    assert pl.applications("autonomous")[0]["executed"] is False

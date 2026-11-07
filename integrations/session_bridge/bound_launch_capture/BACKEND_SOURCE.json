@@ -1,0 +1,181 @@
+{
+  "schema": "mastermind.fabric_attended_backend_source/v1",
+  "classification": "SOURCE_ONLY_UNINSTALLED",
+  "files": {
+    "integrations/session_bridge/bound_launch_capture/fabric_attended_backend.py": {
+      "bytes": 52922,
+      "sha256": "d137e34fd9c8de7d9056bb8aeab6bb991b861525b414bf718eac21968d0291b4"
+    },
+    "tests/test_fabric_attended_backend.py": {
+      "bytes": 56702,
+      "sha256": "5527eb39b3b9f198839e258f0a6d07bd4edef82d50404c1bcbbfa2d31e96e505"
+    },
+    "tests/test_fabric_assignment_freshness.py": {
+      "bytes": 2658,
+      "sha256": "ab13ab1787bb7a33a13f68d2feb35e334f4d81841aa379a446a1a9bfdbf4f5b5"
+    },
+    "tests/test_fabric_attended_probe_join.py": {
+      "bytes": 25290,
+      "sha256": "4f75fc1f829ec2b5bb444e847e6d171d09c25184aacf7418b7c7d45594d6163a"
+    }
+  },
+  "dependencies": [
+    "c8479a83446824e093bf8e3265a882237115c403",
+    "d3ba60bd7985c605164147fdc0a3d691e4eeb3e9",
+    "c00d19eddf70aaf09801c7ef00ac6cfe6909a181"
+  ],
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "immediate_parent": "01a1321e-f5fc-7e10-b790-f06f300206b9",
+  "original_worker": {
+    "id": "fabric-attended-backend-build-01a11e90-v1",
+    "consumed_once": true,
+    "raw_bytes": 32107,
+    "raw_characters": 32101,
+    "raw_sha256": "7f631be392722bd6ffc6affff3527297e1373a340f1f340a37bf80219d7f44e5",
+    "acceptance": "NOT_ACCEPTED",
+    "contract_overrun_characters": 101
+  },
+  "checks": {
+    "W8_CREDENTIAL_COUPLED_GREEN.xml": {
+      "sha256": "7a901c2add4e6f438536f4827772dc2c67dcfc0e1703c72fae5497eb145374d5",
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "exit_code": 0
+    },
+    "CANONICAL_CANCEL_GREEN.xml": {
+      "sha256": "6cbebe667dfe4ee2fda9808c18f053ebc65bbd53cae13f964cb252ecb485c95c",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "exit_code": 0
+    },
+    "CURRENT_REALM_PHYSICAL_FINAL.xml": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/native-closure-20261012/bound-launch-producer/complete-start/assignment-control-join/CURRENT_REALM_PHYSICAL_FINAL.xml",
+      "bytes": 11282,
+      "sha256": "290e1260a67610b4608d8956b5c455d0080a55c0ed748d68c8b6bd5db7baf1ba",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "CURRENT_REALM_PATCH_GUARD.xml": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8e34b04c37f6a527fb96f784110b8cc66ad2cfda4af7ed336f5ee3d84a990a2c"
+    }
+  },
+  "factory_source_join": "create_attended_backend(trusted BridgeConfig, owner_resources=_FixedOwnerResources) -> fixed single-use service composition. It authenticates exact in-process ControlStartAuthority before deriving Runtime request/correlation and retaining ONE FabricAttendedBackend. Default unconfigured invocation refuses; no JSON/env/import selectors.",
+  "activation_path": "Qualified fixed owner supplies independent typed policy/catalog/profile/binary/physical/path/evidence resources plus actual typed current realm owner/loader, creates backend through fixed factory, then calls existing scripts.executive_fabric_bridge.serve(config, backend, stop_event=original owner event, activate_socket=existing qualified platform producer) on original main thread/event loop. Darwin default is activate_launchd_socket; Linux composition uses existing scripts.executive_os_linux_worker.activate_systemd_socket (closed one-FD producer) with independently qualified Control GID. No new listener. Original signal/cleanup owner shutdown composition remains required.",
+  "unsupported": "Nonempty validation argv refused pre-effect. validation/nonterminal/restart/unbound absence cleanup scopes remain unavailable. Existing original owner reconciliation required after controller restart.",
+  "pending": "Actual finite Anthropic current observer/V2 producer and installed composition, final source review/release and host qualification remain. Prior paid review exceeded bound and is NOT_ACCEPTED; concrete F3 independently reproduced and repaired.",
+  "credential_source_join": "Fixed canonical CredentialLoader, typed current SubscriptionRealmOwner and original binding/profile catalogs. Existing physical route pins realm config, worker and actual controller UID/GID/HOME before reservation and at original credential boundary. No secret in RPC/descriptor/evidence, no interactive-canary task authority.",
+  "canonical_cancellation": "Authenticated FabricBridgeBroker validates the closed cancellation body; original lane owner independently validates before signals. Backend delegates without a third duplicated numeric bound.",
+  "post_release_failure": "Verified original lease release is immutable. A later cleanup carrier read failure is propagated without re-holding the released lease or obscuring original failure.",
+  "historical_file_snapshots": [
+    {
+      "revision": "UNKNOWN_UNVERIFIED",
+      "files": {
+        "control_plane/fabric_attended_backend.py": {
+          "bytes": 46660,
+          "sha256": "a4ead111d65dcf3de832c1a2229d2c839ca4225ab2fd385b99b5e7525c6493b7"
+        },
+        "tests/test_fabric_attended_backend.py": {
+          "bytes": 54220,
+          "sha256": "b178e4c76afcfaa62ca21dc965ac9ef3590ec64d69e783198316b5682cec05d8"
+        }
+      },
+      "note": "Values retained verbatim from the prior manifest; no source revision or current verification is inferred."
+    },
+    {
+      "revision": "d29f0726d58499090913ed7dcc2b3d0784ca7986",
+      "files": {
+        "control_plane/fabric_attended_backend.py": {
+          "bytes": 52915,
+          "sha256": "d4615f31e27d046af762898389173637e31d41d77c51ce6fe737bb63a5401e1b"
+        },
+        "tests/test_fabric_attended_backend.py": {
+          "bytes": 56667,
+          "sha256": "3e3fa8b5b9fdbacde50a677601578d8f029ada49825f8b4876a5d3a168db96c7"
+        },
+        "tests/test_fabric_assignment_freshness.py": {
+          "bytes": 2623,
+          "sha256": "8fa4261009c55b0c3621c97c0b0fad6c6fbb9e45bb79ca0d2fa7f7a231a7f59b"
+        },
+        "tests/test_fabric_attended_probe_join.py": {
+          "bytes": 25055,
+          "sha256": "ed02383f1c78b545c35e519e44ec514aaeae2ed7f3f0445fb290391abe26b007"
+        }
+      },
+      "note": "Exact git-show pre-repair bytes, verified at restart repair; does not rebind older checks."
+    }
+  ],
+  "architecture_boundary": "Concrete backend lives under existing session_bridge integration; control_plane keeps shared protocol. No compatibility shim or dynamic import.",
+  "current_verification": {
+    "state": "SOURCE_CHECKS_PASS_UNINSTALLED",
+    "checks": {
+      "LOCAL_RED.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/LOCAL_RED.xml",
+        "sha256": "d0fefa2da983e52e01faf7f631f23ee78983fc1bea2458e8bc07cb0d96cf37c1",
+        "tests": 3,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      },
+      "LOCAL_GREEN.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/LOCAL_GREEN.xml",
+        "sha256": "ffebe8e79d990e64c690778c256401a95aca92008fcb21d43cf6be37870602c9",
+        "tests": 278,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "GATEWAY_GREEN.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/GATEWAY_GREEN.xml",
+        "sha256": "f477327e3f80ef48f5451da75599f040c5497718b2b626de625b134b9b5d12e1",
+        "tests": 53,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "GATEWAY_SHORT_PATH.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/GATEWAY_SHORT_PATH.xml",
+        "sha256": "5f94633c65a23abafddaebac1011b1a77bed179541041b780185b9d8d1f987a4",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "D8_COMMITTED.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/D8_COMMITTED.xml",
+        "sha256": "9a11818ee68b2ec3361d22af7d9c80afa94acadcbe2235e2ac6606627338c041",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "MERGED_GREEN.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/MERGED_GREEN.xml",
+        "sha256": "ebc67d05389e80704e097434df9d1e10873d91898a5e1bc05fef150ef5a600d5",
+        "tests": 112,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "MERGED_TERMINAL.xml": {
+        "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/restart-resume-20261013-1038/MERGED_TERMINAL.xml",
+        "sha256": "2f07e9a546792ea7c19eb061eed44caef092efee1a9b743adee799967d6da8d8",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "note": "LOCAL_RED preserves three initial failures. GATEWAY_GREEN contains52passes and one macOS test-socket path-length failure; that exact test passed separately with a short fresh external-SSD basetemp in GATEWAY_SHORT_PATH. No production guard changed.",
+    "tested_revision": "5e91f622f5ef8849887464014769be05eb2e48be",
+    "integrated_main": "a246810e22257ea19a41aa6c3f3c42399f682f01"
+  }
+}
