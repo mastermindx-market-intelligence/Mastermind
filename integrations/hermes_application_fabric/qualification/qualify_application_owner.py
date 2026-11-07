@@ -154,7 +154,9 @@ def main():
             assert SERVICE_TOKEN not in rendered_manifest
             # codeql[py/clear-text-storage-sensitive-data]
             (config / "capability_manifest.yml").write_text(rendered_manifest)  # lgtm[py/clear-text-storage-sensitive-data]
-            environment = patch.dict(os.environ, {qualified.secret_ref: SERVICE_TOKEN,
+            # Runtime env wiring only — in-memory process env for the fixture
+            # harness; the token value never reaches disk (asserted above).
+            environment = patch.dict(os.environ, {qualified.secret_ref: SERVICE_TOKEN,  # lgtm[py/clear-text-storage-sensitive-data] # codeql[py/clear-text-storage-sensitive-data]
                 "MM_PROVIDER_WORKLOAD_PROFILE": "site_interactive"})
             environment.start()
             self.addCleanup(environment.stop)
