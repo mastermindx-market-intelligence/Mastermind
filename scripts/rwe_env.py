@@ -1063,14 +1063,18 @@ def _stop_gate_controller(process: subprocess.Popen[str]) -> bool:
     drain_deadline = deadline - min(1.0, _CONTROLLER_CLEANUP_SECONDS / 2)
     healthy = True
     complete = False
+    signal_unavailable = False
     descriptors = set()
     try:
         if process.poll() is None:
             try:
                 process.send_signal(signal.SIGTERM)
             except ProcessLookupError:
-                pass
+                signal_unavailable = True
             except OSError:
+                # Observe/reap only after refusal; never retry or escalate the
+                # same controller identity through the forced-kill fallback.
+                signal_unavailable = True
                 healthy = False
         for stream in (process.stdout, process.stderr):
             try:
@@ -1110,10 +1114,13 @@ def _stop_gate_controller(process: subprocess.Popen[str]) -> bool:
         complete = healthy and not descriptors and process.poll() in (0, 128 + signal.SIGTERM)
     finally:
         if process.poll() is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+            if not signal_unavailable:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    healthy = False
             try:
                 process.wait(timeout=max(0.0, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
@@ -1672,15 +1679,44 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _report_gate_interruption(error: _GateInterrupted) -> None:
+    """Make one nonblocking best-effort write; never buffer terminal diagnostics."""
+    notes = getattr(error, "__notes__", ())
+    lines = [f"rwe_env gate interrupted by signal {error.signum}"]
+    for note in (
+        "rwe_env gate: controller cleanup unconfirmed",
+        "rwe_env gate: stream close failed during cleanup",
+        "rwe_env gate: output flags restoration failed",
+    ):
+        if note in notes:
+            lines.append(note)
+    payload = ("\n".join(lines) + "\n").encode("ascii")
+    try:
+        descriptor = sys.stderr.fileno()
+        was_blocking = os.get_blocking(descriptor)
+    except Exception:
+        # An arbitrary descriptorless observer has no bounded write contract.
+        return
+    try:
+        os.set_blocking(descriptor, False)
+        os.write(descriptor, payload)
+    except Exception:
+        # A closed/full output sink must not replace the first signal's exit.
+        pass
+    finally:
+        try:
+            os.set_blocking(descriptor, was_blocking)
+        except Exception:
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
         return int(args.func(args))
     except _GateInterrupted as exc:
-        print(f"rwe_env gate interrupted by signal {exc.signum}", file=sys.stderr)
-        for note in getattr(exc, "__notes__", ()):
-            print(note, file=sys.stderr)
+        _report_gate_interruption(exc)
         return 128 + exc.signum
     except EnvError as exc:
         # Defense in depth: individual subcommands already catch the

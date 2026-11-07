@@ -433,7 +433,8 @@ def test_stream_close_error_restores_handlers_and_preserves_original_observer_fa
     assert all(signal.getsignal(number) == handler for number, handler in previous.items())
 
 @pytest.mark.parametrize("signal_number", [signal.SIGINT, signal.SIGTERM])
-def test_unread_wrapper_output_cannot_block_nested_cancellation(tmp_path, signal_number):
+@pytest.mark.parametrize("combine_streams", [False, True], ids=["separate", "combined"])
+def test_unread_wrapper_output_cannot_block_nested_cancellation(tmp_path, signal_number, combine_streams):
     source = (
         "from pathlib import Path\nimport os,signal,subprocess,sys,time\n"
         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
@@ -446,7 +447,8 @@ def test_unread_wrapper_output_cannot_block_nested_cancellation(tmp_path, signal
     )
     root, environment, env, original = _project(tmp_path, source)
     process = subprocess.Popen(_launcher(root, "blocked-output"), cwd=root, env=env,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT if combine_streams else subprocess.PIPE, text=True)
     try:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -472,7 +474,10 @@ def test_unread_wrapper_output_cannot_block_nested_cancellation(tmp_path, signal
         assert all(not _running(pid) for pid in owned)
         assert (environment / rwe.RECEIPT_FILENAME).read_bytes() == original
         output, errors = process.communicate(timeout=2)
-        assert "gate interrupted" in errors
+        if not combine_streams:
+            assert "gate interrupted" in errors
+        # A full combined pipe may drop the bounded best-effort diagnostic;
+        # returning the original signal code must not depend on its consumer.
     finally:
         for path in (root / "seen").glob("child-*"):
             try:
@@ -520,3 +525,54 @@ def test_cancellable_output_preserves_unicode_partial_writes_and_descriptor_flag
             with rwe._gate_output_writer(destination, cancelled) as forward:
                 forward("never")
         assert os.get_blocking(descriptor)
+
+
+@pytest.mark.parametrize("signal_error", [
+    pytest.param(PermissionError, id="refused"),
+    pytest.param(OSError, id="failed"),
+    pytest.param(ProcessLookupError, id="absent"),
+])
+def test_refused_controller_signal_is_not_retried_and_cannot_complete_receipt(
+    tmp_path, monkeypatch, signal_error,
+):
+    args, environment = _arguments(tmp_path, monkeypatch)
+    args.processes = 4
+    original = json.dumps({"schema": rwe.SCHEMA, "definition": {"lock_path": None},
+                           "proof": {"realized": True}, "degraded": []}).encode()
+    (environment / rwe.RECEIPT_FILENAME).write_bytes(original)
+    calls = []
+
+    class Controller:
+        stdout = stderr = None
+        returncode = None
+        def poll(self):
+            return self.returncode
+        def send_signal(self, number):
+            calls.append(("signal", number))
+            raise signal_error(1, "injected controller signal refusal")
+        def kill(self):
+            calls.append(("kill", signal.SIGKILL))
+            self.returncode = -signal.SIGKILL
+        def wait(self, timeout):
+            if self.returncode is None:
+                time.sleep(min(0.005, max(0.0, timeout)))
+                raise subprocess.TimeoutExpired("owned controller", timeout)
+            return self.returncode
+
+    controller = Controller()
+    monkeypatch.setattr(rwe.subprocess, "Popen", lambda *a, **k: controller)
+    def interrupted(*a, **k):
+        raise rwe._GateInterrupted(signal.SIGINT)
+    monkeypatch.setattr(rwe, "_observe_gate", interrupted)
+    monkeypatch.setattr(rwe, "_CONTROLLER_CLEANUP_SECONDS", 0.05)
+    handlers = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)}
+    started = time.monotonic()
+    with pytest.raises(rwe._GateInterrupted) as captured:
+        rwe.cmd_gate(args)
+    assert captured.value.signum == signal.SIGINT
+    assert "rwe_env gate: controller cleanup unconfirmed" in captured.value.__notes__
+    assert calls == [("signal", signal.SIGTERM)]
+    assert controller.returncode is None
+    assert time.monotonic() - started < 0.5
+    assert (environment / rwe.RECEIPT_FILENAME).read_bytes() == original
+    assert all(signal.getsignal(number) == handler for number, handler in handlers.items())
