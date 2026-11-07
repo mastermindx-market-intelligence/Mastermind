@@ -1,0 +1,23 @@
+{
+  "reason": "Newly demonstrated IPv4/UDP containment defect materially affected scanner qualification; one stricter full replay required. No model refits or new candidate selection.",
+  "strict_scanner_commit": "3b08dd90f",
+  "comparison": {
+    "selected_messages.bin": {
+      "original_sha256": "2e398a87f7ed3d8e8d327d14dc4b31024aeff39663b28e7075b40e0f016eca62",
+      "requalified_sha256": "2e398a87f7ed3d8e8d327d14dc4b31024aeff39663b28e7075b40e0f016eca62",
+      "byte_identical": true
+    },
+    "executions.csv.gz": {
+      "original_sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+      "requalified_sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+      "byte_identical": true
+    },
+    "scan.json": {
+      "original_sha256": "2b49c332ed3b709813d06c788d06e188726b96d7f023df275bca7ff77ee79624",
+      "requalified_sha256": "2b49c332ed3b709813d06c788d06e188726b96d7f023df275bca7ff77ee79624",
+      "byte_identical": true
+    }
+  },
+  "result": "ALL_THREE_OUTPUTS_BYTE_IDENTICAL",
+  "original_forecasts_reused": true
+}

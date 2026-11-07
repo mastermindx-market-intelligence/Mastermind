@@ -32,7 +32,8 @@ def _ledger_lock():
     """Serialize ledger mutations across both threads and processes."""
     with _LOCAL_LOCK:
         _LEDGER.parent.mkdir(parents=True, exist_ok=True)
-        with _lock_path().open("a+", encoding="utf-8") as lock:
+        lock = _lock_path().open("a+", encoding="utf-8")
+        try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -40,17 +41,27 @@ def _ledger_lock():
                 try:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
                 except OSError:
-                    # The data effect, if any, was already decided by atomic os.replace below;
-                    # lock cleanup must not turn a known committed effect into an apparent failure.
+                    # The data effect, if any, was already decided by atomic os.replace below.
                     pass
+        finally:
+            try:
+                lock.close()
+            except OSError:
+                # Cleanup must preserve the committed result or the original operation error.
+                pass
 
 
 def _read_unlocked() -> list[dict]:
-    if not _LEDGER.exists():
+    try:
+        _LEDGER.lstat()
+    except FileNotFoundError:
         return []
     # Deliberately fail closed on malformed historical evidence. This owner does not silently
     # discard or quarantine accountability rows; callers must repair corrupt evidence explicitly.
-    return [json.loads(l) for l in _LEDGER.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(line) for line in _LEDGER.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("thesis ledger rows must be mappings")
+    return rows
 
 
 def _read() -> list[dict]:
