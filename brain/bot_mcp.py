@@ -318,9 +318,34 @@ def _stock_price(t: str):
 # ---------------- READ tools ----------------
 @tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
 async def get_regime(args):
-    d = _read_json(_V / "data" / "regime" / "latest.json") or {}
     keys = ["date", "quad", "quad_name", "growth_score", "inflation_score", "liquidity_overlay", "cycle_tag"]
-    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (d.get("sector_rs") or [])[:6]}
+    d, core_failed = _read_first_nonempty_mapping_checked((
+        _V / "data" / "regime" / "latest.json",
+    ))
+    if d is None:
+        out = {k: None for k in keys} | {
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable" if core_failed else "absent",
+            "error": "regime_core_unavailable" if core_failed else "regime_core_absent",
+        }
+        if core_failed:
+            out["failed_sources"] = ["regime"]
+        return _json(out)
+
+    sector_rs = d.get("sector_rs")
+    if sector_rs is not None and not isinstance(sector_rs, list):
+        return _json({
+            **{k: None for k in keys},
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable",
+            "error": "regime_core_unavailable",
+            "failed_sources": ["regime"],
+        })
+
+    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (sector_rs or [])[:6]}
+    failed_sources = []
     # E1.1 — append the market_view brief + label_vs_planes line (ADDITIVE; absent view → keys absent).
     # This replaces the ad-hoc 7-key slice so the autonomous Brain reads the same perception layer as
     # the judgment seats — the incident's root cause was the Brain seeing ONLY the label.
@@ -328,35 +353,52 @@ async def get_regime(args):
         from brain.pm_conviction import _read_market_view, _market_view_enrichment
         mv = _read_market_view()
         enrichment = _market_view_enrichment(mv)
+        if enrichment is not None and not isinstance(enrichment, dict):
+            raise TypeError("market-view enrichment is not a mapping")
         if enrichment:
-            compact_mv = dict(enrichment)
-            compact_mv["plane_summaries"] = [
-                {
+            planes = enrichment.get("plane_summaries")
+            if planes is None:
+                planes = []
+            if not isinstance(planes, list):
+                raise TypeError("market-view planes are not a list")
+            compact_planes = []
+            for row in planes:
+                if not isinstance(row, dict):
+                    raise TypeError("market-view plane is not a mapping")
+                freshness, freshness_failed = _mapping_field_checked(row, "freshness")
+                if freshness_failed:
+                    raise TypeError("market-view plane freshness is not a mapping")
+                compact_planes.append({
                     "name": row.get("name"),
                     "direction": row.get("direction"),
                     "status": row.get("status"),
-                    "asof": (row.get("freshness") or {}).get("asof"),
-                    "stale": (row.get("freshness") or {}).get("stale"),
-                    "age_sessions": (row.get("freshness") or {}).get("age_sessions"),
-                }
-                for row in (enrichment.get("plane_summaries") or [])
-            ]
+                    "asof": freshness.get("asof"),
+                    "stale": freshness.get("stale"),
+                    "age_sessions": freshness.get("age_sessions"),
+                })
+            compact_mv = dict(enrichment)
+            compact_mv["plane_summaries"] = compact_planes
+            json.dumps(compact_mv, default=str, ensure_ascii=False)
             out["market_view"] = compact_mv
-    except Exception:  # noqa: BLE001 — additive; never break the tool
-        pass
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("market_view")
     try:
         from brain import decision_context as _dc
 
         dc = _dc.prompt_summary(
             expected_publication=(out.get("market_view") or {}).get("publication")
         )
+        if dc is not None and not isinstance(dc, dict):
+            raise TypeError("decision context is not a mapping")
         if dc:
-            liquidity = dc.get("liquidity") or {}
-            quality = liquidity.get("quality") or {}
-            driver = dc.get("market_driver") or {}
+            liquidity, liquidity_failed = _mapping_field_checked(dc, "liquidity")
+            quality, quality_failed = _mapping_field_checked(liquidity, "quality")
+            driver, driver_failed = _mapping_field_checked(dc, "market_driver")
+            if liquidity_failed or quality_failed or driver_failed:
+                raise TypeError("decision context contains an invalid mapping field")
             # Keep this tool's JSON safely below its transport cap. Rich fresh-lobe context remains
             # available to the strategist/PM; get_regime carries the precise regime core.
-            out["decision_context"] = {
+            compact_dc = {
                 "schema_version": dc.get("schema_version"),
                 "market_asof": dc.get("market_asof"),
                 "hard_label": dc.get("hard_label"),
@@ -383,8 +425,14 @@ async def get_regime(args):
                 "publication": dc.get("publication"),
                 "serving_freshness": dc.get("serving_freshness"),
             }
-    except Exception:  # noqa: BLE001
-        pass
+            json.dumps(compact_dc, default=str, ensure_ascii=False)
+            out["decision_context"] = compact_dc
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("decision_context")
+    if failed_sources:
+        out["read_status"] = "partial"
+        out["failed_sources"] = failed_sources
+        out["note"] = "Regime core is available; named context sources did not complete."
     return _json(out)
 
 
