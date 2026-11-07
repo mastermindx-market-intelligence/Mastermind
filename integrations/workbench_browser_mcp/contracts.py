@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from control_plane.browser_resource_contract import ALLOWED_BROWSER_TOOLS, BrowserMode
+from .credential_use import CREDENTIAL_ACTION_SCHEMA, CREDENTIAL_TOOL
 
 
 START_SCHEMA = "mastermind.workbench_browser_start.v1"
@@ -298,7 +299,7 @@ def validate_prepared_browser_action(
         raise BrowserContractError("invalid browser action reference")
     _common(
         schema=value.schema,
-        expected_schema=ACTION_SCHEMA,
+        expected_schema=CREDENTIAL_ACTION_SCHEMA if value.schema == CREDENTIAL_ACTION_SCHEMA else ACTION_SCHEMA,
         subject_digest=value.subject_digest,
         client_ref=value.client_ref,
         resource=value.resource,
@@ -317,7 +318,9 @@ def validate_prepared_browser_action(
     )
     _hex(value.action_id, _HEX32, "action_id")
     _hex(value.browser_ref_sha256, _HEX64, "browser_ref_sha256")
-    if value.tool_name not in ALLOWED_BROWSER_TOOLS:
+    credential = value.schema == CREDENTIAL_ACTION_SCHEMA
+    if ((credential and value.tool_name != CREDENTIAL_TOOL)
+            or (not credential and value.tool_name not in ALLOWED_BROWSER_TOOLS)):
         raise BrowserContractError("browser tool is not granted")
     try:
         parsed = json.loads(value.arguments_json)
@@ -325,6 +328,12 @@ def validate_prepared_browser_action(
         raise BrowserContractError("browser arguments are invalid") from error
     if canonical_browser_arguments(parsed) != value.arguments_json:
         raise BrowserContractError("browser arguments are not canonical")
+    if credential and (type(parsed) is not dict or set(parsed) != {"grant_ref", "selection_sha256"}
+            or type(parsed["grant_ref"]) is not str
+            or re.fullmatch(r"credential:[a-f0-9]{32}", parsed["grant_ref"]) is None
+            or type(parsed["selection_sha256"]) is not str
+            or _HEX64.fullmatch(parsed["selection_sha256"]) is None):
+        raise BrowserContractError("credential action is not closed")
     return value
 
 
