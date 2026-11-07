@@ -15,6 +15,7 @@ from integrations.session_bridge.web_reply_subscription_owner import owner_key
 from integrations.session_bridge.installed_reply_events import RuntimeReplyEventHost
 from test_session_bridge_reply_event_host_integration import (
     event_case, short_socket_root, with_peer, URL, SECRET,
+    authenticated_receiver, native_case,
 )
 
 
