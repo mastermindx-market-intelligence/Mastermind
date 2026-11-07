@@ -1455,7 +1455,7 @@ class _A2Rebind:
 
 async def _rebind(*, bot_user_id: str, enable_w3c: bool = False,
                   enable_dot_canary: bool = False) -> dict[str, object]:
-    """Bind an existing enrollment; only an explicit flag enables W3C.
+    """Bind an existing enrollment; explicit flags enable W3C or canary reads.
 
     Token, scopes, bot, disabled/unloaded admission and descriptor-bound pair
     ownership remain unchanged. This does not activate the relay.
@@ -1476,7 +1476,8 @@ async def _rebind(*, bot_user_id: str, enable_w3c: bool = False,
                     raise ValueError("noncanonical canary selection")
                 old = _canonical_json_bytes(build_config_document(
                     bot_user_id=bot_user_id, release_sha=old_sha,
-                    scopes=scopes, w3c_enabled=w3c_enabled))
+                    scopes=scopes, w3c_enabled=w3c_enabled,
+                    dot_canary_enabled=dot_canary_enabled))
                 old_plist = render_plist(bot_user_id=bot_user_id, release_sha=old_sha,
                                          w3c_enabled=w3c_enabled,
                                          dot_canary_enabled=dot_canary_enabled)
