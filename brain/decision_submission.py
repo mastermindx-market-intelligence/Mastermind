@@ -1052,13 +1052,93 @@ def normalize(
     return payload, audit
 
 
-def write_atomic(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8"
-    )
-    os.replace(tmp, path)
+def _us_submission_path(path: Path) -> bool:
+    from portfolio import registry
+    return Path(path).absolute() == (
+        registry.data_dir("autonomous") / "_pending_decision.json").absolute()
+
+
+def _selected_submission_locked(path: Path, correlation: dict) -> tuple[dict, dict]:
+    from brain import runlog
+    if (not _us_submission_path(path) or type(correlation) is not dict
+            or set(correlation) != {"run_id", "tool_id"}):
+        raise runlog.PortfolioRunError("fabric_submission_correlation_invalid")
+    doc = runlog.portfolio_pending_locked()
+    if doc is None or doc["state"]["run_id"] != correlation["run_id"]:
+        raise runlog.PortfolioRunError("fabric_submission_original_missing")
+    effect = next((row for row in doc["state"].get("tools", [])
+                   if row.get("id") == correlation["tool_id"]), None)
+    prepared = effect.get("submission") if effect is not None else None
+    if (effect is None or effect.get("name") != "mcp__desk__submit_book"
+            or type(prepared) is not dict or effect.get("state") not in {"pending", "complete"}
+            or prepared.get("payload_digest") != runlog.digest(prepared.get("payload"))):
+        raise runlog.PortfolioRunError("fabric_submission_intent_missing")
+    payload = prepared["payload"]
+    if payload.get("_fabric_submission") != {
+            "schema": "mastermind.submission_origin.v1", "run_id": correlation["run_id"],
+            "tool_id": correlation["tool_id"], "book": "autonomous",
+            "asof": doc["state"]["asof"],
+            "normalized_digest": runlog.digest({k: v for k, v in payload.items()
+                                               if k != "_fabric_submission"})}:
+        raise runlog.PortfolioRunError("fabric_submission_origin_invalid")
+    return prepared, payload
+
+
+def reconcile_submission(path: Path, correlation: dict) -> dict:
+    """Read only the exact original effect; never normalize or rewrite its target."""
+    from brain import runlog
+    with runlog.portfolio_lock():
+        prepared, payload = _selected_submission_locked(path, correlation)
+        raw = runlog.strict_read(path)
+        if runlog.strict_json(raw) != payload:
+            raise runlog.PortfolioRunError("fabric_submission_effect_unsettled")
+        # A prior visible replace whose fsync/ACK failed is not durable until this succeeds.
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        runlog.sync_directory(path.parent)
+        if runlog.strict_read(path) != raw:
+            raise runlog.PortfolioRunError("fabric_submission_readback_failed")
+        return {"schema": "mastermind.submission_receipt.v1", **correlation,
+                "book": "autonomous", "asof": payload["_fabric_submission"]["asof"],
+                "payload_digest": prepared["payload_digest"],
+                "written_sha256": __import__("hashlib").sha256(raw).hexdigest()}
+
+
+def write_atomic(path: Path, payload: dict, *, correlation: dict | None = None):
+    from brain import runlog
+    if not _us_submission_path(path):
+        if correlation is not None:
+            raise runlog.PortfolioRunError("fabric_submission_book_invalid")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8"
+        )
+        os.replace(tmp, path)
+        return None
+    with runlog.portfolio_lock():
+        original = runlog.portfolio_pending_locked()
+        if correlation is None:
+            if original is not None:
+                raise runlog.PortfolioRunError("fabric_submission_owned")
+            old = runlog.strict_read(path, absent=True)
+            runlog.durable_replace(path, json.dumps(
+                payload, indent=2, default=str, ensure_ascii=False).encode("utf-8"), expected=old)
+            return None
+        prepared, expected_payload = _selected_submission_locked(path, correlation)
+        if payload != expected_payload:
+            raise runlog.PortfolioRunError("fabric_submission_payload_changed")
+        raw = runlog.strict_read(path, absent=True)
+        before = __import__("hashlib").sha256(raw).hexdigest() if raw is not None else None
+        wanted = runlog.canonical(payload)
+        if raw != wanted:
+            if before != prepared.get("before_sha256"):
+                raise runlog.PortfolioRunError("fabric_submission_preimage_changed")
+            runlog.durable_replace(path, wanted, expected=raw)
+    return reconcile_submission(path, correlation)
 
 
 def holding_audit_fields(holding: dict | None) -> dict:

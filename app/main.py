@@ -52,7 +52,7 @@ def _resolve_deployed_git_sha(root: Path | None = None) -> str | None:
 _MANUAL_BRAIN_RESPONSE_FIELDS = (
     "asof", "inaugural", "trading_day", "decided", "holdings",
     "executed", "skipped_unpriceable", "nav", "brain",
-    "target_status", "decision_effective",
+    "target_status", "decision_effective", "run_id", "fabric_held",
 )
 
 
@@ -148,12 +148,25 @@ if FastAPI is not None:
         """
         from app.auth import serve_only as _serve_only
         from brain import client as _brain_client, codex_bridge as _codex_bridge
-        reasoning_backend = _brain_client.backend()
-        shared_reasoning_available = (
-            _brain_client.available() if reasoning_backend == "waterfall" else False
-        )
-        reasoning_policy_ok = reasoning_backend == "waterfall" and shared_reasoning_available
-        codex_available = _codex_bridge.available()
+        from brain import fabric_portfolio
+        fabric_policy = fabric_portfolio.readiness() if fabric_portfolio.selected() else None
+        if fabric_policy is not None:
+            reasoning_backend = "fabric"
+            shared_reasoning_available = fabric_policy["eligible"] is True
+            reasoning_policy_ok = shared_reasoning_available
+            codex_available = None
+            reasoning_policy = "fabric_us_portfolio_typed"
+            reasoning_primary = "fabric_policy_eligible" if reasoning_policy_ok else "unavailable"
+        else:
+            reasoning_backend = _brain_client.backend()
+            shared_reasoning_available = (
+                _brain_client.available() if reasoning_backend == "waterfall" else False
+            )
+            reasoning_policy_ok = reasoning_backend == "waterfall" and shared_reasoning_available
+            codex_available = _codex_bridge.available()
+            reasoning_policy = "codex_first_claude_oauth_fallback"
+            reasoning_primary = ("unavailable" if not shared_reasoning_available
+                                 else "codex" if codex_available else "claude_oauth_fallback")
         is_serve_only = _serve_only()
         scheduler_obj = getattr(app.state, "scheduler", None)
         scheduler_running = bool(
@@ -166,17 +179,13 @@ if FastAPI is not None:
             "paper_only": True,
             "reasoning_policy_scope": "scheduled_portfolio_reasoning",
             "reasoning_backend": reasoning_backend,
-            "reasoning_policy": "codex_first_claude_oauth_fallback",
+            "reasoning_policy": reasoning_policy,
             "reasoning_policy_ok": reasoning_policy_ok,
             "shared_reasoning_available": shared_reasoning_available,
             "codex_available": codex_available,
-            "reasoning_primary": (
-                "unavailable" if not shared_reasoning_available
-                else "codex" if codex_available
-                else "claude_oauth_fallback"
-            ),
+            "reasoning_primary": reasoning_primary,
             "scheduled_portfolio_reasoning_backend": reasoning_backend,
-            "scheduled_portfolio_reasoning_policy": "codex_first_claude_oauth_fallback",
+            "scheduled_portfolio_reasoning_policy": reasoning_policy,
             "scheduled_portfolio_reasoning_available": shared_reasoning_available,
             "scheduled_portfolio_reasoning_policy_ok": reasoning_policy_ok,
             "scheduled_runtime_expected": scheduled_runtime_expected,
@@ -185,6 +194,11 @@ if FastAPI is not None:
             "advisor_chat_backend": "claude_agent_sdk",
             "advisor_chat_uses_scheduled_reasoning_waterfall": False,
         }
+        if fabric_policy is not None:
+            out["reasoning_policy_evidence"] = fabric_policy
+            out["reasoning_policy_scope"] = "typed_us_portfolio_policy_only"
+            out["advisor_chat_backend"] = "fabric"
+            out["advisor_chat_readiness_inferred"] = False
         if _git_sha:
             out["commit"] = _git_sha
             out["version"] = _git_sha
@@ -398,6 +412,7 @@ if FastAPI is not None:
         from control_plane import run_ledger, locks
         from app.scheduler import _brain_job_outcome
         from bot import autonomous
+        from brain import fabric_portfolio
         if wait:
             import asyncio as _aio
             handle = run_ledger.start_run("autonomous_daily", book="autonomous", trigger="http")
@@ -407,11 +422,13 @@ if FastAPI is not None:
                 return {"skipped": True, "reason": "lock_held"}
             try:
                 with lock:
-                    out = await _aio.to_thread(autonomous.run_autonomous, force=force)
+                    from brain.fabric_chat import _observe_thread
+                    kwargs = fabric_portfolio.caller_kwargs(handle)
+                    out = await _observe_thread(lambda: autonomous.run_autonomous(force=force, **kwargs))
                 _status, _severity, _extra = _brain_job_outcome(out)
                 run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
                 return _manual_brain_response(out, _status, _extra)
-            except Exception:
+            except BaseException:
                 run_ledger.end_run(handle, "error")
                 raise
 
@@ -423,7 +440,7 @@ if FastAPI is not None:
                 return
             try:
                 with lock:
-                    out = autonomous.run_autonomous(force=force)
+                    out = autonomous.run_autonomous(force=force, **fabric_portfolio.caller_kwargs(handle))
                 _status, _severity, _extra = _brain_job_outcome(out)
                 run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
             except Exception as exc:

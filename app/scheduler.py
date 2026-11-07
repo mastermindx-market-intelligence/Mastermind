@@ -394,6 +394,10 @@ def _maybe_schedule_brain_retry(job_id: str, book: str, since_ts) -> None:
     try:
         if _BRAIN_RETRY_JOBS.get(job_id) != book:
             return  # archived/unknown jobs are ineligible even if an old failure marker exists
+        if book == "autonomous":
+            from brain import fabric_portfolio, runlog
+            if runlog.portfolio_lookup() is not None or fabric_portfolio.selected():
+                return  # Original Fabric effects never become legacy whole-book retries.
         marker = _read_pool_exhausted_since(book, since_ts)
         if marker is None:
             return  # no all-cooling failure this run — nothing to retry
@@ -523,7 +527,8 @@ def _autonomous_job():
             return
         with lock:
             from bot.autonomous import run_autonomous
-            _result = run_autonomous()
+            from brain import fabric_portfolio
+            _result = run_autonomous(**fabric_portfolio.caller_kwargs(handle))
             _post_mark_forward_evaluation("autonomous", _result)
         _status, _severity, _extra = _brain_job_outcome(_result)
         _ledger_end(handle, _status, severity=_severity, extra=_extra)
@@ -2048,8 +2053,11 @@ def maybe_first_autonomous_run() -> bool:
     except Exception:
         pass
     try:
-        from brain import cli_bridge
-        if not cli_bridge.available():
+        from brain import cli_bridge, fabric_portfolio, runlog
+        original = runlog.portfolio_lookup()
+        ready = (True if original is not None else fabric_portfolio.available()
+                 if fabric_portfolio.selected() else cli_bridge.available())
+        if not ready:
             return False  # no subscription/CLI → don't fire a doomed armed run
     except Exception:
         return False
@@ -2066,7 +2074,8 @@ def maybe_first_autonomous_run() -> bool:
                 return
             with lock:
                 from bot.autonomous import run_autonomous
-                _result = run_autonomous()
+                from brain import fabric_portfolio
+                _result = run_autonomous(**fabric_portfolio.caller_kwargs(handle))
                 _post_mark_forward_evaluation("autonomous", _result)
             _status, _severity, _extra = _brain_job_outcome(_result)
             _ledger_end(handle, _status, severity=_severity, extra=_extra)
