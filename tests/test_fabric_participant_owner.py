@@ -3,17 +3,87 @@
 No production broker, capability, task, participant, source/rating, dispatch or
 study is accessed. A valid fixture still cannot authenticate a served actor.
 """
-import copy,hashlib,importlib.util,json,sqlite3,sys,tempfile
+import contextlib,copy,hashlib,importlib,importlib.util,json,sqlite3,sys,tempfile
 from pathlib import Path
 from unittest import mock
 import pytest
 
 ROOT=Path(__file__).resolve().parents[1]
 NATIVE=ROOT/'ops/native_fabric/quota_continuity'
-sys.path[:0]=[str(NATIVE/'candidate'),str(NATIVE/'source')]
-import fabric_operator_owner as owner_module
-import fabric_participant_owner as port
-import fabric_task
+# Native modules belong to this fixture's lifetime, including lazy imports.
+# Collection must not preload an unsealed generation into later enrollment.
+@contextlib.contextmanager
+def _native_owner_import_scope():
+    names = {path.stem for directory in (NATIVE / "candidate", NATIVE / "source")
+             for path in directory.glob("*.py")}
+    def yaml_name(name):
+        return name == "yaml" or name.startswith("yaml.") or name == "_yaml"
+    names.update(name for name in sys.modules if yaml_name(name))
+    absent = object()
+    previous = {name: sys.modules.get(name, absent) for name in names}
+    previous_path = list(sys.path)
+    try:
+        sys.path[:0] = [str(NATIVE / "candidate"), str(NATIVE / "source")]
+        for name in names:
+            sys.modules.pop(name, None)
+        yield tuple(importlib.import_module(name) for name in
+                    ("fabric_operator_owner", "fabric_participant_owner", "fabric_task"))
+    finally:
+        sys.path[:] = previous_path
+        # The owner also imports PyYAML lazily while its cases run. Restore that
+        # finite dependency namespace so later held-YAML admission sees no leak.
+        names.update(name for name in sys.modules if yaml_name(name))
+        for name in names:
+            module = previous.get(name, absent)
+            if module is absent:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _native_owner_modules():
+    global owner_module, port, fabric_task
+    with _native_owner_import_scope() as modules:
+        owner_module, port, fabric_task = modules
+        yield
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_native_import_scope_restores_prior_module_objects_and_paths(tmp_path, interrupted):
+    name = "a04_terminal_reconcile"
+    previous = sys.modules[name]
+    previous_path = list(sys.path)
+    previous_yaml = {key: value for key, value in sys.modules.items()
+                     if key == "yaml" or key.startswith("yaml.") or key == "_yaml"}
+    sentinel = object()
+    sys.modules[name] = sentinel
+    sys.modules["yaml"] = sentinel
+    try:
+        try:
+            with _native_owner_import_scope():
+                assert sys.modules[name] is not sentinel
+                assert Path(sys.modules[name].__file__).resolve() == NATIVE / "source" / (name + ".py")
+                assert importlib.import_module("yaml") is not sentinel
+                sys.modules["yaml.scope_only_fixture"] = object()
+                sys.path.append(str(tmp_path / "scope-only"))
+                if interrupted:
+                    raise RuntimeError("inert scoped import interruption")
+        except RuntimeError as error:
+            assert interrupted and str(error) == "inert scoped import interruption"
+        assert sys.modules[name] is sentinel
+        assert sys.modules["yaml"] is sentinel
+        assert {key: value for key, value in sys.modules.items()
+                if key == "yaml" or key.startswith("yaml.") or key == "_yaml"} == {
+                    **previous_yaml, "yaml": sentinel}
+        assert sys.path == previous_path
+    finally:
+        sys.modules[name] = previous
+        for key in tuple(sys.modules):
+            if key == "yaml" or key.startswith("yaml.") or key == "_yaml":
+                sys.modules.pop(key, None)
+        sys.modules.update(previous_yaml)
+        sys.path[:] = previous_path
 
 FIXTURE=ROOT/'tests/fixtures/market-memory-owner-contract'
 spec=importlib.util.spec_from_file_location('_exact_memory_v2',FIXTURE/'engine/research_factory/market_memory_e0_review_metadata_v2.py')

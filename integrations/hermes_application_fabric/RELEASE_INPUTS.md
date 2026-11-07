@@ -27,9 +27,10 @@ Focused success is not general-CI, source-release or live-account acceptance.
 The attended contribution a664a288a3791bda3ea2b43af08278f1d8fb0d9b
 from #2166 is incorporated. Its older 81-case receipt remains historical.
 The current runtime has 100 patched-gateway, 85 unpatched-native and 66 offline
-contract cases. Their322 execution used Macroc164; this workflow now binds
-the exact published owner a577 below, with the same verified client bytes.
-Current-head executed results must be read from the corresponding workflow.
+contract cases. Their322 execution used Macroc164. Historical ABI/gateway
+contexts retain a577 and its unchanged client bytes; the committed-current
+owner context now pins the incorporated12efe carrier below. Current-head
+executed results must be read from the corresponding workflow.
 
 The original APPLICATION handler/Broker qualification preserves all nine
 secretary fixed/AUTO/exact conversation, limit and unknown-effect cases and
@@ -51,15 +52,20 @@ authenticates a live attended host. The separate patched-gateway suite covers
 native route/admission projection. The shared paired gate still consumes its
 original CI-owned pin.
 
-The current-source context consumes Macro contribution
-a43c7c2c71355521b837974d3e06430688527d00, which incorporates the four-file
-support proposal. It verifies the committed postimages and unchanged owner
-inputs, exports only regular local Git blobs, and consumes the actual support
-flags without applying a patch. Its adapter and native owner must be the same
-clean Mastermind candidate. Historical a577 fixture/proposal contexts retain
-their own checkout and exact contract; their receipts are not attributed to a43.
-The original #10740 carrier must still incorporate the contribution and pass its
-current-head delivery checks. Source support does not enroll a live service.
+The current-source context consumes original Macro #10740 at
+12efe39a6b6e2f6d19f3a9893f978c55d4656681. That head joins qualified a43 support
+with the original cd2 CI repair, and the original carrier's adoption is directly
+read back. Its complete engine/lib/config/test trees equal a43. The actual
+21-case native execution remains attributed to Brain559/a43; it passed without
+a proposal replay or source-flag overrides. The current workflow separately
+qualifies the resulting pinned carrier and its own Mastermind candidate.
+
+The qualifier verifies committed postimages and unchanged owner inputs, exports
+only regular local Git blobs, and consumes the actual support flags without
+applying a patch. Adapter and native owner must be the same clean candidate.
+Historical a577 fixture/proposal contexts retain their own checkout and exact
+contract. Source support does not enroll a live service; current-head delivery,
+installation and authenticated provider acceptance remain separate.
 
 The repaired Studio diagnostic passed all848 discovery cases on d7/173b224,
 plus the baseline and observed isolated target. That actual receipt supports
@@ -71,10 +77,10 @@ Only one acquisition path is used; no original assertion or guard is changed.
 | --- | --- |
 | Primary runtime package | Eleven-file digest `c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa`, computed by the existing publication.py algorithm |
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
-| APPLICATION factory/client | Original Macro#10740 at a577dbbf605474f97bbafa4ceeb0daf841292421; client blob323953c2030ce45b3a889bbb6e7a6a6751c90702 and SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e are unchanged fromc164 |
-| Published Hermes declarations | a577 factory bloba8d1b7a8d86946eb9870c56a54e1599eae5fa5c5; all five Hermes transports remain source-disabled; workload blobf9f0bd26af3f543aaee8d05fb465a4ea53219660 is unchanged |
-| Proposed Hermes source support | Exact four-file proposal in qualification/application_owner_support/; patch SHA2569ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d;383 owner cases and21 native cases pass in the hosted proposal context; original#10740 adoption remains pending |
-| Attended owner qualification | The31-case attended test from#10832 is already incorporated in a577 as exact blob3725f43f67f17e4e290c5c7b9791f65b85f692eb. Its historical hosted126/local197 results and#10832 CI-authority refusal retain their original scope |
+| APPLICATION factory/client | Original Macro#10740 at12efe39a6b6e2f6d19f3a9893f978c55d4656681; client blob323953c2030ce45b3a889bbb6e7a6a6751c90702 and SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e are unchanged fromc164/a577 |
+| Published Hermes declarations | Current factory blob6f73e65bdc9aa7548acc49b39e11f4054c405b40 supports the five existing Hermes transports; workload blobf9f0bd26af3f543aaee8d05fb465a4ea53219660 is unchanged. Runtime enrollment remains absent |
+| Historical Hermes source proposal | Exact four-file a577 proposal in qualification/application_owner_support/; patch SHA2569ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d. Its postimages are incorporated through a43 into original12efe; historical383+21 proposal proof is retained |
+| Attended owner qualification | Current31-case attended test blob6886e418a0df7d529e260e309ab76cdf1f61b940 consumes supported descriptors and retains revocation/refusal checks. Historical#10832 blob3725f43f67f17e4e290c5c7b9791f65b85f692eb, hosted126/local197 results and its CI-authority refusal retain their original scope |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |
 | Attended Hermes ABI | Exact upstream2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19 plus the reviewed core patch in hermes_core/ |
@@ -115,22 +121,20 @@ route fixture alone could not establish these properties.
 | Meta-CEO | hermes-meta-ceo / hermes_meta_fabric / site_interactive | Original mmmeta role/session/principal and HERMES_META_FABRIC_APPLICATION_TOKEN |
 | Ordinary attended | hermes-attended / hermes_attended_fabric / hermes_attended | Original attended native admission plus a separately qualified APPLICATION service relation |
 
-Original Macro a577 supplies all five dedicated Hermes descriptors but keeps
-qualified=false and application_allowed=false on each. Its eight general AUTO
-source-support declarations exclude Hermes. The shipped application mode map
-remains empty, the three Hermes capability IDs are absent, and the attended
-client_session_metadata_accepted flag remains false. A configuration-only edit
-cannot override the missing source support.
+Historical Macro a577 supplies all five dedicated Hermes descriptors with
+qualified=false and application_allowed=false. The [bounded source proposal](qualification/application_owner_support/README.md)
+changes only those two flags and their qualification tests. Its exact postimages
+are now incorporated through a43 into original Macro12efe. Dataclass defaults,
+identity fields, credential-reference names, capabilities, endpoints, models,
+workloads and every factory admission check remain intact.
 
-The [bounded source proposal](qualification/application_owner_support/README.md)
-changes only the two support flags on those five existing descriptors, plus
-tests that preserve source revocation and exercise operational refusal. It
-retains dataclass defaults, identity fields, credential-reference names,
-capabilities, endpoints, models, workloads and all factory admission checks.
-Ten positive cases fail against unchanged a577;383 cases pass against the
-proposal. The original APPLICATION owner must reconcile and consume it. Its
-presence in this qualification package does not change the active Macro branch
-or enroll a capability, runtime service record, principal/grant or credential.
+The shipped application mode map is still empty, the three Hermes capability
+IDs remain absent, and attended client_session_metadata_accepted remains false.
+Source support does not enroll a capability, runtime service record,
+principal/grant or credential. Ten positive cases failed against unchanged a577;
+383 cases passed against the proposal and actual a43 source. The current12efe
+owner-workflow invocation passed219 cases, including all93 source-support cases.
+Historical and current source contexts retain separate execution receipts.
 
 The attended factory therefore remains closed until its original owners
 qualify and enroll the actual service. It cannot borrow a Brain, secretary,

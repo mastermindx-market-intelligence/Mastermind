@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 
 
 OWNER_COMMIT = "a577dbbf605474f97bbafa4ceeb0daf841292421"
-CURRENT_OWNER_COMMIT = "a43c7c2c71355521b837974d3e06430688527d00"
+CURRENT_OWNER_COMMIT = "12efe39a6b6e2f6d19f3a9893f978c55d4656681"
 CHANGED = frozenset({
     "engine/provider_production_modes.py",
     "tests/test_hermes_primary_fabric_identity.py",
