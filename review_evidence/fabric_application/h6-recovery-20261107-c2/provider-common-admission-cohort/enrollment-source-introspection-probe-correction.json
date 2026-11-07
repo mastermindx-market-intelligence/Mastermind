@@ -1,0 +1,9 @@
+{
+  "after_sha256": "25af19a4e305f0e2fbde17032ffa557c28b9073be849c3b4f2984746d69c4119",
+  "before_sha256": "c0ade08d41cf7e38b85eb16897183a8d3104290c354ef636198f3ed8d7812f9a",
+  "cause": "Probe inspected contextlib decorator wrapper location, not the wrapped exact source function. Inspecting __wrapped__ preserves the actual source identity assertion.",
+  "enrollment_setup_errors": 6,
+  "first_proof": "h6-authenticated-cohort-proof-fhsrwktg",
+  "production_or_proposal_source_changed": false,
+  "source_relation_cases_passed": 30
+}

@@ -1,0 +1,35 @@
+{
+  "comments": [
+    {
+      "body_sha256": "ebeb37ca6dff7d015fc1cbc885acb37b0dcda5a8f71963f96136d208a42af591",
+      "id": 6712579265,
+      "updated_at": "2026-11-07T20:24:37Z",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6712579265"
+    },
+    {
+      "body_sha256": "6bc3c944e89b41b3b18fe2b3197d30f8a0cd55e64bb6dd2188110106084438ab",
+      "id": 6712329564,
+      "updated_at": "2026-11-07T20:40:52Z",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6712329564"
+    },
+    {
+      "body_sha256": "8295646f8fae98f47f988eb6358796a8c4004fbf100aee5825232c1c99490dde",
+      "id": 6708081894,
+      "updated_at": "2026-11-07T20:33:30Z",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6708081894"
+    },
+    {
+      "body_sha256": "d5320362aa01260f58c3fa72bb07ef3759b361ea99b0a9dca6bc2b26ee5a8ea4",
+      "id": 6712449544,
+      "updated_at": "2026-11-07T20:12:24Z",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6712449544"
+    }
+  ],
+  "completed_receivers": {
+    "2225": "024bc08b63072a03ca3af296cf3e52d9ab3388ad",
+    "2232": "d0c543124b47372becd8ee632a1c29b32ffc3ef0"
+  },
+  "decision": "Return completed H6 proof/proposal to existing carrier; preserve H4 activation/latency writer and existing acceptance command. No source-only result closes live A-D scope.",
+  "h4_acceptance_owner": "88a68e32a2fd2343636b122e1c4322ff19e56d30",
+  "original_carrier_observed": "bf46d822dbce3ac2226df69da7f94e37101df986"
+}

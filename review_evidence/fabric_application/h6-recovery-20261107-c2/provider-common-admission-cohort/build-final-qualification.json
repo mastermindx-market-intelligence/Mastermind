@@ -1,0 +1,44 @@
+{
+  "builds": [
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds-final/common-go",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery",
+        "--include-common-admission-source",
+        "--include-go-application"
+      ],
+      "files": 118,
+      "inventory_sha256": "f5a976fd6c6d022ea16fee0f09d939ff797664a2a542e100dacea2a1dd0fb089",
+      "log_sha256": "4b7254d5f196c41265d3953607a1730cabfa5540c730ee21ca85eefb4f51f0ae",
+      "manifest_sha256": "ebd7e5088723c027b70c2b78c5fddf2104a7e38c0f8163238528592a2c3691a8",
+      "name": "common-go",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds-final/common-http",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery",
+        "--include-common-admission-source",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "files": 121,
+      "inventory_sha256": "c7d45569cbf11ff8a01c6c7bf1a5efb798de222f83b4fd98810844fc26f684ef",
+      "log_sha256": "39d3187b80af091c5cf694ce19735c0e94599b0414f7d5e7d7c8edb345557c5d",
+      "manifest_sha256": "db3a75f12f2a013073692902be03b06e45381022dd2d200bd8e189dd45fa7357",
+      "name": "common-http",
+      "rc": 0
+    }
+  ],
+  "seconds": 0.55
+}

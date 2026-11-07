@@ -1,0 +1,8 @@
+{
+  "after_sha256": "0f85fb9aafd1bb513b88f341a00279790a8b634d29001fbe35ec266de3ad0fc7",
+  "before_sha256": "8445983156f323907c65b02fbf7ba0b8da5aafac8e7a69cec3f7142171d6d40a",
+  "decision": "Current top-level inventory describes the new patch step. Prior source/verified_patch fields are retained only inside preimage_inventory, preventing stale flat fields from describing earlier provider patch as final source.",
+  "prior_build_proof": "build-qualification.json retained; only two common inventory outputs need successor verification.",
+  "record_changed": false,
+  "runtime_bytes_changed": false
+}

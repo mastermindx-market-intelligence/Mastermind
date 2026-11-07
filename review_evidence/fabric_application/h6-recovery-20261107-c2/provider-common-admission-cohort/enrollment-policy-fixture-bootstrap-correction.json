@@ -1,0 +1,9 @@
+{
+  "after_sha256": "e2680025e7cc8a96fb071317573a956dc7aff4a01ce773426fe284db6d60ca2b",
+  "before_sha256": "25af19a4e305f0e2fbde17032ffa557c28b9073be849c3b4f2984746d69c4119",
+  "cause": "Real target helper correctly refused missing fixture policy directory before Go selection. Explicit fixture bootstrap now creates the policy directory before the new selector; the unchanged service setup reuses only that exact empty owned inode.",
+  "failed_fixtures_retained": true,
+  "prior_receipt": "h6-authenticated-enrollment-proof-1m6ndmdi",
+  "production_or_proposal_source_changed": false,
+  "verified_admission_scope_injected": false
+}

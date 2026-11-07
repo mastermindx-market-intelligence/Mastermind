@@ -1,0 +1,102 @@
+{
+  "argv": [
+    "/private/tmp/h6-h1-exact-fixture-p8ns5zzf/hermes/.venv/bin/python",
+    "-B",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/hermes_application_fabric/qualification/qualify_application_owner.py",
+    "--adapter-root",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2",
+    "--native-owner-root",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2",
+    "--macro-root",
+    "/private/tmp/h6-macro25ba-object-proof-s9fn19de/macro",
+    "--hermes-root",
+    "/private/tmp/h6-h1-exact-fixture-p8ns5zzf/hermes",
+    "--composed-owner-source"
+  ],
+  "head_after": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895",
+  "log_sha256": "aa00cedb572c9e23208645e72265eafcf9970e23370d6201f2bc052bb57e05d2",
+  "macro_source_setup": {
+    "filled": [
+      {
+        "blob": "58b9e494a08f15ee5db3a5f3850954b85a09850a",
+        "path": "engine/neuralweb/options_selection_context.py",
+        "sha256": "addeaccb3fcc5ac4f12701bc056bcf4e7655599db356e8c2419b58dc802b7d77",
+        "source": "verified committed Macro25ba projection"
+      },
+      {
+        "blob": "8e70c3944e50eed84e214eef464e71768f9c9e10",
+        "path": "engine/provider_production_modes.py",
+        "sha256": "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8",
+        "source": "verified committed Macro25ba projection"
+      },
+      {
+        "blob": "b59efa283a91afdd64e938c871293ced7ae6d96a",
+        "path": "tests/test_hermes_application_source_support.py",
+        "sha256": "6e4a9b8b477cc29512b1ed5bc02d2dbbab290a0313a2f432bac6568c240cbdf0",
+        "source": "authenticated GitHub exact Git blob"
+      },
+      {
+        "blob": "d04b18079b17d984cfa60bcb2cd087d07f6bd905",
+        "path": "tests/test_hermes_attended_fabric_identity.py",
+        "sha256": "69e7b4486924772d8d9b00e19b0a740fd16656c66a365e3777458ebf755019cd",
+        "source": "authenticated GitHub exact Git blob"
+      }
+    ],
+    "fixture": "/private/tmp/h6-macro25ba-object-proof-s9fn19de/macro",
+    "method": "Exact pinned blob completion in this disposable fixture only; sparse scope matches committed-source exporter.",
+    "preparation_failures": "Local clone rc128 produced no checkout; initial local-only object fixture revealed four missing required blobs; attempted common-store read of first missing blob confirmed unavailable. No qualifier execution occurred in those attempts.",
+    "status": "clean"
+  },
+  "rc": 0,
+  "result": {
+    "blocked_external_connections": 0,
+    "committed_owner_source": {
+      "contract_sha256": "af4aef376f0f5f76505848d8d93569bddb1b08966f302d8c4b7c1ebba9f3ae79",
+      "fixture_files": 2540,
+      "historical_patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+      "original_source_unchanged": true,
+      "owner_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+      "patch_applied": false,
+      "postimages": {
+        "engine/provider_production_modes.py": "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8",
+        "tests/test_hermes_application_source_support.py": "6e4a9b8b477cc29512b1ed5bc02d2dbbab290a0313a2f432bac6568c240cbdf0",
+        "tests/test_hermes_attended_fabric_identity.py": "69e7b4486924772d8d9b00e19b0a740fd16656c66a365e3777458ebf755019cd",
+        "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+      },
+      "runtime_enrollment": false,
+      "source_context": "committed_attended_auto",
+      "source_materialization": {
+        "bytes": 74803787,
+        "files": 2540,
+        "lazy_fetch_permitted": false,
+        "method": "verified_local_committed_blobs",
+        "unique_blobs": 2536,
+        "worktree_content_used": false
+      }
+    },
+    "errors": 0,
+    "failures": 0,
+    "fixture_overrides_source_flags": false,
+    "live_provider_acceptance": false,
+    "monetary_acceptance": false,
+    "network_counter_scope": "native_conversation_process_after_source_preparation",
+    "provider_is_fixture": true,
+    "provider_sdk_constructions": 0,
+    "real_application_handler": true,
+    "real_broker": true,
+    "skips": 0,
+    "source_context": "committed_attended_auto",
+    "source_support_proposal": null,
+    "sources": {
+      "adapter_root": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895",
+      "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+      "macro_root": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+      "native_owner_root": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895"
+    },
+    "tests_run": 27
+  },
+  "root": "/private/tmp/h6-macro25ba-object-proof-s9fn19de",
+  "seconds": 206.176,
+  "source_head": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895",
+  "status_after": ""
+}

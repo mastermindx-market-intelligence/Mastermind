@@ -1,0 +1,32 @@
+{
+  "filled": [
+    {
+      "blob": "58b9e494a08f15ee5db3a5f3850954b85a09850a",
+      "path": "engine/neuralweb/options_selection_context.py",
+      "sha256": "addeaccb3fcc5ac4f12701bc056bcf4e7655599db356e8c2419b58dc802b7d77",
+      "source": "verified committed Macro25ba projection"
+    },
+    {
+      "blob": "8e70c3944e50eed84e214eef464e71768f9c9e10",
+      "path": "engine/provider_production_modes.py",
+      "sha256": "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8",
+      "source": "verified committed Macro25ba projection"
+    },
+    {
+      "blob": "b59efa283a91afdd64e938c871293ced7ae6d96a",
+      "path": "tests/test_hermes_application_source_support.py",
+      "sha256": "6e4a9b8b477cc29512b1ed5bc02d2dbbab290a0313a2f432bac6568c240cbdf0",
+      "source": "authenticated GitHub exact Git blob"
+    },
+    {
+      "blob": "d04b18079b17d984cfa60bcb2cd087d07f6bd905",
+      "path": "tests/test_hermes_attended_fabric_identity.py",
+      "sha256": "69e7b4486924772d8d9b00e19b0a740fd16656c66a365e3777458ebf755019cd",
+      "source": "authenticated GitHub exact Git blob"
+    }
+  ],
+  "fixture": "/private/tmp/h6-macro25ba-object-proof-s9fn19de/macro",
+  "method": "Exact pinned blob completion in this disposable fixture only; sparse scope matches committed-source exporter.",
+  "preparation_failures": "Local clone rc128 produced no checkout; initial local-only object fixture revealed four missing required blobs; attempted common-store read of first missing blob confirmed unavailable. No qualifier execution occurred in those attempts.",
+  "status": "clean"
+}

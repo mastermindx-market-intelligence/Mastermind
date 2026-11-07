@@ -1,0 +1,105 @@
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.OriginalOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.OriginalOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133751_387511.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.OriginalOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133755_539524.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.AutoOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.AutoOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133807_054613.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.AutoOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133811_391612.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.ExactOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.ExactOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133820_210180.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.ExactOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133824_822072.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.AttendedOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.AttendedOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133833_969046.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.AttendedOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133838_639724.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.MetaOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.MetaOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133847_784785.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.MetaOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133852_002967.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.MetaAutoOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.MetaAutoOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133903_070694.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.MetaAutoOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133909_658273.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.MetaExactOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.MetaExactOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133919_268692.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.MetaExactOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133924_614087.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.AttendedAutoOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.AttendedAutoOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133934_726116.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.AttendedAutoOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133939_087455.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_native_tool_conversation_through_original_application_owners (__main__.qualify.<locals>.AttendedExactOwnerConversation.test_native_tool_conversation_through_original_application_owners) ... ok
+test_original_step_limit_refuses_followup_before_provider_dispatch (__main__.qualify.<locals>.AttendedExactOwnerConversation.test_original_step_limit_refuses_followup_before_provider_dispatch) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133949_582559.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+test_unknown_followup_retains_original_lease_without_replay (__main__.qualify.<locals>.AttendedExactOwnerConversation.test_unknown_followup_retains_original_lease_without_replay) ... 🧾 Request debug dump written to: /private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/sessions/request_dump_hermes-owner-session_20261107_133953_956967.json
+⚠️  Attempt 1/3, not retryable failed: hermes_fabric_owner_refused
+❌ Mastermind Fabric rejected the request and retrying won't help: hermes_fabric_owner_refused
+   💡 Fix: pick another model (/model), or check `/private/tmp/h6-macro25ba-object-proof-s9fn19de/hermes-home/logs/agent.log`.
+ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 132.140s
+
+OK
+{"sources": {"adapter_root": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895", "macro_root": "25ba92bb52120fae550b54c29f82929c0b77d37b", "native_owner_root": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895", "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"}, "source_context": "committed_attended_auto", "source_support_proposal": null, "committed_owner_source": {"owner_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b", "contract_sha256": "af4aef376f0f5f76505848d8d93569bddb1b08966f302d8c4b7c1ebba9f3ae79", "source_context": "committed_attended_auto", "historical_patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d", "patch_applied": false, "postimages": {"engine/provider_production_modes.py": "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8", "tests/test_hermes_application_source_support.py": "6e4a9b8b477cc29512b1ed5bc02d2dbbab290a0313a2f432bac6568c240cbdf0", "tests/test_hermes_attended_fabric_identity.py": "69e7b4486924772d8d9b00e19b0a740fd16656c66a365e3777458ebf755019cd", "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"}, "fixture_files": 2540, "source_materialization": {"method": "verified_local_committed_blobs", "files": 2540, "unique_blobs": 2536, "bytes": 74803787, "lazy_fetch_permitted": false, "worktree_content_used": false}, "original_source_unchanged": true, "runtime_enrollment": false}, "fixture_overrides_source_flags": false, "tests_run": 27, "network_counter_scope": "native_conversation_process_after_source_preparation", "failures": 0, "errors": 0, "skips": 0, "blocked_external_connections": 0, "provider_sdk_constructions": 0, "real_application_handler": true, "real_broker": true, "provider_is_fixture": true, "live_provider_acceptance": false, "monetary_acceptance": false}

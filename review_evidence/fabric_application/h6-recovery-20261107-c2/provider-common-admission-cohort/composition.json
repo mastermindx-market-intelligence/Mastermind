@@ -1,0 +1,78 @@
+{
+  "cohorts": {
+    "116": "06fdf18614a3d89bdfa74e94e208af2c14634e1712e7aaf81b0df1423fd6c094",
+    "118": "ebd7e5088723c027b70c2b78c5fddf2104a7e38c0f8163238528592a2c3691a8",
+    "121": "db3a75f12f2a013073692902be03b06e45381022dd2d200bd8e189dd45fa7357"
+  },
+  "entry": {
+    "bytes": 52922,
+    "patch_sha256": "f73f0667c102860ac72238e58385938004c65f9cfcc3aebbd582bdb863b7518f",
+    "patch_source": "rollout/common_admission_cohort/native_go_entry.py.patch",
+    "preimage_bytes": 52904,
+    "preimage_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+    "sha256": "f4d1da6b10cf532b99e3176bfb4664bba0be601ae9eff65681b544572f526868"
+  },
+  "manifest_sha256": "06fdf18614a3d89bdfa74e94e208af2c14634e1712e7aaf81b0df1423fd6c094",
+  "operational_enrollment": false,
+  "parent_manifest_sha256": "b49e1350b83afd4f2c439e7b13b2b7079a4db88dd7d9d6b0cf9801c423f29547",
+  "replacements": {
+    "ext/lease_broker.py": {
+      "bytes": 230461,
+      "patch_sha256": "1b214f03f5bcc8cfc2445ae56c3c2818f40f94854d083845d2ffe60bfa0fd564",
+      "patch_source": "rollout/common_admission_cohort/lease_broker.py.patch",
+      "preimage_bytes": 202943,
+      "preimage_sha256": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+      "sha256": "8354ddaff32e3491f9e716bfb186f490496962f55609f183500691679163a6b5"
+    },
+    "ext/native_runtime_bindings.py": {
+      "bytes": 7301,
+      "patch_sha256": "2978e58c16797af600e1672910db8037f5225a3f5d0274db9a817ee1abc3d1f3",
+      "patch_source": "rollout/common_admission_cohort/native_runtime_bindings.py.patch",
+      "preimage_bytes": 5346,
+      "preimage_sha256": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
+      "sha256": "15c0c046a1c7e1c9a0cf9aee5af8f6631793d8a9af6f219e16a69830df3b42e3"
+    },
+    "ext/paid_model_owner.py": {
+      "bytes": 18813,
+      "patch_sha256": "3db99f04f01e9e3084111e218c60785bee030733995b6ae9683d15da94be184c",
+      "patch_source": "rollout/common_admission_cohort/paid_model_owner.py.patch",
+      "preimage_bytes": 16818,
+      "preimage_sha256": "75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b",
+      "sha256": "378c1d30757292da236713543d7c4935b1a83e0445d1e22e53db1b5f3a2ee8fe"
+    },
+    "ext/paid_provider_entry.py": {
+      "bytes": 36967,
+      "patch_sha256": "abff035587725a51e6d9bf65398c697c27374315db33ff8fdc2ec58811f4bed7",
+      "patch_source": "rollout/common_admission_cohort/paid_provider_entry.py.patch",
+      "preimage_bytes": 36798,
+      "preimage_sha256": "780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0",
+      "sha256": "1b4af5ef7db5ab7f61c05eda4fc53aa4e9cfd1253c08cd09f8a2d9dbb5ab7d2c"
+    },
+    "ext/quota_remote.py": {
+      "bytes": 84559,
+      "patch_sha256": "149b8a63f0c77154bc5c1a88edd90ec1a9838d35bad6dcca4501646964ef64ac",
+      "patch_source": "rollout/common_admission_cohort/quota_remote.py.patch",
+      "preimage_bytes": 75273,
+      "preimage_sha256": "91c89d4197d791a078e804db9c591c4cddc197f1e35f54f46fba95fe7b27a9a5",
+      "sha256": "fd0ac449e6a74e491646b360d5c9882d640bfb658f94e950ee709003dec87f8c"
+    },
+    "ext/remote_sub.sh": {
+      "bytes": 117714,
+      "patch_sha256": "a5649409798298e0cdd24f6db2ce1173318bc2ee915ed61519e110f61c3a5313",
+      "patch_source": "rollout/common_admission_cohort/remote_sub.sh.patch",
+      "preimage_bytes": 117639,
+      "preimage_sha256": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+      "sha256": "3e30f9eb4841f7fa0e0a90fb124cac93fd7add2e4cf2bea060b7343911587107"
+    },
+    "ext/support_bundle.py": {
+      "bytes": 44250,
+      "patch_sha256": "b9dea3eff283bd3ceb4c81a5e15f4cc1c1d80f44b45dc4a944d96b0715cc03eb",
+      "patch_source": "rollout/common_admission_cohort/support_bundle.py.patch",
+      "preimage_bytes": 39302,
+      "preimage_sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+      "sha256": "c38319838f286f1cc1591d1050870a91c44df5c787ac6fa27f7bc916b0f1411e"
+    }
+  },
+  "schema": "native-common-admission-composition.v1",
+  "source_only": true
+}

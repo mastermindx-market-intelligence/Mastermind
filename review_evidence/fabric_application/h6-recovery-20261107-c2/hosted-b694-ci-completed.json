@@ -1,0 +1,62 @@
+{
+  "run_id": 42407083688,
+  "head": "b694",
+  "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42407083688",
+  "jobs": [
+    {
+      "id": 128506992459,
+      "name": "pytest shard 0",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 128506992623,
+      "name": "pytest shard 2",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 128506992652,
+      "name": "pytest shard 1",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 128506992676,
+      "name": "pytest shard 3",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 128506992694,
+      "name": "pytest shard 5",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 128506992784,
+      "name": "pytest shard 4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 128506993427,
+      "name": "PR fast checks",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 128506993453,
+      "name": "PR test scope",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 128520358369,
+      "name": "test",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "qualification_scope": "Historical H6 b694 run; not later a54/current-head CI."
+}

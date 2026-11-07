@@ -1,0 +1,290 @@
+{
+  "root": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-authenticated-cohort-proof-fhsrwktg",
+  "argv": [
+    "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/private/tmp/h6-common-admission-cohort-1ce8b2ya/proofs/test_common_admission_source_relation.py",
+    "/private/tmp/h6-common-admission-cohort-1ce8b2ya/proofs/test_authenticated_common_enrollment.py",
+    "-c",
+    "/dev/null",
+    "--noconftest",
+    "--basetemp",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-authenticated-cohort-proof-fhsrwktg/fixtures",
+    "--junitxml",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-authenticated-cohort-proof-fhsrwktg/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 1,
+  "seconds": 7.871,
+  "testcases": 36,
+  "failures": 0,
+  "errors": 6,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/lease_broker.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/native_runtime_bindings.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/paid_model_owner.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/paid_provider_entry.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/quota_remote.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/remote_sub.sh]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[preimage-ext/support_bundle.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/lease_broker.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/native_runtime_bindings.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/paid_model_owner.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/paid_provider_entry.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/quota_remote.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/remote_sub.sh]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_member_refuses_at_each_normalization_boundary[foreign-ext/support_bundle.py]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_whole_manifest_identity_refuses_partial_or_foreign_unchanged_members[missing]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_whole_manifest_identity_refuses_partial_or_foreign_unchanged_members[untouched]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_legacy_family_cannot_take_the_seven_forward_members",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_inverse_preserves_current_and_historical_views_and_inputs",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_installer_rejects_cross_cohort_and_changed_component[new-base-old-entry]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_installer_rejects_cross_cohort_and_changed_component[old-base-new-entry]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_installer_rejects_cross_cohort_and_changed_component[missing-http]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_installer_rejects_cross_cohort_and_changed_component[old-staged-broker]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_installer_rejects_cross_cohort_and_changed_component[forged-captured-broker]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_installer_rejects_cross_cohort_and_changed_component[untouched-stage-bytes]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_captured_broker_cannot_skip_existing_provider_h2_provenance",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_composer_authenticates_untouched_staged_parent_before_any_replacement",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_corrupted_patch_refuses_in_real_composer_or_entry_resolver[False]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_corrupted_patch_refuses_in_real_composer_or_entry_resolver[True]",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_transition_predecessor_still_refuses",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_inventory_describes_current_step_and_preserves_complete_prior_row",
+      "classname": "",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_physical_lock_excludes_then_original_bundle_completes_once[single]",
+      "classname": "",
+      "failure": false,
+      "error": true,
+      "skipped": false,
+      "message": "failed on setup with \"AssertionError: assert '/opt/homebre...contextlib.py' == '/private/tmp...generation.py'\n  \n  - /private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/native_generation.py\n  + /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py\""
+    },
+    {
+      "name": "test_physical_lock_excludes_then_original_bundle_completes_once[set]",
+      "classname": "",
+      "failure": false,
+      "error": true,
+      "skipped": false,
+      "message": "failed on setup with \"AssertionError: assert '/opt/homebre...contextlib.py' == '/private/tmp...generation.py'\n  \n  - /private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/native_generation.py\n  + /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py\""
+    },
+    {
+      "name": "test_replaced_admission_inode_after_broker_lock_refuses_before_intent[single]",
+      "classname": "",
+      "failure": false,
+      "error": true,
+      "skipped": false,
+      "message": "failed on setup with \"AssertionError: assert '/opt/homebre...contextlib.py' == '/private/tmp...generation.py'\n  \n  - /private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/native_generation.py\n  + /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py\""
+    },
+    {
+      "name": "test_replaced_admission_inode_after_broker_lock_refuses_before_intent[set]",
+      "classname": "",
+      "failure": false,
+      "error": true,
+      "skipped": false,
+      "message": "failed on setup with \"AssertionError: assert '/opt/homebre...contextlib.py' == '/private/tmp...generation.py'\n  \n  - /private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/native_generation.py\n  + /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py\""
+    },
+    {
+      "name": "test_late_admission_replacement_preserves_prepared_effect_without_binding_rename[single]",
+      "classname": "",
+      "failure": false,
+      "error": true,
+      "skipped": false,
+      "message": "failed on setup with \"AssertionError: assert '/opt/homebre...contextlib.py' == '/private/tmp...generation.py'\n  \n  - /private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/native_generation.py\n  + /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py\""
+    },
+    {
+      "name": "test_late_admission_replacement_preserves_prepared_effect_without_binding_rename[set]",
+      "classname": "",
+      "failure": false,
+      "error": true,
+      "skipped": false,
+      "message": "failed on setup with \"AssertionError: assert '/opt/homebre...contextlib.py' == '/private/tmp...generation.py'\n  \n  - /private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/native_generation.py\n  + /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py\""
+    }
+  ],
+  "files": {
+    "result.log": "9740b515e64251a918089fa9c293c8c812bee93da6600b53a7687ee508d42a3f",
+    "result.xml": "248543760d2e04941de7460b169ba03e938d43d70d1834faa0a6905a333dab51"
+  }
+}

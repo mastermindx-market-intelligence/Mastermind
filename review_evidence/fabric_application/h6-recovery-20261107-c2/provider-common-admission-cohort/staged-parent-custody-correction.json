@@ -1,0 +1,7 @@
+{
+  "after_sha256": "6712da261b70388478fd914adb2c6af035ab416b20a3edf2775754bd4022e38b",
+  "before_sha256": "0f85fb9aafd1bb513b88f341a00279790a8b634d29001fbe35ec266de3ad0fc7",
+  "decision": "Authenticate every staged parent member before deriving the seven replacements, matching the existing provider composer. Installer all-member validation remains unchanged.",
+  "record_changed": false,
+  "runtime_bytes_changed": false
+}

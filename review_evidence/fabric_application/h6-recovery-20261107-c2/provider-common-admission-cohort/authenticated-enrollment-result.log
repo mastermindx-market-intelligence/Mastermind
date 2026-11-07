@@ -1,0 +1,8 @@
+......                                                                   [100%]
+=============================== warnings summary ===============================
+../../private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/lib/python3.14/site-packages/_pytest/cacheprovider.py:469
+  /private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/lib/python3.14/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /dev/.pytest_cache/v/cache/nodeids: [Errno 1] Operation not permitted: '/dev/pytest-cache-files-iof0fz5l'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+6 passed, 1 warning in 31.33s

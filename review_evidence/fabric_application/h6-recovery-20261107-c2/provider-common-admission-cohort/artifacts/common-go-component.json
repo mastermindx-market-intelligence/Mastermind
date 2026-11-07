@@ -1,0 +1,47 @@
+{
+  "candidate_bytes": 190323,
+  "candidate_sha256": "1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7",
+  "candidate_source": "candidate/go_shim.py",
+  "component": "go_application_handler",
+  "dependencies": {
+    "go_lease_capability.py": {
+      "bytes": 24577,
+      "sha256": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
+      "source": "candidate/go_lease_capability.py"
+    },
+    "go_lease_gateway.py": {
+      "bytes": 45716,
+      "sha256": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+      "source": "candidate/go_lease_gateway.py"
+    },
+    "lease_broker.py": {
+      "bytes": 202943,
+      "composition": {
+        "patch_sha256": "1ec36d5b9da4af0e54980eab8608260ad2bff60d981d59ae7e351cbe2c7b775f",
+        "patch_source": "../grok47/quota_billing/lease_broker.py.patch",
+        "preimage_sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+        "provider_preimage": {
+          "composition_sha256": "04d6983e43eaaadeccaf847662a5b9b80b30af88e0e2c0a865f455522031e7f4",
+          "patch_sha256": "62bd1a7adea02a8a53d05d7b46125a3b128210fdf0e464264adcc61b0c4a5316",
+          "preimage_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+          "sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+          "source": "rollout/provider_application/lease_broker.py.patch"
+        },
+        "schema": "native-exact-forward-patch.v1"
+      },
+      "sha256": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+      "source": "candidate/lease_broker.py"
+    }
+  },
+  "destination_relative_to_stable_ext": "go_shim/go_shim.py",
+  "installation_state": "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION",
+  "installed_preimage_sha256": "4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100",
+  "native_stage_dependencies": {
+    "go_lease_capability.py": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
+    "go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "lease_broker.py": "8354ddaff32e3491f9e716bfb186f490496962f55609f183500691679163a6b5"
+  },
+  "preimage_source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6646945527",
+  "schema": "native-external-go-component.v1",
+  "stable_ext": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext"
+}

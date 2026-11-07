@@ -1,0 +1,5 @@
+{
+  "change": "Add explicit new file mode100644 for the nine new cohort record/patch members. No source postimage changes.",
+  "failure": "git apply --check interpreted dev/null as a path because Git extended headers lacked new file mode for added members. No patch application occurred.",
+  "prior_patch_sha256": "cf56f14f9a754455d4d2f26187af2bdb600187ae63c2814458e5168812a5b647"
+}

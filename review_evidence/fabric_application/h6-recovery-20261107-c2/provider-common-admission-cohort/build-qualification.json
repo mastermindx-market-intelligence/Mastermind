@@ -1,0 +1,248 @@
+{
+  "builds": [
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/ordinary-base"
+      ],
+      "files": 107,
+      "inventory_sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47",
+      "log_sha256": "e78a1cf819a4b35d66db1330e2625a05581163c00ab10ce3323c466ba7d0e55f",
+      "manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+      "name": "ordinary-base",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/ordinary-go",
+        "--include-go-application"
+      ],
+      "files": 109,
+      "inventory_sha256": "6e42565f0f32914c4ee3df58b8c097961f19730de4718f20bc49fbd720308d97",
+      "log_sha256": "2c6a9ab8d63b99b29981f9213496fe497a6e464af5f93e8b14e9a3d116da1bd4",
+      "manifest_sha256": "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f",
+      "name": "ordinary-go",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/ordinary-http",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "files": 112,
+      "inventory_sha256": "5faf9b583fe6398d6b6dff0b1033d498b13169d71413c51c846dcc2c8e0aaa66",
+      "log_sha256": "3befc85c6f7e6b48cd729a6bf3c879869063d356f0febdaf937eb9c2ef1c06b1",
+      "manifest_sha256": "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af",
+      "name": "ordinary-http",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/quota-base",
+        "--include-quota-reset-recovery"
+      ],
+      "files": 107,
+      "inventory_sha256": "bbc37ef439df13ecabc1c9c0cbcca613f57f852a704a5a226072c7e811237dcc",
+      "log_sha256": "fb74e0c8c062d6c6ab7db98f029d071f4299d5b7a5c42eed63929c2143659791",
+      "manifest_sha256": "4fe3fee49a6260c96eaf454aa5af14268ce94bd0019b5d06f29d7b45e4979e6c",
+      "name": "quota-base",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/quota-go",
+        "--include-quota-reset-recovery",
+        "--include-go-application"
+      ],
+      "files": 109,
+      "inventory_sha256": "9dbb7d348b8711456eab74e7457d9a5ac7cf0010701d291c53350378825e585a",
+      "log_sha256": "234e54ecba854eac94e88004376bb2cea91e8eaf8dce160de385eedeb3f7a860",
+      "manifest_sha256": "9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7",
+      "name": "quota-go",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/quota-http",
+        "--include-quota-reset-recovery",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "files": 112,
+      "inventory_sha256": "4f36c81c6a524cf7a60fd14402a4e31f97a5b797704f882f55214b3b444d6520",
+      "log_sha256": "47b3f78435f34b67e3d6503eef36c51fa4ff440040f290c5296c048a6704c453",
+      "manifest_sha256": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d",
+      "name": "quota-http",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/provider-base",
+        "--include-provider-plan-application"
+      ],
+      "files": 116,
+      "inventory_sha256": "f4cae97eba27963387461f164fa54482eea11cd41a8a562bad8bb3b46365ab4e",
+      "log_sha256": "2c9dfcefd852351e8f7a67a51ef9b5cb7b85a78c689a846a06fa8819146d383b",
+      "manifest_sha256": "f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4",
+      "name": "provider-base",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/provider-go",
+        "--include-provider-plan-application",
+        "--include-go-application"
+      ],
+      "files": 118,
+      "inventory_sha256": "b99db44af119ff90c493a20b48bf52adf63b0c76bc748dd5ba51ea48edf79216",
+      "log_sha256": "27dc1ab69139a00d20f2c25e797e5e4b5a591b755e62e5bdbce7b458cbd32ed8",
+      "manifest_sha256": "72a393d431caf160360aeab0a02a5fb5fffdefd2f21a7916c3419c812d978081",
+      "name": "provider-go",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/provider-http",
+        "--include-provider-plan-application",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "files": 121,
+      "inventory_sha256": "5ac98d99008de5523563b52b69c2a75ed1dce656877fe62f8fa946b2e0800dfc",
+      "log_sha256": "0de7a15cc770646986799eaf61df92949c037cd1922553380e11b8443c77c916",
+      "manifest_sha256": "7e9c46b0d9da706ddde154ceb6b431bb7fcfe049ab5553ada077a8879f7efb0e",
+      "name": "provider-http",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/provider-quota-base",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery"
+      ],
+      "files": 116,
+      "inventory_sha256": "00d8f0ca2fdeb5e48f8904c569a9b07367fd9140af320f311b9ce31a88c47cc2",
+      "log_sha256": "69c94776a6c77486f7b3e39103d6e277b57c53f2137f6ed5fe9d6e5e21985e82",
+      "manifest_sha256": "b49e1350b83afd4f2c439e7b13b2b7079a4db88dd7d9d6b0cf9801c423f29547",
+      "name": "provider-quota-base",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/provider-quota-go",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery",
+        "--include-go-application"
+      ],
+      "files": 118,
+      "inventory_sha256": "747e005a0f7bbd15aefe8c433083dda6a424d9c6cd314bcb24758d9c90e0b59e",
+      "log_sha256": "6513342c79051ec0c60658b2a7f28c2733c5c0e17f5a1e77af120b3d48e846e9",
+      "manifest_sha256": "cc4984c11405acf71ab8b2a8f5414532da6eb006f0878582ceb35e4f86027ab9",
+      "name": "provider-quota-go",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/provider-quota-http",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "files": 121,
+      "inventory_sha256": "ce030bcc70b725f0e4f2eb6b3159954416f12fa2205e5cb20ad16173d3fccac9",
+      "log_sha256": "dc9d8c1f54748825a77517243a9799b052e87093eb92f7e746bfa0475da8d814",
+      "manifest_sha256": "5da35ef46dc2a89449132c5043d4dd66cd30f020f3865ce2ad9cf3e8930d0479",
+      "name": "provider-quota-http",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/common-go",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery",
+        "--include-common-admission-source",
+        "--include-go-application"
+      ],
+      "files": 118,
+      "inventory_sha256": "2aa7ef4a9c0d0c1967ae2bbe65be0d5a9f4a1cac1ba1605241f78568c0752707",
+      "log_sha256": "be484799f2f7f07cada0c5c3c07b97e5b0aa2828fb3b0c793d7f91c625426a4c",
+      "manifest_sha256": "ebd7e5088723c027b70c2b78c5fddf2104a7e38c0f8163238528592a2c3691a8",
+      "name": "common-go",
+      "rc": 0
+    },
+    {
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/source/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "--output",
+        "/private/tmp/h6-common-admission-cohort-1ce8b2ya/builds/common-http",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery",
+        "--include-common-admission-source",
+        "--include-go-application",
+        "--include-application-http"
+      ],
+      "files": 121,
+      "inventory_sha256": "ca7281f266376149b0059d62277ec7c9bc5feffaacdf5edb1caf72d241e0b3a9",
+      "log_sha256": "021a10eec5e9f0ac272558d24f59c20e2150294e8a2733ab74ffe795925ab36f",
+      "manifest_sha256": "db3a75f12f2a013073692902be03b06e45381022dd2d200bd8e189dd45fa7357",
+      "name": "common-http",
+      "rc": 0
+    }
+  ],
+  "seconds": 2.434
+}
