@@ -49,24 +49,28 @@ LLM metadata. Close on normal completion or interruption; retain the original
 close receipt, including unknown/unsettled effects. Local close is not a
 provider cancellation or physical lease-release receipt.
 
-## What this does not yet install
+## Source integration and remaining installation
 
 This module supplies the tested host-composition seam. It does not automatically
 patch or restart the live gateway, edit `config.yaml`, create an alternate
 launcher, or add another account, credential, session, lease or usage registry.
-The ordinary CLI runtime resolver still requires a compatible keyless route
-through the native gateway's authenticated startup. Setting
-`model.provider: mastermind-fabric` alone is not a valid installation.
+The tested follow-on now includes the native keyless resolver extension and
+original-admission gateway hook as a pinned Hermes core patch, plus a real
+PluginManager entrypoint. [Gateway composition](GATEWAY_COMPOSITION.md) defines
+that source integration and its exact limits. These files are not installed in
+the live gateway. Setting `model.provider: mastermind-fabric` alone remains an
+invalid installation.
 
 The following live prerequisites remain separate:
 
 1. Original APPLICATION owner enrollment and qualification of the attended
    relation, one tool-capable account/model, original admission and settlement.
-2. An explicit native gateway startup/turn hook using this composition, plus
-   compatible CLI/session route resolution. Both in-process and managed-worker
-   paths must preserve original operation and recovery identity.
-3. Release/install of the original application handler. Port 4142 was not
-   listening on M2; its selected installed shim lacked that handler.
+2. Release/install of the tested native core hook, keyless route resolution and
+   plugin entrypoint. The qualified source covers the local in-process gateway;
+   managed-worker and non-local paths remain unqualified and refuse.
+3. Release/install of the original application handler. Neither port 4142 nor
+   the actual owner-pinned endpoint port 50142 was listening on M2 at the
+   2026-11-07 01:14 UTC check; the selected installed shim lacked that handler.
 4. GLM coding-plan tool/usage qualification and shared account admission.
    The inspected generic APPLICATION pool admitted bailian, not GLM.
    Experiential's original eligibility/explicit-use conditions stay binding.
@@ -89,3 +93,14 @@ Fixture factory/host authorization is deliberate test data. These checks do not
 prove live service enrollment, CLI RPC activation, a real provider account,
 budget/usage settlement or production installation. The M2's concurrently
 changed local-Qwen root/secretary selections remain untouched.
+
+## Final candidate evidence
+
+Candidate `83f78197ad0c21ade49059b880582c1fc9f7c61b` passed 81 native-runtime
+qualification cases with zero failures/errors/skips and zero external provider
+connections. Hosted CI and both Python 3.12/3.13 offline contract jobs succeeded
+for that same candidate. The exact source manifest and limits are retained in
+[the machine receipt](qualification/gateway_native_receipt.json). Receipt and
+documentation commits after the tested candidate do not change those tested
+product/test files. Live RPC, shared account balancing and provider acceptance
+remain unproven.
