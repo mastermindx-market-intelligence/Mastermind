@@ -1,10 +1,10 @@
 {
   "schema": "mastermind.dsh_attended_build.v1",
   "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
-  "package_manifest_sha256": "e3062255d5cde50eb8cf1fda6464e8352620c44a4ba725998b4d09c5426a4625",
-  "app_config_sha256": "d72b07ad3a83ea7b07da90aef16200388be27ec8fe5e8bd401d755dacd0a7c4b",
+  "package_manifest_sha256": "a75cbb2d050ada3570425bfd458586dd69bec07a48a398153f0fae9181cdd2c5",
+  "app_config_sha256": "e9f6272dc869536a3e2cf3b3e326c8d56f8a0e92240d218baab04f03182d1b26",
   "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
-  "native_client_build_sha256": "c30f7385cfa652eac94f3c6df42d90a19f512cf800c68deb04c17ed51a3a5df1",
+  "native_client_build_sha256": "acf01742ae8580bd28ca7f87c0b9e40cf5bbe991254f010f1995b7e321448011",
   "index_sha256": "2690f794b0b04377d96dbfbd0d5bf3515a840045fd5f692a297f00997ab41ade",
   "company_host_exports": {
     "./company-peer": {
@@ -22,18 +22,18 @@
     "receipt_sha256": "a026a25beac1b32b422974e800e4084e999f13621573a8e0426a1bd7ec5c0aea"
   },
   "native_owner_access": {
-    "source_sha256": "f66102f24159261559798e46e1cd8eaee54e3e54cce3e53795545b9503276a8f",
-    "patch_sha256": "7da8eb25fe3bd1821f37970d5b573348be9016e93c9d5eb5fc32f0aeb7b29208",
+    "source_sha256": "87f6007a593e6aa845524e741bc59606d646e577fdf6177e09a15ec00276f778",
+    "patch_sha256": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
     "host_source_sha256": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
     "host_patch_sha256": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
-    "receipt_sha256": "797c5f22bad563da091832ce62e36c4d023058094a55a034f5175ef527ef9093"
+    "receipt_sha256": "1bbc5d8610e03f4c7073516eea14085a9d7e7868b4625aaa93973d33eb250ad6"
   },
   "native_acp_patch": {
     "source_sha256": "644bb9e7ed6ba59c522d12b3c8cf01ba8edd80eefd24ab98d426d7a02a3bd885",
     "patch_sha256": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
     "receipt_sha256": "25a8cb3a4565efc72ee0bccca442f53851ccab008d347b94eb79ef349dd1c7af"
   },
-  "evidence_commit": "618a775edc7d3d96ef6b15d39f270f0ff57acf13",
+  "evidence_commit": "988b6890d26bebc211ca3d01949ca161ff414d32",
   "custody": "Protected-source acceptance of the qualified attended build; snapshot evidence only",
   "installed": false,
   "provider_calls": 0
