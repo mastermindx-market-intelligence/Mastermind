@@ -253,9 +253,6 @@ AGENT_OS_STATE_SCHEMA = "agent_os_state.v1"
 #: (``_STATE_JSON = _ROOT / "data" / "governance" / "agent_os_state.json"``).
 AGENT_OS_STATE_RELATIVE_PATH = Path("data") / "governance" / "agent_os_state.json"
 
-#: This Mastermind checkout — same idiom as :mod:`control_plane.ceo_boot_packet`.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-
 #: Wall-clock budget for the one agentos subprocess, shared with
 #: :mod:`control_plane.ceo_boot_packet`.
 DEFAULT_TIMEOUT = ceo_boot_packet.DEFAULT_TIMEOUT
@@ -2152,7 +2149,9 @@ def build_control_room(
     compositor without a replacement read.  The rest of this canonical
     gather remains the same on either path.
     """
-    root = Path(repo_root) if repo_root is not None else _REPO_ROOT
+    # Default source discovery belongs to this gather boundary, not import.
+    root = (Path(repo_root) if repo_root is not None
+            else Path(__file__).resolve().parent.parent)
     generated_at = now or _utc_now_z()
 
     packet: dict[str, Any] | None = None
