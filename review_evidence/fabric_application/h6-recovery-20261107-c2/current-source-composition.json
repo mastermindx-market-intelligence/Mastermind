@@ -19,6 +19,10 @@
     "a884_run": 42380455963,
     "a884_shard0_job": 128426787642,
     "current_hermes_natural_run": 42380883495,
+    "d833_head": "d833bd07819086908c7e6b4695c5da3b389eb2aa",
+    "d833_reconciliation": "ci-d833-reconciliation.json",
+    "d833_run": 42390001239,
+    "d833_status": "SHARD4_FAILED_OTHERS_SUCCESS_OR_RUNNING",
     "h2_upstream_required_test": "SUCCESS",
     "h2_upstream_run": 42376635292,
     "new_exact_head_hosted_result_required": true,
@@ -53,6 +57,7 @@
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
   "h1_source_support": {
     "composed_head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+    "guard_qualification": "h1-final-guards.json",
     "native_conversation_cases": 21,
     "owner_cases": 383,
     "provider_calls": false,

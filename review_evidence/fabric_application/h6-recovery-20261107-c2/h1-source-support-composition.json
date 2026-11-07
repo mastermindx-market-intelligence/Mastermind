@@ -1,6 +1,13 @@
 {
   "current_final_carrier": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
-  "current_guard_success": "PENDING_FINAL_COMMITTED_RUN",
+  "current_guard_success": {
+    "errors": 0,
+    "failures": 0,
+    "receipt": "h1-final-guards.json",
+    "skips": 0,
+    "source_head": "650598ae9236d9817cf33aafb04751f7d8ee3a47",
+    "tests": 30
+  },
   "enrolled": false,
   "existing_native_533_receipt": "current-native-composition.json",
   "immutable_receipt_review": {

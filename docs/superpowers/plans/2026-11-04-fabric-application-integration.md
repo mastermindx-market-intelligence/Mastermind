@@ -342,9 +342,10 @@ fixture. The original source checkouts and live Hermes environment were untouche
 The retained evidence identity guard exposed immutable output tokens. Exact full
 file/token records preserve the historical logs and negative-test account names
 without changing the guard. The initial535-case and committed547-case iterations
-each retained one failing overall composition guard; final committed verification
-follows the last single receipt-token correction. All failed receipts remain
-explicit in h1-source-support-composition.json.
+each retained one failing overall composition guard. The final single receipt-token
+correction passed the complete committed-source guard, both exact new receipt/drift
+controls and all27 anonymous-read checks:30/30 at650598ae. All failed receipts
+remain explicit in h1-source-support-composition.json.
 
 Refreshed compatible law at protected66780ab: same INDEX/active/reliability/review/
 delivery/continuity laws, with current bootstrap/account instruction changes read.
