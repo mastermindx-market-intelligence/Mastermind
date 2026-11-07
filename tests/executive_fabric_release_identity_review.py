@@ -17,7 +17,7 @@ REVIEWED_FILES = {
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
-        "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
+        "sha256": '8abf77434627687cfde819dd8096d0ada754c3c42ff5ec195d36ff5343d43388',
         "sites": (
             (624, 44, 47, 'int', '400'),
             (661, 44, 47, 'int', '400'),
