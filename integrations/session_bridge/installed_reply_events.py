@@ -87,6 +87,12 @@ class RuntimeReplyEventHost:
                 policies,self.challenge,clock=clock,enabled=enabled,
                 policy_provider=canary_policy_provider,
             )
+        self.canary_consumer = None
+        if self.canary_owner is not None:
+            from .runtime_dot_canary_delivery import RuntimeCanaryDeliveryConsumer
+            self.canary_consumer = RuntimeCanaryDeliveryConsumer(
+                self.canary_owner,resolver=resolver,connector=connector,
+            )
         self.audiences = RuntimeReplyAuthorizationOwner(self.store,policies,clock=clock)
         self.delivery = build_runtime_reply_delivery(returns,self.store,clock=clock,enabled=enabled,
             resolver=resolver,connector=connector,audience_owner=self.audiences)
