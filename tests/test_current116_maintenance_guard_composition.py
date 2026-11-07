@@ -68,13 +68,13 @@ def without_guards(raw):
     return dump(tree), added
 
 
-def test_actual116_composition_preserves_every_incumbent_definition_and115_payloads(base, tmp_path):
+def test_actual116_composition_preserves_every_incumbent_definition_and114_payloads(base, tmp_path):
     target = tmp_path / "guarded"
     result = compose.compose(base, target, profile_name=PROFILE)
     profile = json.loads((compose.HERE / "maintenance_guard/profile.json").read_text())
     before, after = profile["base_files"], profile["files"]
     assert len(before) == len(after) == 116
-    assert {p for p in before if before[p] != after[p]} == {"ext/lease_broker.py"}
+    assert {p for p in before if before[p] != after[p]} == {"ext/lease_broker.py", "ext/pick.py"}
     for name, expected in after.items():
         assert sha((target / name).read_bytes()) == expected
     old_ast, old_guards = without_guards((base / "ext/lease_broker.py").read_bytes())
@@ -84,6 +84,12 @@ def test_actual116_composition_preserves_every_incumbent_definition_and115_paylo
     provenance = json.loads((compose.HERE / "maintenance_guard/provenance.json").read_text())
     assert {name: sha(dump(node).encode()) for name, node in new_guards.items()} == provenance["guard_method_ast_sha256"]
     compile((target / "ext/lease_broker.py").read_bytes(), "source-only-guarded-broker", "exec")
+    old_pick, new_pick = ast.parse((base / "ext/pick.py").read_bytes()), ast.parse((target / "ext/pick.py").read_bytes())
+    changed = "_eligible_host_routes"
+    old_body = [n for n in old_pick.body if not (isinstance(n, ast.FunctionDef) and n.name == changed)]
+    new_body = [n for n in new_pick.body if not (isinstance(n, ast.FunctionDef) and n.name == changed)]
+    assert [dump(n) for n in old_body] == [dump(n) for n in new_body]
+    compile((target / "ext/pick.py").read_bytes(), "source-only-fixed-picker", "exec")
     assert result["publication_performed"] is result["selection_performed"] is False
     assert not (target / "ext/broker").exists()
     assert not (target / "CURRENT.json").exists()
@@ -120,10 +126,12 @@ def test_wrong_cohort_or_nonregular_source_refused_before_output(base, tmp_path,
     assert not target.exists()
 
 
-def test_changed_patch_refused_before_output(base, tmp_path, monkeypatch):
+@pytest.mark.parametrize("patch_name", ["maintenance_guard/lease_broker.py.patch", "patches/pick_remote_plan_modes.forward.patch"])
+def test_changed_patch_refused_before_output(base, tmp_path, monkeypatch, patch_name):
     source = tmp_path / "source"
     shutil.copytree(compose.HERE / "maintenance_guard", source / "maintenance_guard")
-    patch = source / "maintenance_guard/lease_broker.py.patch"
+    shutil.copytree(compose.HERE / "patches", source / "patches")
+    patch = source / patch_name
     patch.write_bytes(patch.read_bytes() + b"\n")
     monkeypatch.setattr(compose, "HERE", source)
     target = tmp_path / "output"
@@ -140,3 +148,19 @@ def test_existing_destination_not_overwritten(base, tmp_path):
     with pytest.raises(ValueError, match="output must be new"):
         compose.compose(base, target, profile_name=PROFILE)
     assert marker.read_text() == "preserve"
+
+
+def test_actual_combined_picker_retains_remote_eligibility_without_local_plan_authority(base, tmp_path, monkeypatch):
+    from test_provider_plan_remote_mode_boundary import router, extract_context
+    target = tmp_path / "joined"
+    compose.compose(base, target, profile_name=PROFILE)
+    raw = (target / "ext/pick.py").read_bytes()
+    placement = (target / "ext/placement_view.py").read_bytes()
+    fixed, seen = router(raw, placement, monkeypatch)
+    line = fixed["format_pick"]("extract", host="auto", task_complexity="C0_MECHANICAL",
+        provider_plan_context=extract_context())
+    assert line.startswith("POOL=go ") and line.endswith(" HOST=fixture MODE=go-codex")
+    assert "byteplus" not in seen and "experiential" not in seen
+    for mode in ("byteplus", "experiential"):
+        assert fixed["_format_pick_host"]("extract", host="auto", required_modes=[mode]) == \
+            "NONE reason=no eligible remote mode satisfying required_modes"

@@ -43,7 +43,7 @@ def compose(base, output, *, profile_name="provider-plans"):
         if (row["before"] != profile["base_files"].get(name)
                 or row["after"] != profile["files"].get(name)):
             raise ValueError("patch metadata differs from verified file closure")
-        if digest(profile_root / row["patch"]) != row["patch_sha256"]:
+        if digest(HERE / row["patch"]) != row["patch_sha256"]:
             raise ValueError("source patch changed")
     for relative, source in profile["source_map"].items():
         if digest(REPO / source) != profile["files"][relative]:
@@ -53,7 +53,7 @@ def compose(base, output, *, profile_name="provider-plans"):
     for relative in profile["base_files"]:
         shutil.copyfile(base / relative, output / relative)
     for row in profile["patches"].values():
-        patch = str(profile_root / row["patch"])
+        patch = str(HERE / row["patch"])
         subprocess.run(["git", "apply", "--check", patch], cwd=output, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         subprocess.run(["git", "apply", patch], cwd=output, check=True,
