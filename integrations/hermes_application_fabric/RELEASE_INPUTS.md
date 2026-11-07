@@ -97,6 +97,38 @@ qualified product slice; an arbitrary provider response does not prove it.
 
 ## Installation predicates and recovery
 
+### Published H4 preparation and actual combined native evidence
+
+The original H4 contribution at `f008b67333ecf627270a7d8378720f1f034864ce`
+supplies `qualification/qualify_live_preimages.py`, its dated host receipt,
+the versioned read-only capacity bridge, and their complete seven-test closure.
+Those published additions are adopted unchanged. The bridge's existing installed
+postimage and prepared MCP lifecycle action remain with their original owner;
+source composition does not call for another installation or reload.
+
+The [original activation inputs](../../review_evidence/hermes_h4/ACTIVATION_INPUTS.md)
+and [profile mapping](../../review_evidence/hermes_h4/profile-mapping-20261107.json)
+distinguish Darwin uid501 profiles from Linux mmsecretary/mmmeta principals.
+A similarly named M2 profile cannot inherit a Linux role grant. Its attended
+binding requires the actual native admission and separately qualified service.
+
+The [combined evidence join](../../review_evidence/hermes_primary/h4-combined-evidence-join-20261107.json)
+records direct readback of H4's retained M2 manifest and results:100 gateway/
+APPLICATION cases and37 targeted TUI cases passed against native2bd, all five
+live TUI files and the unchanged0029f3c8 patch. The manifest SHA256 matches
+`133487351126780b34c27dc737053b2b3465c507a63614a1ec511db3e39eafd2`,
+and all ten core postimages match this release's patch contract. Its original
+candidate remains a03; unchanged runtime inputs establish component compatibility,
+not a new current-head or live-provider execution.
+
+The preimage utility covers tracked edits and the core paths; it does not
+inventory untracked files. Preserve the separate five-file combined proof and
+recheck actual writer state/preimages at installation. Neither this utility nor
+the seven-test diagnostic result replaces the combined behavior qualification
+or relaxes the production installer's clean-source and held-release guards.
+
+### Existing installation owner
+
 Use the existing release/installation workflow to bind the actual source
 generation, held Macro root/commit, package digest, dependency inventory, native
 role UID/principal and original enrollment request. Preserve CURRENT,

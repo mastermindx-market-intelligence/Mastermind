@@ -1,0 +1,296 @@
+{
+  "schema": "mastermind.hermes_native_worker_source_isolation.v1",
+  "source_parents": [
+    "552375cd288ebe3c417d10afa17f47114c6319db",
+    "9379f8fa84f8f9fee96d58a05e987bade8e76891"
+  ],
+  "incoming_paths": 25,
+  "original_worker_package_sha256": "c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927",
+  "current_release_inputs": {
+    "package_sha256": "7979dd4fbc42eead4d6e24b0fbcd1cbd73bb73fe645f63f7767b6994639e207a",
+    "runtime_files": {
+      "__init__.py": "91ff6ba36246ee46ac9194d571323648cd5b3f65e15c66259c0b1f604f76caab",
+      "enrollment_check.py": "d0d87bd7435f5c67659df1664ef3ec06fc3cc58ccb84e09616aed0e925070473",
+      "facade_port.py": "2d567ff2a06bbdca014679d607f05383a7f584af5a9baa10da1a458cbf5aef39",
+      "hermes_mcp_client.py": "d2b5a35af13b843d854e6efa6d421441ca9dd531196916d4738ccd4defa5e946",
+      "native.py": "8217cc69b66849e96d06058ae9b2d942b15e85ff6a27630083ca63b7e997af67",
+      "native_evidence.py": "eefd609682a4bb7ef8bc9590a0636769ea108896f596eecfdbee9fe591b89d82",
+      "native_session.py": "13143b1d8e7aa2e4436c630652bd40a616708c943da6e475c696b09ab1859af4",
+      "plugin.yaml": "02c18cb42f53f19c1a60eb5d44f4f732fe093ca7690f38b52f5ac8e05a54dd60"
+    },
+    "backend_sha256": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1"
+  },
+  "finding": "Extra sibling standard-library or private packages and timestamp-valid cached bytecode could execute while the eight sealed source hashes remained unchanged. Three inert marker regressions reproduce the defect on the original bytes.",
+  "repair": {
+    "backend_before_sha256": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
+    "backend_after_sha256": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
+    "checker_before_sha256": "c5e71eea8f5867d6711577e61b071cd0891dfa2f69abf9f6752166c0195a7a7b",
+    "checker_after_sha256": "d0d87bd7435f5c67659df1664ef3ec06fc3cc58ccb84e09616aed0e925070473",
+    "private_sources": [
+      "__init__.py",
+      "native.py",
+      "native_evidence.py"
+    ],
+    "isolation_flags": [
+      "-I",
+      "-B"
+    ],
+    "private_package_discovery_path": []
+  },
+  "initial_joined_qualification": {
+    "head": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "merge_head": "9379f8fa84f8f9fee96d58a05e987bade8e76891",
+    "source_sha256": {
+      "integrations/hermes_application_fabric/RELEASE_INPUTS.md": "ffe50ac9dac4f7278c812ce12cbaced4b78f9869cf7a0fb296aaf47296cf466c",
+      "integrations/hermes_application_fabric/qualification/qualify_live_preimages.py": "9bd739402db36931e52024f2156b1d21b00783c95e6ca337d4173f87849b728f",
+      "integrations/hermes_attended_fabric/NATIVE_ENROLLMENT.md": "61c89b448434fa6d3dd327aa2ade43aad57dce8dea05e06e7053713c6179d56e",
+      "integrations/hermes_attended_fabric/README.md": "ae5e5c46b41ab28757c9a8ef2fd7f36b90b01dfb86b178710d68dc5d4a10b46f",
+      "integrations/hermes_attended_fabric/__init__.py": "91ff6ba36246ee46ac9194d571323648cd5b3f65e15c66259c0b1f604f76caab",
+      "integrations/hermes_attended_fabric/enrollment_check.py": "c5e71eea8f5867d6711577e61b071cd0891dfa2f69abf9f6752166c0195a7a7b",
+      "integrations/hermes_attended_fabric/hermes_mcp_client.py": "d2b5a35af13b843d854e6efa6d421441ca9dd531196916d4738ccd4defa5e946",
+      "integrations/hermes_attended_fabric/native.py": "8217cc69b66849e96d06058ae9b2d942b15e85ff6a27630083ca63b7e997af67",
+      "integrations/hermes_attended_fabric/native_evidence.py": "eefd609682a4bb7ef8bc9590a0636769ea108896f596eecfdbee9fe591b89d82",
+      "integrations/hermes_attended_fabric/native_session.py": "13143b1d8e7aa2e4436c630652bd40a616708c943da6e475c696b09ab1859af4",
+      "integrations/hermes_attended_fabric/plugin.yaml": "02c18cb42f53f19c1a60eb5d44f4f732fe093ca7690f38b52f5ac8e05a54dd60",
+      "integrations/hermes_attended_fabric/tests/facade_wire_fixture.mjs": "686abf53cb7652bd5bf73a88503b274dd22f856303806bb0b2632700ab869eaa",
+      "integrations/hermes_attended_fabric/tests/native_owner_qualification.py": "84c9feed73dd8db94066362b441128a33a562de8a5720e9f647add483add6734",
+      "integrations/hermes_attended_fabric/tests/test_hermes_mcp_client.py": "5a09d55d0fe7c93ebcec07c7264b0ba6ee7214b19fc42065d33f55d674cbe0ed",
+      "integrations/hermes_omh/capacity_bridge.py": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+      "integrations/studio_direct_mcp/fabric-backend.mjs": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
+      "integrations/studio_direct_mcp/fabric-backend.test.mjs": "5583f8b25fa4f07806eaa2cca419f9c98ed74368a80aedf4578065db07b43abb",
+      "review_evidence/hermes_h4/ACTIVATION_INPUTS.md": "6c3dfc1779c41e02e2a1c816df5133bd634429fa4524b88b17843218cd0351d6",
+      "review_evidence/hermes_h4/native-preimage-qualification-20261107.json": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+      "review_evidence/hermes_h4/native-preparation-tests-20261107.json": "29214d1e834b0520f2ed7a68e178b8e6187159ac10e86202fb011554d304c2b9",
+      "review_evidence/hermes_h4/native-preparation-tests-20261107.log": "0b94f650eb7c1019e26b0553f39a6342901c8360285fd0953bd982eef1a05e44",
+      "review_evidence/hermes_h4/profile-mapping-20261107.json": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+      "review_evidence/hermes_primary/h4-combined-evidence-join-20261107.json": "55f5ae642c3f56956e072a767661808e0b32e8e98966cea711b5aa36f00651f4",
+      "tests/executive_fabric_release_identity_review.py": "2cb63109959ed44ef1f5432d560d830e15d8c8a4ea544bf100121996bff3063e",
+      "tests/test_hermes_h4_native_preparation.py": "71c5295debc70285d061b9053fefc146cd8d0d39e4bd71aa723c7fc145a6635f"
+    },
+    "exact_incoming_blobs": true,
+    "source_unchanged": true,
+    "results": [
+      {
+        "name": "package",
+        "command": [
+          "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-B",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "integrations/hermes_attended_fabric/tests",
+          "-p",
+          "test_*.py",
+          "-q"
+        ],
+        "rc": 0,
+        "seconds": 1.16,
+        "log": "/private/tmp/mmx-w2-p2imx9ly/package.log",
+        "log_sha256": "809dd881d997b91bade8ef5fdb49b00cce6eaba76afc00666af5282c9b2d19c3",
+        "tail": "----------------------------------------------------------------------\nRan 68 tests in 1.041s\n\nOK\n"
+      },
+      {
+        "name": "node",
+        "command": [
+          "/opt/homebrew/bin/node",
+          "--test",
+          "integrations/studio_direct_mcp/fabric-backend.test.mjs",
+          "integrations/studio_direct_mcp/fabric-backend-capacity.test.mjs",
+          "integrations/studio_direct_mcp/fabric-diagnostics.test.mjs"
+        ],
+        "rc": 0,
+        "seconds": 3.06,
+        "log": "/private/tmp/mmx-w2-p2imx9ly/node.log",
+        "log_sha256": "34a0e4ba2070a238b708d1245f626e71cf23859c7529be212cff54c861d9b9cc",
+        "tail": ": AUTHORIZATION_DENIED (0.022834ms)\n\u2714 uncertainty and real denial are both retained (0.069375ms)\n\u2714 caller replay false alone supplies neither denial nor permission (0.043916ms)\n\u2714 acceptance code used as top-level error still cannot prove denial (0.036667ms)\n\u2714 unrecognized status schema and prompt text cannot steer recovery (0.04225ms)\n\u2714 missing consent is not an invitation to auto-fill retention_opt_in (0.037125ms)\n\u2714 missing consent is not an invitation to auto-fill sensitive_data_opt_in (0.023333ms)\n\u2714 missing consent is not an invitation to auto-fill code_exposure_opt_in (0.020083ms)\n\u2714 technical schema repair remains bounded and non-authorizing (0.088417ms)\n\u2714 native eligibility preserves reason and strict manual pin (0.060583ms)\n\u2714 factual escalation requirement is not relabeled a safety denial (0.039959ms)\n\u2714 identity guard remains binding: ROOT_MISMATCH (0.043209ms)\n\u2714 identity guard remains binding: ROOT_UNVERIFIED (0.024917ms)\n\u2714 identity guard remains binding: CONTROLLER_NOT_BOUND (0.024375ms)\n\u2714 technical observation is not a safety assertion: ADAPTER_OBSERVATION_UNAVAILABLE (0.045333ms)\n\u2714 technical observation is not a safety assertion: PROCESS_TRANSPORT_ERROR (0.021917ms)\n\u2714 technical observation is not a safety assertion: CAPTURE_INVALID (0.03225ms)\n\u2714 technical observation is not a safety assertion: MANUAL_ROUTE_UNAVAILABLE (0.021375ms)\n\u2714 result paging is a retrieval requirement, not a reason to rerun worker (0.045042ms)\n\u2714 composed facade status exposes typed diagnosis without new processes (1.817709ms)\n\u2714 composed invalid request adds useful diagnosis without dispatch (0.157542ms)\n\u2714 capabilities explain replay scope without granting runtime authority (0.292792ms)\n\u2139 tests 135\n\u2139 suites 0\n\u2139 pass 135\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 3015.653625\n"
+      },
+      {
+        "name": "composition",
+        "command": [
+          "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-B",
+          "-m",
+          "pytest",
+          "-q",
+          "--noconftest",
+          "-p",
+          "no:cacheprovider",
+          "-c",
+          "/dev/null",
+          "--rootdir",
+          "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+          "--basetemp",
+          "/private/tmp/mmx-w2-p2imx9ly/p",
+          "--junitxml",
+          "/private/tmp/mmx-w2-p2imx9ly/composition.xml",
+          "tests/test_hermes_attended_fabric.py",
+          "tests/test_hermes_h4_native_preparation.py",
+          "tests/test_hermes_fabric_native_identity_review.py",
+          "tests/test_executive_fabric_release_identity_review.py",
+          "tests/test_ceo_submit_armed_composition.py"
+        ],
+        "rc": 1,
+        "seconds": 67.8,
+        "log": "/private/tmp/mmx-w2-p2imx9ly/composition.log",
+        "log_sha256": "b007688eca2222004cdb8499198b180c8ebf2891c9583ad793126b9665bb45fe",
+        "tail": "l_spans(PATH, source) == EXPECTED\nE       AssertionError: assert ((48, 65, 68,...0, 63, 'int')) == ((48, 65, 68,...0, 63, 'int'))\nE         \nE         At index 1 diff: (260, 60, 63, 'int') != (250, 60, 63, 'int')\nE         Use -v to get more diff\n\ntests/test_hermes_fabric_native_identity_review.py:28: AssertionError\n=============================== warnings summary ===============================\ntests/test_executive_fabric_release_identity_review.py::test_only_exact_reviewed_file_and_spelling_qualifies[app/mastermind_os/src-tauri/src/auth.rs]\ntests/test_executive_fabric_release_identity_review.py::test_changed_or_extended_file_cannot_reuse_review[app/mastermind_os/src-tauri/src/auth.rs]\n  <unknown>:1: SyntaxWarning: invalid decimal literal\n\ntests/test_executive_fabric_release_identity_review.py::test_only_exact_reviewed_file_and_spelling_qualifies[ops/executive_os/install.sh]\ntests/test_executive_fabric_release_identity_review.py::test_only_exact_reviewed_file_and_spelling_qualifies[ops/executive_os/install.sh]\ntests/test_executive_fabric_release_identity_review.py::test_changed_or_extended_file_cannot_reuse_review[ops/executive_os/install.sh]\ntests/test_executive_fabric_release_identity_review.py::test_changed_or_extended_file_cannot_reuse_review[ops/executive_os/install.sh]\n  <unknown>:1: SyntaxWarning: \"\\$\" is an invalid escape sequence. Such sequences will not work in the future. Did you mean \"\\\\$\"? A raw string is also an option.\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_hermes_fabric_native_identity_review.py::test_exact_source_reviews_only_two_reason_limit_tokens\n1 failed, 580 passed, 6 warnings, 74 subtests passed in 67.39s (0:01:07)\n",
+        "totals": {
+          "tests": 655,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        },
+        "junit_sha256": "d5d9f160dece53e1d0146c32c12317ecf184a92221042f7c4a96708e523fbffe"
+      }
+    ]
+  },
+  "finite_identity_test_correction": {
+    "rc": 0,
+    "seconds": 1.46,
+    "change": "Exact second reason-limit token coordinate250 to260; same count, spelling, columns, source digest and negative drift checks",
+    "before_sha256": "476f94dda57fce8549a4e41b219b0854af8ba60823930ca9a6e7eb728c189081",
+    "after_sha256": "6112710c2bf79bbc7ab42b66ca00c03c6880ed1e2bfe322237e6b567386f4c7b",
+    "native_source_sha256": "8217cc69b66849e96d06058ae9b2d942b15e85ff6a27630083ca63b7e997af67",
+    "native_source_unchanged": true,
+    "command": [
+      "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--noconftest",
+      "-p",
+      "no:cacheprovider",
+      "-c",
+      "/dev/null",
+      "--rootdir",
+      "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+      "--basetemp",
+      "/private/tmp/mmx-id2-4udpsrps/p",
+      "--junitxml",
+      "/private/tmp/mmx-id2-4udpsrps/tests.xml",
+      "tests/test_hermes_fabric_native_identity_review.py"
+    ],
+    "log": "/private/tmp/mmx-id2-4udpsrps/tests.log",
+    "log_sha256": "f63ed36e155f51d176a24bf99a26b78f86aa6146b75b84adcff92d4ad1c40a97",
+    "junit_sha256": "0618bf05fdc2100d2c553503120398ed7721cd8f6c741d48829cfd9e50fc3930",
+    "totals": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "baseline_counterexamples": {
+    "rc": 1,
+    "seconds": 4.23,
+    "proof_dir": "/private/tmp/mmx-nb2-rzbq_mge",
+    "native_python": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+    "backend_sha256": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
+    "checker_sha256": "c5e71eea8f5867d6711577e61b071cd0891dfa2f69abf9f6752166c0195a7a7b",
+    "log_sha256": "522dc68d1aa9099697d2d8a328fbd6e8c3d059a02ef9ee44ad57f96ee3974f7e",
+    "result": {
+      "tests": 3,
+      "failures": [
+        {
+          "test": "test_checker_ignores_unmeasured_standard_library_sibling (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_checker_ignores_unmeasured_standard_library_sibling)",
+          "trace": "Traceback (most recent call last):\n  File \"/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 401, in test_checker_ignores_unmeasured_standard_library_sibling\n    self._assert_unmeasured_code_never_runs(marker)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^\n  File \"/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 391, in _assert_unmeasured_code_never_runs\n    self.assertFalse(marker.exists(), \"unmeasured installed code executed\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: True is not false : unmeasured installed code executed\n"
+        },
+        {
+          "test": "test_checker_uses_exact_private_source_before_sibling_package (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_checker_uses_exact_private_source_before_sibling_package)",
+          "trace": "Traceback (most recent call last):\n  File \"/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 409, in test_checker_uses_exact_private_source_before_sibling_package\n    self._assert_unmeasured_code_never_runs(marker)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^\n  File \"/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 391, in _assert_unmeasured_code_never_runs\n    self.assertFalse(marker.exists(), \"unmeasured installed code executed\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: True is not false : unmeasured installed code executed\n"
+        },
+        {
+          "test": "test_checker_does_not_execute_unmeasured_cached_bytecode (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_checker_does_not_execute_unmeasured_cached_bytecode)",
+          "trace": "Traceback (most recent call last):\n  File \"/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 428, in test_checker_does_not_execute_unmeasured_cached_bytecode\n    self._assert_unmeasured_code_never_runs(marker)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^\n  File \"/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 391, in _assert_unmeasured_code_never_runs\n    self.assertFalse(marker.exists(), \"unmeasured installed code executed\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: True is not false : unmeasured installed code executed\n"
+        }
+      ],
+      "errors": [],
+      "skipped": 0,
+      "native_input_sha256": {
+        "/Users/chriswong/.hermes/hermes-agent/hermes_cli/plugins.py": "0da0ebe88da76f4a73d77fcc6942ef549154abbc573d52d74c1608bcb61efce4",
+        "/Users/chriswong/.hermes/hermes-agent/run_agent.py": "8f8df32b0a027516c11ec58221d266048d0b76157599aa3934b4348add52a643",
+        "/Users/chriswong/.hermes/hermes-agent/hermes_state.py": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2"
+      },
+      "python": "3.14.9 (main, Oct 21 2026, 17:47:42) [Clang 23.1.3 ]",
+      "actual_python": "/Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3",
+      "committed_site_packages": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/lib/python3.14/site-packages"
+    }
+  },
+  "qualified_result": {
+    "tested_head": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "merged_source": "9379f8fa84f8f9fee96d58a05e987bade8e76891",
+    "source_sha256": {
+      "integrations/studio_direct_mcp/fabric-backend.mjs": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
+      "integrations/hermes_attended_fabric/enrollment_check.py": "d0d87bd7435f5c67659df1664ef3ec06fc3cc58ccb84e09616aed0e925070473",
+      "integrations/hermes_attended_fabric/tests/native_owner_qualification.py": "4737a8f8aa3768737c6f0e860cd4d6973c855cc26d4cabf6e8b34a15bc5d57a6",
+      "tests/test_hermes_fabric_native_identity_review.py": "6112710c2bf79bbc7ab42b66ca00c03c6880ed1e2bfe322237e6b567386f4c7b"
+    },
+    "source_unchanged": true,
+    "results": [
+      {
+        "name": "native",
+        "rc": 0,
+        "seconds": 21.59,
+        "log": "/private/tmp/mmx-ni-7g58q0ju/native.log",
+        "log_sha256": "b0d810118ccc9c91d39e7d7f60259054d30519974044c1c7f625daec9aadbcdd",
+        "tail": "ic.tests.native_owner_qualification.NativeOwnerQualification.test_compression_preserves_original_run_and_prior_attempt) ... ok\ntest_fabric_grant_is_not_model_or_fake_native_context (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_fabric_grant_is_not_model_or_fake_native_context) ... ok\ntest_checker_ignores_unmeasured_standard_library_sibling (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_checker_ignores_unmeasured_standard_library_sibling) ... ok\ntest_checker_uses_exact_private_source_before_sibling_package (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_checker_uses_exact_private_source_before_sibling_package) ... ok\ntest_checker_does_not_execute_unmeasured_cached_bytecode (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_checker_does_not_execute_unmeasured_cached_bytecode) ... ok\ntest_real_facade_native_verifier_request_and_result_path (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_real_facade_native_verifier_request_and_result_path) ... ok\ntest_native_channel_cannot_omit_origin_or_claim_another_profile (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_native_channel_cannot_omit_origin_or_claim_another_profile) ... ok\ntest_installed_pin_and_byte_drift_refuse_before_request_engine (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_installed_pin_and_byte_drift_refuse_before_request_engine) ... ok\ntest_native_plugin_slot_link_cannot_redirect_qualifier (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_native_plugin_slot_link_cannot_redirect_qualifier) ... ok\ntest_server_rechecks_enrollment_after_async_preflight (integrations.hermes_attended_fabric.tests.native_owner_qualification.NativeOwnerQualification.test_server_rechecks_enrollment_after_async_preflight) ... ok\n\n----------------------------------------------------------------------\nRan 25 tests in 18.924s\n\nOK\n",
+        "result": {
+          "tests": 25,
+          "failures": [],
+          "errors": [],
+          "skipped": 0,
+          "native_input_sha256": {
+            "/Users/chriswong/.hermes/hermes-agent/hermes_cli/plugins.py": "0da0ebe88da76f4a73d77fcc6942ef549154abbc573d52d74c1608bcb61efce4",
+            "/Users/chriswong/.hermes/hermes-agent/run_agent.py": "8f8df32b0a027516c11ec58221d266048d0b76157599aa3934b4348add52a643",
+            "/Users/chriswong/.hermes/hermes-agent/hermes_state.py": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2"
+          },
+          "python": "3.14.9 (main, Oct 21 2026, 17:47:42) [Clang 23.1.3 ]",
+          "actual_python": "/Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3",
+          "committed_site_packages": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/lib/python3.14/site-packages"
+        }
+      },
+      {
+        "name": "package",
+        "rc": 0,
+        "seconds": 1.38,
+        "log": "/private/tmp/mmx-ni-7g58q0ju/package.log",
+        "log_sha256": "911280b7107f739710a3692fcb06bc21ef5353ac54443a1d218304c4e327a4ef",
+        "tail": "----------------------------------------------------------------------\nRan 68 tests in 1.209s\n\nOK\n"
+      },
+      {
+        "name": "node",
+        "rc": 0,
+        "seconds": 3.83,
+        "log": "/private/tmp/mmx-ni-7g58q0ju/node.log",
+        "log_sha256": "6d1e58e76dbd158269a04429548fd8928a37d2ba109219a3d9d621c3d5b753f6",
+        "tail": "te\":\"STATUS_UNREADABLE\"} (0.24175ms)\n\u2714 uncertainty outranks apparent result/absence: {\"state\":\"RESULT_UNAVAILABLE\"} (0.049958ms)\n\u2714 uncertainty outranks apparent result/absence: {\"state\":\"REQUEST_RETAINED_NO_START_EVIDENCE\"} (0.045792ms)\n\u2714 real denial remains action-scoped: SAFETY_DENIED (0.081291ms)\n\u2714 real denial remains action-scoped: PERMISSION_DENIED (0.032542ms)\n\u2714 real denial remains action-scoped: AUTHORIZATION_DENIED (0.025666ms)\n\u2714 uncertainty and real denial are both retained (0.045708ms)\n\u2714 caller replay false alone supplies neither denial nor permission (0.098833ms)\n\u2714 acceptance code used as top-level error still cannot prove denial (0.055084ms)\n\u2714 unrecognized status schema and prompt text cannot steer recovery (0.0485ms)\n\u2714 missing consent is not an invitation to auto-fill retention_opt_in (0.043666ms)\n\u2714 missing consent is not an invitation to auto-fill sensitive_data_opt_in (0.03225ms)\n\u2714 missing consent is not an invitation to auto-fill code_exposure_opt_in (0.024958ms)\n\u2714 technical schema repair remains bounded and non-authorizing (0.035334ms)\n\u2714 native eligibility preserves reason and strict manual pin (0.134625ms)\n\u2714 factual escalation requirement is not relabeled a safety denial (0.116667ms)\n\u2714 identity guard remains binding: ROOT_MISMATCH (0.068875ms)\n\u2714 identity guard remains binding: ROOT_UNVERIFIED (0.033917ms)\n\u2714 identity guard remains binding: CONTROLLER_NOT_BOUND (0.029333ms)\n\u2714 technical observation is not a safety assertion: ADAPTER_OBSERVATION_UNAVAILABLE (0.039542ms)\n\u2714 technical observation is not a safety assertion: PROCESS_TRANSPORT_ERROR (0.026125ms)\n\u2714 technical observation is not a safety assertion: CAPTURE_INVALID (0.037334ms)\n\u2714 technical observation is not a safety assertion: MANUAL_ROUTE_UNAVAILABLE (0.025ms)\n\u2714 result paging is a retrieval requirement, not a reason to rerun worker (0.039833ms)\n\u2714 composed facade status exposes typed diagnosis without new processes (2.819541ms)\n\u2714 composed invalid request adds useful diagnosis without dispatch (0.178458ms)\n\u2714 capabilities explain replay scope without granting runtime authority (0.379917ms)\n\u2139 tests 135\n\u2139 suites 0\n\u2139 pass 135\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 3773.860417\n"
+      }
+    ]
+  },
+  "initial_native_runner_environment_failure": {
+    "retained_receipt": "/tmp/mmx-worker-isolation-baseline.json",
+    "tests_executed": 0,
+    "reason": "Native interpreter relaunch needed explicit already-committed dependency site path; no dependency installation or repair was performed."
+  },
+  "guard_preservation": [
+    "Same existing native plugin installer and sealed Fabric backend.",
+    "Same ordinary WORKER admission, original native/session/turn identity and result owner.",
+    "Existing manual/AUTO selection, revocation, uncertain-effect and original-result guards retained.",
+    "Native registration is not invoked by the read-only checker.",
+    "The current checker change advances the package fingerprint; old c099 remains historical."
+  ],
+  "acceptance": {
+    "native_abi_fixture_cases": 25,
+    "package_cases": 68,
+    "node_cases": 135,
+    "live_provider_acceptance": false,
+    "installed_worker_start": false,
+    "native_plugin_installation": false,
+    "release_selection": false,
+    "uptime_acceptance": false,
+    "fixture_boundary": "Actual PluginContext, SessionDB, middleware, Node facade and checker execute in temporary profiles. Final Fabric command engine is a fixture."
+  },
+  "next_release_action": "Compose the current backend blob and eight-file package from one selected protected revision through the existing H4/native installer; retain original runtime and publication fences."
+}
