@@ -1,0 +1,78 @@
+# Hermes: Executive v3 and Paper MCP integration
+
+**Current source state: CONFIGURED_DISABLED.** The existing Hermes role
+installer now adds two disabled MCP entries to its **same** vendor config via
+`integrations/hermes_harness/executive_paper_mcp.py`. It does not start a
+second MCP service, credential store, profile owner, agent, scheduler or queue.
+
+| Hermes MCP entry | Original service | Transport | Default tool scope |
+| --- | --- | --- | --- |
+| `mastermind_executive_v3` | `integrations/executive_mcp/server.py` / Web CEO v3 | Existing authenticated HTTP MCP URL through `${MASTERMIND_EXECUTIVE_V3_MCP_URL}`; bearer through `${MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN}` | Nine Executive v3 readers, disabled |
+| `mastermind_paper` | `integrations/paper_desktop/mcp_server.py` / guarded Paper bridge | Existing host-pinned local stdio Python `${MASTERMIND_PAPER_MCP_PYTHON}` and script `${MASTERMIND_PAPER_MCP_SERVER}` | `paper_inspect`, `paper_catalog`, `paper_read`, disabled |
+
+The original `mastermind_steward` remains disabled. Native toolsets stay
+`clarify`, all protected disabled-toolset fences stay in place, and the
+installed BYOK model/config remains unchanged. `paper_edit`,
+`paper_prepare`, `session_send`, `session_summon` and
+`submit_ceo_intent` are **not** in the model-visible lists. These already
+exist at their canonical owners; adding a generic exposed tool is not an
+Executive admission or a Paper edit grant.
+
+## Existing-owner live enrollment, not another installer
+
+1. **Reconcile runtime and source custody.** Confirm the exact M2 Hermes
+   role/build, installed configuration owner, current original branch and
+   admitted role principals. Preserve #2134's selected-child/native-session
+   carrier and the Fabric worker's existing parent and effect state. Do not
+   overwrite the active `~/.hermes/config.yaml` or live role files with a
+   bare template. This source installer itself is **not a hot reload**.
+2. **Executive connection.** Use the existing authenticated Executive v3 MCP
+   endpoint/claim issuer. The ChatGPT Executive plugin login **cannot** be
+   assumed to authenticate a Hermes client. Supply the URL and principal-bound
+   bearer through the existing role secret/environment owner; never commit
+   values or accept role claims from model arguments. Before enabling the
+   entry, prove endpoint, JWT audience/scope, and bounded `list_tools`.
+   Inspect actual `executive_state` and retain `backend_unavailable` as a
+   failure, not a healthy read. Do not turn on Executive write tools without
+   existing runtime admission, original effect reconciliation and actual
+   return-path qualification.
+3. **Paper connection.** On the Mac actually running Paper Desktop, qualify
+   the **existing** staged private Paper runtime, executable Python, guarded
+   `mcp_server.py` and active/exact target `fileId`. Never expose or tunnel
+   raw Paper localhost port `29979`, substitute a generic Desktop Commander
+   process, or create another bridge. Prove the existing Paper catalog and
+   `paper_read(tool=get_basic_info, arguments={fileId:...})` on an exact
+   authorized file. A failure of default foreground context does not prove an
+   exact-file read impossible. Design mutation remains separately gated on
+   intended target, fresh snapshot, existing `--allow-write` and accepted
+   guarded Paper edit carrier.
+4. **Hermes owner enablement.** Change only the accepted owner-managed role
+   profile after sources, permissions and credentials are proven. Align
+   registered MCP tool names and original exact tool allowlist at the same
+   current head. Use `hermes mcp list`, then `hermes mcp test
+   mastermind_executive_v3` and `hermes mcp test mastermind_paper`. For a
+   live session use `/reload-mcp`; a gateway may observe config changes
+   separately. Test actual model-facing read calls from **both** Meta-CEO and
+   Secretary in their own authorized profile, including no-token, revoked
+   token, no Paper document, stale document and service-restart failures.
+   A CLI config or connected tool list alone is **not** production proof.
+
+## Verification
+
+```sh
+python3 -m unittest discover -s integrations/hermes_harness/tests -p 'test_executive_paper_mcp.py' -v
+python3 -m unittest discover -s integrations/hermes_harness/tests -p 'test_native_mcp_install.py' -v
+python3 -m compileall -q integrations/hermes_harness
+```
+
+The offline tests must prove exact reader lists, other keys/model preservation,
+no embedded credentials, default disabled configuration, and fail-closed
+source drift. CI still owes the repository's existing closure/build gates;
+the host still owes actual enrollment and real-path results.
+
+**Observed at initial request:** the ChatGPT Executive v3 reader returned
+`backend_unavailable`; the Paper app reported
+`UPSTREAM_UNAVAILABLE` (no accessible open file); M2 Studio route selection
+returned `FLEET_ROUTE_PREFLIGHT_REFUSED` before dispatch. These observations
+do not authorize replay or host-carrier substitution. This source alone
+changes none of those three conditions.
