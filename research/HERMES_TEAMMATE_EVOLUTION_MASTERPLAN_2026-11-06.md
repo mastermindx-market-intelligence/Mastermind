@@ -2145,3 +2145,62 @@ The transient local execution connection became unavailable and was not retried.
 Next bounded source judgment concerns an actual runtime-provider selector witness at the existing observed-dispatch/HTTP transport boundary. Current input policy rechecks the adopted native agent provider, but the original transport observation does not retain that fact. Any implementation must use the same observation owner, preserve strict historical schemas, join every actual call/dispatch/attempt and identify only the frozen public configuration label whose bytes were observed. It cannot attest remote serving-model weights, credential realm, effective sampling defaults, full sandbox/network policy or effects. The remaining missing-observation, coverage and learning-admission gates remain in force.
 
 Original Ubuntu1/root C26 journal-read PermissionError remains closed/unretried; restoration/reconciliation of that original admin connection is still required for installed work. Runtime carrier remains **meta-ceo-byok-followon-parent-20261106-c35-01**, at **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01**. Paid Fabric refusal and two named denied AF_UNIX cases are not replayed. C3 is source-only. No account/login, fleet activation, CUA, daemon/watcher/queue or Slack/email occurred.
+
+
+## 49. Native runtime-selector evidence and remaining owner contracts — 2026-11-07
+
+**Classification: MORE_WORK_EXISTS; MISSION_COMPLETE=false.** One previously always-missing native execution scalar can now be populated from actual original observations. It remains a limited selector fact; eleven other scalar holes, partial coverage, unknown effects and unproven cleanup still prevent valid native learning trials.
+
+### Canonical source
+
+Original Draft [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) advances by compare-and-swap from2d662 to **c19488c14aa1279946e108b2e85b4b8fafba1b49**, tree **9217530e773dd82125b38d2dadec7218f33eee00**, parent **2d662339d8f4b38c67a0739efc0bf0f78bdb9150**. Four postimages: original transport observer, original EVAL publisher, its existing owned publication-test suite, and existing native-input documentation. The EVAL scope guard is unchanged.
+
+GitHub API tree equals the actual staged source tree. [Published transport](https://github.com/mastermindx-market-intelligence/Mastermind/blob/c19488c14aa1279946e108b2e85b4b8fafba1b49/integrations/hermes_runtime/native_transport_observation.py) was read back byte-identical: blob **f2191d890459e2ef14a319827460cfdd5f5df462**, SHA256 **abbaad725f7fb86e95a9349d798314167cab862aaa72abea921c8e7a5a406215**. Publisher SHA256 **7c6b0176603f1707b69254eff1e7c743d6c91f0a18117e72993b27e16dd2da19**. [Contract](https://github.com/mastermindx-market-intelligence/Mastermind/blob/c19488c14aa1279946e108b2e85b4b8fafba1b49/docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md). Fresh PR readback is OPEN/Draft, MERGEABLE, with the exact current description. No EVAL release request exists.
+
+C3 source workspace **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/eval-trial-read-validation** is reconciled to clean HEADc194/tree921 after exact index/postimage comparison, read-only source fetch and soft reset. No hard reset, git push or runtime activation occurred. Local execution remains unavailable and unretried.
+
+### Actual observation and strict historical behavior
+
+The existing Contribution records a digest/status/UTF-8 byte-length projection of the actual adopted agent.provider at each dispatch and every retained HTTP-send attempt. At the qualified original client-factory return, provider_client_check records equality to that dispatch's captured selector. Conflict is sticky; an unavailable observation cannot later become matched just because the mutable label is restored.
+
+No arbitrary provider label is retained. The existing scope/adoption/claim/sealing/currentness fences own all records and updates. Added fields are included before the original shared16KiB metadata reservation; enum changes fit the existing bounded update reserve. No second store, record identity, listener or lifecycle is introduced.
+
+New **mastermind.hermes_native_transport_observation/v2** requires the new fields. Historical v1 remains closed, excludes those fields and cannot acquire inferred observations from today's runtime. Existing request-observation carriers and historical result readers remain the only transport.
+
+The original publisher applies all existing call/dispatch/attempt/request-content/retry-identity joins first. It identifies the frozen public configuration's provider label only when every dispatch/client-return/attempt witness matches that label's exact digest and length. An observed mismatch is OBSERVATION_CONFLICT; missing/unavailable observations stay missing. Historical v1 still contributes its earlier supported observations but no provider scalar.
+
+For the supported named Z.ai route, this can populate **execution.provider="custom"**, the native runtime selector. The separately qualified requested provider remains "zai-glm"; it is not interchangeable with the runtime selector or a model name. Provider-request coverage stays PARTIAL. Provider delivery and model-identity flags stay false. Failed HTTP attempts can still measure the selector while retaining their actual raised state and absent response.
+
+### Factory boundary and wording
+
+Principal source judgment inspected the native factory chain under the existing source-only native-pin-source directory: _NonStreamRequest._make_client calls the adopted agent's request factory; ClientLifecycleMixin._create_request_openai_client copies existing client kwargs under its lock and can check out an existing request client; create_openai_client separately samples the current provider for provider-specific construction. The primary runtime snapshot restores fallback state across turns rather than applying a request-local provider snapshot in _make_client.
+
+These are distinct facts. Matching samples do not establish continuous selector identity between boundaries, atomic factory-input provenance, copied client kwargs, credential realm, endpoint identity, a remote serving organization or model weights. The final comment and contract explicitly say **boundary-sampled selector**, and define provider_client_check as equality at the factory-return boundary. No stronger field is populated from this witness. A later effective-client/auth contribution must use that actual construction/cache-checkout owner.
+
+### Qualification and interruption truth
+
+The actual original transport/SDK/retained-reader and EVAL-publication suites cover **136 distinct passing cases**, with no retained case failures/errors/skips.
+
+The first process was interrupted after stdout appeared quiet. Retained case timings show that it had continued making progress; no deadlock is established. Its XML contains92 completed cases (sum of case times195.039s), SHA256 **c64f1626e31139100d425624a9f939937b14bd6aabf0cea0663f2a5f448d1169**. The process ended with exit1 after the interrupt, so this is not reported as a successful full-batch run. Original parent70488 and pytest70535 were read back ended before continuing.
+
+The remaining **44 cases passed** with those92 exact case IDs deselected, process exit0, zero failures/errors/skips; XML **ed14afc13a1150901869034ced6d05c4352d7f280cff62c7036bd93ab161cf7f**. Case identities were verified disjoint, total136. Earlier mission suites overlap and are not additive.
+
+Proof includes actual in-process SDK/HTTPX bodies, retries and redirects; provider changes at factory return and send; a retry sequence whose selector changes and returns to the original value; raised original attempts without delivery; old transport v1 through the original codec/authenticated reader; malformed/extra/missing/new-schema fields; observation overflow; incomplete spans and missing attempts; all earlier publication/retirement/Trial-reader cases. Current runtime observation only samples labels and never mutates provider state; controlled label changes occur exclusively in tests.
+
+Final D8 collected **three source paths** under its ordinary production-collector rules, no identity/evidence findings. Whitespace and exact source/API tree passed. Final wording-only source changes have equal Python AST. No denied sockets, real provider requests, account use or installed service execution occurred.
+
+### Release frontier
+
+Discovery [#2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217) CI **42409220290** completed SUCCESS. Its original release request moved to queue entry **MQE_lQDOTotz3c8AAAABNgoCtM4ABAiKzgPOiYQ**, last observed position3/AWAITING_CHECKS at headc4cd. autoMergeRequest is null because queued. No merge, second request, or cancellation is claimed.
+
+Context #2242 remains merged as24263b. The latest observed master is **f57b08549634a5d3ab75f1dbdca6926d9cc8d6b3**. The bounded98a→f57 comparison contains ticker evidence and Fabric custody/qualification source changes; no governing law change. Protected compatible pin **66780ab7e3e9fdbfd40713bb5791fb1888529f7c** remains. Those source changes do not establish restored runtime/Fabric permission, so neither denied action is retried.
+
+Next release action after original discovery acceptance: compose that accepted source onto the original EVAL carrier, preserve current protected fences, obtain current CI and use the ordinary single leased release request only when ready. Before acceptance, continue independent source work.
+
+### Next substantive contracts, unchanged holds
+
+Principal source judgments are examining actual credential-mechanism and native session/history/cache decisions. The existing OHF bridge already derives the broad auth-realm class from observed provider_auth_type; that definition is distinct from an account/grant attestation. Any native extension must measure the corresponding fact at its actual owner, with cache hits, mutable client kwargs and private credentials accounted for. No caller-supplied realm or new auth registry is authorized by this observation.
+
+Freshness/resume needs the original creation/history decisions; object identity or a new label cannot substitute. Existing capability/environment digests, effective server sampling, complete source/tool/network coverage, effects and cleanup remain unavailable until their actual owner facts can be obtained. No placeholder value, revised validity rule or synthetic production observation closes those gaps.
+
+Original Ubuntu1/root C26 journal-read permission denial remains closed. Original installed carrier **meta-ceo-byok-followon-parent-20261106-c35-01** and its return path remain authoritative. C3 is source validation only; paid Fabric refusal, both named AF_UNIX refusals, vault login entitlement and Outcome Learning #398/#409 holds remain unchanged. No fleet/browser/computer activation, inference, daemon, watcher, queue, outside message or duplicate control plane was started.
