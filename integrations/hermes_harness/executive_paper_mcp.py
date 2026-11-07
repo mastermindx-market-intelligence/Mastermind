@@ -97,3 +97,23 @@ def render_disarmed_native_exec_paper(profile: object) -> str:
     except (ValueError, TypeError, UnicodeError, yaml.YAMLError):
         raise RuntimeRefusal("EXEC_PAPER_CONFIG_UNQUALIFIED") from None
     return rendered
+
+
+def exact_disarmed_catalog(profile: object, observed: bytes) -> dict[str, tuple[str, ...]] | None:
+    """Pure proposed input for the EXISTING supervisor's registry guard.
+
+    A caller must first apply the incumbent private-file, custody and runtime
+    checks. This function never reads an installed file or enables a server;
+    it provides no native admission, only exact-byte recognition and the
+    expected *disabled* MCP census for the already-authoritative supervisor.
+    """
+    if type(observed) is not bytes or len(observed) > 64 * 1024:
+        return None
+    if observed != render_disarmed_native_exec_paper(profile).encode("utf-8"):
+        return None
+    from integrations.hermes_steward.client import ALLOWED_TOOLS
+    return {
+        "mastermind_steward": tuple(ALLOWED_TOOLS),
+        "mastermind_executive_v3": tuple(EXECUTIVE_READ_TOOLS),
+        "mastermind_paper": tuple(PAPER_READ_TOOLS),
+    }
