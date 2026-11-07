@@ -26,7 +26,7 @@ def admit(s):
         workspace_id="T0BRD2AQXQV",channel_id="C0BSBM78V1N",
         relay_bot_user_id="U0BT71H4FQE",owner_slack_user_id="U0BRET6191C",
         principal_digest=owner_key(who),
-        not_before_ts=f"{s.auth.now[0]-60}.000001",current=True,
+        not_before_ts="1794017500.000001",current=True,
     )
     s.host=RuntimeReplyEventHost(
         s.owner,ExecutiveReplyCipher("fixture-key",b"k"*32),
