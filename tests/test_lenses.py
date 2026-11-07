@@ -138,13 +138,16 @@ def test_altdata_divergence_patterns():
     assert any(x["pattern"] == "political_flow_early" for x in early)
 
 
-def test_get_altdata_tool(monkeypatch):
+def test_get_altdata_tool(monkeypatch, tmp_path):
     bt = {"tickers": {"EFX": {"convergence_score": 2, "channels": ["gov_contract", "trump"], "trump_linked": True}}}
     latent = {"watch": [{"ticker": "HUT", "themes": [{"en": "AI power & data-center infrastructure"}],
                          "trump_people": ["Eric Trump"], "top_holder": {"owner": "BlackRock"}}],
               "mismatches": [{"entity_ticker": "ABTC", "repointed_ticker": "HUT", "real_theme": {"en": "AI infra"}}]}
-    monkeypatch.setattr(bot_mcp, "_read_json",
-                        lambda p: bt if "by_ticker" in str(p) else latent if "latent" in str(p) else None)
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    altdata = tmp_path / "site" / "altdata"
+    altdata.mkdir(parents=True)
+    (altdata / "by_ticker.json").write_text(json.dumps(bt))
+    (altdata / "latent.json").write_text(json.dumps(latent))
     d = json.loads(asyncio.run(bot_mcp.get_altdata.handler({"ticker": "EFX"}))["content"][0]["text"])
     assert d["ticker"] == "EFX" and d["flow"]["convergence_score"] == 2
     # HUT carries no direct flow row but resolves the latent graph + the ABTC->HUT label mismatch
