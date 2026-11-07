@@ -20,7 +20,7 @@ from tests.test_session_bridge_reply_event_host_integration import (
 
 def admit(s):
     source=s.host
-    who=dataclasses.replace(s.principal,scopes=tuple((*s.principal.scopes,CANARY_SCOPE)))
+    who=s.principal
     policy=TrustedCanaryPolicy(
         workspace_id="T0BRD2AQXQV",channel_id="C0BSBM78V1N",
         relay_bot_user_id="U0BT71H4FQE",owner_slack_user_id="U0BRET6191C",
@@ -62,7 +62,7 @@ def test_exact_existing_peer_challenge_persists_chris_subscription(event_case,tm
 
 def test_original_default_off_host_does_not_grant_canary(event_case,tmp_path,short_socket_root):
     s=event_case
-    who=dataclasses.replace(s.principal,scopes=tuple((*s.principal.scopes,CANARY_SCOPE)))
+    who=s.principal
     async def act(client,service):
         return await client._call("canary_policy",who,{})
     try:
