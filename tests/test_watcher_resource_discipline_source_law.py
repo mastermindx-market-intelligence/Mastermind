@@ -121,14 +121,20 @@ def test_slack_reciprocal_edges_are_bound_to_exact_thread_root_not_channel() -> 
 def test_terminal_stop_consumes_receiver_assignment_for_that_child() -> None:
     index = _flat("docs/sol_skills/INDEX.md")
     routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
-    for text in (index, routing):
-        for phrase in (
-            "Receiver assignment is child-specific",
-            "terminal STOP consumes that child assignment",
-            "standing program instruction does not self-assign a successor child",
-            "fresh Sol/Chairman delivery or canonical placement edge",
-        ):
-            assert phrase in text
+    for phrase in (
+        "Receiver assignment is child-specific",
+        "terminal STOP consumes that child assignment",
+        "standing program instruction does not self-assign a successor child",
+        "fresh Sol/Chairman delivery or canonical placement edge",
+    ):
+        assert phrase in routing
+    for phrase in (
+        "STOP consumes only that child's assignment",
+        "Standing programs cannot self-assign successors",
+        "fresh Sol/Chairman delivery or canonical placement edge",
+        "plus carrier/pickup",
+    ):
+        assert phrase in index
 
 
 def test_exact_session_required_does_not_equate_slack_seat_with_native_session() -> None:
@@ -177,22 +183,27 @@ def test_buried_direct_targeted_new_child_reply_cannot_originate_a_child() -> No
     ):
         assert phrase in routing
 
-    assert "never makes that buried reply a successor-child assignment" in index
+    assert "A buried `DIRECT_TARGETED \u2014 NEW CHILD` under another program/child is not assignment" in index
 
 
 def test_unacked_slack_delivery_is_unconsumed_prestart_not_active_work() -> None:
     law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
     index = _flat("docs/sol_skills/INDEX.md")
     routing = _flat("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
-
-    for text in (law, index, routing):
+    for text in (law, routing):
         for phrase in (
             "DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK",
             "DELIVERY_UNCONSUMED / PRE_START",
             "must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed",
         ):
             assert phrase in text
-
+    for phrase in (
+        "DELIVERY_SENT/mention without PICKUP_ACK",
+        "DELIVERY_UNCONSUMED / PRE_START",
+        "not active, STARTED, executing, waiting-on-worker or watcher-consumed",
+        "Executive owns lifecycle; receipt is not START",
+    ):
+        assert phrase in index
     for phrase in (
         "PICKUP_ACK and START are separate edges",
         "Executive OS remains the lifecycle owner",

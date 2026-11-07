@@ -495,7 +495,8 @@ class TestRotationLoop:
 
         async def _fake_via_sdk(prompt, mdl, role, system, append_system, tools, dirs,
                                 turns, workdir, perm, mcp_servers, resume, arm,
-                                run_id=None, env_name=None, thinking_out=None):
+                                run_id=None, env_name=None, thinking_out=None,
+                                failure_out=None):
             call_count["n"] += 1
             if env_name == "CLAUDE_CODE_OAUTH_TOKEN_3":
                 # Return the org-disabled banner as text (the crux case)
@@ -553,7 +554,7 @@ class TestRotationLoop:
                 "what is the market doing?",
                 log_run=False,
                 _backend_override="cli",
-                _oauth_candidates=pinned,
+                _subscription_slots=pinned,
             )
         )
 

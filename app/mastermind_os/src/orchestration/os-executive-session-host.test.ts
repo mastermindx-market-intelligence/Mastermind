@@ -1,0 +1,444 @@
+import { searchSavedConversations } from "../discovery/saved-conversations";
+// Focused coverage for the separately mounted session host lifecycle.
+// Every fixture is in-memory: no backend, route, credential or producer.
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  completeExecutiveSessionBinding,
+  createOsExecutiveSessionHost,
+  readSessionOwnerContext,
+} from "./os-executive-session-host";
+import type {
+  ExecutiveSessionTransport,
+  SessionSendArguments,
+} from "./executive-session-command-port";
+import { OperationController } from "./operation-controller";
+import type { PendingPointerStore } from "./operation-controller";
+
+const WS = "WS:ALPHA";
+const ROOT = "JOB-1";
+const REF = `fabric_attempt:${"a".repeat(64)}`;
+const OPKEY = `session-continue-${"b".repeat(64)}`;
+const SCOPE = "c".repeat(64);
+
+function memStore(): PendingPointerStore {
+  const hints = new Map<string, { operationKey: string; kind: "message"; targetKey: string }>();
+  return {
+    read: (scope) => hints.get(scope) ?? null,
+    reserve: (scope, pointer) => {
+      const existing = hints.get(scope);
+      if (existing) return { reserved: false, pointer: existing };
+      hints.set(scope, { operationKey: pointer.operationKey, kind: "message", targetKey: pointer.targetKey as string });
+      return { reserved: true };
+    },
+    clearIfEqual: (scope, pointer) => {
+      const existing = hints.get(scope);
+      if (existing && existing.operationKey === pointer.operationKey) {
+        hints.delete(scope);
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
+function fixture() {
+  let authGen = 1;
+  let available = true;
+  const listeners = new Set<() => void>();
+  const contextSelections: Array<{ workRef: string; rootJobId: string }> = [];
+  const envelope = (state: "RESOLVED" | "UNAVAILABLE" | "AMBIGUOUS" = "RESOLVED") => ({
+    schema: "mastermind.os.executive.session_result.v1",
+    operation: "context",
+    ok: true,
+    effect: "NONE",
+    operation_key: null,
+    data: {
+      schema: "mastermind.os.executive.session_context.v1",
+      principal_scope: SCOPE,
+      verified_expiry: 4102444800,
+      selection: { work_ref: WS, root_job_id: ROOT },
+      selection_state: state,
+      target: state === "RESOLVED"
+        ? {
+            target_ref: REF,
+            generation: "a".repeat(24),
+            addressable: true,
+            kind: "fabric_attempt",
+            continuation_operation_key: OPKEY,
+            work_ref: WS,
+            root_job_id: ROOT,
+          }
+        : null,
+      capabilities: { send: state === "RESOLVED", reply_read: true, stop: false },
+    },
+    error: null,
+  });
+  let contextResponse: unknown = envelope();
+  const transport: ExecutiveSessionTransport = {
+    authGeneration: () => authGen,
+    available: () => available,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    context: vi.fn(async (selected: { workRef: string; rootJobId: string }) => {
+      contextSelections.push(selected);
+      return contextResponse;
+    }),
+    send: vi.fn(async (_args: SessionSendArguments) => {
+      throw new Error("not used here");
+    }),
+    reply: vi.fn(async () => {
+      throw new Error("not used here");
+    }),
+    references: vi.fn(async () => ({ reference_only: true })),
+  };
+  return {
+    transport,
+    contextSelections,
+    contextCalls: () => (transport.context as ReturnType<typeof vi.fn>).mock.calls.length,
+    setContext: (value: unknown) => {
+      contextResponse = value;
+    },
+    setAvailable: (value: boolean) => {
+      available = value;
+    },
+    bumpAuth: () => {
+      authGen++;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+const disposables: Array<() => void> = [];
+afterEach(() => {
+  for (const dispose of disposables.splice(0)) dispose();
+});
+
+function mount(f: ReturnType<typeof fixture>) {
+  const host = createOsExecutiveSessionHost(f.transport, memStore());
+  disposables.push(host.dispose);
+  return { ...host, ready: host.refresh({ workRef: WS, rootJobId: ROOT }) };
+}
+
+describe("selected-session host lifecycle", () => {
+  it("searches an original other-root answer through the real mounted qualified-answer decoder", async()=>{
+    const f=fixture();
+    const digest="1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e";
+    const originalKey="session-continue-"+"b".repeat(64);
+    const readRef="session-reply-"+digest;
+    f.transport.projectReferences=vi.fn(async()=>({
+      schema:"mastermind.os.executive.session_result.v1",operation:"references",ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.session_reply_references.v1",status:"COMPLETE",high_water:5,next_cursor:null,references:[{
+        read_ref:readRef,operation_key:originalKey,request_ref:"session-bridge-continue:"+digest,
+        request_event_id:5,request_revision:"e".repeat(64),requested_at:"2026-11-03T10:20:30Z",
+        work_ref:WS,root_job_id:"JOB-2",target_ref:REF,reference_only:true}]}}));
+    vi.mocked(f.transport.reply).mockResolvedValue({
+      schema:"mastermind.os.executive.session_result.v1",operation:"reply",ok:true,effect:"CONTINUATION_COMMITTED",operation_key:originalKey,error:null,
+      data:{schema:"mastermind.native_reply_read.v1",read_ref:readRef,request_ref:"session-bridge-continue:"+digest,
+        in_reply_to:"asd-dot-continue-c81bfcc7ccadd7372a1b0d05bb610f9d147b43b9",
+        message_key:"asd-native-reply-4310b611582e4d2fa8f7053ea19490441b3e3db1",fingerprint:"f".repeat(64),
+        text:"Historical native A recovered",next_step:"B remains pending",primary_ts:"1728620000.000001",
+        reply_committed:true,parent_consumed:false,operation_key:originalKey}});
+    const host=mount(f);await host.ready;
+    const result=await searchSavedConversations({workRef:WS,query:"Historical",signal:new AbortController().signal},host.binding.port.projectHistory!);
+    expect(result.state).toBe("AVAILABLE");expect(result.items).toHaveLength(1);
+    expect(result.items[0].reference.root_job_id).toBe("JOB-2");
+    expect(result.items[0].excerpt).toBe("Historical native A recovered");
+    expect(f.transport.reply).toHaveBeenCalledWith({operation_key:originalKey},expect.any(AbortSignal));
+    expect(f.transport.projectReferences).toHaveBeenCalledWith({work_ref:WS,page_size:4},expect.any(AbortSignal));
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+
+  it("reads one project history page under the same Session owner without root or pointer writes", async () => {
+    const f = fixture();
+    f.transport.projectReferences = vi.fn(async () => ({ original: "other-root reference" }));
+    const store = memStore(), reserve = vi.spyOn(store, "reserve"), clear = vi.spyOn(store, "clearIfEqual");
+    const host = createOsExecutiveSessionHost(f.transport, store);
+    disposables.push(host.dispose);
+    const history = host.binding.port.projectHistory!;
+    const signal = new AbortController().signal;
+    await expect(history.readReferences({workRef:WS,pageSize:4,signal})).rejects.toThrow();
+    expect(f.transport.projectReferences).not.toHaveBeenCalled();
+    await host.refresh({workRef:WS,rootJobId:ROOT});
+    await expect(history.readReferences({workRef:"WS:OTHER",pageSize:4,signal})).rejects.toThrow();
+    await expect(history.readReferences({workRef:WS,pageSize:16 as 4,signal})).rejects.toThrow();
+    await expect(history.readReferences({workRef:WS,pageSize:4,signal,cursor:"bad/.."})).rejects.toThrow();
+    expect(f.transport.projectReferences).not.toHaveBeenCalled();
+    await expect(history.readReferences({workRef:WS,pageSize:4,signal,cursor:"YQ=="}))
+      .resolves.toEqual({original:"other-root reference"});
+    expect(f.transport.projectReferences).toHaveBeenCalledWith({work_ref:WS,page_size:4,cursor:"YQ=="},signal);
+    expect(f.transport.references).not.toHaveBeenCalled();
+    expect(f.transport.send).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled(); expect(clear).not.toHaveBeenCalled();
+  });
+  it.each(["refresh", "auth", "method", "abort"])("withholds project history after %s changes", async change => {
+    const f = fixture(); let release!: (v:unknown)=>void;
+    f.transport.projectReferences = vi.fn(() => new Promise(resolve => {release=resolve;}));
+    const host = mount(f); await host.ready;
+    const abort = new AbortController();
+    const pending = host.binding.port.projectHistory!.readReferences({workRef:WS,pageSize:4,signal:abort.signal});
+    const rejected = expect(pending).rejects.toThrow("session_references_unavailable");
+    if (change === "refresh") {
+      await host.refresh(null); await host.refresh({workRef:WS,rootJobId:ROOT});
+    } else if (change === "auth") f.bumpAuth();
+    else if (change === "method") f.transport.projectReferences = vi.fn(async()=>({}));
+    else abort.abort();
+    release({private:"old"}); await rejected;
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("does not invent project history for older hosts or a Session without reply READ", async () => {
+    const f = fixture(), old = mount(f); await old.ready;
+    expect(old.binding.port.projectHistory).toBeUndefined();
+    f.transport.projectReferences = vi.fn(async()=>({}));
+    const denied = fixture();
+    denied.transport.projectReferences = vi.fn(async()=>({}));
+    vi.mocked(denied.transport.context).mockImplementation(async()=>({
+      schema:"mastermind.os.executive.session_result.v1",operation:"context",ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.os.executive.session_context.v1",principal_scope:SCOPE,verified_expiry:4102444800,
+        selection:{work_ref:WS,root_job_id:ROOT},selection_state:"UNAVAILABLE",target:null,
+        capabilities:{send:false,reply_read:false,stop:false}}}));
+    const host = mount(denied); await host.ready;
+    await expect(host.binding.port.projectHistory!.readReferences({workRef:WS,pageSize:4,signal:new AbortController().signal})).rejects.toThrow();
+    expect(denied.transport.projectReferences).not.toHaveBeenCalled();
+  });
+
+  it("binds historical reference READ to the verified selection before starting HTTP", async () => {
+    const f = fixture();
+    const store = memStore();
+    const reservedB = { operationKey: OPKEY, targetKey: REF, kind: "message" as const };
+    expect((await store.reserve(SCOPE, reservedB)).reserved).toBe(true);
+    const clear = vi.spyOn(store, "clearIfEqual");
+    const reserve = vi.spyOn(store, "reserve");
+    const host = createOsExecutiveSessionHost(f.transport, store);
+    disposables.push(host.dispose);
+    const controller = new AbortController();
+    const read = host.binding.port.readOriginalReferences!;
+    await expect(read({ workRef: WS, rootJobId: ROOT }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).not.toHaveBeenCalled();
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    await expect(read({ workRef: "WS:OTHER", rootJobId: ROOT }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    await expect(read({ workRef: WS, rootJobId: "JOB-OTHER" }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).not.toHaveBeenCalled();
+    const result = await read({ workRef: WS, rootJobId: ROOT }, controller.signal, "YQ==");
+    expect(result).toEqual({ reference_only: true });
+    expect(f.transport.references).toHaveBeenCalledWith(
+      { work_ref: WS, root_job_id: ROOT, page_size: 16, cursor: "YQ==" },
+      controller.signal,
+    );
+    expect(await store.read(SCOPE)).toEqual(reservedB);
+    expect(reserve).toHaveBeenCalledTimes(0);
+    expect(clear).not.toHaveBeenCalled();
+    expect(f.transport.send).not.toHaveBeenCalled();
+    await host.refresh(null);
+    await expect(read({ workRef: WS, rootJobId: ROOT }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a historical READ reply from an abandoned A-B-A session", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    const read = host.binding.port.readOriginalReferences!;
+    let resolve!: (value: unknown) => void;
+    const old = new Promise<unknown>(done => { resolve = done; });
+    vi.mocked(f.transport.references!).mockImplementationOnce(async () => old);
+    const original = read({ workRef: WS, rootJobId: ROOT }, new AbortController().signal);
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+    await host.refresh({ workRef: "WS:OTHER", rootJobId: ROOT });
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    resolve({ foreign_stale_body: "must not reach Office" });
+    await expect(original).rejects.toThrow("session_references_unavailable");
+    expect(f.transport.send).not.toHaveBeenCalled();
+    // New owner generation may read afresh, but the old read must not revive.
+    await expect(read({ workRef: WS, rootJobId: ROOT }, new AbortController().signal))
+      .resolves.toEqual({ reference_only: true });
+    expect(f.transport.references).toHaveBeenCalledTimes(2);
+  });
+
+  it("withholds post-request replies on auth disappearance or abort", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    const read = host.binding.port.readOriginalReferences!;
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(read({ workRef: WS, rootJobId: ROOT }, cancelled.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).not.toHaveBeenCalled();
+    let resolve!: (value: unknown) => void;
+    vi.mocked(f.transport.references!).mockImplementationOnce(
+      () => new Promise<unknown>(done => { resolve = done; }),
+    );
+    const controller = new AbortController();
+    const pending = read({ workRef: WS, rootJobId: ROOT }, controller.signal);
+    f.setAvailable(false); // credential is invalidated while the READ is in flight
+    resolve({ stale_foreign_data: "private" });
+    await expect(pending).rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+    expect(f.transport.send).not.toHaveBeenCalled();
+    await expect(read({ workRef: WS, rootJobId: ROOT }, new AbortController().signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+    host.dispose();
+  });
+
+  it("does not advertise SEND for a resolved read-only target", async () => {
+    const f = fixture();
+    const raw = await f.transport.context({ workRef: WS, rootJobId: ROOT }, new AbortController().signal) as { data: { capabilities: { send: boolean } } };
+    raw.data.capabilities.send = false;
+    f.setContext(raw);
+    const host = mount(f); await host.ready;
+    expect(readSessionOwnerContext(host.binding)?.principalScope).toBe(SCOPE);
+    expect(host.binding.port.currentTargetRef()).toBeNull();
+    expect(host.binding.port.currentObservation?.()).toBeNull();
+    expect(host.binding.makeSessionMessageIntent(REF, "Continue", "done")).toBeNull();
+  });
+  it("refreshes on EVERY pushed selection transition, including same-value and A→B→A", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    expect(f.contextCalls()).toBe(1);
+    expect(f.contextSelections[0]).toEqual({ workRef: WS, rootJobId: ROOT });
+    const firstGeneration = host.binding.port.context()?.generation;
+    // Same-value transition: still an event, still invalidated and re-read.
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    expect(f.contextCalls()).toBe(2);
+    // A→B→A: each leg pushes and invalidates; the final generation is new.
+    await host.refresh({ workRef: "WS:OTHER", rootJobId: ROOT });
+    expect(f.contextCalls()).toBe(3);
+    expect(f.contextSelections[2]).toEqual({ workRef: "WS:OTHER", rootJobId: ROOT });
+    expect(host.binding.port.context()).toBeNull();
+    expect(host.binding.port.currentObservation?.()).toBeNull();
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    expect(f.contextCalls()).toBe(4);
+    const generations = new Set([
+      firstGeneration,
+      host.binding.port.context()?.generation,
+    ]);
+    expect(generations.size).toBe(2);
+    expect(host.binding.port.currentTargetRef()).toBe(REF);
+    expect(host.binding.port.currentObservation?.()).toEqual({
+      targetRef: REF,
+      selection: { workRef: WS, rootJobId: ROOT },
+      principalScope: SCOPE,
+      generation: host.binding.port.context()?.generation,
+    });
+  });
+
+  it("clears a null push and sends nothing while the transport is unavailable", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    await host.refresh(null);
+    expect(host.binding.port.context()).toBeNull();
+    f.setAvailable(false);
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    expect(f.contextCalls()).toBe(1); // unavailable transport reads nothing more
+    expect(host.binding.port.context()).toBeNull();
+  });
+
+  it("re-reads on auth change and fences a stale context reply", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    const generation = host.binding.port.context()?.generation;
+    const initial = await vi.mocked(f.transport.context).mock.results[0].value as { data: Record<string, unknown> };
+    let resolve!: (value: unknown) => void;
+    const delayed = new Promise<unknown>(done => { resolve = done; });
+    vi.mocked(f.transport.context).mockImplementationOnce(() => delayed);
+    f.bumpAuth();
+    expect(host.binding.port.context()).toBeNull();
+    expect(f.contextCalls()).toBe(2);
+    f.bumpAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.contextCalls()).toBe(3);
+    const current = host.binding.port.context();
+    expect(current?.principalScope).toBe(SCOPE);
+    expect(current?.generation).not.toBe(generation);
+    resolve({ ...initial, data: { ...initial.data, principal_scope: "d".repeat(64) } });
+    await delayed;
+    await Promise.resolve();
+    expect(host.binding.port.context()).toEqual(current);
+    expect(host.binding.port.currentTargetRef()).toBe(REF);
+  });
+
+  it("carries the explicit synchronous condition provider and no default", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    // No provider registered: the two-argument helper refuses outright.
+    expect(host.binding.makeMessageIntent(REF, "Continue")).toBeNull();
+    host.setStopCondition(() => "CI green");
+    const explicit = host.binding.makeMessageIntent(REF, "Continue");
+    expect(explicit?.payload).toMatchObject({ stop_condition: "CI green" });
+    expect(host.binding.makeLaunchIntent({ goal: "g", projectRef: "p", profileRef: "r" })).toBeNull();
+    expect(host.binding.makeStopIntent(REF)).toBeNull();
+  });
+
+  it("dispose stops subscription, drops the session and clears the provider", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    host.setStopCondition(() => "owned");
+    expect(host.binding.makeMessageIntent(REF, "Continue")).not.toBeNull();
+    host.dispose();
+    expect(readSessionOwnerContext(host.binding)).toBeNull();
+    expect(host.binding.makeMessageIntent(REF, "Continue")).toBeNull();
+    f.bumpAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.contextCalls()).toBe(1);
+  });
+});
+
+describe("completeExecutiveSessionBinding shape gate", () => {
+  it("accepts the mounted binding and refuses launch-shaped or aliased substitutes", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    expect(completeExecutiveSessionBinding(host.binding)).toBe(host.binding);
+    expect(completeExecutiveSessionBinding(null)).toBeNull();
+    expect(completeExecutiveSessionBinding({})).toBeNull();
+    const aliased = {
+      ...host.binding,
+      store: { ...host.binding.store, write: () => undefined },
+    };
+    expect(completeExecutiveSessionBinding(aliased)).toBeNull();
+    const cleared = {
+      ...host.binding,
+      store: { ...host.binding.store, clear: () => undefined },
+    };
+    expect(completeExecutiveSessionBinding(cleared)).toBeNull();
+    const withoutSessionEntry = { ...host.binding };
+    delete (withoutSessionEntry as Record<string, unknown>).makeSessionMessageIntent;
+    expect(completeExecutiveSessionBinding(withoutSessionEntry)).toBeNull();
+  });
+
+  it("drives a real controller against the mounted binding", async () => {
+    const f = fixture();
+    const store = memStore();
+    const host = createOsExecutiveSessionHost(f.transport, store);
+    disposables.push(host.dispose);
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    const controller = new OperationController(host.binding.port, store);
+    const intent = host.binding.makeSessionMessageIntent(REF, "Continue", "CI green");
+    expect(intent).not.toBeNull();
+    // The send transport is not wired to succeed here; a lost response must
+    // retain the exact original pointer for status-only recovery.
+    const state = await controller.begin(intent!);
+    expect(state.status).toBe("unknown");
+    expect(state.pointer?.operationKey).toBe(OPKEY);
+    expect(state.pointer?.kind).toBe("message");
+    const recovered = await controller.recover();
+    expect(recovered.status).toBe("unknown"); // reply fixture refuses; pointer retained
+    expect((await store.read(SCOPE))?.operationKey).toBe(OPKEY);
+  });
+});

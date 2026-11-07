@@ -15,7 +15,7 @@ Coverage:
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -292,3 +292,73 @@ class TestConfig:
         cfg = LQ._cfg()
         assert cfg["expand_bn"] == pytest.approx(25.0)
         assert cfg["rrp_buffer_bn"] == pytest.approx(100.0)
+
+
+class TestDateNormalization:
+    @pytest.mark.parametrize("key", [
+        datetime(2026, 1, 5),
+        datetime(2026, 1, 5, 14, 30),
+        datetime(2026, 1, 5, 23, 30, tzinfo=timezone(timedelta(hours=-5))),
+    ])
+    def test_datetime_normalizes_to_calendar_date(self, key):
+        result = LQ._to_date(key)
+        assert type(result) is date
+        assert result == date(2026, 1, 5)
+
+    def test_pandas_timestamp_normalizes_to_calendar_date(self):
+        pd = pytest.importorskip("pandas")
+        result = LQ._to_date(pd.Timestamp("2026-01-05T14:30:00Z"))
+        assert type(result) is date
+        assert result == date(2026, 1, 5)
+
+    @pytest.mark.parametrize("representation", ["datetime", "pandas"])
+    @pytest.mark.parametrize("walcl_step,rrp_level,expected_label", [
+        (3.0, 200.0, "benign-expansion"),
+        (3.0, 10.0, "stress-expansion"),
+        (-3.0, 200.0, "contracting"),
+        (0.0, 200.0, "neutral-hollow"),
+    ])
+    def test_mixed_date_types_preserve_classification(
+        self, representation, walcl_step, rrp_level, expected_label,
+    ):
+        days = _bdays(date(2026, 1, 5), 30)
+        source = {
+            "walcl_bn": {d: 6000.0 + i * walcl_step for i, d in enumerate(days)},
+            "rrp_bn": {d: rrp_level for d in days},
+            "tga_bn": {d: 500.0 for d in days},
+            "hy_oas": {d: 3.0 for d in days},
+            "nfci": {d: -0.5 for d in days},
+        }
+        expected = LQ.classify(source.get)
+        assert expected["label"] == expected_label
+        mixed = dict(source)
+        if representation == "datetime":
+            mixed["rrp_bn"] = {
+                datetime(d.year, d.month, d.day, 14, 30): value
+                for d, value in source["rrp_bn"].items()
+            }
+        else:
+            pd = pytest.importorskip("pandas")
+            mixed["rrp_bn"] = pd.Series(
+                list(source["rrp_bn"].values()),
+                index=pd.DatetimeIndex(days, tz="UTC"),
+            )
+        assert LQ.classify(mixed.get) == expected
+
+    def test_mixed_date_stress_remains_visible_to_regime_reader(self):
+        from brain import regime_frame
+
+        days = _bdays(date(2026, 1, 5), 30)
+        source = {
+            "walcl_bn": {d: 6000.0 + i * 3.0 for i, d in enumerate(days)},
+            "rrp_bn": {datetime(d.year, d.month, d.day): 10.0 for d in days},
+            "tga_bn": {d: 500.0 for d in days},
+        }
+        assert regime_frame._liquidity_stress_source(series_fn=source.get) is True
+
+    def test_plain_dates_strings_and_invalid_keys_keep_existing_behavior(self):
+        day = date(2026, 1, 5)
+        assert LQ._to_date(day) is day
+        assert LQ._to_date("2026-01-05") == day
+        assert LQ._to_date("not-a-date") is None
+        assert LQ._to_date(None) is None

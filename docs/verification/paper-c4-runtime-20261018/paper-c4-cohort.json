@@ -1,0 +1,69 @@
+{
+  "schema": "mastermind.paper_c4_cohort_observation.v1",
+  "observed_at_utc": "2026-10-18T07:29:43.536032+00:00",
+  "proof_class": "read_only_installed_cohort",
+  "effects": false,
+  "source_ref": "ef4be2f5c9b0b82fc11be83f03cf7bcdb8cea6f2",
+  "account": "chatgpt4",
+  "original_manifest_sha256": "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071",
+  "original_manifest_canonical_sha256": "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
+  "original_non_paper_config_sha256": "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894",
+  "original_config_sha256": "bada228d827e63017c9fee6aa7817ad531338115d3597773ceb9762967db997b",
+  "files_sha256": {
+    "fleet-routing.mjs": "dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533",
+    "fleet-status.mjs": "a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780",
+    "gateway.mjs": "92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8",
+    "git-publish.mjs": "9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae",
+    "output-budget.mjs": "5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071",
+    "package-lock.json": "9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0",
+    "package.json": "25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634",
+    "paper-design.mjs": "e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e",
+    "private-tunnel-auth.mjs": "fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0",
+    "private-tunnel-gateway.mjs": "fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540",
+    "tailnet-gateway.mjs": "9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b"
+  },
+  "runtime_identity": {
+    "node": "/Users/chriswong/.local/share/mastermind-runtime/node/bin/node",
+    "nodeHash": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+    "backend": "/Users/chriswong/.local/share/desktop-commander-service/vendor/node_modules/@wonderwhy-er/desktop-commander/dist/index.js",
+    "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
+    "dependencyTreeHash": "639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211",
+    "host": "127.0.0.1",
+    "port": 45024,
+    "label": "com.mastermind.studio-direct-private.chatgpt4",
+    "source": "/Volumes/Mastermind/agent-workspaces/web/studio-direct-fleet-routing-concurrency-20261004-sol-001/integrations/studio_direct_mcp"
+  },
+  "actual_runtime_hashes": {
+    "nodeHash": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+    "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
+    "plistHash": "b63dcc9017b61553888b95d9ffc68c572020ef02b74e73ee60c990ed1f89fe16",
+    "dependencyTreeHash": "639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211"
+  },
+  "original_paper": {
+    "appPath": "/Users/chriswong/Applications/Paper.app",
+    "bridgePath": "/Users/chriswong/.local/share/mastermind-paper/runtime/v10/source/bridge.py",
+    "bridgeSha256": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
+    "commandTimeoutMs": 70000,
+    "enabled": true,
+    "pythonPath": "/Users/chriswong/.local/share/mastermind-paper/runtime/v10/venv/bin/python"
+  },
+  "target_paper": {
+    "enabled": true,
+    "pythonPath": "/Users/chriswong/.local/share/mastermind-paper/runtime/v12/venv/bin/python",
+    "bridgePath": "/Users/chriswong/.local/share/mastermind-paper/runtime/v12/source/bridge.py",
+    "bridgeSha256": "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb",
+    "appPath": "/Users/chriswong/Applications/Paper.app",
+    "commandTimeoutMs": 70000
+  },
+  "target_config_sha256": "e6c1495c7552241a847b3d541f99913e6a74838e0fb5aee9477b861e92d2a48b",
+  "target_manifest_canonical_sha256": "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+  "target_manifest_sha256": "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+  "target_runtime_verified": true,
+  "dependency_tree_actual_verified": true,
+  "file_modes": {
+    "manifest.json": "0o600",
+    "config.json": "0o600",
+    "com.mastermind.studio-direct-private.chatgpt4.plist": "0o600"
+  },
+  "completed_at_utc": "2026-10-18T07:29:47.437811+00:00"
+}

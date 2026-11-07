@@ -1,0 +1,38 @@
+{
+  "schema": "mastermind.client_reuse.browser_fixture.v1",
+  "proof_scope": "SOURCE_FIXTURE_ONLY",
+  "base_sha": "d31aade92b969e8897513d8634ecd59dba00e1e3",
+  "upstream_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "production_authentication": false,
+  "real_provider_calls": 0,
+  "real_send": false,
+  "parent_consumption": false,
+  "results": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1100,
+      "horizontal_overflow": false,
+      "page_errors": [],
+      "external_requests": [],
+      "plain_enter_sends": 0,
+      "ctrl_enter_fixture_callbacks": 1,
+      "inert_markdown": true,
+      "dark_background": "rgb(8, 8, 8)",
+      "light_background": "rgb(247, 248, 250)"
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "horizontal_overflow": false,
+      "page_errors": [],
+      "external_requests": [],
+      "plain_enter_sends": 0,
+      "ctrl_enter_fixture_callbacks": 1,
+      "inert_markdown": true,
+      "dark_background": "rgb(8, 8, 8)",
+      "light_background": "rgb(247, 248, 250)"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "observedAt": "2026-11-07T08:09:26.693Z",
+  "pid": 31049,
+  "windowCount": 1,
+  "minimized": false,
+  "view": [
+    {
+      "i": 0,
+      "role": "AXStaticText",
+      "name": "mastermind"
+    },
+    {
+      "i": 1,
+      "role": "AXStaticText",
+      "name": "EXECUTIVE OS"
+    },
+    {
+      "i": 2,
+      "role": "AXButton",
+      "name": "New conversation"
+    },
+    {
+      "i": 3,
+      "role": "AXGroup",
+      "name": null
+    },
+    {
+      "i": 4,
+      "role": "AXButton",
+      "name": "Search"
+    },
+    {
+      "i": 5,
+      "role": "AXStaticText",
+      "name": "COMPANY"
+    },
+    {
+      "i": 6,
+      "role": "AXGroup",
+      "name": "Company navigation"
+    },
+    {
+      "i": 7,
+      "role": "AXStaticText",
+      "name": "WORK & CONTEXT"
+    },
+    {
+      "i": 8,
+      "role": "AXGroup",
+      "name": null
+    },
+    {
+      "i": 9,
+      "role": "AXButton",
+      "name": "Display settings"
+    },
+    {
+      "i": 10,
+      "role": "AXStaticText",
+      "name": "Signed in"
+    },
+    {
+      "i": 11,
+      "role": "AXButton",
+      "name": "Sign out"
+    }
+  ],
+  "callbackPath": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/Mastermind OS.app",
+  "source": "386578f66392ae79a1759a0d216c102509277fba",
+  "build": "hermes-thin-native-386578f66392-20261107-pro-04",
+  "scope": "same-process main-window restoration after minimize; normal close/relaunch separately recorded; absent-window rebuild branch not exercised; signed-in recovery pending",
+  "priorMinimizedObservation": "2026-11-07T08:08:35.819Z",
+  "openExistingAt": "2026-11-07T08:09:04.935159+00:00"
+}

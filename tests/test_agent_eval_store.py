@@ -578,3 +578,92 @@ def test_verify_tree_graph_enumeration_is_deterministic(fresh_store) -> None:
     first = fresh_store.verify_tree_graph()
     second = fresh_store.verify_tree_graph()
     assert first == second == ()
+# EVAL-R0 read-only consumer: never create a missing evidence store.
+def test_noncreating_store_missing_root_does_not_materialize(tmp_path):
+    root = tmp_path / "absent-parent" / "artifact-store"
+    with pytest.raises(FileNotFoundError):
+        store.ArtifactStore(root, create_root=False)
+    assert not root.exists() and not root.parent.exists()
+
+
+def test_noncreating_store_existing_root_does_not_mutate(tmp_path):
+    root = tmp_path / "existing"
+    root.mkdir()
+    marker = root / "sentinel"
+    marker.write_text("unchanged")
+    opened = store.ArtifactStore(root, create_root=False)
+    assert opened.root == root.resolve(strict=True)
+    assert marker.read_text() == "unchanged"
+    assert sorted(p.name for p in root.iterdir()) == ["sentinel"]
+
+
+def test_noncreating_store_rejects_real_and_dangling_symlink(tmp_path):
+    target = tmp_path / "real"
+    target.mkdir()
+    live_link = tmp_path / "live-link"
+    live_link.symlink_to(target, target_is_directory=True)
+    dead_link = tmp_path / "dead-link"
+    dead_link.symlink_to(tmp_path / "absent", target_is_directory=True)
+    for path in (live_link, dead_link):
+        with pytest.raises(ContractError) as exc:
+            store.ArtifactStore(path, create_root=False)
+        assert any(d.code == "ROOT_IS_SYMLINK" for d in exc.value.defects)
+    assert not (tmp_path / "absent").exists()
+
+
+def test_noncreating_store_rejects_file_root(tmp_path):
+    root = tmp_path / "plain-file"
+    root.write_text("do not change")
+    with pytest.raises(ContractError) as exc:
+        store.ArtifactStore(root, create_root=False)
+    assert any(d.code == "ROOT_NOT_A_DIRECTORY" for d in exc.value.defects)
+    assert root.read_text() == "do not change"
+
+
+def test_noncreating_store_removed_during_resolve_fails_closed(tmp_path, monkeypatch):
+    root = tmp_path / "removable"
+    root.mkdir()
+    original_resolve = store.Path.resolve
+
+    def remove_during_resolve(self, *args, **kwargs):
+        if self == root:
+            root.rmdir()
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(store.Path, "resolve", remove_during_resolve)
+    with pytest.raises(FileNotFoundError):
+        store.ArtifactStore(root, create_root=False)
+    assert not root.exists()
+
+
+def test_noncreating_store_replaced_during_resolve_is_refused(tmp_path, monkeypatch):
+    root = tmp_path / "active"
+    root.mkdir()
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    original_resolve = store.Path.resolve
+
+    def replace_during_resolve(self, *args, **kwargs):
+        if self == root:
+            root.rename(tmp_path / "old")
+            replacement.rename(root)
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(store.Path, "resolve", replace_during_resolve)
+    with pytest.raises(ContractError) as exc:
+        store.ArtifactStore(root, create_root=False)
+    assert any(d.code == "ROOT_CHANGED" for d in exc.value.defects)
+
+
+def test_store_create_root_flag_requires_boolean(tmp_path):
+    root = tmp_path / "not-created"
+    with pytest.raises(TypeError):
+        store.ArtifactStore(root, create_root=1)
+    assert not root.exists()
+
+
+def test_legacy_store_constructor_still_creates_private_root(tmp_path):
+    root = tmp_path / "nested" / "new"
+    opened = store.ArtifactStore(root)
+    assert opened.root == root.resolve(strict=True)
+    assert root.is_dir() and not any(root.iterdir())
