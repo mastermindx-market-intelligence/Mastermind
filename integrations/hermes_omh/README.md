@@ -121,3 +121,13 @@ better model task success, lower cost or production adoption.
 No native tool is registered or role profile changed by import, CLI execution,
 or source publication. Live Hermes enrollment and the broader memory/skill/
 verification adoption remain separate work in the existing Hermes programme.
+
+## Native bridge and existing OMH recommendations
+
+`bridge_cli.py` accepts `status`, `plan` (the existing proposal object), or `recommend` (message plus explicit OMH category). A host supplies an absolute OMH routing home; model arguments cannot select a path, provider or account. Recommendations use the installed OMH package's own ranker and chain parser. Invalid override documents refuse rather than silently falling back. Only `routing/model-chains.json` is read; auth and memory stores are not consulted.
+
+The dependency-free `plugin/` payload registers `mmx_omh` through the real Hermes `PluginContext`. Its operator-generated `_runtime.json` binds one profile, immutable source closure, hashes, approved Python executable and routing home. It invokes only the fixed bounded CLI, without shell expansion, ambient API keys, retries or external inference. The native registry and registration leases remain responsible for tool scope/unload. It does not provide a memory provider, scheduler or alternate worker entry point.
+
+`qualification/native_canary.py` exercises real installed Hermes plugin discovery and registry dispatch with a temporary profile, the actual OMH package, canonical parser and cross-profile negative. This is native integration qualification, not a production conversation, worker admission, entitlement or serving-model proof.
+
+Source publication alone does not install the descriptor or enable the tool. Install from the exact protected release using Hermes' existing plugin installer with `--no-enable`, populate the reviewed descriptor and immutable local source artifact, then enable through the native plugin control. Never overwrite an existing unrelated install or replace the selected OMH memory provider.

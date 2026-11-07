@@ -22,3 +22,11 @@ N4: publish the executable candidate interface to active Capacity #2155 and Agen
 DONE_WHEN: original core is protected-merged; native bridge is source/release-qualified, installed through current native owner and invoked through real Hermes tool dispatch; real OMH model/skill proposals are returned without provider/permission claims; actual execution integration consumed by existing owners is distinguished from outstanding acceptance. Pure fixtures or a source PR alone do not complete the larger programme.
 
 Direct retention: PRINCIPAL_JUDGMENT / UNIQUE_APPROVED_ACCESS for the exact installed-runtime composition. Original refused core worker is not retried. Scope: integrations/hermes_omh/**, tests/test_hermes_omh_native.py, tests/test_hermes_omh_recommendations.py, this doc and the existing OMH readme only.
+
+## Source qualification
+
+N1/N2 source is implemented. Exact local command: `python3 -m pytest -q -o addopts='' tests/test_hermes_omh_native.py tests/test_hermes_omh_recommendations.py tests/test_hermes_omh.py tests/test_executive_plan_schema_versions.py integrations/hermes_delegate/tests/test_delegate.py` -> **176 passed, 9 subtests passed**, exit0. The real installed-runtime canary remains pending at this source checkpoint.
+
+Observed RED failures preceded recommendation and native plugin implementation. Two additional failure tests exposed missing post-call registration revalidation and unsanitized partial registration uncertainty; both were repaired. The preexisting repository fixtures create scratch directories, so the no-write test compares the before/after directory census rather than assuming an empty fixture.
+
+The runtime descriptor binds exactly19 original source files, including the unchanged canonical parser and its dependencies. It is operator installation metadata, not an authentication token or permission grant. The native bridge inherits no provider credentials into its local deterministic subprocess and never changes the existing memory provider. Native plugin registry collisions refuse; source/profile/registration drift refuses before delivery; there is no same-call retry.
