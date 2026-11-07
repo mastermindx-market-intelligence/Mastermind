@@ -103,9 +103,8 @@ def main():
                     guard.start()
                     self.addCleanup(guard.stop)
                 profile = ApplicationSelectionProfile(source_generation="a" * 64,
-                    ingress_digest=hashlib.sha256((roots["native_owner_root"] /
-                        "ops/native_fabric/quota_continuity/candidate/go_shim.py").read_bytes()).hexdigest(),
-                    account_profile=self.accounts)
+                    ingress_digest=hashlib.sha256(Path(self.go.__file__).read_bytes()).hexdigest(),
+                    account_profile=self.router.accounts_path)
                 self.gateway = self.new_gateway(application_selection_profile=profile)
                 purpose = RegisteredPoolFixture.purpose_for(self, "go")
                 purpose["task"]["needs"] = ["tools"]
