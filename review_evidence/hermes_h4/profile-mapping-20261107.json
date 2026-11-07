@@ -1,0 +1,82 @@
+{
+  "notes": [
+    "Configured route is not served identity.",
+    "Darwin uid501 profiles are not the Linux mmsecretary/mmmeta enrollment identities.",
+    "No credential content or secret-derived digest is included."
+  ],
+  "original_gateway_process": "48443 chriswong Fri Nov  6 15:17:32 2026     /Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3",
+  "profiles": [
+    {
+      "application_enrollment_proven": false,
+      "config_identity": {
+        "inode": 2016753998,
+        "mtime_ns": 1794057259680655400,
+        "size": 7421
+      },
+      "home": "/Users/chriswong/.hermes",
+      "mcp_names": [
+        "mastermind-fabric-capacity"
+      ],
+      "native_uid": 501,
+      "platform": "Darwin",
+      "profile": "default",
+      "route_config": {
+        "base_url": "http://127.0.0.1:11434/v1",
+        "default": "qwen3:14b",
+        "model": null,
+        "provider": "custom"
+      },
+      "plugin_settings_keys": [
+        "clone_timeout_seconds",
+        "disabled",
+        "enabled",
+        "entries"
+      ]
+    },
+    {
+      "application_enrollment_proven": false,
+      "config_identity": {
+        "inode": 2016643946,
+        "mtime_ns": 1794056763583564800,
+        "size": 133674
+      },
+      "home": "/Users/chriswong/.hermes/profiles/secretary",
+      "mcp_names": [
+        "mastermind-fabric-capacity"
+      ],
+      "native_uid": 501,
+      "platform": "Darwin",
+      "profile": "secretary",
+      "route_config": {
+        "default": "glm-5.3",
+        "model": null,
+        "provider": "zai"
+      },
+      "plugin_settings_keys": [
+        "clone_timeout_seconds",
+        "enabled",
+        "entries"
+      ]
+    },
+    {
+      "application_enrollment_proven": false,
+      "config_identity": {
+        "inode": 2016643653,
+        "mtime_ns": 1794056756747369500,
+        "size": 1972
+      },
+      "home": "/Users/chriswong/.hermes/profiles/meta-ceo-uncensored",
+      "mcp_names": [],
+      "native_uid": 501,
+      "platform": "Darwin",
+      "profile": "meta-ceo-uncensored",
+      "route_config": {
+        "default": "glm-5.3",
+        "model": null,
+        "provider": "zai"
+      },
+      "plugin_settings_keys": []
+    }
+  ],
+  "schema": "mastermind.hermes_h4_profile_mapping.v1"
+}
