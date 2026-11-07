@@ -166,7 +166,7 @@ Current-source artifacts and raw proof are in current-native-composition.json,
 its log and XML. This qualification supersedes earlier native candidate output
 identities; it does not claim hosted CI, installation, enrollment or live use.
 
-## Native attended-worker source tuple
+## Historical worker7425 source qualification
 
 Worker contribution7425d029c7e2afbe38d07abfa3cf95c1527d4439 is composed separately
 from the primary APPLICATION package. Its eight-file runtime projection remains
@@ -229,3 +229,36 @@ syntax and reversed exactly to the original preimages. The live native tree was
 not modified. The receipt is primary-core-preimages.json. Recheck these inputs
 and current live custody at any actual install boundary; this observation is not
 an installation CAS or release authorization.
+
+
+## Completed worker checker and H4 source join
+
+The c07bc854 completed return is now composed through its actual source lineage,
+including H4 preparation9379f8fa. All17 incoming changed paths are exact source
+bytes. The current H2 loader45e560ea, complete native generation and H5 repair
+remain unchanged; the older c07 loader pin is not substituted.
+
+For this repaired worker, the package is
+7979dd4fbc42eead4d6e24b0fbcd1cbd73bb73fe645f63f7767b6994639e207a
+and the paired backend is
+8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1.
+These replace the historical7425 tuple for installation preparation. The existing
+checker executes exact private source and launches isolated Python without
+ambient sibling packages or cached bytecode. Same-final-release installation
+and enrollment requirements are unchanged.
+
+The composed source passed68 package,135 backend and36 H4/identity/transport-guard
+cases (7 H4,2 identity and27 repository guard). The original c07 return's25 native
+cases remain component evidence for identical runtime/checker bytes. This session's
+earlier zero-case native reexec/import failure was not retried or represented as
+current native success. H4's reusable preimage utility, profile map, installed
+diagnostic history and combined100 gateway/37 TUI proof are retained with dates;
+no installation or reload is repeated by source adoption.
+
+Mastermind2175 remains552375cd and Macro10740 remainscc457576 at the latest
+canonical read. Our contribution is not yet adopted by those original carriers.
+The CI fixture remains the qualified a577 runtime. The active original v10
+enrollment, Macro dependency/weight/support/AUTO, worker AUTO/catalog/PyYAML and
+H5 physical consumer lanes are not replaced by this completed-source join.
+No current one-account APPLICATION envelope has been returned. Original J,
+Go401 fences and H4 scoped-serving-child/reload custody remain with their owners.

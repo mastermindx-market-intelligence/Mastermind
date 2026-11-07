@@ -285,3 +285,26 @@ worker source tuple; incorporate that bounded delta while preserving #2225's
 active AUTO/catalog/PyYAML writer. Current exact-head hosted CI, final-carrier
 adoption, qualified release/account/enrollment and original primary/worker/OS
 acceptance remain open. Agent OS plan linkage remains unproven. MISSION_COMPLETE=false.
+
+
+### H6 completed worker isolation and H4 preparation composition — 2026-11-07
+
+Consumed completedc07bc854 through its actual552/9379 lineage without replacing
+the newer H2 loader/pin, native generation or H5 route repair. All17 incoming
+paths are exact source, including the worker checker isolation, its three inert
+regressions, H4's preparation utility/profile map and dated component evidence.
+Current repaired worker package7979dd4f and backend8ff1b90a must move together
+from the eventual single selected protected release.
+
+Current composed proof passes68 package,135 backend and36 H4/identity/guard cases.
+The c07 author's25 native cases are retained component evidence for identical
+bytes. The earlier zero-case native import/reexec failure remains explicit and
+was not retried. Native install, enrollment, actual worker result/consumption and
+primary/tool/settlement acceptance are not inferred.
+
+Original2175 remains552 and Macro10740 remainscc457 at canonical readback.
+Preserve their active writer, v10 enrollment, Macro contract/support/AUTO work,
+H5 physical join, worker AUTO/catalog/PyYAML lane and original J reconciliation.
+No current qualified one-account APPLICATION envelope is present. Complete
+source/CI/install receipts and remaining acceptance return to2175 and983.
+The Agent OS plan-link gap remains explicit. MISSION_COMPLETE=false.

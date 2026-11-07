@@ -1,0 +1,92 @@
+{
+  "combined_gateway_result": {
+    "blocked_external_connections": 0,
+    "candidate": "a03e3672b1a144599488e33327e8762260ab9f75",
+    "errors": 0,
+    "failures": 0,
+    "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "installed": false,
+    "live_provider_acceptance": false,
+    "sdk_constructions": [],
+    "skips": 0,
+    "snapshot_manifest_sha256": "133487351126780b34c27dc737053b2b3465c507a63614a1ec511db3e39eafd2",
+    "tests_run": 100
+  },
+  "combined_manifest": {
+    "candidate": "a03e3672b1a144599488e33327e8762260ab9f75",
+    "core_files": {
+      "gateway/run.py": "86fb8733e839f66442fc8219ce236ec5123151a855cc88265a7e3c7f1093cd8c",
+      "gateway/run_turn_prepare.py": "804d9c2ab6438594f7f996ab4d2bdc24bbf6b24cdf5441a84bbbb24151eee2ad",
+      "gateway/run_turn_runner.py": "4d775d0cf16e11838710ff87b62153c010f9c67f30932b0d2695acacb1c7103a",
+      "gateway/session_authority.py": "e4b1dcb9e61a94f39ca620c2349d35d4713b1b4d56943186296ce352cb9816be",
+      "gateway/session_provider_context.py": "6b6f20519b940e473cd72827c9ffe6534d8c8bc297f9d84cf4a9b44959b7c833",
+      "hermes_cli/cli_agent_setup_mixin.py": "2aef5fda6f5bd6687bd675027d12ed0a7c867d17c642569fa5f7496d8d133d66",
+      "hermes_cli/plugins.py": "56503d6897b570b3c8ff8d568f8c1a5952c5207131319b883ea910744b3436f5",
+      "hermes_cli/runtime_provider.py": "b85334ca6ef45a24c7c37a311b66b4ec5f700ed2a3b9b55d097f01dd19fae515",
+      "hermes_cli/runtime_provider_host.py": "39caeb4b4653b3db25b8a237912f6fcc2b3f0529f8f9f3899a41a4fb7fa8f6cc",
+      "providers/base.py": "018fb53d9213b4e3a5fe79522bca60e920569a7ddbbadecf79c55e64328d13fe"
+    },
+    "gateway_restarted": false,
+    "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "installed": false,
+    "overlay": {
+      "tests/tui_gateway/test_kanban_resume_guard.py": "e25a4ea47ade78982a4fb0a9c0f4e962a83170b4bfea838538b3c6bbf8c799cc",
+      "tests/tui_gateway/test_omit_messages_resume_bounded_ack.py": "210e8a1088066c30961b3db454ad724303e3aa00c3552b0bb67000093e63859d",
+      "tests/tui_gateway/test_protocol.py": "4aa138c12cc41be298059be8e8a9b77471dce9f443c5108c464c8d8096106e03",
+      "tests/tui_gateway/test_tui_gateway_server.py": "77f67dd2c7b0fba928fcecd00daa1366822849ffa67a3acb75a4fb494c2ff535",
+      "tui_gateway/methods_session.py": "69b00256bd55956c53fb6ab86ab3af9be0fc637cc4f52b34a66143d86247e0a9"
+    },
+    "patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+    "provider_called": false,
+    "recorded_at": "2026-11-07T13:21:37.449146+00:00",
+    "schema": "mastermind.hermes_h4_native_composition_qualification.v1",
+    "snapshot_consistent": true,
+    "source": "/Users/chriswong/.hermes/hermes-agent",
+    "stage": "/Users/chriswong/.local/share/mastermind/test-runs/h4-native-compat-20261107-bon1jg71"
+  },
+  "combined_manifest_sha256": "133487351126780b34c27dc737053b2b3465c507a63614a1ec511db3e39eafd2",
+  "installed_primary": false,
+  "limits": [
+    "Original 100+37 qualification is dated a03/c8bb and is not a new current-head or live run.",
+    "The seven-case root check exercises the exact adopted H4 source without provider or runtime effects.",
+    "The qualifier covers tracked edits and core paths; retain the separate five-file combined overlay proof, including its untracked test.",
+    "Recheck live writer state and preimages at actual installation; do not relax the production clean-source gate.",
+    "H4 prepared MCP reload and Go C1 authentication refusal retain their original owners."
+  ],
+  "live_provider_acceptance": false,
+  "mission_complete": false,
+  "observed_at": "2026-11-07T14:24:46Z",
+  "original_combined_candidate": "a03e3672b1a144599488e33327e8762260ab9f75",
+  "original_h4_source": "f008b67333ecf627270a7d8378720f1f034864ce",
+  "original_host_artifact": "/Users/chriswong/.local/share/mastermind/test-runs/h4-native-compat-20261107-bon1jg71",
+  "original_source_return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166#issuecomment-6707549578",
+  "root_provider_request": false,
+  "root_runtime_mutation": false,
+  "root_source_check": {
+    "errors": 0,
+    "failures": 0,
+    "files": {
+      "integrations/hermes_application_fabric/qualification/qualify_live_preimages.py": "9bd739402db36931e52024f2156b1d21b00783c95e6ca337d4173f87849b728f",
+      "integrations/hermes_omh/capacity_bridge.py": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+      "tests/test_hermes_h4_native_preparation.py": "71c5295debc70285d061b9053fefc146cd8d0d39e4bd71aa723c7fc145a6635f"
+    },
+    "python": "3.12.14",
+    "returncode": 0,
+    "seconds": 0.013,
+    "skips": 0,
+    "tests_run": 7,
+    "yaml": "6.0.3"
+  },
+  "runtime_package_sha256": "c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa",
+  "schema": "mastermind.hermes_primary_h4_evidence_join.v1",
+  "source_parent": "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+  "targeted_tui_result": {
+    "discovery_estimate_not_execution_count": 677,
+    "failed": 0,
+    "files": 4,
+    "log_had_nonfatal_non_git_source_notice": true,
+    "log_readback_sha256": "0aac30c4539fc6ed36167a7089f8d83cda2bf068744349a495fe5be99fa14bf4",
+    "passed": 37,
+    "runner_seconds": 41.3
+  }
+}

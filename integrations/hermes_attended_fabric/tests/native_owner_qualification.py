@@ -382,6 +382,51 @@ class NativeOwnerQualification(unittest.TestCase):
         model = CallToolResult.model_validate(captured["reply"])
         return PluginContext._mcp_envelope(_render_call_tool_result(model, server))
 
+    def _assert_unmeasured_code_never_runs(self, marker):
+        self.assertEqual(package_fingerprint(self.plugin_dir), self.expected_package)
+        self.ctx.call_mcp = self.mcp_wire
+        args = self.args()
+        self.persist("isolated-wire-submit", args)
+        submitted = self.invoke(self.mount(), "isolated-wire-submit", args)
+        self.assertFalse(marker.exists(), "unmeasured installed code executed")
+        self.assertEqual(submitted["state"], "CONTROLLER_CREATED", submitted)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_checker_ignores_unmeasured_standard_library_sibling(self):
+        marker = self.home / "unmeasured-standard-import"
+        sibling = self.plugin_dir / "json"
+        sibling.mkdir()
+        (sibling / "__init__.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n")
+        self._assert_unmeasured_code_never_runs(marker)
+
+    def test_checker_uses_exact_private_source_before_sibling_package(self):
+        marker = self.home / "unmeasured-private-import"
+        sibling = self.plugin_dir / "native_evidence"
+        sibling.mkdir()
+        (sibling / "__init__.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n")
+        self._assert_unmeasured_code_never_runs(marker)
+
+    def test_checker_does_not_execute_unmeasured_cached_bytecode(self):
+        import importlib.util
+        import marshal
+        import struct
+        marker = self.home / "unmeasured-cached-import"
+        source = self.plugin_dir / "native_evidence.py"
+        cache = Path(importlib.util.cache_from_source(str(source)))
+        cache.parent.mkdir(exist_ok=True)
+        code = compile(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n",
+            str(source), "exec")
+        stat = source.stat()
+        # A valid timestamp/size cache header leaves all sealed source bytes
+        # unchanged; the checker must execute those source bytes, not this code.
+        cache.write_bytes(importlib.util.MAGIC_NUMBER
+            + struct.pack("<III", 0, int(stat.st_mtime), stat.st_size)
+            + marshal.dumps(code))
+        self._assert_unmeasured_code_never_runs(marker)
+
     def test_real_facade_native_verifier_request_and_result_path(self):
         self.ctx.call_mcp = self.mcp_wire
         args = self.args()

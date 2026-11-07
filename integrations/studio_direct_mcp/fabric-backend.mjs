@@ -90,7 +90,7 @@ function createHermesOriginAdmission(config=null) {
       };
       const timer=setTimeout(()=>{child?.kill('SIGKILL');finish(null);},10000);
       try {
-        child=spawn(config.python,[checker,config.source,config.home,config.revision,config.packageSha256],{
+        child=spawn(config.python,['-I','-B',checker,config.source,config.home,config.revision,config.packageSha256],{
           stdio:['pipe','pipe','ignore'],windowsHide:true,
           env:{PATH:process.env.PATH??'',PYTHONNOUSERSITE:'1'},
         });

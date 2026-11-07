@@ -39,6 +39,14 @@ It verifies the existing native install record and the closed runtime file diges
 before starting that checker, and rechecks after its return. Both the backend
 blob and plugin pin must come from the same selected protected release.
 
+The backend starts this fixed checker with Python `-I -B`. The checker loads
+its private `__init__.py`, `native.py` and `native_evidence.py` directly from
+those named source files, without sibling-package discovery or cached bytecode.
+Its private package has an empty discovery path; the required modules retain
+normal module identities and are registered before their source executes.
+The native source and committed dependency environment keep their existing
+explicit loading path. These checks do not install or activate the plugin.
+
 The closed runtime file projection consists of `__init__.py`, `plugin.yaml`,
 `native.py`, `facade_port.py`, `hermes_mcp_client.py`, `native_session.py`,
 `native_evidence.py` and `enrollment_check.py`. `package_fingerprint()` in
@@ -87,6 +95,7 @@ plugins:
 
 mcp_servers:
   mastermind-fabric-exec:
+    lazy: false
     command: /absolute/path/to/qualified/node
     args:
       - /absolute/path/to/qualified-release/integrations/studio_direct_mcp/fabric-backend.mjs
@@ -100,6 +109,14 @@ mcp_servers:
     tools:
       include: []
 ```
+
+Merge `mmx_fabric` into the profile's existing `platform_toolsets.cli` list,
+retaining every other intended selection. The ordinary native CLI, TUI and
+Desktop gateway use that same `cli` policy. Newly discovered plugin toolsets
+are normally enabled automatically, but an existing known-and-omitted selection
+can hide this tool. Preserve intentional `agent.disabled_toolsets`,
+`HERMES_TUI_TOOLSETS` and coding-focus restrictions; qualify the actual selected
+user path instead of replacing its policy with a broader default.
 
 The stable namespace is an enrollment identity. Retain it across ordinary
 restarts, compression and source upgrades so original task identities remain
@@ -129,9 +146,14 @@ is invented. A native-scoped backend never falls back to broad operator authorit
 if the package, enrollment or database is unavailable.
 
 `tools.include: []` uses Hermes's existing MCP inventory filter to keep raw
-Fabric tools out of ordinary model discovery. The native plugin uses
-`PluginContext.call_mcp` through its existing per-server allowlist. Server-side
-origin enforcement applies even if a raw call is attempted.
+Fabric tools out of ordinary model discovery. Keep `lazy: false`: eager native
+discovery retains the connected server before applying this filter, whereas a
+cached lazy server with no registered tools can lose its connection definition.
+The native plugin uses `PluginContext.call_mcp` through its existing per-server
+allowlist, independently of model-visible raw tools. Server-side origin
+enforcement applies even if a raw call is attempted. The native default trust
+policy needs no additional enrollment flag; preserve any explicit existing
+untrusted-server or spending policy rather than overriding it.
 
 The existing read-only capacity server may remain for preview. It is optional
 in this plugin's allowlist and must retain its own qualified configuration.

@@ -42,11 +42,24 @@
     "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
     "worker_2225_incorporated": true
   },
+  "current_original_carriers": {
+    "Macro10740": "cc45757612addfdc496acbb3c233376ad4c28c78",
+    "Mastermind2175": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "contribution_adoption": "NOT_OBSERVED",
+    "protected_Macro": "b94d5c0fce15e69479c33ea233a5ae5ab3da82a1",
+    "protected_Mastermind": "320611cbd7eca66af86a09d0c6f7622f229bdf73"
+  },
   "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
   "h2_runtime_sources_changed": false,
   "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed",
   "h3_patch_sha256": "5d3ad02f01e6c68184e66a7077ee67c14c7f8ff1213920a899d967d92b54fbf2",
   "h3_strict_scope_qualified": false,
+  "h4_preparation_incorporated": {
+    "installed": false,
+    "qualification": "completed-worker-h4-composition.json",
+    "source": "9379f8fa84f8f9fee96d58a05e987bade8e76891",
+    "via": "c07bc8544caa498a65b49f12c17b79dba13f8c40"
+  },
   "h5_inputs": {
     "baseline_2109_at_4fd_incorporated": true,
     "contract": "h2-h5-consumer-contract.md",
@@ -80,13 +93,14 @@
   "studio_fixture_pair_changed": false,
   "successor_source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
   "worker_join": {
-    "backend_sha256": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
-    "current_native_abi_qualification": "IMPORT_FAILED_BEFORE_CASES",
+    "backend_sha256": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
+    "current_native_abi_qualification": "PRIOR_IMPORT_FAILED_BEFORE_CASES_NOT_RETRIED",
     "live_acceptance": false,
     "newer_completed_checker_contribution": "c07bc8544caa498a65b49f12c17b79dba13f8c40",
-    "newer_completed_checker_incorporated": false,
-    "qualification": "current-worker-composition.json",
-    "runtime_package_sha256": "c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927",
-    "source": "7425d029c7e2afbe38d07abfa3cf95c1527d4439"
+    "newer_completed_checker_incorporated": true,
+    "qualification": "completed-worker-h4-composition.json",
+    "runtime_package_sha256": "7979dd4fbc42eead4d6e24b0fbcd1cbd73bb73fe645f63f7767b6994639e207a",
+    "source": "c07bc8544caa498a65b49f12c17b79dba13f8c40",
+    "upstream_native_component_cases": 25
   }
 }
