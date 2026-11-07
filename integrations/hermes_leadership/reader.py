@@ -129,7 +129,7 @@ class LeadershipReader:
                     'result_boundary':'Result availability is not parent consumption or product acceptance.',
                     'effect_boundary':'Reconcile original effects through Executive before any continuation.',
                 })
-            value['organization'] = organization_context(self._key, summary)
+            value['organization_context'] = organization_context(self._key, summary)
             if self._key == 'grok_adviser':
                 budget = budget_result('meter_unbound')
                 if self._budget_reader is not None:
