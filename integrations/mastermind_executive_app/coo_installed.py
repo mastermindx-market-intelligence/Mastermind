@@ -53,6 +53,12 @@ class CooFactsClient:
         return value
 
     async def agentos_context(self, principal, context, capability_profile_digest):
+        return await self._context_read(principal, context, capability_profile_digest)
+
+    async def agentos_current_context(self, principal, workspace, context, capability_profile_digest):
+        return await self._context_read(principal, context, capability_profile_digest, workspace=workspace)
+
+    async def _context_read(self, principal, context, capability_profile_digest, *, workspace=None):
         from common import coo_agentos_context_contract as wire
         client, request = self._context_client, self._context_request
         def current():
@@ -61,14 +67,24 @@ class CooFactsClient:
                     or getattr(client.request, "__func__", None) is not request.__func__):
                 raise ValueError("installed COO context transport changed")
         current()
-        frame = {"schema": wire.FRAME_SCHEMA, "principal": principal_frame(principal),
+        frame = {"schema": wire.CURRENT_FRAME_SCHEMA if workspace is not None else wire.FRAME_SCHEMA,
+            "principal": principal_frame(principal),
             "principal_context": dataclasses.asdict(context), "capability_profile_digest": capability_profile_digest}
-        wire.validate_frame(frame)
+        if workspace is not None:
+            from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
+            frame["workspace_principal"] = workspace_frame(workspace)
+            wire.validate_current_frame(frame)
+        else:
+            wire.validate_frame(frame)
         response = await request(frame)
         current()
         if response.get("ok") is not True:
             raise ValueError("installed COO context unavailable")
         value = response["result"]
-        wire.validate_result(value, expected_context=frame["principal_context"],
-            capability_profile_digest=capability_profile_digest)
+        if workspace is not None:
+            wire.validate_current_result(value, expected_context=frame["principal_context"],
+                capability_profile_digest=capability_profile_digest, expected_workspace_principal=frame["workspace_principal"])
+        else:
+            wire.validate_result(value, expected_context=frame["principal_context"],
+                capability_profile_digest=capability_profile_digest)
         return value

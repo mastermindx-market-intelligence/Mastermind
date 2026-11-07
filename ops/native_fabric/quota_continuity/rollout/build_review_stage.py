@@ -260,6 +260,46 @@ def before_admission_integrity(manifest):
     return previous
 
 
+# The complete host-pull repair composes only on the exact protected107
+# admission-integrity closure for either bound observer history. This inverse
+# is a validation view; emitted manifests and staged payloads keep the repaired
+# source identities.
+HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+HOST_PULL_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256 = "eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7"
+HOST_PULL_INTEGRITY_PREIMAGES = {
+    "ext/host_pull.sh": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
+    "ext/host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+    "ext/host_pull_daemon.sh": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+}
+HOST_PULL_INTEGRITY_DIGESTS = {
+    "ext/host_pull.sh": "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72",
+    "ext/host_pull_backend.py": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
+    "ext/host_pull_daemon.sh": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
+}
+
+
+def before_host_pull_integrity(manifest):
+    """Validate the complete host-pull successor without changing its identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native host-pull integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: HOST_PULL_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
+        raise ValueError("native host-pull integrity parent closure differs")
+    return previous
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
 
@@ -281,7 +321,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
-    manifest = before_admission_integrity(manifest)
+    manifest = before_admission_integrity(before_host_pull_integrity(manifest))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -642,7 +682,7 @@ def main():
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
     # Qualify the complete repair cohort even when no APPLICATION pair is added.
-    before_admission_integrity(manifest)
+    before_admission_integrity(before_host_pull_integrity(manifest))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

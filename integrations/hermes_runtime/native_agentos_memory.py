@@ -16,7 +16,9 @@ from types import ModuleType
 
 from ops.executive_os.native_gateway_sources import (
     DERIVATION_BASE, PRIVACY_DERIVATION_KIND, PRIVACY_DERIVATION_PATCH,
-    PRIVACY_DERIVATION_POSTIMAGES, PRIVACY_LICENSE_SHA256)
+    PRIVACY_DERIVATION_POSTIMAGES, PRIVACY_LICENSE_SHA256,
+    WORKSPACE_OAUTH_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_PATCH,
+    WORKSPACE_OAUTH_DERIVATION_POSTIMAGES)
 
 from integrations.hermes_harness.agentos_memory_provider import (
     AgentOsBinding, AgentOsHostPorts, AgentOsRefusal, create_provider)
@@ -28,6 +30,7 @@ from .errors import RuntimeRefusal
 from . import native_request_observation as observation
 
 READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v2"
+CURRENT_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v3"
 _CLAIM_ATTRIBUTE = "_mmx_agentos_memory_claim"
 _INSTANCE_ATTRIBUTE = "_mmx_agentos_memory_instance"
 _PACKAGE_MODULE = "integrations.hermes_harness.native_selected_child_plugin"
@@ -66,12 +69,16 @@ def _privacy_receipt_equal(value, expected):
             and value == expected)
 
 
-def _privacy_derivation(launch, vendor):
+def _privacy_derivation(launch, vendor, *, publication=None):
     """Require the existing held owner's verified receipt, never mint a grant."""
     selected = launch.recipe.get("vendor_derivation")
-    expected = {"kind": PRIVACY_DERIVATION_KIND, "base_sha": DERIVATION_BASE,
-        "patch_sha256": PRIVACY_DERIVATION_PATCH,
-        "postimages": dict(PRIVACY_DERIVATION_POSTIMAGES),
+    if publication is not None and type(publication) is not ExecutiveContextConsumerPublication:
+        _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
+    current = publication is not None and publication.workspace_principal is not None
+    expected = {"kind": WORKSPACE_OAUTH_DERIVATION_KIND if current else PRIVACY_DERIVATION_KIND,
+        "base_sha": DERIVATION_BASE,
+        "patch_sha256": WORKSPACE_OAUTH_DERIVATION_PATCH if current else PRIVACY_DERIVATION_PATCH,
+        "postimages": dict(WORKSPACE_OAUTH_DERIVATION_POSTIMAGES if current else PRIVACY_DERIVATION_POSTIMAGES),
         "license_sha256": PRIVACY_LICENSE_SHA256, "vendor_root": str(vendor)}
     if (not _plain_strings(selected)
             or set(selected) != {"kind", "base_sha", "patch_sha256", "source_root"}
@@ -419,7 +426,7 @@ class NativeAgentOsMemoryFactory:
         identity = claim.identity() if installed else None
         readiness = provider.readiness() if installed else None
         snapshot = provider.context_observation() if installed else None
-        context = {"provider": "agentos", "source_mode": "ADOPTED_SNAPSHOT",
+        context = {"provider": "agentos", "source_mode": self.publication.context.source_mode,
             "factory_registered": True, "provider_installed": installed,
             "readiness": None if readiness is None else {
                 "state": readiness["state"], "reason": readiness["reason"]},
@@ -435,7 +442,8 @@ class NativeAgentOsMemoryFactory:
                     or instance.manager.get_provider("agentos") is not provider
                     or (readiness["state"] == "READY") != (snapshot is not None)))):
             _refuse("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
-        return {"schema": READBACK_SCHEMA, "binding": {
+        return {"schema": CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
+            "binding": {
             "implementation_sha": self.slot.owner, "publication_sha256": self.publication_sha256,
             "profile_id": str(self.role_home), "instance_id": self.instance_id,
             "authority_epoch": self.authority_epoch,
@@ -476,14 +484,15 @@ def validate_consumer_readback(value, *, publication, expected_binding):
     shape(value, ("schema", "binding", "context", "selected_child"))
     shape(value["binding"], ("implementation_sha", "publication_sha256", "profile_id", "instance_id",
         "authority_epoch", "enrollment_request_id", "principal_id", "session_id"))
-    if (value["schema"] != READBACK_SCHEMA or value["binding"] != expected_binding
+    expected_schema = CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
+    if (value["schema"] != expected_schema or value["binding"] != expected_binding
             or not observation._integer(value["binding"]["authority_epoch"])
             or value["binding"]["authority_epoch"] < 1):
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     context = value["context"]
     shape(context, ("provider", "source_mode", "factory_registered", "provider_installed",
                     "readiness", "active_claim", "snapshot", "last_delivery"))
-    if (context["provider"] != "agentos" or context["source_mode"] != "ADOPTED_SNAPSHOT"
+    if (context["provider"] != "agentos" or context["source_mode"] != publication.context.source_mode
             or context["factory_registered"] is not True or type(context["provider_installed"]) is not bool):
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     if not context["provider_installed"]:
@@ -548,7 +557,7 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         return None
     if slot.memory_factory is not None:
         _refuse("NATIVE_AGENTOS_FACTORY_ALREADY_BOUND")
-    privacy = _privacy_derivation(launch, vendor)
+    privacy = _privacy_derivation(launch, vendor, publication=slot.publication)
     modules = {}
     for path, expected in SOURCE_SHA256.items():
         if _digest(vendor / path, maximum=256 * 1024) != expected:
@@ -686,7 +695,7 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         (turn_context, "_memory_turn_start_and_prefetch", prefetch_turn),
         (turn_context, "build_api_messages", api_messages)]
     launch.check()
-    if _privacy_derivation(launch, vendor) != privacy:
+    if _privacy_derivation(launch, vendor, publication=slot.publication) != privacy:
         _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
     slot.memory_factory = factory
     factory.wrappers = wrappers

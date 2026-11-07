@@ -116,7 +116,7 @@ ADMISSION_PARENT_ROWS = (
 def before_admission_integrity(manifest):
     # Historical-generation cases retain their exact parent, while the current
     # build and the new successor tests below inspect the actual repaired bytes.
-    previous = dict(manifest)
+    previous = builder.before_host_pull_integrity(manifest)
     if any(previous.get(name) == digest
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
@@ -760,7 +760,8 @@ def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
 
 
 def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = builder.before_host_pull_integrity(
+        json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     for observer, expected_parent_sha in ADMISSION_PARENT_ROWS:
         exact = dict(current)
@@ -794,7 +795,8 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    built_current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    built_current = builder.before_host_pull_integrity(
+        json.loads((builds.default / "native-manifest.json").read_bytes()))
     for observer, _ in ADMISSION_PARENT_ROWS:
         current = dict(built_current)
         current["ext/current_source_observation.py"] = observer

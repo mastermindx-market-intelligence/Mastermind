@@ -753,3 +753,114 @@ def test_reverse_changed_control_after_first_publication_freezes_effect(host, mo
     assert a2.PLIST_PATH.read_bytes() == old_pair[0]
     assert a2.CONFIG_PATH.read_bytes() == new_pair[1]
     assert a2.TOKEN_PATH.stat() == before_token
+
+
+
+def test_dot_canary_rebind_is_explicit_atomic_and_preserves_existing_token(host, monkeypatch):
+    # The original shared app and release are already enrolled. Enabling the
+    # read-only canary cannot trigger another OAuth ceremony or token selection.
+    host(sha=NEW)
+    initial=pair()
+    token_info=a2.TOKEN_PATH.stat()
+    original_read=os.read
+    def no_token_read(fd,count):
+        assert os.fstat(fd).st_ino != token_info.st_ino
+        return original_read(fd,count)
+    monkeypatch.setattr(os,"read",no_token_read)
+    parsed=a2.build_parser().parse_args([
+        "rebind-release","--expected-bot-user-id",BOT,"--enable-dot-canary",
+    ])
+    assert parsed.enable_dot_canary is True
+    assert asyncio.run(a2._rebind(
+        bot_user_id=BOT,enable_dot_canary=True,
+    ))["action"]=="rebound"
+    config=json.loads(a2.CONFIG_PATH.read_bytes())
+    assert config["dot_canary_enabled"] is True
+    assert config["slack_bot_user_id"]==BOT
+    assert tuple(config["slack_scopes"])==a2.SHARED_A2_SCOPES
+    assert config["w3c_enabled"] is False
+    actual=plistlib.loads(a2.PLIST_PATH.read_bytes())
+    argv=actual["ProgramArguments"]
+    assert argv.count("--enable-dot-canary")==1
+    assert "--enable-w3c" not in argv
+    assert a2.TOKEN_PATH.stat()==token_info
+    assert pair()!=initial
+    # A new invocation without the flag must preserve the active canary, not
+    # silently downgrade a live enrollment or attempt a second write.
+    after=pair()
+    assert rebind()["action"]=="already-current"
+    assert pair()==after
+    binding=a2._open_bound_config_directory()
+    try:
+        a2._validate_existing(
+            binding,bot_user_id=BOT,release_sha=NEW,
+            scopes=a2.SHARED_A2_SCOPES,w3c_enabled=False,
+            dot_canary_enabled=True,
+        )
+    finally:
+        os.close(binding.descriptor)
+
+
+@pytest.mark.parametrize("mutation",["nonboolean","config_only","plist_only"])
+def test_incoherent_dot_canary_rebind_preimage_refused_without_effect(host, mutation):
+    if mutation in {"nonboolean","config_only"}:
+        config=json.loads(a2.CONFIG_PATH.read_bytes())
+        config["dot_canary_enabled"]=("yes" if mutation=="nonboolean" else True)
+        a2.CONFIG_PATH.chmod(0o600)
+        a2.CONFIG_PATH.write_bytes(a2._canonical_json_bytes(config))
+        a2.CONFIG_PATH.chmod(0o400)
+    else:
+        plist=plistlib.loads(a2.PLIST_PATH.read_bytes())
+        plist["ProgramArguments"].append("--enable-dot-canary")
+        a2.PLIST_PATH.write_bytes(plistlib.dumps(
+            plist,fmt=plistlib.FMT_XML,sort_keys=False,
+        ))
+    original=pair()
+    with pytest.raises(a2.A2EnrollmentError,match="STATE_REFUSED"):
+        asyncio.run(a2._rebind(bot_user_id=BOT,enable_dot_canary=True))
+    assert pair()==original
+
+
+def test_new_canary_has_no_extra_slack_scopes_and_legacy_enroll_stays_closed():
+    for enabled in (False,True):
+        config=a2.build_config_document(
+            bot_user_id=BOT,release_sha=NEW,
+            scopes=a2.SHARED_A2_SCOPES,dot_canary_enabled=enabled,
+        )
+        assert tuple(config["slack_scopes"])==a2.SHARED_A2_SCOPES
+        assert config.get("dot_canary_enabled",False) is enabled
+        args=plistlib.loads(a2.render_plist(
+            bot_user_id=BOT,release_sha=NEW,dot_canary_enabled=enabled,
+        ))["ProgramArguments"]
+        assert ("--enable-dot-canary" in args)==enabled
+    for name in ("enroll-shared","verify","rebind-release"):
+        args=a2.build_parser().parse_args([
+            name,"--expected-bot-user-id",BOT,"--enable-dot-canary",
+        ])
+        assert args.enable_dot_canary is True
+    with pytest.raises(a2.A2EnrollmentError):
+        a2.build_parser().parse_args([
+            "enroll","--expected-bot-user-id",BOT,"--enable-dot-canary",
+        ])
+
+
+
+def test_w3c_and_dot_canary_combined_mode_refused_until_separate_d8_review(host):
+    # D8's exact immutable w3c_plist_configured() was intentionally not edited.
+    # Therefore it must never be asked to certify additional unreviewed argv.
+    with pytest.raises(a2.A2EnrollmentError,match="ARGUMENTS_REFUSED"):
+        a2.build_config_document(
+            bot_user_id=BOT,release_sha=NEW,w3c_enabled=True,
+            dot_canary_enabled=True,
+        )
+    with pytest.raises(a2.A2EnrollmentError,match="ARGUMENTS_REFUSED"):
+        a2.render_plist(
+            bot_user_id=BOT,release_sha=NEW,w3c_enabled=True,
+            dot_canary_enabled=True,
+        )
+    before=pair()
+    with pytest.raises(a2.A2EnrollmentError,match="ARGUMENTS_REFUSED"):
+        asyncio.run(a2._rebind(
+            bot_user_id=BOT,enable_w3c=True,enable_dot_canary=True,
+        ))
+    assert pair()==before

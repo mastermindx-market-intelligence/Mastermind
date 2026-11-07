@@ -107,6 +107,35 @@ your platform's default location differs (e.g. a different Homebrew prefix).
 python scripts/rwe_env.py gate --env /path/to/venv
 ```
 
+The shadow workflow runs the canonical six-shard plan on six independent
+runners. One `prepare-lock` job supplies the same Linux lock bytes to
+every runner; each realizes its own environment, then runs
+`gate --env /tmp/rwe-env --shard-index N` for its index from 0 through 5.
+Each shard has a 45-minute job limit, and the final `shadow-gate` job
+requires both lock preparation and the complete shard matrix to succeed.
+A failed, cancelled, or missing shard cannot qualify the full gate.
+
+Each runner installs Node 22.14.0 and the package-lock-bound npm
+dependencies before realizing the Python environment and running its
+shard. Python hash-lock checks, native nested test deadlines, and the
+canonical discovery/exclusion rules remain in force.
+
+A shard receipt records only `proof.shard`, including its index, six-way
+plan, selected module count, included-module digest, command, exit code
+and elapsed time. It never becomes `proof.gate`; full coverage is proved
+by the workflow's complete matrix and fail-closed fan-in. The ordinary
+`gate --env /path/to/venv` command above still invokes the full discovery
+gate and records `proof.gate`.
+
+Serial execution remains the default (`processes: 0`). An explicit workflow
+input of `processes: 4` passes `--processes 4` to each canonical shard;
+locally, use `gate --env DIR --shard-index N --processes 4`. Four precollection
+children require one canonical shard and cannot be combined with `--subset`.
+Their selected-module union and requested process mode must match the shard
+plan before its receipt can qualify. This option retains `proof.shard` and
+the same six-shard aggregate; it does not create a full `proof.gate` receipt.
+
+
 Refuses first (before anything else, including any subprocess call) if the
 environment's interpreter is no longer CPython 3.12, or if a prior receipt
 exists and the lock file it recorded has since changed content on disk

@@ -76,9 +76,10 @@ class CeoIngressWorkspaceClient:
         from common import workspace_resource_capacity_contract as capacity_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
-        context_read = type(frame) is dict and frame.get("schema") == context_wire.FRAME_SCHEMA
+        current_context = type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
+        context_read = type(frame) is dict and frame.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA}
         if context_read:
-            context_wire.validate_frame(frame)
+            (context_wire.validate_current_frame if current_context else context_wire.validate_frame)(frame)
             ceiling = context_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == byok_wire.FRAME_SCHEMA:
@@ -183,8 +184,10 @@ class CeoIngressWorkspaceClient:
                     if set(value) != {"ok", "result"} or type(value["result"]) is not dict:
                         raise ValueError("source_unavailable")
                     if context_read:
-                        context_wire.validate_result(value["result"], expected_context=frame["principal_context"],
-                            capability_profile_digest=frame["capability_profile_digest"])
+                        validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                        validator(value["result"], expected_context=frame["principal_context"],
+                            capability_profile_digest=frame["capability_profile_digest"],
+                            **({"expected_workspace_principal": frame["workspace_principal"]} if current_context else {}))
                 elif (value.get("ok") is not False or set(value) != {"ok", "status", "error"}
                       or type(value["status"]) is not int or value["status"] not in (400, 403, 404, 503)
                       or type(value["error"]) is not dict or set(value["error"]) != {"code", "message"}):
@@ -197,7 +200,7 @@ class CeoIngressWorkspaceClient:
                     try:
                         writer.close()
                         await asyncio.wait_for(writer.wait_closed(), timeout=min(1.0, timeout))
-                    except (Exception, asyncio.CancelledError):
+                    except Exception:
                         pass
                 else:
                     writer.close()

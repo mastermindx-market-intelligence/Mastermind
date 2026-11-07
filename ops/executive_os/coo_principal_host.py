@@ -21,7 +21,9 @@ from control_plane.executive_agent_capabilities import (
     HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
     HERMES_NATIVE_PRINCIPAL_PROFILE_ID,
     HERMES_NATIVE_CONTEXT_PROFILE_ID,
+    HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID,
     PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -177,7 +179,8 @@ class CooInstalledSource:
                 or profile.execution_surface not in {
                     CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE}
                 or (profile.execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
-                    and profile.profile_id not in {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID})
+                    and profile.profile_id not in {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
+                                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID})
                 or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         self._profile_catalogue(profile)
@@ -192,22 +195,26 @@ class CooInstalledSource:
         from common import coo_agentos_context_contract as wire
         from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, catalogue_specs
         found = []
-        for catalogue in (wire.LEGACY_CATALOGUE, wire.CATALOGUE):
+        context_profiles = {
+            wire.CATALOGUE: (HERMES_NATIVE_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID),
+            wire.CURRENT_CATALOGUE: (HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID),
+        }
+        for catalogue in (wire.LEGACY_CATALOGUE, *context_profiles):
             specs = {s.name: {"name": s.name, "inputSchema": s.input_schema, "annotations": s.annotations}
                      for s in catalogue_specs(catalogue)}
             schema_digest = observed_mcp_tool_schema_digest({"tools": specs})
             for grant in profile.mcp_server_grants:
                 if (grant.server_identity == COO_SERVER_NAME and grant.server_version == COO_SERVER_VERSION
                         and set(grant.enabled_tools) == set(specs) and grant.tool_schema_digest == schema_digest):
-                    if catalogue == wire.CATALOGUE and (
-                            profile.profile_id != HERMES_NATIVE_CONTEXT_PROFILE_ID
-                            or grant.capability_id != PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID):
+                    if catalogue in context_profiles and (
+                            (profile.profile_id, grant.capability_id) != context_profiles[catalogue]):
                         _refuse()
                     found.append(catalogue)
         if len(found) != 1:
             _refuse()
-        if profile.profile_id == HERMES_NATIVE_CONTEXT_PROFILE_ID and found[0] != wire.CATALOGUE:
-            _refuse()
+        for catalogue, (profile_id, _) in context_profiles.items():
+            if profile.profile_id == profile_id and found[0] != catalogue:
+                _refuse()
         return found[0]
 
     def catalogue_for_principal(self, principal, *, work_ref=None):
@@ -235,9 +242,11 @@ class CooInstalledSource:
             # Internal per-read permission check, never a tools/list selector.
             # AuthorityFact's generation deliberately excludes enabled.
             scoped = [row for row in selected if row["work_ref"] == work_ref]
+            actions = {HERMES_NATIVE_CONTEXT_PROFILE_ID: wire.ACTION,
+                       HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: wire.CURRENT_ACTION}
             if (not _check_work_ref(work_ref) or len(scoped) != 1
-                    or scoped[0]["capability_profile_id"] != HERMES_NATIVE_CONTEXT_PROFILE_ID
-                    or wire.ACTION not in _authority(scoped[0]).principal_actions):
+                    or scoped[0]["capability_profile_id"] not in actions
+                    or actions[scoped[0]["capability_profile_id"]] not in _authority(scoped[0]).principal_actions):
                 _refuse()
         catalogues = set()
         for row in selected:
@@ -268,13 +277,16 @@ class CooInstalledSource:
         coo = self._load_coo()
         found = False
         for row in validate_missions(coo.get("missions", [])):
-            if (row["enabled"] and row["capability_profile_id"] == HERMES_NATIVE_CONTEXT_PROFILE_ID):
+            alternatives = {HERMES_NATIVE_CONTEXT_PROFILE_ID: (wire.ACTION, wire.CATALOGUE),
+                            HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: (wire.CURRENT_ACTION, wire.CURRENT_CATALOGUE)}
+            if (row["enabled"] and row["capability_profile_id"] in alternatives):
                 _, fact, authority = self._snapshot(row["work_ref"], coo)
                 principal = {"policy_id": fact.policy_id, "issuer_digest": fact.issuer_digest,
                     "subject_digest": fact.subject_digest, "client_ref": fact.client_ref,
                     "resource": fact.resource_ref, "scopes": list(fact.scopes)}
-                if (wire.ACTION in authority.principal_actions
-                        and self.catalogue_for_principal(principal) == wire.CATALOGUE):
+                action, catalogue = alternatives[row["capability_profile_id"]]
+                if (action in authority.principal_actions
+                        and self.catalogue_for_principal(principal) == catalogue):
                     found = True
         if self._load_coo() != coo:
             _refuse()

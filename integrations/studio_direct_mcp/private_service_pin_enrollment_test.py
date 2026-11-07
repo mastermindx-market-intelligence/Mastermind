@@ -760,5 +760,45 @@ for _index, _name in enumerate(owner.ORDER):
                 + _name.replace(".", "_"), _test)
 
 
+
+
+
+class C4PublisherFrozenContractTests(unittest.TestCase):
+    def test_c4_successor_is_exact_and_preserves_original_profiles(self):
+        self.assertEqual(owner.C4_PUBLISHER_BEFORE_MANIFEST,
+                         "c440f2ba4c0bdfbba3aff86303a483e3ab42a1093f330ba9e3fd6c6f923783b4")
+        self.assertEqual(owner.C4_PUBLISHER_BEFORE_CONFIG, owner.C4_PAPER_V20_CONFIG_SHA256)
+        self.assertEqual(owner.C4_PUBLISHER_BEFORE, owner.TARGET_FILES["git-publish.mjs"])
+        self.assertEqual(owner.C4_ADAPTER_BEFORE, owner.TARGET_FILES["workspace-access.mjs"])
+        self.assertEqual(owner.C4_ADAPTER_AFTER,
+                         "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c")
+        self.assertNotEqual(owner.C4_ADAPTER_BEFORE, owner.C4_ADAPTER_AFTER)
+        self.assertEqual(owner.C4_PUBLISHER_AFTER,
+                         "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e")
+        self.assertEqual(set(owner.PROFILES), {
+            "chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"})
+        self.assertNotEqual(owner.C4_PUBLISHER_TRANSACTION, owner.TRANSACTION)
+
+    def test_current_protected_payload_matches_inventory_successor(self):
+        payload = Path(__file__).with_name("git-publish.mjs").read_bytes()
+        self.assertEqual(owner.digest(payload), owner.C4_INVENTORY_AFTER)
+        adapter = Path(__file__).with_name("workspace-access.mjs").read_bytes()
+        self.assertEqual(owner.digest(adapter), owner.C4_ADAPTER_AFTER)
+
+    def test_existing_cli_selects_c4_successor_without_new_control(self):
+        args = svc.build_parser().parse_args([
+            "native-pool-pin-enrollment", "--account", "chatgpt4",
+            "--operation", "preview", "--expected-manifest-sha256",
+            owner.C4_PUBLISHER_BEFORE_MANIFEST])
+        self.assertEqual(args.func, svc.cmd_native_pool_pin_enrollment)
+        self.assertFalse(any(hasattr(args, key) for key in
+                             ("credential", "remote", "branch", "force", "skip_integrity")))
+
+    def test_foreign_account_cannot_recognize_c4_transaction(self):
+        for account in ("chatgpt2-personal", "chatgpt2-business", "admin-business",
+                        "chatgpt3", "chatgpt3-w570f6f34", "unknown"):
+            self.assertFalse(owner.c4_publisher_postimage(svc, account, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -232,10 +232,10 @@ def test_cli_roundtrip_uses_actual_canonical_consumer():
 # Keep pytest metadata below the Linux per-string exec limit; the oversized
 # input itself still reaches the CLI unchanged through stdin.
 @pytest.mark.parametrize("raw", [b'{"nodes":[],"nodes":[]}', b'{"a":NaN}', b'{"a":Infinity}',
-    b'\xff', b'', b'{}', b'[]', b'['*10000+b']'*10000, b' '*131073,
+    b'\xff', b'', b'{}', b'[]', b'['*10000+b']'*10000, pytest.param(b' '*131073, id='oversized-whitespace'),
     b'{"SENSITIVE_SENTINEL": "secret"}', b'{"a":"\\ud800"}'], ids=[
     "duplicate-key", "nan", "infinity", "invalid-utf8", "empty", "empty-object",
-    "empty-array", "deep-nesting", "oversize", "sentinel-key", "lone-surrogate",
+    "empty-array", "deep-nesting", "oversized-whitespace", "sentinel-key", "lone-surrogate",
 ])
 def test_cli_refuses_bad_input_without_echo_or_traceback(raw):
     proc = cli(raw)

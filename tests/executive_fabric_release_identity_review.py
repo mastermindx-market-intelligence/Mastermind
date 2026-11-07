@@ -206,10 +206,10 @@ REVIEWED_FILES = {
                                               (1104, 100, 103, 'int', '456'))},
  'ops/executive_os/attended_worker_definition.py': {'sha256': '267ca3fceea48d2c3a1e8a4aaefbf8a90bd595d0c324f1a503826e9604ead92d',
  'sites': ((255, 31, 51, 'str', "'_mastermind_worker'"), (351, 95, 100, 'int', '0o660'))},
- 'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
-                                        'sites': ((776, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
-                                                  (778, 97, 120, 'str', '_mastermind_agent_relay'),
-                                                  (784, 89, 92, 'int', '457'))}}
+ 'ops/executive_os/bootstrap-host.sh': {'sha256': 'acb2c16a703b018fe110bf88ff576b60a32b2d029db24a769e58dac3d98daf60',
+ 'sites': ((784, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
+           (786, 97, 120, 'str', '_mastermind_agent_relay'),
+           (792, 89, 92, 'int', '457'))}}
 
 # Candidate-only fixed finite publisher principal/mode postimage for independent
 # review: SHA and precise sites are frozen, not computed at runtime. This does
@@ -677,7 +677,7 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4f6aa75978f73afcdd72cc568f54062b4560f9bedc3dc5bd65bb8a81b0ae7e8e', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '252a9d57fe21bd618875dcd2026b21947870af7a6f179a75ca80a666a8121d12', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -707,7 +707,9 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 # complete bounded-path lines; the optional callback shifts them by three lines.
 # The full-source hash and both spans still reject all path/context/byte drift.
 # This source audit supplies no native runtime or release approval.
-REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
+# Accepted S24 composition (4aabd797 custody /578ec12e persistence review):
+# only the same two512 path-length bounds move eight lines; no identity or limit change.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '1bfbec76a4f007d5ab5570eb5080891c896714129d4f0c51d7cfaf56a260b419', 'sites': ((371, 26, 29, 'int', '512'), (487, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
@@ -743,7 +745,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
+    "sha256": "7531a99e59e878aecc1df9d0bf0b6a388a8b1af3dfd5f8d3035a9beb5c91edf6",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -761,7 +763,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
 REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '2bf7475cfc2b133459cbf914b9a9cd7b327121cd40b8f6e3c9ab3428f4ea9860',
+    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
     'sites': ((1668, 26, 31, 'int', '0o700'),),
 }
 
@@ -782,3 +784,23 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
+
+# Test-owned frozen source data, merged into this same finite review table.
+from tests.test_hermes_workspace_oauth_identity_review import (
+    REVIEWED_FILES as HERMES_WORKSPACE_OAUTH_REVIEWED_FILES,
+)
+REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
+
+# Original #852 held subscription principals, source-qualified at exact sites.
+# This fixed source evidence grants no installed identity, credential or capacity.
+REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
+ 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
+           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
+           (170, 19, 22, 'int', '459'),
+           (171, 19, 22, 'int', '459'),
+           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
+           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
+           (182, 19, 22, 'int', '460'),
+           (183, 19, 22, 'int', '460'),
+           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
+           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
