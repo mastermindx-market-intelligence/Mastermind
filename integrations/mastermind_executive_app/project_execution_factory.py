@@ -154,10 +154,19 @@ class ProjectExecutionAppFactory:
                 projects=[{"ref": "executive-infrastructure", "label": "Project team"}], profiles=profiles))
 
     def _original(self, principal, args, *, submit):
-        operation, workspace, scope, stamp = self._authorize(principal, args)
+        operation, workspace, scope, stamp = self._authorize(principal, args, fresh=False)
+
+        def require_current_read():
+            current, current_workspace, current_scope, current_stamp = self._authorize(
+                principal, args, fresh=False)
+            if (current is not operation or current_workspace != workspace
+                    or current_scope != scope or current_stamp != stamp):
+                raise ProjectExecutionRefusal("context_changed")
+
         runtime = self.service._require_runtime()
         event = runtime.store.find_event_by_command_id(operation._command)
         if event is None:
+            require_current_read()
             return None
         root = runtime.jobs.get_job(event["job_id"])
         material = source_owner.read_source(runtime, root)
@@ -166,7 +175,11 @@ class ProjectExecutionAppFactory:
                 or (submit and material["arguments_sha256"] != wire.digest(args))):
             raise ProjectExecutionRefusal("operation_conflict")
         source_owner.read_original_input(self._supervisor(), material)
-        return ceo_intent.resolve_intent(runtime, material["intent_id"])
+        receipt = ceo_intent.resolve_intent(runtime, material["intent_id"])
+        # Retained reads may block. Qualify the same live reader and permission
+        # after the last read, without requiring a new plan or execution arm.
+        require_current_read()
+        return receipt
 
     def _request(self, args):
         return ceo_request.normalize_automated_request(dict(objective=wire.objective_for_intent(args["objective"]),

@@ -61,7 +61,7 @@ describe("project execution through the existing command owner",()=>{
       validation:{git_diff_check:true}},context,preview)!;
     expect(build.payload.allowed_write_paths).toEqual(["app/example"]);
   });
-  it.each(["refused","effect_unknown"])("retains the original pointer through a lost reply and %s status until recovery",async code=>{
+  it.each(["refused","context_changed","effect_unknown"])("retains the original pointer through a lost reply and %s status until recovery",async code=>{
     let statusReads=0;
     const f=setup((operation,args)=>{
       if(operation==="submit") throw Error("lost response");
