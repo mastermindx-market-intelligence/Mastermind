@@ -1,0 +1,226 @@
+--- a/ext/native_runtime_bindings.py
++++ b/ext/native_runtime_bindings.py
+@@ -14,6 +14,7 @@
+ import stat
+ 
+ SCHEMA = "native-code-generation.v1"
++SELECTION_SCHEMA = "native-code-selection.v1"
+ STORE_NAME = "native-code-releases"
+ HEX = re.compile(r"[0-9a-f]{64}\Z")
+ EXT_NAMES = frozenset({
+@@ -37,15 +38,17 @@
+     return info
+ 
+ 
+-def _json(path):
++def _json(path, *, expected_mode=0o444, maximum=128 * 1024, single_link=False):
+     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+     try:
+         before = os.fstat(fd)
+         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+-                or stat.S_IMODE(before.st_mode) != 0o444 or before.st_size > 128 * 1024):
++                or stat.S_IMODE(before.st_mode) != expected_mode
++                or not 0 <= before.st_size <= maximum
++                or single_link and before.st_nlink != 1):
+             raise ValueError("native state binding metadata custody")
+         with os.fdopen(os.dup(fd), "rb") as handle:
+-            data = handle.read(128 * 1024 + 1)
++            data = handle.read(maximum + 1)
+         def identity(value):
+             return (value.st_dev, value.st_ino, value.st_uid, value.st_mode,
+                     value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+@@ -121,3 +124,38 @@
+             continue
+         return Path(target) / tail
+     return path
++
++
++def require_current_selection(code_here):
++    """Return the incumbent selection for this executing native generation.
++
++    A NEW claim's caller must hold the existing physical admission fence until
++    its commit. This pure read does not acquire a lock, publish a selection, or
++    grant admission. Original recovery continues to use owner_path(), which is
++    deliberately independent of CURRENT.
++    """
++    here = Path(code_here)
++    if (not here.is_absolute() or here.name != "ext"
++            or here.parent.parent.name != STORE_NAME
++            or not HEX.fullmatch(here.parent.name)):
++        raise ValueError("native claim source context unavailable")
++    # Reuse the original immutable metadata and fixed-alias custody verifier.
++    owner_path(here / "active", here)
++    try:
++        selected = _json(here.parent.parent / "CURRENT.json", expected_mode=0o600,
++                         maximum=4096, single_link=True)
++    except OSError:
++        raise ValueError("native claim selection unavailable") from None
++    if (type(selected) is not dict or set(selected) != {
++            "schema", "generation", "previous", "sequence"}
++            or selected["schema"] != SELECTION_SCHEMA
++            or type(selected["sequence"]) is not int or selected["sequence"] < 1
++            or type(selected["generation"]) is not str
++            or not HEX.fullmatch(selected["generation"])
++            or selected["previous"] is not None and (
++                type(selected["previous"]) is not str
++                or not HEX.fullmatch(selected["previous"]))):
++        raise ValueError("native claim selection malformed")
++    if selected["generation"] != here.parent.name:
++        raise ValueError("native claim source is no longer selected")
++    return dict(selected)
+--- a/ext/support_bundle.py
++++ b/ext/support_bundle.py
+@@ -3,6 +3,9 @@
+ 
+ import os, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
+ from pathlib import Path
++from contextlib import contextmanager
++
++COMMON_ADMISSION_PROTOCOL = "physical-admission.v1"
+ 
+ # Fixed public source closure (no credentials or controller-only helpers)
+ SOURCE_FILES = frozenset({
+@@ -294,10 +297,14 @@
+ _POLICY_LOCK_WAIT_SECONDS = 2.0
+ 
+ 
+-def _acquire_policy_lock(fd):
++def _acquire_policy_lock(fd, *, deadline_ns=None):
+     # Wait for a short metadata critical section, never for a host slot or worker.
++    if deadline_ns is not None and (type(deadline_ns) is not int or deadline_ns <= 0):
++        raise ValueError("ADMISSION_DEADLINE_INVALID")
+     deadline = time.monotonic() + _POLICY_LOCK_WAIT_SECONDS
+     while True:
++        if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
++            raise TimeoutError("ADMISSION_DEADLINE_EXPIRED")
+         try:
+             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+             return
+@@ -305,6 +312,9 @@
+             remaining = deadline - time.monotonic()
+             if remaining <= 0:
+                 raise BlockingIOError(errno.EAGAIN, "SUPPORT_ADMISSION_LOCK_BUSY")
++            if deadline_ns is not None:
++                remaining = min(remaining, max(0.0,
++                    (deadline_ns - time.monotonic_ns()) / 1_000_000_000))
+             time.sleep(min(0.02, remaining))
+ 
+ 
+@@ -501,7 +511,7 @@
+         raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_CHANGED")
+ 
+ 
+-def _policy_open_scope(stable_ext):
++def _policy_open_scope(stable_ext, *, deadline_ns=None):
+     """Open and lock the existing owner only; never create a missing installation."""
+     descriptors, handles, lock_fd = [], [], None
+     try:
+@@ -524,7 +534,7 @@
+         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1 or info.st_size != 0):
+             raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_INVALID")
+-        _acquire_policy_lock(lock_fd)
++        _acquire_policy_lock(lock_fd, deadline_ns=deadline_ns)
+         lock_identity = _policy_file_identity(info)
+         _policy_handles_current(handles, lock_fd, lock_identity)
+         return handles, lock_fd, lock_identity
+@@ -547,6 +557,28 @@
+                 failure = exc
+     if failure is not None:
+         raise failure
++
++
++@contextmanager
++def admission_scope(stable_ext, *, deadline_ns=None):
++    """Hold the incumbent physical owner without creating installation state.
++
++    Callers which also publish take publication before this scope; Broker and
++    SQLite ownership are inside it. The yielded check must run before the
++    caller commits its effect. This helper owns no claim, selection or grant.
++    It is deliberately not reentrant: an already-held caller passes its scope
++    through existing owner operations instead of opening a second flock.
++    """
++    handles, lock_fd, identity = _policy_open_scope(
++        stable_ext, deadline_ns=deadline_ns)
++    try:
++        def require_current():
++            _policy_handles_current(handles, lock_fd, identity)
++            if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
++                raise TimeoutError("ADMISSION_DEADLINE_EXPIRED")
++        yield require_current
++    finally:
++        _policy_close_scope(handles, lock_fd)
+ 
+ 
+ def _policy_public_document(raw, policy_owner):
+--- a/rollout/native_generation.py
++++ b/rollout/native_generation.py
+@@ -3,7 +3,8 @@
+ 
+ This is an OFFLINE ROLLOUT CANDIDATE. A reviewed manifest is an input, not a
+ claim that this file discovers the full dependency closure. Runtime state stays
+-with the incumbent kit. Publication and selection use an artifact lock only.
++with the incumbent kit. Selection nests its existing physical admission
++fence inside publication; this candidate does not create an installation.
+ """
+ from __future__ import annotations
+ 
+@@ -366,15 +367,50 @@
+     return value
+ 
+ 
++@contextlib.contextmanager
++def verified_admission_scope(store, generation, *, deadline_ns=None):
++    """Use the target's held, verified helper without populating runtime imports.
++
++    Publication ownership, when required, is already held by the caller.
++    Historical artifact verification remains available; a helper-less release
++    does not become eligible for a new fenced selection.
++    """
++    root, meta = verify(store, generation)
++    relative = "ext/support_bundle.py"
++    if relative not in meta["files"]:
++        raise ValueError("native common admission source unavailable")
++    target = root / relative
++    require(target, stat.S_ISREG, 0o555)
++    raw = regular_bytes(target)
++    if digest(raw) != meta["files"][relative]:
++        raise ValueError("native common admission source changed")
++    # Private handle only: native_go_entry retains ownership of ordinary module
++    # slots and its foreign-module refusal.
++    spec = importlib.util.spec_from_file_location("_native_selection_support_bundle", target)
++    if spec is None or spec.loader is None:
++        raise ValueError("native common admission helper unavailable")
++    helper = importlib.util.module_from_spec(spec)
++    exec(compile(raw, str(target), "exec"), helper.__dict__)
++    if (getattr(helper, "COMMON_ADMISSION_PROTOCOL", None) != "physical-admission.v1"
++            or not callable(getattr(helper, "admission_scope", None))):
++        raise ValueError("native common admission protocol unavailable")
++    with helper.admission_scope(Path(meta["stable_ext"]), deadline_ns=deadline_ns) as held:
++        yield held
++
++
+ def _select_locked(store, generation, expected):
+-    verify(store, generation)
+-    old = current(store)
+-    if (old["generation"] if old else None) != expected:
+-        raise ValueError("native selection compare-and-swap refused")
+-    value = {"schema": POINTER_SCHEMA, "generation": generation,
+-             "previous": expected, "sequence": old["sequence"] + 1 if old else 1}
+-    atomic_bytes(Path(store) / "CURRENT.json", canonical(value) + b"\n", 0o600)
+-    return value
++    # All incumbent callers already hold publication. This is the shared entry
++    # used by both select() and installer transitions.
++    with verified_admission_scope(store, generation) as require_admission:
++        verify(store, generation)
++        old = current(store)
++        if (old["generation"] if old else None) != expected:
++            raise ValueError("native selection compare-and-swap refused")
++        value = {"schema": POINTER_SCHEMA, "generation": generation,
++                 "previous": expected, "sequence": old["sequence"] + 1 if old else 1}
++        require_admission()
++        atomic_bytes(Path(store) / "CURRENT.json", canonical(value) + b"\n", 0o600)
++        return value
+ 
+ 
+ def select(store, generation, expected):

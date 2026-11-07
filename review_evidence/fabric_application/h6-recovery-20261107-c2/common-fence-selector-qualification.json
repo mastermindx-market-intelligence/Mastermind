@@ -1,0 +1,76 @@
+{
+  "schema": "mastermind.h6.common_fence_selector_qualification.v1",
+  "source_base": "d8c53e74040f2a1f0ce8b68e129cf209748374b6",
+  "base_emission_manifest": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d",
+  "predecessor": "common-fence-source-preparation.json plus its four exact H3 patches",
+  "patch": "common-fence-selector-only.patch",
+  "patch_sha256": "1c7dbdac52e3d0a94b1b9532a93df8d03d561a9451a5fb7121482e85dd4c018c",
+  "changes": {
+    "ext/native_runtime_bindings.py": {
+      "before": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
+      "after": "15c0c046a1c7e1c9a0cf9aee5af8f6631793d8a9af6f219e16a69830df3b42e3"
+    },
+    "ext/support_bundle.py": {
+      "before": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+      "after": "c2e638d08e969f0421c6aa7508bd9d906a9191fa712e079b2079d8668f2005b3"
+    },
+    "rollout/native_generation.py": {
+      "before": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+      "after": "a570210825da7eb58be83381860c5ffa013ed5889486e4a3b822f96d0dab09db"
+    }
+  },
+  "probes": {
+    "test_current_selection_reader.py": {
+      "executed_sha256": "753bc630e48bf9735fcfd92fdc51b488ba8a90b2ef4bb080d5600cf79d1a62a0",
+      "persisted_sha256": "340ff5d27ccaec2237ec9274bd7ef7731518fb5eace042be740a0d1e2f547c9f",
+      "only_replay_change": "explicit H6_COMMON_FENCE_SOURCE path input"
+    },
+    "test_common_admission_fence.py": {
+      "executed_sha256": "096024619b3035799ada3161cd746079f400315da9d01f16b0bf8b3d20cc534e",
+      "persisted_sha256": "096024619b3035799ada3161cd746079f400315da9d01f16b0bf8b3d20cc534e",
+      "only_replay_change": null
+    }
+  },
+  "receipts": [
+    {
+      "stem": "common-fence-reader-before-selector",
+      "cases": 35,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "ad571a36799f859d1ad66bb6a8ec7dbaa318543cf8e10ccf12a8f6db6677d50d",
+        "result.xml": "84cd0075ee5339c8110e7f82d129d1741896f74543c52e4d1a97e194e7903c5b"
+      }
+    },
+    {
+      "stem": "common-fence-selector",
+      "cases": 48,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "f636d23d4ea49c42f4dbb80ca0cc88063562c01fbcd8be65c7d995e432400320",
+        "result.xml": "da668d161a54b21c2fea41cdd5e247b6e67a13361208c0409fe2464efe1b247e"
+      }
+    }
+  ],
+  "positive_scope": [
+    "actual publisher and selector artifacts in disposable roots",
+    "old generation owner mapping survives selection movement",
+    "current claim reader rejects stale executing generation",
+    "cross-process selection waits under publication behind held physical admission",
+    "selection increments once after release without replacing the physical inode",
+    "deadline bounded contention through the same helper",
+    "private selector helper does not occupy native runtime module slot",
+    "historical verification is separate from fenced selection eligibility"
+  ],
+  "limitations": [
+    "Broker and quota/enrollment joins not implemented in this receipt",
+    "remote and native helper closure joins still owed",
+    "writer/configuration/credential closure incomplete",
+    "no provider call, APPLICATION issuer, runtime deployment, selection or acceptance"
+  ],
+  "selectable": false,
+  "mission_complete": false
+}

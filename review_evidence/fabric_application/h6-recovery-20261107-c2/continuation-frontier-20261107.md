@@ -147,3 +147,42 @@ separate gates. H3 remains outside selectable artifacts. Root retains protected
 delivery/native/C3/J recovery; H4/H5 and provider-plan/AUTO writers retain their
 effects. No new permission request is justified by these source gaps.
 MISSION_COMPLETE=false.
+
+## 2026-11-07 current-selection and selector fence qualification
+
+Published test-reader repair: d8c53e74040f2a1f0ce8b68e129cf209748374b6,
+tree 86f5edad5b190b0135ae4bcf5031bd136ab39b5c. Local=remote and clean was
+read back. Follow-up delivery to authorized PR #2175 is
+https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711273713
+with exact body SHA256 05f3abbb5371811461fa7f90169637d1f9809c79c61af4b0c9b35cde61367bcf.
+Do not copy it to issue #983: that separate publication was explicitly denied.
+
+The isolated pure current-selection reader passed 35 authentic-layout cases.
+A subsequent combined reader + actual helper/selector cohort passed 48 cases
+in one process, with 0 failures/errors/skips. See common-fence-selector-qualification.json.
+The latter includes separate-process contention: selector owns publication and
+waits for physical admission, then publishes sequence 2 once after release;
+the physical lock inode remains unchanged across both generation directories.
+The original policy owner creates the initial lock. No selector fallback creates
+installation state. Historical releases still verify, but cannot become new
+fenced selections without the qualified helper. The selector uses a private
+held-byte helper handle and leaves ordinary native module ownership untouched.
+
+This source is retained as common-fence-selector-only.patch, not applied to
+production source or artifact builders. The new physical helper retains the
+existing custody verifier and bounded lock loop, with an optional monotonic
+deadline. Publication -> physical admission -> Broker -> SQLite remains the order.
+The caller must use its fixed authenticated source directory and check held
+custody immediately before its mutation.
+
+Next ready phase: authenticated native/remote helper closure and the actual
+Broker, H2 quota publication and two service/account enrollment joins, with
+cross-process claim/publication proof. Inspect existing lane/policy/recovery
+holders first to avoid opening a second flock recursively. All external
+writer/credential/billable-meter/service-issuer/legacy-transition gates remain.
+
+Hosted CI 42398870463 at debb50dd: shards 1,3,4,5 completed SUCCESS; shard 2
+still executing at this readback. Shard 0 retains the exact test-fixture failure
+repaired in d8; its Python tests never executed. No cancellation or successor
+dispatch while the original run remains active. Required current-head hosted
+proof remains owed. MISSION_COMPLETE=false.
