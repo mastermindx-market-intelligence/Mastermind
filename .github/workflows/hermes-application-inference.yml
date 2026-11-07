@@ -14,6 +14,8 @@ on:
       - 'ops/executive_os/application_tunnel_control.py'
       - 'ops/executive_os/os_tunnel_entry.py'
       - '.github/workflows/hermes-application-inference.yml'
+      - '.github/workflows/ci.yml'
+      - 'tests/integration/test_fabric_*_cross_pool_auto.py'
   merge_group:
     types: [checks_requested]
   push:
@@ -30,11 +32,73 @@ on:
       - 'ops/executive_os/application_tunnel_control.py'
       - 'ops/executive_os/os_tunnel_entry.py'
       - '.github/workflows/hermes-application-inference.yml'
+      - '.github/workflows/ci.yml'
+      - 'tests/integration/test_fabric_*_cross_pool_auto.py'
 
 permissions:
   contents: read
 
 jobs:
+  paired-application-composition:
+    name: Current paired APPLICATION text, AUTO and native tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+      - name: Install incumbent paired dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e '.[dev]'
+          npm ci --prefix app/mastermind_os
+      - name: Read the incumbent paired gate and exact owner pin
+        id: paired-inputs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, os, re, yaml
+          workflow = yaml.safe_load(Path('.github/workflows/ci.yml').read_text())
+          steps = workflow['jobs']['pytest_shards']['steps']
+          owner = next(s for s in steps if s.get('name') == 'Checkout paired Brain production owner fixture')['with']
+          gate = next(s for s in steps if s.get('name') == 'Verify actual Brain Fabric and production inference composition')
+          assert owner['repository'] == 'mastermindx-market-intelligence/macro'
+          assert owner['path'] == '.ci-production-macro'
+          assert re.fullmatch(r'[0-9a-f]{40}', owner['ref'])
+          assert all(value == '1' for value in gate['env'].values())
+          Path(os.environ['RUNNER_TEMP'], 'paired-application-gate.json').write_text(json.dumps(gate))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('macro_ref=' + owner['ref'] + '\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: ${{ steps.paired-inputs.outputs.macro_ref }}
+          path: .ci-production-macro
+          sparse-checkout: |
+            engine
+            lib
+            config
+            tests
+            research/earnings_intelligence/e3/gold
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Execute the existing paired composition gate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, os, subprocess
+          gate = json.loads(Path(os.environ['RUNNER_TEMP'], 'paired-application-gate.json').read_text())
+          subprocess.run(['bash', '-euo', 'pipefail', '-c', gate['run']],
+                         env={**os.environ, **gate['env']}, check=True)
+          PY
   attended-gateway-contract:
     name: Hermes attended gateway with original admission and role coexistence
     runs-on: ubuntu-latest
