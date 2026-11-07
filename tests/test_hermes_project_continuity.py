@@ -164,7 +164,8 @@ def test_existing_native_handler_returns_separate_authored_continuity(mission_bo
         assert ctx["adoption"] == {"state": "UNAVAILABLE", "reason": "NOT_DECLARED"}
         assert ctx["source"]["commit"] == "a" * 40
         assert ctx["field_coverage"]["objective"]["state"] == "RETURNED"
-        assert ctx["wave_coverage"] == {"total": 1, "returned": 0, "omitted": 1}
+        assert ctx["wave_coverage"] == {"total": 1, "returned": 1, "omitted": 0}
+        assert ctx["waves"][0]["id"] == "W1"
         assert result["continuity"]["missing_fields"] == ["done_when", "unresolved_effects"]
         assert result["continuity"]["new_work_authorized"] is False
         assert result["continuity"]["next_action_is_recommendation"] is True

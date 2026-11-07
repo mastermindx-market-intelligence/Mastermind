@@ -58,6 +58,9 @@ def project_plan_context(body: object, *, work_ref: str, read_completed_at: floa
             "content_basis": "AUTHORED_WORKSTREAM_RECORD",
             "root_job_binding": "NOT_ESTABLISHED",
             "adoption": plan["adoption"], "field_coverage": {},
+            "waves": [],
+            "wave_boundary": "Authored planning evidence only; omitted waves remain unknown. "
+                             "Not runtime task, effect or acceptance state.",
             "wave_coverage": {"total": len(plan["waves"]), "returned": 0,
                               "omitted": len(plan["waves"])},
             "version_history": {"state": "NOT_PROJECTED"},
@@ -81,6 +84,22 @@ def project_plan_context(body: object, *, work_ref: str, read_completed_at: floa
                              separators=(",", ":")).encode("utf-8")
         if len(encoded) > MAX_BYTES:
             return unavailable_plan("projection_over_budget")
+        # Carry complete authored rows in source order. An omitted predecessor
+        # remains in a retained row's depends_on; omission never satisfies it.
+        # The upstream closed validator already checks the entire graph.
+        for wave in plan["waves"]:
+            value["waves"].append({field: wave[field] for field in
+                ("id", "title", "status", "depends_on", "next_action", "prs")})
+            value["wave_coverage"]["returned"] += 1
+            value["wave_coverage"]["omitted"] -= 1
+            candidate = json.dumps(value, ensure_ascii=False, allow_nan=False,
+                                   separators=(",", ":")).encode("utf-8")
+            if len(candidate) > MAX_BYTES:
+                value["waves"].pop()
+                value["wave_coverage"]["returned"] -= 1
+                value["wave_coverage"]["omitted"] += 1
+            else:
+                encoded = candidate
         return json.loads(encoded)
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError,
             UnicodeError, AttributeError):
