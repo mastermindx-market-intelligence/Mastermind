@@ -847,3 +847,34 @@ The original Ubuntu1 root-owned C26 journal had an explicit PermissionError unde
 5. Run the prospective memory/skill experiment, publish supported suspected discoveries and source skills through current owners, then execute the original endurance/restart/revocation acceptance.
 
 Original computer and grounding Fabric requests were reconciled as REQUEST_REFUSED_BEFORE_LAUNCH with retained launch_attempted=false and terminated controllers; neither was redispatched. Original memory feature and repair processes are terminal. No temporary watcher, post-turn wake, new scheduler or daemon was created. Native principal children supplied read-only architecture judgment. Current source procedure pin is `650b81344a7cf5790cdf617dff6e1e2175742037`; INDEX/laws were retrieved at that pin. Its sole delta fromad6275 is the delivery workflow's exact accepted-PR deployment identity example and its test; no source-law authority was silently changed.
+
+## 19. Protected source merges and native carrier recovery — 2026-11-07
+
+**Mission state remains BUILT_NOT_PROVEN; MISSION_COMPLETE=false.** This milestone records actual source merges and source recovery, not installed activation.
+
+### Canonical release receipts
+
+- Recall PR #2163 is MERGED at `5ca25e561ffaeacb4ef94bb08f507617f80d0607`.
+- Grounded scorer PR #2167 is MERGED at `78d8cb693888579808f02de0934c18f4915fd042`.
+- Both merges were read back through native GitHub state with timestamp `2026-11-07T01:17:19Z` and successful head checks. Do not re-arm their concluded effects.
+- Computer guard PR #2165 remains on its original request at head `1c8a4391cad243f860c25431e8adf849ecf5f6f7`; one canonical test shard was still running at the observed boundary. No duplicate release request.
+- Agent OS continuation is [macro PR #10813](https://github.com/mastermindx-market-intelligence/macro/pull/10813), head `3a1b705b945e514c7fd003cbd6d032ca30615e8e`, one new `agentos/handoffs/CHAIRMAN-CONTROL-ROOM-2026-11-07-hermes-teammate.md`. Exact protected `check_handoff` returned zero errors and the committed file was read back byte-for-byte. Full graph CI and Macro's own merge-on-green controller remain distinct; no native auto-merge fallback and no adopted-continuity claim before merge.
+
+### Original PR #2134 recovered without replacing its carrier
+
+The original auto request was disarmed with canonical absence of both auto request and queue entry. Its original registered M2 source workspace contained stale merge metadata for already-ancestor `e1869de4`, with a clean index/worktree. After that metadata was reconciled, a real merge against protected `1b469573f57c6016a46757dd98b95fa43af2a8eb` produced exactly one conflict: the `auth.rs` entry in `tests/executive_fabric_release_identity_review.py`.
+
+The composed auth SHA-256 is `3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c`, with the unchanged HTTP 503 operands at lines 3514, 3519 and 3523. Both protected Control Room changes and native session behavior were retained. No broad scanner exemption or functional rewrite was introduced.
+
+Final original branch head is **`7a3160fa76ceae58726eacd27d741872273d3828`**, tree **`3ddb5de3275c798c1d5eebc2210f1c86d7349163`**. The exposed typed commit schema lacks its implementation's nested merge fence. The known single-parent local commit `562d1990` was reconciled; the already prepared merge was concluded locally in the same registered workspace, preserving parents `562d1990` and `1b469573` and exactly the qualified tree. The original typed push returned APPLIED, clean local=remote at `7a3160fa`; remote PR readback is MERGEABLE. No undeclared tool input, new publisher, account switch, force push or service/configuration change was used. An unrelated automatic repack warning concerned another worktree's denied index; that read was not repeated or repaired.
+
+Separate focused receipts: 316 Python identity/topology/shared-auth tests; TypeScript typecheck; 67 UI tests across six files; native-mode frontend build; 16 targeted native Rust passes. One existing signed-HTTP fixture was explicitly ignored, not counted as installed proof. The initial native build lacked mandatory source/build metadata and failed before tests; the corrected invocation used the actual committed source revision and passed. The final merge has the exact tested source tree. Fresh final-head canonical CI remains required.
+
+### Next bounded implementation seams
+
+1. **Vendor derivation:** extend the existing frozen native_gateway recipe, prepare-hermes-dependencies, NativeSourceClosure and installer. Reuse guard #2165's exact `prepare_sources()`, prepare a new unselected artifact, retain the selected upstream base, admit only the two declared postimages plus the complete frozen inventory, and preserve the pristine path. Never add allow_dirty or patch a selected runtime in place.
+2. **Native recall enrollment:** use actual authenticated role/session/enrollment and per-admission authority. The provider needs a real local nonblocking generation fence; the existing network-capable session_guard cannot simply be substituted. Macro compiler root and rendered capacity must come from trusted installation input, not a job root or model text. Hermes' generic PluginContext.register_memory_provider is inert at the selected pin: actual MemoryManager/provider-loader or agent-construction receiving code must be exercised.
+3. **Learning producer evidence:** use exact original terminal result and actual provider-call evidence. Retained answer bytes are redacted user-visible output, not raw provider bytes. Configured catalog model or served_model fallback hints cannot set model_identity_verified. Observer/middleware coverage and exact tool/model/runtime joins must be proven before existing EVAL can become technically VALID.
+4. **Website vault:** retain the existing-owner permission-producer plus secret-safe owned-page fill requirement from section 18. Credential readiness alone remains insufficient; do not expose generic backend discovery/unlock.
+
+The original Ubuntu1 C26 permission denial is unchanged. Restore its original authorized root/admin connection to reconcile the original result. It is not resolved by source merges or local tests. No post-turn wake, daemon or background Web execution is asserted.
