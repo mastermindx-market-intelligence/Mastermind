@@ -2087,3 +2087,61 @@ Next source leaf is an authenticated finite **read of an already published origi
 C3 remains source validation only. Original Ubuntu1/root C26 journal-read PermissionError remains closed and unretried. Installed acceptance, vault login entitlement, fleet browser/computer journeys and live recovery stay on original carrier **meta-ceo-byok-followon-parent-20261106-c35-01**, path **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01**. Original paid-Fabric refusal and two named denied AF_UNIX tests are not replayed. No daemon, watcher, queue, alternate runtime carrier or outside message was started.
 
 Recovery source workspaces: local mirror **/workspace/scratch/1d075ac94a2c/hermes-native-eval**; C3 parent **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q** with **eval-source-convergence-validation** (final tree6460; local structural parentec315, context merge staged), **eval-9353-validation** (prior final tested postimages), and **discovery-ad248-integration** (tree64d10, accepted-master composition staged). New source work must retain the original #2234 branch/head and reconcile staged states before modifying them.
+
+
+## 48. Authenticated retained Trial consumption — 2026-11-07
+
+**Classification: MORE_WORK_EXISTS; MISSION_COMPLETE=false.** The native learning evidence consumer is connected in source. Current native evidence is still ineligible for refinement, and original-carrier installed acceptance remains open. This milestone does not lift Outcome Learning #398/#409 or the runtime access hold.
+
+### Published source and exact proof
+
+Original Draft [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) now has **2d662339d8f4b38c67a0739efc0bf0f78bdb9150**, parent **2341b535cb889b91cb77a4fe2496cf81a630c3fa**, tree **5cadab3ac95ba77162acee33ff225c7b053822ba**. Eleven own postimages were staged in the original source-validation connection. Git's staged tree and GitHub's API tree match exactly. The branch moved by compare-and-swap from2341; fresh PR readback is OPEN/Draft at2d662 with no EVAL release request.
+
+[Published reader](https://github.com/mastermindx-market-intelligence/Mastermind/blob/2d662339d8f4b38c67a0739efc0bf0f78bdb9150/integrations/hermes_runtime/native_eval_publication.py) was read back byte-identical, blob **a76a5abac30460832476bf5e8611659fd772f790**, source SHA256 **c93d4e106b3138278d02c95f90770c2f4f50e5f985ec197be62640812d753378**. [Current contract](https://github.com/mastermindx-market-intelligence/Mastermind/blob/2d662339d8f4b38c67a0739efc0bf0f78bdb9150/docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md). The PR description was rewritten to the current cumulative behavior and source, and returned byte-identical after update.
+
+The original held archive includes the incumbent Harness2 recursion and context modules needed by the reader. Its existing command selector now admits the finite eval-trial command. Exact source review updates only native control's unchanged wire-bound operand and enrollment's unchanged ensure_directories permission operand; the latter function has equal AST before/after, with its 0o750 token moved706→708 by archive entries. Final review table SHA256 **d8947f768f02a7f6d17fadfdb4e2e2f2bc66bcf1b6512b5887c2288a0f697257**. No identity/scanner or validity gate was widened.
+
+### Original owner, graph and output
+
+The existing same-UID private operation read_evaluation_trial accepts only the exact original profile/session/submission/input/admission/EVAL binding. The original selected memory/EVAL owner, native database epoch, principal and admission/tombstone authenticate the request. It requires a frozen original publication and an already present byte-identical run in the original ArtifactStore. The same store's scenario/configuration/experiment must equal the original marker, and the existing graph verifiers run.
+
+Output comes only from the bounded original RESULT_PREFIX projection. The exact retained-redacted final-response stage, UTF-8 bytes, byte count, digest and admission/binding-derived locator must match. That locator is not followed as a file or URL. Normal retirement expiry still removes the answer even when a frozen publication survives; the reader neither regenerates it nor creates another output store. Before/after ownership checks and a second original read prevent splicing changed ownership, publication or output into the returned evidence. They establish an observation at the final read, not an ongoing retention lease.
+
+The detached private Trial document is bounded to256KiB in full. decode_trial validates the closed document and exact original binding/output, native candidate files, public-safe evidence and the incumbent Harness2 Trial validator. The reader applies already verified NO_EFFECT/VALID ineligibility before constructing a candidate, preserving the existing effect-before-validity precedence. The actual consumer still performs complete validation on an eligible candidate.
+
+Current invalid runs return their authentic ID/digest/validity/reason codes without output, graph or candidate files. Empty failed answers cannot erase that summary. Otherwise eligible empty, oversized or privacy-refused candidates also retain a closed refusal summary. These summaries do not certify a run that failed graph or original-custody validation.
+
+### Attended consumer and effect truth
+
+eval-trial uses the original recovery selector and qualified current reader. It first reads original identity; a nonterminal original returns immediately without polling. It then performs one private trial read, with the same before/after owner fencing. It does not enroll, submit, publish, create, retry, reconcile publication or invoke refinement.
+
+The attended consumer validates the complete private response and returns only the original receipt/recovery and eligibility summary under **mastermind.hermes_native_eval_trial_operator/v1**. Existing submit/read/publish result schemas remain unchanged. Private graph/output bytes do not reach CLI stdout. An eligible Trial remains evidence for an otherwise admitted consumer; it is not a parent/Attempt, budget or execution grant.
+
+Lost reads and owner replacement are UNAVAILABLE, including outer asyncio failure. They never become publication EFFECT_UNKNOWN. Original submit/publication uncertainty remains unchanged.
+
+### Qualification and repaired diagnostics
+
+- The first reader batch found an incorrect access to output["bytes"]; the original terminal metadata contract is output["utf8_bytes"]. After correction, **26 of27** cases passed. The remaining SQL fixture passed the result-codec dictionary directly rather than its serialized JSON; that fixture was corrected, and its focused case passed (XML **acf4ea0d46c5982ed9a579e8017658105f1d5f0cd5d5a3484059d60f245d206c**).
+- The actual attended operator and held archive batch passed **54 tests**, zero failures/errors/skips; XML SHA256 **c1b890b109a0c06cb14f9136b8966629c17c810dc9db6cd4f190755e6c871a67**. It covers one-call private reads, no enrollment/publication, forged/mixed responses, owner/read loss, nonterminal immediate return, outer-runner loss and actual packaged eval-trial/eval-publish help/import paths.
+- Principal source judgment identified loss of the authenticated summary when an already-invalid run had empty output. That ordering was repaired as above. New boundary checks also exposed incorrect exception-constructor/property assumptions; handlers now use the actual RuntimeRefusal.code and structured ContractDefect contract.
+- Final affected reader suite: **24 passed**, zero failures/errors/skips; XML **813fcefefb07a06eaa8bcb1eba7fb632340f77c8afbb94bb399ded8fc5dbbef5**. Actual original settlement/freeze/store/retirement executes; explicit synthetic complete historical producer facts exercise the eligible branch without altering current production observations. Cases cover live/retired/expired results, frozen-but-unpublished refusal, changed run/graph/root/principal/mid-read owner, output corruption, exact binding/stage/size, empty/limited/privacy refusal, summary preservation and zero writes.
+- Final actual D8 collector selected **eight source paths** under its production collector rules, no identity/evidence findings. Full source AST parse, whitespace and exact staged/API tree comparison passed.
+- Suites overlap and are not additive. Earlier current source-policy proofs in section47 remain; denied AF_UNIX tests were not run, and no live provider/account or runtime listener was used.
+
+### Dependency release and CI truth
+
+Current-context [#2242](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2242) **merged** at **2026-11-07T20:17:25Z**, commit **24263b0f3c7b5297f9abc233b97a0ccff4a0cd5e**. Its original queue request completed without duplication. This supersedes section47's queued-only observation.
+
+Discovery [#2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217) remains OPEN at **c4cd48c83c1bc8b59744c58fdf678207b3494c0d**, latest source read MERGEABLE. Its original auto-merge request is preserved; CI **42409220290** remained in progress at the last workflow read. No re-arm/cancel/merge is claimed.
+
+EVAL parent2341 CI **42409558835** failed. The bounded original job-log diagnostic (**128514927891**, pytest shard0) confirms the two source-scope preflight failures: inherited discovery/context/control-plane paths were outside the EVAL-owned delta while dependencies were unmerged. Other2341 runtime/harness/OAuth/qualification/OS workflows succeeded. Keep the scope guard intact. Accepted dependency composition and current protected CI remain necessary before the original EVAL candidate is ready.
+
+The observed master advanced to **98a47a9bd8552584447ef18e67a84f3a8579e243** through gateway mission-profile adoption, current-context receipts and portfolio reconciliation truth. The bounded ad248→98a comparison changes no governing law. Compatible protected pin **66780ab7e3e9fdbfd40713bb5791fb1888529f7c** remains.
+
+### Execution environment and next material source work
+
+The transient local execution connection became unavailable and was not retried. Previously published source and this plan remain durable. The existing C3 source-validation connection stayed healthy; it is not a runtime failover. Current workspace **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/eval-trial-read-validation** was reconciled from staged tree5cad to clean HEAD **2d662339d8f4b38c67a0739efc0bf0f78bdb9150** after exact source/API proof. No hard reset or git push was used. The old local mirror is not a current postimage source for this leaf.
+
+Next bounded source judgment concerns an actual runtime-provider selector witness at the existing observed-dispatch/HTTP transport boundary. Current input policy rechecks the adopted native agent provider, but the original transport observation does not retain that fact. Any implementation must use the same observation owner, preserve strict historical schemas, join every actual call/dispatch/attempt and identify only the frozen public configuration label whose bytes were observed. It cannot attest remote serving-model weights, credential realm, effective sampling defaults, full sandbox/network policy or effects. The remaining missing-observation, coverage and learning-admission gates remain in force.
+
+Original Ubuntu1/root C26 journal-read PermissionError remains closed/unretried; restoration/reconciliation of that original admin connection is still required for installed work. Runtime carrier remains **meta-ceo-byok-followon-parent-20261106-c35-01**, at **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01**. Paid Fabric refusal and two named denied AF_UNIX cases are not replayed. C3 is source-only. No account/login, fleet activation, CUA, daemon/watcher/queue or Slack/email occurred.
