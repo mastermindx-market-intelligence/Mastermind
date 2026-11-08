@@ -162,10 +162,10 @@
   <main class="reference">
     <header class="reference-head">
       <div><p class="eyebrow">Mastermind · Design reference</p><h1>Work you can follow.</h1></div>
-      <p class="reference-note">Local example observations. Use the controls to inspect the interaction; no runtime is connected.</p>
+      <p class="reference-note">Choose an independent example scenario. Inspect the interaction; no runtime is connected.</p>
     </header>
     <section class="controls" aria-label="Design reference controls">
-      <div class="control"><label for="scenario">Observation</label><select id="scenario">
+      <div class="control"><label for="scenario">Scenario</label><select id="scenario">
         <option value="active">Working · qualified task facts</option>
         <option value="result">Result returned · ready to inspect</option>
         <option value="stale">Stale observation</option>
@@ -182,7 +182,7 @@
         <option value="unavailable">Mode unavailable</option>
       </select></div>
       <label class="toggle"><input type="checkbox" id="reduce-motion">Reduce motion</label>
-      <button type="button" class="button primary" id="apply-observation">Apply observation</button>
+      <button type="button" class="button primary" id="apply-observation">Load scenario</button>
     </section>
 
     <section class="app" aria-label="Project workspace design">
@@ -276,7 +276,7 @@
         <section class="disclosure" id="preview-panel" tabindex="-1" aria-labelledby="preview-heading" hidden><header class="disclosure-head"><h3 id="preview-heading">Draft preview</h3><button type="button" class="text-button" data-close>Back to your draft</button></header><p id="preview-copy"></p><p class="support" id="preview-context"></p><p class="support">This reference stops at preview. It does not submit work.</p></section>
       </div>
     </section>
-    <details class="build-notes"><summary>Interaction and build contract ↓</summary><p>Only applying a changed, qualified working/result observation can reveal the card once, over 180 ms. Settled, stale, disconnected and unknown states rest. Reapplying an unchanged observation has no animation or announcement. Reduced motion preserves every fact.</p><p>Team identities and task states are fixtures here. Production must use existing qualified owner data, with a root-only fallback when task facts are absent. Recent runs uses the existing reader, capped at eight original-principal project runs; it is not complete history.</p><p>Continue from result opens an unsent draft. An existing draft is never overwritten. The production preview/submission owner must supply and revalidate the complete parent witness; one new self-root follows the verified result. Unknown original effects use the original reconciliation path, with no resend.</p><p>Files and Details remain after the mounted composer. Their owner sections remain mounted while navigating. Back/Escape returns focus; source refresh does not move focus. <a href="https://github.com/mastermindx-market-intelligence/Mastermind/blob/design/paper-workflow-audit-20261108-44569e75/docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md" target="_blank" rel="noopener noreferrer">Read the implementation and proof matrix ↗</a></p></details>
+    <details class="build-notes"><summary>Interaction and build contract ↓</summary><p>Each scenario is an independent fixture, not the next event in a run. Production must keep read quality separate from the retained run/result payload. A failed refresh after a returned result retains that result; it does not revert to working. The unknown-request fixture has no current run identity, but a real uncertain effect must retain any identity already established.</p><p>A changed working/result scenario demonstrates one 180 ms reveal. Production animates only an observed material change. Settled, stale, disconnected and unknown states rest. Reloading an unchanged scenario has no animation or announcement. Reduced motion preserves every fact.</p><p>Team identities and task states are fixtures here. Production must use existing qualified owner data, with a root-only fallback when task facts are absent. Recent runs uses the existing reader, capped at eight original-principal project runs; it is not complete history.</p><p>Continue from result opens an unsent draft. An existing draft is never overwritten. The production preview/submission owner must supply and revalidate the complete parent witness; one new self-root follows the verified result. Unknown original effects use the original reconciliation path, with no resend.</p><p>Files and Details remain after the mounted composer. Their owner sections remain mounted while navigating. Back/Escape returns to the exact available opener. Refresh preserves focus while its target remains available; a disappearing or disabled target returns focus to the project heading. <a href="https://github.com/mastermindx-market-intelligence/Mastermind/blob/design/paper-workflow-audit-20261108-44569e75/docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md" target="_blank" rel="noopener noreferrer">Read the implementation and proof matrix ↗</a></p></details>
     <div class="sr-only" id="announcement" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
   <script>
@@ -383,6 +383,7 @@
       if (disclosure === 'details' && selectedSection) resetDetails(true); else closePanel();
     }));
     function render(animate) {
+      const previouslyFocused = document.activeElement;
       const view = describeObservation(current.state,current.mode);
       const data = view.data;
       stopMotion();
@@ -428,6 +429,10 @@
         }
       }
       document.documentElement.dataset.observation = current.state;
+      if (previouslyFocused && previouslyFocused !== document.body &&
+          (!previouslyFocused.isConnected || previouslyFocused.closest('[hidden]') || previouslyFocused.matches(':disabled'))) {
+        $('project-title').focus({preventScroll:true});
+      }
       if (animate && !reduced() && view.canAnimate) {
         const card = data.kind === 'result' ? $('result-card') : $('activity-card');
         card.animate([{opacity:.65,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:180,easing:'cubic-bezier(.2,.8,.2,1)',iterations:1});
