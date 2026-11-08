@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. The next foreground is a bounded Sector R4 comparison-return qualification slice. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. The next foreground is the Terminal's current Company journey audit. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -726,3 +726,80 @@ All mutations returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed on
 Required consumer proof: ordinary and new-tab company → issuer → publication path; exact admitted attribution and unchanged public-payload boundary; direct entry and invalid return; empty catalogue versus search no-match; absent source URL; shared response for retired issuer URLs; native disclosure and external-link behavior; EN/ZH/theme/mobile reading. Existing exact opener, scroll and source-snapshot restoration remain unproven.
 
 **Next safe phase:** Sector R4 comparison-return qualification. A read-only audit found accepted success states without a visible unverified/changed-basis return outcome. Validate the incumbent state-owner contract before adding a disjoint proposal; preserve BML, GPI, G4P and all existing candidate holds.
+
+
+## Continuing phase — Sector comparison-return qualification
+
+**State:** a disjoint EN/ZH proposal is completed, visually inspected, read back and scoped-finished. File `01M6FAXA774QT1VRDMAG7DFQ2W`; new page **`p-6-0`**, “Proposed · Comparison return”; new artboard **`GPL-0`**, “PROPOSED · Comparison return · EN/ZH”.
+
+### Concrete design gap
+
+The retained R4 comparison (`FB7-0` desktop, `FO0-0` mobile) presents Energy/XLE against Technology/XLK on **21 sessions versus S&P 500, total return, as of 30 October 2026 close**. Its illustrated answer is **11.0 percentage points**, from the retained design fixture. Dossier actions and relocated build notes promise returning with both groups and the window kept.
+
+The existing D05 contract already asks for exact selection, source, population, window, focus and negative-state proof. The useful addition is therefore visible **return outcomes**, not another generic promise. A displayed group name alone does not establish that an ordered comparison and its full basis were restored.
+
+### Current source and fidelity limit
+
+Candidate [Macro #10703](https://github.com/mastermindx-market-intelligence/Macro/pull/10703), exact head **`9fc460ff36345387c3a2c5435b079852e8488da0`**, is open, Draft, unmerged, with no auto-merge and HOLD in its title. It and the incumbent D05/programme carriers retain their existing ownership and release restrictions.
+
+| Source at exact head | Git blob | Inspected responsibility |
+|---|---|---|
+| `templates/si_workspace.js` | `ac426abc3a8a49a6d1023cc53b8eedb00a23c57a` | Native entry, pure export, qualified apply, typed focus/viewport and outcomes. |
+| `templates/sector_central.html.j2` | `ef96b8d3965dc6affcc7782625dbb9e85e7abb0d` | Measured capture and existing producer generation. |
+| `templates/sector_cycles.js` | `13d359b8d299bc55b725e8710b84343cc1b37d73` | Strict Cycles state and source qualification. |
+| `templates/sector_dossier_cycle.js` | `909e43196a4efab130a7eba0563543ecd19ce220` | Inline Dossier application and readback. |
+| `docs/verification/d05_native_cycles_20261104/SOURCE_CONTRACT.md` | `78af3fe4b0c512933d5e54fe7606b92b909faa2e` | Existing owner boundaries and evolving proof limits. |
+
+Principal directly read the workspace and source contract; the source reviewer read all five. These are source-inspected behaviors, not newly executed runtime or browser results. Older retained validation was not promoted to proof for this head.
+
+The current measured projection has **one** groupId, historyMode and generation. It does not contain the R4 ordered Group A/Group B pair, selected comparison window or complete comparison basis. Generation comes from the existing producer spine when available, otherwise its generation ID; no new browser fingerprint is warranted.
+
+`SectorWorkspaceExport()` remains the pure detached bridge export of the existing native entry plus one qualified origin. `SectorWorkspaceCapture()` keeps its existing persisting callers. The closed projection is bounded at 32,768 UTF-8 bytes. `SectorWorkspaceApplyCurrent()` binds to exact current entry/href/view/intent and request identity, preflights existing source/settings, applies through incumbent owners, captures/readbacks, and reports analytical application plus actual focus/viewport outcomes.
+
+The current sequence can be partially applied; it is **not a full rollback transaction**. A later Cycles, Dossier, source, focus or viewport failure can produce partial. That status alone cannot certify a proposed two-group comparison.
+
+### Four visible outcomes
+
+| Section / state | User-facing behavior | Qualification boundary |
+|---|---|---|
+| **`GSP-0` — current basis unverified** | EN light and ZH dark, 390px. Earlier ordered Energy/Technology request and its dated ETF basis remain visible. Current difference says Unavailable / 不可用. Review current comparison and choose-other-groups actions are explicit. | No 11.0 pp fixture result, current rank or lead claim is carried forward. Neutral failure is the default when current identity cannot be established. |
+| **`GUD-0` — source publication changed** | EN dark and ZH light, 390px. The earlier request stays dated; current result remains unavailable pending review. | Requires qualified captured and current comparison-source identities that are both known and differ. A date change or generic rejection code is insufficient. |
+| **`GVV-0` — captured pair unavailable** | EN light and ZH dark, 390px. Group A, Group B and window are unchosen; Review is disabled until valid inputs, and Explore sectors remains available. | No pair reconstructed from labels, ticker coincidence, one measured group or a Cycles overlay selection. Analytical results additionally need qualified producer basis. |
+| **`GXH-0` — comparison verified, position unavailable** | EN/ZH notices distinguish a verified dated comparison from failed previous control/page-position restoration. The complete ETF/relative benchmark/total-return basis is visible. | Success wording requires the proposed ordered-pair and full-basis readback together. A generic partial receipt is insufficient. If that evidence is absent, show the neutral unavailable state. |
+
+The first three states use **“earlier request / design fixture”** where retained context appears. Dates and metrics were not refreshed or manufactured. Review current comparison is a proposed path through the existing Explore/Rotation setup; it is not automatic adoption, a successful calculation or a Research save. A separately qualified current result must be deliberately adopted.
+
+Two final text refinements (`GXP-0 / GXX-0`) make the partial-position state's basis explicit: sector ETFs, 21 sessions **versus** S&P 500, total return and the original close date.
+
+### Consequential implementation constraints
+
+The source's `measured_source_changed` predicate also covers missing generation, missing capture, a different group or a mismatch with URL g. It cannot independently justify “the source changed.” The new neutral state makes that distinction visible.
+
+Cycles `selectedIds` are overlays compared as sets; strict sector restoration rejects a nonempty sector overlay set. They cannot represent directional Group A/Group B. Reversal changes the comparison and must be preserved as ordered intent.
+
+The actual native Dossier is an inline disclosure inside Cycles. Closing it returns to the Cycles heading; the existing `sc-cycle-return` then uses the validated Central origin, with its current safe fallback. Closing Dossier is not itself a direct comparison restore. Joining the R4 comparison actions and capture to that path remains an implementation dependency.
+
+The minimal extension belongs to the existing native entry/export/apply and parent bridge/originNav validators **together**:
+
+- Ordered native Group A/Group B identities.
+- Supported comparison window and actual producer field.
+- Qualified benchmark, return basis, source population and observation identity actually supplied for that comparison.
+- Invoking comparison control through the existing typed focus owner.
+
+No new schema name, route, navigation store, source registry or generated cohort hash was introduced. Reuse a producer identity only after proving it covers the exact comparison inputs. A Cycles publication or sector spine is not blanket authority for member baskets, ETF returns or every R4 metric. Foreign history fields, existing source checks, bounded origin state and later user intent remain with their incumbents.
+
+Preflight both groups and the full basis before presenting a restored comparison, then read back the same ordered pair/basis and recheck current source/intent. Keep analytical outcome, focus and viewport distinct; do not invent transaction rollback.
+
+### Verification and preservation
+
+The proposal includes header `GSH-0`, state headings `GSM-0 / GUA-0`, four state sections above, current-owner contract **`GY4-0`**, and consumer-proof section **`GYJ-0`**. It contains **146 text leaves** after exact readback. All newly drawn controls have a minimum 44px area.
+
+Screenshots verified all six 390px EN/ZH recovery panes, both wider partial-position notices, owner contract and proof section. Text wraps without clipping. The new 1600px artboard is the only board on its separate page; inactive-page fit-content height is null and section screenshots establish the inspected composition.
+
+Fresh JSX confirms **`FB7-0`, `FO0-0`, `BML-0`, `GPI-0` and `G4P-0` byte-identical**. Accepted comparison, D05 contract, current build work, review-only fixture-clock canary and original Terminal-reference navigation were not changed. A separate semantic critique found no substantive contradiction in the proposed state/owner boundaries.
+
+All mutations returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed only on `GPL-0`. No product code, runtime route, source calculation, save, trade, release control or incumbent PR changed.
+
+**Required consumer proof:** the real comparison → native Cycles/inline Dossier → qualified Central return; A/B reversal; supported 21/63/126 windows; benchmark/basis/population mismatch; missing generation; same-date source replacement; absent pair/unknown group; direct entry and browser history; full pair/basis readback and later-source recheck; later-input cancellation; actual focus/scroll readback; correct partial/rejected copy; explicit current-data review/adoption; EN/ZH and 390px keyboard/touch behavior.
+
+**Next safe phase:** a bounded read-only audit of the Terminal's current Company journey is running. Preserve D07/current-study/source-only/held Returns distinctions and all already accepted Options, News, Memory and Prophet flows. Require a new consequential destination, identity or state gap before editing.
