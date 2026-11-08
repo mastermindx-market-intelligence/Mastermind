@@ -722,11 +722,13 @@ class NativeAcpProcess:
     async def observe(self, *, timeout_seconds: float = 30):
         """Read versioned facts on the retained connection; the factory joins canonical owners."""
         connection, session_id = self.connection, self.provider_session_id
+        extension = dict(self.native_extension) if type(self.native_extension) is dict else None
         def require_current():
             if (connection is None or session_id is None or self.connection is not connection
                     or self.provider_session_id != session_id or self.client.session_id != session_id
                     or self._closing is not None or self.client.violation
-                    or self.native_extension != EXTENSION_V2):
+                    or extension not in (EXTENSION_V2, EXTENSION_V3)
+                    or self.native_extension != extension):
                 raise NativeProtocolError("NATIVE_OBSERVATION_OWNER_UNAVAILABLE")
         require_current()  # a v1 peer is refused before any extension request
         if (type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds)

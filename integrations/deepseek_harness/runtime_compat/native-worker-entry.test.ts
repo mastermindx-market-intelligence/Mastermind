@@ -12,6 +12,10 @@ import SandboxPolicy from "@deepseek-ai/dsh-sandbox-policy";
 import Approval from "@deepseek-ai/dsh-user-approval";
 import Skills from "@deepseek-ai/dsh-skill";
 import * as Acp from "mmx-native-acp";
+import AuthorizationService from "@deepseek-ai/dsh-authorization";
+import {LocalCredentialProvider} from "@deepseek-ai/dsh-credentials-local";
+import {credentialKey} from "@deepseek-ai/dsh-credentials";
+import {PlatformAccount} from "@deepseek-ai/dsh-deepseek-account-platform";
 import {canonical,nativeConfig,parseExecutionPolicy,createNativeHostBindings,createNativeReadAdmission,createNativeReadOutputGuard} from "../native_worker.mjs";
 import {mkdtemp,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
@@ -22,12 +26,11 @@ import TypertRegistry from "@deepseek-ai/dsh-typert-registry";
 import TypertGateway from "@deepseek-ai/dsh-api-gateway";
 import * as Connection from "@deepseek-ai/dsh-client-connection";
 import {createSessionTestController} from "mmx-native-test-remote";
-import {provideBrowserCredentials} from "mmx-native-browser-credentials";
 import {createCompanySessionReadBridge} from "../company_plugin/lib/company-peer.js";
 import {executeExecutiveNativeRead,inject as readInject} from "../company_plugin/lib/executive-read-port.js";
 
 const cleanup:(()=>Promise<unknown>)[]=[];
-afterEach(async()=>{while(cleanup.length)await cleanup.pop()!();vi.restoreAllMocks();});
+afterEach(async()=>{while(cleanup.length)await cleanup.pop()!();vi.unstubAllGlobals();vi.restoreAllMocks();});
 const hash=(x:any)=>createHash("sha256").update(canonical(x)).digest("hex");
 const requirements=()=>{
   const config=nativeConfig();return{schema:"mastermind.dsh.native_execution_policy.v1",
@@ -49,8 +52,9 @@ const text=(value:string):StreamChunk[]=>[
   {type:"block-start",index:0,blockType:"text"},{type:"text-delta",index:0,text:value},
   {type:"block-end",index:0,block:{type:"text",text:value}},{type:"finish",reason:{kind:"stop"}},
 ];
-async function host({tool=false,hang=false,read=false,beforeNew,onStream}:{tool?:boolean,hang?:boolean,read?:boolean,
-  beforeNew?:(client:any)=>Promise<void>,onStream?:(ctx:Context,options:GenerateOptions)=>Promise<void>}={}){
+async function host({tool=false,hang=false,read=false,realAccount=false,beforeNew,beforeWrite,onStream}:{tool?:boolean,hang?:boolean,read?:boolean,realAccount?:boolean,
+  beforeNew?:(client:any)=>Promise<void>,beforeWrite?:(ctx:Context,options:GenerateOptions)=>Promise<void>,
+  onStream?:(ctx:Context,options:GenerateOptions)=>Promise<void>}={}){
   const ctx=new Context(),workspace=await mkdtemp(join(tmpdir(),"mmx native entry "));
   const generation=new AbortController(),account={current:true,cache:0,userId:null as string|null},seen:{requests:GenerateOptions[],writes:number,assignments:number,tools:number}=
     {requests:[],writes:0,assignments:0,tools:0};
@@ -75,12 +79,39 @@ async function host({tool=false,hang=false,read=false,beforeNew,onStream}:{tool?
         isInferenceCurrent:()=>account.current});
     }
   }
-  await ctx.plugin(InertAccount);
+  const credentialFiber=ctx.plugin(LocalCredentialProvider,{path:join(workspace,"credentials.yaml"),watch:false});
+  await credentialFiber;
+  let real:undefined|{
+    owner:PlatformAccount,fetch:ReturnType<typeof vi.fn<typeof globalThis.fetch>>,
+    write:(token?:string)=>Promise<unknown>,warm:(id:string)=>Promise<unknown>,signOut:()=>Promise<unknown>,
+  };
+  if(realAccount){
+    await ctx.plugin(AuthorizationService);
+    await ctx.plugin(PlatformAccount,{logoutMaxRetries:0});
+    const owner=ctx.deepseekAccount as PlatformAccount;
+    const fetch=vi.fn<typeof globalThis.fetch>().mockRejectedValue(Error("Unexpected fixture HTTP"));
+    vi.stubGlobal("fetch",fetch);
+    const meta={version:"1.2.3",locale:"en",timezoneOffsetSeconds:0};
+    const response=(data:unknown)=>Response.json({code:0,data:{biz_code:0,biz_data:data}});
+    real={owner,fetch,
+      write:(token="inert-original-grant")=>ctx.credentials.modifyRecord(
+        credentialKey("deepseek-account-platform","default"),
+        ()=>Promise.resolve({kind:"grant" as const,payload:{version:1,issuer:"https://platform.deepseek.com",token}})),
+      async warm(id:string){
+        fetch.mockResolvedValueOnce(response({id,email:"m***@example.invalid",
+          id_profile:{name:"Inert Account",picture:null}}));
+        return owner.getProfile(meta);
+      },
+      async signOut(){fetch.mockResolvedValueOnce(response(null));return owner.signOut(meta);},
+    };
+    await real.write();
+  }else await ctx.plugin(InertAccount);
   class Inert extends LlmAdapter{
     providerInfo(){return{id:"deepseek-account",name:"Inert native test model"};}
     async listModels(){return[{provider:"deepseek-account",id:"deepseek-chat",name:"Inert",inputModalities:["text"] as const}];}
     async resolveModel(){return{provider:"deepseek-account",id:"deepseek-chat",name:"Inert",inputModalities:["text"] as const,context:{contextWindow:1024}};}
     async *stream(options:GenerateOptions,permit?:NativeLlmWritePermit):AsyncIterable<StreamChunk>{
+      if(beforeWrite)await beforeWrite(ctx,options);
       permit?.assertCurrent();seen.writes++;seen.requests.push(options);
       await onStream?.(ctx,options);
       if(hang){
@@ -113,7 +144,7 @@ async function host({tool=false,hang=false,read=false,beforeNew,onStream}:{tool?
     await ctx.plugin({inject:["sessions","agents","sessionPersistence","typert",...controllerDependencies],apply(inner:Context){
       createSessionTestController(inner,{defaultModelSelection:()=>({provider:"deepseek-account",model:"deepseek-chat"}),cwd:workspace});
     }});
-    provideBrowserCredentials(ctx);await ctx.plugin(Connection);await ctx.plugin(TypertGateway);
+    await ctx.plugin(Connection);await ctx.plugin(TypertGateway);
   }
   const a=new TransformStream<Uint8Array,Uint8Array>(),b=new TransformStream<Uint8Array,Uint8Array>();
   const toHost=new PassThrough(),fromHost=new PassThrough();
@@ -147,7 +178,7 @@ async function host({tool=false,hang=false,read=false,beforeNew,onStream}:{tool?
   const prompt=(id="original-op",content:any[]=[{type:"text",text:"Original question"}])=>client.request(methods.agent.session.prompt,{
     sessionId,prompt:content,_meta:{mastermindNative:{operationId:id}},
   });
-  return{ctx,workspace,generation,account,seen,bindings,sourceFacts,client,sessionId,agent,selected,initialized,observe,prompt,claims,updates};
+  return{ctx,workspace,generation,account,real,credentialFiber,seen,bindings,sourceFacts,client,sessionId,agent,selected,initialized,observe,prompt,claims,updates};
 }
 it("joins the original zero-setter startup, observed account and original answer",async()=>{
   const h=await host();
@@ -209,12 +240,190 @@ it("receipt-first Stop settles the retained original prompt",async()=>{
   expect(h.seen.writes).toBe(1);expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
 });
 
+it("reconnects the same identified account through its original grant owner and Session",async()=>{
+  const h=await host({realAccount:true}),real=h.real!;
+  await real.warm("original-account");
+  const old=(await real.owner.getLocalInferenceSnapshot())!,first:any=await h.observe();
+  const originalSession=h.agent.session;
+  expect(first.facts.account.user_id).toBe("original-account");
+  await expect(h.prompt("before-signout")).resolves.toMatchObject({stopReason:"end_turn"});
+  await real.signOut();
+  expect(old.isInferenceCurrent()).toBe(false);
+  await expect(h.observe()).rejects.toThrow();
+  await expect(h.prompt("while-signed-out")).rejects.toThrow();
+  expect(h.seen.writes).toBe(1);expect(h.claims).toHaveLength(1);
+  await real.write("inert-replacement-grant");await real.warm("original-account");
+  await expect(h.prompt("before-reobservation")).rejects.toThrow();
+  const reconnected:any=await h.observe();
+  expect(reconnected.facts).toEqual(first.facts);
+  expect(old.isInferenceCurrent()).toBe(false);
+  await expect(h.prompt("after-reconnect")).resolves.toMatchObject({stopReason:"end_turn"});
+  expect(h.seen.writes).toBe(2);expect(h.claims).toHaveLength(2);
+  expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+  expect(h.ctx.sessions.get(SessionId(h.sessionId))).toBe(originalSession);
+  expect(h.agent.session).toBe(originalSession);
+  expect(real.fetch).toHaveBeenCalledTimes(3);
+});
+it("keeps sealed account facts while the same real grant learns its identity",async()=>{
+  const h=await host({realAccount:true}),real=h.real!;
+  const first:any=await h.observe();
+  expect(first.facts.account.user_id).toBeNull();
+  await real.warm("original-account");
+  expect((await real.owner.getLocalInferenceSnapshot())!.userId).toBe("original-account");
+  expect((await h.observe() as any).facts).toEqual(first.facts);
+  await expect(h.prompt("known-same-grant")).resolves.toMatchObject({stopReason:"end_turn"});
+  await real.signOut();await real.write("inert-replacement-grant");await real.warm("original-account");
+  expect((await h.observe() as any).facts).toEqual(first.facts);
+  await expect(h.prompt("renewed-known-grant")).resolves.toMatchObject({stopReason:"end_turn"});
+  expect(h.seen.writes).toBe(2);expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+});
+it.each(["unknown-original","unknown-replacement","different-account"])(
+  "refuses retired-grant renewal without original account continuity: %s",async kind=>{
+    const h=await host({realAccount:true}),real=h.real!;
+    if(kind!=="unknown-original")await real.warm("original-account");
+    await h.observe();await real.signOut();await real.write("inert-replacement-grant");
+    if(kind!=="unknown-replacement")await real.warm(kind==="different-account"?"foreign-account":"original-account");
+    await expect(h.observe()).rejects.toThrow();
+    await expect(h.prompt("unproved-replacement")).rejects.toThrow();
+    expect(h.seen.writes).toBe(0);expect(h.claims).toEqual([]);
+    expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+  });
+it("only one concurrent observation can publish the replacement grant witness",async()=>{
+  const h=await host({realAccount:true}),real=h.real!;
+  await real.warm("original-account");const first:any=await h.observe();
+  await real.signOut();await real.write("inert-replacement-grant");await real.warm("original-account");
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const original=h.ctx.skills.snapshot.bind(h.ctx.skills);
+  vi.spyOn(h.ctx.skills,"snapshot").mockImplementationOnce(async(...args)=>{
+    entered.resolve();await release.promise;return original(...args);
+  });
+  const pending=expect(h.observe()).rejects.toThrow();
+  await entered.promise;
+  try{expect((await h.observe() as any).facts).toEqual(first.facts);}
+  finally{release.resolve();}
+  await pending;
+  await expect(h.prompt("after-single-renewal")).resolves.toMatchObject({stopReason:"end_turn"});
+  expect(h.seen.writes).toBe(1);expect(h.claims).toHaveLength(1);
+  expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+});
+it("withdrawal during the original skills await cannot publish a replacement witness",async()=>{
+  const h=await host({realAccount:true}),real=h.real!;
+  await real.warm("original-account");await h.observe();
+  await real.signOut();await real.write("inert-replacement-grant");await real.warm("original-account");
+  const original=h.ctx.skills.snapshot.bind(h.ctx.skills);
+  vi.spyOn(h.ctx.skills,"snapshot").mockImplementationOnce(async(...args)=>{
+    await real.signOut();return original(...args);
+  });
+  await expect(h.observe()).rejects.toThrow();
+  await expect(h.prompt("withdrawn-renewal")).rejects.toThrow();
+  expect(h.seen.writes).toBe(0);expect(h.claims).toEqual([]);
+});
+it("keeps observation closed during an original active candidate and settles that candidate first",async()=>{
+  const h=await host({realAccount:true,hang:true}),real=h.real!;
+  await real.warm("original-account");const first:any=await h.observe();
+  const pending=h.prompt("original-hanging-turn");
+  await vi.waitFor(()=>expect(h.claims).toHaveLength(1));
+  await expect(h.observe()).rejects.toThrow();expect(h.seen.writes).toBe(1);
+  await expect(h.client.request("_mastermind/native_cancel",h.claims[0])).resolves.toMatchObject({status:"requested"});
+  await expect(pending).resolves.toMatchObject({stopReason:"cancelled"});
+  await real.signOut();await real.write("inert-replacement-grant");await real.warm("original-account");
+  expect((await h.observe() as any).facts).toEqual(first.facts);
+  expect(h.seen.writes).toBe(1);expect(h.claims).toHaveLength(1);
+  expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+});
+it("retired fresh authority cannot cross the final model write or revive on later renewal",async()=>{
+  let withdraw=true;
+  const h=await host({realAccount:true,beforeWrite:async()=>{
+    if(withdraw){withdraw=false;await h.real!.signOut();}
+  }}),real=h.real!;
+  await real.warm("original-account");await h.observe();
+  await h.prompt("withdraw-at-write").catch(()=>undefined);
+  expect(h.seen.writes).toBe(0);expect(h.claims).toHaveLength(1);
+  await real.write("inert-replacement-grant");await real.warm("original-account");
+  await h.observe();
+  await expect(h.prompt("new-authorized-operation")).resolves.toMatchObject({stopReason:"end_turn"});
+  expect(h.seen.writes).toBe(1);expect(h.claims).toHaveLength(2);
+  expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
+});
+it("rejects replacement of the original snapshot method without a model write",async()=>{
+  const h=await host({realAccount:true}),real=h.real!;
+  await real.warm("original-account");await h.observe();
+  const original=real.owner.getLocalInferenceSnapshot.bind(real.owner);
+  vi.spyOn(real.owner,"getLocalInferenceSnapshot").mockImplementation(()=>original());
+  await expect(h.observe()).rejects.toThrow();
+  await expect(h.prompt("changed-snapshot-owner")).rejects.toThrow();
+  expect(h.seen.writes).toBe(0);expect(h.claims).toEqual([]);
+});
+it("refuses the original host after credential-store replacement with the same stored grant",async()=>{
+  const h=await host({realAccount:true}),real=h.real!;
+  await real.warm("original-account");await h.observe();
+  const identity=(value:any)=>value?.[symbols.original]??value;
+  const originalStore=identity(h.ctx.credentials);
+  await h.credentialFiber.dispose();
+  await h.ctx.plugin(LocalCredentialProvider,{path:join(h.workspace,"credentials.yaml"),watch:false});
+  expect(identity(h.ctx.credentials)===originalStore).toBe(false);
+  // Retaining the same record does not grant a replacement service the
+  // original host's credential/account ownership. Avoid matcher introspection
+  // on Cordis shadows, which is itself subject to service injection rules.
+  await expect(h.observe()).rejects.toThrow();
+  await expect(h.prompt("changed-credential-owner")).rejects.toThrow();
+  expect(h.seen.writes).toBe(0);expect(h.claims).toEqual([]);
+});
+it.each(["method","origin","identity"])(
+  "rejects snapshot mutation inside its currentness callback: %s",async kind=>{
+    const h=await host({realAccount:true}),real=h.real!;
+    await real.warm("original-account");
+    const original=real.owner.getLocalInferenceSnapshot.bind(real.owner);
+    let mutate=false;
+    vi.spyOn(real.owner,"getLocalInferenceSnapshot").mockImplementation(async()=>{
+      const value=(await original())!;
+      if(value===null)return null;
+      const snapshot={...value,isCurrent(){
+        if(mutate){
+          if(kind==="method")snapshot.isInferenceCurrent=()=>true;
+          else if(kind==="origin")snapshot.inferenceOrigin="https://foreign.invalid";
+          else snapshot.userId="foreign-account";
+        }
+        return value.isCurrent();
+      }};
+      return snapshot;
+    });
+    await h.observe();await real.signOut();await real.write("inert-replacement-grant");await real.warm("original-account");
+    mutate=true;
+    await expect(h.observe()).rejects.toThrow();
+    await expect(h.prompt("mutated-snapshot")).rejects.toThrow();
+    expect(h.seen.writes).toBe(0);expect(h.claims).toEqual([]);
+    mutate=false;await h.observe();
+    await expect(h.prompt("unchanged-original-account")).resolves.toMatchObject({stopReason:"end_turn"});
+    expect(h.seen.writes).toBe(1);
+  });
+it.each(["origin","empty-id","secret-id","surrogate-id","response-bound"])(
+  "invalid first account facts cannot partially authorize Send: %s",async kind=>{
+    const h=await host({realAccount:true}),real=h.real!;
+    const original=real.owner.getLocalInferenceSnapshot.bind(real.owner);
+    let invalid=true;
+    vi.spyOn(real.owner,"getLocalInferenceSnapshot").mockImplementation(async()=>{
+      const value=(await original())!;
+      if(!invalid)return value;
+      return {...value,
+        inferenceOrigin:kind==="origin"?value.inferenceOrigin+"/":value.inferenceOrigin,
+        userId:kind==="empty-id"?"":kind==="secret-id"?"auth.json":
+          kind==="surrogate-id"?"\ud800":kind==="response-bound"?"x".repeat(32768):value.userId};
+    });
+    await expect(h.observe()).rejects.toThrow();
+    await expect(h.prompt("unpublished-invalid-observation")).rejects.toThrow();
+    expect(h.seen.writes).toBe(0);expect(h.claims).toEqual([]);
+    invalid=false;await h.observe();
+    await expect(h.prompt("valid-original-observation")).resolves.toMatchObject({stopReason:"end_turn"});
+    expect(h.seen.writes).toBe(1);
+  });
 it("an ordinary cached-profile refresh preserves the original grant and same Session",async()=>{
-  const h=await host();await h.observe();
+  const h=await host(),first:any=await h.observe();
   h.account.cache++;h.account.userId="original-account";
   await expect(h.prompt("same-grant")).resolves.toMatchObject({stopReason:"end_turn"});
   const next:any=await h.observe();
-  expect(next.facts.account.user_id).toBe("original-account");expect(h.seen.writes).toBe(1);
+  expect(h.account.userId).toBe("original-account");
+  expect(next.facts.account).toEqual(first.facts.account);expect(h.seen.writes).toBe(1);
   expect(h.ctx.agents.get(SessionId(h.sessionId))).toBe(h.agent);
   h.account.current=false;
   await expect(h.observe()).rejects.toThrow();

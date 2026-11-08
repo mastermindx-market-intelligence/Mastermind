@@ -14,7 +14,8 @@ from ops.executive_os import os_public_edge as edge
 from ops.executive_os.os_public_edge_transition import prepare_config, final_config
 from integrations.executive_mcp.server import _ExecutivePathFence
 from tests.test_os_public_edge import manifest
-from tests.test_project_controls_edge_join import predecessor, method_routes
+from tests.test_project_controls_edge_join import predecessor, method_routes, add_expected_native_branch
+from tests.test_os_public_edge_transition import NATIVE_PATHS
 from tests.test_mastermind_os_session_transport import (
     make_app, request, rsa_key, auth_fixture, ARGS, KEY, NOW,
 )
@@ -44,7 +45,13 @@ def test_session_send_is_one_fixed_post_in_the_complete_composed_profile():
     assert config.count(ROUTE) == 1
     assert config.count("max_size 64KB") == 2
     assert config.count("max_size 98304") == 1
-    assert config.count("reverse_proxy 127.0.0.1:49152") == 5
+    assert config.count("reverse_proxy 127.0.0.1:49152") == 6
+    assert config.count("max_size 524288") == 1
+    assert all(config.split().count(path) == 1 for path in NATIVE_PATHS)
+    assert config.count("    @nativepost {") == 1
+    assert config.count("    handle @nativepost {") == 1
+    native = config.split("    @nativepost {", 1)[1].split("    }", 1)[0]
+    assert native.split() == ["method", "POST", "path", *NATIVE_PATHS]
 
 
 @pytest.mark.parametrize("maker", [prepare_config, final_config])
@@ -66,6 +73,7 @@ def test_real_transition_preserves_predecessor_and_changes_only_fixed_route_path
             list(edge.COMPLETE_MCP_METADATA_ROUTES)
             if route["match"][0]["method"] == ["GET"]
             else list(edge.COMPLETE_MCP_ROUTES))
+    add_expected_native_branch(expected)
     assert result == expected and old == before
     for suffix in ("/", "-other", "/*"):
         malformed = copy.deepcopy(old)

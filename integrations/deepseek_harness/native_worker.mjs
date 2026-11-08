@@ -83,14 +83,56 @@ export function createNativeHostBindings({root,generation,policy,workspace,symbo
       agent.session.header.cwd!==workspace||association.caller.fiber!==acpFiber)throw refused();
     acpFiber.assertActive();return true;
   };
-  const requireProvider=()=>{
+  const requireProviderRegistration=()=>{
     requireOwners();if(!provider)throw refused();literalTrue(()=>provider.assertCurrent());
+    requireOwners();return true;
+  };
+  const requireAccountShape=held=>{
+    const snapshot=held.snapshot,prototype=Object.getPrototypeOf(snapshot);
+    if(prototype!==Object.prototype&&prototype!==null||Reflect.ownKeys(snapshot).length!==4)throw refused();
+    const fields=Object.getOwnPropertyDescriptors(snapshot);
+    for(const [key,value]of [["inferenceOrigin",held.origin],["userId",held.userId],
+      ["isCurrent",held.current],["isInferenceCurrent",held.check]]){
+      const field=fields[key];
+      if(!field||!("value"in field)||!field.enumerable||field.value!==value)throw refused();
+    }
+  };
+  const inferenceCurrent=held=>{
+    requireAccountShape(held);
+    const value=held.check.call(held.snapshot);
+    requireAccountShape(held);
+    if(value!==true&&value!==false){
+      if(value instanceof Promise)void value.catch(()=>{});
+      throw refused();
+    }
+    return value;
+  };
+  const captureAccount=snapshot=>{
+    if(snapshot===null||typeof snapshot!=="object")throw refused();
+    const fields=Object.getOwnPropertyDescriptors(snapshot);
+    const held={snapshot,origin:fields.inferenceOrigin?.value,userId:fields.userId?.value,
+      current:fields.isCurrent?.value,check:fields.isInferenceCurrent?.value};
+    requireAccountShape(held);
+    if(typeof held.current!=="function"||typeof held.check!=="function"||
+      typeof held.origin!=="string"||!held.origin.isWellFormed()||
+      Buffer.byteLength(held.origin)>32768)throw refused();
+    let origin;try{origin=new URL(held.origin);}catch{throw refused();}
+    if(!["http:","https:"].includes(origin.protocol)||origin.origin!==held.origin||
+      origin.username||origin.password)throw refused();
+    if(held.userId!==null&&(typeof held.userId!=="string"||!held.userId.length||
+      !held.userId.isWellFormed()||Buffer.byteLength(held.userId)>32768||
+      ["token","refresh","secret","auth.json","credential"].some(part=>held.userId.toLowerCase().includes(part))))
+      throw refused();
+    return Object.freeze(held);
+  };
+  const requireProvider=()=>{
+    requireProviderRegistration();
     if(accountObservation){
-      const held=accountObservation,check=()=>{
-        if(held.snapshot.isInferenceCurrent!==held.check||held.snapshot.inferenceOrigin!==held.origin||
-          held.snapshot.userId!==held.userId)throw refused();
-      };
-      check();literalTrue(()=>held.check.call(held.snapshot));check();requireOwners();
+      const held=accountObservation;
+      if(owners.get("deepseekAccount").getLocalInferenceSnapshot!==held.snapshotMethod||
+        !inferenceCurrent(held))throw refused();
+      requireProviderRegistration();
+      if(accountObservation!==held)throw refused();
     }
     return true;
   };
@@ -220,7 +262,7 @@ export function createNativeHostBindings({root,generation,policy,workspace,symbo
     bindAcpFiber(fiber){alive();if(acpFiber!==undefined||!fiber)throw refused();acpFiber=fiber;},
     bindServices({requireLoaderCurrent,toolModules}){
       alive();if(owners!==undefined||typeof requireLoaderCurrent!=="function")throw refused();
-      owners=new Map(["agents","sessions","llm","tools","deepseekAccount","skills","sandboxPolicy","approval"].map(key=>{
+      owners=new Map(["agents","sessions","llm","tools","credentials","deepseekAccount","skills","sandboxPolicy","approval"].map(key=>{
         const value=normalize(root.get(key));if(!value)throw refused();return[key,value];
       }));
       loaderCurrent=requireLoaderCurrent;requireOwners();
@@ -272,27 +314,43 @@ export function createNativeHostBindings({root,generation,policy,workspace,symbo
       return facts.action==="settle"||candidate.consumed;
     },
     async nativeObservation(facts,signal){
-      requireAgent(facts.agent);requireProvider();signal.throwIfAborted();
-      const agent=facts.agent,session=agent.session,selection=facts.selection;
+      requireAgent(facts.agent);requireProviderRegistration();signal.throwIfAborted();
+      const agent=facts.agent,session=agent.session,selection=facts.selection,previous=accountObservation;
       if(!selection||selection.provider!==PROVIDER||selection.model!==policy.model.model||candidate)throw refused();
       const accountOwner=owners.get("deepseekAccount"),snapshotMethod=accountOwner.getLocalInferenceSnapshot;
+      if(typeof snapshotMethod!=="function"||previous&&snapshotMethod!==previous.snapshotMethod)throw refused();
       const current=()=>{
-        signal.throwIfAborted();requireCeilings(agent);requireProvider();
+        signal.throwIfAborted();requireCeilings(agent);requireProviderRegistration();
         if(agent.session!==session||normalize(root.deepseekAccount)!==accountOwner||
-          accountOwner.getLocalInferenceSnapshot!==snapshotMethod||candidate)throw refused();
+          accountOwner.getLocalInferenceSnapshot!==snapshotMethod||candidate||accountObservation!==previous)throw refused();
       };
       current();
       const accountSnapshot=await snapshotMethod.call(accountOwner);current();
-      if(!accountSnapshot||typeof accountSnapshot.isCurrent!=="function"||
-        typeof accountSnapshot.isInferenceCurrent!=="function")throw refused();
-      literalTrue(()=>accountSnapshot.isInferenceCurrent());
-      if(accountObservation&&(accountSnapshot.inferenceOrigin!==accountObservation.origin||
-        accountObservation.userId!==null&&accountSnapshot.userId!==accountObservation.userId))throw refused();
-      literalTrue(()=>accountSnapshot.isCurrent());current();
+      const fresh=captureAccount(accountSnapshot);
+      const requireFresh=()=>{
+        current();
+        if(!inferenceCurrent(fresh))throw refused();
+        current();literalTrue(()=>fresh.current.call(fresh.snapshot));
+        requireAccountShape(fresh);current();
+        if(!inferenceCurrent(fresh))throw refused();
+        current();
+      };
+      const continuity=()=>{
+        current();let identity=previous?.identityUserId??null;
+        if(previous){
+          const sameGrant=inferenceCurrent(previous);current();
+          if(fresh.origin!==previous.origin||
+            identity!==null&&fresh.userId!==null&&fresh.userId!==identity)throw refused();
+          // A new grant in the same slot is insufficient. Renewal needs the
+          // already observed original account identity on both grant lifetimes.
+          if(!sameGrant&&(identity===null||fresh.userId!==identity))throw refused();
+        }
+        return identity??fresh.userId;
+      };
+      requireFresh();continuity();
       const skills=await root.skills.snapshot({scope:agent,cwd:workspace,signal});current();
       if(!skills.complete||skills.skills.length!==0)throw refused();
-      const source=await sourceFacts();current();
-      literalTrue(()=>accountSnapshot.isCurrent());current();
+      const source=await sourceFacts();current();requireFresh();
       const schemas=root.tools.schemas(agent);
       if(schemas.length!==TOOLS.length||!TOOLS.every(name=>schemas.some(row=>row.name===name)))throw refused();
       const capabilities=TOOLS.map(name=>capability("tool",name,digest(tools.get(name).schema)));
@@ -303,19 +361,27 @@ export function createNativeHostBindings({root,generation,policy,workspace,symbo
       // "disabled" is the model's tool-network ceiling. It does not describe
       // the Web host's loopback listener or the original inference connection.
       if(digest(effective)!==policy.expected_config_digest)throw refused();
-      current();literalTrue(()=>accountSnapshot.isCurrent());current();
-      accountObservation??=Object.freeze({snapshot:accountSnapshot,check:accountSnapshot.isInferenceCurrent,
-        origin:accountSnapshot.inferenceOrigin,userId:accountSnapshot.userId});
-      observedSelection=Object.freeze({...selection});
-      return {
+      const nextSelection=Object.freeze({...selection});
+      // Account facts are part of the original sealed generation attestation.
+      // Cache enrichment/renewal changes only its private live witness and
+      // continuity anchor, never the original reported tuple or receipt.
+      const admitted=previous?.admitted??Object.freeze({inference_origin:fresh.origin,user_id:fresh.userId});
+      const result={
         agent_id:agent.id,session_cwd:session.header.cwd,...source,
-        selection:{provider:selection.provider,model:selection.model,reasoning_effort:selection.reasoningEffort??null},
-        account:{inference_origin:accountSnapshot.inferenceOrigin,user_id:accountSnapshot.userId??null},
+        selection:{provider:nextSelection.provider,model:nextSelection.model,reasoning_effort:nextSelection.reasoningEffort??null},
+        account:admitted,
         capabilities,effective_skills:[],effective_mcp:[],effective_plugins_or_apps:["mastermind-company"],
         sandbox_state:effective.sandbox_policy,approval_state:effective.approval_policy,
         network_state:effective.network_policy,effective_config_digest:digest(effective),
         supports_subagent_capability_ceiling:"FALSE",unknown_fields:[],
       };
+      if(Buffer.byteLength(JSON.stringify({schema:"mastermind.dsh.native_owner_observation.v1",
+        sessionId:agent.id,facts:result}))>32768)throw refused();
+      const identityUserId=continuity();requireFresh();
+      const next=Object.freeze({...fresh,snapshotMethod,identityUserId,admitted});
+      current(); // one synchronous compare-and-swap, after all awaited/callback work
+      accountObservation=next;observedSelection=nextSelection;
+      return result;
     },
   });
 }

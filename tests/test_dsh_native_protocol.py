@@ -257,11 +257,14 @@ def test_native_observation_rejects_foreign_or_incomplete_facts(case):
 
 
 def test_exact_extension_versions_never_accept_mixed_advertisements():
-    from integrations.deepseek_harness.native_protocol import EXTENSION, EXTENSION_V2, native_extension
+    from integrations.deepseek_harness.native_protocol import EXTENSION, EXTENSION_V2, EXTENSION_V3, native_extension
     assert native_extension(EXTENSION) == EXTENSION
     assert native_extension(EXTENSION_V2) == EXTENSION_V2
+    assert native_extension(EXTENSION_V3) == EXTENSION_V3
     for value in ({**EXTENSION, "observeMethod": "_mastermind/native_observe"},
-                  {**EXTENSION_V2, "extra": True}, {"schema": EXTENSION_V2["schema"]}):
+                  {**EXTENSION_V2, "extra": True}, {"schema": EXTENSION_V2["schema"]},
+                  {**EXTENSION_V2, "readMethod": EXTENSION_V3["readMethod"]},
+                  {key: value for key, value in EXTENSION_V3.items() if key != "readMethod"}):
         with pytest.raises(NativeProtocolError, match="EXTENSION_REFUSED"):
             native_extension(value)
 
@@ -287,13 +290,14 @@ def test_native_observation_requires_retained_v2_owner_before_send(case):
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("change", ["connection", "session", "closing", "violation", "none"])
-def test_native_observation_rechecks_owner_after_await(change):
-    from integrations.deepseek_harness.native_protocol import EXTENSION_V2, OBSERVATION_REQUEST_SCHEMA
+@pytest.mark.parametrize("version", [2, 3])
+@pytest.mark.parametrize("change", ["connection", "session", "closing", "violation", "extension", "none"])
+def test_native_observation_rechecks_owner_after_await(change, version):
+    from integrations.deepseek_harness.native_protocol import EXTENSION_V2, EXTENSION_V3, OBSERVATION_REQUEST_SCHEMA
     async def exercise():
         client = NativeClient(); client.bind_session("session-1")
         owner = NativeAcpProcess(client); owner.provider_session_id = "session-1"
-        owner.native_extension = EXTENSION_V2
+        owner.native_extension = EXTENSION_V2 if version == 2 else EXTENSION_V3
         entered, release = asyncio.Event(), asyncio.Event()
         calls = []
         async def request(*args):
@@ -305,6 +309,7 @@ def test_native_observation_rechecks_owner_after_await(change):
         elif change == "session": owner.provider_session_id = "other"
         elif change == "closing": owner._closing = object()
         elif change == "violation": client.poison("fixture violated")
+        elif change == "extension": owner.native_extension = EXTENSION_V3 if version == 2 else EXTENSION_V2
         release.set()
         if change == "none":
             assert (await task).served_model is None

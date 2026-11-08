@@ -4,7 +4,8 @@ import pytest
 from ops.executive_os import os_public_edge as edge
 from ops.executive_os.os_public_edge_transition import prepare_config, final_config
 from tests.test_os_public_edge import manifest
-from tests.test_project_controls_edge_join import predecessor, method_routes
+from tests.test_project_controls_edge_join import predecessor, method_routes, add_expected_native_branch
+from tests.test_os_public_edge_transition import NATIVE_PATHS
 
 ROUTE = '/workspace/byok/roles/current'
 
@@ -26,7 +27,13 @@ def test_byok_read_has_one_exact_get_and_no_post_or_source_branch():
     assert 'method GET' in get and get.count(ROUTE) == 1
     assert text.count(ROUTE) == 1
     assert text.count('max_size 64KB') == 2 and text.count('max_size 98304') == 1
-    assert text.count('reverse_proxy 127.0.0.1:49152') == 5
+    assert text.count('reverse_proxy 127.0.0.1:49152') == 6
+    assert text.count("max_size 524288") == 1
+    assert all(text.split().count(path) == 1 for path in NATIVE_PATHS)
+    assert text.count("    @nativepost {") == 1
+    assert text.count("    handle @nativepost {") == 1
+    native = text.split("    @nativepost {", 1)[1].split("    }", 1)[0]
+    assert native.split() == ["method", "POST", "path", *NATIVE_PATHS]
 
 @pytest.mark.parametrize('maker',[prepare_config, final_config])
 def test_byok_get_transition_retains_complete_predecessor_and_other_sites(maker):
@@ -42,6 +49,7 @@ def test_byok_get_transition_retains_complete_predecessor_and_other_sites(maker)
             list(edge.COMPLETE_MCP_METADATA_ROUTES)
             if route["match"][0]["method"] == ["GET"]
             else list(edge.COMPLETE_MCP_ROUTES))
+    add_expected_native_branch(expected)
     result = maker(fullconfig=live,current_manifest=manifest(),candidate_manifest=manifest(),relay_port=49152)
     assert result == expected and live == before
     for bad in (ROUTE+'/',ROUTE+'-other','/workspace/byok/*'):

@@ -103,6 +103,49 @@ async def sdk(*, blocked=False):
         if owned: await asyncio.gather(*owned, return_exceptions=True)
 
 
+def test_real_v3_sdk_observation_preserves_the_original_owner_and_following_read():
+    from integrations.deepseek_harness.native_protocol import NativeOwnerFacts, OBSERVATION_REQUEST_SCHEMA
+    from tests.test_dsh_native_protocol import owner_facts_wire
+
+    async def run():
+        async with sdk() as h:
+            connection, resource = h.native.connection, h.native.resource
+            pending = asyncio.create_task(h.native.observe())
+            incoming = asyncio.create_task(h.receive())
+            try:
+                done, _ = await asyncio.wait(
+                    {pending, incoming}, return_when=asyncio.FIRST_COMPLETED)
+                if pending in done:
+                    await pending
+                wire = await incoming
+                assert wire["method"] == "_mastermind/native_observe"
+                assert wire["params"] == {
+                    "schema": OBSERVATION_REQUEST_SCHEMA, "sessionId": SESSION}
+                await h.reply(wire, owner_facts_wire(SESSION))
+                observed = await pending
+                assert type(observed) is NativeOwnerFacts
+                assert observed.agent_id == SESSION
+                assert h.native.connection is connection and h.native.resource is resource
+                assert h.native.provider_session_id == h.client.session_id == SESSION
+                assert h.client.current is None and h.client.turns == 0
+                assert h.client.native_read is None and len(h.writes) == 1
+                following = asyncio.create_task(h.read())
+                read_wire = await h.receive()
+                assert read_wire["method"] == "_mastermind/native_read"
+                assert read_wire["id"] != wire["id"]
+                await h.reply(read_wire)
+                assert (await following)["status"] == "READ"
+                assert h.native.connection is connection and h.native.resource is resource
+                assert h.client.current is None and h.client.turns == 0
+                assert h.client.native_read is None and len(h.writes) == 2
+            finally:
+                for task in (pending, incoming):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(pending, incoming, return_exceptions=True)
+    asyncio.run(run())
+
+
 def test_real_sdk_read_uses_its_original_id_parser_queue_and_no_prompt_owner():
     async def run():
         async with sdk() as h:
