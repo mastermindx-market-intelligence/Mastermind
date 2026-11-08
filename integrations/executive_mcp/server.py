@@ -2594,7 +2594,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     authenticated = PreAuthMcpBodyApp(AuthenticationMiddleware(
         RequireAuthMiddleware(BoundedRequestApp(manager.handle_request), required_scopes=list(settings.policy.required_scopes),
                               resource_metadata_url=settings.policy.resource_metadata_url),
-        backend=BearerAuthBackend(BoundVerifier())))
+        backend=BearerAuthBackend(BoundVerifier())),
+        mcp_path=COO_MCP_PATH, strict_json=True)
 
     @asynccontextmanager
     async def lifespan(_app):
