@@ -1,5 +1,57 @@
 # DeepSeek native company join: exact acceptance frontier
 
+## C43–C44 — original closed-session answers recovered; protected #2175 composed
+
+This section supersedes C42's active **closed-session history** source gap. The original Hermes #2180 journey and C21 native canary remain accepted and are not repeated. This continuation uses the original DeepSeek operation, branch and managed M2 writer.
+
+### Source and package
+
+C43 source `11eea754d6a93f275559f8cff3b6bcadb0dd162a` joins retained Runtime/Session/Attempt results to the original native binding and Worker. The Worker owns a finite cold read under its state lock, validates the original materialization receipt and physical old-process absence, and rechecks currentness at the final write. The pinned donor opens the original closed Session read-only. The original G1 Stop → same-Session G2 Resume → final Stop fixture now recovers both answers after final closure without another Agent, Session, provider or auth owner.
+
+The actual compiled Worker exposed a standard-decorator import failure in the first candidate. The original build owner now applies the pinned TypeScript transform and syntax-checks both host exports before its manifest. The repaired complete candidate passed all **seven build gates**, produced **325 client artifacts** and a **116,164-entry closure**, passed full check-only validation, and recovered the original answer through its actual Node/compiled Worker entry. That test also excludes a later answer and preserves the original JSONL bytes. The failed candidate and terminal evidence remain retained.
+
+The source build binding is `3c21707fbec462596ac848f5fc778cc82022e3f59d3d7d11d837b1a344022866`; package manifest `79570a871965abfac1fc51ae538b302a5a79bd40b26c41a4f9f8010c9ebabaed`; app configuration `61da053ca49ecf20b56325aae6ce5f622b47cae16ca4dad5f869b7f484719b50`; native Worker `3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642`. The exact candidate is `.cache/attended-native-c43-20261108-pro2`. This is an unselected, provider-free qualified candidate, **not installed production acceptance**.
+
+C43 preservation commit `e754aee1132b1304786fb6b0d09989535062e116` retains ordinary non-native post-shutdown idle observation. C44 merge `c6c5097fdd6e976edc85591836bf3a3c8ec68d8f` has parents `e754aee1132b1304786fb6b0d09989535062e116` and protected master `7a3c0b78710ffa66140228b6e2af53036c78d63e`; subsequent source/fixture repairs are `26ab5b43d52930c791d2268ff7f25c70428bb3d4` and `e314575d6d38dd3472d53ed77cfb0d637f9f1ec3`. Governing pin `1981aea5122943ce59d7ebe9706ddf5a658b377d` remains applicable; governing files are unchanged.
+
+### Protected composition
+
+The composition preserves #2175's Fabric v2 application pools and native carrier alongside the original DSH v1 purpose. It retains canonical operation identities, credentials, strict initial-v2 preimage/process checks, peer journal custody and exact purpose-qualified process/listener detection. Role aliases remain Fabric-only and are refused before locks for DSH. Actual isolated Linux proof covers the three new cross-purpose/journal/history cases and all original mandatory cases.
+
+The model view's existing consumer and authenticated Workspace endpoint now have their exact public GET route, `/workspace/resources/models/current`. All 33 prior complete route-profile pairs remain intact, followed by the new complete pair. Native transitions admit exactly the complete pre-model and current profiles. The original 17 native POST paths, six proxies and 64KB/98304/524288 limits remain exact.
+
+Protected auth/application changes, source identity scanners, the Paperclip organization view, company priorities and original native contracts are retained. `MetaCeoOffice.tsx` required no content change. `os_assets.py` remains under #2175 ownership. Source judgment identified and verified the process-purpose correction; it is not a formal GitHub approval.
+
+### Observed qualification
+
+| Scope | Actual result | Receipt SHA256 |
+| --- | --- | --- |
+| C43 affected Python consumers | 215 passed | `519a8b8bf8d96560cb074092ccf3e48eece999acbcbba6c2770ce4b8c2a1c849` |
+| Original shared brokers | 242 passed | `f468a7b626a0844953f28cf6eb7d97f94c41877348a77d28228c3bc32143fc44` |
+| Cold-history/host source tests | 39 passed; one conditional package case qualified separately | `c109dfa3802cd686501a567f0d758aef4f01372b1aa31a13a505f25ccff30e06` |
+| Actual compiled native Worker entry | 34 passed | `fa28faa4800c8eaa5146e391040d520afa17574f588f84b9bc6e4b26219a4b0e` |
+| Actual packaged closed-history entry | One selected case passed; seven other cases deselected | `9a32620c4e3b536080632e758ae75cf1da75b2f7637508327860d42090e15b42` |
+| Shutdown preservation/history | 16 passed | `ce925b645efab97cc2951d9893c25108f0e44252c612a6bf5d1e42cc939f8bbc` |
+| C44 isolated Linux transport | 181 passed; zero skips/errors/failures | `d8d28514aae704e06f2db1b907944487337e07fb377885279da1c233844696d9` |
+| C44 focused UI composition | 59 passed in six files | `d82b5e53e0c4de810e4b76d11879d70f4b1eeb1cacef2522dafbd8b8c39cc3e9` |
+| C44 application types | Zero diagnostics | `f1a62f0f4997d474c8190dfd78b1206d41bb27cafdecced9fc85eafe6bf996b7` |
+| Broad C44 source run | 1,926 passed, five failures and one setup error in two stale fixtures | `c6985b5a9fe7c6832a58b3b75d4516e7419c7a70e0c1707d915c049b6620f986` |
+| Both repaired fixture modules | 183 passed; zero skips/errors/failures | `1e14121ba60cdac703ac6c6d603dc3be273219d05d476d9721ce6e4a9845a183` |
+
+The last repair changes only those two test modules: original asset-render assertions now include the exact native branch, and the pre-native publication fixture again uses its complete historical GET/POST profile. The complete two-file rerun covers every prior case plus the complete 14-asset profile. No production source changed after the broad/transport/UI/type qualification. This records the failed broad run and selective requalification explicitly; it does not claim an unperformed full-suite rerun.
+
+Machine-readable source, test, package, failed-attempt, effect and preservation evidence is in [deepseek-native-history-master-composition-c44-20261108.json](../../research/evidence/deepseek-native-history-master-composition-c44-20261108.json). Receipt/log hashes and original source-input snapshots are retained there. Hosted exact-head CI and protected merge are separate delivery evidence.
+
+### Remaining production holds and next permitted milestone
+
+The candidate is source-qualified; real DeepSeek production acceptance still requires accepted source/required CI, original final Worker coordinates and materialization custody, actual company-account/realm/capability/quota/host admission, compatible routing/deployment and a signed-in packaged journey. The latest actual installed DeepSeek observation remains `backend_unavailable` at 2026-11-07 18:51:29; no later acceptance is invented.
+
+No active service was restarted, no live conversation/Session owner created, and no accepted Hermes/C21 proof repeated. Installed receipt/config/search denials, Fabric/VPS denials, protection-administration403 and foreign-Git maintenance denials remain closed; no alternate carrier replay occurred. Preserve #2120, #2134, #2147, #2180/#2228, Paperclip, #2230 and #2175; exclude #1870.
+
+**Next:** publish this same branch, verify exact GitHub head/tree/blob and canonical handoff readback, mark the stable source candidate Ready, consume required exact-head CI and request only eligible native protected merge. Production holds remain distinct. **MORE_WORK_EXISTS.**
+
+---
+
 ## C42 — complete C41 package qualified on the original carrier
 
 The ordinary candidate now contains the published C41 native entry and the complete original donor application. The first stage attempt failed before native compilation because the accepted standalone Node executable lacked the builder's conventional adjacent headers. Its terminal receipt, original log and three patch receipts were retained. All 7,220 pre-existing source inputs were unchanged; the raw input-snapshot mismatch consisted only of 10,300 newly generated paths under this exact candidate.

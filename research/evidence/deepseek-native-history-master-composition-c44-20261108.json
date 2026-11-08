@@ -1,0 +1,1365 @@
+{
+  "boundaries": {
+    "accepted_c21_canary_repeated": false,
+    "accepted_hermes_journey_repeated": false,
+    "existing_docker_daemon_reused": true,
+    "github_approval_claimed": false,
+    "installed": false,
+    "live_session_owners_created": 0,
+    "native_final_layout_materialized": false,
+    "production_acceptance": false,
+    "provider_calls": 0,
+    "services_restarted": 0
+  },
+  "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+  "captured_at": "2026-11-08T10:21:27.887563+00:00",
+  "closed_actions": [
+    "Installed receipt/config reads and directory search, including /var/db/mastermind-executive listing; no alternate-carrier replay.",
+    "Paid Fabric/VPS denied lanes.",
+    "Branch-protection administration403; normal PR-native readiness metadata remains independent.",
+    "Foreign-worktree GC/repack/index/gc.log/permissions actions."
+  ],
+  "current_build_binding_sha256": "3c21707fbec462596ac848f5fc778cc82022e3f59d3d7d11d837b1a344022866",
+  "current_source_sha256": {
+    "app/mastermind_os/src-tauri/src/auth.rs": "a22a1e221c33b390fe0fd5044292c14ebe08e47d709880e1b1e4bd15b8b28e3c",
+    "app/mastermind_os/src-tauri/src/main.rs": "c2b4146128f67044236f9e6b7ab530a9c27286e61e38a70505675a3a774ffc24",
+    "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx": "222d4916cfd1168809ef71bfe68f23d0c528790a148fbdce68d5f8bd138dec63",
+    "control_plane/executive_fabric_composition.py": "4433d7e5cb02cb6003d31f310e5c67bda0f66cb66d099e81c3ceab44a9ccad63",
+    "control_plane/executive_worker_broker.py": "9e0902e63bb83ed2305e9268d1a7c7e3c2150c4f6e2f96595e40a6dcdcb699a7",
+    "integrations/deepseek_harness/native_history.py": "ac3f7771731ccea79efbb0d0488185e77ead8999e37828f1196017f0d60f8691",
+    "integrations/deepseek_harness/native_worker.mjs": "3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642",
+    "integrations/deepseek_harness/package_attended.py": "ad28a230b878e93aa879b85b24143effc3ed9d330a9960c80e2449b9b434647e",
+    "integrations/session_bridge/retained_native_read.py": "fd5f2bd857b6fd8074f7b088e621b50790cda5363f02f92eb9c2e5a622b62c27",
+    "ops/executive_os/application_tunnel_control.py": "ff51437a598b7c0d47eeafdbe01beb70c66260de1c1459ce5b42a33425f8370f",
+    "ops/executive_os/os_public_edge.caddy.template": "785a7e3c7812b1c84b2e73e0b096b35c11f73d8395c8dee7e36f4f330c411bec",
+    "ops/executive_os/os_public_edge.py": "38319a2d5a3eccc597c02be588ff7a9f18f074537fc18ec094ba5f40610c289c",
+    "ops/executive_os/os_public_edge_transition.py": "44259d04e37e4e33f565e9524e2eb28a5a90bb4a2ceb7082da7d14b8f7da83c2",
+    "ops/executive_os/os_tunnel_entry.py": "d3055d102107f0614e8b854edd8dd581c96e70ac557f05def3fd44d2b0468c72",
+    "tests/test_deepseek_os_asset_layout.py": "371f5a08b23a088852e1be9f65e41858ce2a91248accbc4e4be474d04f3d7b4b",
+    "tests/test_os_public_edge_publication.py": "67e87af71784fcc4d322cfb1cb667ebc50543aded44e148618f5558795b9d231"
+  },
+  "disposition": "MORE_WORK_EXISTS",
+  "do_not_redo": {
+    "c21": {
+      "provider_calls": 0,
+      "receipt_sha256": "e18c1f0797635c77febf8d00eebd12f9093e4b745c3125d263b448d618418184",
+      "session": "2830a46c-8bd7-42af-bc73-b3431c24ad9f",
+      "state": "RELEASED"
+    },
+    "hermes": {
+      "app": "/Users/chriswong/Applications/Mastermind OS.app",
+      "bundle_sha256": "b2b5f4c2755869e9a45288a427623ebace1f4fc78b7eaf4dd59edcff8db7ebb6",
+      "pr": 2180,
+      "status": "merged, installed, signed-in accepted"
+    },
+    "latest_deepseek_installed_observation": {
+      "at": "2026-11-07T18:51:29",
+      "production_acceptance": false,
+      "result": "backend_unavailable"
+    }
+  },
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "governing_files_unchanged_through_protected_composition": [
+    "docs/sol_skills/INDEX.md",
+    "AGENTS.md",
+    "docs/DELIVERY_WORKFLOW.md"
+  ],
+  "governing_pin": "1981aea5122943ce59d7ebe9706ddf5a658b377d",
+  "implementation": {
+    "closed_history": "The original retained Runtime/Session/Attempt reader joins the original native binding and materialization receipt. The existing Worker owns a finite cold read child under its state lock, after physical old-process absence and currentness checks. The pinned donor opens its original closed Session read-only; no Agent, Session, provider, listener or auth owner is created.",
+    "compiled_entry": "The existing native Worker --read-history entry uses the qualified Node, compiled host export, package closure, inherited descriptor and private state-home custody. Pinned TypeScript standard-decorator transformation and Node syntax checks precede the existing build manifest.",
+    "continuation": "The original G1 Stop, same-Session G2 Resume and final Stop test retains its original assertions and now recovers both original answers after final closure.",
+    "excluded": [
+      "#1870"
+    ],
+    "fixtures": "All original assertions remain. Current source/AST pins and positions reflect the composed files. Final asset-render fixtures account for six proxies/five public Host headers and assert the exact native branch; the pre-native publication fixture uses its exact historical GET/POST pair.",
+    "model_route": "The existing authenticated public edge adds exactly GET /workspace/resources/models/current. All 33 old route-profile pairs are preserved and the complete new pair is appended. Native admission accepts exactly the complete pre-model and current pairs; the 17 native POST paths and 524288 cap are unchanged.",
+    "preserved": [
+      "#2120",
+      "#2134",
+      "#2147",
+      "Hermes #2180 and #2228",
+      "Paperclip organization view",
+      "company priorities #2230",
+      "#2175 protected source; os_assets.py untouched by this operation's composition repair",
+      "#2272 sealed-release walk boundary"
+    ],
+    "protected_composition": "Protected #2175's Fabric v2 application pools, native carrier, model view and source ownership are composed with the DSH v1 purpose. Both original operation identities, credentials, predecessor/journal custody and explicit refusals remain distinct.",
+    "shutdown_preservation": "Only brokers with a native history reader use the native history shutdown fence. The original non-native idle-absence observation remains available after shutdown.",
+    "tunnel": "Purpose is propagated through preparation, bundle, receipt, listener and process-currentness checks. Role aliases remain Fabric-only, admission precedes locks, peer custody includes the existing Fabric v2 journal, and initial v2 mutation still requires the original authfile preimage and server process."
+  },
+  "linux_transport_summary": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 181
+  },
+  "merge_receipts": {
+    "c44-master-composition-20261108-pro1": {
+      "path": "/private/tmp/mmx-dsh-c44-master-composition-20261108-pro1.json",
+      "sha256": "65953f4ce017fdcbf3d774853e47960a0965e4c5b70d88bd5b22dcc4faa00983"
+    },
+    "c44-master-composition-20261108-pro3": {
+      "path": "/private/tmp/mmx-dsh-c44-master-composition-20261108-pro3.json",
+      "sha256": "c169b44ad63aa9afbc180f5143343549ae24f9539526dceb34ba74053dd7f4ab"
+    },
+    "c44-prepared-composition-20261108-pro1": {
+      "path": "/private/tmp/mmx-dsh-c44-prepared-composition-20261108-pro1.json",
+      "sha256": "d51d5f89493a78626882760f61aa1dae55e88f8a57392e853cdda3645faacc52"
+    }
+  },
+  "next_action": "Publish this qualified source/evidence on the same managed branch, verify GitHub head/tree/blob readback, update existing PR/canonical handoff, mark source-complete PR Ready, and use only eligible native protected merge/CI. Production holds remain separate.",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "package_capture": {
+    "accepted_build": {
+      "app_config_sha256": "61da053ca49ecf20b56325aae6ce5f622b47cae16ca4dad5f869b7f484719b50",
+      "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+      "company_host_exports": {
+        "./company-peer": {
+          "file": "company-peer.js",
+          "sha256": "8a00870eea70d3e89de1bff988731409700e0b9ae6c2003ee2f8a528bc24ea5b"
+        },
+        "./executive-read-port": {
+          "file": "executive-read-port.js",
+          "sha256": "7d11c2d521b4f41a0ff49c292476d05ac6c6086facdffe37bfcbafc4507f7eb5"
+        }
+      },
+      "custody": "Source-linked C43 complete staged attended package and original Worker entry; seven build gates, full check-only closure and a finite test-owned closed-Session answer read through the compiled entry passed. No final Worker materialization, installation or production acceptance claimed.",
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "evidence_commit": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+      "index_sha256": "0c37affd964c8819b210e02b5da8c600c2cfa03ee999fc3977a8809b2e8c74a0",
+      "installed": false,
+      "native_acp_patch": {
+        "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+        "receipt_sha256": "8931fd1764e7887b76c9ea1c0d07cd9ce6379dc069c75516d066ed509cfefeef",
+        "source_sha256": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720"
+      },
+      "native_client_build_sha256": "6d9529336be67e059e55b3727fd9fa6d2fe53a40ad9a1079deaac9f939ed84ad",
+      "native_owner_access": {
+        "host_patch_sha256": "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597",
+        "host_source_sha256": "c1b49a4e2cedbf7930b8633aa4c3047c919e5484d13bd744c70e887e35552878",
+        "patch_sha256": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
+        "receipt_sha256": "569f5e69f1a16950fb92987872aa65e585b6cbe4fde40d7d1d053c40d75df093",
+        "source_sha256": "07f538387397222ebda157ec3be76e88e9bba4dfe19842ac8a9ee5e83016b054"
+      },
+      "native_session_patch": {
+        "patch_sha256": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+        "receipt_sha256": "a026a25beac1b32b422974e800e4084e999f13621573a8e0426a1bd7ec5c0aea",
+        "source_sha256": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487"
+      },
+      "native_worker": {
+        "agent_name": "deepseek-harness-acp",
+        "agent_version": "0.0.1",
+        "entry": "native_worker.mjs",
+        "model_provider": "deepseek-account",
+        "schema": "mastermind.dsh_native_worker_entry/v1",
+        "sha256": "3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642"
+      },
+      "native_worker_patch_sha256": "79d2034a4e0e21f3386333d1959e1196a8a8c21535c860c696ce9c3cb8082583",
+      "package_manifest_sha256": "79570a871965abfac1fc51ae538b302a5a79bd40b26c41a4f9f8010c9ebabaed",
+      "provider_calls": 0,
+      "schema": "mastermind.dsh_attended_build.v1"
+    },
+    "accepted_build_before_sha256": "8509245e0fb079b9c98d71b1c3553ebcd210515a9af171eb3d918e0af0d781e8",
+    "accepted_build_sha256": "3c21707fbec462596ac848f5fc778cc82022e3f59d3d7d11d837b1a344022866",
+    "artifact_source_binding": "Every snapshotted tracked DeepSeek integration input matches source commit11eea754d6a93f275559f8cff3b6bcadb0dd162a; compiled exports are separately bound by app.json and package-manifest. Source publication is separately verified in the PR handoff.",
+    "artifact_source_files": {
+      "integrations/deepseek_harness/attended-build.json": "8509245e0fb079b9c98d71b1c3553ebcd210515a9af171eb3d918e0af0d781e8",
+      "integrations/deepseek_harness/company_plugin/build.mjs": "78155e62a55737190c5288c0df58827655d0f406d889910ca1ddfaff064c49a4",
+      "integrations/deepseek_harness/company_plugin/native.client.test.ts": "eb7b071dda6e94141b28d516aea44cbd6f9d1297f88bbce278ecd746f06e5e8a",
+      "integrations/deepseek_harness/company_plugin/native.closed-history.test.ts": "21789931aafc85c935d7cb9fa1d806d3d91e3f8542157e073cae03f02714693d",
+      "integrations/deepseek_harness/company_plugin/native.executive.fixture.test.ts": "7be8d447cdc7552da862cbdb1232208e520c3de33fb500d22ff2b247134c7222",
+      "integrations/deepseek_harness/company_plugin/native.executive.test.ts": "2d60fd8cf0244d50a99465f18a40786f46bdbb935c38e6f141ead16439fded63",
+      "integrations/deepseek_harness/company_plugin/native.host.test.ts": "07f68a286f342ab901e79ab6cdf99889a08a8ab124d4dcdb290d8af49113225d",
+      "integrations/deepseek_harness/company_plugin/native.read-fixture.ts": "7c01fe47928d822abc6e91abed3cf8f5b940042f7db2cac2020cab0fbe174d1c",
+      "integrations/deepseek_harness/company_plugin/package.json": "f6ae65d09b42299940283ee9dc7d1d4286baf9e51b32b2166e08560a59171b52",
+      "integrations/deepseek_harness/company_plugin/prepare_preview.mjs": "8ac6516b0f5e0b592f87036b70eb448f0b139671ebc22c2ccf1fcf5ddf301192",
+      "integrations/deepseek_harness/company_plugin/src/client/connection.ts": "d914331d4783c8a829f6ae5d34bc13ee8d2980b53d9877ea4d45eee3702186eb",
+      "integrations/deepseek_harness/company_plugin/src/client/index.ts": "ff20e3065c14add6432ea00686dcc5db567bd13a0495a709e89990f5add04567",
+      "integrations/deepseek_harness/company_plugin/src/client/styles.ts": "b3d27b10963634ba74d5544fbf74fed155472b095bd2233a3a7abdd7b02bc479",
+      "integrations/deepseek_harness/company_plugin/src/closed-native-history.ts": "9bec39efa770118dcd4a77bfe40eb5023fa4796d3e593e8053b36d45daff9c66",
+      "integrations/deepseek_harness/company_plugin/src/company-peer.ts": "a612258f3f42e72857f0037626f04e5228b1ec796e3836fbdf5ffd39de75d9ff",
+      "integrations/deepseek_harness/company_plugin/src/executive-read-port.ts": "5238473aa9d13aa1493d7231ba777924df22c3c4b8879938b6a0d70fe726870f",
+      "integrations/deepseek_harness/company_plugin/src/index.ts": "1585af52430af853c86d6b8073dc48053020e63bf54966ca9186fb584eaa44b3",
+      "integrations/deepseek_harness/company_plugin/src/native-result-content.ts": "05a5a8b51da3e4c7d7c3a17b16383c177a05ea69c3d736b190e5b6a3ad3f5523",
+      "integrations/deepseek_harness/company_plugin/src/protocol.ts": "2914e538485e4c63789fd5c8cc9f15766ff9a1def1094aa8a2ba2984d9a5ae41",
+      "integrations/deepseek_harness/company_plugin/vitest.config.mts": "974efe5975e3caeb7aa47792482cb7ec4e1bf20e891fe3844063630dd4cbbae1",
+      "integrations/deepseek_harness/company_plugin/vitest.host.config.mts": "1956fdda7bd4dd7761d2f9ff2b3ac1238e239a2d86f57c864f05cd084acb3996",
+      "integrations/deepseek_harness/embedding.py": "8e48f1c4d9c182130be516fba8af05da55e26940dfff289cb9156a945c701e2c",
+      "integrations/deepseek_harness/launch_attended.mjs": "8fd96f972aedcd5208ecd2b6a57cef6acc9eae97515835b9e2c96140a0a98c15",
+      "integrations/deepseek_harness/native_connection.py": "f9e1d1c4b223615fc965b9146e5fd4750323f49362224db3cab163f8f5a91201",
+      "integrations/deepseek_harness/native_history.py": "ac3f7771731ccea79efbb0d0488185e77ead8999e37828f1196017f0d60f8691",
+      "integrations/deepseek_harness/native_materialization.py": "647459b7389f25efc3e44b3bba8673c96e34547f315f4f2c3d33318f9f7faaa3",
+      "integrations/deepseek_harness/native_protocol.py": "3d516bcca7d5f930ab067e7428dcc3f3c3388592ead8c21a77e1377c51b7df2b",
+      "integrations/deepseek_harness/native_read_port.py": "c2a9db52dfdfbce382d014b37a80e6e1e7d05a47a015aefc70d4fd6f6b9a0a17",
+      "integrations/deepseek_harness/native_worker.mjs": "3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642",
+      "integrations/deepseek_harness/native_worker.patch.yml": "79d2034a4e0e21f3386333d1959e1196a8a8c21535c860c696ce9c3cb8082583",
+      "integrations/deepseek_harness/operator_adapter.py": "2543da3cbafe08f87ee629b4970865c0317ffe5c8e15f54b54b819ac9c864542",
+      "integrations/deepseek_harness/package_attended.py": "ad28a230b878e93aa879b85b24143effc3ed9d330a9960c80e2449b9b434647e",
+      "integrations/deepseek_harness/provider_qualification/sealed_analysis_contract.mjs": "1a8c7e8448019ae41e6246b46f1d946076d5b1b2a85625069c3e334eb324de01",
+      "integrations/deepseek_harness/provider_qualification/sealed_analysis_contract.test.mjs": "72c1ac41cd5bc50a7273bfc29bd7e1488b069d71da61ad44e5b87ab83403c148",
+      "integrations/deepseek_harness/run_local.sh": "e52df818671233f799f7d6429963b17f184321bcfe435addb4cc698145dd9d61",
+      "integrations/deepseek_harness/runtime_compat/build-company-host-fixture.py": "356a4dc602c97806f2948fc81bfe589e49df225e6faeffce8e0f2543d8aba2a9",
+      "integrations/deepseek_harness/runtime_compat/build-native-fixture.mjs": "a1dd120ce3a33a3fba4f87392806ca7cb657858dbfada3cf2f6881682295ac6a",
+      "integrations/deepseek_harness/runtime_compat/check-native-access.mjs": "47a38d370c98461589e2708edccc5330c6e365fcf22d2ad648d5e893459a8b08",
+      "integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "c88ae0da8c4a96c2ed7ac9d3f81ff81d20c50544190509431f467ec0e69ab716",
+      "integrations/deepseek_harness/runtime_compat/check-native-host.mjs": "c766a8f77bdb449e7188f867d17f2da6173e5cc53e22f41e53fc49c24078683b",
+      "integrations/deepseek_harness/runtime_compat/check-native-session.mjs": "5c050d8338274cd45cb4b166c2317b5281752a64346e70338df38e384a6c9380",
+      "integrations/deepseek_harness/runtime_compat/dispatch.test.ts": "b3b9902e3d66dd2fd2eb45e62f213415036d0ab7502c3e353105f0d8c8ad50f1",
+      "integrations/deepseek_harness/runtime_compat/evidence/ci-source-20261107.json": "7e8ae8d36d89696100c9980a565988b0cbc4d0977e65d80abd18fa2d74d21562",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-acp-lifecycle-20261107.json": "d85f0802f068a8d87a6429897c2b272887e5d96a9b6ecdfeb7f35fd8894b2ef7",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-company-profile-20261107.json": "7e47ba1194d97b5d2815a6d48198d9dee73b86547c22cf28d3f384c932828191",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-connection-20261107.json": "10add49a8b7a73fe94d4b684e7632c49acf52c2bdef0199954246c16cc081d4d",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-fresh-content-20261107.json": "dda88954ae0338455f3734367aed60246f67b95280e02b7af03f14fb0d430a75",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-fresh-history-20261107.json": "292198cdb45c6046611dbb46c51d165d8aec6f0d3f9c85fc4d1bc99a42f86826",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-fresh-owner-20261107.json": "cb616402d366a32c929d55ac8e20c7eb1bc13f0672b7a1bee414faac18caf063",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-fresh-transport-20261107.json": "5fecaf3b6e73ca36d9ace3bf713546ecd70d6d03b993ff7b6371ea8b21592b50",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-idle-custody-20261107.json": "da424ace6315530eef6e4728e0216caea3449286c6c904236c84a42ab8c362e6",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-initial-custody-20261107.json": "52e1e226ef5e5ac3e42ef484ec298601a21945b0dca475db614cf7c6da4daf28",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-operator-20261107.json": "8f2cf33c79953c268ee47f2cde2ce29876c3d83766a018fbe7d112e1f8ef5a23",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-owner-access-20261107.json": "cc1699404be19bbeb24f713d152f432deb211ff25c13b6520f5d222acc016fe4",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-owner-access-v3-20261107.json": "6d5ed744175e0e734d71b4ab871b1e8e0585deccf904bbeda39c2889e5c18998",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-owner-access-v4-20261107.json": "f40ba5fa4b8a66f44f3074619b016f1a65fc26753b857c76378b3e9947a761fb",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.json": "19773e5b2995d686d27b4a465d6ba88c6cad2cb05ea32bc2424a40b94d7562e3",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-recovery-transport-20261107.json": "8a09c2000d8449afd1fdade6c854c2cf0fd431f5a7fc5f4056c76e0e0aff0c52",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-supervisor-conversation-20261107.json": "e2b5f4ca80792d71d2166b9215e8eb0e74484defc32848b0177b8d8537dc6a1d",
+      "integrations/deepseek_harness/runtime_compat/evidence/native-terminal-custody-20261107.json": "07106af4dfc568495584e146e25436f5268c63e797cdd57ea6f0159408fdb99d",
+      "integrations/deepseek_harness/runtime_compat/evidence/workspace-presence-repair-20261107.json": "94cd48a14b786f3b2f53fd3c8a7494dd2ee1f20192fabb37f26cea90849a182c",
+      "integrations/deepseek_harness/runtime_compat/fixture-persistence.mjs": "5a1ca287c3764db8390be58dc23332a4d209b8a4d757dd820b79f20c28ca02c1",
+      "integrations/deepseek_harness/runtime_compat/mcp-context.test.ts": "c2e5780a5aeb943cf4d60ed92dfc3ae137dfffd61cdb99bddb963c407e70c0fd",
+      "integrations/deepseek_harness/runtime_compat/mcp-generation-admission.patch": "1233c8fc06e9bb509b4a42a37da2bdd5fee719adc75e75708921e184ba04dbe5",
+      "integrations/deepseek_harness/runtime_compat/mcp-rich.test.ts": "256e3255c475ef3db8d05a10e3a92426bab1b9b34a34cf4e1ae17171e4093e5a",
+      "integrations/deepseek_harness/runtime_compat/mcp.test.ts": "38123350a190ac73effce89883985887dc3f7ff915cf3d0cc65711f5b1149c4b",
+      "integrations/deepseek_harness/runtime_compat/native-access-source.json": "07f538387397222ebda157ec3be76e88e9bba4dfe19842ac8a9ee5e83016b054",
+      "integrations/deepseek_harness/runtime_compat/native-account-admission.test.ts": "f9d411243f242e283acf3bf0e1fa6139aa46245b44c448f4fd2fc7f13df2fab9",
+      "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+      "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "1fc40d841cd269c8a0ffe27badeed2796ea01f8ea2b2b98a8a643b7bb9080e8c",
+      "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720",
+      "integrations/deepseek_harness/runtime_compat/native-agent-fixture.mjs": "b46ab2e34f9885ee760a682981df8f62f3992005cc1d519fffb4a362296a27e9",
+      "integrations/deepseek_harness/runtime_compat/native-capability-admission.test.ts": "bb48e710915ad562dcdae3a4d4d28593d8955ed8914515dde3f3a4edab1b3950",
+      "integrations/deepseek_harness/runtime_compat/native-company-profile-fixture.mjs": "dfb2eb7dd9d8bd0f2b2e8497ea2ae9836c1944b74ab82ca7ee40afc99d515cd3",
+      "integrations/deepseek_harness/runtime_compat/native-history-fixture.mjs": "939eb0a686a3746a22b1ef9007631c0322947d355a83ab4109c5e3ab91eac60a",
+      "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597",
+      "integrations/deepseek_harness/runtime_compat/native-host-admission.test.ts": "836fb2b075c5607d5385db63a9c790dcca3eb9266f2075d072e7923d09c938d0",
+      "integrations/deepseek_harness/runtime_compat/native-host-source.json": "c1b49a4e2cedbf7930b8633aa4c3047c919e5484d13bd744c70e887e35552878",
+      "integrations/deepseek_harness/runtime_compat/native-llm-admission.test.ts": "fa118c10fb005eefc70f4a638e95a9a76dd527b48789bdab6829a52e39def0a7",
+      "integrations/deepseek_harness/runtime_compat/native-owner-access.patch": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
+      "integrations/deepseek_harness/runtime_compat/native-owner-access.test.ts": "5d49204443a0b64919c4d4f29b3286019e2ec9a33102b7cfa937585b9e6b0957",
+      "integrations/deepseek_harness/runtime_compat/native-owner-changes.test.ts": "6c2aafb323528058397eed0e12a6b399681fb341394f70ec77d8982fa450981a",
+      "integrations/deepseek_harness/runtime_compat/native-owner-hold.test.ts": "20ea812f947da34ee3f8339bfd5a6a3a8868d5c845fb6d49f01cd9de15162d5d",
+      "integrations/deepseek_harness/runtime_compat/native-owner-upload.test.ts": "ef1b701444acdca9b7864b2dedbcd166b9deab61b471bf2a3418f9d15a4ff68d",
+      "integrations/deepseek_harness/runtime_compat/native-profile-source.test.ts": "f0d56a335da837695b1dd6dbf76650e678f2a17faebbc70cf803aa7e8da9bd23",
+      "integrations/deepseek_harness/runtime_compat/native-session-generation.patch": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+      "integrations/deepseek_harness/runtime_compat/native-session-generation.test.ts": "390241ce58a09b1c9a783d96f4a6e01edebfc71a3ca3afaf7804e8862205084e",
+      "integrations/deepseek_harness/runtime_compat/native-session-source.json": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487",
+      "integrations/deepseek_harness/runtime_compat/native-worker-entry.test.ts": "32c073cbb6d9dd2f3b7764c218a0c7dc7f6023d7decba967ef5c6d674bbad388",
+      "integrations/deepseek_harness/runtime_compat/native_access_package.py": "a8f839aa2c8fb114985392179043cdc539aef301f9785c698ee3f9234622c92d",
+      "integrations/deepseek_harness/runtime_compat/native_acp_package.py": "24be6ba5431a83fadd2abd519f8f70151d0ce36a9c39134d9e769d6169ad7d5f",
+      "integrations/deepseek_harness/runtime_compat/prepare.py": "b6a6e844cd122e2dff4fe48bc564d6965099616f403e52233a58971e1fca672c",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_access.py": "5d6792e7eaffbe976ededcffa68c7d5ced83260d4a5249550dab6497414a7c42",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "7635e33655639e2ea5854c64abf7acfd6379bddd6685de5e9c53a71a597fc6dd",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "97866f1b593e30c2e8900eb12afcfd7b33b1cff1b6f6378ee27e98ac74fe00b5",
+      "integrations/deepseek_harness/runtime_compat/prepare_native_session.py": "52aa4d1258015e368ae9cc8f92366d1fa09a32baf44a6ae166487410923c317d",
+      "integrations/deepseek_harness/runtime_compat/source-manifest.json": "9fe70b9dc8cb998f96ef6294277bc3e5bda10039721d42d40a771a53e7c429c4",
+      "integrations/deepseek_harness/runtime_compat/strict-dispatch-binding.patch": "8631b18a10c736bcfd97d5e35287c793fe861373523bc31116b21c38522161ae",
+      "integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "3ef543e40f22860b4d65023f733e04ad41d5b9a79269e5cf10d418a738a2978e",
+      "integrations/deepseek_harness/runtime_compat/vitest.config.mts": "175c993220c36ff84cab76c23372f64cc4373159eb97179d234227344d9c2bc8",
+      "integrations/deepseek_harness/runtime_compat/vitest.host-admission.config.mts": "f078cb97dbf0239f2f1581bdade64d8429d2ed94cae17a7af2efdb14578a8255",
+      "integrations/deepseek_harness/runtime_compat/vitest.native-account.config.mts": "37e386219449b2962781fbbdc27f0cff29f7c026aea000fa8e6f288ec648e596",
+      "integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts": "766004f277b20d9e9516f170e45fe1bd09ebc9d45734498577c6a516f9b9e658",
+      "integrations/deepseek_harness/runtime_compat/vitest.native-llm.config.mts": "901857b7e3da186748f91bc46bd846f5889606b6b39742e29c0d8220715958f4",
+      "integrations/deepseek_harness/runtime_compat/vitest.owner-access.config.mts": "917073ba864c2a71497c48df5d6630e86989751b526517eb71871df9971b3891",
+      "integrations/deepseek_harness/runtime_compat/vitest.session.config.mts": "456cbed1317208c5ec0b1cda9750891e221c3b22ba5e94284810821c86eda688"
+    },
+    "build_receipt": "/private/tmp/mmx-dsh-c43-complete-build-20261108-pro2.json",
+    "build_receipt_sha256": "0eb79f41fe7b118b640e6d3b58320535f73afafb972d65d56fad8091e8c98c3d",
+    "captured_at": "2026-11-08T09:57:37.984038+00:00",
+    "description_normalization": "The retained raw capture used premature published-source wording for then-local commit11ee; this derived description corrects only that wording. The original receipt bytes/hash are unchanged.",
+    "package_config": {
+      "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+      "company_host_exports": {
+        "./company-peer": {
+          "file": "company-peer.js",
+          "sha256": "8a00870eea70d3e89de1bff988731409700e0b9ae6c2003ee2f8a528bc24ea5b"
+        },
+        "./executive-read-port": {
+          "file": "executive-read-port.js",
+          "sha256": "7d11c2d521b4f41a0ff49c292476d05ac6c6086facdffe37bfcbafc4507f7eb5"
+        }
+      },
+      "company_patch_sha256": "08675fa00112aae71cf309b975c5490b9d5c4837ccd8089090c514b9f51411f2",
+      "company_worker_admission": false,
+      "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "execution": "native-attended",
+      "native_acp_patch": {
+        "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+        "receipt_sha256": "8931fd1764e7887b76c9ea1c0d07cd9ce6379dc069c75516d066ed509cfefeef",
+        "source_sha256": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720"
+      },
+      "native_client_build_sha256": "6d9529336be67e059e55b3727fd9fa6d2fe53a40ad9a1079deaac9f939ed84ad",
+      "native_owner_access": {
+        "host_patch_sha256": "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597",
+        "host_source_sha256": "c1b49a4e2cedbf7930b8633aa4c3047c919e5484d13bd744c70e887e35552878",
+        "patch_sha256": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
+        "receipt_sha256": "569f5e69f1a16950fb92987872aa65e585b6cbe4fde40d7d1d053c40d75df093",
+        "source_sha256": "07f538387397222ebda157ec3be76e88e9bba4dfe19842ac8a9ee5e83016b054"
+      },
+      "native_session_patch": {
+        "patch_sha256": "52c09e2159c8a8397f7bf4db7cabb8190b8bb06ddbd5c098fd0dd264bd614eee",
+        "receipt_sha256": "a026a25beac1b32b422974e800e4084e999f13621573a8e0426a1bd7ec5c0aea",
+        "source_sha256": "116c06a4acf97333f82dc1ce28ff694a938d011c812caa248c1fe01da5454487"
+      },
+      "native_worker": {
+        "agent_name": "deepseek-harness-acp",
+        "agent_version": "0.0.1",
+        "entry": "native_worker.mjs",
+        "model_provider": "deepseek-account",
+        "schema": "mastermind.dsh_native_worker_entry/v1",
+        "sha256": "3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642"
+      },
+      "native_worker_patch_sha256": "79d2034a4e0e21f3386333d1959e1196a8a8c21535c860c696ce9c3cb8082583",
+      "node": "/private/tmp/mmx-dsh-c41-node-build-prefix-20261108-pro1/bin/node",
+      "node_sha256": "cbee2298aee5cc476bf8d5441e7348b627254a39d869743a5b04489028c729d4",
+      "pnpm_sha256": "67b035e322203961795e8e34ca63a08c37a4386eda94107fb3d28f3246d882ad",
+      "port": 4180,
+      "public_url": "https://chat.mastermind-x.com/",
+      "relay_port": 4181,
+      "release": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c43-20261108-pro2",
+      "schema": "mastermind.dsh_attended_package.v1",
+      "state": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-state-c43-20261108-pro2"
+    },
+    "package_entries": 116164,
+    "protected_composition": "7a3c0b78710ffa66140228b6e2af53036c78d63e",
+    "receipt_path": "/private/tmp/mmx-dsh-c44-build-capture-20261108-pro1.json",
+    "receipt_sha256": "0a4084ce926aac2000b41938c0d6c54d5f2aa49b8201357979d8673880661796",
+    "release": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c43-20261108-pro2",
+    "schema": "mastermind.dsh.c43_artifact_capture.v1",
+    "source_sha": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+    "state": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-state-c43-20261108-pro2",
+    "supplementary_control_source": "e754aee1132b1304786fb6b0d09989535062e116"
+  },
+  "production_holds": [
+    "Accepted source and actual required exact-head hosted CI/native protected merge.",
+    "Original final Worker coordinates, root/Node/native/ACP materialization and custody attestation.",
+    "Actual company-account/realm/capability/quota/host admission.",
+    "Routing and deployment compatible with the explicit no-active-service-restart constraint.",
+    "Real signed-in packaged DeepSeek create/history/send/original-answer recovery/logout/reconnect/uncertain-send/Stop/same-Session resume/eligible-tool-settlement acceptance."
+  ],
+  "protected_master": "7a3c0b78710ffa66140228b6e2af53036c78d63e",
+  "qualification": {
+    "c43-affected-tests-20261108-pro1": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--junitxml=/private/tmp/mmx-dsh-c43-affected-tests-20261108-pro1.xml",
+        "tests/test_dsh_native_history.py",
+        "tests/test_dsh_native_retained_read.py",
+        "tests/test_dsh_native_fresh_conversation.py",
+        "tests/test_dsh_native_composition.py",
+        "tests/test_dsh_native_broker.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_source_operation_public_edge.py",
+        "tests/test_session_bridge_native_read.py",
+        "tests/test_deepseek_native_read.py"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "failed_cases": [],
+      "finished_at": "2026-11-08T09:27:13.696008+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "5a73134302e4b7bc255edf2d3ca1c1f5011a4653a50e5e1946833ab6b5e3c163",
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "215",
+          "time": "191.703",
+          "timestamp": "2026-11-08T02:24:01.189798-07:00"
+        }
+      ],
+      "log_sha256": "4c8d2e46a81a8967e5515e040a285e9095ca5ea4ce468b17549c92e1bc18f4b5",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-affected-tests-20261108-pro1.json",
+      "receipt_sha256": "519a8b8bf8d96560cb074092ccf3e48eece999acbcbba6c2770ce4b8c2a1c849",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "47fc6945e993987f15e7bee87f57fef69fc009212397cc0585673c3fa981b679",
+      "started_at": "2026-11-08T09:23:59.846221+00:00"
+    },
+    "c43-cold-host-tests-20261108-pro3": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--pool",
+        "threads",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin/vitest.host.config.mts",
+        "native.closed-history.test.ts",
+        "native.executive.test.ts",
+        "native.host.test.ts"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:22:33.425014+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "87b9e037ba3fe4fc229989c85a71c2040013de85db4017d65637babe4c46dc2d",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-cold-host-tests-20261108-pro3.json",
+      "receipt_sha256": "c109dfa3802cd686501a567f0d758aef4f01372b1aa31a13a505f25ccff30e06",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "b6d25882b4c7f39fffd6d9708485839995eab388fd68d328c01c60d9f32efbfe",
+      "started_at": "2026-11-08T09:22:27.836500+00:00"
+    },
+    "c43-company-build-20261108-pro3": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin/build.mjs",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:30:25.694952+00:00",
+      "inputs_count": 20,
+      "inputs_snapshot_sha256": "581a31e27d997507a874a0b526853d7ee47e2e202a62c8ede96e7515112cb1d4",
+      "inputs_unchanged": true,
+      "log_sha256": "368f6d66f814e7f8443e720c1147b82684f75cf8fd0876e8777636d510fe9c6a",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-company-build-20261108-pro3.json",
+      "receipt_sha256": "cb5dc21db805399eb950343199c121e795a89001c43736fdec44007bcad86d18",
+      "started_at": "2026-11-08T09:30:24.958267+00:00"
+    },
+    "c43-complete-build-20261108-pro2": {
+      "argv": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-S",
+        "-B",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/package_attended.py",
+        "--donor",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022",
+        "--pnpm",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.pnpm/pnpm@11.28.5/node_modules/pnpm/bin/pnpm.cjs",
+        "--node",
+        "/private/tmp/mmx-dsh-c41-node-build-prefix-20261108-pro1/bin/node",
+        "--release",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c43-20261108-pro2",
+        "--state",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-state-c43-20261108-pro2",
+        "--public-url",
+        "https://chat.mastermind-x.com/",
+        "--port",
+        "4180",
+        "--relay-port",
+        "4181"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:33:34.338021+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "56a1559fb24fdd29dc8aef5c466961415eb6da59e824a92ffc13cea93d37765f",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-complete-build-20261108-pro2.json",
+      "receipt_sha256": "0eb79f41fe7b118b640e6d3b58320535f73afafb972d65d56fad8091e8c98c3d",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "f2524a5764000b89d4e7c6d4be71414aa842472c5d13216b3f4b509e624d30f1",
+      "started_at": "2026-11-08T09:30:49.555029+00:00"
+    },
+    "c43-native-worker-entry-20261108-pro2": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--pool",
+        "threads",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts",
+        "native-worker-entry.test.ts"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:30:55.369202+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "5e4b0fafaac7d8c22196bd774ccf976c8830565255ea839006ddad61d4e48f48",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-native-worker-entry-20261108-pro2.json",
+      "receipt_sha256": "fa28faa4800c8eaa5146e391040d520afa17574f588f84b9bc6e4b26219a4b0e",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "f2524a5764000b89d4e7c6d4be71414aa842472c5d13216b3f4b509e624d30f1",
+      "started_at": "2026-11-08T09:30:50.274063+00:00"
+    },
+    "c43-package-check-20261108-pro2": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c41-node-build-prefix-20261108-pro1/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c43-20261108-pro2/launch_attended.mjs",
+        "--check-only"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:35:11.920030+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "a981d37dae317604bd0bf63abcabd48ece98e45e01e3ba01e07551f0ab4f5487",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-package-check-20261108-pro2.json",
+      "receipt_sha256": "9679fab1cca96ef3d031fb2d5368ae3e6e88739f75c63954f96c3c998ccec817",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "c16c0f952f69f05f81c86f18e6aafdd62ae035cf9e1d6faa9d5af1b907da1959",
+      "started_at": "2026-11-08T09:34:30.872011+00:00"
+    },
+    "c43-packaged-history-20261108-pro2": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--pool",
+        "threads",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin/vitest.host.config.mts",
+        "native.closed-history.test.ts",
+        "-t",
+        "qualified packaged Worker entry"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:34:34.851446+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "2c8497d5272e08b83136274065bec278bb6282a2fcb7873343f1912ee8926401",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-packaged-history-20261108-pro2.json",
+      "receipt_sha256": "9a32620c4e3b536080632e758ae75cf1da75b2f7637508327860d42090e15b42",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "c16c0f952f69f05f81c86f18e6aafdd62ae035cf9e1d6faa9d5af1b907da1959",
+      "started_at": "2026-11-08T09:34:31.469141+00:00"
+    },
+    "c43-shared-broker-tests-20261108-pro1": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--junitxml=/private/tmp/mmx-dsh-c43-shared-broker-tests-20261108-pro1.xml",
+        "tests/test_executive_worker_broker.py",
+        "tests/test_executive_operator_broker.py",
+        "tests/test_operator_only_worker_broker.py"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "failed_cases": [],
+      "finished_at": "2026-11-08T09:35:04.424746+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "262034bba468410c33c5f506f302aacc09cc233141bc10387d81260bd32eecea",
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "242",
+          "time": "16.311",
+          "timestamp": "2026-11-08T02:34:45.923263-07:00"
+        }
+      ],
+      "log_sha256": "cccc7697f7243d3526e88b5b7ef2bd8f60eb9ade89dba455e1c4899ea9560d8d",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-shared-broker-tests-20261108-pro1.json",
+      "receipt_sha256": "f468a7b626a0844953f28cf6eb7d97f94c41877348a77d28228c3bc32143fc44",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "c16c0f952f69f05f81c86f18e6aafdd62ae035cf9e1d6faa9d5af1b907da1959",
+      "started_at": "2026-11-08T09:34:43.588271+00:00"
+    },
+    "c43-shutdown-preservation-20261108-pro1": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "--maxfail=3",
+        "--junitxml=/private/tmp/mmx-dsh-c43-shutdown-preservation-20261108-pro1.xml",
+        "tests/test_executive_worker_broker.py::test_fresh_status_uid_sweep_proves_idle_absence",
+        "tests/test_executive_worker_broker.py::test_fresh_status_after_shutdown_without_native_history_reader",
+        "tests/test_executive_worker_broker.py::test_remote_controller_missing_owner_requires_fresh_startup_and_absence",
+        "tests/test_dsh_native_history.py"
+      ],
+      "base_sha": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "failed_cases": [],
+      "finished_at": "2026-11-08T09:41:08.236993+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "cb3c85f2b73236668b5529d04f1b418cbb20a7993b37ad9c4ac6d843f83a7d9f",
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "16",
+          "time": "2.032",
+          "timestamp": "2026-11-08T02:41:05.584455-07:00"
+        }
+      ],
+      "log_sha256": "ecf57d762b443151696ef4727347520d0d5715719bac1e0cd93caddf627ffa61",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-shutdown-preservation-20261108-pro1.json",
+      "receipt_sha256": "ce925b645efab97cc2951d9893c25108f0e44252c612a6bf5d1e42cc939f8bbc",
+      "source_inputs": 7245,
+      "source_sha256_count": 7245,
+      "source_sha256_snapshot_sha256": "9bfc551f6e25e4f942877f1083af50be19b112f3deb3e80fa18c648d4dab0de1",
+      "started_at": "2026-11-08T09:41:04.155748+00:00"
+    },
+    "c44-composition-tests-20261108-pro2": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "--maxfail=0",
+        "--junitxml=/private/tmp/mmx-dsh-c44-composition-tests-20261108-pro2.xml",
+        "tests/test_model_configuration_public_edge.py",
+        "tests/test_os_public_edge.py",
+        "tests/test_os_public_edge_transition.py",
+        "tests/test_os_public_edge_publication.py",
+        "tests/test_source_operation_public_edge.py",
+        "tests/test_os_public_project_plan_route.py",
+        "tests/test_os_public_project_knowledge_routes.py",
+        "tests/test_os_public_project_archive_route.py",
+        "tests/test_byok_roles_public_edge.py",
+        "tests/test_native_session_send_public_edge.py",
+        "tests/test_native_draft_identity.py",
+        "tests/test_following_conversation_public_edge.py",
+        "tests/test_workspace_result_references_http.py",
+        "tests/test_h6_model_configuration_composition.py",
+        "tests/test_deepseek_os_asset_layout.py",
+        "tests/test_os_private_entry_release_profile.py",
+        "tests/test_os_release_assets.py",
+        "tests/test_workspace_fabric_review_pins.py",
+        "tests/test_discovery_correction_identity_review.py",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+        "tests/test_executive_installed_peer.py",
+        "tests/test_dsh_native_composition.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_executive_launchd_config.py"
+      ],
+      "base_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "failed_cases": [
+        {
+          "class": "tests.test_os_public_edge_publication",
+          "kind": "error",
+          "name": "test_native_post_contract_survives_real_stage_prepare_and_finalize[inputs0]"
+        },
+        {
+          "class": "tests.test_deepseek_os_asset_layout",
+          "kind": "failure",
+          "name": "test_actual_manifest_and_public_edge_accept_exact_layouts[names0]"
+        },
+        {
+          "class": "tests.test_deepseek_os_asset_layout",
+          "kind": "failure",
+          "name": "test_actual_manifest_and_public_edge_accept_exact_layouts[names1]"
+        },
+        {
+          "class": "tests.test_deepseek_os_asset_layout",
+          "kind": "failure",
+          "name": "test_actual_manifest_and_public_edge_accept_exact_layouts[names2]"
+        },
+        {
+          "class": "tests.test_deepseek_os_asset_layout",
+          "kind": "failure",
+          "name": "test_actual_manifest_and_public_edge_accept_exact_layouts[names3]"
+        },
+        {
+          "class": "tests.test_deepseek_os_asset_layout",
+          "kind": "failure",
+          "name": "test_actual_manifest_and_public_edge_accept_exact_layouts[names4]"
+        }
+      ],
+      "finished_at": "2026-11-08T10:09:52.551101+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "888acaa9d36a4040f03e2b182782cc50d685bb5b253cf7926ff4cb952fc1543d",
+      "junit_suites": [
+        {
+          "errors": "1",
+          "failures": "5",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "1932",
+          "time": "233.239",
+          "timestamp": "2026-11-08T03:05:56.836338-07:00"
+        }
+      ],
+      "log_sha256": "c764f80007a1f1231777808555ab2be7785ee137f4aef61f10534460df2f057f",
+      "receipt_path": "/private/tmp/mmx-dsh-c44-composition-tests-20261108-pro2.json",
+      "receipt_sha256": "c6985b5a9fe7c6832a58b3b75d4516e7419c7a70e0c1707d915c049b6620f986",
+      "source_inputs": 7549,
+      "source_sha256_count": 7549,
+      "source_sha256_snapshot_sha256": "357fb533b0fcfe6f6afed1a0caa3542d7c94fcf53c9b82e31133e59f9cb6622f",
+      "started_at": "2026-11-08T10:05:55.550932+00:00"
+    },
+    "c44-final-fixtures-20261108-pro1": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "--junitxml=/private/tmp/mmx-dsh-c44-final-fixtures-20261108-pro1.xml",
+        "tests/test_deepseek_os_asset_layout.py",
+        "tests/test_os_public_edge_publication.py"
+      ],
+      "base_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "failed_cases": [],
+      "finished_at": "2026-11-08T10:19:17.026834+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "af0c00085dc49e8e7f28859df62e722428157007b452e6cc8cc40dc15df2f2c9",
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "183",
+          "time": "123.667",
+          "timestamp": "2026-11-08T03:17:11.286121-07:00"
+        }
+      ],
+      "log_sha256": "82482b52e11ca0f3e28ee92e286a78b081f628422f0026ab2cef161ff7303b54",
+      "receipt_path": "/private/tmp/mmx-dsh-c44-final-fixtures-20261108-pro1.json",
+      "receipt_sha256": "1e14121ba60cdac703ac6c6d603dc3be273219d05d476d9721ce6e4a9845a183",
+      "source_inputs": 7549,
+      "source_sha256_count": 7549,
+      "source_sha256_snapshot_sha256": "cec784a0dc6dbd81933c4d687bb62a51a874ec32fe0dc92c4b4cf5bd51d503e8",
+      "started_at": "2026-11-08T10:17:09.817081+00:00"
+    },
+    "c44-linux-transport-20261108-pro2": {
+      "archive_sha256": "23b29e4b0845ccd7e48e26ac79207213b4d32a86a319d816d7648838781bd4bc",
+      "argv": [
+        "/usr/local/bin/docker",
+        "run",
+        "--rm",
+        "--name",
+        "mmx-dsh-c44-transport-pro2",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,mode=1777",
+        "--tmpfs",
+        "/fixture:rw,exec,nosuid,nodev,mode=0755",
+        "--mount",
+        "type=bind,src=/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro2-source,dst=/repo,readonly",
+        "sha256:bfb1bc04d37596a1dde15199a75c26398483c84245e5e755b09d99c5da504d1c"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-11-08T10:06:30.535481+00:00",
+      "image": "sha256:bfb1bc04d37596a1dde15199a75c26398483c84245e5e755b09d99c5da504d1c",
+      "installed": false,
+      "log_sha256": "320a94a5a908f26619f6d6d8f90950765774be39ea4c3b1aa14a1febe8af476e",
+      "provider_calls": 0,
+      "receipt_path": "/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro2.json",
+      "receipt_sha256": "d8d28514aae704e06f2db1b907944487337e07fb377885279da1c233844696d9",
+      "schema": "mastermind.dsh.c44_linux_transport_proof.v1",
+      "source": "/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro2-source",
+      "source_archive": "/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro2-source.tar",
+      "source_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "source_tree": "c8e1b103bd46b5a69633eb0b15a966a4b0ccd4b0",
+      "source_unchanged": true,
+      "started_at": "2026-11-08T10:06:01.277477+00:00"
+    },
+    "c44-ui-composition-20261108-pro1": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/vitest/vitest.mjs",
+        "run",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os",
+        "--reporter=default",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c44-ui-composition-20261108-pro1.xml",
+        "src/resources/ModelConfigurationRead.test.tsx",
+        "src/conversations/new-conversation/native-conversation-consumer.test.tsx",
+        "src/conversations/new-conversation/native-fresh-journey.test.tsx",
+        "src/meta-ceo/MetaCeoOffice.composition.test.tsx",
+        "src/App.conversations-list-integration.test.tsx",
+        "src/App.native-goal-recovery.integration.test.tsx"
+      ],
+      "base_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "failed_cases": [],
+      "finished_at": "2026-11-08T10:06:05.509840+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "b3a93913462ac8c85ce5b199456066d5ac38ba24265eec6eac02489bbbf2f037",
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "src/App.conversations-list-integration.test.tsx",
+          "skipped": "0",
+          "tests": "4",
+          "time": "1.995767958",
+          "timestamp": "2026-11-08T10:06:05.070Z"
+        },
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "src/App.native-goal-recovery.integration.test.tsx",
+          "skipped": "0",
+          "tests": "15",
+          "time": "7.009008333",
+          "timestamp": "2026-11-08T10:06:05.071Z"
+        },
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "src/conversations/new-conversation/native-conversation-consumer.test.tsx",
+          "skipped": "0",
+          "tests": "12",
+          "time": "0.386413333",
+          "timestamp": "2026-11-08T10:06:05.074Z"
+        },
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "src/conversations/new-conversation/native-fresh-journey.test.tsx",
+          "skipped": "0",
+          "tests": "10",
+          "time": "0.499687875",
+          "timestamp": "2026-11-08T10:06:05.076Z"
+        },
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "src/meta-ceo/MetaCeoOffice.composition.test.tsx",
+          "skipped": "0",
+          "tests": "8",
+          "time": "0.403814584",
+          "timestamp": "2026-11-08T10:06:05.077Z"
+        },
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "src/resources/ModelConfigurationRead.test.tsx",
+          "skipped": "0",
+          "tests": "10",
+          "time": "0.375311041",
+          "timestamp": "2026-11-08T10:06:05.079Z"
+        }
+      ],
+      "log_sha256": "ad1f37f02fe4392f19093d5430f7032b5b62a3e7fe4a99dd69af43a96240f169",
+      "receipt_path": "/private/tmp/mmx-dsh-c44-ui-composition-20261108-pro1.json",
+      "receipt_sha256": "d82b5e53e0c4de810e4b76d11879d70f4b1eeb1cacef2522dafbd8b8c39cc3e9",
+      "source_inputs": 7549,
+      "source_sha256_count": 7549,
+      "source_sha256_snapshot_sha256": "357fb533b0fcfe6f6afed1a0caa3542d7c94fcf53c9b82e31133e59f9cb6622f",
+      "started_at": "2026-11-08T10:05:54.661503+00:00"
+    },
+    "c44-ui-typecheck-20261108-pro1": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/node_modules/typescript/bin/tsc",
+        "-p",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/app/mastermind_os/tsconfig.build.json",
+        "--noEmit",
+        "--pretty",
+        "false"
+      ],
+      "base_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T10:07:29.394191+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "receipt_path": "/private/tmp/mmx-dsh-c44-ui-typecheck-20261108-pro1.json",
+      "receipt_sha256": "f1a62f0f4997d474c8190dfd78b1206d41bb27cafdecced9fc85eafe6bf996b7",
+      "source_inputs": 7549,
+      "source_sha256_count": 7549,
+      "source_sha256_snapshot_sha256": "357fb533b0fcfe6f6afed1a0caa3542d7c94fcf53c9b82e31133e59f9cb6622f",
+      "started_at": "2026-11-08T10:07:28.073423+00:00"
+    }
+  },
+  "retained_preimage_attempts": {
+    "c43-complete-build-20261108-pro1": {
+      "argv": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "-I",
+        "-S",
+        "-B",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/package_attended.py",
+        "--donor",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022",
+        "--pnpm",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.pnpm/pnpm@11.28.5/node_modules/pnpm/bin/pnpm.cjs",
+        "--node",
+        "/private/tmp/mmx-dsh-c41-node-build-prefix-20261108-pro1/bin/node",
+        "--release",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c43-20261108-pro1",
+        "--state",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-state-c43-20261108-pro1",
+        "--public-url",
+        "https://chat.mastermind-x.com/",
+        "--port",
+        "4180",
+        "--relay-port",
+        "4181"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:26:59.218875+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "a70a88be933e2bec31bc79627031deb142bdcd99d1f437ce0c760fd37f3dd581",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-complete-build-20261108-pro1.json",
+      "receipt_sha256": "da54376f4e8dd4097407ef5d66445ee079e5613807a0f737c1f2e3cd71da1288",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "47fc6945e993987f15e7bee87f57fef69fc009212397cc0585673c3fa981b679",
+      "started_at": "2026-11-08T09:23:57.818228+00:00"
+    },
+    "c43-native-worker-entry-20261108-pro1": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--pool",
+        "threads",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.native-capability.config.mts",
+        "native-worker-entry.test.ts"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T09:27:54.645371+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "3a724e8fb0c64c3d6cc01228ddf2e5a5d0c19ca4108e3c5e34832b68ee19673c",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-native-worker-entry-20261108-pro1.json",
+      "receipt_sha256": "91d1eebf427f1e46e11e74bc6bf4c293158c18fd4f9de2444faff4e7d24cc5d7",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "47fc6945e993987f15e7bee87f57fef69fc009212397cc0585673c3fa981b679",
+      "started_at": "2026-11-08T09:27:51.187586+00:00"
+    },
+    "c43-package-check-20261108-pro1": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c41-node-build-prefix-20261108-pro1/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/.cache/attended-native-c43-20261108-pro1/launch_attended.mjs",
+        "--check-only"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T09:28:27.888426+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "a981d37dae317604bd0bf63abcabd48ece98e45e01e3ba01e07551f0ab4f5487",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-package-check-20261108-pro1.json",
+      "receipt_sha256": "351766d64666622eaf41e4d1d85039ea3fc49abe84016f18a80ab1ae43708b61",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "47fc6945e993987f15e7bee87f57fef69fc009212397cc0585673c3fa981b679",
+      "started_at": "2026-11-08T09:27:49.688954+00:00"
+    },
+    "c43-packaged-history-20261108-pro1": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--pool",
+        "threads",
+        "--root",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/company_plugin/vitest.host.config.mts",
+        "native.closed-history.test.ts",
+        "-t",
+        "qualified packaged Worker entry"
+      ],
+      "base_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T09:27:55.901032+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "326b2f13888ab4cfcb823ef164a31bd8c6cf8dad392b506a2114bd106f384282",
+      "receipt_path": "/private/tmp/mmx-dsh-c43-packaged-history-20261108-pro1.json",
+      "receipt_sha256": "2e1d44ba88a475530073dd24987117c7f6d829f7eaf3fa757a8aedd3d4640bbf",
+      "source_inputs": 7226,
+      "source_sha256_count": 7226,
+      "source_sha256_snapshot_sha256": "47fc6945e993987f15e7bee87f57fef69fc009212397cc0585673c3fa981b679",
+      "started_at": "2026-11-08T09:27:53.253662+00:00"
+    },
+    "c44-composition-tests-20261108-pro1": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "--maxfail=12",
+        "--junitxml=/private/tmp/mmx-dsh-c44-composition-tests-20261108-pro1.xml",
+        "tests/test_model_configuration_public_edge.py",
+        "tests/test_os_public_edge.py",
+        "tests/test_os_public_edge_transition.py",
+        "tests/test_os_public_edge_publication.py",
+        "tests/test_source_operation_public_edge.py",
+        "tests/test_os_public_project_plan_route.py",
+        "tests/test_os_public_project_knowledge_routes.py",
+        "tests/test_os_public_project_archive_route.py",
+        "tests/test_byok_roles_public_edge.py",
+        "tests/test_native_session_send_public_edge.py",
+        "tests/test_native_draft_identity.py",
+        "tests/test_following_conversation_public_edge.py",
+        "tests/test_workspace_result_references_http.py",
+        "tests/test_h6_model_configuration_composition.py",
+        "tests/test_deepseek_os_asset_layout.py",
+        "tests/test_os_private_entry_release_profile.py",
+        "tests/test_os_release_assets.py",
+        "tests/test_workspace_fabric_review_pins.py",
+        "tests/test_discovery_correction_identity_review.py",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+        "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+        "tests/test_executive_installed_peer.py",
+        "tests/test_dsh_native_composition.py",
+        "tests/test_deepseek_attended_export.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_executive_launchd_config.py"
+      ],
+      "base_sha": "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "failed_cases": [
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch[False-False-fixed8-posts8]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch[False-True-fixed8-posts8]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch[True-False-fixed8-posts8]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch[True-True-fixed8-posts8]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed0-posts0]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed1-posts1]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed2-posts2]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed3-posts3]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed4-posts4]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed5-posts5]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed6-posts6]"
+        },
+        {
+          "class": "tests.test_os_public_edge_transition",
+          "kind": "failure",
+          "name": "test_complete_but_incompatible_os_profiles_refuse[False-fixed7-posts7]"
+        }
+      ],
+      "finished_at": "2026-11-08T10:02:29.618119+00:00",
+      "inputs_unchanged": true,
+      "junit_sha256": "6a18173349ca4182e6d02e46034431443ef1b02df784670ace753f479a202627",
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "12",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "115",
+          "time": "8.216",
+          "timestamp": "2026-11-08T03:02:20.209709-07:00"
+        }
+      ],
+      "log_sha256": "91c872285459a12e946ee20af444c72495fb2fc56b802a8761a079f18aa4d43e",
+      "receipt_path": "/private/tmp/mmx-dsh-c44-composition-tests-20261108-pro1.json",
+      "receipt_sha256": "4fddff33557c556b0f406c7cb4ebcf7f50ecc5f927e7a5f6dd673a558c0f1220",
+      "source_inputs": 7549,
+      "source_sha256_count": 7549,
+      "source_sha256_snapshot_sha256": "400c368b1865c5e4a1d67f9786893668ad4c308ae06d6cb9bd0e0779dd46afc6",
+      "started_at": "2026-11-08T10:02:18.754496+00:00"
+    },
+    "c44-linux-transport-20261108-pro1": {
+      "archive_sha256": "bcf7b5912fd9046c91848513310db9db91394d9ae2dac018aa1fca92bda21212",
+      "argv": [
+        "/usr/local/bin/docker",
+        "run",
+        "--rm",
+        "--name",
+        "mmx-dsh-c44-transport-pro1",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,mode=1777",
+        "--tmpfs",
+        "/fixture:rw,exec,nosuid,nodev,mode=0755",
+        "--mount",
+        "type=bind,src=/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro1-source,dst=/repo,readonly",
+        "sha256:bfb1bc04d37596a1dde15199a75c26398483c84245e5e755b09d99c5da504d1c"
+      ],
+      "exit_code": 1,
+      "finished_at": "2026-11-08T10:02:53.411847+00:00",
+      "image": "sha256:bfb1bc04d37596a1dde15199a75c26398483c84245e5e755b09d99c5da504d1c",
+      "installed": false,
+      "log_sha256": "df56124504e3d75c45fd85fed674d50dad1e22cb011b033a1731f3fe1eb4cb72",
+      "provider_calls": 0,
+      "receipt_path": "/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro1.json",
+      "receipt_sha256": "ab488a7e440c39ab5f97ebdd8e79a1d4768ca3400487bce3709a8c126d02151b",
+      "schema": "mastermind.dsh.c44_linux_transport_proof.v1",
+      "source": "/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro1-source",
+      "source_archive": "/private/tmp/mmx-dsh-c44-linux-transport-20261108-pro1-source.tar",
+      "source_sha": "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f",
+      "source_tree": "bf8550de3c2e81f10c81adfe3a7f278dfa6289e1",
+      "source_unchanged": true,
+      "started_at": "2026-11-08T10:02:24.308819+00:00"
+    }
+  },
+  "retained_preimage_explanation": {
+    "c43": "First full candidate passed static build/check but failed actual compiled import on raw standard decorators. Pinned transform and Node syntax checks repaired the original producer; pro2 actual compiled package proof passed. The pro1 candidate is retained, not installed.",
+    "c44_profiles": "Pro1 exposed historical fixture aliases/profile counts. Preserve the complete old profile and append the new model profile. Pro2 then isolated the final two stale fixtures, selectively requalified above.",
+    "c44_transport": "Pro1 had180 passes and one refusal-message mismatch. Restored the original separate refusal diagnostics; pro2 passed181.",
+    "merge": "An already-integrated stale MERGE_HEAD was reconciled by original-checkout git merge --quit after clean/ancestry proof. The next wrapper attempt terminated before merge effect and was reconciled by target readback. The captured original-carrier merge then reached and resolved nine conflicts; no reset, alternate worktree or publisher."
+  },
+  "schema": "mastermind.deepseek_native_history_master_composition.v1",
+  "selective_requalification": {
+    "all_prior_changed_module_cases_preserved": true,
+    "changed_inputs": [
+      "tests/test_deepseek_os_asset_layout.py",
+      "tests/test_os_public_edge_publication.py"
+    ],
+    "final_source_snapshot_matches_committed_tree": true,
+    "full_changed_module_rerun_cases": 183,
+    "method": "Full rerun of both changed test modules; every other snapshotted input byte-identical to the broad run. This is not a full-suite rerun.",
+    "new_cases": [
+      {
+        "class": "tests.test_deepseek_os_asset_layout",
+        "name": "test_actual_manifest_and_public_edge_accept_exact_layouts[names5]"
+      }
+    ],
+    "original_broad_cases": 1932,
+    "original_broad_passed": 1926,
+    "original_cases_in_changed_modules": 182,
+    "unchanged_passing_cases_retained": 1750,
+    "union_distinct_cases_qualified": 1933
+  },
+  "source_commits": [
+    {
+      "action_ref": "b8be7f219d00f760d25c48bf6979aadd8f42310eedc52aa5f4907588774a0d72",
+      "commit": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+      "parents": [
+        "15c093d79bef3a06649f174894389ec51b8673eb"
+      ],
+      "tree": "c748cdb1b109e06602e1a096b4dfee4b7246d7d3"
+    },
+    {
+      "action_ref": "0d9e4cdd0367233920cacef128cefa16e81392d086a7e2d5bb99b5d584198ef1",
+      "commit": "e754aee1132b1304786fb6b0d09989535062e116",
+      "parents": [
+        "11eea754d6a93f275559f8cff3b6bcadb0dd162a"
+      ],
+      "tree": "828f8246c8584b2078a0d15434bf6d849bbf900b"
+    },
+    {
+      "action_ref": "5b5219c21d65244e8748eeef769c60fa8522b328c6d4009bdba62b9e0cd6019e",
+      "commit": "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f",
+      "parents": [
+        "e754aee1132b1304786fb6b0d09989535062e116",
+        "7a3c0b78710ffa66140228b6e2af53036c78d63e"
+      ],
+      "tree": "bf8550de3c2e81f10c81adfe3a7f278dfa6289e1"
+    },
+    {
+      "action_ref": "61fb5a8f80b290ccd8b9ceac14189d96b058b94933d5f1cc9431f14649bb0e90",
+      "commit": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "parents": [
+        "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f"
+      ],
+      "tree": "c8e1b103bd46b5a69633eb0b15a966a4b0ccd4b0"
+    },
+    {
+      "action_ref": "301527a390c09ceb3820893e51a09c0d73038a4fef43fa6e7453bd966d3daca3",
+      "commit": "e314575d6d38dd3472d53ed77cfb0d637f9f1ec3",
+      "parents": [
+        "26ab5b43d52930c791d2268ff7f25c70428bb3d4"
+      ],
+      "tree": "2fb96fa29570959af1f109a3c90538b8aabdb1d3"
+    }
+  ],
+  "source_effects": [
+    {
+      "action_ref": "b8be7f219d00f760d25c48bf6979aadd8f42310eedc52aa5f4907588774a0d72",
+      "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+      "clean": true,
+      "code": "APPLIED",
+      "commit_head_sha": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+      "effect_state": "APPLIED",
+      "index_synced": true,
+      "local_head_sha": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+      "operation_id": "deepseek-mastermind-chat-20261106-c2",
+      "previous_head_sha": "15c093d79bef3a06649f174894389ec51b8673eb",
+      "schema": "mastermind.studio_git_commit_result.v1",
+      "status": "OK"
+    },
+    {
+      "action_ref": "0d9e4cdd0367233920cacef128cefa16e81392d086a7e2d5bb99b5d584198ef1",
+      "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+      "clean": true,
+      "code": "APPLIED",
+      "commit_head_sha": "e754aee1132b1304786fb6b0d09989535062e116",
+      "effect_state": "APPLIED",
+      "index_synced": true,
+      "local_head_sha": "e754aee1132b1304786fb6b0d09989535062e116",
+      "operation_id": "deepseek-mastermind-chat-20261106-c2",
+      "previous_head_sha": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+      "schema": "mastermind.studio_git_commit_result.v1",
+      "status": "OK"
+    },
+    {
+      "action_ref": "5b5219c21d65244e8748eeef769c60fa8522b328c6d4009bdba62b9e0cd6019e",
+      "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+      "clean": true,
+      "code": "APPLIED",
+      "commit_head_sha": "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f",
+      "effect_state": "APPLIED",
+      "index_synced": true,
+      "local_head_sha": "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f",
+      "operation_id": "deepseek-mastermind-chat-20261106-c2",
+      "previous_head_sha": "e754aee1132b1304786fb6b0d09989535062e116",
+      "schema": "mastermind.studio_git_commit_result.v1",
+      "status": "OK"
+    },
+    {
+      "action_ref": "61fb5a8f80b290ccd8b9ceac14189d96b058b94933d5f1cc9431f14649bb0e90",
+      "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+      "clean": true,
+      "code": "APPLIED",
+      "commit_head_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "effect_state": "APPLIED",
+      "index_synced": true,
+      "local_head_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "operation_id": "deepseek-mastermind-chat-20261106-c2",
+      "previous_head_sha": "c6c5097fdd6e976edc85591836bf3a3c8ec68d8f",
+      "schema": "mastermind.studio_git_commit_result.v1",
+      "status": "OK"
+    },
+    {
+      "action_ref": "301527a390c09ceb3820893e51a09c0d73038a4fef43fa6e7453bd966d3daca3",
+      "branch": "sol/web-deepseek-mastermind-chat-20261106-c2",
+      "clean": true,
+      "code": "APPLIED",
+      "commit_head_sha": "e314575d6d38dd3472d53ed77cfb0d637f9f1ec3",
+      "effect_state": "APPLIED",
+      "index_synced": true,
+      "local_head_sha": "e314575d6d38dd3472d53ed77cfb0d637f9f1ec3",
+      "operation_id": "deepseek-mastermind-chat-20261106-c2",
+      "previous_head_sha": "26ab5b43d52930c791d2268ff7f25c70428bb3d4",
+      "schema": "mastermind.studio_git_commit_result.v1",
+      "status": "OK"
+    }
+  ],
+  "source_head": "e314575d6d38dd3472d53ed77cfb0d637f9f1ec3",
+  "source_judgment": {
+    "actions": "Read-only source/contract judgment; no child edits, tests or runtime/installed probes.",
+    "children": [
+      "c38_layout_review",
+      "c38_materialization_review",
+      "c38_registry_ci_judgment"
+    ],
+    "finding": "Concrete normal-argv process-purpose defect corrected; exact source-pin preservation and final fixture repairs verified.",
+    "kind": "distinct source judgment, not GitHub APPROVED"
+  },
+  "workspace": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2"
+}
