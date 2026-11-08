@@ -26,6 +26,7 @@ from typing import Any, Callable
 from . import web_sol_instance as wsi
 from . import web_sol_protocol as wsp
 from . import web_sol_census_protocol as census
+from . import web_sol_browser_protocol as browser
 
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -61,6 +62,8 @@ _PROBE_KEYS = frozenset(
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
 _TYPED_REENTRY_NONCES: set[str] = set()
 MAX_TYPED_REENTRY_NONCES = 256
+_BROWSER_NONCES: dict[str, datetime] = {}
+MAX_BROWSER_NONCES = 2048
 
 
 class NativeHostError(RuntimeError):
@@ -477,6 +480,8 @@ def _is_probe_event(message: Any) -> bool:
 
 
 def _timeout_code(request: dict[str, Any]) -> str:
+    if request.get("schema") == browser.REQUEST_SCHEMA:
+        return "browser_unavailable" if request.get("action") in browser.READ_ACTIONS else "browser_effect_unknown"
     if request.get("action") == "FOREGROUND":
         return "foreground_effect_unknown"
     if request.get("action") == "TYPED_REENTRY":
@@ -488,11 +493,14 @@ def _receipt_matches(
     request: dict[str, Any],
     receipt: dict[str, Any],
 ) -> bool:
-    fields = census.IDENTITY_FIELDS if request.get("schema") == census.REQUEST_SCHEMA else _MATCH_FIELDS
+    fields = (browser.IDENTITY_FIELDS if request.get("schema") == browser.REQUEST_SCHEMA
+              else census.IDENTITY_FIELDS if request.get("schema") == census.REQUEST_SCHEMA else _MATCH_FIELDS)
     return all(receipt.get(field) == request[field] for field in fields)
 
 
 def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
+    if request.get("schema") == browser.REQUEST_SCHEMA:
+        return "browser_unavailable" if request.get("action") in browser.READ_ACTIONS else "browser_effect_unknown"
     if request.get("action") == "FOREGROUND":
         return "foreground_effect_unknown"
     if request.get("action") == "TYPED_REENTRY":
@@ -523,9 +531,21 @@ def forward_request(
 
     timeout = _validate_timeout_seconds(timeout_seconds)
     is_census = request.get("schema") == census.REQUEST_SCHEMA if isinstance(request, dict) else False
-    accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
-    if not is_census:
+    is_browser = request.get("schema") == browser.REQUEST_SCHEMA if isinstance(request, dict) else False
+    accepted = (browser.validate_window(request) if is_browser else
+                census.validate_census_window(request) if is_census else wsp.validate_request(request))
+    if not is_census and not is_browser:
         accepted = wsp.validate_action_window(accepted, now=datetime.now(timezone.utc))
+    if is_browser:
+        current = datetime.now(timezone.utc)
+        for key, expiry in list(_BROWSER_NONCES.items()):
+            if expiry <= current:
+                del _BROWSER_NONCES[key]
+        if accepted["nonce"] in _BROWSER_NONCES:
+            return browser.receipt(accepted, status="NONCE_REUSED")
+        if len(_BROWSER_NONCES) >= MAX_BROWSER_NONCES:
+            return browser.receipt(accepted, status="NONCE_LIMIT")
+        _BROWSER_NONCES[accepted["nonce"]] = browser._timestamp(accepted["expires_at"])
     if (
         accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
         and accepted["nonce"] in _TYPED_REENTRY_NONCES
@@ -541,7 +561,7 @@ def forward_request(
         )
     if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         _TYPED_REENTRY_NONCES.add(accepted["nonce"])
-    fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
+    fields = browser.IDENTITY_FIELDS if is_browser else census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
         exchange_deadline,
@@ -577,7 +597,8 @@ def forward_request(
                     _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
                 )
             try:
-                receipt = census.validate_census_receipt(message) if is_census else wsp.validate_receipt(message)
+                receipt = (browser.validate_receipt(message) if is_browser else
+                           census.validate_census_receipt(message) if is_census else wsp.validate_receipt(message))
             except wsp.WebSolProtocolError as exc:
                 raise ChromeChannelError(
                     _untrusted_receipt_code(accepted, "receipt_invalid")
@@ -817,6 +838,12 @@ def _serve_client(
                 if request["adapter_instance_id"] != expected_instance_id:
                     raise NativeHostError("transport_instance_mismatch")
                 deadline = Deadline(ends_at=started + census.TOTAL_SECONDS)
+            elif request.get("schema") == browser.REQUEST_SCHEMA:
+                request = browser.validate_window(request)
+                if (request["adapter_instance_id"] != expected_instance_id
+                        or request["transport_boot_nonce"] != boot_nonce):
+                    raise NativeHostError("transport_instance_mismatch")
+                deadline = Deadline(ends_at=started + browser.TOTAL_SECONDS)
             receipt = forward_request(
                 request,
                 write_chrome=lambda document: _write_chrome(

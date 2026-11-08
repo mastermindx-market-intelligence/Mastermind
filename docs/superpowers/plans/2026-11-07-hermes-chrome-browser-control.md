@@ -56,3 +56,20 @@ Workspace: /Volumes/Mastermind/agent-workspaces/web/hermes-chrome-browser-contro
 Known applied effect: managed workspace acquisition at the protected base.
 Uncertain effects: none at initial save.
 Next action: finish native-host/client/Hermes seam inspection, then freeze and implement the smallest complete browser-control path.
+
+
+## Implementation milestone (2026-11-07)
+
+State: MORE_WORK_EXISTS. Source is implemented and locally qualified; protected CI/release, coordinated installation and actual installed Chrome/Orbita journeys remain owed.
+
+- Added closed browser request/receipt family to the existing extension/native socket/client. Package 0.3.0 and capability digest c3cf6a8186d967b499e74432acc23f10a9a765138fd50e2c8e0cfa54e9a38309 qualify the added command surface; old ChatGPT actions retain their separate schemas.
+- Added native Hermes PluginContext consumer, immutable runtime descriptor/source closure, actual native session/profile binding, existing-inventory projection, multimodal screenshot presentation and uncertainty-preserving one-shot subprocess invocation.
+- Chrome debugger must be required at install/update (official permissions API); optional tabs/scripting and website grants still gate every browser action. Removed the proposed unsupported optional-debugger toggle. No transport permission-grant operation, browser daemon, alternate account, raw CDP/eval, lifecycle or registry was added.
+- Repaired advisory findings within incumbent owners: current connection/expiry checks, document/snapshot invalidation, focus preparation and lost-focus uncertainty, bounded construction, page scrolling and non-sensitive form-state readback. Native advisory child browser_architecture performed judgment only and is terminal. Its earlier-snapshot advice is not final-head or formal GitHub approval.
+- Paid Fabric run hermes-browser-page-core-20261107-c3 was REQUEST_REFUSED_BEFORE_LAUNCH / UNCLASSIFIED_PRELAUNCH_REFUSAL, controller exit 75, no result or worker START. One bounded same-run diagnostic completed. No replay. Direct source work continued under NO_ELIGIBLE_PRE_EFFECT_WORKER.
+- M2 observed qualification: 739 tests passed, zero failures/skips (Web Sol regression plus native browser plugin tests; /tmp/hermes-browser-qualified-20261107.xml). This includes the existing native census vertical. The final added status package-version field separately passed the focused Node controller contract.
+- Actual isolated Google Chrome DOM fixture passed sensitive exclusions, form readback, consumed refs, session separation, target mutation, offscreen refusal, document scrolling, focus proof, same-URL reload and snapshot bounds (tests/browser_page_playwright.cjs). This is fixture proof, not installed-profile acceptance.
+- Existing M2 surface inventory contains four multilogin-managed adapter coordinates. Three incumbent socket entries were observed; no upgraded connectivity claim. Compatibility installation wrappers currently refer to an older managed source workspace. Preserve incumbent effect/writer custody before any update. Any installed browser absent from existing validated coordinates requires enrollment-owner reconciliation, not fabricated ChatGPT bindings.
+- Native installed Hermes runtime qualification is next; initial guessed venv Python path was absent (no execution). The installed launcher exposed its actual pinned Python/bootstrap command. No install, enable, production browser command, merge or release has run.
+
+Next: finish native registry and settings UI qualification, publish this same branch/PR, consume required CI and actual release rules, then qualify the incumbent per-profile installer and browser permission/readback gates. No new worker or background observer is running.
