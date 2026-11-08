@@ -785,8 +785,8 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
 REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
+    'sha256': '73d00ddf64d29d17e0a677a87ee43cd4febfc9310f8127e9a6533e42ea6a28e3',
+    'sites': ((1675, 26, 31, 'int', '0o700'),),
 }
 
 
@@ -801,6 +801,35 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
+}
+
+# Hermes primary APPLICATION codec: fixed input-byte and conversation-count
+# bounds, never OS accounts, principals, permissions or service selection.
+# Attended source self-review under the CEO-Web waiver. Full source hash and
+# complete typed tokens remain required; any drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
+    "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
+}
+
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {
+    "sha256": "78bde48fefedd95f7cec923d83dac6886424913887b683061877db4c2f0ed612",
+    "sites": ((335, 37, 40, "int", "409"),),
+}
+
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
 }
 
 # Native Agent OS v2 adds private readback and projects an optional real child.
@@ -836,4 +865,12 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
     "sites": ((252, 46, 49, "int", "512"),),
+}
+
+# Select-option value length bound, not a UID/GID or account identity. Only this
+# complete protocol source and typed literal are reviewed; any byte drift restores
+# ordinary D8 scrutiny. This grants no browser permission or runtime authority.
+REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
+    "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
+    "sites": ((128, 72, 75, "int", "512"),),
 }

@@ -221,8 +221,8 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         if (attempt["request"]["content_sha256"] != event["content_sha256"]
                 or attempt["request"]["content_fields"] != event["fields"]):
             return
-    from .native_transport_observation import SCHEMA as CURRENT_TRANSPORT_OBSERVATION
-    if transport["schema"] == CURRENT_TRANSPORT_OBSERVATION:
+    from .native_transport_observation import SCHEMA as CURRENT_TRANSPORT_OBSERVATION, PROVIDER_SCHEMAS
+    if transport["schema"] in PROVIDER_SCHEMAS:
         # Identify the frozen public runtime selector only when its label
         # matched samples at dispatch, original factory return and every
         # retained HTTP-send boundary. This does not attest factory inputs,
@@ -238,6 +238,18 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         elif (all(row["provider_client_check"] == "matched" for row in dispatches)
                 and all(item == expected_provider for item in witnesses)):
             draft["execution"]["provider"] = selected_provider
+    if transport["schema"] == CURRENT_TRANSPORT_OBSERVATION:
+        # A closed nonsecret mechanism from the original credential/client/send
+        # chain. No account, exact realm, remote acceptance or delivery claim.
+        checks = [row["auth_client_check"] for row in dispatches]
+        mechanisms = [row["auth_mechanism"] for row in attempts]
+        selected_auth = marker["configuration"]["execution"]["auth_realm_class"]
+        if ("conflicting" in checks or "conflicting" in mechanisms
+                or (all(value == "API_KEY" for value in mechanisms) and selected_auth != "API_KEY")):
+            unavailable["execution.auth_realm_class"] = "OBSERVATION_CONFLICT"
+        elif (selected_auth == "API_KEY" and all(value == "matched" for value in checks)
+                and all(value == "API_KEY" for value in mechanisms)):
+            draft["execution"]["auth_realm_class"] = "API_KEY"
     physical_ids = {row["identity"].get("agent_session_id") for row in calls}
     if len(physical_ids) == 1:
         draft["execution"]["native_session_fingerprint"] = digest_value([

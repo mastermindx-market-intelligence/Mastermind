@@ -526,7 +526,7 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
 def run(launch, argv: list[str]) -> int:
     """Enter native main only through the actual held release capability."""
     from .profile import load_profile
-    from .supervisor import expected_disabled_mcp
+    from .supervisor import expected_disabled_mcp, expected_disabled_mcp_with_application
 
     role = launch.row["role"]
     state = Path(launch.row["state_dir"])
@@ -545,7 +545,7 @@ def run(launch, argv: list[str]) -> int:
     consumer_document = launch.recipe.get("executive_consumer")
     primary_document = launch.recipe.get("primary_application")
     if primary_document is not None:
-        expected_disabled_mcp(profile, consumer_document, primary_document)
+        expected_disabled_mcp_with_application(profile, consumer_document, primary_application=primary_document)
     elif consumer_document is None:
         expected_disabled_mcp(profile)
     else:
@@ -598,6 +598,7 @@ def run(launch, argv: list[str]) -> int:
         if "evaluation_inputs" in launch.recipe:
             from .native_eval_inputs import NativeEvalInputOwner
             request_observation.evaluation_owner = NativeEvalInputOwner(launch, profile, request_observation)
+            request_observation.transport_installation.bind_credentials(vendor, profile)
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,

@@ -280,7 +280,7 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
     from .system_service import assert_root_service_cgroup, assert_role_network_profile
     from .role_isolation import assert_role_credential_isolation
     from .tcp_sandbox import enforce_role_tcp_ports
-    from .supervisor import expected_disabled_mcp
+    from .supervisor import expected_disabled_mcp, expected_disabled_mcp_with_application
     from .profile import dump_profile
     from ops.executive_os.hermes_role_metadata_observer import (
         _HeldRoleQualification, _query_fixed_pid1, _boot_id,
@@ -295,7 +295,8 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
             or not profile_path.is_absolute()
             or native_launch.recipe.get("schema") not in (
                 "mastermind.hermes_native_gateway_installation/v2",
-                "mastermind.hermes_native_gateway_installation/v3")):
+                "mastermind.hermes_native_gateway_installation/v3",
+                "mastermind.hermes_native_gateway_installation/v4")):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_INSTALLATION_REQUIRED")
     # These existing v2/v3 recipes require a closed enrollment descriptor.
     # Structural validation creates no enrollment and historical EVAL never
@@ -308,6 +309,13 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
     saved_profile = dump_profile(profile)
 
     def qualify_profile():
+        primary = native_launch.recipe.get("primary_application")
+        if primary is not None:
+            current_primary = load_profile(profile_path)
+            enforce_role_tcp_ports(current_primary, native_launch=native_launch)
+            expected_disabled_mcp_with_application(current_primary, native_launch.recipe.get("executive_consumer"),
+                                                   primary_application=primary,
+                                                   evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
         current = load_profile(profile_path)
         if dump_profile(current) != saved_profile:
             raise RuntimeRefusal("NATIVE_ENROLLMENT_PROFILE_CHANGED")
@@ -507,7 +515,8 @@ def _supervise(args: argparse.Namespace, *,
         from .role_isolation import assert_role_credential_isolation
         from .tcp_sandbox import enforce_role_tcp_ports
         assert_role_credential_isolation(profile)
-        enforce_role_tcp_ports(profile)
+        enforce_role_tcp_ports(profile, **({"native_launch": native_launch}
+            if profile.model_provider == "mastermind-fabric" else {}))
         from .role_status_publisher import publisher_from_process
         publisher = publisher_from_process(profile, custody_observer=custody_observer)
         if profile.gateway_backend == "native-session-authority":

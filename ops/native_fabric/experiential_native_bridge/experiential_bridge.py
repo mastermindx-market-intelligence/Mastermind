@@ -461,11 +461,17 @@ def qualified_route(
     model: Any = MODEL, plan_lane: str = "free",
 ) -> dict[str, str]:
     """Resolve once for a new selection, then preserve that exact model pin."""
-    if model is None:
+    if model is None or model in PLAN_MODELS:
         adapter = resolve_host_adapter(runtime_root)
         context = _host_context(adapter)
         try:
-            model = select_plan_model(plan_lane, context.get("quota_readback", {}).get("available_models"))
+            if model is None:
+                model = select_plan_model(plan_lane, context.get("quota_readback", {}).get("available_models"))
+            # Funding is an eligibility gate before AUTO can select this route.
+            # Request and send boundaries still re-read the original owner.
+            admit_plan_account(model=model, account=context.get("account"),
+                registration=context.get("registry_entry", {}).get("plan"),
+                observation=context.get("quota_readback"))
         except PlanRequestRefused as exc:
             _refuse(exc.reason)
     witness = preflight(run_id=run_id, task_class=task_class, model=model,
