@@ -87,7 +87,7 @@ def test_partial_extra_duplicate_or_malformed_layout_refuses(names):
         os_asset_mimes(names)
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT])
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT, CLIENT + [PRIVATE[-1]]])
 def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     dist = make_dist(tmp_path, names)
     manifest = build_os_asset_manifest(tmp_path)
@@ -102,11 +102,14 @@ def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     config = render(manifest, 49152)
     for route in routes:
         assert route in config
-    # Five fixed branches: OS GET, legacy OS POST (64KB), the dedicated
-    # source-operation POST branch (98304), and the two public MCP entrypoint
-    # branches (RFC 9728 metadata GET, POST /mcp). Asset names only ever widen
-    # the OS GET matcher; they cannot create or alter an MCP or source branch.
-    assert config.count("reverse_proxy 127.0.0.1:49152") == 5
+    # Six fixed branches: the five original OS/source/MCP branches and the
+    # separate exact native conversation POST. Assets only widen the GET matcher.
+    assert config.count("reverse_proxy 127.0.0.1:49152") == 6
+    from tests.test_os_public_edge_transition import NATIVE_PATHS
+    native = config.split("    @nativepost {", 1)[1].split("    }", 1)[0]
+    assert "method POST" in native
+    assert native.split("path ", 1)[1].strip().split() == list(NATIVE_PATHS)
+    assert config.count("max_size 524288") == 1
     assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
     assert ("path /workspace/source-operation/prepare /workspace/source-operation/submit"
             " /workspace/source-operation/reconcile /workspace/source-operation/advance\n") in config
@@ -116,7 +119,7 @@ def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     assert config.count("/mcp") == 4
     assert config.count("max_size 98304") == 1
     assert config.count("max_size 64KB") == 2
-    assert config.count("header_up Host mcp.mastermind-x.com") == 4
+    assert config.count("header_up Host mcp.mastermind-x.com") == 5
     assert config.count("header_up Host 127.0.0.1") == 1
 
 
