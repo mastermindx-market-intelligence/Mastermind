@@ -50,14 +50,19 @@ finally:
             sys.modules[name] = module
 
 
+def _bind_economic_namespace(request):
+    namespace = pytest.MonkeyPatch()
+    request.addfinalizer(namespace.undo)
+    for directory in reversed(_candidates):
+        namespace.syspath_prepend(str(directory))
+    for name, module in _ECONOMIC_MODULES.items():
+        namespace.setitem(sys.modules, name, module)
+
+
 @pytest.fixture
 def economy(tmp_path,monkeypatch,request):
     fixture_lifecycle=request
-    namespace = pytest.MonkeyPatch()
-    fixture_lifecycle.addfinalizer(namespace.undo)
-    namespace.syspath_prepend(str(NATIVE))
-    for name, module in _ECONOMIC_MODULES.items():
-        namespace.setitem(sys.modules, name, module)
+    _bind_economic_namespace(request)
     here=tmp_path/'ext';(here/'broker').mkdir(parents=True)
     policy=tmp_path/'orch/fabric/pools.yaml';policy.parent.mkdir(parents=True)
     policy.write_text(json.dumps({'pools':{'glm':{'models':{'executor':'glm-5.3-flash'}}}}))

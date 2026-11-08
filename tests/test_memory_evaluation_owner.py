@@ -45,7 +45,7 @@ from tests.test_executive_peer_identity import owner_observation, bind_fixture
 from tests.test_memory_evaluation_contract import ref
 from tests import test_executive_coo_app as coo_app
 from tests import test_mastermind_executive_app_asgi as jwt_fixture
-from tests.test_protected_memory_economic import OperatorOwner, Broker, ProtectedMemoryEconomicOwner, pool_ledger
+from tests.test_protected_memory_economic import OperatorOwner, Broker, ProtectedMemoryEconomicOwner, pool_ledger, _bind_economic_namespace
 rsa_key=jwt_fixture.rsa_key
 REAL_POPEN=subprocess.Popen
 from integrations.executive_mcp.server import _LiteralCooRoute
@@ -81,6 +81,7 @@ def configured(tmp_path,monkeypatch):
 
 @pytest.fixture
 def economy(tmp_path,monkeypatch,request):
+    _bind_economic_namespace(request)
     # Four originally authorized DISPOSABLE children: subject + 2review +1judge.
     # This is initial fixture DATA, never a new allowance on a real root.
     here=tmp_path/'ext';(here/'broker').mkdir(parents=True);policy=tmp_path/'orch/fabric/pools.yaml';policy.parent.mkdir(parents=True)
