@@ -283,3 +283,60 @@ def test_legacy_review_profile_is_not_implicitly_authoring():
             private_key_source=lambda: b"unused",
             permissions={"administration": "write"},
         )
+
+def test_unhashable_action_and_nonstring_host_fields_refuse_without_side_effect():
+    app, fake, _ = make()
+    with pytest.raises(GitHubBotRefused, match="ACTION_ARGUMENTS"):
+        app.perform({"action": {}})
+    assert fake.writes == []
+    with pytest.raises(GitHubBotRefused, match="HOST_BINDING"):
+        make(role=4)
+    with pytest.raises(GitHubBotRefused, match="HOST_GRANT"):
+        make(authorized_paths=(123,))
+
+
+def test_prefix_not_directory_boundary_does_not_grant_sibling_files():
+    app, fake, _ = make(authorized_paths=("docs/hermes",))
+    assert app.binding.path_is_allowed("docs/hermes")
+    assert not app.binding.path_is_allowed("docs/hermes_private/credentials.txt")
+    assert not app.binding.path_is_allowed("docs/hermes/subtree.txt")
+    assert fake.writes == []
+
+
+def test_real_signed_authoring_issuer_scopes_token_and_rejects_extra_grants():
+    from test_github_review_app_token import private_key, NOW
+    import datetime
+
+    key, pem = private_key()
+    expiry = datetime.datetime.fromtimestamp(
+        NOW + 1800, tz=datetime.timezone.utc,
+    ).isoformat().replace("+00:00", "Z")
+    observed = []
+    def handler(request):
+        payload = json.loads(request.content)
+        observed.append(payload)
+        assert payload == {
+            "repositories": ["repo"],
+            "permissions": {
+                "contents": "write", "issues": "write",
+                "pull_requests": "write",
+            },
+        }
+        return httpx.Response(201, json={
+            "token": "AUTHORING_TOKEN_NOT_FOR_TOOL_OUTPUT",
+            "expires_at": expiry,
+            "permissions": {**AUTHORING_PERMISSIONS, "metadata": "read"},
+            "repositories": [{"full_name": REPO}],
+        })
+
+    source = GitHubAppInstallationTokens(
+        app_id=123, installation_id=4321, repository=REPO,
+        private_key_source=lambda: pem,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        clock=lambda: NOW,
+        permissions=AUTHORING_PERMISSIONS,
+    )
+    assert source.token_for_installation(installation_id=4321).startswith("AUTHORING_")
+    assert source.token_for_installation(installation_id=4321).startswith("AUTHORING_")
+    assert len(observed) == 1
+    assert "AUTHORING_TOKEN_NOT_FOR_TOOL_OUTPUT" not in repr(source)
