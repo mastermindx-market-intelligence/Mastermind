@@ -139,3 +139,16 @@ Fresh readback found changes made outside this session's own writes:
 These are revalidated outcomes, not this session's edits. They improve current-study → contract → evidence navigation without declaring any candidate approved. No resource was archived, deleted, moved between files or promoted to accepted status.
 
 Existing programme context was read at `design/f03-paper-directory-20261102-c2`: `research/design_candidates/production_design_20261102/README.md` and `ORGANIZATION_RULES.md`. Their historical tool-schema gate is superseded for this session only by the observed qualified tool-scoped contract; unsupported folder/archive/resource actions remain unapplied. The programme's owner and directory identity remain unchanged.
+
+
+## Additional bounded scanner repair — planned before mutation
+
+International Markets `01M3P1TW5Y3XWQC37ADDS8K5AG`, page `p-I-0`, R14 scanner variants `G9J-0`, `GWG-0`, `HIX-0`, `I5E-0`, `IRV-0`, `J74-0`, `JLR-0`, `K0E-0`.
+
+Observed defect: the specimen selects aligned periods and claims aligned 21 October closes, while Mexico, South Africa and Poland show 20 October. Preserve all dates, rows, scores and values. Change the selected display mode to Latest available (using existing control labels and sibling moves), replace the alignment claim with an explicit row-date caveat, and put the existing Brazil −6.9% / US 2-of-4 result in the subtitle. This corrects what the static specimen describes; it does not recalculate a market dataset.
+
+Exact planned text targets: `GDY-0`, `GE0-0`, `GBU-0`, `GEO-0`, `GEV-0`, `HER-0`, `HEP-0`, `HGS-0`, `HDZ-0`, `HDS-0`, `I18-0`, `I16-0`, `I39-0`, `I0G-0`, `I09-0`, `INP-0`, `INN-0`, `IPQ-0`, `IMX-0`, `IMQ-0`, `IVE-0`, `IVG-0`, `ITI-0`, `IW2-0`, `IW9-0`, `JIF-0`, `JID-0`, `JK7-0`, `JHO-0`, `JHI-0`, `JX2-0`, `JX0-0`, `JYU-0`, `JWB-0`, `JW5-0`, `KBP-0`, `KBN-0`, `KDH-0`, `KAY-0`, `KAS-0`.
+Exact planned selected-control sibling moves: `GDZ-0` before `GDX-0`; `HEO-0` before `HEQ-0`; `I15-0` before `I17-0`; `INM-0` before `INO-0`; `IVF-0` before `IVD-0`; `JIC-0` before `JIE-0`; `JWZ-0` before `JX1-0`; `KBM-0` before `KBO-0`.
+Keep raw formulas and the existing research-attention/watch-not-order distinctions; no new assessment or signal.
+
+Next action: fresh exact-file guard, apply the 40-node copy/state update, move the eight existing selected controls into the original Latest-first ordering, then inspect/read back desktop/mobile and language/theme parity.
