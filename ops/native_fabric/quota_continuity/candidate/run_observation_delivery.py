@@ -165,8 +165,6 @@ def artifact_snapshot(run_id, root):
     authentication. The original owner must independently verify its commission.
     No legacy scope, missing producer contract or refused operation is promoted.
     """
-    from fabric_memory_view import require_generic_channel
-    require_generic_channel(delivery.HERE, run_id)
     import fabric_task
     import run_observation
     if (run_id in SCOPES or type(run_id) is not str or type(root) is not str

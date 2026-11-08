@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import ast
-import base64
 import hashlib
 import json
 from pathlib import Path
 import shutil
-import zlib
 
 import pytest
 
@@ -24,23 +22,12 @@ def sha(raw):
 
 @pytest.fixture(scope="module")
 def current_source(tmp_path_factory):
-    stage = tmp_path_factory.mktemp("actual-source116")
-    fixture = json.loads((ROOT / "tests/fixtures/provider-plan-auto-predecessor.json").read_text())
-    predecessor = json.loads((compose.HERE / "profile.json").read_text())
-    assert fixture["files"] == predecessor["base_files"]
-    base = stage / "predecessor"
-    from tests.provider_plan_current116_fixture import materialize_predecessor
-    materialize_predecessor(base, fixture)
-    (base / "RELEASE.json").write_text(json.dumps({
-        "digest": predecessor["base_selection"]["generation"], "files": fixture["files"]}))
-    current = stage / "current116"
-    result = compose.compose(base, current)
-    assert result["publication_performed"] is False
+    from provider_plan_fixed_parent import materialize_fixed_parent
+    stage = tmp_path_factory.mktemp("sealed-sequence37")
+    current = materialize_fixed_parent(stage / "current116")
     profile = json.loads((compose.HERE / "maintenance_guard/profile.json").read_text())
     assert json.loads((current / "FILES.json").read_text()) == profile["base_files"]
-    # Explicit inert source descriptor; not an installed/selected generation receipt.
-    (current / "RELEASE.json").write_text(json.dumps({
-        "digest": profile["base_selection"]["generation"], "files": profile["base_files"]}))
+    assert json.loads((current / "RELEASE.json").read_text())["digest"] == profile["base_selection"]["generation"]
     return current
 
 

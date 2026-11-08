@@ -193,7 +193,7 @@ def _read_json(p: Path):
 # producer retained a previous build's feed), `retained_from_previous_build`, `generated_utc`.
 # An absent clock is null — never inferred from the file's mtime or from today's date.
 _FRESHNESS_BASIS = "vendored_macro_file"
-_FRESHNESS_KEYS = ("freshness", "alt_freshness")
+_FRESHNESS_KEYS = ("freshness", "alt_freshness", "news_freshness")
 
 
 def _ticker_record_checked(mapping, ticker):
@@ -282,6 +282,21 @@ def _freshness(doc, rel) -> dict:
             "generated_utc": _clock("generated_utc"),
             "basis": _FRESHNESS_BASIS,
             "source_file": rel}
+
+
+def _news_freshness(doc) -> dict:
+    """News-input provenance carried by the unified producer, not its build clock."""
+    doc = doc if isinstance(doc, dict) else {}
+
+    def text(key):
+        value = doc.get(key)
+        return value if isinstance(value, str) and value.strip() else None
+
+    retained = doc.get("retained_from_previous_build")
+    return {"source_asof": text("source_asof"),
+            "source_asof_basis": text("source_asof_basis"),
+            "retained_from_previous_build": retained if isinstance(retained, bool) else None,
+            "retained_reason": text("retained_reason")}
 
 
 def _pick(d, keys):
@@ -446,9 +461,16 @@ async def get_regime(args):
 async def get_overnight_tape(args):
     try:
         from data_layer import overnight
-        return _json(overnight.tape())
-    except Exception as e:  # noqa: BLE001
-        return _json({"error": repr(e)[:200], "note": "overnight tape unavailable"})
+        return _json(overnight.tape(strict=True))
+    except Exception:  # noqa: BLE001
+        return _json({
+            "overnight_status": "unavailable",
+            "risk": None,
+            "groups": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+            "note": "overnight tape unavailable",
+        })
 
 
 @tool("get_themes", "Narrative baskets with recent relative performance (the theme universe).",
@@ -854,6 +876,7 @@ async def get_intelligence(args):
                 "ticker": t, **rec,
                 "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
                 "freshness": _freshness(unified_store, urel), "evidence_grade": "vendored_snapshot",
+                "news_freshness": _news_freshness(unified_store.get("news_freshness")),
             }
             if unified_failed:
                 payload["read_status"] = "partial"
@@ -1184,28 +1207,138 @@ async def get_intake_candidates(args):
       "Context-only — informs conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_ticker_package(args):
-    t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
-    intel = (uni.get("tickers") or {}).get(t)
-    pkg = {"ticker": t, "intelligence": intel}
     try:
+        t = _single_name_ticker(args)
+    except Exception:  # noqa: BLE001 - reject invalid arguments before any source access
+        t = None
+    if t is None:
+        return _json({
+            "ticker": None,
+            "read_status": "unavailable",
+            "error": "ticker_package_unavailable",
+        })
+
+    pkg = {"ticker": t, "intelligence": None, "intake": None}
+    failed_sources = []
+    degraded_sources = []
+    intelligence_available = False
+    try:
+        uni, intel, intelligence_failed, _ = _read_ticker_feed_checked(t, (
+            "site/intelligence/by_ticker.json",
+            "data/intelligence/by_ticker.json",
+        ))
+        pkg["intelligence"] = intel
+        intelligence_available = uni is not None
+    except Exception:  # noqa: BLE001 - retain independent sources
+        intelligence_failed = True
+    if intelligence_failed:
+        failed_sources.append("intelligence")
+
+    lenses_available = False
+    meaningful_lenses = False
+    try:
+        import math
         from portfolio import lenses
-        s = lenses.synthesize(lenses.decision_matrix(t, "name"))
-        pkg["lenses"] = {"divergences": s.get("divergences"), "confluence": s.get("confluence"),
-                         "vetoes": s.get("vetoes")}
-    except Exception as e:  # noqa: BLE001
-        pkg["lenses"] = {"error": f"decision matrix unavailable ({e})"}
+
+        synthesis = lenses.synthesize(lenses.decision_matrix(t, "name"))
+        if not isinstance(synthesis, dict):
+            raise TypeError("lens synthesis is not a mapping")
+        confluence = synthesis.get("confluence")
+        if (isinstance(confluence, bool) or not isinstance(confluence, (int, float))
+                or not math.isfinite(confluence)):
+            raise TypeError("lens confluence is not finite numeric evidence")
+        if not isinstance(synthesis.get("divergences"), list) or not isinstance(synthesis.get("vetoes"), list):
+            raise TypeError("lens evidence rows are not lists")
+        qualification_keys = ("data_degraded", "stockdata_present", "n_scored", "thin_evidence", "size_authority")
+        for key in ("data_degraded", "stockdata_present", "thin_evidence"):
+            if key in synthesis and not isinstance(synthesis[key], bool):
+                raise TypeError("lens qualification is not boolean")
+        if "n_scored" in synthesis and (
+            isinstance(synthesis["n_scored"], bool)
+            or not isinstance(synthesis["n_scored"], int)
+            or synthesis["n_scored"] < 0
+        ):
+            raise TypeError("lens vote count is invalid")
+        if "size_authority" in synthesis and (
+            not isinstance(synthesis["size_authority"], str)
+            or not synthesis["size_authority"].strip()
+        ):
+            raise TypeError("lens authority is not a label")
+        projected = {
+            "divergences": synthesis["divergences"],
+            "confluence": confluence,
+            "vetoes": synthesis["vetoes"],
+        }
+        projected.update({key: synthesis[key] for key in qualification_keys if key in synthesis})
+        json.dumps(projected, default=str, ensure_ascii=False)
+        pkg["lenses"] = projected
+        lenses_available = True
+        meaningful_lenses = bool(
+            confluence or projected["divergences"] or projected["vetoes"]
+            or any(key in projected for key in qualification_keys)
+        )
+        if synthesis.get("data_degraded") is True:
+            degraded_sources.append("lenses")
+    except Exception:  # noqa: BLE001 - no exception text reaches the model
+        failed_sources.append("lenses")
+        pkg["lenses"] = {
+            "read_status": "unavailable",
+            "error": "ticker_package_lenses_unavailable",
+        }
+
+    intake_available = False
+    intake_failed = False
     try:
         from brain import intake
-        prov = next((c for c in intake.queue(60) if c["ticker"] == t), None)
-        pkg["intake"] = prov
-    except Exception:  # noqa: BLE001
-        pkg["intake"] = None
-    if intel is None and pkg.get("intake") is None:
-        return _ok(f"no per-ticker intelligence for {t} — not flagged by any dashboard engine.")
-    pkg["note"] = ("Full per-name picture: intelligence facets + lens divergences + intake provenance. "
-                   "The divergence between demand-tape and supply-smart-money is the read; never sizes alone.")
+
+        rows = intake.queue(60)
+        if not isinstance(rows, list):
+            raise TypeError("intake queue is not a list")
+        matching = None
+        valid_rows = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                intake_failed = True
+                continue
+            row_ticker = _feed_ticker_checked(row.get("ticker"))
+            if row_ticker is None:
+                intake_failed = True
+                continue
+            valid_rows += 1
+            if matching is None and row_ticker == t:
+                matching = row
+        json.dumps(matching, default=str, ensure_ascii=False)
+        pkg["intake"] = matching
+        intake_available = not intake_failed or valid_rows > 0
+    except Exception:  # noqa: BLE001 - preserve selected intelligence and lenses
+        intake_failed = True
+    if intake_failed:
+        failed_sources.append("intake")
+
+    if failed_sources or degraded_sources:
+        if failed_sources:
+            pkg["failed_sources"] = failed_sources
+        if degraded_sources:
+            pkg["degraded_sources"] = degraded_sources
+        pkg["read_status"] = (
+            "partial" if intelligence_available or lenses_available or intake_available else "unavailable"
+        )
+        if pkg["read_status"] == "unavailable":
+            pkg["error"] = "ticker_package_unavailable"
+        pkg["note"] = (
+            "Ticker-package evidence is incomplete; missing fields are unknown, not negative evidence."
+        )
+        return _json(pkg)
+
+    if pkg["intelligence"] is None and pkg["intake"] is None and not meaningful_lenses:
+        return _ok(
+            f"no per-ticker intelligence for {t} in the inspected artifacts or first 60 intake candidates."
+        )
+    pkg["note"] = (
+        "Per-name picture: selected intelligence facets, available lens synthesis and intake provenance. "
+        "The intake search covers its first 60 candidates and does not establish complete upstream coverage; "
+        "this package never sizes alone."
+    )
     return _json(pkg)
 
 
@@ -1823,12 +1956,37 @@ class InferenceToolError(ValueError):
     """Bounded protocol refusal before any registered handler executes."""
 
 
+# The Fabric inference view is DERIVED, lazy and read-only: the incumbent bot
+# roster plus the cognition owner's existing read objects under the cognition
+# owner's own namespace. It is a view of existing handlers, not a second
+# roster and not a new authority: the legacy bot server, _ALL and TOOL_NAMES
+# keep exactly their incumbent 25-tool authority, and no cognition object is
+# relabelled as mcp__bot__.
+def _inference_tool_view() -> dict:
+    """Return the derived fully-qualified-name -> existing handler object view.
+
+    The cognition import is deliberately lazy. brain.cognition_mcp imports
+    brain.autonomous_mcp, which imports brain.bot_mcp; a module-level import
+    here would close that cycle and break both owners. The first call happens
+    after this module has finished executing.
+    """
+    from brain import cognition_mcp
+
+    reads = cognition_mcp._READ_TOOLS
+    view = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    for tool in reads:
+        view[f"mcp__{cognition_mcp.SERVER_NAME}__{tool.name}"] = tool
+    if len(view) != len(_ALL) + len(reads):
+        raise InferenceToolError("fabric_tool_roster_invalid")
+    return view
+
+
 def inference_tool_catalog() -> list[dict]:
     """Describe exactly the incumbent registered roster, without SDK-only tools."""
     from jsonschema import Draft202012Validator
 
     catalog = []
-    for tool in _ALL:
+    for name, tool in _inference_tool_view().items():
         schema = copy.deepcopy(tool.input_schema)
         if schema == {}:
             schema = {"type": "object", "properties": {}}
@@ -1839,7 +1997,7 @@ def inference_tool_catalog() -> list[dict]:
         # smuggled through JSON Schema's permissive extra-property default.
         schema["additionalProperties"] = False
         Draft202012Validator.check_schema(schema)
-        catalog.append({"name": f"mcp__{SERVER_NAME}__{tool.name}",
+        catalog.append({"name": name,
                         "description": tool.description, "input_schema": schema})
     if len({row["name"] for row in catalog}) != len(catalog):
         raise InferenceToolError("fabric_tool_roster_invalid")
@@ -1891,7 +2049,7 @@ async def invoke_inference_tool(call: dict, *, provenance: dict) -> dict:
     if (set(provenance) != {"provider", "model", "turn_id"}
             or any(not isinstance(value, str) or not value for value in provenance.values())):
         raise InferenceToolError("fabric_tool_provenance_invalid")
-    tools = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    tools = _inference_tool_view()
     token = _INFERENCE_PROVENANCE.set({"source": "fabric_application", **provenance})
     try:
         return await tools[call["name"]].handler(copy.deepcopy(call["input"]))

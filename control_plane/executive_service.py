@@ -5600,7 +5600,7 @@ class ExecutiveControlService:
                     # failure cannot manufacture a NOT_DISPATCHED receipt.
                     response = workspace_error("source_unavailable", 503)
                 await self._send_ceo_ingress_response(writer, response,
-                    response_ceiling=source_operation_wire.MAX_RESPONSE_BYTES)
+                    response_ceiling=source_operation_wire.operation_response_limit(parsed.get("operation")))
                 return
             if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
                 if not app_peer:
@@ -5828,17 +5828,25 @@ class ExecutiveControlService:
             from common import workspace_project_archive_contract as project_archive_wire
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
+            from common import workspace_model_configuration_contract as model_configuration_wire
             from common import workspace_host_observation_contract as host_observation_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, model_configuration_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+                    ceiling = model_configuration_wire.MAX_RESPONSE_BYTES
+                    try:
+                        model_configuration_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == byok_wire.FRAME_SCHEMA:
                     ceiling = byok_wire.MAX_RESPONSE_BYTES
                     try:
                         byok_wire.validate_frame(parsed)
@@ -5901,7 +5909,7 @@ class ExecutiveControlService:
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
                         return
-                elif parsed.get("schema") == knowledge_wire.FRAME_SCHEMA:
+                elif parsed.get("schema") in {knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                     ceiling = knowledge_wire.MAX_RESPONSE_BYTES
                     try:
                         knowledge_wire.validate_frame(parsed)
@@ -6088,6 +6096,10 @@ class ExecutiveControlService:
                         result = await factory(self._require_runtime()).handle_frame(parsed)
                     except Exception:
                         result = workspace_error("source_unavailable", 503)
+                if (parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA
+                        and (self._ceo_ingress_app_binding is not app_binding
+                             or app_binding.workspace_read_provider_factory is not factory)):
+                    result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 try:
@@ -6461,14 +6473,16 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
                 return
             from common import coo_agentos_context_contract as context_wire
-            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA}:
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
                     return
                 try:
                     parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
-                    current_context = parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
-                    (context_wire.validate_current_frame if current_context else context_wire.validate_frame)(parsed)
+                    discovery_context = parsed["schema"] == context_wire.DISCOVERY_FRAME_SCHEMA
+                    current_context = discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+                    validator(parsed)
                     factory = app_binding.principal_facts_factory
                     runtime = self._require_runtime()
                     arms = (app_binding.armed, app_binding.principal_admission_armed)
@@ -6495,7 +6509,7 @@ class ExecutiveControlService:
                     data_binding = workspace._canonical_project_data
                     require_context_host_current()
                     from control_plane.workspace_owned_task import await_owned
-                    context_read = provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                    context_read = provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
                     result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
                     require_context_host_current()
                     if (provider.source is not source or provider.workspace is not workspace

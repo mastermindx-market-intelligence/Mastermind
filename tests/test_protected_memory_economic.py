@@ -19,8 +19,9 @@ import pytest
 
 # Explicit source-qualification input only; never selects or reads an installed generation.
 NATIVE=Path(os.environ.get('MMX_PROTECTED_MEMORY_TEST_STAGE',
-    str(Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/candidate'))).resolve()
-sys.path[:0]=[str(NATIVE),str(NATIVE.parent/'source')]
+    str(Path(__file__).resolve().parents[1]/'ops/native_fabric/provider_plans/memory118/native_owner'))).resolve()
+sys.path[:0]=[str(NATIVE),str(Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/candidate'),
+              str(Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/source')]
 from fabric_operator_owner import OperatorOwner, DelegationRefused
 from lease_broker import Broker
 import pool_ledger

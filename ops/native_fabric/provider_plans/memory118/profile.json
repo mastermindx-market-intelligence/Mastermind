@@ -270,12 +270,12 @@
     }
   },
   "source_map": {
-    "ext/artifact_delivery.py": "ops/native_fabric/quota_continuity/candidate/artifact_delivery.py",
+    "ext/artifact_delivery.py": "ops/native_fabric/provider_plans/memory118/native_owner/artifact_delivery.py",
     "ext/fabric_memory_view.py": "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
-    "ext/fabric_operator_contract.py": "ops/native_fabric/quota_continuity/candidate/fabric_operator_contract.py",
-    "ext/fabric_operator_owner.py": "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py",
-    "ext/protected_memory_economic.py": "ops/native_fabric/quota_continuity/candidate/protected_memory_economic.py",
-    "ext/provider_outcome.py": "ops/native_fabric/quota_continuity/candidate/provider_outcome.py",
-    "ext/run_observation_delivery.py": "ops/native_fabric/quota_continuity/candidate/run_observation_delivery.py"
+    "ext/fabric_operator_contract.py": "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_contract.py",
+    "ext/fabric_operator_owner.py": "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_owner.py",
+    "ext/protected_memory_economic.py": "ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py",
+    "ext/provider_outcome.py": "ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py",
+    "ext/run_observation_delivery.py": "ops/native_fabric/provider_plans/memory118/native_owner/run_observation_delivery.py"
   }
 }

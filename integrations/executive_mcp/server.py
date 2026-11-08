@@ -598,6 +598,7 @@ _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
+    "/workspace/resources/models/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
@@ -794,6 +795,7 @@ class AuditedWorkspaceApp:
         if not isinstance(verifier, MastermindTokenVerifier):
             raise TypeError("incumbent A1 verifier required")
         self._app, self._verifier = app, verifier
+        self._context_routing_app = app
         if (authenticator is None)!=(authorize_principal is None):
             raise TypeError('Workspace planning READ must retain both existing owners')
         if authenticator is not None:
@@ -815,7 +817,7 @@ class AuditedWorkspaceApp:
 
     def _context_auth_current(self):
         verifier, authenticator, authorize, config, clock, policy, stamp_callback = self._context_auth_owners
-        if (config is None or self._verifier is not verifier
+        if (config is None or self._app is not self._context_routing_app or self._verifier is not verifier
                 or self._planning_authenticator is not authenticator or self._planning_authorize is not authorize
                 or self._fresh_workspace_config is not config or config.authenticator is not authenticator
                 or config.authorize_principal is not authorize or config.now is not clock
@@ -2376,10 +2378,11 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     from control_plane import ceo_intent
     from integrations.executive_mcp.coo import (
         COO_MCP_PATH, COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS,
-        COO_CONTEXT_TOOL_SPECS, COO_CURRENT_CONTEXT_TOOL_SPECS,
+        COO_CONTEXT_TOOL_SPECS, COO_CURRENT_CONTEXT_TOOL_SPECS, COO_DISCOVERY_TOOL_SPECS,
         validate_coo_tool_arguments, validate_coo_context_tool_arguments,
     )
     from common import coo_agentos_context_contract as context_wire
+    from common import coo_discovery_contract as discovery_wire
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
     from integrations.mastermind_workspace_app.contract import principal_frame as workspace_principal_frame
 
@@ -2410,7 +2413,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
             securitySchemes=schemes, _meta={"securitySchemes": schemes}) for spec in specs)
     tools = {context_wire.LEGACY_CATALOGUE: descriptors(COO_TOOL_SPECS),
              context_wire.CATALOGUE: descriptors(COO_CONTEXT_TOOL_SPECS),
-             context_wire.CURRENT_CATALOGUE: descriptors(COO_CURRENT_CONTEXT_TOOL_SPECS)}
+             context_wire.CURRENT_CATALOGUE: descriptors(COO_CURRENT_CONTEXT_TOOL_SPECS),
+             discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS)}
 
     @server.list_tools()
     async def list_tools():
@@ -2439,7 +2443,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         # ``state`` is the outcome. It is a valid answer, not a protocol
         # error, so it is never marked as one here.
         is_error = payload.get("ok") is not True
-        if isinstance(payload, dict) and payload.get("schema") == SELECTED_CHILD_SCHEMA:
+        if isinstance(payload, dict) and payload.get("schema") in {SELECTED_CHILD_SCHEMA, discovery_wire.RESULT_SCHEMA}:
             is_error = False
         return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
             text=canonical_json(payload).decode("utf-8"))], isError=is_error,
@@ -2452,10 +2456,20 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
             raise ValueError("unambiguous current authorization required")
         try:
             validated = (validate_coo_context_tool_arguments(name, arguments)
-                         if name in (context_wire.TOOL, context_wire.CURRENT_TOOL)
+                         if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
                          else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return result(error(name, exc.code))
+        if name in discovery_wire.TOOLS:
+            from integrations.mastermind_executive_app.coo_discovery import forward_discovery_mcp
+            payload = await forward_discovery_mcp(core, inner, request, name, validated)
+            reply = result(payload)
+            if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - 4096:
+                payload = discovery_wire.result(name, validated,
+                    state="EFFECT_UNKNOWN" if discovery_wire.mutating(name, validated) else "UNAVAILABLE",
+                    reason="ORIGINAL_OUTCOME_UNKNOWN" if discovery_wire.mutating(name, validated) else "SOURCE_UNAVAILABLE")
+                reply = result(payload)
+            return reply
         is_submit = name == "submit_principal_intent"
         is_selected_child = name == "mmx_delegate"
         has_receipt = is_submit or name == "principal_intent_status"
@@ -2480,12 +2494,14 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                 held_digest = held_target.material_digest()
             headers = {"authorization": request.headers["authorization"]}
             context_auth = None
+            discovery_context = False
             if name == context_wire.CURRENT_TOOL:
                 companion = request.headers.getlist("x-mastermind-workspace-authorization")
                 if len(companion) != 1:
                     return result(error(name, "authority_refused"))
                 headers["x-mastermind-workspace-authorization"] = companion[0]
                 context_auth = await core.current_context_auth(request)
+                discovery_context = await core.catalogue(*context_auth[0], work_ref=validated["work_ref"]) == context_wire.DISCOVERY_CATALOGUE
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=inner),
                     base_url="http://127.0.0.1", trust_env=False, follow_redirects=False) as client:
                 response = await client.post("/v1/tools/" + name,
@@ -2550,7 +2566,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                 payload = failed()
             elif not preflight and name in (context_wire.TOOL, context_wire.CURRENT_TOOL):
                 data = payload["data"]
-                validator = context_wire.validate_current_result if name == context_wire.CURRENT_TOOL else context_wire.validate_result
+                validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if name == context_wire.CURRENT_TOOL else context_wire.validate_result
                 validator(data, expected_context=data["principal_context"],
                     capability_profile_digest=data["capability_profile_digest"],
                     **({"expected_workspace_principal": workspace_principal_frame(context_auth[1][0])}
@@ -2565,7 +2581,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         except Exception:
             payload = selected_child_failed() if is_selected_child else failed()
         reply = result(payload, challenge)
-        reply_ceiling = (MAX_RESPONSE_BYTES - 4096 if name in (context_wire.TOOL, context_wire.CURRENT_TOOL)
+        reply_ceiling = (MAX_RESPONSE_BYTES - 4096 if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
                          else MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096)
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > reply_ceiling:
             reply = result(selected_child_failed() if is_selected_child
@@ -2579,7 +2595,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     authenticated = PreAuthMcpBodyApp(AuthenticationMiddleware(
         RequireAuthMiddleware(BoundedRequestApp(manager.handle_request), required_scopes=list(settings.policy.required_scopes),
                               resource_metadata_url=settings.policy.resource_metadata_url),
-        backend=BearerAuthBackend(BoundVerifier())))
+        backend=BearerAuthBackend(BoundVerifier())),
+        mcp_path=COO_MCP_PATH, strict_json=True)
 
     @asynccontextmanager
     async def lifespan(_app):

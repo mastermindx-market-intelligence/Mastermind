@@ -535,8 +535,6 @@ def assert_settlement_family(request, go):
 
 
 def qualify(request):
-    from fabric_memory_view import require_generic_channel
-    require_generic_channel(HERE, request.get('run_id'))
     import fabric_task
     reader.validate_request(request)
     rid = request["run_id"]
@@ -1602,15 +1600,6 @@ def export(request, destination):
 
 
 def main():
-    # All fixed --read-artifacts variants pass the original ID in argv[2].
-    # Refuse before helper dispatch/SSH/destination reservation or raw reads.
-    if len(sys.argv) > 2 and sys.argv[1].startswith('--'):
-        from fabric_memory_view import require_generic_channel
-        try:
-            require_generic_channel(HERE, sys.argv[2])
-        except ValueError:
-            print('{"state":"REFUSED","reason":"participant_view_required"}')
-            return 75
     if sys.argv[1:2] == ["--mac-policy-return"]:
         import mac_policy_return
         p = argparse.ArgumentParser(description="Original mac-policy retained evidence only")

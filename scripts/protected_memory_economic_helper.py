@@ -38,8 +38,9 @@ def main():
     for path in (OWNER/'broker/leases.sqlite',OWNER/'broker/leases.lock'):
         info=path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=501 or info.st_mode&0o022: return 75
-    native=ROOT/'ops/native_fabric/quota_continuity/candidate'
-    sys.path[:0]=[str(native),str(ROOT/'ops/native_fabric/quota_continuity/source')]
+    native=ROOT/'ops/native_fabric/provider_plans/memory118/native_owner'
+    sys.path[:0]=[str(native),str(ROOT/'ops/native_fabric/quota_continuity/candidate'),
+                  str(ROOT/'ops/native_fabric/quota_continuity/source')]
     import lease_broker
     import pool_ledger
     from fabric_operator_owner import OperatorOwner

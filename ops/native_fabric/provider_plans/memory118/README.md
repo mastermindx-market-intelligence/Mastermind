@@ -50,3 +50,12 @@ The current executor stays on its bb036 lineage and receives only reviewed
 a56’s fixed Git tuple append (postimagee13). The historical4a whole executor
 is never substituted. All other current application/executor definitions remain
 exact; this source fix alone does not establish installed worker adoption.
+
+
+## Current protected application source coexistence
+
+The protected canonical native default remains its107-member APPLICATION source and exact carrier/pool/quota/placement validators. Memory does not change that default or its current source inventory. The old109 endpoint is retained solely as frozen source-test evidence under `tests/fixtures/memory-historical109-55f`; its builder is not the production builder, an installation source or a selected generation.
+
+The fixed `native_owner/` namespace retains the exact previously reviewed prospective Memory owner code. The explicit118 source map consumes its five unchanged replacement postimages; the existing task/Broker patches and private WAL helper remain unchanged. The fixed Control economic helper qualifies and imports this namespace first, then only its fixed incumbent dependencies. No path/owner/credential can be supplied by a caller. This is a source dependency move, not authentication or a new capability.
+
+The profile is still bound to its explicit historical116 source preimages and generation. A changed current selection must refuse; no source fixture or profile proves current installed custody. Root must reconcile the actual current generation and the complete Memory owner/private-helper/application closure before any installation, selection, activation or private study. All protocol/scientific flags remain false.

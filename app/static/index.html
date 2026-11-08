@@ -1889,6 +1889,11 @@ body.page-mm .mm-pf-tab .mm-pf-sub {
   white-space: nowrap;
 }
 
+body.page-mm .mm-pf-status-chip { margin-left: 5px; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+body.page-mm .mm-pf-status-chip.partial { color: var(--warn); }
+body.page-mm .mm-pf-status-chip.unavailable { color: var(--down); }
+body.page-mm .mm-pf-switch-unavailable { align-self: center; padding: 0 10px; color: var(--down); font-size: 11px; font-weight: 750; }
+
 /* Unified layout rhythm and machined panels. */
 body.page-mm .mm-section { margin-top: 18px; }
 body.page-mm .grid { gap: 18px; }
@@ -3921,6 +3926,47 @@ var fmtTsShort = function(s) {
 
 // ── state ────────────────────────────────────────────────────────────────────
 var _book = null, _trades = null, _activity = [], _research = [];
+var _activityStatus = 'loading', _activityFailedSources = [];
+function _activityUnavailable() {
+  return { activity_status: 'unavailable', error: 'activity_unavailable', events: null, failed_sources: [] };
+}
+function _activityFetch() {
+  return fetch('/api/activity')
+    .then(function(r) { return r.ok ? r.json() : _activityUnavailable(); })
+    .catch(function() { return _activityUnavailable(); });
+}
+function _validActivityEvents(rows) {
+  return Array.isArray(rows) && rows.every(function(row) {
+    return row && typeof row === 'object' && !Array.isArray(row) &&
+      ['ts', 'kind', 'title', 'detail'].every(function(key) { return typeof row[key] === 'string'; }) &&
+      ['trade', 'decision', 'research', 'run'].indexOf(row.kind) >= 0 &&
+      ['title_zh', 'detail_zh'].every(function(key) { return row[key] === undefined || typeof row[key] === 'string'; }) &&
+      (row.today === undefined || typeof row.today === 'boolean');
+  });
+}
+function _applyActivityFeed(data) {
+  if (_validActivityEvents(data)) {
+    _activity = data; _activityStatus = 'available'; _activityFailedSources = []; return;
+  }
+  var sources = data && data.failed_sources;
+  var knownSources = Array.isArray(sources) && sources.every(function(source) {
+    return ['trades', 'decisions', 'research'].indexOf(source) >= 0;
+  }) && sources.every(function(source, index) { return sources.indexOf(source) === index; });
+  if (data && data.activity_status === 'partial' && _validActivityEvents(data.events) &&
+      knownSources && sources.length > 0 && sources.length < 3 &&
+      data.events.every(function(row) {
+        var family = {trade: 'trades', decision: 'decisions', run: 'decisions', research: 'research'}[row.kind];
+        return sources.indexOf(family) < 0;
+      })) {
+    _activity = data.events; _activityStatus = 'partial'; _activityFailedSources = sources; return;
+  }
+  _activity = []; _activityStatus = 'unavailable';
+  _activityFailedSources = knownSources ? sources : [];
+}
+window.retryBrainActivity = function() {
+  _activityStatus = 'loading'; renderBrainLog();
+  return _activityFetch().then(function(data) { _applyActivityFeed(data); renderBrainLog(); });
+};
 var _shadowBooks = null;          // parallel forward shadow-book leaderboard (/api/shadow_books)
 var _predictions = null;          // universe-wide prediction log coverage + cross-sectional scorecard
 var _engineBacktest = null;       // historical engine-backtest verdict (/api/engine_backtest)
@@ -3996,6 +4042,7 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
+var _portfoliosStatus = 'loading'; // loading | available | unavailable
 var _decisionAvailability = null; // independent persisted decision/account clocks; active regional books only
 var _forwardEvaluation = null;
 var _forwardEvaluationPending = true;
@@ -5509,45 +5556,63 @@ window.tradesPage = function(d) {
 // ── BRAIN LOG ─────────────────────────────────────────────────────────────────
 function renderBrainLog() {
   var el = E('brainlog');
+  if (_activityStatus === 'loading') {
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading activity…</span><span class="l-zh">正在加载动态…</span></div>';
+    applyColl('brainlog'); return;
+  }
+  if (_activityStatus === 'unavailable') {
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Brain Log unavailable — activity evidence could not be read.</span>' +
+      '<span class="l-zh">脑波日志暂不可用 — 无法读取动态证据。</span>' +
+      '<div style="margin-top:8px"><button class="mm-pager-btn" type="button" onclick="retryBrainActivity()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></div></div>';
+    applyColl('brainlog'); return;
+  }
+
+  var partial = '';
+  if (_activityStatus === 'partial') {
+    var sources = _activityFailedSources.join(', ');
+    partial = '<div class="mm-cal-building" style="margin-bottom:10px"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Partial activity</strong> — unavailable sources: ' + esc(sources || 'unknown') + '.</span>' +
+      '<span class="l-zh"><strong>动态不完整</strong> — 暂不可用来源：' + esc(sources || 'unknown') + '。</span>' +
+      ' <button class="mm-pager-btn" type="button" onclick="retryBrainActivity()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></span></div>';
+  }
   if (!_activity.length) {
-    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('brain.empty') + '</div>';
-    applyColl('brainlog');
-    return;
+    var emptyCopy = _activityStatus === 'partial'
+      ? '<span class="l-en">No events were available from the readable activity sources.</span><span class="l-zh">当前可读取的动态来源没有可显示事件。</span>'
+      : t('brain.empty');
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + partial + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + emptyCopy + '</div>';
+    applyColl('brainlog'); return;
   }
 
   var pages = Math.max(1, Math.ceil(_activity.length / BRAIN_PAGE_SIZE));
-  _brainPage = Math.max(0, Math.min(pages - 1, _brainPage));   // clamp (data may have shrunk on reload)
+  _brainPage = Math.max(0, Math.min(pages - 1, _brainPage));
   var start = _brainPage * BRAIN_PAGE_SIZE;
   var pageItems = _activity.slice(start, start + BRAIN_PAGE_SIZE);
   var ICONS = { trade: '↕', decision: '◉', research: '◎', run: '▷' };
   var KIND_ZH = { trade: '交易', decision: '决策', research: '研究', run: '运行' };
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
-  var html = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-timeline">';
+  var html = collH2('brainlog', 'Brain Log', '脑波日志') + partial + '<div class="mm-timeline">';
   pageItems.forEach(function(e, i) {
     var kind = e.kind || 'run';
     var isLast = i === pageItems.length - 1;
-    // zh title/detail come from /api/activity (deterministic labels + cached free-text);
-    // fall back to English when a _zh field is absent so nothing ever renders blank
     var title = (isZh && e.title_zh) ? e.title_zh : (e.title || '—');
     var detail = (isZh && e.detail_zh) ? e.detail_zh : (e.detail || '');
     var kindLabel = (isZh && KIND_ZH[kind]) ? KIND_ZH[kind] : kind;
-    // actions logged today (e.today, set server-side) get a "NEW" tag + a highlighted row
+    var timestamp = fmtTsShort(e.ts);
+    if (e.ts && isNaN(new Date(e.ts))) timestamp = esc(timestamp);
     var newBadge = e.today ? '<span class="mm-new-badge">' + (isZh ? '新' : 'NEW') + '</span>' : '';
     html += '<div class="mm-tl-item' + (e.today ? ' mm-tl-today' : '') + '">' +
-      '<div class="mm-tl-ts">' + fmtTsShort(e.ts) + '</div>' +
-      '<div class="mm-tl-node">' +
-        '<div class="mm-tl-dot k-' + kind + '"></div>' +
-        (isLast ? '' : '<div class="mm-tl-line"></div>') +
-      '</div>' +
-      '<div class="mm-tl-content">' +
-        '<div><span class="mm-kind-chip mm-kind-' + kind + '">' + (ICONS[kind]||'·') + ' ' + kindLabel + '</span>' + newBadge + '</div>' +
+      '<div class="mm-tl-ts">' + timestamp + '</div>' +
+      '<div class="mm-tl-node"><div class="mm-tl-dot k-' + kind + '"></div>' +
+        (isLast ? '' : '<div class="mm-tl-line"></div>') + '</div>' +
+      '<div class="mm-tl-content"><div><span class="mm-kind-chip mm-kind-' + kind + '">' +
+        (ICONS[kind]||'·') + ' ' + kindLabel + '</span>' + newBadge + '</div>' +
         '<div class="mm-tl-title">' + esc(title) + '</div>' +
         (detail ? '<div class="mm-tl-detail">' + esc(detail.slice(0,200)) + (detail.length > 200 ? '…' : '') + '</div>' : '') +
-      '</div>' +
-    '</div>';
+      '</div></div>';
   });
-  html += '</div>';
-  html += _pager(_brainPage, pages, 'brainPage');
+  html += '</div>' + _pager(_brainPage, pages, 'brainPage');
   el.innerHTML = html;
   applyColl('brainlog');
 }
@@ -6382,13 +6447,21 @@ window.downloadPaperPdf = function() {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="l-en">Generating…</span><span class="l-zh">生成中…</span>'; }
   var ticker = ((E('mm-modal-title') || {}).textContent || 'research').split(' ')[0].replace(/[^A-Za-z0-9._-]/g, '');
+  var failureMessage = 'PDF generation failed';
   fetch('/research_paper.pdf?id=' + encodeURIComponent(_openPaperId))
     .then(function(r) {
       if (!r.ok) {
-        return r.text().then(function(body) {
-          var msg = 'HTTP ' + r.status;
-          try { var j = JSON.parse(body); if (j && j.error) msg = j.error; } catch (e) { if (body) msg = body; }
-          throw new Error(msg);
+        return r.json().catch(function(){ return null; }).then(function(j) {
+          failureMessage = r.status === 404 ? 'research paper not found' : 'PDF generation failed';
+          var allowedNotes = {
+            404: ['research paper not found'],
+            500: ['research paper unavailable', 'PDF generation failed'],
+            503: ['research store unavailable', 'PDF engine unavailable']
+          }[r.status] || [];
+          if (j && typeof j.note === 'string' && allowedNotes.indexOf(j.note) !== -1) {
+            failureMessage = j.note;
+          }
+          return Promise.reject();
         });
       }
       return r.blob();
@@ -6400,7 +6473,7 @@ window.downloadPaperPdf = function() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
     })
-    .catch(function(e) { alert('PDF generation failed: ' + (e && e.message ? e.message : e)); })
+    .catch(function() { alert(failureMessage); })
     .finally(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } });
 };
 
@@ -7114,6 +7187,10 @@ function _fmtPctSigned(v) {
 function renderPortfolioSwitch() {
   var host = E('pf-switch');
   if (!host) return;
+  if (_portfoliosStatus === 'unavailable') {
+    host.innerHTML = '<span class="mm-pf-switch-unavailable"><span class="l-en">Portfolios unavailable</span><span class="l-zh">组合列表暂不可用</span></span>';
+    return;
+  }
   if (!_portfolios.length) { host.innerHTML = ''; return; }
   host.innerHTML = _pfOrdered(_portfolios).map(function(p) {
     var st = p.status || {};
@@ -7124,7 +7201,13 @@ function renderPortfolioSwitch() {
     // tracks the live mark. The old $X.XXM format quantized to $10k steps, so intraday moves
     // (and books sitting near $1M) looked frozen even though /api/portfolios refreshes them.
     var navStr = st.nav != null ? ccy + Math.round(st.nav).toLocaleString('en-US') : '—';
-    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>';
+    var statusChip = '';
+    if (st.read_status === 'partial') {
+      statusChip = '<span class="mm-pf-status-chip partial"><span class="l-en">PARTIAL</span><span class="l-zh">不完整</span></span>';
+    } else if (st.read_status === 'unavailable') {
+      statusChip = '<span class="mm-pf-status-chip unavailable"><span class="l-en">UNAVAILABLE</span><span class="l-zh">不可用</span></span>';
+    }
+    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>' + statusChip;
     var archived = p.lifecycle === 'archived' || p.active === false;
     var archiveChip = archived ? '<span class="mm-archive-chip">' + (document.documentElement.getAttribute('data-lang') === 'zh' ? '已归档' : 'ARCHIVED') + '</span>' : '';
     var title = archived ? ((p.archived_reason || 'Frozen historical portfolio') + (p.superseded_by ? ' · successor: ' + p.superseded_by : '')) : (p.tagline || '');
@@ -7263,7 +7346,14 @@ async function loadPortfolios() {
   try {
     var r = await fetch('/api/portfolios');
     var d = r.ok ? await r.json() : null;
-    if (d && d.portfolios) {
+    if (!d || d.read_status === 'unavailable' || !Array.isArray(d.portfolios) ||
+        !d.portfolios.every(function(p) { return p && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && p.id.length > 0; })) {
+      _portfoliosStatus = 'unavailable';
+      renderPortfolioSwitch();
+      return;
+    }
+    if (Array.isArray(d.portfolios)) {
+      _portfoliosStatus = 'available';
       _portfolios = d.portfolios;
       // The registry owns the product default. Explicit historical/workspace URLs keep their
       // selected book, while the root dashboard follows the backend contract instead of a second
@@ -7283,7 +7373,10 @@ async function loadPortfolios() {
       }
       _schedulePortfolioPrefetch();
     }
-  } catch (e) {}
+  } catch (e) {
+    _portfoliosStatus = 'unavailable';
+    renderPortfolioSwitch();
+  }
 }
 
 // ── DECISION AVAILABILITY: display-only, per-book, independent source clocks ──
@@ -8410,8 +8503,18 @@ window.addEventListener('resize', function() {
 // ── STRATEGY POSTURE: per-book strategy-label chip + hover playbook ────────────
 // The glance-able layer on top of the Brain's free-form rationale. Pure presentation —
 // the label / favored / avoided / driver are computed server-side by /api/posture.
+function _postureUnavailable() {
+  return { available: false, read_status: 'unavailable', posture_label: '—', posture_label_zh: '—', posture_tone: 'muted' };
+}
+
 function _postureChipHTML(p) {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (p && p.read_status === 'unavailable') {
+    return '<div class="mm-posture tone-muted">' +
+      '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
+      '<div class="mm-posture-head"><span class="mm-posture-label">' + (isZh ? '姿态暂不可用' : 'Posture unavailable') + '</span></div>' +
+      '<span class="mm-posture-sub">' + (isZh ? '最近一次读取未完成。' : 'The latest read did not complete.') + '</span></div>';
+  }
   if (!p || !p.available || !p.posture_label || p.posture_label === '—') {
     return '<div class="mm-posture tone-muted">' +
       '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
@@ -8442,9 +8545,13 @@ function _postureChipHTML(p) {
 function loadDeskPosture() {
   var host = E('desk-posture'); if (!host) return;
   fetch('/api/posture?book=flagship')
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ host.innerHTML = d ? ('<div class="mm-posture-wrap">' + _postureChipHTML(d) + '</div>') : ''; })
-    .catch(function(){ host.innerHTML = ''; });
+    .then(function(r){ return r.ok ? r.json() : _postureUnavailable(); })
+    .then(function(d){
+      var payload = d && typeof d === 'object' && !Array.isArray(d) && typeof d.available === 'boolean'
+        ? d : _postureUnavailable();
+      host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(payload) + '</div>';
+    })
+    .catch(function(){ host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(_postureUnavailable()) + '</div>'; });
 }
 
 function renderDecisions() {
@@ -9743,7 +9850,7 @@ function _hydrateShared() {
   if (_sharedLoad) return _sharedLoad;
   _sharedLoad = loadPortfolios().then(function() {
     return Promise.allSettled([
-      fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
+      _activityFetch(),
       fetch('/api/research').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
       _learningFetch('/api/shadow_books', 'shadow_books'),
       _learningFetch('/api/predictions', 'predictions'),
@@ -9757,7 +9864,7 @@ function _hydrateShared() {
     var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],
         ebtRes = s[4], fzRes = s[5], fundRes = s[6],
         studentRes = s[7], distillRes = s[8];
-    _activity    = (actRes.status    === 'fulfilled' ? actRes.value     : null) || [];
+    _applyActivityFeed(actRes.status === 'fulfilled' ? actRes.value : _activityUnavailable());
     _research    = (researchRes.status === 'fulfilled' ? researchRes.value : null) || [];
     _shadowBooks    = shadowRes.status === 'fulfilled' ? shadowRes.value : null;
     _predictions    = predRes.status   === 'fulfilled' ? predRes.value   : null;

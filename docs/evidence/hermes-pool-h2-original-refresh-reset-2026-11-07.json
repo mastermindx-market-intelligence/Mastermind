@@ -1,0 +1,186 @@
+{
+  "after": {
+    "cache_mtime": 1794053002.709312,
+    "read_at": "2026-11-07T12:03:22.830520+00:00",
+    "rows": [
+      {
+        "account": "chairman-max",
+        "observed_at": "2026-11-07T12:03:21Z",
+        "provider": "glm",
+        "remaining_pct": 100,
+        "reset_at": null,
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "chairman-max",
+        "observed_at": "2026-11-07T12:03:21Z",
+        "provider": "glm",
+        "remaining_pct": 99,
+        "reset_at": "2026-11-14T06:25:24Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      },
+      {
+        "account": "chairman-max-2",
+        "observed_at": "2026-11-07T12:03:22Z",
+        "provider": "glm",
+        "remaining_pct": 100,
+        "reset_at": null,
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "chairman-max-2",
+        "observed_at": "2026-11-07T12:03:22Z",
+        "provider": "glm",
+        "remaining_pct": 59,
+        "reset_at": "2026-11-09T01:39:33Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      },
+      {
+        "account": "chairman-max-3",
+        "observed_at": "2026-11-07T12:03:22Z",
+        "provider": "glm",
+        "remaining_pct": 76,
+        "reset_at": "2026-11-07T14:20:12Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "chairman-max-3",
+        "observed_at": "2026-11-07T12:03:22Z",
+        "provider": "glm",
+        "remaining_pct": 74,
+        "reset_at": "2026-11-11T06:16:02Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      },
+      {
+        "account": "default",
+        "observed_at": "2026-11-07T12:03:18Z",
+        "provider": "minimax",
+        "remaining_pct": 96,
+        "reset_at": "2026-11-07T15:00:00Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "default",
+        "observed_at": "2026-11-07T12:03:18Z",
+        "provider": "minimax",
+        "remaining_pct": 20,
+        "reset_at": "2026-11-09T00:00:00Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      }
+    ],
+    "selection": {
+      "generation": "ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46",
+      "previous": "a7671e6e0f275e25b296e8d0c972c2c45f68d8cb737152cb4a282d3bc450a775",
+      "schema": "native-code-selection.v1",
+      "sequence": 35
+    }
+  },
+  "before": {
+    "cache_mtime": 1794051108.0878417,
+    "read_at": "2026-11-07T12:03:18.149720+00:00",
+    "rows": [
+      {
+        "account": "chairman-max",
+        "observed_at": "2026-11-07T11:31:47Z",
+        "provider": "glm",
+        "remaining_pct": 99,
+        "reset_at": "2026-11-07T12:03:09Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "chairman-max",
+        "observed_at": "2026-11-07T11:31:47Z",
+        "provider": "glm",
+        "remaining_pct": 99,
+        "reset_at": "2026-11-14T06:25:24Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      },
+      {
+        "account": "chairman-max-2",
+        "observed_at": "2026-11-07T11:31:47Z",
+        "provider": "glm",
+        "remaining_pct": 100,
+        "reset_at": null,
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "chairman-max-2",
+        "observed_at": "2026-11-07T11:31:47Z",
+        "provider": "glm",
+        "remaining_pct": 59,
+        "reset_at": "2026-11-09T01:39:33Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      },
+      {
+        "account": "chairman-max-3",
+        "observed_at": "2026-11-07T11:31:48Z",
+        "provider": "glm",
+        "remaining_pct": 81,
+        "reset_at": "2026-11-07T14:20:12Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "chairman-max-3",
+        "observed_at": "2026-11-07T11:31:48Z",
+        "provider": "glm",
+        "remaining_pct": 75,
+        "reset_at": "2026-11-11T06:16:02Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      },
+      {
+        "account": "default",
+        "observed_at": "2026-11-07T11:31:44Z",
+        "provider": "minimax",
+        "remaining_pct": 96,
+        "reset_at": "2026-11-07T15:00:00Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "5h"
+      },
+      {
+        "account": "default",
+        "observed_at": "2026-11-07T11:31:44Z",
+        "provider": "minimax",
+        "remaining_pct": 20,
+        "reset_at": "2026-11-09T00:00:00Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "window": "weekly"
+      }
+    ],
+    "selection": {
+      "generation": "ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46",
+      "previous": "a7671e6e0f275e25b296e8d0c972c2c45f68d8cb737152cb4a282d3bc450a775",
+      "schema": "native-code-selection.v1",
+      "sequence": 35
+    }
+  },
+  "command": "selected installed native launcher / pool status",
+  "exit_code": 0,
+  "finished_at": "2026-11-07T12:03:22.830859+00:00",
+  "schema": "h2-original-quota-reset-observation.v1",
+  "started_at": "2026-11-07T12:03:18.151025+00:00",
+  "stderr_empty": true,
+  "stdout_bytes": 4384,
+  "process_pid": 51107,
+  "process_terminal_exit_code": 0,
+  "process_runtime_seconds": 4.78,
+  "launcher_file": "43e814339a16582e2205f12117e1f17c40dce2e42a9c52d815a37c043e772e1b.py",
+  "source_contribution_head_at_observation": "17164ab746c480aaf471c21a37304d96a73ff090",
+  "installed_quota_module_sha256": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
+  "source_installation_claim": false,
+  "inference_issued": false,
+  "proof_scope": "Original installed refresh and natural GLM window replenishment; not exhausted-account recovery or APPLICATION admission."
+}

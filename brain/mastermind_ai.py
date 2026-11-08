@@ -214,6 +214,8 @@ def update_settings(patch: dict) -> dict:
 
 def _read_jsonl(p: Path, limit: int | None = None) -> list[dict]:
     try:
+        if p in (_LOOP_LOG, _REVIEWS):
+            return _portfolio_public_rows(p, limit=limit)
         if not p.exists():
             return []
         rows = []
@@ -234,6 +236,8 @@ def _read_jsonl(p: Path, limit: int | None = None) -> list[dict]:
 
 def _append_jsonl(p: Path, row: dict) -> bool:
     """Append one complete row and report durability to state-machine callers."""
+    if p in (_LOOP_LOG, _REVIEWS):
+        return _portfolio_legacy_append(p, row)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("a") as fh:
@@ -709,12 +713,8 @@ def _agenda_top(n: int = 3) -> list[str]:
         return []
 
 
-def run_cycle(asof: date | str | None = None, trigger: str = "manual") -> dict:
-    """One self-improvement tick. Observational only; never raises. Returns the loop-log row."""
-    asof_s = (asof.isoformat() if isinstance(asof, date) else str(asof)) if asof else date.today().isoformat()
-    if not (loop_flag_on() and settings()["loop_enabled"]):
-        return {"ok": False, "skipped": "loop disabled", "asof": asof_s}
-    cfg = settings()
+def _cycle_snapshot(asof_s: str, trigger: str, cfg: dict, loop_n: int, loop_rows: list) -> tuple[dict, dict | None]:
+    """Existing deterministic business steps; the caller owns reservation/publication."""
     steps: dict[str, Any] = {}
 
     # 1. journal maintenance (idempotent, deterministic — the seats still own their lessons)
@@ -813,12 +813,6 @@ def run_cycle(asof: date | str | None = None, trigger: str = "manual") -> dict:
     steps["self_tune"] = _self_tune_state()
     steps["agenda_top"] = _agenda_top()
 
-    loop_rows = _read_jsonl(_LOOP_LOG)
-    # loop_n survives log truncation/rotation: continue the last recorded counter, not row count
-    try:
-        loop_n = (int(loop_rows[-1].get("loop_n")) if loop_rows else 0) + 1
-    except Exception:  # noqa: BLE001
-        loop_n = len(loop_rows) + 1
     summary = (f"loop {loop_n}: {steps.get('journal_drafts_added', 0)} new journal drafts, "
                f"{jc['pending']} lessons pending, {jc['pins_active']} pinned rules, "
                f"{nudges_open} open nudges to the orchestrator"
@@ -850,17 +844,11 @@ def run_cycle(asof: date | str | None = None, trigger: str = "manual") -> dict:
     except Exception:  # noqa: BLE001
         pass
 
-    # 6. every-N-loops review
-    try:
-        if loop_n % max(2, int(cfg["review_every_n_loops"])) == 0:
-            review = _build_review(loop_n, cfg)
-            _append_jsonl(_REVIEWS, review)
-            row["review"] = {"loop_n": loop_n, "assessment_n": len(review.get("assessment") or [])}
-    except Exception:  # noqa: BLE001
-        pass
-
-    _append_jsonl(_LOOP_LOG, row)
-    return row
+    review = (_deterministic_review(loop_n, cfg)
+              if loop_n % max(2, int(cfg["review_every_n_loops"])) == 0 else None)
+    if review is not None:
+        row["review"] = {"loop_n": loop_n, "assessment_n": len(review.get("assessment") or [])}
+    return row, review
 
 
 def _trend(first, last) -> str:
@@ -872,7 +860,7 @@ def _trend(first, last) -> str:
         return "flat"
 
 
-def _build_review(loop_n: int, cfg: dict) -> dict:
+def _deterministic_review(loop_n: int, cfg: dict) -> dict:
     """Deterministic N-loop review: what was completed + an honest progress assessment."""
     n = max(2, int(cfg["review_every_n_loops"]))
     window = _read_jsonl(_LOOP_LOG, limit=n - 1)  # current row not yet appended
@@ -960,25 +948,986 @@ def _build_review(loop_n: int, cfg: dict) -> dict:
         "agenda_top": _agenda_top(5),
     }
 
-    # optional LLM prose (double-gated: env capability flag AND runtime setting).
-    # reason_sync (reason() is async — a bare call returns a coroutine); allowed_tools=[] so the
-    # model sees ONLY the deterministic counts JSON in the prompt, never the repo/ledgers; and the
-    # output is deny-swept before it lands in reviews.jsonl, which rsyncs to the PUBLIC mirror —
-    # a single pattern hit rejects the whole assessment (review finding, 2026-07-13).
-    if llm_review_flag_on() and cfg.get("llm_review"):
-        try:
-            from brain import cli_bridge
-            prompt = ("You are the Mastermind Portfolio reviewing your bounded improvement loop. "
-                      "In <=150 words, assess progress honestly (no alpha claims): "
-                      + json.dumps({"completed": completed, "assessment": assessment})[:4000])
-            res = cli_bridge.reason_sync(prompt, role="analyst", max_turns=1,
-                                         allowed_tools=[], log_run=False)
-            text = str(res.get("text") or "")[:2000] if isinstance(res, dict) and res.get("ok") else ""
-            if text and not any(p.search(text) for _, p in _DIRECTIVE_DENY):
-                review["llm_assessment"] = text
-        except Exception:  # noqa: BLE001
-            pass
     return review
+
+
+# The existing two public journals own cycle and optional-prose custody. Nested
+# versions replace one logical row atomically; no private sidecar or usage sink.
+_PORTFOLIO_CYCLE = "_portfolio_cycle"
+_PORTFOLIO_REVIEW = "_portfolio_review"
+_PORTFOLIO_ANCHOR = "_portfolio_anchor"
+_PORTFOLIO_LANE = "mastermind-portfolio-review"
+_PORTFOLIO_SERVICE = "macro_portfolio_fabric"
+_PORTFOLIO_WORKLOAD = "portfolio_analysis"
+_PORTFOLIO_MAX_TOKENS = 1500
+_PORTFOLIO_LOCK = "global:mastermind-portfolio-review"
+_PORTFOLIO_PROMPT_VERSION = "portfolio-progress-v1"
+_PORTFOLIO_PRIVATE = re.compile(
+    r"(?i)(?:https?://|file://|(?:^|\s)/(?:Users|Volumes|home|root|opt|tmp)/|"
+    r"(?:api[_-]?key|token|secret|password|credential)[a-z0-9_-]*\s*[:=])")
+_PORTFOLIO_REASONS = frozenset({
+    "pending", "accepted", "prose_rejected", "response_unusable",
+    "binding_unavailable", "close_unsettled", "observation_unsettled",
+    "journal_unavailable", "original_incomplete", "selection_changed", "disabled",
+})
+_REVIEW_FIELDS = frozenset({"ts", "loop_n", "window_loops", "completed", "assessment", "agenda_top"})
+
+
+class _PortfolioHeld(ValueError):
+    """A bounded local reason; private exception text never enters public data."""
+
+
+def _portfolio_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def _portfolio_hash(value):
+    return hashlib.sha256(_portfolio_json(value)).hexdigest()
+
+
+def _portfolio_decode(raw):
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                raise _PortfolioHeld("journal_unavailable")
+            value[key] = item
+        return value
+    def invalid(_):
+        raise _PortfolioHeld("journal_unavailable")
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
+
+
+def _portfolio_digest(value):
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _portfolio_id(value):
+    return (type(value) is str and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value)
+            is not None)
+
+
+def _portfolio_label(value):
+    return (type(value) is str and 0 < len(value) <= 128 and "://" not in value
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", value) is not None
+            and not _PORTFOLIO_PRIVATE.search(value)
+            and not any(pattern.search(value) for _, pattern in _DIRECTIVE_DENY))
+
+
+def _portfolio_text(text):
+    # Sweep the COMPLETE candidate before truncation. Rejected output is never
+    # written to a public journal, including internal observation versions.
+    if (type(text) is not str or not text.strip() or len(text.encode("utf-8")) > 1048576
+            or any(pattern.search(text) for _, pattern in _DIRECTIVE_DENY)
+            or _PORTFOLIO_PRIVATE.search(text)):
+        return None
+    return text[:2000]
+
+
+def _portfolio_public_input(value):
+    """Check already public facts, not opaque owner commitments."""
+    if isinstance(value, dict):
+        return all(type(k) is str and _portfolio_public_input(v) for k, v in value.items())
+    if isinstance(value, list):
+        return all(_portfolio_public_input(v) for v in value)
+    if isinstance(value, str):
+        return (len(value) <= 16000 and not any(p.search(value) for _, p in _DIRECTIVE_DENY)
+                and not _PORTFOLIO_PRIVATE.search(value))
+    if value is None or type(value) in (bool, int):
+        return True
+    if type(value) is float:
+        import math
+        return math.isfinite(value)
+    return False
+
+
+def _portfolio_path(path, *, create=False):
+    path = Path(path).absolute()
+    declared = Path(_ROOT).absolute()
+    root = declared.resolve(strict=True)
+    try:
+        relative = path.parent.relative_to(declared)
+    except ValueError:
+        relative = path.parent.relative_to(root)
+    path = root / relative / path.name
+    current = root
+    for part in relative.parts:
+        if part in (".", ".."):
+            raise _PortfolioHeld("journal_unavailable")
+        current = current / part
+        if create:
+            current.mkdir(exist_ok=True)
+        if current.is_symlink() or current.exists() and not current.is_dir():
+            raise _PortfolioHeld("journal_unavailable")
+        if create:
+            _portfolio_sync(current.parent)
+    if create:
+        _portfolio_sync(current)
+    return path
+
+
+def _portfolio_sync(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _portfolio_read(path):
+    """Strict bounded authority read, retaining exact legacy line bytes."""
+    import stat
+    path = _portfolio_path(path)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return b"", [], []
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 32 * 1024 * 1024:
+            raise _PortfolioHeld("journal_unavailable")
+        raw = stream.read(32 * 1024 * 1024 + 1)
+    if len(raw) > 32 * 1024 * 1024 or raw and not raw.endswith(b"\n"):
+        raise _PortfolioHeld("journal_unavailable")
+    lines, rows = raw.splitlines(keepends=True), []
+    if len(lines) > 50000:
+        raise _PortfolioHeld("journal_unavailable")
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        if len(line) > 262144:
+            raise _PortfolioHeld("journal_unavailable")
+        value = _portfolio_decode(line)
+        if type(value) is not dict:
+            raise _PortfolioHeld("journal_unavailable")
+        rows.append((index, value))
+    return raw, lines, rows
+
+
+def _portfolio_store(path, *, expected, row, index=None):
+    """CAS one row in the existing journal; retain all other bytes exactly.
+
+    Callers hold the existing root lock. A failed write/readback leaves the
+    original record or the new complete version for subsequent local inspection.
+    """
+    import tempfile
+    path = _portfolio_path(path, create=True)
+    before, lines, _ = _portfolio_read(path)
+    if before != expected:
+        raise _PortfolioHeld("journal_unavailable")
+    encoded = _portfolio_json(row) + b"\n"
+    if len(encoded) > 262144:
+        raise _PortfolioHeld("journal_unavailable")
+    if index is None:
+        lines.append(encoded)
+    else:
+        if type(index) is not int or not 0 <= index < len(lines):
+            raise _PortfolioHeld("journal_unavailable")
+        lines[index] = encoded
+    raw = b"".join(lines)
+    if len(raw) > 32 * 1024 * 1024:
+        raise _PortfolioHeld("journal_unavailable")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + ".tmp-",
+                                         delete=False) as target:
+            temporary = Path(target.name)
+            target.write(raw)
+            target.flush()
+            os.fsync(target.fileno())
+        if _portfolio_read(path)[0] != expected:
+            raise _PortfolioHeld("journal_unavailable")
+        os.replace(temporary, path)
+        _portfolio_sync(path.parent)
+        _portfolio_sync(path.parent.parent)
+        if _portfolio_read(path)[0] != raw:
+            raise _PortfolioHeld("journal_unavailable")
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def _portfolio_lock():
+    from contextlib import contextmanager
+    @contextmanager
+    def locked():
+        import stat
+        from control_plane import locks
+        # The incumbent lock owner retains the one mutex. Reject changed or
+        # symlinked directory/lock identities before trusting it.
+        _portfolio_path(Path(_ROOT) / "data/locks/guard", create=True)
+        lock = locks.acquire(_PORTFOLIO_LOCK, root=_ROOT)
+        if lock is None:
+            raise _PortfolioHeld("journal_unavailable")
+        with lock:
+            actual, opened = os.lstat(lock._path), os.fstat(lock._fd)
+            if (not stat.S_ISREG(actual.st_mode)
+                    or (actual.st_dev, actual.st_ino) != (opened.st_dev, opened.st_ino)):
+                raise _PortfolioHeld("journal_unavailable")
+            _portfolio_sync(lock._path.parent)
+            yield
+    return locked()
+
+
+def _portfolio_selected():
+    from brain import cli_bridge
+    return cli_bridge._application_fabric_selected()
+
+
+def _portfolio_base(review):
+    base = {key: review[key] for key in _REVIEW_FIELDS if key in review}
+    if (set(base) != _REVIEW_FIELDS or type(base["loop_n"]) is not int or base["loop_n"] < 1
+            or type(base["window_loops"]) is not int or not 2 <= base["window_loops"] <= 50
+            or type(base["completed"]) is not dict or type(base["assessment"]) is not list
+            or any(type(item) is not str for item in base["assessment"])
+            or type(base["agenda_top"]) is not list or type(base["ts"]) is not str
+            or _parse_ts(base["ts"]) is None or not _portfolio_public_input(base)):
+        raise _PortfolioHeld("journal_unavailable")
+    _portfolio_json(base)
+    return base
+
+
+def _portfolio_prompt(base):
+    return ("You are the Mastermind Portfolio reviewing your bounded improvement loop. "
+            "In <=150 words, assess progress honestly (no alpha claims): "
+            + json.dumps({"completed": base["completed"], "assessment": base["assessment"]},
+                         sort_keys=True, separators=(",", ":"))[:4000])
+
+
+def _portfolio_request(base, operation_id):
+    from engine import fabric_inference_client as transport
+    _, raw = transport._request({"model": None, "request_id": operation_id + ":brain:0",
+        "max_tokens": _PORTFOLIO_MAX_TOKENS,
+        "messages": [{"role": "user", "content": _portfolio_prompt(base)}]}, None, False)
+    original = transport._load_json(raw, unknown=False)
+    return original, {"request_id": operation_id + ":brain:0",
+        "digest": transport._auto_request_digest(original),
+        "max_tokens": _PORTFOLIO_MAX_TOKENS, "requested_model": None}
+
+
+def _portfolio_ref(row):
+    owned = row[_PORTFOLIO_REVIEW]
+    return {"loop_n": row["loop_n"], "operation_id": owned["operation_id"],
+            "input_digest": owned["input_digest"]}
+
+
+def _portfolio_ref_valid(value):
+    return (type(value) is dict and set(value) == {"loop_n", "operation_id", "input_digest"}
+            and type(value["loop_n"]) is int and value["loop_n"] > 0
+            and _portfolio_id(value["operation_id"]) and _portfolio_digest(value["input_digest"]))
+
+
+def _portfolio_close(value):
+    if value is None:
+        return None
+    fields = {"disposition", "closed", "effect_unknown", "attempted"}
+    if (type(value) is not dict or set(value) != fields
+            or value["disposition"] not in ("closed", "not_bound", "not_admitted", "refused",
+                                             "pending", "effect_unknown", "not_required")
+            or any(type(value[k]) is not bool for k in ("closed", "effect_unknown", "attempted"))):
+        raise _PortfolioHeld("journal_unavailable")
+    closed = {"disposition": "closed", "closed": True, "effect_unknown": False, "attempted": True}
+    if (value["closed"] or value["disposition"] == "closed") and value != closed:
+        raise _PortfolioHeld("journal_unavailable")
+    if value["disposition"] == "not_bound" and value != {
+            "disposition": "not_bound", "closed": False, "effect_unknown": False, "attempted": False}:
+        raise _PortfolioHeld("journal_unavailable")
+    return value
+
+
+def _portfolio_validate_review(row):
+    base = _portfolio_base(row)
+    owned = row.get(_PORTFOLIO_REVIEW)
+    if owned is None:
+        return row
+    fields = {"schema", "operation_id", "cycle_id", "input_digest", "prompt_version",
+              "authority", "request", "phase", "approved_text", "text_digest",
+              "receipt", "reason", "revision", "original_digest"}
+    if (set(row) != _REVIEW_FIELDS | {_PORTFOLIO_REVIEW} or type(owned) is not dict
+            or set(owned) != fields or owned["schema"] != "mastermind.portfolio_review.fabric.v1"
+            or not _portfolio_id(owned["operation_id"])
+            or owned["cycle_id"] is not None and not _portfolio_id(owned["cycle_id"])
+            or owned["input_digest"] != _portfolio_hash(base)
+            or owned["prompt_version"] != _PORTFOLIO_PROMPT_VERSION
+            or owned["phase"] not in ("pending", "observed", "terminal", "held")
+            or type(owned["revision"]) is not int
+            or owned["revision"] != {"pending": 0, "observed": 1, "terminal": 2, "held": 2}[owned["phase"]]
+            or owned["reason"] not in _PORTFOLIO_REASONS):
+        raise _PortfolioHeld("journal_unavailable")
+    from engine import fabric_inference_client as transport
+    authority = owned["authority"]
+    if (type(authority) is not dict or set(authority) != {
+            "service", "workload", "inspection_digest", "route_scope", "route_scope_digest"}
+            or authority["service"] != _PORTFOLIO_SERVICE
+            or authority["workload"] != _PORTFOLIO_WORKLOAD
+            or not _portfolio_digest(authority["inspection_digest"])):
+        raise _PortfolioHeld("journal_unavailable")
+    _, scope_digest = transport.validate_auto_route_scope(authority["route_scope"])
+    if scope_digest != authority["route_scope_digest"]:
+        raise _PortfolioHeld("journal_unavailable")
+    original, request = _portfolio_request(base, owned["operation_id"])
+    if owned["request"] != request:
+        raise _PortfolioHeld("journal_unavailable")
+    commitment = {key: owned[key] for key in ("schema", "operation_id", "cycle_id",
+        "input_digest", "prompt_version", "authority", "request")}
+    if owned["original_digest"] != _portfolio_hash(commitment):
+        raise _PortfolioHeld("journal_unavailable")
+    text = owned["approved_text"]
+    if (text is not None and _portfolio_text(text) != text
+            or owned["text_digest"] != (_portfolio_hash(text) if text is not None else None)):
+        raise _PortfolioHeld("journal_unavailable")
+    receipt = owned["receipt"]
+    if owned["phase"] == "pending":
+        if receipt is not None or text is not None or owned["reason"] != "pending":
+            raise _PortfolioHeld("journal_unavailable")
+        return row
+    fields = {"disposition", "effect_unknown", "pool", "selected_model", "serving_model",
+              "selection_digest", "recipe_digest", "protocol", "routed_request_digest",
+              "input_tokens", "output_tokens", "usage", "close"}
+    if (type(receipt) is not dict or set(receipt) != fields
+            or receipt["disposition"] not in ("terminal", "effect_unknown", "unobserved")
+            or type(receipt["effect_unknown"]) is not bool
+            or receipt["disposition"] == "effect_unknown" and receipt["effect_unknown"] is not True):
+        raise _PortfolioHeld("journal_unavailable")
+    for key in ("input_tokens", "output_tokens"):
+        value = receipt[key]
+        if value is not None and (type(value) is not int or not 0 <= value <= 10**12):
+            raise _PortfolioHeld("journal_unavailable")
+    usage = receipt["usage"]
+    if usage is not None:
+        if (type(usage) is not dict or set(usage) != {"usage_state", "input_tokens", "output_tokens",
+                "completed_input_tokens", "completed_output_tokens"}
+                or usage["usage_state"] not in ("known", "unknown")):
+            raise _PortfolioHeld("journal_unavailable")
+        for key in ("input_tokens", "output_tokens", "completed_input_tokens", "completed_output_tokens"):
+            value = usage[key]
+            if value is not None and (type(value) is not int or not 0 <= value <= 10**12):
+                raise _PortfolioHeld("journal_unavailable")
+        if usage["usage_state"] == "known" and any(usage[k] is None for k in ("input_tokens", "output_tokens")):
+            raise _PortfolioHeld("journal_unavailable")
+    if receipt["serving_model"] is not None and not _portfolio_label(receipt["serving_model"]):
+        raise _PortfolioHeld("journal_unavailable")
+    if receipt["pool"] is None:
+        if (any(receipt[k] is not None for k in ("selected_model", "selection_digest",
+                "recipe_digest", "protocol", "routed_request_digest")) or text is not None
+                or receipt["disposition"] != "unobserved"):
+            raise _PortfolioHeld("journal_unavailable")
+    else:
+        if (receipt["pool"] not in authority["route_scope"]["pools"]
+                or not _portfolio_label(receipt["selected_model"])
+                or not _portfolio_digest(receipt["selection_digest"])
+                or receipt["protocol"] not in ("chat", "responses", "harness")
+                or receipt["routed_request_digest"] != transport._auto_request_digest(
+                    dict(original, model=receipt["selected_model"]))):
+            raise _PortfolioHeld("journal_unavailable")
+        if ((receipt["pool"] == "go" and (receipt["recipe_digest"] is not None
+                                         or receipt["protocol"] != "chat"))
+                or receipt["pool"] == "bailian" and receipt["protocol"] != "responses"
+                or receipt["pool"] not in ("go", "bailian") and receipt["protocol"] != "harness"
+                or receipt["pool"] != "go" and not _portfolio_digest(receipt["recipe_digest"])):
+            raise _PortfolioHeld("journal_unavailable")
+    if text is not None and (receipt["disposition"] != "terminal" or receipt["effect_unknown"]
+                              or receipt["serving_model"] != receipt["selected_model"]):
+        raise _PortfolioHeld("journal_unavailable")
+    close = _portfolio_close(receipt["close"])
+    if owned["phase"] == "observed" and close is not None:
+        raise _PortfolioHeld("journal_unavailable")
+    if owned["phase"] == "terminal":
+        closed = {"disposition": "closed", "closed": True, "effect_unknown": False, "attempted": True}
+        not_bound = {"disposition": "not_bound", "closed": False, "effect_unknown": False, "attempted": False}
+        no_binding = (close == not_bound and receipt["disposition"] == "unobserved"
+                      and receipt["usage"] is None and text is None
+                      and all(receipt[k] is None for k in (
+                          "pool", "selected_model", "serving_model", "input_tokens", "output_tokens")))
+        if (receipt["effect_unknown"] or not (close == closed or no_binding)
+                or owned["reason"] not in ("accepted", "prose_rejected", "response_unusable", "binding_unavailable")):
+            raise _PortfolioHeld("journal_unavailable")
+        if (text is not None) != (owned["reason"] == "accepted"):
+            raise _PortfolioHeld("journal_unavailable")
+    return row
+
+
+def _portfolio_review_public(row):
+    if _PORTFOLIO_REVIEW not in row:
+        public = dict(row)
+        if "llm_assessment" in public and _portfolio_text(public["llm_assessment"]) != public["llm_assessment"]:
+            public.pop("llm_assessment", None)
+        return public
+    _portfolio_validate_review(row)
+    public, owned = _portfolio_base(row), row[_PORTFOLIO_REVIEW]
+    receipt = owned["receipt"] or {}
+    state = ("complete" if owned["phase"] == "terminal" and owned["approved_text"] is not None
+             else "rejected" if owned["phase"] == "terminal" else "held")
+    public["llm_review"] = {"state": state, "reason": owned["reason"],
+        "model": receipt.get("serving_model"), "provider": receipt.get("pool"),
+        "input_tokens": receipt.get("input_tokens"), "output_tokens": receipt.get("output_tokens")}
+    if state == "complete":
+        public["llm_assessment"] = owned["approved_text"]
+    return public
+
+
+def _portfolio_cycle_validate(row):
+    if _PORTFOLIO_ANCHOR in row:
+        owned = row[_PORTFOLIO_ANCHOR]
+        if (set(row) != {_PORTFOLIO_ANCHOR} or type(owned) is not dict
+                or set(owned) != {"schema", "cycle_highwater", "review_highwater", "open_review"}
+                or owned["schema"] != "mastermind.portfolio_review_anchor.v1"
+                or any(type(owned[k]) is not int or owned[k] < 0 for k in ("cycle_highwater", "review_highwater"))
+                or owned["open_review"] is not None and not _portfolio_ref_valid(owned["open_review"])):
+            raise _PortfolioHeld("journal_unavailable")
+        return owned
+    if type(row.get("loop_n")) is not int or row["loop_n"] < 1:
+        raise _PortfolioHeld("journal_unavailable")
+    owned = row.get(_PORTFOLIO_CYCLE)
+    if owned is None:
+        return None
+    fields = {"schema", "cycle_id", "phase", "review_highwater", "open_review", "review",
+              "review_operation_id", "review_started", "llm_requested", "fabric_selected", "snapshot_digest"}
+    if (type(owned) is not dict or set(owned) != fields
+            or owned["schema"] != "mastermind.portfolio_cycle.v1" or not _portfolio_id(owned["cycle_id"])
+            or owned["phase"] not in ("claimed", "frozen", "complete")
+            or type(owned["review_highwater"]) is not int or owned["review_highwater"] < 0
+            or any(type(owned[k]) is not bool for k in ("review_started", "llm_requested", "fabric_selected"))
+            or owned["open_review"] is not None and not _portfolio_ref_valid(owned["open_review"])
+            or owned["review_operation_id"] is not None and not _portfolio_id(owned["review_operation_id"])):
+        raise _PortfolioHeld("journal_unavailable")
+    base = {key: value for key, value in row.items() if key != _PORTFOLIO_CYCLE}
+    required = {"ts", "asof", "trigger", "loop_n", "steps", "nudges_open", "summary", "ok"}
+    if (not required <= set(base) or set(base) - required - {"run_id", "review"}
+            or type(base["steps"]) is not dict or type(base["ok"]) is not bool
+            or type(base["nudges_open"]) is not int or base["nudges_open"] < 0
+            or not _portfolio_id(base["trigger"])
+            or type(base["ts"]) is not str or _parse_ts(base["ts"]) is None
+            or type(base["summary"]) is not str or not _portfolio_public_input(base)):
+        raise _PortfolioHeld("journal_unavailable")
+    review = owned["review"]
+    if review is not None:
+        _portfolio_base(review)
+        if set(review) != _REVIEW_FIELDS or review["loop_n"] != row["loop_n"]:
+            raise _PortfolioHeld("journal_unavailable")
+    if owned["phase"] == "claimed":
+        if review is not None or owned["snapshot_digest"] is not None or owned["review_started"]:
+            raise _PortfolioHeld("journal_unavailable")
+    elif owned["snapshot_digest"] != _portfolio_hash({"row": base, "review": review}):
+        raise _PortfolioHeld("journal_unavailable")
+    return owned
+
+
+def _portfolio_state():
+    loop_raw, _, loops = _portfolio_read(_LOOP_LOG)
+    review_raw, _, reviews_ = _portfolio_read(_REVIEWS)
+    cycle_highwater = review_highwater = 0
+    open_ref, unfinished = None, None
+    review_map, loop_numbers = {}, set()
+    for index, row in loops:
+        owned = _portfolio_cycle_validate(row)
+        if _PORTFOLIO_ANCHOR in row:
+            cycle_highwater = max(cycle_highwater, owned["cycle_highwater"])
+        else:
+            if row["loop_n"] in loop_numbers:
+                raise _PortfolioHeld("journal_unavailable")
+            loop_numbers.add(row["loop_n"])
+            cycle_highwater = max(cycle_highwater, row["loop_n"])
+            if owned is not None and owned["phase"] != "complete":
+                if unfinished is not None:
+                    raise _PortfolioHeld("journal_unavailable")
+                unfinished = (index, row)
+        if owned is not None:
+            review_highwater = max(review_highwater, owned["review_highwater"])
+            open_ref = owned["open_review"]  # Every later owned tail carries the current anchor.
+    for index, row in reviews_:
+        _portfolio_validate_review(row)
+        number = row["loop_n"]
+        if number in review_map:
+            raise _PortfolioHeld("journal_unavailable")
+        review_map[number] = (index, row)
+        review_highwater = max(review_highwater, number)
+    for _, cycle in loops:
+        owned = cycle.get(_PORTFOLIO_CYCLE)
+        if owned is not None and owned["review"] is not None:
+            saved = review_map.get(cycle["loop_n"])
+            if saved is not None:
+                _portfolio_cycle_review(cycle, saved[1])
+    if open_ref is not None:
+        original = review_map.get(open_ref["loop_n"])
+        if (original is None or _PORTFOLIO_REVIEW not in original[1]
+                or _portfolio_ref(original[1]) != open_ref):
+            raise _PortfolioHeld("original_incomplete")
+    pending = [(index, row) for index, row in reviews_ if _PORTFOLIO_REVIEW in row
+               and row[_PORTFOLIO_REVIEW]["phase"] != "terminal"]
+    if len(pending) > 1:
+        raise _PortfolioHeld("journal_unavailable")
+    return {"loop_raw": loop_raw, "review_raw": review_raw, "loops": loops,
+            "reviews": reviews_, "review_map": review_map, "cycle_highwater": cycle_highwater,
+            "review_highwater": review_highwater, "open_ref": open_ref,
+            "unfinished": unfinished, "pending": pending}
+
+
+def _portfolio_anchor(state, reference):
+    import copy
+    if reference is not None and not _portfolio_ref_valid(reference):
+        raise _PortfolioHeld("journal_unavailable")
+    high = max(state["review_highwater"], reference["loop_n"] if reference else 0)
+    if state["loops"] and any(key in state["loops"][-1][1] for key in (_PORTFOLIO_CYCLE, _PORTFOLIO_ANCHOR)):
+        index, row = state["loops"][-1]
+        row = copy.deepcopy(row)
+        owned = row.get(_PORTFOLIO_CYCLE, row.get(_PORTFOLIO_ANCHOR))
+        owned["review_highwater"], owned["open_review"] = high, reference
+        _portfolio_cycle_validate(row)
+        _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=row, index=index)
+    else:
+        row = {_PORTFOLIO_ANCHOR: {"schema": "mastermind.portfolio_review_anchor.v1",
+            "cycle_highwater": state["cycle_highwater"], "review_highwater": high, "open_review": reference}}
+        _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=row)
+
+
+def _portfolio_reconcile(state):
+    """Clear a retained open anchor only from its original terminal review.
+
+    Called under the existing root lock, never by a public read surface.
+    """
+    reference = state["open_ref"]
+    if reference is not None:
+        found = state["review_map"].get(reference["loop_n"])
+        if (found is not None and _PORTFOLIO_REVIEW in found[1]
+                and _portfolio_ref(found[1]) == reference
+                and found[1][_PORTFOLIO_REVIEW]["phase"] == "terminal"):
+            _portfolio_anchor(state, None)
+            return _portfolio_state()
+    return state
+
+
+def _portfolio_public_rows(path, limit=None):
+    _, _, rows = _portfolio_read(path)
+    public = []
+    for _, row in rows:
+        if path == _REVIEWS:
+            _portfolio_validate_review(row)
+            public.append(_portfolio_review_public(row))
+        else:
+            owned = _portfolio_cycle_validate(row)
+            if _PORTFOLIO_ANCHOR in row or owned is not None and owned["phase"] != "complete":
+                continue
+            public.append({key: value for key, value in row.items() if key != _PORTFOLIO_CYCLE})
+    return public[-limit:] if limit else public
+
+
+def _portfolio_legacy_append(path, row):
+    try:
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            if _portfolio_selected() or state["unfinished"] is not None or state["pending"] or state["open_ref"]:
+                return False
+            if any(_PORTFOLIO_REVIEW in value for _, value in state["reviews"]):
+                return False
+            raw = state["loop_raw"] if path == _LOOP_LOG else state["review_raw"]
+            _portfolio_store(path, expected=raw, row=row)
+        return True
+    except Exception:
+        return False
+
+
+def _portfolio_held_review(base, reason="journal_unavailable"):
+    return {**base, "llm_review": {"state": "held", "reason": reason,
+        "model": None, "provider": None, "input_tokens": None, "output_tokens": None}}
+
+
+def _portfolio_observation(provider, shared, transport, inspection, original, request, operation_id):
+    receipt = {"disposition": "unobserved", "effect_unknown": False,
+        "pool": None, "selected_model": None, "serving_model": None,
+        "selection_digest": None, "recipe_digest": None, "protocol": None, "routed_request_digest": None,
+        "input_tokens": None, "output_tokens": None,
+        "usage": shared.fabric_usage(provider) if provider is not None else None, "close": None}
+    if provider is None:
+        return receipt
+    observed = provider.get("_fabric_last_observation")
+    if isinstance(observed, dict):
+        if _portfolio_label(observed.get("serving_model")):
+            receipt["serving_model"] = observed["serving_model"]
+        for key in ("input_tokens", "output_tokens"):
+            value = observed.get(key)
+            if type(value) is int and 0 <= value <= 10**12:
+                receipt[key] = value
+    receipt["effect_unknown"] = bool(provider.get("_fabric_pending")
+        or getattr(provider.get("_fabric_failure"), "effect_unknown", False))
+    observation = shared._fabric_routed_observation(
+        provider, shared.fabric_observation(provider), request["request_id"])
+    if observation is not None:
+        document = observation.document
+        routed = transport._auto_request_digest(dict(original, model=document["routing"]["selected_model"]))
+        document = transport.validate_auto_observation(document, inspection,
+            operation_id=operation_id, request_id=request["request_id"],
+            request_digest=request["digest"], routed_request_digest=routed,
+            max_tokens=_PORTFOLIO_MAX_TOKENS)
+        route = document["routing"]
+        if not all(_portfolio_label(v) for v in (route["selected_model"], document["serving_model"]) if v is not None):
+            receipt["effect_unknown"] = True
+            return receipt
+        receipt.update(disposition=document["disposition"],
+            effect_unknown=receipt["effect_unknown"] or document["effect_unknown"],
+            pool=route["pool"], selected_model=route["selected_model"], serving_model=document["serving_model"],
+            selection_digest=route["selection_digest"], recipe_digest=route["recipe_digest"],
+            protocol=route["protocol"], routed_request_digest=routed,
+            input_tokens=document["usage"]["input_tokens"], output_tokens=document["usage"]["output_tokens"])
+    return receipt
+
+
+def _portfolio_update_review(expected, updated):
+    _portfolio_validate_review(updated)
+    with _portfolio_lock():
+        state = _portfolio_reconcile(_portfolio_state())
+        found = state["review_map"].get(expected["loop_n"])
+        if found is None or found[1] != expected or state["open_ref"] != _portfolio_ref(expected):
+            raise _PortfolioHeld("original_incomplete")
+        _portfolio_store(_REVIEWS, expected=state["review_raw"], row=updated, index=found[0])
+
+
+def _portfolio_infer(base, *, cycle_id=None, operation_id=None):
+    import copy
+    import secrets
+    from brain import fabric_inference
+    provider = operation = None
+    try:
+        modes, shared, root = fabric_inference._owner()
+        from engine import fabric_inference_client as transport
+        cfg = {"provider_order": ["fabric"], "workload_profile": _PORTFOLIO_WORKLOAD,
+               "max_tokens": _PORTFOLIO_MAX_TOKENS, "usage_lane": _PORTFOLIO_LANE}
+        mode_id = shared.application_mode_id()
+        factory = modes.make_application_fabric_factory(mode_id=mode_id, lane=_PORTFOLIO_LANE,
+            workload_cfg=cfg, root=root, service_mode_id=_PORTFOLIO_SERVICE)
+        if type(factory) is not modes.ApplicationFabricFactory:
+            raise _PortfolioHeld("binding_unavailable")
+        inspection = transport.validate_auto_inspection(factory.inspect(cfg))
+        operation_id = operation_id or "portfolio-review:" + secrets.token_hex(16)
+        original, request = _portfolio_request(base, operation_id)
+        owned = {"schema": "mastermind.portfolio_review.fabric.v1", "operation_id": operation_id,
+            "cycle_id": cycle_id, "input_digest": _portfolio_hash(base), "prompt_version": _PORTFOLIO_PROMPT_VERSION,
+            "authority": {"service": _PORTFOLIO_SERVICE, "workload": _PORTFOLIO_WORKLOAD,
+                "inspection_digest": _portfolio_hash(inspection),
+                "route_scope": inspection["route_scope"], "route_scope_digest": inspection["route_scope_digest"]},
+            "request": request, "phase": "pending", "approved_text": None, "text_digest": None,
+            "receipt": None, "reason": "pending", "revision": 0}
+        owned["original_digest"] = _portfolio_hash({key: owned[key] for key in (
+            "schema", "operation_id", "cycle_id", "input_digest", "prompt_version", "authority", "request")})
+        pending = {**base, _PORTFOLIO_REVIEW: owned}
+        _portfolio_validate_review(pending)
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            prior = state["review_map"].get(base["loop_n"])
+            if prior is not None:
+                return _portfolio_review_public(prior[1])
+            if state["pending"] or state["open_ref"] or base["loop_n"] <= state["review_highwater"]:
+                return _portfolio_held_review(base, "original_incomplete")
+            current = state["unfinished"]
+            if current is not None:
+                cycle = current[1][_PORTFOLIO_CYCLE]
+                if (cycle_id != cycle["cycle_id"] or cycle["phase"] != "frozen"
+                        or cycle["review_started"]
+                        or cycle["review"] != base or cycle["review_operation_id"] != operation_id):
+                    return _portfolio_held_review(base, "original_incomplete")
+            elif cycle_id is not None:
+                return _portfolio_held_review(base, "original_incomplete")
+            if not _portfolio_selected() or not llm_review_flag_on() or not settings().get("llm_review"):
+                return _portfolio_held_review(base, "selection_changed")
+            _portfolio_store(_REVIEWS, expected=state["review_raw"], row=pending)
+            state = _portfolio_reconcile(_portfolio_state())
+            _portfolio_anchor(state, _portfolio_ref(pending))
+            if cycle_id is not None:
+                state = _portfolio_reconcile(_portfolio_state())
+                found = state["unfinished"]
+                if found is None or found[1][_PORTFOLIO_CYCLE]["cycle_id"] != cycle_id:
+                    raise _PortfolioHeld("original_incomplete")
+                index, cycle = found
+                cycle = copy.deepcopy(cycle)
+                cycle[_PORTFOLIO_CYCLE]["review_started"] = True
+                _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=cycle, index=index)
+        text = None
+        reason = "response_unusable"
+        observed_saved = False
+        try:
+            provider = shared.build_fabric_provider(factory.with_inspection(inspection),
+                request_id=operation_id, workload_cfg=cfg)
+            provider["usage_lane"] = _PORTFOLIO_LANE
+            operation = shared.begin_operation([provider], operation_id=operation_id, context=_PORTFOLIO_LANE)
+            def call(client, model):
+                response = client.messages.create(model=model, max_tokens=_PORTFOLIO_MAX_TOKENS,
+                    messages=[{"role": "user", "content": _portfolio_prompt(base)}])
+                if (getattr(response, "stop_reason", None) != "end_turn"
+                        or not response.content
+                        or any(getattr(block, "type", None) != "text" for block in response.content)):
+                    raise ValueError("portfolio_prose_response_unusable")
+                return "".join(block.text for block in response.content), None, response
+            candidate, _, _ = shared.make_call(operation.providers, call, context=_PORTFOLIO_LANE)
+            text = _portfolio_text(candidate)
+            reason = "accepted" if text is not None else "prose_rejected"
+        except Exception:
+            reason = "binding_unavailable" if provider is None else "response_unusable"
+        finally:
+            # Observation is durably retained before close/public acceptance.
+            # Cancellation still propagates; its pending record stays a barrier.
+            import sys
+            cancelling = sys.exc_info()[0] is not None
+            try:
+                if not cancelling:
+                    try:
+                        receipt = _portfolio_observation(provider, shared, transport, inspection,
+                            original, request, operation_id)
+                        if (receipt["disposition"] != "terminal" or receipt["effect_unknown"]
+                                or receipt["serving_model"] != receipt["selected_model"]):
+                            text = None
+                            if reason == "accepted":
+                                reason = "response_unusable"
+                        observed = copy.deepcopy(pending)
+                        observed[_PORTFOLIO_REVIEW].update(phase="observed", revision=1,
+                            approved_text=text, text_digest=_portfolio_hash(text) if text is not None else None,
+                            receipt=receipt, reason=reason)
+                        _portfolio_update_review(pending, observed)
+                        observed_saved = True
+                    except Exception:
+                        observed_saved = False
+            finally:
+                try:
+                    if operation is not None:
+                        operation.close()
+                    elif provider is not None:
+                        shared.close_fabric_provider(provider)
+                except Exception:
+                    # The original close may have executed. Do not repeat it.
+                    pass
+        if not observed_saved:
+            return _portfolio_held_review(base)
+        close = (provider.get("_fabric_close") if provider is not None else
+                 {"disposition": "not_bound", "closed": False, "effect_unknown": False, "attempted": False})
+        try:
+            close = _portfolio_close(close)
+        except Exception:
+            close = None
+        if close is None:
+            close = {"disposition": "effect_unknown", "closed": False, "effect_unknown": True, "attempted": True}
+        settled = copy.deepcopy(observed)
+        saved = settled[_PORTFOLIO_REVIEW]
+        saved["receipt"]["close"] = close
+        uncertain = (saved["receipt"]["effect_unknown"] or close["effect_unknown"]
+                     or provider is not None and not close["closed"])
+        saved.update(phase="held" if uncertain else "terminal", revision=2,
+                     reason="close_unsettled" if uncertain else reason)
+        _portfolio_update_review(observed, settled)
+        if not uncertain:
+            with _portfolio_lock():
+                state = _portfolio_reconcile(_portfolio_state())
+                if state["open_ref"] == _portfolio_ref(settled):
+                    _portfolio_anchor(state, None)
+        return _portfolio_review_public(settled)
+    except Exception:
+        return _portfolio_held_review(base, "binding_unavailable" if provider is None else "journal_unavailable")
+
+
+def _build_review(loop_n: int, cfg: dict, *, _snapshot=None, _cycle_id=None, _operation_id=None,
+                  _fabric_selected=None, _llm_requested=None, _native_claim=None) -> dict:
+    """Resolve an original before mutable inputs, selection, cadence or opt-ins."""
+    try:
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            prior = state["review_map"].get(loop_n)
+            if prior is not None:
+                return _portfolio_review_public(prior[1])
+            blocked = bool(state["pending"] or state["open_ref"]
+                           or loop_n <= state["review_highwater"]
+                           or state["unfinished"] is not None
+                              and state["unfinished"][1][_PORTFOLIO_CYCLE]["cycle_id"] != _cycle_id)
+        base = _portfolio_base(_snapshot if _snapshot is not None else _deterministic_review(loop_n, cfg))
+        if blocked:
+            return _portfolio_held_review(base, "original_incomplete")
+        requested = (llm_review_flag_on() and cfg.get("llm_review")
+                     if _llm_requested is None else _llm_requested)
+        if not requested:
+            return base
+        if not llm_review_flag_on() or not cfg.get("llm_review"):
+            return _portfolio_held_review(base, "disabled") if _llm_requested else base
+        if _portfolio_selected() or _fabric_selected is True:
+            if not _portfolio_selected() or not llm_review_flag_on() or not cfg.get("llm_review"):
+                return _portfolio_held_review(base, "selection_changed")
+            return _portfolio_infer(base, cycle_id=_cycle_id, operation_id=_operation_id)
+        from brain import cli_bridge
+        # Recheck immediately before the incumbent bridge, which also has its
+        # own selected-path pre-start veto. A late selector cannot become a
+        # native fallback for an original selected review.
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            if _portfolio_selected() or state["pending"] or state["open_ref"] or loop_n in state["review_map"]:
+                return _portfolio_held_review(base, "selection_changed")
+            if _cycle_id is not None:
+                import copy
+                current = state["unfinished"]
+                if (current is None or current[1][_PORTFOLIO_CYCLE]["cycle_id"] != _cycle_id
+                        or current[1][_PORTFOLIO_CYCLE]["review_started"]):
+                    return _portfolio_held_review(base, "original_incomplete")
+                index, cycle = current
+                cycle = copy.deepcopy(cycle)
+                cycle[_PORTFOLIO_CYCLE]["review_started"] = True
+                _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=cycle, index=index)
+                if _native_claim is not None:
+                    _native_claim["owned"] = True
+        result = cli_bridge.reason_sync(_portfolio_prompt(base), role="analyst", max_turns=1,
+                                        allowed_tools=[], log_run=False)
+        completed = isinstance(result, dict) and result.get("ok") is True
+        if _native_claim is not None:
+            _native_claim["completed"] = completed
+        if not completed:
+            return _portfolio_held_review(base, "original_incomplete")
+        if _portfolio_selected():
+            return _portfolio_held_review(base, "selection_changed")
+        text = _portfolio_text(result.get("text"))
+        return {**base, **({"llm_assessment": text} if text is not None else {})}
+    except Exception:
+        try:
+            base = _portfolio_base(_snapshot if _snapshot is not None else _deterministic_review(loop_n, cfg))
+        except Exception:
+            base = {"ts": _now_iso(), "loop_n": loop_n, "window_loops": max(2, int(cfg.get("review_every_n_loops", 5))),
+                    "completed": {}, "assessment": [], "agenda_top": []}
+        return _portfolio_held_review(base)
+
+
+def _portfolio_cycle_review(cycle, review):
+    owned = cycle[_PORTFOLIO_CYCLE]
+    if _portfolio_base(review) != owned["review"]:
+        raise _PortfolioHeld("original_incomplete")
+    original = review.get(_PORTFOLIO_REVIEW)
+    if original is not None and (original["cycle_id"] != owned["cycle_id"]
+                                 or original["operation_id"] != owned["review_operation_id"]):
+        raise _PortfolioHeld("original_incomplete")
+
+
+def _portfolio_finish_cycle(cycle):
+    import copy
+    owned = cycle[_PORTFOLIO_CYCLE]
+    base = {key: value for key, value in cycle.items() if key != _PORTFOLIO_CYCLE}
+    review = owned["review"]
+    if review is not None:
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            found = state["review_map"].get(cycle["loop_n"])
+            if found is not None:
+                _portfolio_cycle_review(cycle, found[1])
+                if (_PORTFOLIO_REVIEW in found[1]
+                        and found[1][_PORTFOLIO_REVIEW]["phase"] != "terminal"):
+                    return {**base, "review_state": "held"}
+            else:
+                current = state["unfinished"]
+                if (current is None or current[1][_PORTFOLIO_CYCLE]["cycle_id"] != owned["cycle_id"]
+                        or current[1][_PORTFOLIO_CYCLE]["review_started"]):
+                    return {**base, "review_state": "held"}
+        if found is None:
+            native_claim = {}
+            result = _build_review(cycle["loop_n"], {"review_every_n_loops": review["window_loops"],
+                "llm_review": settings().get("llm_review")}, _snapshot=review,
+                _cycle_id=owned["cycle_id"], _operation_id=owned["review_operation_id"],
+                _fabric_selected=owned["fabric_selected"], _llm_requested=owned["llm_requested"],
+                _native_claim=native_claim)
+            with _portfolio_lock():
+                state = _portfolio_reconcile(_portfolio_state())
+                found = state["review_map"].get(cycle["loop_n"])
+                if found is None:
+                    current = state["unfinished"]
+                    if (current is None or current[1][_PORTFOLIO_CYCLE]["cycle_id"] != owned["cycle_id"]
+                            or current[1][_PORTFOLIO_CYCLE]["review_started"]
+                               and (native_claim.get("owned") is not True
+                                    or native_claim.get("completed") is not True)):
+                        return {**base, "review_state": "held"}
+                    # No Fabric intent was committed. Preserve deterministic
+                    # output plus the bounded reason, without inventing a receipt.
+                    _portfolio_store(_REVIEWS, expected=state["review_raw"], row=result)
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            found = state["review_map"].get(cycle["loop_n"])
+            if found is None:
+                raise _PortfolioHeld("original_incomplete")
+            _portfolio_cycle_review(cycle, found[1])
+            if (_PORTFOLIO_REVIEW in found[1] and found[1][_PORTFOLIO_REVIEW]["phase"] != "terminal"):
+                return {**base, "review_state": "held"}
+    with _portfolio_lock():
+        state = _portfolio_reconcile(_portfolio_state())
+        current = state["unfinished"]
+        if current is None:
+            matching = next((r for _, r in state["loops"]
+                if _PORTFOLIO_CYCLE in r and r[_PORTFOLIO_CYCLE]["cycle_id"] == owned["cycle_id"]), None)
+            if matching is None or matching[_PORTFOLIO_CYCLE]["phase"] != "complete":
+                raise _PortfolioHeld("original_incomplete")
+            return {key: value for key, value in matching.items() if key != _PORTFOLIO_CYCLE}
+        index, current = current
+        if current[_PORTFOLIO_CYCLE]["cycle_id"] != owned["cycle_id"]:
+            raise _PortfolioHeld("original_incomplete")
+        current = copy.deepcopy(current)
+        current[_PORTFOLIO_CYCLE]["phase"] = "complete"
+        current[_PORTFOLIO_CYCLE]["review_highwater"] = state["review_highwater"]
+        _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=current, index=index)
+    return base
+
+
+def run_cycle(asof: date | str | None = None, trigger: str = "manual") -> dict:
+    """Reserve the existing cycle before business effects; recover without replay."""
+    import copy
+    import secrets
+    asof_s = (asof.isoformat() if isinstance(asof, date) else str(asof)) if asof else date.today().isoformat()
+    try:
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            current = state["unfinished"]
+            if current is not None:
+                cycle = current[1]
+                if cycle[_PORTFOLIO_CYCLE]["phase"] == "claimed":
+                    return {"ok": False, "held": "original_incomplete", "asof": cycle["asof"],
+                            "loop_n": cycle["loop_n"]}
+                recover = True
+            else:
+                if state["pending"] or state["open_ref"]:
+                    return {"ok": False, "held": "original_incomplete", "asof": asof_s}
+                cfg = settings()
+                if not (loop_flag_on() and cfg["loop_enabled"]):
+                    return {"ok": False, "skipped": "loop disabled", "asof": asof_s}
+                if not _portfolio_id(trigger) or date.fromisoformat(asof_s).isoformat() != asof_s:
+                    raise _PortfolioHeld("journal_unavailable")
+                number = max(state["cycle_highwater"], state["review_highwater"]) + 1
+                cycle = {"ts": _now_iso(), "asof": asof_s, "trigger": trigger, "loop_n": number,
+                    "steps": {}, "nudges_open": 0, "summary": "Original cycle reserved; business result pending.",
+                    "ok": False, _PORTFOLIO_CYCLE: {"schema": "mastermind.portfolio_cycle.v1",
+                        "cycle_id": "portfolio-cycle:" + secrets.token_hex(16), "phase": "claimed",
+                        "review_highwater": state["review_highwater"], "open_review": None, "review": None,
+                        "review_operation_id": None, "review_started": False,
+                        "llm_requested": bool(llm_review_flag_on() and cfg.get("llm_review")),
+                        "fabric_selected": _portfolio_selected(), "snapshot_digest": None}}
+                _portfolio_cycle_validate(cycle)
+                _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=cycle)
+                recover = False
+        if recover:
+            return _portfolio_finish_cycle(cycle)
+        # The durable claim prevents a second caller entering these existing
+        # journal/reflection/directive/learning steps, without a lock over I/O.
+        row, review = _cycle_snapshot(asof_s, trigger, cfg, number, loop_log(limit=None))
+        frozen = {**row, _PORTFOLIO_CYCLE: copy.deepcopy(cycle[_PORTFOLIO_CYCLE])}
+        frozen[_PORTFOLIO_CYCLE].update(phase="frozen", review=review,
+            review_operation_id="portfolio-review:" + secrets.token_hex(16) if review is not None else None,
+            snapshot_digest=_portfolio_hash({"row": row, "review": review}))
+        _portfolio_cycle_validate(frozen)
+        with _portfolio_lock():
+            state = _portfolio_reconcile(_portfolio_state())
+            current = state["unfinished"]
+            if current is None or current[1] != cycle:
+                raise _PortfolioHeld("original_incomplete")
+            _portfolio_store(_LOOP_LOG, expected=state["loop_raw"], row=frozen, index=current[0])
+        return _portfolio_finish_cycle(frozen)
+    except Exception:
+        return {"ok": False, "held": "journal_unavailable", "asof": asof_s}
+
+
+def _portfolio_public_status():
+    try:
+        state = _portfolio_state()
+        return {"state": "held" if state["unfinished"] or state["pending"] or state["open_ref"] else "ready",
+                "allocated_loop_n": state["cycle_highwater"], "review_highwater": state["review_highwater"]}
+    except Exception:
+        return {"state": "held", "reason": "journal_unavailable"}
 
 
 # ── read surfaces for the API/admin ───────────────────────────────────────────────────────────
@@ -1034,6 +1983,7 @@ def status() -> dict:
         "loop_n": (log_rows[-1].get("loop_n") if log_rows else 0),
         "last_loops": log_rows,
         "last_review": (reviews(limit=1) or [None])[-1],
+        "review_runtime": _portfolio_public_status(),
         "reflection": {
             "asof": reflection.get("asof"),
             "nudges": reflection.get("nudges") or [],

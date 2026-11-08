@@ -1,4 +1,5 @@
 import { ORIGINAL_OPERATION_ID_PREFIXES } from "../planning/plan-adoption-status";
+import {validateDiscoveryCorrectionRequest,validateDiscoveryCorrectionLookup,type DiscoveryCorrectionLookup} from '../knowledge/library/project-discovery-correction';
 import {
   validSourceOperationContextSelection,
   type SourceAction,
@@ -17,7 +18,7 @@ export type BasicSourceLookup = {
   work_ref: null;
 };
 /** Exact original safe lookup; Knowledge never accepts the basic selector. */
-export interface KnowledgeSourceLookup {
+export interface LegacyKnowledgeSourceLookup {
   action: 'add_project_file' | 'set_project_communication_preference';
   request_id: string;
   work_ref: string;
@@ -26,6 +27,7 @@ export interface KnowledgeSourceLookup {
   request_sha256: string;
   expected_preference_revision: string | null;
 }
+export type KnowledgeSourceLookup = LegacyKnowledgeSourceLookup | DiscoveryCorrectionLookup;
 export type SourceLookup = BasicSourceLookup | KnowledgeSourceLookup;
 export interface SourcePrepare {
   action: SourceAction;
@@ -229,6 +231,7 @@ export function sourceOperationRequest(
         !Object.hasOwn(ORIGINAL_OPERATION_ID_PREFIXES, body.action)
       )
         invalid();
+      if (body.action === 'correct_project_discovery') validateDiscoveryCorrectionRequest(request);
       const prefix =
         ORIGINAL_OPERATION_ID_PREFIXES[body.action as SourceAction];
       if (
@@ -267,7 +270,9 @@ export function sourceOperationRequest(
       if(method === "read" && body.action === "publish_project_proposal" && body.work_ref === null) {
         const normalized={...body,work_ref:"WS:VALID"};identity(normalized);
       } else identity(body);
-      if (body.action === "add_project_file" || body.action === "set_project_communication_preference") {
+      if (body.action === 'correct_project_discovery') {
+        validateDiscoveryCorrectionLookup(input);
+      } else if (body.action === "add_project_file" || body.action === "set_project_communication_preference") {
         object(body,["action","request_id","work_ref","source_commit","base_revision","request_sha256","expected_preference_revision"]);
         // This added variant is closed own enumerable data before clone as
         // well; keep every older basic lookup's existing semantics intact.
@@ -314,6 +319,11 @@ export function createSourceOperationTransport(
               action: String(body.action),
               request_id: String(body.request_id),
               work_ref: String(body.work_ref),
+              ...(body.action==='correct_project_discovery'?{
+                source_commit:String(body.source_commit),base_revision:String(body.base_revision),
+                request_sha256:String(body.request_sha256),discovery_ref:String(body.discovery_ref),
+                expected_discovery_revision:String(body.expected_discovery_revision),
+              }:{}),
               ...((body.action==="add_project_file"||body.action==="set_project_communication_preference")?{
                 source_commit:String(body.source_commit),base_revision:String(body.base_revision),
                 request_sha256:String(body.request_sha256),expected_preference_revision:String(body.expected_preference_revision),

@@ -1,0 +1,9 @@
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -1222 +1222,5 @@
+-    envelope = cache[provider]["accounts"][account]["admission"]
++    entry = cache[provider]["accounts"][account]
++    if (type(entry) is not dict or entry.get("terminal_refusal")
++            or entry.get("refresh_error") or _has_pending(entry)):
++        raise ValueError("capacity_refresh_unreconciled")
++    envelope = entry["admission"]

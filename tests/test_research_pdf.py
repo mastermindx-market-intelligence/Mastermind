@@ -99,14 +99,14 @@ def test_endpoint_returns_pdf():
     from brain import research_paper
 
     # conftest isolates the papers dir to a tmp path, so seed one paper for the endpoint to find
-    paper = {"id": "test-NVDA", "ticker": "NVDA", "asof": "2026-06-18",
+    paper = {"id": "2026-06-18-NVDA", "ticker": "NVDA", "asof": "2026-06-18",
              "generated_at": "2026-06-18T00:00:00Z", "fair_value": 245, "engine_score": 55,
              "research_score": 52, "combined": 54, "viability": "rich", "confirmed": False,
              "report_md": "## Thesis\n\nGreat company with **observed** demand.",
              "summary": "Strong franchise.", "key_risks": ["concentration"],
              "mode": "llm", "schema": "research_paper.v1"}
     research_paper.save_paper(paper)
-    pid = "test-NVDA"
+    pid = "2026-06-18-NVDA"
     app = FastAPI(); app.include_router(web.router)
     c = TestClient(app)
     r = c.get("/research_paper.pdf", params={"id": pid})

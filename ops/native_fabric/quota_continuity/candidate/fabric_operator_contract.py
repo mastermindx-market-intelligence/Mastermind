@@ -93,42 +93,6 @@ def _refuse(code):
     raise DelegationRefused(code)
 
 
-PROTECTED_REQUEST_SCHEMA = 'mastermind.fabric_protected_memory_pre_input.v1'
-
-
-def validate_protected_launch(grant, lease, launch, request, *, now,
-                              used_children, root_children_remaining):
-    """Same economic grant, without pretending an unknown packet exists.
-
-    This is comparison DATA only. The incumbent owner authenticates its bearer,
-    consumes the original count, and the installed Control peer separately
-    proves custody. Neither this record nor its hashes grant source access.
-    """
-    if not _is_finite_real(now): _refuse('now_invalid')
-    grant = _validate_grant(grant, now)
-    _validate_lease(lease, grant, now)
-    _validate_launch(launch, grant)
-    fields = {'schema', 'root', 'parent', 'run_id', 'task_class',
-              'task_complexity', 'pre_input_sha256', 'profile_sha256', 'model'}
-    value = _as_record(request, 'request_not_mapping')
-    _require_exact_keys(value, fields, 'request_missing_field', 'request_unknown_field')
-    if value['schema'] != PROTECTED_REQUEST_SCHEMA: _refuse('request_schema')
-    if any(type(value[k]) is not str for k in ('root','parent','run_id','task_class','task_complexity','model')):
-        _refuse('request_schema')
-    if value['root'] != grant['root']: _refuse('request_root_mismatch')
-    if value['parent'] != grant['operator_run']: _refuse('request_parent_mismatch')
-    if not _is_id(value['run_id']): _refuse('request_run_id_invalid')
-    if value['run_id'] in (grant['root'], grant['operator_run']): _refuse('request_run_id_not_distinct')
-    if value['task_class'] not in LEAF_TASK_CLASSES: _refuse('request_task_class_not_leaf')
-    if value['task_class'] not in grant['allowed_classes']: _refuse('request_task_class_not_granted')
-    if value['task_complexity'] not in TASK_COMPLEXITIES: _refuse('request_complexity_invalid')
-    if value['model'] not in ('glm-5.3','glm-5.3-flash'): _refuse('grant_pool_model_pair')
-    if not all(_is_hash64(value[k]) for k in ('pre_input_sha256', 'profile_sha256')):
-        _refuse('grant_hash_invalid')
-    _validate_counts(used_children, root_children_remaining, grant['child_budget'])
-    return dict(value)
-
-
 def _is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 

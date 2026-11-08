@@ -346,6 +346,7 @@ _CONFIG_OPTIONAL = frozenset(
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
         "python_runtime_provenance_digest",
+        "hermes_attended_configuration_sha256",
         "fabric_bindings_path",
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
@@ -1063,6 +1064,12 @@ def load_control_config(
                 raise ValueError('completed Memory service access requires its explicit v3 transport')
     except (ValueError,TypeError,KeyError):
         raise ServiceError('protected Memory configuration refused') from None
+    hermes_configuration = config.get("hermes_attended_configuration_sha256")
+    if "hermes_attended_configuration_sha256" in config and (
+            type(hermes_configuration) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", hermes_configuration) is None
+            or set(hermes_configuration) == {"0"}):
+        raise ServiceError("Hermes attended configuration digest must be exact nonzero SHA-256")
     _staged_fabric_binding_source(config)
     company_consultation_launchd_entry(config)
     from integrations.session_bridge.reply_event_host_composition import validate_reply_event_host_config
@@ -2637,6 +2644,8 @@ def _service_from_config(
                 project_knowledge_memory_reader=packet_collector.project_knowledge_memory_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_knowledge_source_reader=packet_collector.project_knowledge_source_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_discovery_source_reader=packet_collector.project_discovery_source_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 canonical_project_read_bindings_factory=canonical_project_read_bindings_factory,
                 project_session_source_factory=managed_project_session_source,

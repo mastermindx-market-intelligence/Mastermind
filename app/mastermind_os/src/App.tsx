@@ -61,7 +61,8 @@ import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/Know
 import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
 import { useProjectKnowledgeWorkspace } from "./knowledge/useProjectKnowledgeWorkspace";
 import { ProjectKnowledgeEditor } from "./knowledge/library/ProjectKnowledgeEditor";
-import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext } from "./knowledge/library/knowledge-library-contract";
+import {ProjectDiscoveryCorrectionEditor,DiscoveryCorrectionReview} from './knowledge/library/ProjectDiscoveryCorrectionEditor';
+import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext, ProjectDiscoverySource } from "./knowledge/library/knowledge-library-contract";
 import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
 import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
 import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
@@ -144,6 +145,7 @@ import { ControlRoomPanel } from "./ControlRoomPanel";
 import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
 import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
+import { ModelConfigurationRead } from "./resources/ModelConfigurationRead";
 import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
@@ -380,10 +382,10 @@ const isDoc = (v: MissionDocument | UnavailableMission): v is MissionDocument =>
 const isDocv3 = (
   v: Missionv3Document | UnavailableMission | null,
 ): v is Missionv3Document => !!v && !("kind" in v);
-function State({ value }: { value: unknown }) {
+function State({ value, text }: { value: unknown; text?: string }) {
   return (
     <span className={`state state-${String(value ?? "UNKNOWN").toLowerCase()}`}>
-      {label(value)}
+      {text ?? label(value)}
     </span>
   );
 }
@@ -1178,55 +1180,6 @@ function ProjectTabs({
   );
 }
 
-function ProjectPlan({ d }: { d: MissionDocument }) {
-  return (
-    <>
-      <section className="card source-gap">
-        <div className="section-title">
-          <div>
-            <h2>Plan</h2>
-            <p className="muted">
-              Agent OS plan content is not projected through the current
-              approved app source.
-            </p>
-          </div>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          This project view does not reconstruct a plan from Mission, Work,
-          GitHub, or conversation data. The current Mission context below is
-          shown only to preserve continuity while the plan owner is absent.
-        </p>
-      </section>
-      <section className="card">
-        <div className="section-title">
-          <h2>Current project context</h2>
-          <State value={d.read_state.state} />
-        </div>
-        <dl>
-          <dt>Project</dt>
-          <dd>{d.program.title || d.program.work_ref}</dd>
-          <dt>Next source-qualified action</dt>
-          <dd>
-            {display(
-              d.program.next_action,
-              "No next action was projected by the Mission source.",
-            )}
-          </dd>
-          <dt>Accountable seat</dt>
-          <dd>{display(d.principal.accountable_seat)}</dd>
-          <dt>Owed turn</dt>
-          <dd>
-            {d.principal.owed_turn
-              ? `${display(d.principal.owed_turn.seat)} · ${display(d.principal.owed_turn.reason)}`
-              : "Not established"}
-          </dd>
-        </dl>
-      </section>
-    </>
-  );
-}
-
 function ProjectMore({
   d,
   sessionPanel,
@@ -1253,16 +1206,6 @@ function ProjectMore({
       {sessionPanel}
       <OperationalNavigation label="Project operations" onNavigate={onNavigate} />
       <Connections d={d} />
-      <section className="card source-gap">
-        <div className="section-title">
-          <h2>Journal</h2>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          No qualified journal source is installed in this project view. No
-          history is inferred.
-        </p>
-      </section>
       <section className="card source-gap">
         <div className="section-title">
           <h2>Resources &amp; systems</h2>
@@ -1500,6 +1443,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     controlRoomAuthEpoch = useRef(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
+    [missionReadRevision, setMissionReadRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -2994,8 +2938,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         controller.abort();
       };
     }
-    const readV3 = window.MastermindMissionHost?.readMissionV3;
-    const read = readV3 ?? window.MastermindMissionHost?.readMission;
+    const missionHost = window.MastermindMissionHost;
+    const readV3 = missionHost?.readMissionV3;
+    const read = readV3 ?? missionHost?.readMission;
+    const missionHostGeneration = missionHost?.invalidationGeneration?.();
+    const readIsCurrent = () => window.MastermindMissionHost === missionHost &&
+      authRevisionRef.current === authRevision &&
+      missionHost?.invalidationGeneration?.() === missionHostGeneration &&
+      (missionHost?.readMissionV3 ?? missionHost?.readMission) === read;
     setMissionV3(null);
     if (typeof read !== "function") {
       setMission(
@@ -3010,9 +2960,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     setMission(unavailableMission(selection, "SOURCE_READ_PENDING"));
     setNotice("Reading the exact selected mission pair…");
     Promise.resolve()
-      .then(() => read({ ...selection, signal: controller.signal }))
+      .then(() => {
+        if (!readIsCurrent()) throw new Error("MISSION_READ_OWNER_CHANGED");
+        return read({ ...selection, signal: controller.signal });
+      })
       .then((raw) => {
-        if (!attached || missionRequest.current !== current) return;
+        if (!attached || missionRequest.current !== current || !readIsCurrent()) return;
         const v3 = readV3 ? decodeMissionv3(raw, selection) : null;
         const decoded = readV3 ? v3 : decodeMission(raw, selection);
         office.acceptMission(officeRead, decoded);
@@ -3063,6 +3016,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authState?.acquisition,
     officeSession.sessionRef,
     officeSession.bindingGeneration,
+    missionReadRevision,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -3196,7 +3150,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 : "Work source unavailable; zero work is not inferred."
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
-              : notice,
+              : notice === "Source and observation clocks are displayed as projected; this render did not refresh them."
+              ? copy.sourceClocksNotice : notice,
     open = (w: string, r: string | null, direct = false) => {
       setCatalogueProject(null);
       if (r) {
@@ -4846,27 +4801,34 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     authGeneration:authRevision,hostGeneration:archiveHostGeneration,canRead:projectReaders.canRead,
     readContext:knowledgePorts.readContext,transport:knowledgePorts.transport,store:commandBinding?.store,
     onSourceObserved:()=>setKnowledgeRefresh(value=>value+1)});
-  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference";
-    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null}|null>(null);
+  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference"|"correction";
+    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null;discovery:ProjectDiscoverySource|null}|null>(null);
   const currentKnowledgeEditor=knowledgeEditor?.scope===knowledgePublication.scope?knowledgeEditor:null;
   hasUnsentUserText.current ||= !!currentKnowledgeEditor;
   useLayoutEffect(()=>{if(knowledgeEditor && !currentKnowledgeEditor)setKnowledgeEditor(null);},[knowledgeEditor,currentKnowledgeEditor]);
   const knowledgeWriteAvailable=!!(commandBinding?.store && knowledgePorts.readContext && knowledgePorts.transport &&
     projectWorkRef && projectReaders.canRead());
-  const openKnowledgeEditor=(mode:"file"|"preference",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null)=>{
+  const openKnowledgeEditor=(mode:"file"|"preference"|"correction",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null,discovery:ProjectDiscoverySource|null=null)=>{
     if(!knowledgeWriteAvailable || context.workRef!==projectWorkRef ||
       ["submitting","checking","unknown"].includes(knowledgePublication.controller?.getState().status??"idle"))return;
     try {
       knowledgePublication.currentSource(context);
+      if(mode==='correction'&&(!discovery||!knowledgePublication.currentDiscovery(discovery)))return;
       if(!knowledgePublication.startDraft())return;
       const bytes=new Uint8Array(20);globalThis.crypto.getRandomValues(bytes);
       const suffix=Array.from(bytes,byte=>byte.toString(16).padStart(2,"0")).join("");
-      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,
-        requestId:`mmos-project-${mode==="file"?"file-add":"preference-set"}-${suffix}`});
+      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,discovery,
+        requestId:`mmos-project-${mode==="file"?"file-add":mode==='correction'?'discovery-correct':"preference-set"}-${suffix}`});
     } catch { /* No current source or original identifier means no editor action. */ }
   };
   const knowledgePublicationPanel=<>
-    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==="file"
+    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==='correction'
+      ? currentKnowledgeEditor.discovery&&<ProjectDiscoveryCorrectionEditor key={currentKnowledgeEditor.requestId}
+          source={currentKnowledgeEditor.discovery} requestId={currentKnowledgeEditor.requestId} locale={locale}
+          phase={knowledgePublication.phase} current={knowledgePublication.currentDiscovery}
+          onPrepare={knowledgePublication.prepareCorrection} onClose={()=>setKnowledgeEditor(null)} onCheckOriginal={knowledgePublication.checkOriginal}
+          onInspectOriginal={knowledgePublication.inspectOriginal}/>
+      :currentKnowledgeEditor.mode==="file"
       ? <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="file"
           sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
           authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
@@ -4883,9 +4845,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     {currentKnowledgeEditor && knowledgePublication.phase==="prepared" && knowledgePublication.prepared && <section className="card" aria-label={locale==="zh-CN"?"检查准备好的更改":"Review prepared changes"}>
       <h2>{locale==="zh-CN"?"检查你的更改":"Review your changes"}</h2>
       <p>{locale==="zh-CN"?"尚未发布。确认后才会提交这一次更改。":"Nothing has been published. Publish submits this original change once."}</p>
-      <pre className="visible-text">{"file" in knowledgePublication.prepared.request
+      {knowledgePublication.prepared.request.schema==='mastermind.project_discovery_correct_request.v1'
+        ? currentKnowledgeEditor.discovery&&<><DiscoveryCorrectionReview request={knowledgePublication.prepared.request} source={currentKnowledgeEditor.discovery} locale={locale}/>
+          <details><summary>{locale==='zh-CN'?'更改的来源记录':'Changed source records'}</summary><ul>{knowledgePublication.prepared.response.preview.postimages.map(image=><li key={image.path}>{image.path}</li>)}</ul></details></>
+        :<pre className="visible-text">{"file" in knowledgePublication.prepared.request
         ? `${knowledgePublication.prepared.request.file.display_name}\n${knowledgePublication.prepared.request.file.content_utf8}`
-        : knowledgePublication.prepared.request.value}</pre>
+        : knowledgePublication.prepared.request.value}</pre>}
       <button type="button" disabled={!knowledgePublication.canPublish} onClick={knowledgePublication.publish}>{locale==="zh-CN"?"发布更改":"Publish changes"}</button>
     </section>}
     {knowledgeWriteAvailable && <section className="card" aria-label={locale==="zh-CN"?"原始发布状态":"Original publication status"}>
@@ -5465,6 +5430,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       readActions={knowledgeWriteAvailable?knowledgePublication.readActions:undefined}
       onAddFiles={knowledgeWriteAvailable?context=>openKnowledgeEditor("file",context,null):undefined}
       onEditPreference={knowledgeWriteAvailable?(context,memory)=>openKnowledgeEditor("preference",context,memory):undefined}
+      onCorrectDiscovery={knowledgeWriteAvailable?source=>openKnowledgeEditor('correction',source.sourceContext,null,source):undefined}
       onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/></>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}
@@ -5637,7 +5603,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               <ResultCard locale={locale} state={resultState} />
             </>
           ) : projectTab === "Plan" ? (
-            <ProjectPlan d={d} />
+            <ProjectPlanPanel {...projectPlanProps} />
           ) : projectTab === "Work" ? (
             <>
               <section ref={resourcesWorkView} tabIndex={-1} aria-label={locale === "zh-CN" ? "所选工作详情" : "Selected work inspection"}>
@@ -5791,7 +5757,22 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     <SupervisionLedger read={currentControlRoom.state === "AVAILABLE"
       ? currentControlRoom.supervision ?? { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }
       : { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }} locale={locale} onOpenMission={open}/>
-    <SupervisionTrace document={d} selection={selection} locale={locale}/>
+    <SupervisionTrace document={d} selection={selection} locale={locale}
+      onReadCurrent={authState?.acquisition && selection && !selectionRefused &&
+        missionSelectionState === "AVAILABLE" &&
+        typeof (window.MastermindMissionHost?.readMissionV3 ?? window.MastermindMissionHost?.readMission) === "function"
+        ? (() => {
+          const host = window.MastermindMissionHost;
+          const read = host?.readMissionV3 ?? host?.readMission;
+          const generation = host?.invalidationGeneration?.();
+          const revision = authRevision;
+          return () => {
+            if (window.MastermindMissionHost !== host || authRevisionRef.current !== revision ||
+                (host?.readMissionV3 ?? host?.readMission) !== read ||
+                host?.invalidationGeneration?.() !== generation || !host?.auth?.getState().acquisition) return;
+            setMissionReadRevision(value => value + 1);
+          };
+        })() : undefined}/>
     <ActivationFacts model={activationModel} locale={locale} onNavigate={navigateActivation}/>
     <details className="reason-details"><summary>{locale === "zh-CN" ? "原始请求状态" : "Original request status"}</summary>
       <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={() => navigateActivation("original_status")}/>
@@ -5834,6 +5815,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           setProjectTab("Work");setActive("Projects");}}
         canOpenWork={resourcesCanOpenWork}
         onReviewSources={() => setActive("Sources")}/></div>
+      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
       <details className="reason-details"><summary>{locale === "zh-CN" ? "原始容量凭据与运行记录" : "Original capacity receipts and run records"}</summary>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,
@@ -6088,7 +6070,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
           </div>
         </header>
         {nativeGoalNotice}

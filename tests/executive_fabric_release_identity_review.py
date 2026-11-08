@@ -14,63 +14,74 @@ REVIEWED_FILES = {
         'sites': ((204, 43, 46, 'int', '512'),),
     },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
-    # These exact 56 spans contain no account/principal identity. Byte drift
+    # These exact spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
-        "sha256": '8abf77434627687cfde819dd8096d0ada754c3c42ff5ec195d36ff5343d43388',
+        "sha256": '5c4ff5854aca04bb1f7395c2afdcf72ae319ee8fe82041f679d1bf16addcc081',
         "sites": (
-            (624, 44, 47, 'int', '400'),
-            (661, 44, 47, 'int', '400'),
+            (652, 44, 47, 'int', '400'),
+            (689, 44, 47, 'int', '400'),
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
-        "sha256": '47d1ee9df7705d8552efe26af561773d59441be2a488a09f89bef0124d4bc4b4',
+        "sha256": '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
         "sites": (
-            (1466, 32, 37, 'int', '0o700'),
-            (1817, 140, 143, 'int', '900'),
-            (1819, 33, 36, 'int', '900'),
-            (1882, 22, 25, 'int', '429'),
-            (2070, 79, 82, 'int', '500'),
-            (2148, 34, 37, 'int', '400'),
-            (2163, 33, 36, 'int', '500'),
-            (2183, 34, 37, 'int', '502'),
-            (2421, 92, 95, 'int', '400'),
-            (2428, 99, 102, 'int', '503'),
-            (2431, 80, 83, 'int', '409'),
-            (2436, 91, 94, 'int', '401'),
-            (2440, 96, 99, 'int', '400'),
-            (2460, 113, 116, 'int', '512'),
-            (2464, 94, 97, 'int', '400'),
-            (2476, 106, 109, 'int', '503'),
-            (2489, 101, 104, 'int', '409'),
-            (2505, 109, 112, 'int', '400'),
-            (2508, 96, 99, 'int', '400'),
-            (2528, 118, 121, 'int', '503'),
-            (2534, 108, 111, 'int', '409'),
-            (2540, 109, 112, 'int', '409'),
-            (2551, 100, 103, 'int', '409'),
-            (2554, 103, 106, 'int', '503'),
-            (2557, 96, 99, 'int', '429'),
-            (2567, 102, 105, 'int', '503'),
-            (2575, 106, 109, 'int', '429'),
-            (2612, 103, 106, 'int', '503'),
-            (2631, 74, 77, 'int', '502'),
-            (2732, 23, 26, 'int', '400'),
-            (2805, 35, 38, 'int', '429'),
-            (2834, 37, 40, 'int', '404'),
-            (2865, 27, 30, 'int', '400'),
-            (2868, 27, 30, 'int', '400'),
-            (2871, 27, 30, 'int', '400'),
-            (2877, 31, 34, 'int', '400'),
-            (2884, 31, 34, 'int', '429'),
+            (487, 66, 69, 'int', '502'),
+            (1707, 32, 37, 'int', '0o700'),
+            (2058, 140, 143, 'int', '900'),
+            (2060, 33, 36, 'int', '900'),
+            (2123, 22, 25, 'int', '429'),
+            (2311, 79, 82, 'int', '500'),
+            (2389, 34, 37, 'int', '400'),
+            (2404, 33, 36, 'int', '500'),
+            (2424, 34, 37, 'int', '502'),
+            (2733, 92, 95, 'int', '400'),
+            (2740, 99, 102, 'int', '503'),
+            (2743, 80, 83, 'int', '409'),
+            (2775, 110, 113, 'int', '503'),
+            (2781, 100, 103, 'int', '409'),
+            (2788, 101, 104, 'int', '409'),
+            (2804, 31, 34, 'int', '409'),
+            (2804, 51, 54, 'int', '503'),
+            (2812, 73, 76, 'int', '409'),
+            (2816, 99, 102, 'int', '503'),
+            (2923, 107, 110, 'int', '503'),
+            (2932, 102, 105, 'int', '400'),
+            (2953, 96, 99, 'int', '429'),
+            (2963, 103, 106, 'int', '503'),
+            (2980, 105, 108, 'int', '503'),
+            (3018, 27, 30, 'int', '503'),
+            (3023, 101, 104, 'int', '502'),
+            (3031, 91, 94, 'int', '401'),
+            (3035, 96, 99, 'int', '400'),
+            (3065, 113, 116, 'int', '512'),
+            (3069, 94, 97, 'int', '400'),
+            (3083, 101, 104, 'int', '409'),
+            (3085, 110, 113, 'int', '503'),
+            (3099, 101, 104, 'int', '409'),
+            (3107, 105, 108, 'int', '409'),
+            (3110, 101, 104, 'int', '409'),
+            (3115, 104, 107, 'int', '400'),
+            (3126, 105, 108, 'int', '409'),
+            (3135, 94, 97, 'int', '400'),
+            (3155, 109, 112, 'int', '400'),
+            (3158, 96, 99, 'int', '400'),
+            (3178, 96, 99, 'int', '429'),
+            (3188, 102, 105, 'int', '503'),
+            (3196, 106, 109, 'int', '429'),
+            (3237, 103, 106, 'int', '503'),
+            (3256, 74, 77, 'int', '502'),
+            (3350, 23, 26, 'int', '400'),
+            (3423, 35, 38, 'int', '429'),
+            (3452, 37, 40, 'int', '404'),
+            (3483, 27, 30, 'int', '400'),
+            (3486, 27, 30, 'int', '400'),
+            (3489, 27, 30, 'int', '400'),
+            (3495, 31, 34, 'int', '400'),
+            (3502, 31, 34, 'int', '429'),
         ),
     },
-    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": 'd6705a98d6f211b38d98dc5f49514dac066cac2b2a49cc283d1d8eb910247291',
-        "sites": (
-            (555, 60, 65, 'int', '0o700'),
-        ),
-    },
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': '41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc', 'sites': ((831, 60, 65, 'int', '0o700'),)},
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
         "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
         "sites": (
@@ -613,7 +624,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '22335a6b83924ae3c28eeb8610e1b8bb2a834964e1ba99afc97ebcaa534440ac', 'sites': ((924, 71, 74, 'int', '400'), (935, 71, 74, 'int', '403'), (943, 71, 74, 'int', '400'), (949, 79, 82, 'int', '400'), (958, 71, 74, 'int', '400'), (968, 71, 74, 'int', '403'), (973, 76, 79, 'int', '503'), (979, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e14333cf9fdddfcc6625357498813fadc0d0f45abc403d0ef9743e3eb87bdf3b', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -654,8 +665,8 @@ REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuat
 
 # Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
 # These are not OS identities; full-source drift exposes every token again.
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'f6401f32f9dbff8af0f5f235bd0d21bde03d060a0c9e8943ca16dd3c048e676b', 'sites': ((95, 97, 100, 'int', '512'),)}
-REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'f2a1bb24330f5afc85c585b4746acc81b218a9e7cc4e675e9ec856cb0955b281', 'sites': ((96, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': 'e5e379e7e4c985d36452fc82c8ad94ecaa7146ebf4aacc6ae0cd08aea504b336', 'sites': ((51, 64, 67, 'int', '512'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}
 
@@ -677,7 +688,7 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '252a9d57fe21bd618875dcd2026b21947870af7a6f179a75ca80a666a8121d12', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '3c2cac6101f754ff5f6c52aee1ebe14d2f247bf212a0317f6970732cade6fb17', 'sites': ((715, 93, 96, 'int', '403'), (717, 56, 59, 'int', '403'), (724, 46, 49, 'int', '403'), (725, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -726,9 +737,14 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
-# Accepted Office READ adds only one module declaration; all prior bytes and
-# three HTTP-status operands are exact Root6a. Source-only pin, no runtime grant.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ddbeb7e61ad3112edd798bddc47c35a3bd2deeea41d426e0bec1555f0475499e', 'sites': ((3614, 68, 71, 'int', '503'), (3619, 69, 72, 'int', '503'), (3623, 67, 70, 'int', '503'))}
+# Discovery correction plus Company priorities changes only the containing source
+# and line positions; these same three fixture HTTP statuses are not principals.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f42e9664f61b44c34bf4200193ba3210aef27acbff05e617c68031ee4b402b19', 'sites': ((3710, 68, 71, 'int', '503'), (3715, 69, 72, 'int', '503'), (3719, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
+    # Inert PR number from the actual temporary-Git test owner, not a UID.
+    'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
+    'sites': ((163, 18, 21, 'int', '401'),),
+}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -795,14 +811,22 @@ REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha
 # C21 attended-parent source review combines native composition with the
 # accepted archive closure and inert gateway replacement. ensure_directories
 # retains its exact AST and whole permission token at the accepted moved site.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9b6349152277e6e5823169c4e3819388434a87102f468f608dbb6ea6f1',
-                                                              'sites': ((677, 71, 76, 'int', '0o750'),)}
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '925aa0d0aa6174d29653f189ffcf47c9550a53aaf303387cf6c0e77b3ac7c1a6',
+                                                              'sites': ((708, 71, 76, 'int', '0o750'),)}
 
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735",
+    "sha256": "716b934f77cdc377b769c6cf1cefcfbb199be3e71d885f4624c6e6dc0d93b9c9",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# Native EVAL marker v2 retains the original directory permission mode.
+# Exact historical root_identity["mode"] comparison, not a selected UID/GID.
+# Whole-source drift and any neighboring identity literal restore ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/native_eval_inputs.py"] = {
+    "sha256": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+    "sites": ((96, 61, 66, "int", "0o700"),),
 }
 
 # HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
@@ -825,10 +849,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6b141c941fac4ebdb8f8f1fa6a48c6ff1d86deb9159e313ce68f460a6998e5c9', 'sites': ((1724, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -840,9 +861,19 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
-    "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
+    "sha256": "9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976",
+    "sites": ((48, 65, 68, "int", "500"), (271, 60, 63, "int", "500")),
 }
+
+# Hermes primary APPLICATION codec: fixed input-byte and conversation-count
+# bounds, never OS accounts, principals, permissions or service selection.
+# Attended source self-review under the CEO-Web waiver. Full source hash and
+# complete typed tokens remain required; any drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
+    "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
+}
+
 
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
@@ -870,21 +901,250 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 
 # Material protected320 context composition: only line locations/file digest
 # move for the same six accepted Memory HTTP-status operands; no new mask.
-REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '18831ba1c32a8c9eb49813e79bb3e08a5f3a5c30232d8724a38c2c57e8c4c64f',
- 'sites': [(244, 75, 78, 'int', '400'),
-           (254, 93, 96, 'int', '503'),
-           (633, 37, 40, 'int', '400'),
-           (646, 54, 57, 'int', '503'),
-           (666, 54, 57, 'int', '503'),
-           (676, 56, 59, 'int', '503')]}
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '5522cf9369fc4c04e585bd24a32e22fc4690c82f4048c65ed52dbe2467a4ae99',
+ 'sites': [(245, 75, 78, 'int', '400'),
+           (255, 93, 96, 'int', '503'),
+           (636, 37, 40, 'int', '400'),
+           (657, 54, 57, 'int', '503'),
+           (677, 54, 57, 'int', '503'),
+           (687, 56, 59, 'int', '503')]}
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {'sha256': '192ff0bf4321f0006cb34ba68dd4d648da3a3825dccc8cd731f220f61e793f32', 'sites': ((367, 37, 40, 'int', '409'),)}
+
+# Original H4 f008 receipts record the existing Darwin host's ownership.
+# These are observed identities, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these fifteen
+# typed integer tokens in the two exact files are reviewed; any byte or path
+# drift restores the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
+    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "sites": (),
+    "utf8_sites": (
+        (20, 20, 23, "int", "501"),
+        (47, 20, 23, "int", "501"),
+        (70, 20, 23, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
+    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "sites": (),
+    "utf8_sites": (
+        (29, 18, 21, "int", "501"),
+        (42, 18, 21, "int", "501"),
+        (55, 18, 21, "int", "501"),
+        (68, 18, 21, "int", "501"),
+        (85, 18, 21, "int", "501"),
+        (98, 18, 21, "int", "501"),
+        (111, 18, 21, "int", "501"),
+        (128, 18, 21, "int", "501"),
+        (141, 18, 21, "int", "501"),
+        (154, 18, 21, "int", "501"),
+        (167, 18, 21, "int", "501"),
+        (180, 18, 21, "int", "501"),
+    ),
+}
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
+}
+# H5 + protected Hermes/auth-timer composition retains all three exact Programs
+# observation status lines; whole-source hash and absolute line positions repinned.
 
 
-# The unchanged optional observation owner limits a regular binding file to
-# 512 KiB. This sole multiplication operand is bytes, not a UID/GID, peer,
-# socket, principal or port. Exact whole-source and token coordinates only;
-# any changed path, operand, custody logic or other byte restores D8 scrutiny.
-# This test evidence grants no profile access, installation or runtime authority.
+# H6 retained qualification receipts: exact immutable output tokens only.
+# These sites are traceback coordinates, temporary path identifiers, HTTP
+# results or negative-test names. They neither create identities nor qualify
+# runtime authority. Full-file or token drift restores the unchanged guard.
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/ci-paired-archive.log'] = {'sha256': '80853727ac6201e58ee123d4ab0a31c55b8ede993d0239935bba56c48812f101',
+ 'sites': ((17, 95, 98, 'int', '469'),
+           (18, 89, 92, 'int', '469'),
+           (21, 95, 98, 'int', '423'),
+           (22, 89, 92, 'int', '423'),
+           (116, 275, 278, 'int', '678'),
+           (306, 180, 183, 'int', '452'),
+           (311, 180, 183, 'int', '452'),
+           (316, 180, 183, 'int', '452'),
+           (321, 180, 183, 'int', '452'),
+           (326, 180, 183, 'int', '452'),
+           (331, 180, 183, 'int', '452'),
+           (336, 180, 183, 'int', '452'),
+           (341, 180, 183, 'int', '452'),
+           (346, 180, 183, 'int', '452'),
+           (351, 180, 183, 'int', '452'),
+           (356, 180, 183, 'int', '452'),
+           (361, 180, 183, 'int', '452'),
+           (366, 180, 183, 'int', '452'),
+           (371, 180, 183, 'int', '452'),
+           (376, 180, 183, 'int', '452'),
+           (381, 180, 183, 'int', '452'),
+           (386, 180, 183, 'int', '452'),
+           (391, 180, 183, 'int', '452'),
+           (396, 180, 183, 'int', '452'),
+           (401, 180, 183, 'int', '452'),
+           (406, 180, 183, 'int', '452'),
+           (411, 180, 183, 'int', '452'),
+           (416, 180, 183, 'int', '452'),
+           (421, 180, 183, 'int', '452'),
+           (426, 180, 183, 'int', '452'),
+           (431, 175, 178, 'int', '529'),
+           (436, 175, 178, 'int', '529'),
+           (441, 175, 178, 'int', '529'),
+           (446, 175, 178, 'int', '529'),
+           (451, 175, 178, 'int', '529'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/ci-paired-archive.xml'] = {'sha256': '971791af5f8194d98c104e5590f525e4aa936fa3d57ec8862a4a0bb0bef500d2',
+ 'sites': ((1, 8804, 8807, 'int', '813'),)}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/ci-release-preflight.xml'] = {'sha256': 'cae40e77100dfaa74987558327261726962b054cdd8e4a5309cd992a741ff9b1',
+ 'sites': ((1, 18691, 18694, 'int', '962'), (1, 55399, 55402, 'int', '971'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/current-native-composition.xml'] = {'sha256': '0db10663c221bb632710946751d17df374503b10bb262837f0257e4482f8a0ed',
+ 'sites': ((1, 103703, 103722, 'str', '_mastermind_account'),
+           (1, 103731, 103750, 'str', '_mastermind_account'),
+           (1, 104037, 104056, 'str', '_mastermind_account'),
+           (1, 104065, 104084, 'str', '_mastermind_account'),
+           (1, 104362, 104381, 'str', '_mastermind_account'),
+           (1, 104390, 104409, 'str', '_mastermind_account'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/h5-composed-baseline.xml'] = {'sha256': '974a1c7266c19a10ce2be0cc7f56d2aef33c07d1af58ee2471f1f7465c2caa29',
+ 'sites': ((10, 14, 17, 'int', '403'),
+           (10, 34, 37, 'int', '403'),
+           (10, 6505, 6521, 'str', '_mastermind_exec'),
+           (10, 6702, 6722, 'str', '_mastermind_intruder'),
+           (10, 53546, 53565, 'str', '_mastermind_account'),
+           (10, 53574, 53593, 'str', '_mastermind_account'),
+           (10, 53880, 53899, 'str', '_mastermind_account'),
+           (10, 53908, 53927, 'str', '_mastermind_account'),
+           (10, 54205, 54224, 'str', '_mastermind_account'),
+           (10, 54233, 54252, 'str', '_mastermind_account'),
+           (10, 59285, 59307, 'str', '_mastermind_unreviewed'),
+           (10, 59546, 59568, 'str', '_mastermind_unreviewed'),
+           (10, 64592, 64614, 'str', '_mastermind_unreviewed'),
+           (10, 64623, 64645, 'str', '_mastermind_unreviewed'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/native-loader-baseline.log'] = {'sha256': '3e21b01c58fdc2a90ad265a0cea6309ec87ac41ffe050200a07baef4a9ac3f93',
+ 'sites': ((9, 102, 105, 'int', '677'),)}
+
+# Existing disposable shared-relay proof parent; immutable receipt, no runtime grant.
+REVIEWED_FILES['review_evidence/fabric_application/shared-relay-source-qualification-20261107.json'] = {
+    "sha256": '3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3',
+    "sites": ((296, 26, 29, "int", "501"),),
+}
+
+# Retained source qualification records the observed proof parent UID only.
+# It grants no runtime identity or enrollment. Exact bytes and the sole complete
+# UTF-8 integer token are required; drift restores the ordinary identity guard.
+REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualification-20261107.json"] = {
+    "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "sites": (),
+    "utf8_sites": ((296, 26, 29, "int", "501"),),
+}
+
+# The sealed verifier ModuleType label is a Python module identity, never an OS
+# account, principal or service. This exact source/string site alone is reviewed;
+# any full-source or token drift restores the ordinary identity guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/source_context.py"] = {'sha256': '887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597', 'sites': ((425, 36, 73, 'str', '"_mastermind_attended_native_sources"'), (444, 42, 78, 'str', '"_mastermind_attended_configuration"'))}
+
+# Exact retained readiness qualification records the observed proof parent UID.
+# This grants no runtime identity. Any source, path or token drift exposes it
+# to the incumbent guard again; the original receipt is preserved unchanged.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
+    "sha256": 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    "sites": (),
+    "utf8_sites": ((61, 13, 16, "int", "501"),),
+}
+
+# Installed-consumer qualification maps disposable Control metadata to the
+# incumbent Control UID. These two exact fixture operands register no account,
+# grant or service; source/token drift restores the ordinary identity guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py"] = {
+    "sha256": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
+    "sites": ((105, 39, 42, "int", "450"), (132, 27, 30, "int", "450")),
+}
+
+# Exact observed native preimage metadata records the proof-host UID only.
+# These immutable evidence tokens create no account, runtime default or grant.
+# Full-source or token drift restores the ordinary guard.
+REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json'] = {
+    "sha256": '7b5af848fa6bdc47b178b73fc027a46c34f897e2a9bade655b9dec09af6d1a12',
+    "sites": (),
+    "utf8_sites": ((39, 18, 21, 'int', '501'), (52, 18, 21, 'int', '501'), (65, 18, 21, 'int', '501'), (78, 18, 21, 'int', '501'), (91, 18, 21, 'int', '501'), (104, 18, 21, 'int', '501'), (121, 18, 21, 'int', '501'), (134, 18, 21, 'int', '501'), (147, 18, 21, 'int', '501'), (160, 18, 21, 'int', '501'), (173, 18, 21, 'int', '501'), (186, 18, 21, 'int', '501'), (199, 18, 21, 'int', '501'), (212, 18, 21, 'int', '501'), (229, 18, 21, 'int', '501'), (242, 18, 21, 'int', '501'), (263, 18, 21, 'int', '501'), (276, 18, 21, 'int', '501'), (289, 18, 21, 'int', '501'), (302, 18, 21, 'int', '501'), (319, 18, 21, 'int', '501')),
+}
 REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
     "sites": ((252, 46, 49, "int", "512"),),
 }
+
+# Select-option value length bound, not a UID/GID or account identity. Only this
+# complete protocol source and typed literal are reviewed; any byte drift restores
+# ordinary D8 scrutiny. This grants no browser permission or runtime authority.
+REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
+    "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
+    "sites": ((128, 72, 75, "int", "512"),),
+}
+
+# Fixed explicit Memory namespace: same reviewed source/operands; only private fixed
+# helper dependency locations move. Current default APPLICATION sources are separate.
+REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': 'fce6fb111e9c8bf0c3caf3dd57874b54cf06d7a69a9bfcf2407467f82e8276e0',
+                                                      'sites': [(62,
+                                                                 33,
+                                                                 36,
+                                                                 'int',
+                                                                 '501'),
+                                                                (142,
+                                                                 25,
+                                                                 28,
+                                                                 'int',
+                                                                 '450')]},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py': {'sha256': 'c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70',
+                                                                                          'sites': [[40,
+                                                                                                     21,
+                                                                                                     24,
+                                                                                                     'int',
+                                                                                                     '501']]},
+ 'scripts/protected_memory_economic_helper.py': {'sha256': 'cb49f73b511ca8905b35b4486572ee8304cac21e01b97e3add375298bb312b19',
+                                                 'sites': [(18,
+                                                            21,
+                                                            24,
+                                                            'int',
+                                                            '501'),
+                                                           (40,
+                                                            58,
+                                                            61,
+                                                            'int',
+                                                            '501')]}})
+
+# Fixed explicit Memory namespace: same reviewed source/operands; only private fixed
+# helper dependency locations move. Current default APPLICATION sources are separate.
+REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': '7ebcfae71e2eec1311b774ea2c501d9fb9acf5425d8653503cdbeab5a7ef3055',
+                                                      'sites': [(63,
+                                                                 33,
+                                                                 36,
+                                                                 'int',
+                                                                 '501'),
+                                                                (143,
+                                                                 25,
+                                                                 28,
+                                                                 'int',
+                                                                 '450')]},
+ 'ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py': {'sha256': 'c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70',
+                                                                                          'sites': [[40,
+                                                                                                     21,
+                                                                                                     24,
+                                                                                                     'int',
+                                                                                                     '501']]},
+ 'scripts/protected_memory_economic_helper.py': {'sha256': 'cb49f73b511ca8905b35b4486572ee8304cac21e01b97e3add375298bb312b19',
+                                                 'sites': [(18,
+                                                            21,
+                                                            24,
+                                                            'int',
+                                                            '501'),
+                                                           (40,
+                                                            58,
+                                                            61,
+                                                            'int',
+                                                            '501')]}})

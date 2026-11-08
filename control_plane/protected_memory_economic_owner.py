@@ -34,9 +34,11 @@ def qualify_helper_source():
     if manifest.get('commit_sha') != root.name: fail()
     entries = {r['path']: r for r in manifest['entries']}
     names = ['scripts/protected_memory_economic_helper.py']
-    names += ['ops/native_fabric/quota_continuity/candidate/' + n for n in (
+    names += ['ops/native_fabric/provider_plans/memory118/native_owner/' + n for n in (
         'fabric_operator_contract.py', 'fabric_operator_owner.py', 'fabric_memory_view.py',
-        'protected_memory_economic.py', 'lease_broker.py', 'pool_ledger.py','pick.py')]
+        'protected_memory_economic.py', 'lease_broker.py', 'artifact_delivery.py',
+        'fabric_task.py', 'provider_outcome.py', 'run_observation_delivery.py')]
+    names += ['ops/native_fabric/quota_continuity/candidate/' + n for n in ('pool_ledger.py','pick.py')]
     names += ['ops/native_fabric/quota_continuity/source/'+n for n in ('model_tier.py','fabric_policy_snapshot.py')]
     for name in names:
         raw = _root_source(root / name); entry = entries.get(name)

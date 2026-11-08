@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import os
+import re
 import stat
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
@@ -242,10 +243,21 @@ def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
-    """Durably replace one runtime-state file without exposing a partial JSON document."""
+    """Replace one complete file, retaining an existing target's permission bits.
+
+    Fresh files retain the existing open/umask behavior. Directory admission stays with each
+    caller; this primitive never creates directories or supplies a multi-file transaction.
+    """
+    existing_mode = None
+    try:
+        existing_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        pass
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as fh:
+            if existing_mode is not None:
+                os.fchmod(fh.fileno(), existing_mode)
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
@@ -524,7 +536,7 @@ def _load_pending() -> list[dict]:
 
 def _save_pending(orders: list[dict]) -> None:
     _require_book_dir()
-    _PENDING_PATH.write_text(json.dumps(orders, indent=2, default=str))
+    _atomic_write_bytes(_PENDING_PATH, json.dumps(orders, indent=2, default=str).encode("utf-8"))
 
 
 def _load_theses() -> dict[str, dict]:
@@ -539,21 +551,63 @@ def _load_theses() -> dict[str, dict]:
 
 def _save_theses(theses: dict[str, dict]) -> None:
     _require_book_dir()
-    _THESES_PATH.write_text(json.dumps(theses, indent=2, default=str, ensure_ascii=False))
+    _atomic_write_bytes(
+        _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False).encode("utf-8")
+    )
 
 
 # ---------------------------------------------------------------------------
 # price + clock resolution (all lazy / optional)
 # ---------------------------------------------------------------------------
 
+# A US symbol is letters/digits plus '.' (BRK.B) and '-' (preferred/class shares). Anchoring the
+# WHOLE string to that allowlist and capping the length is what makes the ticker safe to interpolate
+# into a filename: no path separator, no '..' component, no NUL, no drive prefix, no whitespace.
+_TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
+
+_STOCKDATA_DIR = _ROOT / "vendor" / "macro" / "site" / "stockdata"
+
+
+def _safe_ticker(t: str) -> Optional[str]:
+    """Normalize an operator-supplied ticker to a filesystem-safe symbol, or None if unusable.
+
+    Closes CodeQL py/path-injection at the SOURCE (alerts #23/#24, sinks in ``_stockdata_price``):
+    every path built from a ticker goes through this allowlist first, so the tainted value can
+    never steer the path outside ``vendor/macro/site/stockdata``. Callers treat None as "no data"
+    and degrade exactly as they already do for a missing file.
+    """
+    if not isinstance(t, str):
+        return None
+    sym = t.strip().upper()
+    if not _TICKER_RE.match(sym):
+        return None
+    # '.' and '..' satisfy the character class (dots are legal in symbols) but are directory
+    # components, not symbols — never let one name a file.
+    if not sym.strip("."):
+        return None
+    return sym
+
+
 def _stockdata_price(ticker: str) -> Optional[float]:
     """Last mark from vendor/macro/site/stockdata/<T>.json — a plain file read, no import."""
+    sym = _safe_ticker(ticker)
+    if sym is None:
+        return None
     try:
-        p = _ROOT / "vendor" / "macro" / "site" / "stockdata" / f"{ticker.upper()}.json"
-        if p.exists():
-            v = (json.loads(p.read_text()).get("tech") or {}).get("price")
-            if v is not None and float(v) > 0:
-                return float(v)
+        # No path is ever CONSTRUCTED from the ticker: the directory is enumerated and the
+        # sanitized symbol only selects an already-existing entry by exact name comparison.
+        # Tainted data flows into a comparison, never into a path join.
+        target = f"{sym}.json"
+        p = None
+        for entry in _STOCKDATA_DIR.iterdir():
+            if entry.name == target:
+                p = entry
+                break
+        if p is None:
+            return None
+        v = (json.loads(p.read_text()).get("tech") or {}).get("price")
+        if v is not None and float(v) > 0:
+            return float(v)
     except Exception:
         pass
     return None
@@ -1003,7 +1057,7 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
     }
     if _check_book_dir(_PUBLISHED_PATH.parent)[0] is not None:
         return None   # E14: never create the published dir from a scheduler path
-    _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
+    _atomic_write_bytes(_PUBLISHED_PATH, json.dumps(doc, indent=2, default=str).encode("utf-8"))
     return doc
 
 
@@ -1093,7 +1147,9 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
             if r.get("date") != asof:            # idempotent per date
                 rows.append(r)
     rows.append(row)
-    _NAV_PATH.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
+    _atomic_write_bytes(
+        _NAV_PATH, ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8")
+    )
     return row
 
 

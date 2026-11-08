@@ -499,6 +499,7 @@ class WorkspaceReadService:
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                  project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
+                 project_discovery_source_reader=None,
                  canonical_project_data=None, project_discovery=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None,
@@ -612,16 +613,18 @@ class WorkspaceReadService:
             self._direction_read_adapter = ProjectDirectionReadAdapter(workspace=self, reader=project_direction_reader)
         from control_plane.installed_project_knowledge_readers import (
             AgentOsProjectKnowledgeCatalogueReader, AgentOsProjectKnowledgeMemoryReader,
-            AgentOsProjectKnowledgeSourceReader)
+            AgentOsProjectKnowledgeSourceReader, AgentOsProjectDiscoverySourceReader)
         for reader, reader_type in (
                 (project_knowledge_catalogue_reader, AgentOsProjectKnowledgeCatalogueReader),
                 (project_knowledge_memory_reader, AgentOsProjectKnowledgeMemoryReader),
-                (project_knowledge_source_reader, AgentOsProjectKnowledgeSourceReader)):
+                (project_knowledge_source_reader, AgentOsProjectKnowledgeSourceReader),
+                (project_discovery_source_reader, AgentOsProjectDiscoverySourceReader)):
             if reader is not None and type(reader) is not reader_type:
                 raise ValueError("installed project knowledge reader required")
         self._project_knowledge_catalogue_reader = project_knowledge_catalogue_reader
         self._project_knowledge_memory_reader = project_knowledge_memory_reader
         self._project_knowledge_source_reader = project_knowledge_source_reader
+        self._project_discovery_source_reader = project_discovery_source_reader
         if canonical_project_data is not None:
             from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
             if type(canonical_project_data) is not _ProjectDataReadBinding or canonical_project_data.store is not runtime.store:
@@ -866,6 +869,7 @@ class WorkspaceReadService:
             "project_knowledge_catalogue": self._project_knowledge_catalogue_reader,
             "project_knowledge_memory": self._project_knowledge_memory_reader,
             "project_knowledge_source": self._project_knowledge_source_reader,
+            "project_discovery_source": self._project_discovery_source_reader,
         }
         reader = readers[operation]
         if reader is None: return wire.unavailable(selected, operation=operation)
@@ -873,8 +877,12 @@ class WorkspaceReadService:
         if self._canonical_project_data is not None:
             from control_plane.installed_canonical_project_data_binding import read_installed_project_data
             data = read_installed_project_data(self._canonical_project_data,principal,operation=operation,selection=selected)
+        if operation == "project_discovery_source" and data is None:
+            # A direct current selector never falls back to the adopted CODE
+            # snapshot when the canonical DATA observation is unavailable.
+            return wire.unavailable(selected, operation=operation)
         body = wire.validate_body(reader.read(**selected) if data is None else data[0], operation=operation)
-        expected = {key: item for key, item in selected.items() if key != "expected_revision"}
+        expected = wire.result_selection(selected)
         if body["selection"] != expected:
             return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
         after = self.cache.snapshot()
@@ -893,7 +901,9 @@ class WorkspaceReadService:
                     return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
             if ((expected_code if data is None else data[1].data_commit) != source["commit"]
                     or (operation == "project_knowledge_source"
-                        and source["revision"] != selected["expected_revision"])):
+                        and source["revision"] != selected["expected_revision"])
+                    or (operation == "project_discovery_source"
+                        and source["commit"] != selected["expected_source_commit"])):
                 return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
         if data is not None:
             data[1].check()
@@ -2274,8 +2284,8 @@ class WorkspaceReadService:
         from common.workspace_project_session_contract import FRAME_SCHEMA as PROJECT_SESSION_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == PROJECT_SESSION_FRAME_SCHEMA:
             return await self._handle_project_session_frame(frame)
-        from common.workspace_project_knowledge_read_contract import FRAME_SCHEMA as PROJECT_KNOWLEDGE_FRAME_SCHEMA
-        if type(frame) is dict and frame.get("schema") == PROJECT_KNOWLEDGE_FRAME_SCHEMA:
+        from common.workspace_project_knowledge_read_contract import FRAME_SCHEMA as PROJECT_KNOWLEDGE_FRAME_SCHEMA, DISCOVERY_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") in {PROJECT_KNOWLEDGE_FRAME_SCHEMA, DISCOVERY_FRAME_SCHEMA}:
             return await self._handle_project_knowledge_frame(frame)
         from common.workspace_project_instructions_contract import FRAME_SCHEMA as PROJECT_INSTRUCTIONS_FRAME_SCHEMA
         if frame.get("schema") == PROJECT_INSTRUCTIONS_FRAME_SCHEMA:
@@ -2326,6 +2336,10 @@ class WorkspaceReadService:
             from control_plane.workspace_host_observation_read import handle_host_observation_frame
             return await handle_host_observation_frame(self, frame)
         from common import workspace_resource_capacity_contract as capacity_wire
+        from common import workspace_model_configuration_contract as model_configuration_wire
+        if type(frame) is dict and frame.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+            from control_plane.workspace_model_configuration_read import handle_model_configuration_frame
+            return await handle_model_configuration_frame(self, frame)
         if type(frame) is dict and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
             from control_plane.workspace_resource_capacity_read import handle_capacity_frame
             return await handle_capacity_frame(self, frame)
@@ -2524,6 +2538,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                                project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
+                               project_discovery_source_reader=None,
                                canonical_project_data_factory=None, canonical_project_read_bindings_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None, instruction_admission_permissions=None, byok_roles_reader=None):
@@ -2610,6 +2625,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
                                     project_knowledge_memory_reader=project_knowledge_memory_reader,
                                     project_knowledge_source_reader=project_knowledge_source_reader,
+                                    project_discovery_source_reader=project_discovery_source_reader,
                                     canonical_project_data=data_binding, project_discovery=discovery_binding,
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,

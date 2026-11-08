@@ -83,24 +83,9 @@ def test_http_v2_rejects_selected_purpose_before_enrollment(http_service_owner):
 
 
 def test_http_build_adds_only_closed_three_and_keeps_historical_evidence_inert(builds):
-    default = json.loads((builds.default / "native-manifest.json").read_bytes())
-    # This fixture executes the canonical109 component, not the separate118
-    # profile. Restore its exact accepted107 parent before historical checks.
-    assert len(default) == 109
-    parent = builder.before_memory_owner_integrity(default)
-    assert len(parent) == 107
-    assert set(default) - set(parent) == set(builder.MEMORY_OWNER_ADDITIONS) == {
-        "ext/fabric_memory_view.py", "ext/protected_memory_economic.py"}
-    assert {key for key in parent if parent[key] != default[key]} == set(builder.MEMORY_OWNER_DIGESTS)
-    assert {key: default[key] for key in builder.MEMORY_OWNER_ADDITIONS} == builder.MEMORY_OWNER_ADDITIONS
-    assert {key: default[key] for key in builder.MEMORY_OWNER_DIGESTS} == builder.MEMORY_OWNER_DIGESTS
-    assert g.digest((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()) == builder.MEMORY_OWNER_PARENT_MANIFEST_SHA256
     baseline = json.loads((builds.application / "native-manifest.json").read_bytes())
-    assert len(baseline) == 111
-    assert {key: baseline[key] for key in default} == default
-    assert set(baseline) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
     manifest = json.loads((builds.http / "native-manifest.json").read_bytes())
-    assert len(manifest) == 114 and {key: manifest[key] for key in baseline} == baseline
+    assert len(manifest) == 112 and {key: manifest[key] for key in baseline} == baseline
     assert set(manifest) - set(baseline) == builder.HTTP_GENERATION_MEMBERS == g.HTTP_REQUIRED
     assert all(not path.endswith(".preimage") for path in manifest)
     sources = builder.application_http_sources(ROOT)

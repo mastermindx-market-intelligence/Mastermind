@@ -235,3 +235,67 @@ def test_freshness_survives_transport_compaction(tmp_path, monkeypatch):
     tiny = json.loads(_text(bot_mcp._json({"freshness": {"asof": "2026-10-31"}, "evidence_grade": "g",
                                             **{f"k{i}": {"v": "y" * 200} for i in range(400)}})))
     assert tiny["freshness"] == {"asof": "2026-10-31"} and tiny["evidence_grade"] == "g"
+
+
+_NEWS_ORIGIN = {
+    "source_asof": "2026-10-29T21:00:00+00:00",
+    "source_asof_basis": "financial_news.fetched_at",
+    "retained_from_previous_build": True,
+    "retained_reason": "candidate_darker_than_existing",
+}
+
+
+def test_unified_intelligence_keeps_news_origin_separate(tmp_path, monkeypatch):
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "as_of": "2026-11-08", "generated_utc": "2026-11-08T05:00:00+00:00",
+        "news_freshness": _NEWS_ORIGIN,
+        "tickers": {"NVDA": {"news": _NEWS_REC, "has_news": True, "alt": None}}})
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "source_asof": "2026-11-08T06:00:00+00:00", "retained_from_previous_build": False,
+        "tickers": {"NVDA": dict(_NEWS_REC, n_recent=99)}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"}))))
+    assert out["news_freshness"] == _NEWS_ORIGIN
+    assert out["freshness"]["asof"] == "2026-11-08"
+    assert out["freshness"]["source_asof"] is None
+    assert out["freshness"]["source_file"] == "site/intelligence/by_ticker.json"
+    assert out["news"] == _NEWS_REC
+    assert out["evidence_grade"] == "vendored_snapshot"
+
+
+@pytest.mark.parametrize("metadata", [None, [], "bad", {}, {
+    "source_asof": 12, "source_asof_basis": [], "retained_from_previous_build": "false",
+    "retained_reason": {"reason": "old"}}, {
+    "source_asof": " ", "source_asof_basis": "", "retained_from_previous_build": 0}])
+def test_unified_news_unknown_metadata_never_borrows_newer_standalone(tmp_path, monkeypatch, metadata):
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "as_of": "2026-11-08", "news_freshness": metadata,
+        "tickers": {"NVDA": {"news": _NEWS_REC, "has_news": True}}})
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        **_NEWS_ORIGIN, "retained_from_previous_build": False, "tickers": {"NVDA": _NEWS_REC}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"}))))
+    assert out["news_freshness"] == {
+        "source_asof": None, "source_asof_basis": None,
+        "retained_from_previous_build": None, "retained_reason": None}
+    assert out["news"] == _NEWS_REC
+
+
+@pytest.mark.parametrize("mode", ["compact", "scalar_fallback"])
+def test_unified_news_origin_survives_actual_tool_transport(tmp_path, monkeypatch, mode):
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    news = dict(_NEWS_REC, top=[{"title": "x" * 3000} for _ in range(40)])
+    if mode == "scalar_fallback":
+        news.update({f"wide_{i}": {"nested": "x" * 500} for i in range(250)})
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "as_of": "2026-11-08", "news_freshness": _NEWS_ORIGIN,
+        "tickers": {"NVDA": {"news": news, "has_news": True}}})
+    text = _text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"})))
+    out = json.loads(text)
+    assert out["_transport_truncated"] is True
+    assert len(text) <= 8000
+    assert out["news_freshness"] == _NEWS_ORIGIN
+    assert out["freshness"]["asof"] == "2026-11-08"
+    assert out["evidence_grade"] == "vendored_snapshot"
+    if mode == "scalar_fallback":
+        assert "news" not in out

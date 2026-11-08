@@ -57,7 +57,7 @@ def _vendor_module(name: str, root: Path):
 def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                     host: str, port: int, implementation_sha: str | None = None,
                     session_enrollment: dict | None = None,
-                    consumer_transition=None, request_observation=None) -> None:
+                    consumer_transition=None, primary_launch=None, request_observation=None) -> None:
     _selection(role, host, port)
     if getattr(module, "_mmx_role_api_bound", False):
         raise RuntimeRefusal("NATIVE_API_ALREADY_BOUND")
@@ -83,7 +83,13 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
             options["consumer_transition"] = consumer_transition
         if request_observation is not None:
             request_observation.bind_authority(runner)
+            if getattr(request_observation, "evaluation_owner", None) is not None:
+                options["evaluation_owner"] = request_observation.evaluation_owner
         install_private_control(runner, role_home, role, **options)
+        if primary_launch is not None:
+            from integrations.hermes_application_fabric.host import install_native_host
+            install_native_host(runner, launch=primary_launch, role_home=role_home,
+                document=primary_launch.recipe["primary_application"])
         return await original(runner, host=host, port=port)
 
     module.start_gateway_api = start_role_gateway_api
@@ -129,7 +135,8 @@ def _bind_consumer_provider_imports(launch, vendor: Path) -> None:
     Keep native bundled/legacy providers and their original registry. Exclude
     role-home and pip provider code through the existing two native hooks.
     """
-    if launch.recipe.get("executive_consumer") is None:
+    if (launch.recipe.get("executive_consumer") is None
+            and launch.recipe.get("primary_application") is None):
         return
     launch.check()
     providers = importlib.import_module("providers")
@@ -179,13 +186,14 @@ def _consumer_trust_gate(publication):
     """The incumbent MCP trust gate, consulted before a model-facing call."""
     from integrations.hermes_delegate.policy import TOOL_NAME
 
-    def gate() -> str | None:
+    def gate(tool_name=TOOL_NAME, booked=None, arguments=None) -> str | None:
         try:
             from tools.mcp_tool_handlers import _trust_gate_check
         except Exception:
             return "NATIVE_CONSUMER_TRUST_GATE_UNAVAILABLE"
         try:
-            return _trust_gate_check(publication.mcp.server, TOOL_NAME, [], {})
+            return _trust_gate_check(publication.mcp.server, tool_name,
+                                     [] if booked is None else booked, {} if arguments is None else arguments)
         except Exception:
             return "NATIVE_CONSUMER_TRUST_GATE_UNAVAILABLE"
 
@@ -425,10 +433,13 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
     slot = install_consumer_slot(manager, ConsumerSlot(
         owner=owner, profile_id=get_active_profile_name(), source=CONSUMER_PLUGIN_SOURCE,
         plugin_id=CONSUMER_PLUGIN_NAME, publication=publication))
+    from common.coo_discovery_contract import TOOLS as discovery_tools
+    provided = [] if selected_child_publication(publication) is None else ["mmx_delegate"]
+    if getattr(publication, "discovery", False):
+        provided.extend(discovery_tools)
     manifest = PluginManifest(
         name=CONSUMER_PLUGIN_NAME, version="1.0.0", source=CONSUMER_PLUGIN_SOURCE,
-        path=str(package), provides_tools=([] if selected_child_publication(publication) is None
-                                          else ["mmx_delegate"]), key=CONSUMER_PLUGIN_NAME)
+        path=str(package), provides_tools=provided, key=CONSUMER_PLUGIN_NAME)
     if slot.package_path is not None:
         raise RuntimeRefusal("NATIVE_CONSUMER_LOADER_ALREADY_BOUND")
     slot.package_path, slot.package_check = str(package), package_check
@@ -529,12 +540,17 @@ def run(launch, argv: list[str]) -> int:
     assert_root_service_cgroup(role)
     assert_role_network_profile(profile)
     assert_role_credential_isolation(profile)
-    enforce_role_tcp_ports(profile)
+    enforce_role_tcp_ports(profile, **({"native_launch": launch}
+        if launch.recipe.get("primary_application") is not None else {}))
     consumer_document = launch.recipe.get("executive_consumer")
-    if consumer_document is None:
+    primary_document = launch.recipe.get("primary_application")
+    if primary_document is not None:
+        expected_disabled_mcp(profile, consumer_document, primary_document)
+    elif consumer_document is None:
         expected_disabled_mcp(profile)
     else:
-        expected_disabled_mcp(profile, consumer_document)
+        expected_disabled_mcp(profile, consumer_document,
+                              evaluation_inputs=launch.recipe.get("evaluation_inputs"))
     _selection(role, profile.gateway_host, profile.backend_port)
     gateway_args = ["-p", role, "gateway", "run", "--external-supervisor"]
     tools_args = ["-p", role, "tools", "list", "--platform", "cli"]
@@ -558,6 +574,9 @@ def run(launch, argv: list[str]) -> int:
     # module applies its profile selector at import time.
     sys.argv[:] = [str(launch.launcher), *argv]
     _bind_consumer_provider_imports(launch, vendor)
+    if primary_document is not None:
+        from integrations.hermes_application_fabric.native import register_native_provider
+        register_native_provider()
     native_main = _vendor_module("hermes_cli.main", vendor)
     constants = _vendor_module("hermes_constants", vendor)
     role_home = home / "profiles" / role
@@ -575,14 +594,19 @@ def run(launch, argv: list[str]) -> int:
         from .native_request_observation import install_request_observation
         request_observation = install_request_observation(launch, vendor, role_home, role)
         from .native_agentos_memory import install_native_agentos_memory
-        install_native_agentos_memory(launch, vendor, role_home, request_observation)
+        request_observation.memory_factory = install_native_agentos_memory(launch, vendor, role_home, request_observation)
+        if "evaluation_inputs" in launch.recipe:
+            from .native_eval_inputs import NativeEvalInputOwner
+            request_observation.evaluation_owner = NativeEvalInputOwner(launch, profile, request_observation)
+            request_observation.transport_installation.bind_credentials(vendor, profile)
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,
                         implementation_sha=launch.owner.root.name,
                         session_enrollment=launch.recipe.get("session_enrollment"),
                         consumer_transition=consumer_transition,
-                        request_observation=request_observation)
+                        request_observation=request_observation,
+                        **({"primary_launch": launch} if primary_document is not None else {}))
     launch.check()
     result = native_main.main()
     return result if type(result) is int else 0
@@ -609,3 +633,4 @@ def native_ready(*, vendor: Path, home: Path, host: str, port: int, pid: int) ->
                 and _CAPABILITIES <= endpoint.capabilities)
     except (OSError, ValueError, TypeError, AttributeError, RuntimeRefusal):
         return False
+

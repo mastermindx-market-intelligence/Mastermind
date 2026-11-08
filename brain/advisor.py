@@ -319,12 +319,30 @@ def fabric_conversation(conversation_id: str, *, scope: str):
         else:
             doc = {"schema": _FABRIC_SCHEMA, "backend": "fabric", "scope": scope,
                    "conversation_id": conversation_id, "rendered": [], "messages": [], "turns": []}
+        _validate_fabric_turns(doc)
         yield doc
+
+
+def _validate_fabric_turns(doc):
+    # Validation is pure and precedes any selector, provider binding or replay.
+    # It extends this file's incumbent owner; historical turns keep their shape.
+    from brain.fabric_chat import _digest, _AUTO_TURN_SCHEMA, validate_auto_turn
+    seen = set()
+    for turn in doc["turns"]:
+        validate_auto_turn(turn)
+        identifier = turn.get("id")
+        if not isinstance(identifier, str) or identifier in seen:
+            raise FabricConversationError("fabric_conversation_invalid")
+        seen.add(identifier)
+        if (turn.get("schema") == _AUTO_TURN_SCHEMA
+                and turn["operation_id"] != "mastermind-chat:" + _digest([doc["conversation_id"], identifier])[:48]):
+            raise FabricConversationError("fabric_conversation_invalid")
 
 
 def save_fabric_conversation(doc: dict) -> None:
     """Atomic, observable persistence; callers hold fabric_conversation's lock."""
     path = _hist_path(doc["conversation_id"])
+    _validate_fabric_turns(doc)
     try:
         raw = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
         if len(raw) > _MAX_CONVERSATION_BYTES:

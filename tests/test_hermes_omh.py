@@ -231,7 +231,8 @@ def test_cli_roundtrip_uses_actual_canonical_consumer():
 
 @pytest.mark.parametrize("raw", [b'{"nodes":[],"nodes":[]}', b'{"a":NaN}', b'{"a":Infinity}',
     b'\xff', b'', b'{}', b'[]', b'['*10000+b']'*10000, pytest.param(b' '*131073, id='oversized-whitespace'),
-    b'{"SENSITIVE_SENTINEL": "secret"}', b'{"a":"\\ud800"}'])
+    b'{"SENSITIVE_SENTINEL": "secret"}', b'{"a":"\\ud800"}'], ids=["duplicate-keys", "nan", "infinity", "invalid-utf8", "empty",
+    "empty-object", "array", "deep-nesting", "oversize", "sensitive-key", "unpaired-surrogate"])
 def test_cli_refuses_bad_input_without_echo_or_traceback(raw):
     proc = cli(raw)
     assert proc.returncode == 2

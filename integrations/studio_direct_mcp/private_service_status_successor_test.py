@@ -1152,7 +1152,6 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
 
 
 
-
 class C4PublisherSuccessorTests(unittest.TestCase):
     """Real prior transactions and exclusive filesystem publication, inert runtime."""
     build = EnrolledRetainedReceiptTests.build
@@ -1593,6 +1592,129 @@ class C4PublisherSuccessorTests(unittest.TestCase):
             self.assertEqual(self.call("status", pd)["effect"], "APPLIED")
         self.assertEqual(self.snapshot(), snapshot)
 
+
+
+class HistoricalStatusPairTests(unittest.TestCase):
+    """Qualify frozen forward input without reinterpreting a changed live pair."""
+
+    patch = OwnerTransactionTests.patch
+    patch_object = OwnerTransactionTests.patch_object
+    write = OwnerTransactionTests.write
+    preview = OwnerTransactionTests.preview
+    apply = OwnerTransactionTests.apply
+
+    def setUp(self):
+        import private_service_pin as pin
+        OwnerTransactionTests.setUp(self)
+        self.original_plan = {
+            "account": self.account, "fixture": "authenticated-original",
+            "config_mode": 0o600, "manifest_mode": 0o600,
+        }
+        self.original_raw = {
+            "config.before.json": self.config,
+            "config.after.json": self.config,
+            "manifest.before.json": self.before,
+            "manifest.after.json": self.before,
+        }
+        self.pin = pin.plan_sha(self.svc, self.original_plan)
+        self.original_path = self.roots["state"] / "native-pool-pin"
+        self.original_path.mkdir(mode=0o700)
+        for name, blob in self.original_raw.items():
+            self.write(self.original_path / name, blob)
+        self.write(self.original_path / "plan.json",
+                   self.svc._fabric_release_json(self.original_plan))
+        self.write(self.original_path / "intent.json",
+                   self.svc._fabric_release_json({
+                       "schema": pin.SCHEMA, "planSha256": self.pin}))
+        self.write(self.original_path / "result.json",
+                   self.svc._fabric_release_json({
+                       "schema": pin.SCHEMA, "planSha256": self.pin,
+                       "effect": "APPLIED"}))
+        self.apply(self.preview())
+
+    def qualify(self, **changes):
+        args = dict(
+            original_plan=self.original_plan, original_raw=self.original_raw,
+            config_bytes=self.config, manifest_bytes=self.after,
+        )
+        args.update(changes)
+        return s.historical_pair(self.svc, self.account, self.roots, **args)
+
+    def test_complete_retained_status_chain_qualifies(self):
+        self.assertTrue(self.qualify())
+
+    def test_frozen_pair_survives_forward_after_pair_installation(self):
+        self.write(self.roots["config"], b'{"forward":"new configured native pool"}')
+        self.write(self.roots["manifest"], b'{"forward":"new manifest"}')
+        with mock.patch.object(s, "_original_pin",
+                               side_effect=AssertionError("native context reacquired")), \
+             mock.patch.object(s, "_confirm_retained_durability",
+                               side_effect=AssertionError("historical read acknowledged")):
+            self.assertTrue(self.qualify())
+
+    def test_missing_status_transaction_does_not_authorize_a_chain(self):
+        shutil.rmtree(self.roots["state"] / s.TRANSACTION)
+        self.assertFalse(self.qualify())
+
+    def test_changed_original_applied_receipt_refuses(self):
+        self.write(self.original_path / "result.json", b'{"effect":"APPLIED"}')
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+            self.qualify()
+
+    def test_original_fingerprint_change_between_reads_refuses(self):
+        actual = self.svc._fabric_release_bytes
+        changed = False
+        target = self.original_path / "config.before.json"
+        def raced(path, *args, **kwargs):
+            nonlocal changed
+            result = actual(path, *args, **kwargs)
+            if Path(path) == target and not changed:
+                changed = True
+                self.write(target, b"changed after fingerprint read")
+            return result
+        with mock.patch.object(self.svc, "_fabric_release_bytes", side_effect=raced):
+            with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+                self.qualify()
+        self.assertTrue(changed)
+
+    def test_caller_original_snapshots_must_match_retained_bytes(self):
+        raw = dict(self.original_raw)
+        raw["config.after.json"] = b"substituted original"
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+            self.qualify(original_raw=raw)
+
+    def test_changed_status_applied_receipt_refuses(self):
+        self.write(self.roots["state"] / s.TRANSACTION / "result.json",
+                   b'{"effect":"APPLIED","planSha256":"wrong"}')
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_PIN_CHANGED"):
+            self.qualify()
+
+    def test_status_must_be_successor_of_exact_authenticated_original(self):
+        raw = dict(self.original_raw)
+        raw["manifest.after.json"] = b'{"foreign":"intermediate manifest"}'
+        self.write(self.original_path / "manifest.after.json",
+                   raw["manifest.after.json"])
+        with self.assertRaisesRegex(SystemExit, "ORIGINAL_SUCCESSOR_EDGE_CHANGED"):
+            self.qualify(original_raw=raw)
+
+    def test_frozen_endpoint_must_equal_retained_status_postimage(self):
+        with self.assertRaisesRegex(SystemExit, "RETAINED_ENDPOINT_CHANGED"):
+            self.qualify(manifest_bytes=self.before)
+
+    def test_installed_status_module_tamper_refuses(self):
+        self.write(self.roots["base"] / s.MODULE, b"unqualified status")
+        with self.assertRaisesRegex(SystemExit, "RETAINED_ENDPOINT_CHANGED"):
+            self.qualify()
+
+    def test_other_installed_module_tamper_refuses(self):
+        self.write(self.roots["base"] / "gateway.mjs", b"changed gateway")
+        with self.assertRaisesRegex(SystemExit, "OTHER_MODULE_CHANGED"):
+            self.qualify()
+
+    def test_unqualified_enrollment_is_not_accepted_as_an_alternate_path(self):
+        (self.roots["state"] / owner.TRANSACTION).mkdir(mode=0o700)
+        with self.assertRaisesRegex(SystemExit, "ENROLLMENT_ACCOUNT_UNQUALIFIED"):
+            self.qualify()
 
 class C4InventorySourceIdentityTests(unittest.TestCase):
     def test_installed_successor_target_is_the_exact_shipped_publisher(self):

@@ -407,7 +407,9 @@ def create_app(
         snapshot = await request.app.state.admissions.snapshot()
         snapshot.update(plan_policy=cfg.plan_policy,
                         plan_policy_digest=plan_policy_digest(cfg.plan_policy),
-                        account_metadata_enabled=cfg.enable_account_metadata)
+                        account_metadata_enabled=cfg.enable_account_metadata,
+                        included_funding_state="unverified",
+                        included_funding_reason="PLAN_INCLUDED_FUNDING_UNVERIFIED")
         return JSONResponse(snapshot)
 
     @app.api_route("/v1/{endpoint:path}", methods=["POST", "GET"])
@@ -444,7 +446,13 @@ def create_app(
                     status_code=HTTPStatus.CONFLICT,
                 )
             try:
-                validate_plan_request(cfg.plan_policy, endpoint, bytes(body))
+                lane = validate_plan_request(cfg.plan_policy, endpoint, bytes(body))
+                if lane == "free":
+                    # The public API supplies no account-specific Max entitlement
+                    # or effective continuation readback. A local flag, catalog,
+                    # wallet, or caller assertion cannot authorize wallet-free
+                    # plain-ID inference. Refuse before RPM/slot/upstream send.
+                    raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_UNVERIFIED")
             except PlanRequestRefused as exc:
                 return JSONResponse(
                     {"error": {"message": "provider plan request refused",

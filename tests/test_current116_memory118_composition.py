@@ -215,10 +215,10 @@ def test_changed_profile_helper_source_refuses_before_any_output(current_source,
 
 
 def test_profile_privacy_delta_preserves_all_native_participant_and_pair_helpers():
-    canonical = ast.parse((ROOT / "ops/native_fabric/quota_continuity/candidate/fabric_memory_view.py").read_bytes())
+    canonical = ast.parse((ROOT / "ops/native_fabric/provider_plans/memory118/native_owner/fabric_memory_view.py").read_bytes())
     variant = ast.parse((compose.HERE / "memory118/fabric_memory_view.py").read_bytes())
     old = {n.name: dump(n) for n in canonical.body if isinstance(n, ast.FunctionDef)}
     new = {n.name: dump(n) for n in variant.body if isinstance(n, ast.FunctionDef)}
     assert set(new) - set(old) == {"_current_authorization_row"}
     assert {n for n in old if old[n] != new[n]} == {"require_generic_channel"}
-    assert sha((ROOT / "ops/native_fabric/quota_continuity/candidate/fabric_memory_view.py").read_bytes()) == "a7bfc2567c8abc6c27e3fe2277d8b21669420d90e547aafc42e1186ea0740081"
+    assert sha((ROOT / "ops/native_fabric/provider_plans/memory118/native_owner/fabric_memory_view.py").read_bytes()) == "a7bfc2567c8abc6c27e3fe2277d8b21669420d90e547aafc42e1186ea0740081"

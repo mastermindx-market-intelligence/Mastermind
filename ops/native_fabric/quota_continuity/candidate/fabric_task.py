@@ -713,12 +713,6 @@ def _qualify_completed_poll255(rid: str, original_log: bytes, *, owner_ext: Path
 
 
 def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:
-    from fabric_memory_view import require_generic_channel
-    require_generic_channel(HERE if owner_ext is None else Path(owner_ext), run_id)
-    return _inspect_run(run_id, owner_ext=owner_ext)
-
-
-def _inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:
     # The original paid owner binds immutable code to its fixed existing data
     # namespace. This read-only parameter grants no caller authority, starts
     # no process, and never changes module globals shared by concurrent reads.
@@ -995,8 +989,6 @@ def read_result(run_id: str, *, max_bytes: int = DEFAULT_RESULT_BYTES) -> bytes:
     rid = validate_run_id(run_id)
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 1 <= max_bytes <= MAX_RESULT_BYTES:
         raise ValueError("invalid result byte limit")
-    from fabric_memory_view import require_generic_channel
-    require_generic_channel(HERE, rid)
     try:
         return _result_snapshot(rid, max_bytes)
     except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -1867,16 +1859,6 @@ def main(argv: list[str] | None = None) -> int:
     p_completed.add_argument("--apply", action="store_true")
 
     args = parser.parse_args(argv)
-    # Public CLI adapters may not expose or reconcile a prospective participant
-    # original through status/log/artifact/continuation/acceptance shortcuts.
-    from fabric_memory_view import require_generic_channel
-    original = getattr(args, 'run_id', None)
-    if original is not None:
-        try:
-            require_generic_channel(HERE, original)
-        except ValueError:
-            print('participant_view_required', file=sys.stderr)
-            return 75
     if args.cmd == "provider-diagnostics":
         import original_delivery_collector as collector
         try:

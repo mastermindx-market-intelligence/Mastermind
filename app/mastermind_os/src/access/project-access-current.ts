@@ -10,7 +10,7 @@ export type { ProjectAccessSelection } from "./project-access";
 type Available = Extract<ProjectAccessRead, { availability: "AVAILABLE" }>;
 type Row = NonNullable<Available["grants"]>[number];
 export type ProjectAccessAction =
-  Row["action"] | "publish_project_plan_proposal" | "read_latest_project_data";
+  Row["action"] | "publish_project_plan_proposal" | "read_latest_project_data" | "correct_project_discovery";
 export type CurrentGrant = Omit<Row, "action" | "scope" | "instruction_ref"> & {
   action: ProjectAccessAction;
   scope: "WORKSPACE" | "PROJECT" | "INSTRUCTION";
@@ -22,7 +22,11 @@ type V5 = Omit<Available, "schema" | "declaration" | "grants"> & {
   declaration: "SUPPLIED";
   grants: CurrentGrant[];
 };
-export type ProjectAccessCurrentRead = ProjectAccessRead | V5;
+type V6 = Omit<V5,'schema'|'grant_schema'> & {
+  schema:'mastermind.workspace_project_access.v3';
+  grant_schema:'mastermind.workspace_acquisition_bindings.v6';
+};
+export type ProjectAccessCurrentRead = ProjectAccessRead | V5 | V6;
 function exact(
   value: unknown,
   keys: readonly string[],
@@ -57,8 +61,9 @@ export function decodeCurrentProjectAccess(
         ? Object.getOwnPropertyDescriptor(value, "schema")
         : undefined;
     if (!schema || !Object.hasOwn(schema, "value")) return null;
-    if (schema.value !== "mastermind.workspace_project_access.v2")
+    if (schema.value !== "mastermind.workspace_project_access.v2" && schema.value !== 'mastermind.workspace_project_access.v3')
       return decodeProjectAccess(value, expected);
+    const v6=schema.value==='mastermind.workspace_project_access.v3', count=v6?11:10;
     const body = exact(value, [
       "schema",
       "selection",
@@ -72,7 +77,7 @@ export function decodeCurrentProjectAccess(
     ]);
     if (
       !body ||
-      body.grant_schema !== "mastermind.workspace_acquisition_bindings.v5" ||
+      body.grant_schema !== (v6?'mastermind.workspace_acquisition_bindings.v6':"mastermind.workspace_acquisition_bindings.v5") ||
       body.availability !== "AVAILABLE" ||
       body.declaration !== "SUPPLIED" ||
       !Array.isArray(body.grants) ||
@@ -82,14 +87,14 @@ export function decodeCurrentProjectAccess(
     const fields = Object.getOwnPropertyDescriptors(body.grants as object),
       keys = Reflect.ownKeys(fields);
     if (
-      fields.length?.value !== 10 ||
-      keys.length !== 11 ||
-      !Array.from({ length: 10 }, (_, i) => String(i)).every(
+      fields.length?.value !== count ||
+      keys.length !== count+1 ||
+      !Array.from({ length: count }, (_, i) => String(i)).every(
         (key) => fields[key]?.enumerable && Object.hasOwn(fields[key], "value"),
       )
     )
       return null;
-    const rows = Array.from({ length: 10 }, (_, i) => fields[String(i)].value);
+    const rows = Array.from({ length: count }, (_, i) => fields[String(i)].value);
     const { grant_schema: _, ...base } = body;
     const decoded = decodeProjectAccess(
       {
@@ -107,10 +112,12 @@ export function decodeCurrentProjectAccess(
     )
       return null;
     const added: CurrentGrant[] = [];
-    for (const [i, action, scope] of [
+    const extensions:readonly (readonly [number,ProjectAccessAction,'PROJECT'|'WORKSPACE'])[]=[
       [8, "publish_project_plan_proposal", "PROJECT"],
       [9, "read_latest_project_data", "WORKSPACE"],
-    ] as const) {
+      ...(v6?[[10,'correct_project_discovery','PROJECT'] as const]:[]),
+    ];
+    for (const [i, action, scope] of extensions) {
       const row = exact(rows[i], [
         "action",
         "scope",
@@ -136,12 +143,12 @@ export function decodeCurrentProjectAccess(
         supply: row.supply as "SUPPLIED" | "NOT_SUPPLIED",
       });
     }
-    return {
+    const qualified = {
       ...decoded,
-      schema: "mastermind.workspace_project_access.v2",
-      grant_schema: "mastermind.workspace_acquisition_bindings.v5",
       grants: [...decoded.grants, ...added],
     };
+    return v6?{...qualified,schema:'mastermind.workspace_project_access.v3',grant_schema:'mastermind.workspace_acquisition_bindings.v6'}
+      :{...qualified,schema:'mastermind.workspace_project_access.v2',grant_schema:'mastermind.workspace_acquisition_bindings.v5'};
   } catch {
     return null;
   }

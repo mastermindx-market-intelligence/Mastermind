@@ -631,13 +631,13 @@ def _parse_native_completion(raw, content_type, model, packet, canonical_model=N
     echo = frame.get("model")
     allowed_echoes = {model, model.removesuffix(":free")}
     # The Decisions alias exposes the documented underlying OpenAI Luna model.
-    if model == "gpt-6-luna-decisions:free":
+    if model == "gpt-6-luna-decisions":
         allowed_echoes.add("gpt-6-luna")
     if echo is not None and (type(echo) is not str or echo not in allowed_echoes):
         # TypeSafe documents a concrete Jev semantic version for jev-latest.
         # The exact free request alias/endpoint stays pinned; a reported release
         # is retained as model_echo, never used to select or send another model.
-        if not (model == "jev-latest:free" and type(echo) is str
+        if not (model == "jev-latest" and type(echo) is str
                 and re.fullmatch(r"jev-\d+\.\d+\.\d+", echo)
                 and (canonical_model is None or canonical_model in allowed_echoes | {echo})):
             raise ExperientialTransportRefused("GATEWAY_RESPONSE_MODEL_MISMATCH")
@@ -673,49 +673,119 @@ def _parse_native_completion(raw, content_type, model, packet, canonical_model=N
     return json.dumps(frame, ensure_ascii=False, allow_nan=False), echo, frame.get("usage")
 
 
-def _classify_http_error(status: int, content_type: str,
-                         provider_request_id: str = "") -> ExperientialTransportRefused:
-    """One typed refusal per status class.  No status is silently accepted.
+# Stable provider codes only. Arbitrary messages and unrecognized codes never
+# enter logs, terminal receipts, or exception text.
+PROVIDER_ERROR_CODES = frozenset({
+    "invalid_key", "model_not_granted", "model_location_not_supported",
+    "insufficient_quota", "free_limit_reached", "key_daily_cap",
+    "insufficient_credits", "promo_byok_only", "org_under_review",
+    "free_tier_requires_payment", "pro_required", "unsupported_capability",
+    "rate_limit_exceeded", "invalid_request", "model_not_found",
+})
+PROVIDER_ERROR_TYPES = frozenset({
+    "authentication_error", "permission_error", "invalid_request_error",
+    "rate_limit_error", "insufficient_quota", "billing_error",
+})
+PROVIDER_ERROR_PARAMS = frozenset({"model", "model_id", "service_tier"})
 
-    ``provider_request_id`` (when the failed response carried a VALIDATED
-    ``X-Request-Id``) is appended to the typed detail: the vendor documents
-    that a failed or disconnected request may still incur charge, so the
-    existing billing owner must be able to reconcile even refused POSTs via
-    the provider handle.  The handle is shape-validated printable ASCII, so
-    the detail stays metadata-only and log-safe.
-    """
+
+def _safe_provider_error(raw: bytes, content_type: str) -> dict:
+    """Closed metadata from a bounded JSON error; no body/message reflection."""
+    if (type(raw) is not bytes or len(raw) > MAX_ERROR_BODY_BYTES
+            or content_type.split(";", 1)[0].strip().lower() != "application/json"):
+        return {}
+    def closed(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate field")
+            value[key] = item
+        return value
+    try:
+        value = json.loads(raw, object_pairs_hook=closed)
+        error = value.get("error") if type(value) is dict else None
+    except (ValueError, UnicodeError, RecursionError):
+        return {}
+    if type(error) is not dict:
+        return {}
+    safe = {}
+    for name, allowed in (("code", PROVIDER_ERROR_CODES),
+                          ("type", PROVIDER_ERROR_TYPES),
+                          ("param", PROVIDER_ERROR_PARAMS)):
+        item = error.get(name)
+        if type(item) is str and item in allowed:
+            safe[name] = item
+    return safe
+
+
+def _classify_http_error(status: int, content_type: str,
+                         provider_request_id: str = "",
+                         error_body: bytes = b"") -> ExperientialTransportRefused:
+    """One terminal refusal, retaining closed provider evidence without retry."""
     if 300 <= status < 400:
-        refusal = ExperientialTransportRefused(
-            "GATEWAY_REDIRECT_REFUSED", f"status {status}")
-    elif status in (401, 403):
-        refusal = ExperientialTransportRefused(
-            "GATEWAY_AUTH_REFUSED", f"status {status}")
+        reason = "GATEWAY_REDIRECT_REFUSED"
+    elif status == 401:
+        reason = "GATEWAY_AUTH_REFUSED"
+    elif status == 403:
+        reason = "GATEWAY_PERMISSION_REFUSED"
     elif status == 413:
-        refusal = ExperientialTransportRefused("GATEWAY_REQUEST_TOO_LARGE", "status 413")
+        reason = "GATEWAY_REQUEST_TOO_LARGE"
     elif status == 429:
-        refusal = ExperientialTransportRefused(
-            "GATEWAY_RATE_LIMITED", "status 429; Retry-After is never obeyed (one POST)")
+        reason = "GATEWAY_RATE_LIMITED"
     elif 400 <= status < 500:
-        refusal = ExperientialTransportRefused("GATEWAY_REQUEST_REFUSED", f"status {status}")
+        reason = "GATEWAY_REQUEST_REFUSED"
     elif status == 503:
-        refusal = ExperientialTransportRefused(
-            "GATEWAY_LOCAL_QUEUE_FULL", "status 503")
+        reason = "GATEWAY_LOCAL_QUEUE_FULL"
     elif status == 504:
-        refusal = ExperientialTransportRefused(
-            "GATEWAY_QUEUE_WAIT_EXPIRED", "status 504")
+        reason = "GATEWAY_QUEUE_WAIT_EXPIRED"
     elif status >= 500:
-        refusal = ExperientialTransportRefused("GATEWAY_UPSTREAM_ERROR", f"status {status}")
+        reason = "GATEWAY_UPSTREAM_ERROR"
     elif status != 200:
-        # e.g. the gateway's 204 disconnected-caller response: not a success,
-        # and never silently accepted as an empty completion.
-        refusal = ExperientialTransportRefused("GATEWAY_STATUS_REFUSED", f"status {status}")
+        reason = "GATEWAY_STATUS_REFUSED"
     else:
-        refusal = ExperientialTransportRefused(
-            "GATEWAY_RESPONSE_MALFORMED", "expected Content-Type application/json")
+        reason = "GATEWAY_RESPONSE_MALFORMED"
+    detail = f"status {status}"
+    if status == 429:
+        detail += "; Retry-After is never obeyed (one POST)"
+    for name, value in _safe_provider_error(error_body, content_type).items():
+        detail += f"; provider_error_{name}={value}"
     if provider_request_id:
-        refusal.detail = (f"{refusal.detail}; provider_request_id="
-                          f"{provider_request_id}")
-    return refusal
+        detail += "; provider_request_id=" + provider_request_id
+    return ExperientialTransportRefused(reason, detail)
+
+
+def transport_refusal_metadata(stderr: str) -> dict:
+    """Project only the bridge's closed terminal vocabulary into the owner."""
+    reason = stderr.strip().split(":", 1)[0]
+    kinds = {
+        "GATEWAY_RATE_LIMITED": "rate_limit",
+        "GATEWAY_AUTH_REFUSED": "authentication",
+        "GATEWAY_PERMISSION_REFUSED": "permission",
+        "GATEWAY_REQUEST_REFUSED": "invalid_request",
+        "GATEWAY_UPSTREAM_ERROR": "provider_error",
+    }
+    result = {"kind": kinds.get(reason, "unknown"),
+              "transport_reason": reason if re.fullmatch(r"[A-Z_]{1,80}", reason) else "UNCLASSIFIED"}
+    if reason not in kinds:
+        return result
+    status = re.search(r"(?:^|: )status ([1-5][0-9]{2})(?:;|$)", stderr.strip())
+    if status:
+        result["http_status"] = int(status.group(1))
+    error = {}
+    for name, allowed in (("code", PROVIDER_ERROR_CODES),
+                          ("type", PROVIDER_ERROR_TYPES),
+                          ("param", PROVIDER_ERROR_PARAMS)):
+        values = re.findall(r"; provider_error_" + name + r"=([a-z_]+)(?:;|$)", stderr.strip())
+        if len(values) == 1 and values[0] in allowed:
+            error[name] = values[0]
+    if error:
+        result["provider_error"] = error
+    handle = re.search(r"; provider_request_id=([^;\r\n]+)$", stderr.strip())
+    if handle:
+        value = _validate_provider_request_id(handle.group(1))
+        if value:
+            result["provider_request_id"] = value
+    return result
 
 
 def _parse_completion(raw: bytes, content_type: str, expected_model: str = MODEL) -> Tuple[str, Optional[str], Any]:
@@ -1040,14 +1110,15 @@ def run_opt_in_inference(
         # on the success path only.
         failed_handle = _validate_provider_request_id(
             exc.headers.get("X-Request-Id") if exc.headers else None)
+        error_body = b""
         try:
-            exc.read(MAX_ERROR_BODY_BYTES)  # drained, never surfaced or logged
+            error_body = exc.read(MAX_ERROR_BODY_BYTES + 1)
         except Exception:
             pass
         finally:
             exc.close()
         raise _classify_http_error(exc.code, content_type,
-                                   provider_request_id=failed_handle or "")
+                                   provider_request_id=failed_handle or "", error_body=error_body)
     except (socket.timeout, TimeoutError, http.client.HTTPException) as exc:
         raise ExperientialTransportRefused(
             "GATEWAY_TIMEOUT", type(exc).__name__)
@@ -1062,14 +1133,15 @@ def run_opt_in_inference(
     if status != 200:
         non200_handle = _validate_provider_request_id(
             response.headers.get("X-Request-Id") if response.headers else None)
+        error_body = b""
         try:
-            response.read(MAX_ERROR_BODY_BYTES)
+            error_body = response.read(MAX_ERROR_BODY_BYTES + 1)
         except Exception:
             pass
         finally:
             response.close()
         raise _classify_http_error(status, content_type,
-                                   provider_request_id=non200_handle or "")
+                                   provider_request_id=non200_handle or "", error_body=error_body)
     provider_handle_raw = (response.headers.get("X-Request-Id")
                            if response.headers else None)
     provider_handle = _validate_provider_request_id(provider_handle_raw)

@@ -234,9 +234,6 @@ class OperatorOwner:
                 "expires_at": grant["expires_at"], "allowed_classes": grant["allowed_classes"]}
 
     def reserve(self, token, request, *, participant=None):
-        import fabric_memory_view as memory
-        if type(request) is dict and type(request.get('packet')) is str and request['packet'].encode().startswith(memory.PACKET_PREFIX):
-            refuse(memory.VIEW_REQUIRED)
         with self.transaction() as con:
             grant, launch, lease, root = self._authorized(con, token)
             used = con.execute("SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?", (grant["operator_run"],)).fetchone()[0]
@@ -265,7 +262,7 @@ class OperatorOwner:
                         (rid, grant["operator_run"], grant["root"], digest(canonical(stored).encode()), self.clock(), canonical(stored)))
         return grant
 
-    def _child_authorization(self, token, rid):
+    def child_binding(self, token, rid):
         safe_id(rid)
         with self.transaction() as con:
             grant, _, _, _ = self._authorized(con, token)
@@ -273,78 +270,7 @@ class OperatorOwner:
                               (rid, grant["operator_run"], grant["root"])).fetchone()
             if row is None:
                 refuse("child_binding_refused")
-        return grant, dict(row)
-
-    def reserve_protected_memory(self, token, request, *, authority=None):
-        """Delegate economic permission only, in the existing child row.
-
-        No packet, source capability, result or provider call is accepted here.
-        The later installed Control owner must independently match the exact
-        pre-input intent before the real broker can acquire a child lease.
-        Lost response consumes the original count; it never refunds/replays.
-        """
-        from fabric_operator_contract import validate_protected_launch
-        from protected_memory_economic import require_root_invocation
-        require_root_invocation(authority,request)
-        with self.transaction() as con:
-            grant, launch, lease, root = self._authorized(con, token)
-            used = con.execute('SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?',
-                               (grant['operator_run'],)).fetchone()[0]
-            root_used = con.execute('SELECT COUNT(*) FROM operator_child_authorizations WHERE root=?',
-                                    (grant['root'],)).fetchone()[0]
-            request = validate_protected_launch(grant, lease, launch, request, now=self.clock(),
-                used_children=used, root_children_remaining=root['child_limit'] - root_used)
-            from protected_memory_economic import require_economic_policy
-            require_economic_policy(self,request)
-            if min(root['expires'], grant['expires_at']) - self.clock() < OPERATOR_MIN_START_WINDOW_SECONDS:
-                refuse('operator_child_start_window_expired')
-            rid = request['run_id']
-            if con.execute('SELECT 1 FROM operator_child_authorizations WHERE run_id=?', (rid,)).fetchone():
-                refuse('RUN_EXISTS')
-            for suffix in ('.log', '.result', '.operator-packet', '.request.packet'):
-                path = self.here / 'state/remote_sub' / (rid + suffix)
-                if path.exists() or path.is_symlink(): refuse('RUN_EXISTS')
-            stored = {'schema': 'mastermind.fabric_bound_child_authorization.v3',
-                'economic': {'schema': 'mastermind.protected_memory_economic.v1',
-                    'request': request, 'phase': 'RESERVED', 'input': None,
-                    'launch': None, 'terminal': None}}
-            raw = canonical(stored)
-            con.execute('INSERT INTO operator_child_authorizations VALUES (?,?,?,?,?,?,NULL,NULL)',
-                (rid, grant['operator_run'], grant['root'], digest(raw.encode()), self.clock(), raw))
-            require_root_invocation(authority,request)
-        return {'root': grant['root'], 'parent': grant['operator_run'], 'run_id': rid,
-                'pre_input_sha256': request['pre_input_sha256'], 'retry_authorized': False}
-
-    def child_binding(self, token, rid):
-        grant, row = self._child_authorization(token, rid)
-        from fabric_memory_view import require_generic_row
-        require_generic_row(row)
         return grant
-
-    def dispatch_memory_participant(self, token, lookup):
-        # This private entry cannot accept a packet/source/condition/role or
-        # caller-defined issuer.  Missing real issuer refuses before a child
-        # authorization/budget/file/controller effect.
-        import fabric_memory_view as memory
-        rid = memory.validate_lookup(lookup)
-        with self.transaction() as con:
-            grant, _, _, _ = self._authorized(con, token)
-            if con.execute("SELECT 1 FROM operator_child_authorizations WHERE run_id=?", (rid,)).fetchone():
-                refuse("RUN_EXISTS")
-            memory.selected_case(self, grant, {"run_id": rid})
-        refuse(memory.ISSUER_UNAVAILABLE)
-
-    def memory_participant_result(self, token, lookup):
-        import fabric_memory_view as memory
-        rid = memory.validate_lookup(lookup)
-        grant, row = self._child_authorization(token, rid)
-        stored = memory._stored_row(row)
-        if not memory.is_prospective(stored):
-            refuse(memory.VIEW_REQUIRED)
-        # No generic terminal read can substitute for current issuer, source,
-        # recipient, input and original result/attempt qualification.
-        memory.selected_case(self, grant, {"run_id": rid})
-        refuse(memory.ISSUER_UNAVAILABLE)
 
     def dispatch(self, token, request, *, popen=subprocess.Popen, participant=None):
         grant = (self.reserve(token, request) if participant is None
@@ -393,9 +319,7 @@ class OperatorOwner:
         return metadata(self, token, rid, binding_sha256, object_id)
 
     def observe(self, token, action, rid):
-        grant, row = self._child_authorization(token, rid)
-        from fabric_memory_view import require_generic_row
-        require_generic_row(row)
+        grant = self.child_binding(token, rid)
         import fabric_task
         state = fabric_task.inspect_run(rid)
         if state.get("result_available"):
@@ -416,11 +340,7 @@ class OperatorOwner:
     def returns(self, token):
         with self.transaction() as con:
             grant, _, _, _ = self._authorized(con, token)
-            rows = con.execute("SELECT run_id,acknowledged_sha256,request_json,request_digest FROM operator_child_authorizations WHERE operator_run=? AND root=? ORDER BY authorized_at", (grant['operator_run'], grant['root'])).fetchall()
-        from fabric_memory_view import require_generic_row
-        # Check the whole recipient set before any original status/result read.
-        for row in rows:
-            require_generic_row(dict(row))
+            rows = con.execute("SELECT run_id,acknowledged_sha256 FROM operator_child_authorizations WHERE operator_run=? AND root=? ORDER BY authorized_at", (grant['operator_run'], grant['root'])).fetchall()
         import fabric_task
         states = []
         for row in rows:
@@ -493,34 +413,17 @@ def validate_child_admission(con, run_id, root, *, now, admitted_lease_id=None, 
         refuse("operator_child_authorization_changed")
     if type(request) is not dict:
         refuse("operator_child_authorization_changed")
-    if request.get('schema') == 'mastermind.fabric_bound_child_authorization.v3':
-        from protected_memory_economic import validate_stored
-        from fabric_operator_contract import validate_protected_launch
-        economic = validate_stored(request)
-        request = economic['request']
-        validate_protected_launch(grant, lease, launch, request, now=now,
-                                 used_children=0, root_children_remaining=1)
-        if economic['phase'] not in ('RESERVED', 'BOUND'):
-            refuse('protected_memory_original_recovery_only')
-        if admitted_lease_id is None and economic['phase'] != 'RESERVED':
-            refuse('protected_memory_original_recovery_only')
-        protected = True
-    else:
-        protected = False
     if request.get("schema") == "mastermind.fabric_bound_child_authorization.v2":
         from fabric_participant_owner import unwrap
         request, _ = unwrap(None, grant, request, expected_run=run_id)
-    if not protected:
-        validate_launch(grant, lease, launch, request, now=now, used_children=0,
-                        root_children_remaining=1)
+    validate_launch(grant, lease, launch, request, now=now, used_children=0,
+                    root_children_remaining=1)
     if admitted_lease_id is not None:
         child = OperatorOwner.lease(con, admitted_lease_id)
         if (child['orchestrator_id'] != root or child['state'] not in ('held', 'rented')
                 or not child['last_heartbeat'] <= now < child['last_heartbeat'] + child['ttl']):
             refuse("operator_child_lease_unavailable")
-        expected_packet = (economic['input']['input_sha256'] if protected and economic['input'] is not None
-                           else None if protected else digest((request['packet'] + CHILD_SUFFIX).encode()))
-        if packet_sha256 is not None and packet_sha256 != expected_packet:
+        if packet_sha256 is not None and packet_sha256 != digest((request['packet'] + CHILD_SUFFIX).encode()):
             refuse('operator_child_packet_binding_mismatch')
         if start_binding is not None and (set(start_binding) != {'pool','model','account','host'} or any(child[k] != v for k,v in start_binding.items())):
             refuse('operator_child_launch_binding_mismatch')

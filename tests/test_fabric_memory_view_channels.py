@@ -10,11 +10,18 @@ import json
 from unittest import mock
 
 import pytest
-from tests.test_fabric_participant_owner import case, participant, reserve
-import fabric_operator_owner as owner_module
-import fabric_memory_view as view
-import fabric_task
-import artifact_delivery
+from tests.test_fabric_participant_owner import case, participant, reserve, _native_owner_modules
+import importlib
+
+@pytest.fixture(scope="module",autouse=True)
+def _view_native_modules(_native_owner_modules):
+    global owner_module,view,fabric_task,artifact_delivery
+    owner_module=importlib.import_module('fabric_operator_owner')
+    view=importlib.import_module('fabric_memory_view')
+    fabric_task=importlib.import_module('fabric_task')
+    artifact_delivery=importlib.import_module('artifact_delivery')
+    yield
+
 
 
 def bind_unissued_v3(c):
