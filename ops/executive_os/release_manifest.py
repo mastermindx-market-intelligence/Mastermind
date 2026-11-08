@@ -303,8 +303,10 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
     version = value.get("schema")
     enrollment = None
     consumer = None
+    primary_application = None
     if version in ("mastermind.hermes_native_gateway_installation/v2",
-                   "mastermind.hermes_native_gateway_installation/v3"):
+                   "mastermind.hermes_native_gateway_installation/v3",
+                   "mastermind.hermes_native_gateway_installation/v4"):
         keys = keys | {"session_enrollment"}
         enrollment = value.get("session_enrollment")
         if (type(enrollment) is not dict
@@ -319,7 +321,9 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
             request_id.encode("utf-8", "strict")
         except UnicodeError:
             raise ReleaseManifestError("Hermes enrollment request identity is invalid") from None
-        if version == "mastermind.hermes_native_gateway_installation/v3":
+        if (version == "mastermind.hermes_native_gateway_installation/v3"
+                or version == "mastermind.hermes_native_gateway_installation/v4"
+                and "executive_consumer" in value):
             # The optional qualified consumer. It is a closed, non-secret
             # document: the frozen target material, the mission joins, the
             # approved MCP/public client metadata, the installed enrollment
@@ -353,6 +357,12 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
                         raise ValueError("consumer enrollment identity differs")
                 except Exception:
                     raise ReleaseManifestError("Hermes executive consumer is invalid") from None
+        if version == "mastermind.hermes_native_gateway_installation/v4":
+            keys = keys | {"primary_application"}
+            primary_application = value.get("primary_application")
+            if type(primary_application) is not dict:
+                raise ReleaseManifestError("Hermes primary APPLICATION is invalid")
+            primary_application = _closed_json(_canonical(primary_application))
     elif version != "mastermind.hermes_native_gateway_installation/v1":
         raise ReleaseManifestError("Hermes native installation is invalid")
     evaluation_inputs = None
@@ -384,6 +394,14 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
             or any(a != b and (_within(a, b) or _within(b, a))
                    for a in roots for b in roots)):
         raise ReleaseManifestError("Hermes native import roots overlap")
+    if primary_application is not None and not _defer_consumer:
+        try:
+            from integrations.hermes_application_fabric.publication import (
+                qualify_installation, validate_publication)
+            primary_application = validate_publication(primary_application)
+            qualify_installation(primary_application, role=role, enrollment=enrollment, import_roots=roots)
+        except Exception:
+            raise ReleaseManifestError("Hermes primary APPLICATION is invalid") from None
     inventory = value["dependency_inventory"]
     if (type(inventory) is not dict or set(inventory) != {"path", "sha256", "size"}
             or type(inventory["sha256"]) is not str
@@ -408,6 +426,8 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
             "dependency_inventory": {"path": inventory_path, "sha256": inventory["sha256"],
                                      "size": inventory["size"]},
             **({"session_enrollment": dict(enrollment)} if enrollment is not None else {}),
+            **({"primary_application": json.loads(json.dumps(primary_application))}
+               if primary_application is not None else {}),
             **({"vendor_derivation": derivation} if derivation is not None else {}),
             **({"evaluation_inputs": dict(evaluation_inputs)} if evaluation_inputs is not None else {}),
             **({"executive_consumer": json.loads(json.dumps(consumer))}
@@ -439,6 +459,9 @@ def _hermes_roles(value: Any, *, _defer_consumer: bool = False) -> list[dict[str
             raise ReleaseManifestError("Hermes runtime role uid is invalid")
         if type(gid) is not int or not 1 <= gid <= 2 ** 31 - 1:
             raise ReleaseManifestError("Hermes runtime role gid is invalid")
+        if (not _defer_consumer and native is not None and "primary_application" in native
+                and native["primary_application"]["principal_id"] != "uid:" + str(uid)):
+            raise ReleaseManifestError("Hermes primary APPLICATION principal differs")
         burst, interval = row["start_limit_burst"], row["start_limit_interval_sec"]
         if type(burst) is not int or not 1 <= burst <= 10:
             raise ReleaseManifestError("Hermes runtime start limit burst is invalid")
@@ -1053,6 +1076,12 @@ class _NativeGatewayLaunch:
             if (receipt.get("native_consumer_plugin_sha256") != consumer["plugin"]["digest"]
                     or held_plugin_package_digest(self.owner) != consumer["plugin"]["digest"]):
                 raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_UNPROVEN")
+        if self.recipe.get("primary_application") is not None or profile.model_provider == "mastermind-fabric":
+            from integrations.hermes_application_fabric.publication import qualify_launch
+            try:
+                qualify_launch(self, profile)
+            except Exception:
+                raise RuntimeRefusal("NATIVE_PRIMARY_APPLICATION_UNQUALIFIED") from None
         self.check()
 
     def argv(self, profile, hermes_bin, *, tools=False):
@@ -1309,3 +1338,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

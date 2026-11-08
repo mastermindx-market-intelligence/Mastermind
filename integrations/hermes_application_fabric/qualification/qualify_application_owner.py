@@ -15,30 +15,50 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 import unittest
 from unittest.mock import patch
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--adapter-root", required=True)
-    parser.add_argument("--macro-root", required=True)
-    parser.add_argument("--native-owner-root", required=True)
-    parser.add_argument("--hermes-root", required=True)
-    args = parser.parse_args()
-    roots = {name: Path(value).resolve() for name, value in vars(args).items()}
+def qualify(args):
+    from owner_source_support import COMPOSED_OWNER_COMMIT, CURRENT_OWNER_COMMIT, OWNER_COMMIT
+    source_context = ("committed_attended_auto" if args.composed_owner_source else
+                      "committed_current" if args.current_owner_source else
+                      "historical_proposal" if args.source_support_proposal else
+                      "historical_fixture")
+    uses_source_flags = args.composed_owner_source or args.current_owner_source or args.source_support_proposal
+    roots = {name: Path(getattr(args, name)).resolve()
+             for name in ("adapter_root", "macro_root", "native_owner_root", "hermes_root")}
+    candidate = subprocess.run(
+        ["git", "-c", "gc.auto=0", "-C", str(roots["adapter_root"]), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
     expected = {
-        "macro_root": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
-        "native_owner_root": "5fcb76e8274d28f37da6bb06583343c57fcdfc47",
+        "adapter_root": candidate,
+        "macro_root": (COMPOSED_OWNER_COMMIT if args.composed_owner_source else
+                       CURRENT_OWNER_COMMIT if args.current_owner_source else OWNER_COMMIT),
+        "native_owner_root": candidate,
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
     for name, sha in expected.items():
-        actual = subprocess.run(["git", "-C", str(roots[name]), "rev-parse", "HEAD"],
+        actual = subprocess.run(["git", "-c", "gc.auto=0", "-C", str(roots[name]), "rev-parse", "HEAD"],
             check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if actual != sha:
             raise RuntimeError("Qualification source differs: " + name)
-        subprocess.run(["git", "-C", str(roots[name]), "diff", "--exit-code", "HEAD", "--"],
+        subprocess.run(["git", "-c", "gc.auto=0", "-C", str(roots[name]), "diff", "--exit-code", "HEAD", "--"],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    support, committed_source = None, None
+    if args.source_support_proposal:
+        from owner_source_support import prepare, qualify_unit
+        support = prepare(roots["macro_root"], roots["adapter_root"], args.proposal_directory)
+        support["unit_qualification"] = qualify_unit(args.proposal_directory, sys.executable)
+        roots["macro_root"] = args.proposal_directory
+    elif args.current_owner_source or args.composed_owner_source:
+        from owner_source_support import prepare_current
+        committed_source = prepare_current(
+            roots["macro_root"], roots["adapter_root"], args.proposal_directory,
+            composed=args.composed_owner_source)
+        roots["macro_root"] = args.proposal_directory
     owner_tests = roots["native_owner_root"] / "ops/native_fabric/quota_continuity/tests"
     sys.path[:0] = [str(roots["adapter_root"]), str(roots["macro_root"]),
                    str(owner_tests), str(roots["hermes_root"])]
@@ -77,12 +97,19 @@ def main():
 
     class OriginalOwnerConversation(NativeApplicationHTTPFixture):
         route_mode = "fixed"
+        service_lane = "hermes-secretary"
+        service_mode = "hermes_secretary_fabric"
+        workload = "site_interactive"
+        credential_ref = "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN"
+        profile_id = "mmsecretary"
+        fixed_transport = "native_go_hermes_secretary_v1"
+        automatic_transport = "native_fabric_hermes_secretary_auto_v1"
 
         def setUp(self):
             super().setUp()
-            self.grant.update(principal_id="hermes-secretary", grant_id="fixture-hermes",
-                credential_ref="HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN",
-                admission_root="service:hermes-secretary", accounts=["account-a"])
+            self.grant.update(principal_id=self.service_lane, grant_id="fixture-hermes",
+                credential_ref=self.credential_ref, workloads=[self.workload],
+                admission_root="service:" + self.service_lane, accounts=["account-a"])
             self.save()
             self.physical_before = json.loads(self.accounts.read_bytes())["providers"]
             scoped = self.route_mode != "fixed"
@@ -113,8 +140,8 @@ def main():
             # Reuse the original physical Router/gateway/Broker, with a Hermes
             # service binding in the disposable owner. The prior fixture
             # listener remains unused and retains its own cleanup callback.
-            self.service = self.go.ApplicationServiceBinding("hermes-secretary", "vps",
-                "site_interactive", "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN", SERVICE_TOKEN, **selection)
+            self.service = self.go.ApplicationServiceBinding(self.service_lane, "vps",
+                self.workload, self.credential_ref, SERVICE_TOKEN, **selection)
             self.server = self.go.make_server(self.router, lease_gateway=self.gateway,
                 application_services=(self.service,))
             self._serve(self.server)
@@ -125,11 +152,16 @@ def main():
                 (roots["macro_root"] / "config/provider_workloads.v1.json").read_bytes())
             document = json.loads((roots["macro_root"] / "config/provider_production_modes.v1.json").read_bytes())
             self.assertEqual(document["application_fabric_modes"], {})
-            transport_id = "native_fabric_hermes_secretary_auto_v1" if scoped else "native_go_hermes_secretary_v1"
+            transport_id = self.automatic_transport if scoped else self.fixed_transport
             original = factory_owner._APPLICATION_FABRIC_TRANSPORTS[transport_id]
-            self.assertFalse(original.qualified or original.application_allowed)
+            if not uses_source_flags:
+                self.assertFalse(original.qualified or original.application_allowed)
+                fixture_support = {"qualified": True, "application_allowed": True}
+            else:
+                self.assertTrue(original.qualified and original.application_allowed)
+                fixture_support = {}  # Consume the candidate's real source flags.
             qualified = replace(original, base_url=f"http://127.0.0.1:{self.server.server_port}/v1",
-                model=None if scoped else "fixture-model", qualified=True, application_allowed=True)
+                model=None if scoped else "fixture-model", **fixture_support)
             held = patch.dict(factory_owner._APPLICATION_FABRIC_TRANSPORTS, {transport_id: qualified})
             held.start()
             self.addCleanup(held.stop)
@@ -139,7 +171,7 @@ def main():
                 qualification_ref="fixture:original-owner-conversation", qualified_until=time.time() + 300)
             if scoped:
                 row["route_scope"] = route_scope
-            document["application_fabric_modes"] = {"hermes_secretary_fabric": row}
+            document["application_fabric_modes"] = {self.service_mode: row}
             # Fixture only: `secret_ref` is an env-var NAME, never a token
             # value; SERVICE_TOKEN is injected via os.environ below and must
             # never reach disk — asserted here so a fixture change that
@@ -150,19 +182,19 @@ def main():
             (config / "provider_production_modes.v1.json").write_text(rendered)  # lgtm[py/clear-text-storage-sensitive-data]
             rendered_manifest = json.dumps({"capabilities": [{
                 "capability_id": qualified.capability_id, "secret_ref": qualified.secret_ref,
-                "kill_state": "active", "allowed_lanes": ["hermes-secretary"]}]})
+                "kill_state": "active", "allowed_lanes": [self.service_lane]}]})
             assert SERVICE_TOKEN not in rendered_manifest
             # codeql[py/clear-text-storage-sensitive-data]
             (config / "capability_manifest.yml").write_text(rendered_manifest)  # lgtm[py/clear-text-storage-sensitive-data]
             # Runtime env wiring only — in-memory process env for the fixture
             # harness; the token value never reaches disk (asserted above).
             environment = patch.dict(os.environ, {qualified.secret_ref: SERVICE_TOKEN,  # lgtm[py/clear-text-storage-sensitive-data]
-                "MM_PROVIDER_WORKLOAD_PROFILE": "site_interactive"})
+                "MM_PROVIDER_WORKLOAD_PROFILE": self.workload})
             environment.start()
             self.addCleanup(environment.stop)
             factory = factory_owner.make_application_fabric_factory(mode_id="shared_fabric",
-                lane="hermes-secretary", root=self.config_root, service_mode_id="hermes_secretary_fabric",
-                workload_cfg={"workload_profile": "site_interactive", "provider_order": ["fabric"]})
+                lane=self.service_lane, root=self.config_root, service_mode_id=self.service_mode,
+                workload_cfg={"workload_profile": self.workload, "provider_order": ["fabric"]})
             if self.route_mode == "exact":
                 factory = factory.with_requested_model("fixture-model")
             # Inspect outside native middleware so a fixture authority error
@@ -187,7 +219,7 @@ def main():
                 self.native_calls.append(call)
                 if self.binding is None:
                     try:
-                        self.binding = ApplicationBinding.from_factory(factory, profile_id="mmsecretary",
+                        self.binding = ApplicationBinding.from_factory(factory, profile_id=self.profile_id,
                             operation_id="hermes-owner-proof", session_id=call.session_id, turn_id=call.turn_id,
                             requested_model=self.native_model, authorized=lambda current: current.session_id == call.session_id,
                             prior_admission_possible=False, strict_model=None if self.route_mode == "auto" else "fixture-model",
@@ -252,7 +284,7 @@ def main():
         def assert_original_requests(self, count):
             requests = self.rows("application_requests")
             self.assertEqual(len(requests), count)
-            self.assertEqual({r["principal_id"] for r in requests}, {"hermes-secretary"})
+            self.assertEqual({r["principal_id"] for r in requests}, {self.service_lane})
             self.assertEqual({r["turn_id"] for r in requests}, {self.binding.operation_id})
             for row, call, sent in zip(requests, self.native_calls, self.posts):
                 self.assertEqual(row["request_id"], self.binding.request_id(call))
@@ -342,16 +374,71 @@ def main():
     class ExactOwnerConversation(OriginalOwnerConversation):
         route_mode = "exact"
 
+    class MetaOwnerConversation(OriginalOwnerConversation):
+        service_lane = "hermes-meta-ceo"
+        service_mode = "hermes_meta_fabric"
+        credential_ref = "HERMES_META_FABRIC_APPLICATION_TOKEN"
+        profile_id = "mmmeta"
+        fixed_transport = "native_go_hermes_meta_v1"
+        automatic_transport = "native_fabric_hermes_meta_auto_v1"
+
+    class MetaAutoOwnerConversation(MetaOwnerConversation):
+        route_mode = "auto"
+
+    class MetaExactOwnerConversation(MetaOwnerConversation):
+        route_mode = "exact"
+
+    class AttendedOwnerConversation(OriginalOwnerConversation):
+        # Existing factory/handler/Broker with a distinct disposable service.
+        # Runtime application data remains unenrolled in every source context.
+        service_lane = "hermes-attended"
+        service_mode = "hermes_attended_fabric"
+        workload = "hermes_attended"
+        credential_ref = "HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN"
+        profile_id = "attended"
+        fixed_transport = "native_go_hermes_attended_v1"
+
+    class AttendedAutoOwnerConversation(AttendedOwnerConversation):
+        route_mode = "auto"
+        automatic_transport = "native_fabric_hermes_attended_auto_v1"
+
+    class AttendedExactOwnerConversation(AttendedAutoOwnerConversation):
+        route_mode = "exact"
+
+    contexts = (OriginalOwnerConversation, AutoOwnerConversation, ExactOwnerConversation,
+                AttendedOwnerConversation, MetaOwnerConversation,
+                MetaAutoOwnerConversation, MetaExactOwnerConversation)
+    if args.composed_owner_source:
+        contexts += (AttendedAutoOwnerConversation, AttendedExactOwnerConversation)
     suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(cls)
-        for cls in (OriginalOwnerConversation, AutoOwnerConversation, ExactOwnerConversation))
+                              for cls in contexts)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    print(json.dumps({"sources": expected, "tests_run": result.testsRun,
+    print(json.dumps({"sources": expected, "source_context": source_context,
+        "source_support_proposal": support, "committed_owner_source": committed_source,
+        "fixture_overrides_source_flags": not uses_source_flags, "tests_run": result.testsRun,
+        "network_counter_scope": "native_conversation_process_after_source_preparation",
         "failures": len(result.failures), "errors": len(result.errors), "skips": len(result.skipped),
         "blocked_external_connections": len(blocked), "provider_sdk_constructions": len(constructed),
         "real_application_handler": True, "real_broker": True, "provider_is_fixture": True,
         "live_provider_acceptance": False, "monetary_acceptance": False}), flush=True)
-    return 0 if (result.wasSuccessful() and result.testsRun == 9 and not result.skipped
+    return 0 if (result.wasSuccessful() and result.testsRun == (27 if args.composed_owner_source else 21) and not result.skipped
                  and not blocked and not constructed) else 1
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--adapter-root", required=True)
+    parser.add_argument("--macro-root", required=True)
+    parser.add_argument("--native-owner-root", required=True)
+    parser.add_argument("--hermes-root", required=True)
+    context = parser.add_mutually_exclusive_group()
+    context.add_argument("--source-support-proposal", action="store_true")
+    context.add_argument("--current-owner-source", action="store_true")
+    context.add_argument("--composed-owner-source", action="store_true")
+    args = parser.parse_args()
+    with tempfile.TemporaryDirectory(prefix="hermes-owner-support-") as temporary:
+        args.proposal_directory = Path(temporary) / "macro"
+        return qualify(args)
 
 
 if __name__ == "__main__":

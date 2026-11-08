@@ -88,23 +88,22 @@ class BufferedNativeChatTests(unittest.TestCase):
         self.addCleanup(self.native.doCleanups)
         transport = self.owner._ApplicationFabricTransport(
             f"http://127.0.0.1:{self.native.server.server_port}/v1",
-            self.native.service.credential_ref, "go", MODEL, "unknown", "fabric:chat-fixture",
-            "chat_fixture", qualified=True, application_allowed=True, protocol=NATIVE_PROTOCOL)
-        # Chat consumes its dedicated owner relation. The retained text fixture
-        # explicitly selects its unchanged generic binding through this helper.
-        transport_id = ("chat_fixture_v1" if service_mode_id is None else
-                        self.owner._SERVICE_FABRIC_RELATIONS[service_mode_id].transport_id)
-        record_id = "shared_fabric" if service_mode_id is None else service_mode_id
-        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {transport_id: transport}))
+            self.native.service.credential_ref, "go", MODEL, "unknown",
+            "fabric:go_mastermind_chat", "fabric_application_go_mastermind_chat",
+            qualified=True, application_allowed=True, protocol=NATIVE_PROTOCOL,
+            metadata_read=False)
+        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {
+            "native_go_mastermind_chat_v1": transport}))
         row = {key: getattr(transport, key) for key in self.owner._APPLICATION_IDENTITY_FIELDS}
-        row.update(transport_id=transport_id, enabled=True, application_allowed=True,
+        row.update(transport_id="native_go_mastermind_chat_v1", enabled=True, application_allowed=True,
                    qualification=self.owner.PROFILE_QUALIFIED_CANARY,
                    qualification_ref="fixture:buffered-source-only", qualified_until=time.time()+3600)
         document = json.loads(self.originals[self.config_paths[0]])
-        document["application_fabric_modes"] = {record_id: row}
+        document["application_fabric_modes"] = {"mastermind_chat_fabric": row}
         self.config_paths[0].write_text(json.dumps(document))
         self.config_paths[1].write_text(yaml.safe_dump({"capabilities": [{
-            "capability_id": "chat_fixture", "secret_ref": self.native.service.credential_ref,
+            "capability_id": "fabric_application_go_mastermind_chat",
+            "secret_ref": self.native.service.credential_ref,
             "kill_state": "active", "allowed_lanes": ["mastermind-chat"]}]}))
         self.start(patch.dict(os.environ, {
             "BOT_LLM_BACKEND": "fabric", "MM_PROVIDER_APPLICATION_MODE": "shared_fabric",

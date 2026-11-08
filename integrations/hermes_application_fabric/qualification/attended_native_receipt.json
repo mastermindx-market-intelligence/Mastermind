@@ -1,0 +1,61 @@
+{
+  "actual_gateway_constructor_exercised": true,
+  "base_adapter": "72aeadc949a7a9b2c809ecaee9f9da1f658fa770",
+  "baseline_tests": 53,
+  "candidate": "ca82b71d25a7ec2c21ec1df89f86a5042502120b",
+  "cli_rpc_activation_proven": false,
+  "config_changed": false,
+  "direct_secrets_read": false,
+  "exit_code": 0,
+  "factory_authorization": "fixture_only",
+  "files": {
+    "integrations/hermes_application_fabric/__init__.py": "6f64c01a7a1a499009d7526559f0bb8ef952d0a20f39275992187f62e611d42d",
+    "integrations/hermes_application_fabric/attended_host.py": "8afe89f852e015f0ef868cbd13cfaa08d30f70846ff0d2fbf99ff463d654b56a",
+    "integrations/hermes_application_fabric/client.py": "e5271e294d0122b8df434e7be016e2a1070c349562a4dd07dd8ff404508f5161",
+    "integrations/hermes_application_fabric/codec.py": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "integrations/hermes_application_fabric/errors.py": "c0290f842ea9a072688730131d1aa865b3fa4a1bbff00cd1823a32987a1ed1ba",
+    "integrations/hermes_application_fabric/model_provider/__init__.py": "6d99a3fb9c351e4e9ceb02b0298f94af915dd529185a856eb0d01c2e13f1ab86",
+    "integrations/hermes_application_fabric/native.py": "24defcc639ff7785fb9398a21cbfaa1377154d6b097a99db3560d1840ec8d610",
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": "6ed56eb1ab586997ebd8f0f5d134b3f29cfc26514a4b0ea1af787e89191258b9",
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": "bd96d1be635c5e2b4835f8aa640cc0f9db77affb27c88b175d7f002d5e82c6ec",
+    "integrations/hermes_application_fabric/qualification/test_attended_native.py": "728297578397b9090cba2d5d0a819655cc97c10b2247cd511ac2dcff6daaf025",
+    "integrations/hermes_application_fabric/qualification/test_installed_native.py": "dab148df6f94c3c06347bae5deb9a2977102d0859c1e2a9b2d472b313171540d",
+    "integrations/hermes_application_fabric/qualification/test_native_schema.py": "23ee6856606a30066e3ffb3d4c033e7b482a0bd357e84500c879abfed1354962",
+    "integrations/hermes_application_fabric/structured.py": "23dc144518f22e7da96bfee42be6d89c16ea5e4103dc9faa6f619b85cc6f3623",
+    "integrations/hermes_application_fabric/tests/test_attended_host.py": "160a120d0bd4a0e65699b7d936d0f0dc3ce85f44e103fa761f221733ea16535f",
+    "integrations/hermes_application_fabric/tests/test_codec.py": "3a01e3c1d01b9edf0ba1eb709e0827986084ad6b0acbfbe4971c9cd009a2b96d",
+    "integrations/hermes_application_fabric/tests/test_owner_integration.py": "71338c0bdfe2519d775fc5911056053e5e0c18f9791c538e21a3a14087e16165"
+  },
+  "limits": [
+    "No qualified attended APPLICATION owner relation",
+    "No live physical-account admission, usage or settlement",
+    "No main CLI/gateway startup activation",
+    "No GLM or Experiential application qualification"
+  ],
+  "live_provider_acceptance": false,
+  "log_bytes": 12139,
+  "log_sha256": "e7566241a9592e02024ec8e3eddec978b73a4ff59e11593e1c2a14bb793c09e0",
+  "native": {
+    "candidate": "ca82b71d25a7ec2c21ec1df89f86a5042502120b",
+    "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "jsonschema": "4.26.0",
+    "live_provider_acceptance": false,
+    "mode": "installed-native-loopback-fixture",
+    "owner": "2ef828e569b683b9dfaa94f81116da3ac55f6186",
+    "owner_source_verified": true,
+    "python": "3.14.9"
+  },
+  "new_tests": 16,
+  "observed_at": "2026-11-07T00:43:28.492136+00:00",
+  "result": {
+    "blocked_external_connections": 0,
+    "errors": 0,
+    "failures": 0,
+    "live_provider_acceptance": false,
+    "sdk_constructions": [],
+    "skips": 0,
+    "tests_run": 69
+  },
+  "schema": "mastermind.hermes_attended_native_qualification.v1",
+  "services_restarted": false
+}

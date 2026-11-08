@@ -1604,11 +1604,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # no additional event loop or execution call is admitted.
     # The optional sealed observation owner composes with those protected reads;
     # only this final full-file fingerprint changes, never the wrapper AST.
+    # The attended configuration adds one optional digest and its strict
+    # validation. The installed event-loop anchor remains byte-for-byte the
+    # same AST; retain every path, membership and mutation refusal below.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '32dce8877ceb47a7d96dd017fc922e0e740b569b38089c2c820d9edd7b0e82c1'):
+            'a422011c13b7ee3646aab825a0147e8f224048c9654aa7e924ca189ee3f894ba'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

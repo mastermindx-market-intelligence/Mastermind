@@ -1,0 +1,138 @@
+{
+  "acceptance": {
+    "installed_or_selected": false,
+    "measured_availability": false,
+    "protected_merged": false,
+    "provider_delivery_proven": false,
+    "source_qualified": true
+  },
+  "baseline": {
+    "log_sha256": "f2de2efabd03eaadd372122e04ea07330d9cd60baa0815a3ad4688cca7241e0a",
+    "preliminary_fixture_error": "First trial passed a full pointer to the generation-only select helper. The corrected baseline uses its documented generation argument. No product change preceded the failing baseline.",
+    "qualified_failures": 2,
+    "reason": "Both real plan owners accepted selected provider116 to legacy APPLICATION109; expected ValueError was not raised."
+  },
+  "builds": {
+    "builds": [
+      {
+        "name": "base",
+        "rc": 0,
+        "stderr": "",
+        "stdout": "{\"native_files\": 116, \"total_bytes\": 3513782, \"manifest_sha256\": \"f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4\", \"source_inventory_sha256\": \"f4cae97eba27963387461f164fa54482eea11cd41a8a562bad8bb3b46365ab4e\"}\n"
+      },
+      {
+        "name": "application",
+        "rc": 0,
+        "stderr": "",
+        "stdout": "{\"native_files\": 118, \"total_bytes\": 3756981, \"manifest_sha256\": \"20da4dfef57228c2f40bed8e27a2d1708867365c49f4da8cc08d28c56571c100\", \"source_inventory_sha256\": \"5f1eeb59c1a08548d2bbe979430940a2858a00d6c61c333b2cfc7605cc71b02d\"}\n"
+      },
+      {
+        "name": "http",
+        "rc": 0,
+        "stderr": "",
+        "stdout": "{\"native_files\": 121, \"total_bytes\": 3840156, \"manifest_sha256\": \"a14c42b20364cb4788406d3824ab6c849a5feba8c02de688cee1dfa28d1dec10\", \"source_inventory_sha256\": \"c51459561557c4ea00f025d9f09fe7b2e21a1dfe1fc9c339a745dae62c7d50e3\"}\n"
+      }
+    ],
+    "root": "/tmp/mmx-provider-combined-build-gav53tg9"
+  },
+  "child_source_journeys": {
+    "application_v3_methods": 10,
+    "errors": 0,
+    "failures": 0,
+    "original_artifact_methods": 4,
+    "skipped": 0,
+    "source_binding": "All combined ext members verified by manifest hash in a fresh candidate-layout process; original tests unchanged; go_shim fixture name uses the exact staged handler.",
+    "test_methods": 14
+  },
+  "composition_sha256": "04d6983e43eaaadeccaf847662a5b9b80b30af88e0e2c0a865f455522031e7f4",
+  "custody": "Original Brain release/C3/J, H6 physical admission, H4 profile/first account, #2225 config/projection and #2234 context-evidence writers retain their scopes.",
+  "decision": "Preserve the exact provider plan in the existing APPLICATION stage and both existing installation owners.",
+  "diff_review": {
+    "author_review": "SELF_REVIEWED: exact six-member semantic composition, actual dependency provenance, frozen before/after guard, unchanged existing mutation owner and closed CI selectors.",
+    "ordinary_source_whitespace": "clean",
+    "patch_context": "Full diff check reports only the canonical one-space blank context lines inside five new unified patch files. Those patch bytes are kept exact; every patch application and resulting file hash was verified."
+  },
+  "preliminary_v3_fixture": {
+    "baseline_log_sha256": "9e29bc34fbc0f53105689933f69df2f33f55c6824f76e7822c611cf9f96ea5d7",
+    "errors": 10,
+    "qualified_log_sha256": "3511dcd77038f100862210c46630b4f91becf23daf9d47481efd12804670ac93",
+    "reason": "The first disposable fixture omitted the existing go_shim.py handler filename; corrected by copying the identical staged go_application_handler.py bytes, with no assertion or product change.",
+    "warnings": "The standalone unittest run retains SQLite ResourceWarnings; no cleanup claim is made."
+  },
+  "proofs": {
+    "owner": {
+      "elapsed": 95.92930429219268,
+      "junit": "/tmp/mmx-provider-transition-owner-proof.xml",
+      "junit_sha256": "10f4b235717ac14c6e7157a68dea87c5a2fb677e7a0c89af70d1ce146c877913",
+      "log": "/tmp/mmx-provider-transition-owner-proof.log",
+      "log_sha256": "c10656bf9c31fd531de7c81a11ed830a428eb26d6e327a6b021f4dafaf122ea2",
+      "rc": 0,
+      "totals": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 82
+      }
+    },
+    "provider_auto": {
+      "elapsed": 6.126616833964363,
+      "junit": "/tmp/mmx-provider-combined-auto-proof.xml",
+      "junit_sha256": "90723bbcfa67979ed7821e6191c841b7ba639c81fd81435fc785a8f930dcf1a7",
+      "log": "/tmp/mmx-provider-combined-auto-proof.log",
+      "log_sha256": "d4b43cb7e7e6c38aba82ccc153a1ef0a6ac5775ef380cc14b0e31e5a8c13d886",
+      "rc": 0,
+      "stage": "/tmp/mmx-provider-combined-build-gav53tg9/application/native-code-stage",
+      "totals": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 21
+      }
+    },
+    "provider_return": {
+      "elapsed": 17.802616499830037,
+      "junit": "/tmp/mmx-provider-combined-local-return-proof.xml",
+      "junit_sha256": "960b56e6cecb1c612f508076ad43096455db7458b2bda887f409396b2bccffa4",
+      "log": "/tmp/mmx-provider-combined-local-return-proof.log",
+      "log_sha256": "061fbb63ec6a124d989b927ae2bf52f2c1ee9de4486f2308cc9b9cd6ca074a78",
+      "rc": 0,
+      "stage": "/tmp/mmx-provider-combined-build-gav53tg9/application/native-code-stage",
+      "totals": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 6
+      }
+    },
+    "source_journeys": {
+      "elapsed": 3.0198096660897136,
+      "junit": "/tmp/mmx-provider-final-source-owner-proof.xml",
+      "junit_sha256": "88800a1ab83e98264138c1fa8c2ff182f359fcaf062bb7bce481d28f818fea45",
+      "log": "/tmp/mmx-provider-final-source-owner-proof.log",
+      "log_sha256": "15c1f9766a752d537c868e95dea240bda32e2aa54c99d2fe779e5b71c481236a",
+      "rc": 0,
+      "totals": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 1
+      }
+    }
+  },
+  "schema": "mastermind.provider_application_source_qualification.v1",
+  "source_basis": "367254eb8f40102bb2ed78d40dfd99e83df79762",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "15965cc767bdb5a99eef3cda02fbd8c2c284def11ba9e04cd014f5e048a5c83e",
+    ".github/workflows/hermes-application-enrollment.yml": "4b5a99dfe549fb09b1285ea21950c5a19a64ed460264ba74106dff88054645e3",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "18d48bed9924c9554c9a8327aa05edcf8999656716ba537649a7f51ddfd7cc39",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": "b8d7df1b5f8f59a7861fc85c7fe1e8081f13cc37b2e2a655470b6f362e3d9eb1",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "baa0dcb35646d59ab3e30f7cea243c7c6fd4daeb549964efed8482615dde1717"
+  },
+  "stage_and_downgrade_proof": {
+    "errors": 0,
+    "failures": 0,
+    "log_sha256": "59a2e95e53a320bc850c6b08a92dec976b1b7cfa6cb7cefa1727391559bc7152",
+    "passed": 193,
+    "skipped": 0
+  }
+}

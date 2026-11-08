@@ -6,10 +6,21 @@ does not authorize a new credential store, account ledger, service or retry path
 
 ## Fixed ownership
 
-| Native role | APPLICATION profile/lane | Internal credential reference | Relay |
+| Native consumer | APPLICATION profile/lane | Internal credential reference | Relay |
 | --- | --- | --- | --- |
 | mmsecretary | hermes-secretary | HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN | 127.0.0.2:50142 |
 | mmmeta | hermes-meta-ceo | HERMES_META_FABRIC_APPLICATION_TOKEN | 127.0.0.3:50142 |
+| Ordinary attended | hermes-attended | HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN | 127.0.0.1:50142 |
+
+The attended row is the distinct relation from the original Macro owner. It
+uses workload `hermes_attended`; the two role rows use `site_interactive`.
+Published a577 keeps all five Hermes fixed/AUTO descriptors source-disabled.
+The exact [source-support proposal](qualification/application_owner_support/README.md)
+supplies their missing support declarations through that same owner; adoption
+is pending. Source support alone does not enroll a service: the existing
+qualification, capability, internal credential and admission checks still apply.
+Neither a role credential nor the ordinary default Hermes profile substitutes
+for the attended identity.
 
 The numeric addresses preserve the existing Linux role network isolation.
 All three APPLICATION remotes, including the original 127.0.0.1:50142, use the
@@ -17,9 +28,12 @@ same incumbent tunnel client and native 127.0.0.1:4142 target. No public/provide
 endpoint is placed in Hermes.
 
 Source responsibilities:
-- Adapter/host/tunnel: Mastermind #2155.
+- Complete adapter/host/tunnel composition: Mastermind #2186, preserving the
+  primary #2155 and attended #2166 contributions.
 - Existing native enrollment extension: Mastermind #2186, stacked on #2175.
-- Existing Macro factory/client declarations: Macro #10818, stacked on #10740.
+- Existing Macro factory/client declarations: original Macro #10740, including
+  its incorporated #10818 repair and dedicated attended relation. #10832 adds
+  qualification evidence without replacing that production owner.
 - Final APPLICATION release/account/economic composition: #2175/#10740.
 - Native worker delegation #2147, shared-pool policy #2109 and protected model
   packages keep their existing custody.
@@ -48,6 +62,15 @@ host.py wraps the current native TurnRunner entry and cleanup:
 5. Retain the same original owner through native facade rebuilds and recovery.
 6. On exit, close only that owner. A local close or refused close does not prove
    provider cancellation, settlement or permission for a replacement turn.
+
+The ordinary attended path instead uses the existing gateway admission and
+the registered attended plugin. Its native core patch preserves the
+`source=host_bound` marker through both gateway projections, outside constructor
+kwargs. A marked route must pass the native profile/runtime checks and claim
+its original admission before binding the attended APPLICATION factory. The
+role-host paths above remain unmarked and do not consume an additional claim.
+The ten-file patch and its exact pre/postimages are in `hermes_core/`; the plugin
+does not patch the running checkout.
 
 The existing native result/session owner remains authoritative. Serving receipts
 come from the original APPLICATION observation and are correlated to the exact
@@ -99,14 +122,18 @@ already refuses before any provider request.
 
 The closed v9 service specification has two forms: one fixed grant, or a typed
 route scope plus bounded explicit grants. Both preserve role, principal, host,
-APPLICATION purpose, site_interactive workload, lane, enabled state and the
-original internal credential reference. The original accounts parser validates
+APPLICATION purpose, the role-specific workload, lane, enabled state and the
+original internal credential reference. Secretary and meta-CEO retain
+`site_interactive`; the dedicated attended relation uses `hermes_attended` in
+both service scope and grant. The original accounts parser validates
 models/accounts/grant overlap. The original operation owns token generation,
 private binding, account publication and recovery.
 
-For a fresh role, enroll its intended authorized scope once. The fixed factory
-can run the first strict Go canary; later legitimate new turns can use AUTO with
-that exact scope. A completed fixed slot cannot be rewritten into routed form.
+For a fresh Secretary or meta-CEO role, enroll its intended authorized scope
+once. The fixed factory can run the first strict Go canary; later legitimate
+new turns can use AUTO with that exact scope. The current attended relation is
+fixed-only; it must not inherit a role's AUTO transport or grant. A completed
+fixed slot cannot be rewritten into routed form.
 No token remint, file deletion or remembered-ID replacement is an upgrade path.
 
 v1–v8 family readers remain unchanged. Startup aggregates only completed role

@@ -78,11 +78,28 @@ def _firm_clamp_freeze_autonomous(priceable: dict[str, float], exc: Exception) -
 # ---------------------------------------------------------------------------
 
 def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool = True,
-                   directive: str | None = None) -> dict:
+                   directive: str | None = None, run_id: str | None = None,
+                   before_provider_start=None) -> dict:
+    """Recover the original selected operation before any mutable book/routing work."""
+    from brain import fabric_portfolio
+    handled, result = fabric_portfolio.route(
+        asof=asof, force=force, armed=armed, directive=directive, run_id=run_id,
+        runner=_run_autonomous, before_provider_start=before_provider_start)
+    if handled:
+        return result
+    return _run_autonomous(asof, force=force, armed=armed, directive=directive,
+                           _before_provider_start=before_provider_start)
+
+
+def _run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool = True,
+                    directive: str | None = None, _fabric_session=None,
+                    _before_provider_start=None) -> dict:
     """Run one autonomous turn end-to-end. Best-effort: every step degrades gracefully so a
     missing credential / price never leaves the book in a half-traded state."""
     from portfolio import market_calendar, paper_account, registry
 
+    if _fabric_session is not None and registry.is_archived(PORTFOLIO_ID):
+        return registry.archived_run_result(PORTFOLIO_ID, asof)
     asof = asof or date.today().isoformat()
     out: dict = {"portfolio_id": PORTFOLIO_ID, "asof": asof,
                  "ran_at": datetime.now(timezone.utc).isoformat()}
@@ -118,7 +135,9 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     #    and carry the book unchanged — same shape as the feed-health abort. OFF by default (cap
     #    <= 0 → over_budget always False) so this is a no-op and the run is byte-identical.
     from brain import cost_guard
-    if armed and cost_guard.over_budget(PORTFOLIO_ID, asof):
+    _has_fabric_brain = _fabric_session is not None and "brain" in _fabric_session.state
+    _over_budget = cost_guard.fabric_over_budget if _fabric_session is not None else cost_guard.over_budget
+    if armed and not _has_fabric_brain and _over_budget(PORTFOLIO_ID, asof):
         print(f"autonomous turn {asof} — nightly cost cap hit "
               f"(${cost_guard.spent(PORTFOLIO_ID, asof):.2f} / ${cost_guard.cap():.2f}); "
               "skipping the Brain and carrying the book unchanged.")
@@ -140,12 +159,19 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
 
     # 1. run the Brain (armed) → it researches and submits a target book with rationales
     from brain import autonomous_mcp
-    autonomous_mcp.clear_submission(PORTFOLIO_ID)   # never replay yesterday's decision
+    if _fabric_session is None:
+        autonomous_mcp.clear_submission(PORTFOLIO_ID)   # never replay yesterday's native decision
     brain: dict = {"ok": False, "skipped": not armed}
     if armed:
         try:
             # directive is an optional ad-hoc override (overnight reviews) — pass it through only when set
-            brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
+            if _fabric_session is not None:
+                brain = _run_brain(asof, inaugural, directive=directive, _fabric_session=_fabric_session)
+            elif _before_provider_start is not None:
+                brain = _run_brain(asof, inaugural, directive=directive,
+                                   before_provider_start=_before_provider_start)
+            else:
+                brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
         except Exception as e:                       # noqa: BLE001
             brain = {"ok": False, "error": repr(e)[:300]}
             try:
@@ -155,21 +181,35 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
                     brain["run_id"] = _refusal_run_id
             except Exception:
                 pass  # Evidence recovery cannot replace the original error/submission.
-        # record this seat's known cost + token usage against the nightly per-book ledger.
-        _usg = brain.get("usage") or {}
-        cost_guard.record(
-            PORTFOLIO_ID, brain.get("cost_usd"), asof,
-            seat="autonomous_brain",
-            model=str(brain.get("model") or ""),
-            input_tokens=int(_usg.get("input_tokens") or 0),
-            output_tokens=int(_usg.get("output_tokens") or 0),
-            cache_read_tokens=int(_usg.get("cache_read_input_tokens") or 0),
-            cache_creation_tokens=int(_usg.get("cache_creation_input_tokens") or 0),
-        )
+        if _fabric_session is None:
+            # record this seat's known cost + token usage against the nightly per-book ledger.
+            _usg = brain.get("usage") or {}
+            cost_guard.record(
+                PORTFOLIO_ID, brain.get("cost_usd"), asof,
+                seat="autonomous_brain",
+                model=str(brain.get("model") or ""),
+                input_tokens=int(_usg.get("input_tokens") or 0),
+                output_tokens=int(_usg.get("output_tokens") or 0),
+                cache_read_tokens=int(_usg.get("cache_read_input_tokens") or 0),
+                cache_creation_tokens=int(_usg.get("cache_creation_input_tokens") or 0),
+            )
     out["brain"] = {k: brain.get(k) for k in ("ok", "cost_usd", "tools_used", "error", "run_id", "model")}
 
     # 2. read the submitted book
-    submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
+    if _fabric_session is not None:
+        if _fabric_session.persistence_failed:
+            from brain.fabric_portfolio import _held
+            return _held(_fabric_session.state, "fabric_portfolio_persistence_unsettled")
+        if any(effect["state"] == "pending" for effect in _fabric_session.state["tools"]):
+            from brain.fabric_portfolio import _held
+            return _held(_fabric_session.state, "fabric_portfolio_tool_effect_unsettled")
+        submission = _fabric_session.submission()
+        if "frozen" not in _fabric_session.state and "local_gate" not in _fabric_session.state:
+            _fabric_session.stop_unstarted(brain)
+        _fabric_session.state["phase"] = "business"
+        _fabric_session.save()
+    else:
+        submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
     # An all-cash target can be a valid explicit decision (for example, every current name has
     # a reviewed hard exit). Presence of the v2 holdings list—not its truthiness—is the decision
     # boundary; ``None`` still means the manager failed to submit and the prior book is carried.
@@ -342,24 +382,30 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
             # Uses _firm_clamp_freeze_autonomous (module-level) so the logic is testable.
             priceable = _firm_clamp_freeze_autonomous(priceable, e)
             out["firm_clamp_error"] = repr(e)[:200]
-        res = _settle.execute_or_queue(
-            PORTFOLIO_ID,
-            priceable,
-            prices,
-            asof,
-            decision_snapshot=submission,
-            queued_projection_locked=lambda accepted_target: _append_decision_log(
+        def _execute_original_settlement():
+            return _settle.execute_or_queue(
+                PORTFOLIO_ID,
+                priceable,
+                prices,
                 asof,
-                submission,
-                [],
-                skipped,
-                brain,
-                packet_id=(_pgr.packet_id if _pgr else None),
-                target_status="queued",
-                effective_target=accepted_target,
-                _locked=True,
-            ),
-        )
+                decision_snapshot=submission,
+                queued_projection_locked=lambda accepted_target: _append_decision_log(
+                    asof,
+                    submission,
+                    [],
+                    skipped,
+                    brain,
+                    packet_id=(_pgr.packet_id if _pgr else None),
+                    target_status="queued",
+                    effective_target=accepted_target,
+                    _locked=True,
+                ),
+            )
+        res = (_fabric_session.settle(
+            _execute_original_settlement, target=priceable, prices=prices,
+            submission=submission, brain=brain, skipped=skipped,
+            packet_id=(_pgr.packet_id if _pgr else None), out=out)
+            if _fabric_session is not None else _execute_original_settlement())
         executed = res.get("executed") or []
         queued = bool(res.get("queued"))
         accepted_target = res.get("accepted_target")
@@ -513,7 +559,8 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
         payload["safety_overlay"] = _safety_overlay
         try:
             from bridge import build_portfolio
-            out["paths"] = build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
+            out["paths"] = (_fabric_session.publish(payload) if _fabric_session is not None
+                            else build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID))
             _publish_ok = True
         except Exception as e:                       # noqa: BLE001
             out["write_error"] = repr(e)[:200]
@@ -649,17 +696,26 @@ _PERSONA = (
 )
 
 
-def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict:
+def _run_brain(asof: str, inaugural: bool, directive: str | None = None, *,
+               _fabric_session=None, before_provider_start=None) -> dict:
     from brain import autonomous_mcp, cli_bridge
+    if _fabric_session is not None and _fabric_session.recovered:
+        return copy.deepcopy(_fabric_session.state["brain"])
     from brain import self_mirror, risk_lens, student   # lazy; all flag-gated, byte-identical OFF
     perception_capture: dict = {}
     prompt = _build_prompt(asof, inaugural, directive=directive,
-                           perception_capture=perception_capture)
+                           perception_capture=perception_capture,
+                           **({"typed_application": True} if _fabric_session is not None else {}))
     prompt = student.inject(prompt, _safe_date(asof))   # #3 fast numeric prior (MASTERMIND_STUDENT; OFF→unchanged)
     persona = self_mirror.inject(_PERSONA, "autonomous", _safe_date(asof))
     persona = risk_lens.govern_persona(persona, "autonomous")   # RISK GOVERNOR mandate; OFF → unchanged
     from brain import perception_receipt
     captured_receipt = perception_receipt.seal(perception_capture, prompt)
+    if _fabric_session is not None:
+        from portfolio import paper_account
+        return _fabric_session.reason(prompt, persona,
+            prior=paper_account._load_account(PORTFOLIO_ID), inaugural=inaugural,
+            perception_input=captured_receipt, max_turns=_MAX_TURNS)
     coro = cli_bridge.reason(
         prompt,
         role="deep",                 # opus, per config/agents.yml
@@ -669,6 +725,7 @@ def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict
         allowed_tools=autonomous_mcp.allowed_tools(),
         max_turns=_MAX_TURNS,
         book=PORTFOLIO_ID,           # bot records against cost_guard; skip bridge double-count
+        **({"before_provider_start": before_provider_start} if before_provider_start is not None else {}),
     )
     result = _run_coro(coro)
     if isinstance(result, dict):
@@ -677,7 +734,8 @@ def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict
 
 
 def _build_prompt(asof: str, inaugural: bool, directive: str | None = None,
-                  *, perception_capture: dict | None = None) -> str:
+                  *, perception_capture: dict | None = None,
+                  typed_application: bool = False) -> str:
     from portfolio import paper_account
     state = paper_account._load_account(PORTFOLIO_ID)
     cash = float(state.get("cash") or 0.0)
@@ -729,8 +787,11 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None,
                   f"({', '.join(sorted(positions)) or 'none'}). Call mcp__desk__get_my_book for the "
                   "full picture (weights, live P&L, and the rationale you last gave each name).", ""]
     lines += [
-        "Use the typed in-house packets before the web. Delegate only genuinely independent finalist "
-        "research, synthesize it yourself, then call mcp__desk__submit_book exactly once with every "
+        ("Use the declared typed in-house packets, synthesize their dated evidence, then call "
+         if typed_application else
+         "Use the typed in-house packets before the web. Delegate only genuinely independent finalist "
+         "research, synthesize it yourself, then call ")
+        + "mcp__desk__submit_book exactly once with every "
         "required governance field, ADD/HOLD/TRIM intent for each row, and explicit full exits. You are accountable for decision quality and NAV; "
         "the trusted allocator is accountable for weight and execution.",
     ]

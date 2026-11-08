@@ -82,6 +82,7 @@ def _run_default_control_config(
             "0.147.0",
             "0",
             _projected_digest(),
+            "",  # no attended APPLICATION configuration selected by default
         ],
         cwd=ROOT,
         check=False,

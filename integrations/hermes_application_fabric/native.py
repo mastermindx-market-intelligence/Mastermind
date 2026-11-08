@@ -5,6 +5,7 @@ from .client import ApplicationBinding, HermesApplicationClient, NativeCall, cal
 from .errors import HermesFabricError, CodecError
 
 PROVIDER = "mastermind-fabric"
+AUTO_MODEL = f"{PROVIDER}/auto"
 AUTH_TYPE = "mastermind_application_session"
 INSTALLED_HERMES_SHA = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
 
@@ -28,12 +29,19 @@ def build_profile():
         def create_client(self, **_):
             return HermesApplicationClient()
 
-    return Profile(name=PROVIDER, api_mode="chat_completions",
+    profile = Profile(name=PROVIDER, api_mode="chat_completions",
                    display_name="Mastermind Fabric", auth_type=AUTH_TYPE,
                    env_vars=(), base_url="", supports_streaming=False,
                    supports_health_check=False, supports_model_listing=False,
                    supports_vision=False, supports_vision_tool_messages=False,
                    default_max_tokens=4096, classify_api_error=classify_error)
+    # The pinned role owner predates the attended catalog field. Its explicit
+    # programmatic selection remains supported without advertising a fallback.
+    if "static_models" in ProviderProfile.__dataclass_fields__:
+        profile.static_models = (AUTO_MODEL,)
+    if "host_bound_runtime" in ProviderProfile.__dataclass_fields__:
+        profile.host_bound_runtime = True
+    return profile
 
 
 def _resolve_native_client(request):
@@ -75,6 +83,20 @@ def register_native_provider():
     REGISTRY_AUTHTYPE_ARMS[AUTH_TYPE] = _resolve_native_client
 
 
+def _require_native_provider():
+    """Agent construction validates startup registration; it never replaces it."""
+    from providers import get_provider_profile
+    from agent.auxiliary_client_registry import REGISTRY_AUTHTYPE_ARMS
+    from hermes_cli.runtime_provider_custom import has_named_custom_provider
+    profile = get_provider_profile(PROVIDER)
+    if (has_named_custom_provider(PROVIDER) or profile is None
+            or profile.auth_type != AUTH_TYPE
+            or type(profile).create_client.__module__ != __name__
+            or REGISTRY_AUTHTYPE_ARMS.get(AUTH_TYPE) is not _resolve_native_client):
+        raise HermesFabricError("hermes_fabric_native_startup_required")
+    return profile
+
+
 def create_primary_agent(*, model: str, **options):
     """Programmatic native host startup, using its existing session lifecycle.
 
@@ -86,7 +108,7 @@ def create_primary_agent(*, model: str, **options):
         "credential_pool", "fallback_model", "acp_command", "acp_args", "command", "args"}
     if set(options) & forbidden:
         raise HermesFabricError("hermes_fabric_host_runtime_override")
-    register_native_provider()
+    _require_native_provider()
     from run_agent import AIAgent
     agent = AIAgent(model=model, provider=PROVIDER, requested_provider=PROVIDER,
         api_mode="chat_completions", api_key=None, base_url=None,
