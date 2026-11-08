@@ -1793,3 +1793,40 @@ Five native evidence files accompany this amendment under `docs/design/evidence/
 The D23 study and twelve artifacts are canonically published at **`a365475fb389ef2645f5ef29c9f0b23ac0a46179`**. All seven UTF-8 bodies, including the full audit, matched exact readback; all eleven precomputed asset identities matched their published paths. D23 evidence JSON is `ec071bd26b65d7210e50b70d001f6c27e00c724b`; the audit at that commit is `03f647ba52c51281044348f7f8f85b8d2237acca`. The branch head matched. Binary-body fetch remains unsupported and was not retried.
 
 No live listing, price/account endpoint, alert, save, localStorage effect, notification, trade, held PR or deployment was exercised by this Catalyst phase. Existing source and native holds remain intact. The next independent audit lane is D15 bonds/credit/cross-asset, using fresh relocation pointers and the actual yield/credit source owner. F03 D23 integration still awaits a functioning affected build/verification path; the directory remains truthfully at fourteen observations.
+
+
+## Continuation — D15 curve change and spread level made explicit
+
+### Native finding and implemented repair
+
+The current standalone [Bonds and Cross-Asset Transmission studies](https://app.paper.design/file/01M6Y3T1K3573JYPMBATASW1W5/p-1-0), file `01M6Y3T1K3573JYPMBATASW1W5`, page `p-1-0`, board **`73-0` — R32 Curve & Duration**, showed **“10Y −8 bp”** next to **“2s10s +42 bp”** beneath a selected **1D** control. The first is a yield change. The second is the current spread level. The chart caption also said “same close” while its legend compared Today with Previous close.
+
+This phase changed only three existing text leaves:
+
+| Node | Before | After |
+|---|---|---|
+| AA-0 | 10Y −8 bp | **10Y change −8 bp** |
+| AC-0 | 2s10s +42 bp | **10Y−2Y spread level +42 bp** |
+| AI-0 | Same tenors · same close · percent | **Matched tenors · today vs previous close · yield (%)** |
+
+The native screen already marks these as synthetic design values. No new numerical metric was introduced. The visible 1D state now names both the metric basis and the two chart closes. Any future 5D/1M implementation must bind its change baseline explicitly; this native copy correction does not claim that interaction is implemented.
+
+### Actual fixture and source basis
+
+The inspected R33 reference at Macro **`34a32ff08b9e8296863668440adb208feac126f2`**, [`research/bonds_transmission_r30_2026-10-18/r33/reference/index.html`](https://github.com/mastermindx-market-intelligence/Macro/blob/34a32ff08b9e8296863668440adb208feac126f2/research/bonds_transmission_r30_2026-10-18/r33/reference/index.html), blob **`f536254d5ec5ab351f4957a9d496aeff4492330a`**, includes an “illustrative matching nominal curve”: 2Y **4.68%**, 10Y **5.10%**, slope_2s10s_bp **42**. These are fixture values, not live observations.
+
+The native SVG `AL-0` uses a labeled linear yield axis: 4.5% at y=188 and 5.0% at y=120.5. Its current 2Y/10Y points imply 4.68%/5.10%; prior points imply 4.80%/5.18%. Thus the current 10Y−2Y spread is +42 bp and the 10Y close-to-close change is −8 bp. The implied +4 bp spread change was used only to falsify the ambiguous reading; it was not added to the design.
+
+Current-main source was separately inspected at Macro **`5eb1603edb4486f06c74df7c43a1082427a59b6e`**: [`templates/bonds.html.j2`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/templates/bonds.html.j2), blob `8bb464cbbc8e9381a66735cc67ceb44429ef6108`, displays the curve spread as a percentage-point level; [`scripts/build_bonds.py`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/scripts/build_bonds.py), blob `6cc14c336fb055dca7e773cdb273003bfdb69428`, passes that field into the curve model. These source reads do not turn the synthetic Paper chart into current market evidence.
+
+### Preservation, verification and delivery boundary
+
+A fresh pre-edit whole-board JSX read exactly matched the captured baseline. Post-edit whole-board JSX **exactly equals that baseline with only the three listed text substitutions**. All node IDs, style attributes, chart points, values, 1D selection and investigation actions remain exact. Native before/after screenshots were visually inspected; the expanded badges and chart caption fit without clipping. The existing R33 source-inspector work on component clocks and missing observations was not redone.
+
+There were **two distinct APPLIED_RESPONSE_OBSERVED operations and zero unknown effects**: the three-text update and finish scoped to `73-0`. No other native boards, warned original F03 content or runtime sources were mutated. No blanket whole-file preservation claim is made.
+
+Five artifacts accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d15_curve/`: [complete before JSX](evidence/paper_portfolio_20261108/d15_curve/curve-before.jsx), [complete after JSX](evidence/paper_portfolio_20261108/d15_curve/curve-after.jsx), original before/after native JPEGs and [operation/source evidence](evidence/paper_portfolio_20261108/d15_curve/curve-basis-evidence.json). Images are carried directly from the original Paper base64 into Git blobs, with path/blob readback; no independent local digest or decoded binary-body readback is claimed.
+
+[Macro PR #9578](https://github.com/mastermindx-market-intelligence/Macro/pull/9578) was freshly observed open, non-draft, at head `34a32ff08b9e8296863668440adb208feac126f2`, with **merge-blocked** and no auto-merge. Its controls and source were untouched. No endpoint, market data refresh, save, trade, alert, browser-production proof or deployment was exercised.
+
+The prior Catalyst correction is durably published at **`65df2d032cc45ac6f2aa7ab1788affc7d7f79f6f`**; its four UTF-8 bodies, two native image path/blob identities and branch head matched readback. D15 completion advances the audit to current Forex designs. F03 remains truthfully at fourteen observations; D23 integration still needs a functioning affected build/verification path.
