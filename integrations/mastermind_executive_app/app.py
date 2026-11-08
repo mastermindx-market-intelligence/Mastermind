@@ -46,6 +46,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.business_mcp_auth.jwt_verifier import JwksKeySource, JwtAuthenticator
 from integrations.business_mcp_auth.metadata import mcp_auth_error_result, protected_resource_metadata
+from integrations.executive_mcp.e1_http import strict_json_loads
 from integrations.executive_mcp.schemas import GatewayError, refuse_production_path
 from integrations.mastermind_executive_app.admission import (
     STATUS_ACCEPTED,
@@ -346,7 +347,7 @@ async def _read_body_arguments(request: Request) -> dict[str, Any] | JSONRespons
     if not body:
         return {}
     try:
-        parsed = json.loads(body.decode("utf-8"))
+        parsed = strict_json_loads(body)
     except (UnicodeDecodeError, ValueError):
         return JSONResponse(
             {"ok": False, "error": {"code": "invalid_input", "message": "request body must be JSON"}},

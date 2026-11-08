@@ -746,14 +746,22 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 # C21 attended-parent source review combines native composition with the
 # accepted archive closure and inert gateway replacement. ensure_directories
 # retains its exact AST and whole permission token at the accepted moved site.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '0ada16eef382a9083b431caf305ee97c08e38b6b1547d193455dabe23a72404c',
-                                                              'sites': ((687, 71, 76, 'int', '0o750'),)}
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '925aa0d0aa6174d29653f189ffcf47c9550a53aaf303387cf6c0e77b3ac7c1a6',
+                                                              'sites': ((708, 71, 76, 'int', '0o750'),)}
 
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735",
+    "sha256": "716b934f77cdc377b769c6cf1cefcfbb199be3e71d885f4624c6e6dc0d93b9c9",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# Native EVAL marker v2 retains the original directory permission mode.
+# Exact historical root_identity["mode"] comparison, not a selected UID/GID.
+# Whole-source drift and any neighboring identity literal restore ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/native_eval_inputs.py"] = {
+    "sha256": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+    "sites": ((96, 61, 66, "int", "0o700"),),
 }
 
 # HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
@@ -793,33 +801,6 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
-}
-
-# Hermes primary APPLICATION codec: fixed input-byte and conversation-count
-# bounds, never OS accounts, principals, permissions or service selection.
-# Attended source self-review under the CEO-Web waiver. Full source hash and
-# complete typed tokens remain required; any drift restores the ordinary guard.
-REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
-    "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
-    "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
-}
-
-# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
-# Full-source or token-site drift restores the ordinary identity guard.
-REVIEWED_FILES[
-    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {
-    "sha256": "78bde48fefedd95f7cec923d83dac6886424913887b683061877db4c2f0ed612",
-    "sites": ((335, 37, 40, "int", "409"),),
-}
-
-# Exact HTTPS port excluded by the disposable Chisel fixture.
-# This is not a general port exemption or permission to use a live listener.
-REVIEWED_FILES[
-    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
-] = {
-    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
-    "sites": ((27, 26, 29, "int", "443"),),
 }
 
 # Native Agent OS v2 adds private readback and projects an optional real child.
