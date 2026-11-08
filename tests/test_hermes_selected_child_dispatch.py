@@ -923,3 +923,192 @@ def test_private_authority_cannot_be_model_role_or_async_guard(tmp_path, short_s
             finally:
                 clear_selected_child_composition()
     asyncio.run(exercise())
+
+
+# ---------------------------------------------------------------------------
+# WO-13: idempotent ChildExecutionRequest.v1 admission + bounded ready queue
+# ---------------------------------------------------------------------------
+
+
+def _child_request_envelope(root_ref, parent_ref, key, *, complexity="C2_COMPLEX_BOUNDED",
+                            task_kind="research", brief_digest="a" * 64):
+    """One wire-shaped ChildExecutionRequest.v1 with its verified digest."""
+
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+
+    request = ChildExecutionRequest(
+        root_ref=root_ref, immediate_parent_run_ref=parent_ref,
+        logical_child_key=key, task_kind=task_kind,
+        requested_complexity=complexity, brief_digest=brief_digest,
+    )
+    return request.to_dict()
+
+
+def _child_request_events(runtime, command_id: str) -> list[Any]:
+    with runtime.store.read() as connection:
+        return list(connection.execute(
+            "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
+            (command_id,),
+        ).fetchall())
+
+
+def _child_request_job_count(runtime) -> int:
+    with runtime.store.read() as connection:
+        return int(connection.execute(
+            "SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id=e.job_id "
+            "WHERE e.event_type='JOB_CREATED' AND json_extract(e.payload_json,"
+            " '$.provenance.child_request.schema') = 'ChildExecutionRequest.v1'"
+        ).fetchone()[0])
+
+
+def test_child_request_duplicate_key_replay_returns_the_same_job(
+        tmp_path, short_socket_root):
+    async def exercise() -> None:
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-replay",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            envelope = _child_request_envelope(
+                root.job_id, root.job_id, "reconcile-digest-0001")
+
+            first = await service.admit_child_execution_request(envelope)
+            assert first["schema"] == "mastermind.child_request_admission/v1"
+            assert first["state"] == "ADMITTED", first
+            assert isinstance(first["job_id"], str) and first["job_id"]
+            command_id = first["command_id"]
+            assert command_id.startswith("child-request:")
+
+            job = runtime.jobs.get_job(first["job_id"])
+            assert job.status.value == "QUEUED"
+            assert job.attempt_count == 0
+            # Admission selects nothing (OQ-9): no worker, provider or
+            # placement decision rides on the admitted Job.
+            constraints = job.constraints or {}
+            assert "provider" not in constraints and "worker" not in constraints
+
+            # A duplicate delivery of the same key + digest replays to the
+            # SAME Job — exactly one durable admission, not two.
+            replay = await service.admit_child_execution_request(envelope)
+            assert replay["state"] == "REPLAY", replay
+            assert replay["job_id"] == first["job_id"]
+            assert replay["command_id"] == command_id
+            assert replay["request_digest"] == first["request_digest"]
+            events = _child_request_events(runtime, command_id)
+            assert len(events) == 1
+            assert events[0]["event_type"] == "JOB_CREATED"
+            assert events[0]["job_id"] == first["job_id"]
+            assert _child_request_job_count(runtime) == 1
+
+    asyncio.run(exercise())
+
+
+def test_child_request_key_with_different_digest_is_a_conflict(
+        tmp_path, short_socket_root):
+    async def exercise() -> None:
+        from control_plane.executive_runtime import StateConflict
+
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-conflict",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            admitted = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "conflicting-key-001"))
+            assert admitted["state"] == "ADMITTED", admitted
+
+            # Same idempotency triple, different goal digest: a conflict,
+            # never a second Job and never a silent re-admission.
+            with pytest.raises(StateConflict, match="CHILD_REQUEST_DIGEST_CONFLICT"):
+                await service.admit_child_execution_request(
+                    _child_request_envelope(
+                        root.job_id, root.job_id, "conflicting-key-001",
+                        brief_digest="b" * 64))
+            assert _child_request_job_count(runtime) == 1
+
+            # A genuinely different key is ordinary new work.
+            other = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "conflicting-key-002"))
+            assert other["state"] == "ADMITTED", other
+            assert other["job_id"] != admitted["job_id"]
+            assert _child_request_job_count(runtime) == 2
+
+    asyncio.run(exercise())
+
+
+def test_child_request_root_cap_32_returns_precise_wait_reason(
+        tmp_path, short_socket_root):
+    async def exercise() -> None:
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-root-cap",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            for index in range(32):
+                outcome = await service.admit_child_execution_request(
+                    _child_request_envelope(
+                        root.job_id, root.job_id, f"root-cap-key-{index:03d}"))
+                assert outcome["state"] == "ADMITTED", (index, outcome)
+
+            # The 33rd distinct key hits the durable per-root cap and is
+            # returned to the parent planner with a precise wait reason.
+            # One synchronous decision: no job, no retry.
+            wait = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "root-cap-key-032"))
+            assert wait["state"] == "WAIT", wait
+            assert wait["wait_reason"] == "CHILD_QUEUE_ROOT_READY_FULL", wait
+            assert wait["job_id"] is None
+            assert wait["wait_detail"]["root_ready"] == 32
+            assert wait["wait_detail"]["root_limit"] == 32
+            assert wait["wait_detail"]["root_ref"] == root.job_id
+            assert _child_request_job_count(runtime) == 32
+
+            # A replay still outranks the caps: a lost-response retry of
+            # an admitted key recovers its handle even with a full queue.
+            replay = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "root-cap-key-000"))
+            assert replay["state"] == "REPLAY", replay
+            assert _child_request_job_count(runtime) == 32
+
+    asyncio.run(exercise())
+
+
+def test_child_request_fleet_cap_is_configurable_backpressure(
+        tmp_path, short_socket_root, monkeypatch):
+    async def exercise() -> None:
+        monkeypatch.setenv("MMOS_CHILD_FLEET_READY_LIMIT", "2")
+        monkeypatch.setenv("MMOS_CHILD_ROOT_READY_LIMIT", "32")
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-fleet-cap",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            other_root = "ROOT-OTHER-0001"
+            first = await service.admit_child_execution_request(
+                _child_request_envelope(root.job_id, root.job_id, "fleet-key-001"))
+            second = await service.admit_child_execution_request(
+                _child_request_envelope(other_root, other_root, "fleet-key-002"))
+            assert first["state"] == "ADMITTED" and second["state"] == "ADMITTED"
+
+            # The fleet cap is configured at two: a third request from a
+            # third root is backpressured with the fleet reason, even
+            # though neither root has reached its per-root cap.
+            wait = await service.admit_child_execution_request(
+                _child_request_envelope("ROOT-THIRD-0001", "ROOT-THIRD-0001",
+                                        "fleet-key-003"))
+            assert wait["state"] == "WAIT", wait
+            assert wait["wait_reason"] == "CHILD_QUEUE_FLEET_READY_FULL", wait
+            assert wait["wait_detail"]["fleet_ready"] == 2
+            assert wait["wait_detail"]["fleet_limit"] == 2
+            assert wait["wait_detail"]["root_ready"] == 0
+            assert _child_request_job_count(runtime) == 2
+
+            # The durable queue orders by priority, then bounded aging,
+            # with root fairness and skip-ineligible behaviour.
+            ordered, skipped = runtime.jobs.child_request_ready_queue(
+                now_ms=int(runtime.store.now_ms()))
+            assert [item.job_id for item in ordered] == [
+                first["job_id"], second["job_id"]]
+            assert skipped == ()
+
+    asyncio.run(exercise())

@@ -16655,6 +16655,258 @@ class JobRegistry:
             )
         return payload
 
+    def admit_child_execution_request(
+        self,
+        request: Any,
+        *,
+        policy: Any | None = None,
+    ) -> Any:
+        """Admit one ``ChildExecutionRequest.v1`` idempotently (WO-13).
+
+        Exactly-once law: the admission is idempotent within
+        ``(root_ref, immediate_parent_run_ref, logical_child_key)``.  A
+        redelivery with the same ``request_digest`` returns the FIRST
+        admission's Job handle; the same triple with a different digest
+        raises :class:`StateConflict` carrying the
+        ``CHILD_REQUEST_DIGEST_CONFLICT`` code and never creates a second
+        Job.  Durability rides the existing ``events.command_id UNIQUE``
+        invariant: the command id is derived deterministically from the
+        triple, so two concurrent admissions of one triple are arbitrated
+        by the events table inside the losing transaction (its Job row
+        rolls back), and the loser reconciles to the surviving record.
+
+        Caller IDs are references, not credentials: the envelope's IDs
+        are recorded under the created event's ``provenance`` (which
+        changes no job column and confers no authority).  The admitted
+        Job is an ordinary root-level QUEUED Job carrying no worker,
+        provider or placement decision — the authenticated host still
+        selects placement through the incumbent claim path (OQ-9).
+
+        A full ready queue is backpressure, never a retry: when the
+        per-root cap (default 32) or the fleet cap (default 512, both
+        configurable via ``ReadyQueuePolicy``) is reached, a WAIT
+        outcome with the precise wait reason is returned to the parent
+        planner and nothing is created.  A replay always outranks the
+        caps so a retry after a lost response still recovers its
+        handle.
+        """
+
+        from control_plane.child_execution_contracts import (
+            CHILD_EXECUTION_REQUEST_SCHEMA,
+            ChildExecutionRequest,
+        )
+        from control_plane.child_request_admission import (
+            AdmissionOutcome,
+            ChildRequestAdmissionConflict,
+            ReadyQueuePolicy,
+            admission_command_id,
+            decide_admission,
+            request_priority,
+        )
+        from control_plane.executive_coo_hierarchy import child_request_queue_wait
+
+        if type(request) is not ChildExecutionRequest:
+            raise StateConflict(
+                "child request admission requires a ChildExecutionRequest.v1 envelope")
+        resolved_policy = policy if policy is not None else ReadyQueuePolicy.from_env()
+        command_id = admission_command_id(request)
+        digest = request.request_digest
+
+        def child_request_of(payload_json: Any) -> dict[str, Any] | None:
+            payload = _json_loads(str(payload_json), fallback=None)
+            if not isinstance(payload, dict):
+                return None
+            material = payload.get("provenance")
+            if not isinstance(material, dict):
+                return None
+            child_request = material.get("child_request")
+            if (not isinstance(child_request, dict)
+                    or child_request.get("schema") != CHILD_EXECUTION_REQUEST_SCHEMA):
+                return None
+            return child_request
+
+        def existing_admission(connection: Any) -> tuple[str, str] | None:
+            row = connection.execute(
+                """
+                SELECT e.payload_json, j.job_id, j.status, j.current_attempt_id,
+                       j.cancel_requested_at_ms
+                FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.command_id=? AND e.event_type='JOB_CREATED'
+                """,
+                (command_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            material = child_request_of(row["payload_json"])
+            if material is None:
+                raise StateConflict(
+                    "child-request command is owned by another semantic action")
+            if material.get("request_digest") is None:
+                raise StateConflict(
+                    "child-request admission record lost its request digest")
+            return (str(row["job_id"]), str(material["request_digest"]))
+
+        def ready_counts(connection: Any) -> tuple[int, int]:
+            """Ready = admitted, still QUEUED, never claimed, not cancelling.
+
+            Only this lane's Jobs are counted: the child-request ready
+            queue is its own bounded lane and never changes the bounds
+            of the incumbent orchestration queue.
+            """
+
+            root_ready = int(connection.execute(
+                """
+                SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.event_type='JOB_CREATED'
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.schema') = ?
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.root_ref') = ?
+                  AND j.status='QUEUED'
+                  AND j.current_attempt_id IS NULL
+                  AND j.cancel_requested_at_ms IS NULL
+                """,
+                (CHILD_EXECUTION_REQUEST_SCHEMA, request.root_ref),
+            ).fetchone()[0])
+            fleet_ready = int(connection.execute(
+                """
+                SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.event_type='JOB_CREATED'
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.schema') = ?
+                  AND j.status='QUEUED'
+                  AND j.current_attempt_id IS NULL
+                  AND j.cancel_requested_at_ms IS NULL
+                """,
+                (CHILD_EXECUTION_REQUEST_SCHEMA,),
+            ).fetchone()[0])
+            return root_ready, fleet_ready
+
+        common = {
+            "command_id": command_id,
+            "request_digest": digest,
+            "root_ref": request.root_ref,
+            "logical_child_key": request.logical_child_key,
+        }
+        with self.store.read() as connection:
+            existing = existing_admission(connection)
+            if existing is not None:
+                # Replay outranks the caps: no queue re-check may strand
+                # a redelivery of an already-admitted request.
+                try:
+                    return decide_admission(
+                        request, existing=existing, root_ready=0, fleet_ready=0,
+                        policy=resolved_policy)
+                except ChildRequestAdmissionConflict as exc:
+                    raise StateConflict(str(exc)) from exc
+            root_ready, fleet_ready = ready_counts(connection)
+            wait = child_request_queue_wait(
+                root_ready, fleet_ready,
+                policy=resolved_policy, root_ref=request.root_ref)
+        if wait is not None:
+            # Backpressure to the parent planner: one synchronous,
+            # precise decision.  Nothing is created; there is no retry.
+            return AdmissionOutcome(
+                state="WAIT", wait_reason=str(wait["reason"]),
+                wait_detail=wait, **common)
+
+        provenance = {
+            "child_request": {
+                "schema": CHILD_EXECUTION_REQUEST_SCHEMA,
+                "root_ref": request.root_ref,
+                "immediate_parent_run_ref": request.immediate_parent_run_ref,
+                "logical_child_key": request.logical_child_key,
+                "request_digest": digest,
+                "policy_revision": request.policy_revision,
+                "requested_complexity": request.requested_complexity,
+                "fallback_mode": request.fallback_mode,
+                "command_id": command_id,
+            },
+        }
+        objective = (
+            f"[child-request] key={request.logical_child_key} "
+            f"root={request.root_ref} parent={request.immediate_parent_run_ref} "
+            f"digest={digest[:12]}"
+        )
+        try:
+            job = self.create_job(
+                objective,
+                priority=request_priority(request),
+                constraints={"required_capabilities": ["read"]},
+                attempt_limit=1,
+                command_id=command_id,
+                provenance=provenance,
+            )
+        except StateConflict:
+            # The events UNIQUE arbitrates a concurrent duplicate of the
+            # same triple; reconcile against the surviving record rather
+            # than guessing.  Any other conflict propagates unchanged.
+            with self.store.read() as connection:
+                existing = existing_admission(connection)
+            if existing is None:
+                raise
+            try:
+                return decide_admission(
+                    request, existing=existing, root_ready=0, fleet_ready=0,
+                    policy=resolved_policy)
+            except ChildRequestAdmissionConflict as exc:
+                raise StateConflict(str(exc)) from exc
+        return AdmissionOutcome(state="ADMITTED", job_id=job.job_id, **common)
+
+    def child_request_ready_queue(
+        self,
+        *,
+        now_ms: int,
+        policy: Any | None = None,
+        eligible: Any = None,
+    ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+        """Order this lane's ready queue: priority, aging, root fairness.
+
+        Returns ``(ordered, skipped)``.  ``skipped`` holds the
+        skip-ineligible tail (not yet available, or failing the optional
+        ``eligible`` predicate) — an ineligible head never blocks the
+        entries behind it.
+        """
+
+        from control_plane.child_execution_contracts import (
+            CHILD_EXECUTION_REQUEST_SCHEMA,
+        )
+        from control_plane.child_request_admission import (
+            ReadyQueueEntry,
+            ReadyQueuePolicy,
+            select_next_ready,
+        )
+
+        resolved_policy = policy if policy is not None else ReadyQueuePolicy.from_env()
+        with self.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT j.job_id, j.priority, j.available_at_ms,
+                       json_extract(e.payload_json,
+                           '$.provenance.child_request.root_ref') AS root_ref
+                FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.event_type='JOB_CREATED'
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.schema') = ?
+                  AND j.status='QUEUED'
+                  AND j.current_attempt_id IS NULL
+                  AND j.cancel_requested_at_ms IS NULL
+                ORDER BY j.job_id
+                """,
+                (CHILD_EXECUTION_REQUEST_SCHEMA,),
+            ).fetchall()
+        entries = [
+            ReadyQueueEntry(
+                job_id=str(row["job_id"]),
+                root_ref=str(row["root_ref"]),
+                priority=int(row["priority"]),
+                available_at_ms=int(row["available_at_ms"]),
+            )
+            for row in rows
+        ]
+        return select_next_ready(
+            entries, now_ms=int(now_ms), policy=resolved_policy, eligible=eligible)
+
     def create_job(
         self,
         objective: str,

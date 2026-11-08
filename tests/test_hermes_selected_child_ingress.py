@@ -1121,3 +1121,172 @@ def test_the_control_never_imports_the_integration_package():
                 assert all(not alias.name.startswith("integrations") for alias in node.names), path
             elif isinstance(node, ast.ImportFrom) and node.module:
                 assert not node.module.startswith("integrations"), path
+
+
+# ---------------------------------------------------------------------------
+# 7. WO-13: the child-request admission lane on the private ingress
+# ---------------------------------------------------------------------------
+
+
+def test_child_request_admit_action_is_core_private_not_model_facing():
+    """The admit action rides the private App-to-Control frame only.
+
+    The core frame validator accepts it; the model-facing parser refuses
+    it, so the pinned MCP tool surface is unchanged and the envelope
+    never travels through the model.
+    """
+
+    from control_plane.executive_service import (
+        SELECTED_CHILD_FRAME_SCHEMA as CORE_SCHEMA,
+        _SELECTED_CHILD_ACTIONS as CORE_ACTIONS,
+    )
+    from integrations.hermes_delegate.schema import (
+        SELECTED_CHILD_ACTIONS as MODEL_ACTIONS,
+    )
+
+    assert "selected_child_admit" in CORE_ACTIONS
+    assert "selected_child_admit" not in MODEL_ACTIONS
+    assert "selected_child_submit" in CORE_ACTIONS & MODEL_ACTIONS
+    frame = {
+        "schema": SELECTED_CHILD_FRAME_SCHEMA,
+        "request": {"action": "selected_child_admit",
+                    "command": "child-request:" + "0" * 64},
+        "target_digest": "a" * 64,
+        "principal": {"policy_id": "p", "issuer_digest": "i", "subject_digest": "s",
+                      "client_ref": "c", "resource": "r", "scopes": ["a"]},
+        "principal_context": {"work_ref": WORK_REF,
+                              "principal_binding_digest": "a" * 64,
+                              "mission_authority_ref": "mission-authority-01",
+                              "authority_generation_digest": "a" * 64},
+        "capability_profile_digest": "a" * 64,
+    }
+    from control_plane.executive_service import _selected_child_frame
+    parsed = _selected_child_frame(frame)
+    assert parsed == {"action": "selected_child_admit",
+                      "command": "child-request:" + "0" * 64}
+    assert CORE_SCHEMA == INTEGRATION_FRAME_SCHEMA
+
+
+def _admission_material(root_ref, parent_ref, key, *, brief_digest="a" * 64):
+    """The host-frozen envelope plus the command minted from its triple."""
+
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_admission import admission_command_id
+
+    request = ChildExecutionRequest(
+        root_ref=root_ref, immediate_parent_run_ref=parent_ref,
+        logical_child_key=key, task_kind="research",
+        requested_complexity="C2_COMPLEX_BOUNDED", brief_digest=brief_digest,
+    )
+    return admission_command_id(request), request.to_dict()
+
+
+def test_private_child_request_admit_replay_and_digest_conflict(tmp_path):
+    """The real Unix ingress: idempotent admission, conflict on drift."""
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-c29-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            async with _control(tmp_path, socket_root,
+                                name="child-request-admit") as host:
+                service = host.service
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "ingress-key-0001")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope})
+
+                frame = _frame_for(context, command=command,
+                                   action="selected_child_admit")
+                reply = await _send_frame(host.socket, frame)
+                assert reply["ok"] is True, reply
+                admitted = reply["result"]
+                assert admitted["schema"] == "mastermind.child_request_admission/v1"
+                assert admitted["state"] == "ADMITTED", admitted
+                job_id = admitted["job_id"]
+                assert isinstance(job_id, str) and job_id
+
+                # The same frozen command replays to the same Job handle.
+                replay = await _send_frame(host.socket, frame)
+                assert replay["ok"] is True, replay
+                assert replay["result"]["state"] == "REPLAY", replay
+                assert replay["result"]["job_id"] == job_id
+
+                # An unfrozen admission command never reaches admission.
+                unfrozen = await _send_frame(host.socket, _frame_for(
+                    context, command="child-request:" + "e" * 64,
+                    action="selected_child_admit"))
+                assert unfrozen["ok"] is False, unfrozen
+                assert unfrozen["error"]["code"] == "invalid_input", unfrozen
+
+                # The host re-freezes the SAME key with a different goal
+                # digest: a precise conflict, never a second Job.
+                _, drifted = _admission_material(
+                    host.root.job_id, host.root.job_id, "ingress-key-0001",
+                    brief_digest="c" * 64)
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: drifted})
+                conflict = await _send_frame(host.socket, frame)
+                assert conflict["ok"] is False, conflict
+                assert conflict["error"]["code"] == "conflict", conflict
+                with service.runtime.store.read() as connection:
+                    count = int(connection.execute(
+                        "SELECT COUNT(*) FROM events e JOIN jobs j"
+                        " ON j.job_id=e.job_id"
+                        " WHERE e.event_type='JOB_CREATED'"
+                        " AND json_extract(e.payload_json,"
+                        " '$.provenance.child_request.schema')"
+                        " = 'ChildExecutionRequest.v1'"
+                    ).fetchone()[0])
+                assert count == 1
+                assert service.runtime.jobs.get_job(job_id).attempt_count == 0
+
+    asyncio.run(exercise())
+
+
+def test_private_child_request_admit_queue_full_wait_reason(
+        tmp_path, monkeypatch):
+    """A full ready queue returns precise backpressure, not a retry."""
+
+    async def exercise():
+        monkeypatch.setenv("MMOS_CHILD_ROOT_READY_LIMIT", "1")
+        with tempfile.TemporaryDirectory(prefix="mmx-c29-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            async with _control(tmp_path, socket_root,
+                                name="child-request-wait") as host:
+                service = host.service
+                context = _control_context(host)
+                first_command, first = _admission_material(
+                    host.root.job_id, host.root.job_id, "wait-key-0001")
+                second_command, second = _admission_material(
+                    host.root.job_id, host.root.job_id, "wait-key-0002")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={
+                        first_command: first, second_command: second})
+
+                admitted = await _send_frame(host.socket, _frame_for(
+                    context, command=first_command,
+                    action="selected_child_admit"))
+                assert admitted["ok"] is True, admitted
+                assert admitted["result"]["state"] == "ADMITTED", admitted
+
+                # The per-root cap (configured at one) sends the second
+                # request back to the parent planner with a precise
+                # reason.  Nothing was created; there is no retry loop.
+                wait = await _send_frame(host.socket, _frame_for(
+                    context, command=second_command,
+                    action="selected_child_admit"))
+                assert wait["ok"] is True, wait
+                assert wait["result"]["state"] == "WAIT", wait
+                assert wait["result"]["wait_reason"] == "CHILD_QUEUE_ROOT_READY_FULL"
+                assert wait["result"]["wait_detail"]["root_ready"] == 1
+                assert wait["result"]["wait_detail"]["root_limit"] == 1
+                assert wait["result"]["job_id"] is None
+
+                job_id = admitted["result"]["job_id"]
+                assert service.runtime.jobs.get_job(job_id).attempt_count == 0
+
+    asyncio.run(exercise())
