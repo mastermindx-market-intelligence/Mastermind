@@ -129,6 +129,11 @@
           "href": "https://github.com/mastermindx-market-intelligence/Mastermind/rules/22852988"
         }
       }
+    },
+    "latestPr": {
+      "state": "open",
+      "merged": false,
+      "head": "89596672caa46600ace18fbb52d3a3a92e919522"
     }
   },
   "runtimeDiagnosis": {
@@ -670,7 +675,309 @@
         }
       ],
       "recommendedNextAction": "Root prepares exact descriptor/profile source patch and affected tests through protected GitHub workflow now. Choose and bind one actual existing consumer before preparing its narrowly admitted successor. Do not run old v20 transitions against current v20 manifests; do not infer Chairman gate from incomplete installer implementation or historical role labels."
+    },
+    "architectureAndReceiptLocation": {
+      "schema": "mastermind.paper_direct_runtime_architecture_and_operation_provenance.v1",
+      "procedurePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+      "acceptedV20SourceRef": "e3ee36e297140539e05a0524f3446e086f40c5d1",
+      "scope": "Read-only exact source analysis. A later parent instruction separately allowed one bounded read of the six already observed LaunchAgent plists and only their actual declared .log paths for one known owned operation ID. No Paper call, source/runtime mutation, restart, install or instrumentation.",
+      "status": "ARCHITECTURE_RESOLVED_PRIMARY_SEAT_MAPPING_UNRESOLVED",
+      "answers": {
+        "bridgeInvocation": "IN_PROCESS_IMPORTED_AT_SERVER_STARTUP",
+        "perRequestPythonSpawn": false,
+        "missingConfiguredPathsExcludeSixLiveServices": false,
+        "hotProfileReloadSupported": false,
+        "directAtomicReplacementCommandExposed": false,
+        "persistentOperationReceiptLedgerImplemented": false,
+        "exactOwnOperationLogLookup": "UNAVAILABLE_ALL_12_ACTUAL_DECLARED_LOG_PATHS_ENOENT"
+      },
+      "architecture": [
+        {
+          "step": "launch",
+          "owner": "direct_service.py",
+          "behavior": "Verifies bundle/binding/key/SDK, holds per-seat service_lock, and starts the existing external tunnel client with one profile. subprocess.run here supervises the tunnel client, not a bridge process per tool request.",
+          "lines": "v20:646-680"
+        },
+        {
+          "step": "serve startup",
+          "owner": "direct_service.py",
+          "behavior": "verify(root), require_running_python, verify_sdk and _sdk run before importing mcp_server.build_server. It then runs a persistent stdio MCP server.",
+          "lines": "v20:565-576; pinned:582-594"
+        },
+        {
+          "step": "MCP module load",
+          "owner": "mcp_server.py",
+          "behavior": "Imports execute, Refusal and tool sets from bridge at module scope. build_server captures execution_binding; current source also captures transport_diagnostic.",
+          "lines": "v20:18-23; pinned:20-45"
+        },
+        {
+          "step": "ordinary tool request",
+          "owner": "mcp_server.py",
+          "behavior": "asyncio.to_thread(run, action, ...) invokes the already imported execute function in this interpreter. No bridge CLI subprocess is dispatched.",
+          "lines": "v20:39-47;107-128;147-165"
+        },
+        {
+          "step": "native Paper operation",
+          "owner": "bridge.py",
+          "behavior": "execute creates a fresh PaperClient and initializes/requalifies the native catalog under desktop_lock. PaperClient uses http.client against fixed loopback 127.0.0.1:29979. This is native request requalification, not a Python source/profile reload.",
+          "lines": "v20:695-728;1029-1081"
+        }
+      ],
+      "inferences": {
+        "supported": "Continued ordinary calls from an already-running serve process are consistent with subsequently absent source/venv paths because its modules, functions, reviewed profile dictionary and SDK code are already in memory.",
+        "notSupported": "Path absence does not prove that these six processes cannot be the current working carrier. It also does not prove which one is the carrier or what exact bytes were loaded.",
+        "limits": [
+          "Actual configured INSTALLATION/BINDING/source bytes remain absent, so source-to-process byte attestation is still missing.",
+          "Not every future action is guaranteed to work: prepare has a lazy import, other libraries may load resources later, and a cold/replacement process requires the configured source, receipt and interpreter paths.",
+          "The exact behavior of tunnel-client reconnect/child respawn is outside these Python files; no healthy restart/reconnect claim is made.",
+          "Current tool descriptions may be a frozen app action snapshot and are not an installed generation attestation."
+        ]
+      },
+      "hotReload": {
+        "result": "NO_IMPLEMENTED_RELOAD_CONTROL",
+        "evidence": [
+          "REVIEWED_TOOL_CONTRACTS is a module-level Python dictionary; execute uses loaded module state.",
+          "Both inspected mcp_server revisions import bridge.execute once.",
+          "Both direct_service CLI revisions expose only stage, verify, bind, doctor, run, launch, serve and probe.",
+          "No reload command, watcher or SIGHUP/reload handler exists in the inspected direct-service/server/bridge implementation."
+        ],
+        "implication": "Replacing or recreating bridge.py on disk would not install the new update_styles profile into the already running serve process. App tool-list refresh alone also does not reload this interpreter."
+      },
+      "existingInstallProtocol": {
+        "directBundle": "Existing direct_service.stage materializes a NEW immutable bundle with exclusive file creation, content hashes and INSTALLATION.json written last, then verify. Existing destinations and existing bindings refuse overwrite. probe proves local stdio only.",
+        "atomicLimit": "direct_service contains no generic atomic incumbent-bundle replacement or same-seat cutover transaction. Its stage operation is receipt-last staging, not an atomic switch of a live process. The existing per-seat lock prevents duplicate transports; it is not a deployment transaction.",
+        "documentedOwner": "Pinned Paper direct documentation assigns actual same-label source-to-process/binding cutover to the existing host service owner. It does not expose a new direct-service replace/reload action.",
+        "otherOwners": "runtime_stage's atomic rename commits a NEW immutable legacy runtime directory only. private_service._apply_paper_selection is an exact legacy Studio manifest-CAS transaction; it does not own the direct-business LaunchAgent or tunnel binding.",
+        "minimalDependencies": [
+          "Identify the actual current app seat/tunnel through existing provenance, without choosing C4 by name.",
+          "Obtain the intended protected source release and new bundle's exact bytes; do not alter historical immutable bundles.",
+          "Recover the chosen consumer's original binding/receipt and usable SDK/binary/dependency identity or qualify an exact successor through the incumbent owner. Current plist hashes and PIDs alone are insufficient.",
+          "Use existing stage/verify/probe and exact existing tunnel/key reference as applicable; no new app/tunnel, credential plane or second client.",
+          "Before any actual cutover, reconcile active operations and use the genuine existing same-seat service owner. If its transactional replacement operation is missing, that is bounded source composition in the existing owner, not an invented human approval or an already implemented protocol.",
+          "After an authorized same-seat process replacement, prove new source identity, update_styles admission and the bounded native property/content/visual acceptance required by the Paper mission."
+        ]
+      },
+      "operationProvenance": {
+        "exactOwnOperationId": "paper-accent-estate-20261108-c4-t05rm-16oi-svg-label-contrast-v1",
+        "sourceContract": "operation_id is validated and attached to returned mutation/effect receipts. execute explicitly introduces no persistent duplicate/retry ledger. The native client receives only tool name and arguments; the wrapper operation_id is not independently sent as native request metadata.",
+        "mcpPath": "mcp_server.run returns the receipt as CallToolResult text. It does not invoke bridge.main, its CLI print, save_artifacts, or a local audit writer.",
+        "launcherLogs": "Generated plist uses <bundle>/logs/tunnel.stdout.log and tunnel.stderr.log; generated tunnel profile configures info-level JSON logging. These Python sources do not promise that the external tunnel client's logs contain operation IDs or response payloads.",
+        "actualProbe": {
+          "PaperCalls": 0,
+          "credentialFilesRead": false,
+          "entries": [
+            {
+              "label": "com.mastermind.paper-direct.business.ryan",
+              "logs": [
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/ryan/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stdout.log",
+                  "status": "ENOENT",
+                  "stream": "StandardOutPath"
+                },
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/ryan/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stderr.log",
+                  "status": "ENOENT",
+                  "stream": "StandardErrorPath"
+                }
+              ],
+              "plistLabelMatches": true,
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.ryan.plist",
+              "plistSha256": "dd7b8cbfeaabcd99d26b8b26f518b710d5463afef2b736f4635524d3aca8f867"
+            },
+            {
+              "label": "com.mastermind.paper-direct.business.c3",
+              "logs": [
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c3/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stdout.log",
+                  "status": "ENOENT",
+                  "stream": "StandardOutPath"
+                },
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c3/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stderr.log",
+                  "status": "ENOENT",
+                  "stream": "StandardErrorPath"
+                }
+              ],
+              "plistLabelMatches": true,
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c3.plist",
+              "plistSha256": "c98781d1f6f0882da43339858d080813be15ea1421250576b3f4a0e4da2916e4"
+            },
+            {
+              "label": "com.mastermind.paper-direct.business.c4",
+              "logs": [
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stdout.log",
+                  "status": "ENOENT",
+                  "stream": "StandardOutPath"
+                },
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stderr.log",
+                  "status": "ENOENT",
+                  "stream": "StandardErrorPath"
+                }
+              ],
+              "plistLabelMatches": true,
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c4.plist",
+              "plistSha256": "8c985894abff4ce55098b1084e2f6646b633ac3b6e0cb0539c90c4049a15122a"
+            },
+            {
+              "label": "com.mastermind.paper-direct.business.c1",
+              "logs": [
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c1/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stdout.log",
+                  "status": "ENOENT",
+                  "stream": "StandardOutPath"
+                },
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c1/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stderr.log",
+                  "status": "ENOENT",
+                  "stream": "StandardErrorPath"
+                }
+              ],
+              "plistLabelMatches": true,
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c1.plist",
+              "plistSha256": "976c2d71be62e31bdcd1fe964a2ba576d94ddefb1d36182db9843e0ab2deb136"
+            },
+            {
+              "label": "com.mastermind.paper-direct.business.chris-admin",
+              "logs": [
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/chris-admin/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stdout.log",
+                  "status": "ENOENT",
+                  "stream": "StandardOutPath"
+                },
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/chris-admin/paper-v20-merged-e3ee36e-20261102/logs/tunnel.stderr.log",
+                  "status": "ENOENT",
+                  "stream": "StandardErrorPath"
+                }
+              ],
+              "plistLabelMatches": true,
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.chris-admin.plist",
+              "plistSha256": "a774423a7ce4948921865d81883fab082ddd5b3e98fcc29a7bcd77ff9cfaadc3"
+            },
+            {
+              "label": "com.mastermind.paper-direct.business.c2",
+              "logs": [
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c2/paper-v21-merged-9f65957e-20261103/logs/tunnel.stdout.log",
+                  "status": "ENOENT",
+                  "stream": "StandardOutPath"
+                },
+                {
+                  "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c2/paper-v21-merged-9f65957e-20261103/logs/tunnel.stderr.log",
+                  "status": "ENOENT",
+                  "stream": "StandardErrorPath"
+                }
+              ],
+              "plistLabelMatches": true,
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c2.plist",
+              "plistSha256": "223e87fbc2c81e5236763f168be04af4aca7d5623e59c694b2afad7832d5abfa"
+            }
+          ],
+          "kind": "paper_direct_exact_own_operation_log_probe",
+          "maximumReadBytesPerExistingLog": 2097152,
+          "operationId": "paper-accent-estate-20261108-c4-t05rm-16oi-svg-label-contrast-v1",
+          "rawLogTextReturned": false,
+          "writes": false
+        },
+        "probeInterpretation": "All six existing plist SHA-256 values matched the prior observations; all twelve actual declared log paths are ENOENT. No log bytes could be read, so this is not a negative search for the operation ID and supplies no seat attribution.",
+        "helper": {
+          "pid": 9506,
+          "completedExitCode": 0
+        },
+        "noFurtherProbe": "No process-memory/stdin inspection, alternate log discovery, broad filesystem scan or new logging was performed."
+      },
+      "sourceRefs": [
+        {
+          "key": "v20_bridge",
+          "ref": "e3ee36e297140539e05a0524f3446e086f40c5d1",
+          "path": "integrations/paper_desktop/bridge.py",
+          "blob": "49483bc6764d72357f7133d108ad154bf7634f37",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/e3ee36e297140539e05a0524f3446e086f40c5d1/integrations/paper_desktop/bridge.py"
+        },
+        {
+          "key": "v20_mcp_server",
+          "ref": "e3ee36e297140539e05a0524f3446e086f40c5d1",
+          "path": "integrations/paper_desktop/mcp_server.py",
+          "blob": "7498e92a7f84f06d1d10a23ab69de52b4671195a",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/e3ee36e297140539e05a0524f3446e086f40c5d1/integrations/paper_desktop/mcp_server.py"
+        },
+        {
+          "key": "v20_direct_service",
+          "ref": "e3ee36e297140539e05a0524f3446e086f40c5d1",
+          "path": "integrations/paper_desktop/direct_service.py",
+          "blob": "4ba67cb72de5a5b43589f05a30401017f26532fc",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/e3ee36e297140539e05a0524f3446e086f40c5d1/integrations/paper_desktop/direct_service.py"
+        },
+        {
+          "key": "pinned_mcp_server",
+          "ref": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+          "path": "integrations/paper_desktop/mcp_server.py",
+          "blob": "2aa9ce0b2b4ad5d6f7d0dc7b65285ead1811b667",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/mcp_server.py"
+        },
+        {
+          "key": "pinned_direct_service",
+          "ref": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+          "path": "integrations/paper_desktop/direct_service.py",
+          "blob": "0f883967b80d4112d7bb2342084fae9b20b7e656",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/direct_service.py"
+        },
+        {
+          "key": "pinned_runtime_stage",
+          "ref": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+          "path": "integrations/paper_desktop/runtime_stage.py",
+          "blob": "4e41f4f1ca19025fa9203d84723c8858a9b3a3bf",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/runtime_stage.py#L298-L354"
+        },
+        {
+          "key": "pinned_direct_docs",
+          "ref": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+          "path": "docs/PAPER_DIRECT_CHATGPT.md",
+          "blob": "1a75b7558aff3f1f86f3b944d179fcffe752fa3d",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DIRECT_CHATGPT.md#L132-L190"
+        },
+        {
+          "key": "legacy_selection_owner",
+          "ref": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+          "path": "integrations/studio_direct_mcp/private_service.py",
+          "blob": "112282553880aa04ae2c0ae646a30d4d308380ce",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/studio_direct_mcp/private_service.py#L5652-L5741"
+        }
+      ],
+      "boundaries": {
+        "PaperCalls": 0,
+        "hostDiagnosticHelpers": 1,
+        "logContentsRead": 0,
+        "credentialFilesRead": 0,
+        "writes": 0,
+        "restarts": 0,
+        "installs": 0,
+        "heldCalls": 0,
+        "historical1409DenialUnreplayed": true,
+        "noNewPlane": true
+      },
+      "sourceContentSha256": {
+        "v20_bridge": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+        "v20_mcp_server": "37a42f8c79c1b3e7973ec25ef6be432545261c916355729d870a16a48170322e",
+        "v20_direct_service": "74f7e23a919947a41e4992b580adafc625aac66a0cdbf0eacb5c1284d80b0daa",
+        "pinned_mcp_server": "38579850e3727fbb886b50abae4891cdf98ebbc631f7764b6e8d8863269645f7",
+        "pinned_direct_service": "a3b8b0b9a022dcbeb3b6f8a09f8637f0d25e3ad8fcee275a8471dad29fac4446"
+      },
+      "v20BridgeMatchesAcceptedDigest": true
     }
   },
-  "runtimeDisposition": "Do not stop/restart live primary direct processes: configured bundle/SDK paths are absent and current app is not uniquely mapped to a seat. No update_styles call, runtime installation, selector change or Paper carrier change has occurred."
+  "runtimeDisposition": "Do not stop/restart live primary direct processes: configured bundle/SDK paths are absent and current app is not uniquely mapped to a seat. No update_styles call, runtime installation, selector change or Paper carrier change has occurred.",
+  "connectionIdentification": {
+    "state": "DENIED_BROWSER_HOST_RESTRICTION",
+    "requestedRead": "Observe connected ChatGPT page to locate existing Paper service binding",
+    "blockedHost": "https://chatgpt.com",
+    "tool": "Browser js",
+    "reason": "Browser host restrictions gate did not grant authority to observe page content; alternate browser or indirect execution would circumvent the restriction.",
+    "actualAppBindingResolved": false,
+    "alternateBrowserAttempted": false,
+    "settingsChanged": false,
+    "otherAuthorizedPaperWorkContinues": true
+  }
 }
