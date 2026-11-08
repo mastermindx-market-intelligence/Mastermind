@@ -1580,10 +1580,41 @@ def write(asof: date | None = None, *, prebuilt: dict | None = None) -> dict:
             "json_path": str(json_path), "md_path": str(md_path)}
 
 
-def latest() -> dict:
-    """The most recent agenda JSON on disk (for the web page / a maintenance session). {} if none."""
+def latest(*, strict: bool = False) -> dict:
+    """Most recent agenda JSON; optional strict reads distinguish absence from failure.
+
+    Default callers retain the historical tolerant empty result. Display callers can
+    require a complete directory listing and a readable selected artifact.
+    """
     try:
-        files = sorted(_OUT.glob("20*.json"))
-        return json.loads(files[-1].read_text()) if files else {}
+        if strict:
+            import stat
+
+            try:
+                files = sorted(p for p in _OUT.iterdir()
+                               if p.name.startswith("20") and p.name.endswith(".json"))
+            except FileNotFoundError as missing:
+                candidate = _OUT
+                while True:
+                    try:
+                        info = candidate.lstat()
+                    except FileNotFoundError:
+                        if candidate.parent == candidate:
+                            raise missing
+                        candidate = candidate.parent
+                        continue
+                    if candidate != _OUT and stat.S_ISDIR(info.st_mode):
+                        return {}
+                    raise missing
+        else:
+            files = sorted(_OUT.glob("20*.json"))
+        if not files:
+            return {}
+        agenda = json.loads(files[-1].read_text())
+        if strict and (not isinstance(agenda, dict) or not agenda):
+            raise ValueError("agenda artifact is not a nonempty JSON object")
+        return agenda
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         return {}

@@ -40,7 +40,26 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
+      # The production release archives only app/mastermind_os. Build that exact
+      # source closure, rather than succeeding because checkout-root fixtures
+      # happen to exist on the CI runner. Reuse the current frontend job.
+      - name: Build exact app-only release archive
+        working-directory: .
+        run: |
+          release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"
+          git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"
+          (
+            cd "$release_root/app/mastermind_os"
+            npm ci --ignore-scripts
+            npm run build
+          )
+          test -s "$release_root/app/mastermind_os/dist/index.html"
+          # Use the original release owner's closed profile on the REAL compiled files.
+          # A green checkout build must not mask unpublishable static assets.
+          PYTHONPATH="$GITHUB_WORKSPACE" python3 -c 'from pathlib import Path; import sys; from ops.executive_os.executive_mcp_entry import build_os_asset_manifest; manifest = build_os_asset_manifest(Path(sys.argv[1])); print("OS_RELEASE_ASSET_LAYOUT_OK", len(manifest["files"]))' "$release_root"
+          # Never mingle generated test/checkout assets with the sealed archive output.
+          rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"
+          cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"
       - name: Build isolated browser source fixture
         run: npx vite build --config vite.browser-proof.config.ts
       - name: Record exact compiled source identity

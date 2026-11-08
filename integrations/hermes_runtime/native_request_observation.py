@@ -188,6 +188,7 @@ class _Scope:
         self.tool_overflow = self.metadata_overflow = False
         self.metadata_bytes = METADATA_RESERVE_BYTES
         self.closed = False
+        self.evaluation = None
         self.lock = threading.Lock()
         from .native_transport_observation import Contribution
         self.transport = Contribution(self, binding.transport_installation)
@@ -360,6 +361,7 @@ class _Scope:
                 self.overflow = True
             elif self._reserve(event):
                 self.events.append(event)
+                return event
 
     def finish(self, *, execution_outcome="unobserved"):
         # Match the original stamp/adoption/retirement lock ordering. SQLite
@@ -391,19 +393,26 @@ class _Scope:
                 "coverage": "assembly_hooks_only" if self.events else "no_assembly_observation",
                 "provider_dispatch_proven": False, "model_identity_verified": False,
                 "transport": self.transport.document()}
-            if _encoded_size(document) > MAX_METADATA_BYTES:
+            evaluation = self.evaluation.document() if self.evaluation is not None else None
+            if _encoded_size(document) + (_encoded_size(evaluation) if evaluation is not None else 0) > MAX_METADATA_BYTES:
                 # Defensive envelope fallback: absence must never masquerade as
                 # complete empty coverage. No answer/native state is changed.
                 document.update(observations=[], executions=[], commits=[], overflow=True,
                                 tool_overflow=True, metadata_overflow=True,
                                 coverage="no_assembly_observation",
                                 transport=self.transport.document(force_empty=True))
+                if self.evaluation is not None:
+                    evaluation = self.evaluation.document(force_empty=True)
             pending = self.authority.pending_results.get(self.admission_id)
             # The outer pending result is created by native ingress, independently
             # of the agent result body. Preserve any pre-existing field on collision.
             if type(pending) is not dict or type(pending.get("result")) is not dict or RESULT_KEY in pending:
                 return
             pending[RESULT_KEY] = document
+            if evaluation is not None:
+                from .native_eval_inputs import RESULT_KEY as EVAL_RESULT_KEY
+                if EVAL_RESULT_KEY not in pending:
+                    pending[EVAL_RESULT_KEY] = evaluation
 
 
 class _Binding:
@@ -412,6 +421,8 @@ class _Binding:
         self.authority_class = authority_class
         self.authority = None
         self.transport_installation = None
+        self.evaluation_owner = None
+        self.memory_factory = None
 
     def bind_authority(self, runner):
         self.launch.check()
@@ -457,7 +468,11 @@ def install_request_observation(launch, vendor: Path, role_home: Path, role: str
     from .native_gateway_entry import _digest, _vendor_module
     launch.check()
     modules = {}
-    for path, expected in SOURCE_SHA256.items():
+    selected_sources = dict(SOURCE_SHA256)
+    if "evaluation_inputs" in getattr(launch, "recipe", {}):
+        from .native_eval_inputs import authority_source_sha
+        selected_sources["gateway/session_authority.py"] = authority_source_sha(launch, vendor)
+    for path, expected in selected_sources.items():
         if _digest(vendor / path, maximum=128 * 1024) != expected:
             raise RuntimeRefusal("NATIVE_OBSERVATION_SOURCE_MISMATCH")
         name = path.removesuffix(".py").replace("/", ".")
@@ -482,6 +497,15 @@ def install_request_observation(launch, vendor: Path, role_home: Path, role: str
 
     async def execute_observed(authority, ref, row):
         scope = binding.scope(authority, ref, row)
+        marked = (type(row) is dict and type(row.get("payload")) is dict and any(
+            type(key) is str and key.startswith("mastermind_eval_inputs") for key in row["payload"]))
+        if marked:
+            # Input selection is required execution behavior. A marked row
+            # cannot use optional observation's fail-open ordinary-turn path.
+            from .native_eval_inputs import NativeEvalInputOwner
+            if scope is None or type(binding.evaluation_owner) is not NativeEvalInputOwner:
+                raise RuntimeRefusal("NATIVE_EVAL_RECEIVER_UNAVAILABLE")
+            scope.evaluation = binding.evaluation_owner.restore(scope, row)
         if scope is None:
             return await execute(authority, ref, row)
         token = _current.set(scope)
@@ -502,8 +526,17 @@ def install_request_observation(launch, vendor: Path, role_home: Path, role: str
         result = hook(agent, api_kwargs, api_messages, _llm_middleware_trace, **kwargs)
         scope = _current.get()
         if scope is not None and scope.binding is binding:
+            if scope.evaluation is not None:
+                # This check follows actual pre-request hooks and is outside
+                # the observation-only failure policy, before provider dispatch.
+                scope.evaluation.require_request(agent, api_kwargs)
             try:
-                scope.record(agent, api_kwargs, kwargs)
+                event = scope.record(agent, api_kwargs, kwargs)
+                if event is not None and scope.evaluation is not None:
+                    try:
+                        scope.evaluation.record_assembly(agent, api_kwargs, event)
+                    except Exception:
+                        scope.evaluation.fail("assembly_unavailable")
             except _ObservationLimit:
                 scope.fail("content_limit")
             except (ValueError, TypeError, UnicodeError):

@@ -128,7 +128,7 @@ NATIVE_TOOL_SCHEMA: dict[str, Any] = {
 class NativeToolRegistrationError(RuntimeError):
     """One closed refusal code for the native registration."""
 
-    def __init__(self, code: str, *, context=None, binding=None, scope=None, handle=None) -> None:
+    def __init__(self, code: str, *, context=None, binding=None, scope=None, handle=None, tool_name=TOOL_NAME) -> None:
         super().__init__(code)
         self.code = code
         # Private original-owner references for an uncertain registration or
@@ -137,7 +137,7 @@ class NativeToolRegistrationError(RuntimeError):
         self.original_binding = binding
         self.original_scope = scope
         self.original_handle = handle
-        self.original_tool_name = TOOL_NAME if context is not None else None
+        self.original_tool_name = tool_name if context is not None else None
 
 
 @runtime_checkable

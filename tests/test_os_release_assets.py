@@ -244,7 +244,8 @@ def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, 
     assert len(rows) == expected_count
     if expected_count == 12:
         assert rows[PRIVATE_ENTRY] == {"path": PRIVATE_ENTRY, "byte_count": len(PRIVATE_ENTRY_BYTES),
-            "sha256": hashlib.sha256(PRIVATE_ENTRY_BYTES).hexdigest(), "mime": "image/jpeg"}
+                                      "sha256": hashlib.sha256(PRIVATE_ENTRY_BYTES).hexdigest(),
+                                      "mime": "image/jpeg"}
     checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
     stage = tmp_path / "notice-stage"
     stage.mkdir()
