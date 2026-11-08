@@ -1025,3 +1025,12 @@ The first two preserve **Checking for an update**, previous-snapshot wording,27 
 Root inspected all three full390px renders. Exact before/after JSX lengths were13,567→13,673,13,618→13,723 and13,068→13,174. In each case, masking only the identified score text div makes the complete before/after JSX identical modulo whitespace. Every other native node, analytical value, layout style and action label remains unchanged.
 
 The single three-node edit `hub-index-label-consistency-01` and the scoped finish `hub-index-consistency-finish-01` both returned **APPLIED_RESPONSE_OBSERVED**. This completes the observed label omission across these three additional states; p6 remains candidate_unqualified, and held p7/source-only p8 and other writers' structures remain untouched. This is native design clarity, with no actual request, refreshed data, executed filter or production acceptance claimed.
+
+
+### Combined-match consistency in dark English and Chinese
+
+The remaining p6 pass identified the same missing field label in **`4GG-0`** (dark EN, text **`7ML-0`**) and **`503-0`** (light ZH, text **`7NB-0`**). They now show **Research index38.0** and **研究指数38.0**, respectively, with the existing theme roles and retained value. The listing601218.SS, source-position18, dated30-record fixture, Consensus6 / match1 counts, unavailable entry checks, and the two independent Clear outcomes remain unchanged.
+
+Root inspected full390px before/after renders. JSX changed13,116→13,221 and13,384→13,480 characters; masking only the respective text div proves the entire remaining JSX is unchanged modulo whitespace. `hub-combined-locale-index-01` and scoped `hub-combined-locale-finish-01` both returned **APPLIED_RESPONSE_OBSERVED**.
+
+The bounded remainder review found existing score labels/explanations in other score-bearing p6 variants (468/4HZ/51M, Chinese search4SX and4UE), and no contradiction in the inspected count/clear combinations. Those variants were preserved. This closes the identified label-consistency issue across the inspected p6 states without homogenizing their distinct update, filter or locale behavior.
