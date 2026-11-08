@@ -1,5 +1,9 @@
 # Paper portfolio audit and improvement — 8 November 2026
 
+## Current continuation status
+
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption, Market Memory exact-record comparison with actual source-record proof, and Prophet D03 selected comparison, subject identity and security-watchlist outcomes. The next foreground slice is the OS created-project opening recovery and two exact directory pointer corrections. This is a continuing design mission; the first-pass exit below is historical.
+
 ## Assignment and evidence boundary
 
 Current Chairman assignment: audit and improve the Paper designs, strengthening architecture, features and clarity across Paper. This is a design mission: Paper edits and visual evidence are the deliverable. It is not a production deployment or a new product/control plane.
@@ -77,9 +81,9 @@ Principal retains Paper edits because visual/cross-product judgment and the one 
 
 Observed Paper write policy is TOOL_SCOPED_CONTRACT_V1. set_text_content, write_html, update_pages and arrange_pages are compatible. create_artboard and update_styles are currently held by their schema; they will not be invoked or bypassed. No uncertain Paper effects exist at this initial checkpoint.
 
-## Next action
+## First-pass exit (historical)
 
-This audit pass is complete. Use the direct Paper targets and implementation contracts below. Programme-wide design acceptance and application implementation remain distinct follow-on work; no runtime deployment was part of this assignment.
+The first audit pass was complete before the Chairman extended the assignment. Use the direct Paper targets and implementation contracts below. Programme-wide design acceptance and application implementation remain distinct follow-on work; no runtime deployment was part of this assignment.
 
 
 ## Verified improvement milestone
@@ -290,7 +294,7 @@ Source reference: `macro_snapshot:fred_vintage/release_targets/CPIAUCSL_all_vint
 Observed file version, unchanged across describe and all six bounded read pages: `statv1:84838873c52326498f42c832686e12a2256dbfba03505a73afb7b6dece0e870a`.
 Observed bytes: **219151**. Separate same-carrier `/usr/bin/shasum -a 256` completed exit 0, PID54230, and returned **`eabad732825e9d6820774f067e8f86791cc3f64a6a81b655522af621c851f22c`**, matching the pinned manifest. The physical binding was read from the installed immutable runtime configuration; it was not guessed or rebound.
 
-Each exact-vintage query selected only `series, period, realtime_start, realtime_end, value, source_output_type`, used exact series/period/vintage equality, `limit:2`, the same `expected_version`, and returned continuation offsets **0 → 100000 → 200000**. Each first page had no matches and was incomplete; each second page returned its one selected record and was incomplete; each final page scanned 93,509 remaining rows, returned no additional matches and declared `scan_complete:true, next_offset:null`. Only two data records were returned in total; no corpus was downloaded. All six processes exited0.
+Each exact-vintage query selected only `series, period, realtime_start, realtime_end, value, source_output_type`, used exact series/period/vintage equality, `limit:2`, the same `expected_version`, and returned continuation offsets **0 → 100000 → 200000**. Each first page had no matches and was incomplete; each second page returned its one selected record and was incomplete; each final page scanned 93,509 remaining rows, returned no additional matches and declared `scan_complete:true, next_offset:null`. Only two data records were returned in total; no corpus was downloaded. All six processes exited 0.
 
 | Selected vintage | Offset0 receipt | Offset100000 receipt | Offset200000 completed receipt |
 | --- | --- | --- | --- |
@@ -331,10 +335,43 @@ Principal visually checked desktop, both mobile themes through EN/ZH examples, e
 
 **Remaining runtime acceptance:** source-backed unit/basis qualification, exact content-bound CPI pair projection through existing owners, authenticated consumer route and focused real-interface checks. Actual source values and artifact fingerprint have been proven in this session; do not reopen that gap without a source/version change.
 
-### Next active slice: Prophet D03 comparison and save meaning
+### Prophet D03 comparison and save meaning — source plan (now implemented)
 
 Complete the current illustrative INTC/MSFT selection’s full comparison, preserve selected identity in the insufficient-data view, and make the save object explicit. The old DEMO:CPU/DEMO:MEM reference stays untouched. Current D03 remains DRAFT / PROVISIONAL; no canonical approval is inferred.
 
 D03 draft programme source `52636ee4a8e64548983eea09bf629b6b3156b644` cites older WatchStore `fc85b0428cf8b0ca4f2fbbc5a415b2871f15a1c9`. A bounded exact-file reconciliation established unchanged `saveChecked/symbolInspect` behavior across those and the existing product pin. The source of record for this build contract is [WatchStore at the session product pin](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/site/watchstore.js), blob `46e95da158fbe8120c9cb3b56d8e7bdff27bf9ab`. It is byte-identical to freshly observed main `ad00e5676aa94d22918b3b92d8026bd45328536c`; that branch reports protected:false and is not a release/acceptance proof. Governing Mastermind law pin remains unchanged.
 
 Existing WatchStore saves securities/ticker memberships in an explicit account-owned list. It does not establish durable Prophet occurrence/comparison persistence. Proposed UI must distinguish **Add 2 securities to a watchlist** from unavailable **Save this comparison**. Waiting/saved/rejected/uncertain are different outcomes; exact-list membership inspection is read-only and never a receipt for the earlier insert or authorization to retry. No new persistence service, operation identity or automatic retry is invented.
+
+### Prophet D03 — completed Paper slice and verification
+
+[Current D03 design page](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0). Seven new draft boards complete the selected-candidate journey:
+
+| Target | Design result |
+|---|---|
+| `133D-0`, `13RK-0` | 390px dark EN/ZH full selected comparison |
+| `135O-0`, `13V8-0` | 320px light EN/ZH comparison, issuer answers stacked within each question |
+| `13HK-0`, `13YQ-0` | 390px dark EN/ZH account and watchlist destination review |
+| `13L8-0` | Six outcome specimens, existing-owner integration and required consumer proof |
+
+The comparison retains the current illustrative INTC/MSFT facts: INTC $31.20 (+1.4%), waiting on confirmation; MSFT $418.30 (+0.6%), partial evidence. Each published assessment is Nov 2, 17:00 ET and each quote observation Nov 3, 09:41 ET. Conditions, invalidations and clocks remain separate. Strategy/horizon and exact Plan links are explicitly unavailable. No overall winner, exact occurrence ID, new real-time assertion or old DEMO facts were invented. Selecting a watchlist is available as a proposed next step; saving the dated comparison is visibly unavailable.
+
+Eight insufficient-data variants (`10TD/10WD/110D/1133/11DZ/11B9/115T/118J`, all `-0`) now retain an illustrative INTC issuer/market. Body copy explicitly describes an example so it does not assert that actual Intel source checks failed. Their existing return controls and state meaning remain intact.
+
+Eight current scan variants (`11OT/127F/11Y9/122U/11TO/12L6/12C0/12GL`, all `-0`) now say **Add 2 securities**, explain that dated research is not saved, and separate quote and assessment comparisons from the save decision. Exact leaf-text readback found 73 text nodes per board, precisely three intended replacements each, zero unrelated text changes and zero missing nodes. The current directory `10NB-0` preserves all 63 prior text nodes and adds four proposal-routing text nodes under `140A–140D`.
+
+The proposed account review holds save unavailable until the existing account and owned list are resolved. `13L8-0` distinguishes destination review, waiting, confirmed/readback, no-write-attempt refusal, uncertain save and current membership inspection. Examples name an illustrative account and Research shortlist; no actual save occurred. Already-listed membership is retained. Current membership does not establish the earlier uncertain write's outcome and never permits a write retry.
+
+Source reconciliation read the canonical existing WatchStore implementation at the product pin: `saveChecked`, `symbolInspect`, `_checkedInsert`, `_saveSnapshots` and `listsFetch` are unchanged across the relevant draft/cited/product revisions. The caller must retain account, list ID/name, original requested securities and return context: outcome objects do not supply a durable operation ID, saved Prophet object ID or complete destination identity. Saved outcomes use actual `readBackAt`; uncertain outcomes retain `askedAt`; membership reads use `observedAt`. `writeRetryAllowed` remains false after inspection. Local decision notes do not constitute a durable source-bound comparison.
+
+Principal inspected full screenshots for 390 dark and 320 light comparisons, EN/ZH destination review, the outcome/build board, 320 dark ZH insufficient-data state and 320 dark ZH scan footer. The bounded critique found one concrete contract ambiguity in `13RI-0`: unconditional selection restoration across account changes. It was corrected and visually/textually read back: revalidate access, source identity and list ownership after an account change, restore only safe selection intent, and retain uncertain operations under the original account/destination. Small-screen copy wraps without observed clipping; 44px controls remain. Seven new boards occupy separate horizontal canvas positions. Fit-content height nulls are not claimed as numeric geometry proof.
+
+All edits returned **APPLIED_RESPONSE_OBSERVED**. Scoped `finish_working_on_nodes` completed for the 24 touched/new boards. Existing R2 DEMO comparison `79J-0`, p-C / `ZE5-0` uncertain-effect fence, D03 provisional status and Phase 2A acceptance are preserved. No watchlist membership, authentication, production source, trading action or deployment was changed.
+
+**Remaining runtime acceptance:** bind exact candidate/occurrence/source-generation and Plan identities; exercise existing authenticated WatchStore outcomes and focus/return behavior; prove real outcome clocks, account transitions and disabled/touch/keyboard behavior. Comparison persistence remains unavailable until its exact existing-owner object/receipt contract is established.
+
+### Next active slice: OS created-project opening recovery
+
+Read-only current-design and protected-source evidence identifies a specific gap: a project creation can be observed while the fresh project catalogue cannot resolve exactly one matching created work reference for opening. Add a disjoint proposed recovery specimen on p-E-0 using existing `ProjectPlanningJourney` and `App.openCreatedProject` owners. Preserve original created identity; retry only the exact read/selection path; keep unknown creation outcomes on original-request inspection. Open does not establish a conversation or running work.
+
+Protect current live Today/New project targets `LNV-0/N27-0/N8N-0/NBB-0` and the newer goal-first journey `PBQ-0`. Hidden prior JSX is not a visible overlap defect. Two independent directory corrections are narrowly authorized at `A3C-0` and `A3U-0`. No OS mutation has occurred yet in this continuing slice.
