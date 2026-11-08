@@ -381,3 +381,57 @@ Sources at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`:
 - [GMI state matrix](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/mockups/refs/gmi_explorer/SPECS.md), blob `3a5341d7e8416dc75a97c9e1e4814dabb226f88a`.
 
 Sixteen text nodes were updated with all four native card structures, icons, 44px controls and theme tokens preserved. Root checked all four rendered cards and read back their JSX. `gmi-recovery-states-finish-01` finished exactly those four cards. All News and GMI mutation receipts were observed applied. These changes align editable design states with existing source meanings and routes; browser binding, release and production acceptance are not claimed.
+
+## Continuation: AI Chats read recovery and conversation ownership
+
+The new work is on [AI · Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0). Fresh inspection found a concrete distinction missing from the current client: failing to read history is different from successfully reading an empty history, and selecting a history item is different from committing it as the current conversation.
+
+Three editable native compositions were added in a free band at y=4120:
+
+| Native board | Composition | Result |
+| --- | --- | --- |
+| `64I-0` · 69 | Chats history unavailable · desktop, 1440×900 | Native clone of R10 `2NN-0`, with Chats selected and an explicit list-read failure. Current question, answer, source context and illustrative unsent draft remain visible. Send belongs to the current conversation. Try loading chats again only reads history. |
+| `67G-0` · 70 | Selected chat unavailable · mobile, 390×844 | Native clone of `2PT-0`, explicitly separating current conversation “Semiconductors: participation” from selected example “Compare two stocks.” Exact-target retry and Return to current chat fit within the drawer. The background is specified as inert while the drawer is open. |
+| `6BM-0` · 71 | Chats read recovery · proposed owner contract | Current/selected identity comparison and nine contract rows define empty-list truth, qualified target reads, explicit draft switching, read-only recovery, stale-response fencing, account changes, request custody, focus and implementation proof. |
+
+These are proposed UI and interaction states, not implemented client fixes. The existing Saved cases references `2NN-0`/`2PT-0`, reopened-case boards, builder `1MO-0`, Save/monitoring holds `5M0-0`, source-gap board `5VN-0`, existing incomplete-response proposals and QA HOLD page remain unchanged.
+
+### Concrete source gap and proposed commit boundary
+
+At [templates/chat.html](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/chat.html), blob `93c56416344e6a5099308d6397bc6256d0d4d952`:
+
+- `loadThreads` maps a non-OK history read to an empty array and catches transport rejection silently. The new design distinguishes unavailable history from a valid current-account empty list.
+- `openThread` clears messages and assigns the selected `threadId` before the target GET succeeds. The proposed design retains the current conversation until the requested target's valid response qualifies a switch.
+- The existing conversation/account boundaries and local stream handling are retained as owners. Current source does not prove all proposed draft/account fencing; no completed implementation is claimed.
+
+The contract requires a target response to match the captured account, current-conversation generation, still-selected thread ID and active read attempt at commit. New target selection, Stay, Return or drawer dismissal invalidates that pending switch. This closes a race where conversation A remains current while B loads, then a late B response arrives after C is selected or the user returns to A. This validity condition stays inside the incumbent owner and does not cancel an unrelated current-chat research request.
+
+A valid selected-thread read still does not silently carry a nonempty current draft into another conversation: an explicit Stay / Discard draft and switch decision is required. No durable draft persistence across close/reopen or account changes is promised. On an account change, old-account messages, history, draft, errors and target identity must be hidden or cleared before new-account data is exposed.
+
+Retries use only the existing list or exact-target GET. They do not send a draft, create a thread, start research, refresh answer evidence, replay an uncertain operation or establish another retry queue. Duplicate read actions are disabled while pending; sign-in, permission and missing-thread outcomes keep their typed incumbent branches. Local abort remains distinct from server cancellation proof.
+
+### Verification and limits
+
+Root inspected all three final compositions, extracted their JSX (21,202 / 23,938 / 14,257 characters), and checked the revised contract screenshot after the selected-target race clarification. A bounded C3 reasoning pass found no material geometry defect and surfaced the race clarification that was applied to `6CK-0`. Both 44px mobile recovery actions and the contract footer remain visible. All mutation receipts were `APPLIED_RESPONSE_OBSERVED`; `ai-chats-recovery-finish-01` finished only the three new boards.
+
+Real consumer proof is still required for successful empty/retained reads, malformed responses, failed exact-target opens, superseded reads, dismissal during pending reads, account changes, draft choices, active/uncertain request custody, keyboard access and focus return. Native composition does not prove runtime behavior or release acceptance.
+
+## Continuation: Expectation unit provenance and selection clarity
+
+The five existing entry compositions on [Expectation Surface · Start](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) had two unsupported assertions: a USD-per-share unit absent from the source, and a “largest EPS revision” description for selected MU even though the illustrated absolute revisions include larger INTC and NKE changes.
+
+Fourteen text nodes were corrected across dark/light, desktop/mobile and English/Chinese variants, including four hidden counterpart nodes:
+
+| Meaning | Visible node IDs | Result |
+| --- | --- | --- |
+| Desktop unit basis | `KB-0`, `18G-0`, `24B-0` | Unit not recorded / 来源未记录单位, followed by the existing period-end field. |
+| Mobile unit basis | `33K-0`, `3OB-0` | Source unit is not recorded; existing period ends 2027-08 remains explicit. |
+| Selected series | `JL-0`, `194-0`, `24Z-0`, `32Z-0`, `3NR-0` | Selected example / 当前示例 · MU · EPS · Next FY / 下一财年. This identifies selection without asserting rank. |
+| Hidden counterparts | `KC-0`, `18F-0`, `JM-0`, `193-0` | Matching Chinese parity corrections, remaining hidden. |
+
+Sources at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`:
+
+- [Expectation template](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/expectation_surface.html.j2), blob `51d99c9ac76557e2dce356a53231416f5fe84a44`, explicitly forbids a unit claim when the source did not record one and ranks quick picks by absolute change.
+- [Page contract](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_PAGE_CONTRACT_2026-10-21.md), blob `bfa98c7e0316fd9f46d8e74c6e724c6cc9fe4961`, defines the period-matched estimate fields without a currency/unit field and the percentage-change basis.
+
+All numeric values, chart geometry, periods, clocks, selected MU context, colored locale conventions and native board IDs were preserved. Root verified the 14 exact text readbacks and visibility, focused unit/selection screenshots, and both full mobile compositions. Existing interaction contract `3XP-0`, source map `3ZI-0`, synthetic-identity examples, shared-state/recovery additions and Study returns were not rewritten. `expectation-parity-finish-01` finished the five original compositions after the bounded copy corrections. This is design/source alignment, not evidence of a runtime change.
