@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §56. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §§56–57. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2456,3 +2456,71 @@ Created and read back **sol/hermes-native-project-knowledge-20261108-c3** at acc
 Principal judgment confirms a separate v5 extension can reuse the same ConsumerSlot, paired OAuth, original MCP caller, Workspace reads, source-operation prepare/read/submit/reconcile, Events and Git publisher. No parallel memory, auth, uncertainty, retry or publication plane is needed. PR2175 filename overlap is ordinary semantic composition, not a transfer of its primary APPLICATION source or writer custody. Its original branch/effects/holds remain preserved.
 
 Original runtimeC26 denial, paid Fabric refusal, two AF_UNIX test denials, local exec disconnection, active primary APPLICATION writer, held398/409 and fleet predecessor/writer predicates are unchanged. C3 remains source validation only. Reuse the compatible protected-law pin66780; the inspected protected move to1890 has no governing-law or auth/EVAL overlap.
+
+## 57. Principal authorization: connected native project notes and preferences — 2026-11-08
+
+**Actual source operation:** hermes-native-project-knowledge-20261108-c3. **Single publication carrier:** [sol/hermes-native-project-knowledge-20261108-c3](https://github.com/mastermindx-market-intelligence/Mastermind/tree/sol/hermes-native-project-knowledge-20261108-c3), created/read back at accepted protected **1890f60881707da8939167e5736aa02af1d7f125** before edits. Dedicated clean C3 source validation worktree: /Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/knowledge-current-source-validation. This is a source operation, not runtime admission.
+
+### Explicit assigned-principal finite product wave
+
+Under the Chairman's current full Hermes implementation commission, the assigned integration principal authorizes the following exact source paths for the **connected v5 ProjectKnowledge consumer**:
+
+- common/coo_project_knowledge_contract.py
+- common/coo_agentos_context_contract.py
+- control_plane/coo_principal_mandate.py
+- control_plane/executive_agent_capabilities.py
+- config/executive_claude_principal_capabilities.json
+- ops/executive_os/coo_principal_host.py
+- control_plane/coo_principal_host.py
+- control_plane/executive_service.py
+- integrations/mastermind_workspace_app/installed.py
+- integrations/mastermind_executive_app/coo_installed.py
+- ops/executive_os/executive_mcp_entry.py
+- integrations/mastermind_executive_app/coo.py
+- integrations/mastermind_executive_app/coo_discovery.py
+- integrations/executive_mcp/coo.py
+- integrations/executive_mcp/server.py
+- integrations/hermes_harness/native_executive_consumer.py
+- integrations/hermes_harness/native_agentos_context.py
+- integrations/hermes_harness/native_discovery_tools.py
+- integrations/hermes_runtime/native_gateway_entry.py
+- ops/executive_os/release_manifest.py
+
+The following exact qualification/documentation paths are authorized as needed for this same connected contribution:
+
+- tests/test_coo_project_knowledge_tools.py
+- tests/test_coo_project_knowledge_context.py
+- integrations/hermes_harness/tests/test_native_project_knowledge_tools.py
+- integrations/hermes_harness/tests/test_native_discovery_tools.py
+- integrations/hermes_harness/tests/test_native_executive_consumer.py
+- integrations/hermes_harness/tests/test_native_agentos_context.py
+- tests/test_executive_coo_agentos_context.py
+- tests/test_executive_claude_principal_capabilities.py
+- tests/test_executive_coo_mcp.py
+- tests/test_executive_public_coo_composition.py
+- tests/test_os_gateway_release_manifest_bound.py
+- tests/test_hermes_native_gateway_sources.py
+- integrations/hermes_runtime/tests/test_native_gateway_entry.py
+- docs/hermes/NATIVE_PROJECT_KNOWLEDGE.md
+
+These are finite paths, not open directory exemptions. The new common module must be a value-only contract. Existing production modules retain their current owners. The new consumer wave is outside the EVAL-owned trigger and does not expand NATIVE_EVAL_INTEGRATION_PATHS or weaken its core/import/environment/process/network/workflow fences. If an exact identity-review record needs a mechanical source-pin update, identify and explicitly amend that exact path before editing; preserve all unrelated entries and refusal semantics.
+
+### Product contract / owner composition
+
+Add two finite tools through the existing native_discovery_tools registration/call owner: current knowledge reads (catalogue, project communication preference, exact opaque source at its expected DATA commit), and governed note/preference authoring (add_project_file / set_project_communication_preference with prepare/read/submit/reconcile). Use explicit v5 publication/catalogue/digest/profile selection; keep v2/v3/v4 bytes, tools and envelopes unchanged. The new profile remains disabled until its original installed admission qualifies it.
+
+Reuse the same ExecutiveContextConsumerPublication type, ConsumerSlot, native MCP connection, independently authenticated Executive/Workspace resources, original source-operation custody, private input, Events and Git publisher. Preserve matching issuer/subject/client, permissions, catalogue and owner currentness before and after awaited work. Add exact closed principal actions; do not infer write authority from the discovery action or local filesystem permissions.
+
+Authoring derives source_commit and base_revision from the actual current authenticated catalogue. Preference preparation additionally joins the current preference's expected revision, with matching current DATA snapshots and explicit EMPTY versus UNAVAILABLE. The actual request and seven-field original knowledge lookup remain immutable. Submit first reads that full original lookup, then uses the original three-field submit selection and preview witness. Notes/preferences require exactly two intended postimages; discovery keeps its eight-field lookup and three-file proof. Lost replies retain the same original future/lookup and uncertain effect; no duplicate note operation, retry queue or second call slot.
+
+Canonical notes are project files and the preference is the existing project preference record. This wave does not claim personal memory or automatic injection of every note into every model prompt. Full encoded request/result bounds must refuse oversize; no truncation with a successful-capture claim.
+
+The accepted ExecutiveService v4 path still appears to dispatch the discovery context producer then apply the v3 current-result validator. The same ingress boundary is authorized to select the exact result validator for each explicit v3/v4/v5 schema while preserving all original peer/runtime/task/currentness checks. Prove this in process without replaying either denied AF_UNIX test.
+
+### Qualification and independence
+
+Qualify the real native registration and existing signed HTTP/MCP/Workspace owner chain, exact original request/recovery identity, witness/two-file receipt, current source content digest and CODE/DATA provenance. Cover mismatched principal/work/preimage/witness, permission/catalogue/owner changes across await, original-future uncertainty and concurrent recovery, historical catalogue byte/digest stability and complete encoded-message bounds. Synthetic account/fixture source journeys do not establish installed acceptance.
+
+PR2175's shared filenames require ordinary semantic composition only; its active primary APPLICATION branch, original publication effects and independent holds are not transferred. This contribution does not include its model/provider application implementation. Do not take a former writer's source or request former-chat permission for an independent exact contribution.
+
+No runtime deployment, inference, real credential read, host activation, source-owner replacement, new vault/memory/auth/publication plane or recovery-carrier failover is authorized by this source amendment. OriginalC26/Fabric/socket denials and all held release/security obligations remain intact. **No v5 edits or qualification results exist at this authorization checkpoint. MISSION_COMPLETE=false.**
