@@ -129,7 +129,7 @@ def test_task_first_direct_execution_is_visible_in_project_and_native_briefs():
     native = (ROOT / "docs/NATIVE_EXECUTION_BRIEF.md").read_text(encoding="utf-8")
     assert "9A. TASK FIRST: operational fix -> authorized host/service direct + live proof" in block
     assert "no PR absent source change" in block
-    assert "21. Select fastest lawful route:" in block
+    assert "21. Direct principal implementation/test/repair needs no failed Fabric attempt." in block
     assert "without a failed Fabric attempt" in block
     assert "No extra review/handoff ceremony" in block
     assert "No denied-effect/EFFECT_UNKNOWN carrier swap" in block
