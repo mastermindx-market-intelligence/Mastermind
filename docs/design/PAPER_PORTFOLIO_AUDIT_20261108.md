@@ -267,4 +267,40 @@ Source contract: [origin v1](https://github.com/mastermindx-market-intelligence/
 
 Market Memory now has page `p-2-0` **02 · Record comparison · Proposed**, with duplicated existing-shell artboards `MX-0` (1440) and `P7-0` (390); their original counterparts are preserved. The new desktop comparison has January 1987, selected vintage dates 1 Jan 1997 and 20 Feb 2002, unavailable source values, unverified units, separate house observation and expected fingerprint. Mobile composition and state/entry contracts remain actively in progress. This is not a completed or deployed feature claim.
 
-The [CPI manifest](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/data/fred_vintage/release_targets/manifest.json) was read at the protected product pin. It declares 956 periods, 377 vintage dates, 293,509 rows and SHA-256 `eabad732825e9d6820774f067e8f86791cc3f64a6a81b655522af621c851f22c`; this is not a newly computed binary hash. No actual selected-period numeric values were retrieved or invented. Next: complete mobile and truthful record states, verify, save/read back, then continue Prophet D03.
+The [CPI manifest](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/data/fred_vintage/release_targets/manifest.json) was read at the session product pin. It declares 956 periods, 377 vintage dates, 293,509 rows and SHA-256 `eabad732825e9d6820774f067e8f86791cc3f64a6a81b655522af621c851f22c`; this is not a newly computed binary hash. No actual selected-period numeric values were retrieved or invented. Next: complete mobile and truthful record states, verify, save/read back, then continue Prophet D03.
+
+
+### Market Memory exact-record proof — 8 November 2026
+
+The bounded read-only Data & Lab follow-up **closed the selected-value gap**. It used the existing authorized Studio carrier and installed `/Users/chriswong/.local/bin/mmx-data-workspace`; no new reader, cache, ingestion, runtime install or data write was made. The installed accepted runtime revision observed by capabilities is `e5e84272bc9128e2577f907de4d4960e84950a9b`, separate from session source pin `ba32f20ba306f9e75b7c400992138e736b904516`.
+
+| Field | Earlier retained record | Later retained record |
+| --- | --- | --- |
+| Series | CPIAUCSL | CPIAUCSL |
+| Period | 1987-01-01T00:00:00 | 1987-01-01T00:00:00 |
+| Source vintage | 1997-01-01T00:00:00 | 2002-02-20T00:00:00 |
+| Retained source value | **111.5** | **111.4** |
+| realtime_end | 1997-01-13 | 2002-03-20 |
+| source_output_type | 2 | 2 |
+| Zero-based source row position | 180960 | 181023 |
+| Value read observation | 2026-11-08T14:26:51.119723+00:00 | 2026-11-08T14:27:03.505122+00:00 |
+| Missingness notes | None | None |
+
+Source reference: `macro_snapshot:fred_vintage/release_targets/CPIAUCSL_all_vintages.parquet`.
+Observed file version, unchanged across describe and all six bounded read pages: `statv1:84838873c52326498f42c832686e12a2256dbfba03505a73afb7b6dece0e870a`.
+Observed bytes: **219151**. Separate same-carrier `/usr/bin/shasum -a 256` completed exit 0, PID54230, and returned **`eabad732825e9d6820774f067e8f86791cc3f64a6a81b655522af621c851f22c`**, matching the pinned manifest. The physical binding was read from the installed immutable runtime configuration; it was not guessed or rebound.
+
+Each exact-vintage query selected only `series, period, realtime_start, realtime_end, value, source_output_type`, used exact series/period/vintage equality, `limit:2`, the same `expected_version`, and returned continuation offsets **0 → 100000 → 200000**. Each first page had no matches and was incomplete; each second page returned its one selected record and was incomplete; each final page scanned 93,509 remaining rows, returned no additional matches and declared `scan_complete:true, next_offset:null`. Only two data records were returned in total; no corpus was downloaded. All six processes exited0.
+
+| Selected vintage | Offset0 receipt | Offset100000 receipt | Offset200000 completed receipt |
+| --- | --- | --- | --- |
+| 1997-01-01 | `fdfa49f1a37d9046625d2d7eeca94699364dbf15927df56b35b7327e820453ec` | `bc9ab283a2588770a0103505cadf614b15655f6ec86aefb98b8c15a51579e2f4` | `12344eb3cf4407c32e0dabceadf3ae1c9fa56672f9f1fbc8bdda59683bed6be2` |
+| 2002-02-20 | `bbb992a50fad8fa416693ab2ec9ec39c0621035b50faa97ed2b2fd41973c1c6a` | `076e3899815ab1c09403ddaf1bf50ba3fc36b8e812e75c32f6596d94764eda07` | `639796e39d5460e0462f9f30488274ca2e42d11c354e3bf34e15d2a78141a284` |
+
+Final completion observations: 14:27:30.903985Z and14:27:50.775261Z. The reader itself still returns `content_sha256:null`; its query receipt is not the separate artifact checksum and this is not an implemented atomic content-bound consumer API. The adapter labels the source `unqualified_snapshot` and `production_qualification:NOT_ESTABLISHED_BY_THIS_ADAPTER`.
+
+The six-column Parquet has **no retained unit, index-base or seasonal-treatment metadata**. Paper can truthfully show111.5/111.4 as retained source values. Their stored-scale arithmetic difference is−0.1, but no qualified economic unit is established; the product proposal does not label it as percent, percentage points, basis points or verified index points. The [existing comparison owner](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/engine/rates_command_basis.py) was read by the principal: `same_basis_level_change.v1` inherits the helper’s `output_unit="bp"` default and does not require a same-period match. The CPI adapter must explicitly qualify both period and unit rather than reuse that rule unchanged.
+
+The inherited **16Oct2026 21:23UTC** Paper snapshot observation is not established by the new read or manifest. It remains separate and labelled as an inherited observation whose receipt is unbound in this proposed view. The actual8Nov verification-read times are explicit; knowledge cutoff is **Not provided**, not inferred from either clock.
+
+Applied follow-through: desktop/mobile proposed comparisons `MX-0 / P7-0` now show the two actual values and **Units and basis: Not retained**. Difference remains unavailable pending qualification. Exact earlier-record detail `YI-0`, dark mobile `105-0`, expanded provenance and recovery transitions are still being composed. Original revision-history views remain preserved and will receive a comparison entry after destination verification. Next safe work continues immediately.
