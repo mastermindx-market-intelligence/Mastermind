@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption, Market Memory exact-record comparison with actual source-record proof, and Prophet D03 selected comparison, subject identity and security-watchlist outcomes. OS created-project opening recovery and two exact directory reference corrections are also completed. Invalid project setup link recovery through the existing journey owner is now completed as well. The next foreground slice is a bounded News reading/return flow audit against its actual existing implementation. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption; Market Memory exact-record comparison with actual source-record proof; Prophet D03 selected comparison, subject identity and security-watchlist outcomes; OS created-project opening and invalid-link recovery with exact directory corrections; and the News source-reading and return proposal with EN/ZH states. The next foreground is a bounded International Markets workflow audit beyond the already accepted R14 date-label corrections. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -433,3 +433,62 @@ The original recovery contract now includes a compact proposal index `YZ2-0` for
 Principal inspected EN/ZH mobile, desktop and the appended contract screenshots; all controls and copy fit in the observed layouts. Text readback confirms required owner constraints and the unchanged protected source pin. Desktop invalid-link board lies below its corresponding created-project desktop with an 80px gap; mobile proposals have separate horizontal positions. Scoped finish completed for all three new boards and the appended contract board. All effects were **APPLIED_RESPONSE_OBSERVED**; no runtime setup navigation was performed.
 
 **Next foreground:** inspect News count-detail and publisher-reading transitions against the actual existing TickerNewsPanel / NewsCatchup owners. Preserve frozen R3 `27K-0` and accepted R2 return-header repairs. Do not invent an internal article route, review effect, reader service or persistence merely to illustrate the return flow.
+
+
+### News source reading and return — completed Paper slice
+
+File `01M5EXPMQTSBFBAM8KKG83FTZH`, page `p-1-0`, new board **`2RL-0` — PROPOSED · News reading and return · Dark EN/ZH**. Direct entry: [News states and user help](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-1-0).
+
+This closes the design gap between an expanded count disclosure, opening an actual publisher link, returning to the original mounted News tab, and explicitly returning to the headline. It uses the existing AAPL R2 specimen without borrowing the current Northwind fixture. The stage strip distinguishes the publisher tab from the three News views; no publisher URL or article body is fabricated.
+
+| Target | Purpose |
+|---|---|
+| `34J-0`, `34N-0` | Explicit proposed status, same-mounted-tab boundary, four-stage journey |
+| `355-0` | Ordered English excerpts: `356-0` before opening → `37X-0` returned unchanged example → `3AN-0` count details collapsed |
+| `3DO-0` | Story no longer in view, superseded expanded evidence, absent publisher URL |
+| `3EF-0` | Existing state ownership, identity/currentness fences, distinct opening/review/focus actions |
+| `3EV-0` | Chinese collapsed return `3EW-0`, neutral publisher handoff, missing-story fallback |
+| `3GP-0` | Source delta and required consumer proof |
+
+The complete board has seven sections, fits within a distinct 1600 × 3104 canvas at x=6998, y=-450, and does not overlap its neighboring artboards. The three English panes were corrected to chronological order after visual review. Chinese fallback now names the **“新闻 · AAPL”列表标题** precisely, rather than ambiguously referring to an article headline.
+
+#### Verified source and architecture
+
+Terminal protected master pin remains **`d7a83d3348a4fcb762d93221f19c4e94cbe4505e`**. Read:
+
+- [TickerNewsPanel.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/news/TickerNewsPanel.tsx), blob `0b0facb3839e84d54ddbf99937c74283479c120c`.
+- [NewsFlowStrip.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/news/NewsFlowStrip.tsx), blob `418034c031ffe25856b5dc3d4d880544c171e1cc`.
+- [NewsCatchup.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/news/NewsCatchup.tsx), blob `3d5ac82df72a8777d19c30c69cfda794be6d1de6`.
+- [useNewsCatchup.ts](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/news/useNewsCatchup.ts), blob `4df49fca41045d6442fced974cb9bf529daa36af`.
+- [useTickerNewsFeed.ts](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/news/useTickerNewsFeed.ts), blob `e8ca969d8a14f7e76014e60bdc1e9bc91d4bacbc`.
+- Existing catchup, flow and ladder lexicons supplied the Chinese status/control terms. No independent localization vocabulary was introduced for review states.
+
+The Macro R3 spec remains at product pin `ba32f20ba306f9e75b7c400992138e736b904516`, path `research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md`, blob `129b9b8991b8359a1c27f7402c92f1a51ca7977b`. Its November 2 amendment retains dark implementation direction and light specimen-only status; this proposal does not change that release boundary.
+
+**Publisher boundary.** Headlines and member links use supplied `row.url` / `member.url` with `target="_blank"` and `rel="noopener noreferrer"`. Missing URL produces static text and **Source link unavailable / 原文链接不可用**. The grouped-story detail endpoint returns evidence JSON, not an article reader. Returning from a browser tab provides no article-read receipt.
+
+**Reading context.** Keep ticker/editorial view, current eligible source/review filters, qualified story anchor and local scroll/focus with the existing panel. Detail validity is the existing tuple of symbol, security ID, story ID, sequence, editorial policy, editorial-view revision and view. Reuse its generation/currentness fences. Superseded evidence discards old members and offers the existing qualified detail reader; it does not replay old results.
+
+**Currentness.** The existing feed stream may update while the publisher tab is open. Return uses current counts, actual count time, membership and access. The identical before/after screenshot is expressly an unchanged-snapshot example. No second refresh service, history store, free-text query, article route, or durable reload/remount restoration is proposed.
+
+**Review boundary.** Opening a source, switching tabs, closing count details and reading a clock do not call `markStory` or `markShown`. Explicit review actions remain in NewsCatchup. Existing owner-scoped saved/session state, including valid changes from another tab, is preserved. It is not overwritten by an old departure snapshot.
+
+**Two focus destinations.** Proposed Back to headlines collapses count details and restores the still-qualified story anchor; missing/non-focusable anchors fall back to the News feed heading with an announcement. Escape closes the disclosure and focuses its trigger. At the source pin, Escape is attached only to the trigger because the implemented disclosure contains no buttons. Adding the proposed Back/Sources/How counts work controls therefore also requires descendant Escape handling in the same disclosure owner, respecting IME composition. No global shortcut is introduced.
+
+**Clock delta.** Back to headlines is not implemented at the pin. The current `flow.as_of` is displayed only inside the open disclosure. Retaining the same actual clock in the collapsed count summary is a proposed extension. An unavailable count clock is not replaced by headline or view-open time. The fixture's **02:14 AM** compact headline time could originate from updated, published or received time; it is not relabeled Published.
+
+#### Static evidence and preserved targets
+
+The AAPL fixture retains **13 reports in 24h**, **13 reports in 9 stories**, **9 days on record**, **9 of 20** comparison days, **91 reports in 7 days**, Benzinga/GlobeNewswire, and **02:35 AM** count time. The first Apple results-call story retains its New state, company-announcement identity, one outlet/one report, and distinct **02:14 AM** compact headline time. Review counts remain 3 new / 1 updated and All 5 / New 3 / Updated 1 / Reviewed 1. The panes are labeled focused excerpts, so displaying one row is not a new five-row-count discrepancy.
+
+Final JSX readback contains 201 text leaves; all 20 intended Chinese-pane replacements match exactly. The main child order is **356 → 37X → 3AN** and the collapsed pane no longer contains the count-detail subtree. Principal inspected the English journey, Chinese journey, fallback cases, owner contract and proof contract screenshots. A bounded independent reasoning critique supplied the two concrete order/focus-label fixes; no runtime or source-owner contradiction remained in that critique.
+
+New Back, selected-headline, current-reports, source-selector and question-trigger components declare 44px minimum interaction geometry. Inherited review/source-help fixture controls include 40px controls. **This is not a blanket 44px certification** and is not browser hit-target, focus, screen-reader or contrast proof. Held style mutation capability was not bypassed.
+
+Original QO specimen JSX was byte-for-byte unchanged. M3 readback showed an external shell-context text-leaf drift (M8 absent / M7 empty), while the AAPL news fixture values remained; this session did not target M3 and did not restore that unrelated change. Frozen R3 build `27K-0`, current product `27L-0 / 2G9-0 / 2JL-0`, current help `2NG-0 / 2OM-0`, accepted R2 return headers and original `QO-0 / 2F7-0` remain outside the new proposal's mutation scope. Existing count-method/source help boards share coordinates; that separate layout issue was observed but is not silently folded into this work.
+
+All logical edits returned **APPLIED_RESPONSE_OBSERVED**. Scoped `finish_working_on_nodes` completed on `2RL-0` only. No publisher page was visited, no News API was called, no story was marked reviewed, and no application code was changed by this slice.
+
+**Required consumer proof:** actual new-tab publisher URL and same-mounted-tab return; unchanged and stream-updated feeds; changed detail identity; removed story; missing URL; source/review-filter changes; owner/access invalidation; reload/remount without restoration promises; Back and descendant Escape focus; correct ARIA expansion/control state and fallback announcement; EN/ZH mobile wrapping and touch geometry. Opening/returning/closing must cause no review write and no duplicate refresh service.
+
+**Next safe phase:** inspect International Markets' current journey for a substantive, source-supported comparison or drill-in gap. Preserve all eight accepted R14 date-mode corrections and any live concurrent targets. Continue within the existing product/state owners.
