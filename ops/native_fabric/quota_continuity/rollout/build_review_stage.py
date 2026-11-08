@@ -269,6 +269,55 @@ def go_staged_dependency_hashes(manifest, candidate_hashes):
     return staged
 
 
+def _glm_core_inventory_row(row, relative, raw, source, prior):
+    """Retain the existing exact core composition metadata projection."""
+    return dict(row, source=source, sha256=sha(raw), bytes=len(raw), composition={'schema': 'mastermind.glm-native-core-source.v1', 'preimage_sha256': prior, 'candidate_sha256': GLM_CORE_DIGESTS[Path(relative).name]})
+
+
+def verify_glm_core_release_records(root, originals, generated):
+    """Admit only the authenticated core-three derivation of frozen records."""
+    names = {"native-manifest.json", "native-source-inventory.json"}
+    if type(originals) is not dict or type(generated) is not dict:
+        raise ValueError("native release records must be byte mappings")
+    if set(originals) != names or set(generated) != names:
+        raise ValueError("native release record pair differs")
+    parsed = {}
+    for name in names:
+        raw = originals[name]
+        if type(raw) is not bytes or type(generated[name]) is not bytes:
+            raise ValueError("native release records must retain raw bytes")
+        value = json.loads(raw)
+        if type(value) is not dict:
+            raise ValueError("native release record shape differs")
+        if raw != (json.dumps(value, sort_keys=True, indent=2) + "\n").encode():
+            raise ValueError("native release predecessor encoding differs")
+        parsed[name] = value
+    manifest = parsed["native-manifest.json"]
+    inventory = parsed["native-source-inventory.json"]
+    files = inventory.get("files")
+    if (type(files) is not dict or len(manifest) != 107 or
+            inventory.get("native_code_files") != 107 or set(files) != set(manifest)):
+        raise ValueError("native release predecessor closure differs")
+    for name in GO_APPLICATION_DEPENDENCIES:
+        relative = "ext/" + name
+        prior = GLM_CORE_PREIMAGES[name]
+        historical = _glm_historical_core_source(root, name).read_bytes()
+        row = files.get(relative)
+        if (sha(historical) != prior or manifest.get(relative) != prior or type(row) is not dict or
+                set(row) != {"bytes", "installed_preimage_sha256", "sha256", "source"} or
+                row["source"] != "candidate/" + name or
+                row["sha256"] != prior or row["bytes"] != len(historical)):
+            raise ValueError("native release core predecessor differs")
+        raw = _glm_core_dependency_bytes(root, name, prior)
+        manifest[relative] = sha(raw)
+        files[relative] = _glm_core_inventory_row(
+            row, relative, raw, "candidate/" + name, prior)
+    for name, value in parsed.items():
+        expected = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode()
+        if generated[name] != expected:
+            raise ValueError("native release derivation differs outside exact core successor")
+
+
 def compose_glm_application_core(root, output, manifest, files):
     """Advance one complete admitted source cohort without changing its namespace."""
     if before_glm_application_core(manifest) != manifest:
@@ -292,9 +341,7 @@ def compose_glm_application_core(root, output, manifest, files):
     for relative, (raw, source, prior) in captured.items():
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)
-        files[relative] = dict(files[relative], source=source, sha256=sha(raw), bytes=len(raw),
-            composition={"schema": "mastermind.glm-native-core-source.v1",
-                         "preimage_sha256": prior, "candidate_sha256": GLM_CORE_DIGESTS[Path(relative).name]})
+        files[relative] = _glm_core_inventory_row(files[relative], relative, raw, source, prior)
     validate_go_base_manifest(
         manifest, {name: manifest["ext/" + name] for name in GO_APPLICATION_DEPENDENCIES})
 

@@ -1,4 +1,56 @@
 {
+  "ci_followup": {
+    "actual_head_archive_qualification": "Run after source commit; exact commit/result recorded on PR before push. No installed release claimed.",
+    "fixture_repairs": [
+      "H1 inventory successor",
+      "external component retained source and captured-stage refusal",
+      "catalog and actual-archive exact derived records",
+      "historical paid initializer source comparison",
+      "provider/H2 inner-cohort negative inputs and selected historical Broker",
+      "retired credential retained inputs"
+    ],
+    "identity_review": {
+      "meaning": "application claim duration bound",
+      "mechanism": "existing whole-file SHA and exact token span; no scanner change",
+      "negative_proof": "authenticated introduction delta; missing postimage, foreign path, changed token, unrelated drift and added peer identity",
+      "source_file": "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py",
+      "source_sha256": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"
+    },
+    "observed_ci_head": "a6b41bae56edde22cbfe12b350567a9afa735333",
+    "overlapping_qualification_counts_must_not_be_summed": true,
+    "release_owner_change": {
+      "complete_expected_raw_record_comparison": true,
+      "exact_changed_native_members": [
+        "ext/go_lease_capability.py",
+        "ext/go_lease_gateway.py",
+        "ext/lease_broker.py"
+      ],
+      "exact_existing_metadata_projection_factored": true,
+      "historical_git_records_unchanged": {
+        "native-manifest.json": "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada",
+        "native-source-inventory.json": "aa4ca6b0f27e411870f9bad325aca295da1bf3fbf6c536d213d002f675eb2b68"
+      },
+      "original_record_encoding": "canonical JSON, sorted keys, indent2, terminal LF",
+      "process_free_read_only_transition_verifier": true,
+      "release_seal_and_publication_owners_unchanged": true,
+      "same_archived_builder_executions": 1,
+      "source_and_installed_preimage_fields_preserved": true,
+      "unchanged_other_members": 104,
+      "unchanged_record_fast_path_preserved": true
+    },
+    "source_checkpoint": "ci_followup_source",
+    "source_parent": "a6b41bae56edde22cbfe12b350567a9afa735333",
+    "successful_cases_in_partial_shard4_run": {
+      "failed_new_proof_input_resolved_by": "h4-glm-claim-literal-refusal-4",
+      "log_sha256": "8528c10efe5e2be1ba116eafe6b4b855371058ddf8427da453a6ae6e647b5582",
+      "tests": [
+        "test_changed_preimage_refuses_publication_despite_valid_overlay",
+        "test_missing_secure_overlay_cannot_deploy_retired_helper",
+        "test_publishes_secure_overlay_and_preserves_exact_nonimportable_evidence",
+        "test_d8_template_topology_and_protected_defaults"
+      ]
+    }
+  },
   "created_at": "2026-11-08T16:17:41.085308+00:00",
   "implementation": {
     "application_capability_domain": "mastermind.glm.application-lease-capability/v4",
@@ -47,52 +99,110 @@
     "source_qualification_is_not_live_acceptance": true
   },
   "qualification": {
+    "h4-glm-claim-literal-refusal-4": {
+      "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+      "passed": 1,
+      "seconds": 2.16,
+      "skipped": 0,
+      "source_checkpoint": "ci_followup_source",
+      "source_parent": "a6b41bae56edde22cbfe12b350567a9afa735333"
+    },
+    "h4-glm-complete-provider-h2-fixtures-1": {
+      "log_sha256": "f4ec20301e69c81086d2616dcb7485c137bd991756f66fd10d0988dcc139c12e",
+      "passed": 185,
+      "seconds": 151.27,
+      "skipped": 0,
+      "source_checkpoint": "ci_followup_source",
+      "source_parent": "a6b41bae56edde22cbfe12b350567a9afa735333"
+    },
+    "h4-glm-component-fixture-repair-1": {
+      "log_sha256": "4d2df7a96ce4a667da3ccf295f2d16c728a65ed0e861a3baa919f7bb469b02b5",
+      "passed": 5,
+      "seconds": 0.94,
+      "skipped": 0,
+      "source_checkpoint": "ci_followup_source",
+      "source_parent": "a6b41bae56edde22cbfe12b350567a9afa735333"
+    },
     "h4-glm-core-composition-qualification-1": {
       "log_sha256": "9352925e5e271773731e7ca3a390daf15479f6b144d2d059ca8d677d62821619",
       "passed": 60,
-      "seconds": 32.25
+      "seconds": 32.25,
+      "source_commit": "a6b41bae56edde22cbfe12b350567a9afa735333"
     },
     "h4-glm-facade-integrity-3": {
       "log_sha256": "74c1e3279f3e776fdd9fd48bbb6e470baccebfa985ef2c8d3dbbec88025420fa",
       "passed": 70,
-      "seconds": 6.81
+      "seconds": 6.81,
+      "source_commit": "a6b41bae56edde22cbfe12b350567a9afa735333"
+    },
+    "h4-glm-h1-fixture-repair-1": {
+      "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+      "passed": 1,
+      "seconds": 2.47,
+      "skipped": 0,
+      "source_checkpoint": "ci_followup_source",
+      "source_parent": "a6b41bae56edde22cbfe12b350567a9afa735333"
     },
     "h4-glm-identity-qualification-1": {
       "log_sha256": "eb27a136c18598aedc0e4f11e6893b614a04335a9faf3ec03433325d777e2663",
       "passed": 12,
-      "seconds": 3.61
+      "seconds": 3.61,
+      "source_commit": "a6b41bae56edde22cbfe12b350567a9afa735333"
     },
     "h4-glm-legacy-binding-and-identity-1": {
       "log_sha256": "4d2df7a96ce4a667da3ccf295f2d16c728a65ed0e861a3baa919f7bb469b02b5",
       "passed": 5,
-      "seconds": 9.04
+      "seconds": 9.04,
+      "source_commit": "a6b41bae56edde22cbfe12b350567a9afa735333"
     },
     "h4-glm-native-enrollment-and-identity-5": {
       "log_sha256": "475bcfb56b286d857c4310602373e306e2cb722ad6df6053d0e1aff939c18220",
       "passed": 23,
-      "seconds": 79.76
+      "seconds": 79.76,
+      "source_commit": "a6b41bae56edde22cbfe12b350567a9afa735333"
+    },
+    "h4-glm-release-record-and-fixture-qualification-2": {
+      "log_sha256": "b2cace8d442dfd18f85561da7ba0822d6c7c22d40c04361fb9e32fe98ee722ed",
+      "passed": 97,
+      "seconds": 59.05,
+      "skipped": 0,
+      "source_checkpoint": "ci_followup_source",
+      "source_parent": "a6b41bae56edde22cbfe12b350567a9afa735333"
     },
     "h4-glm-transport-composition-qualification-5": {
       "log_sha256": "31b7fa74284f469ce754363932e5d9ae14fd0d7da73cf3ec4cabdcf8dcc5f0ef",
       "passed": 383,
-      "seconds": 22.1
+      "seconds": 22.1,
+      "source_commit": "a6b41bae56edde22cbfe12b350567a9afa735333"
     }
   },
   "schema": "mastermind.glm-native-application-qualification.v1",
   "source_audit": {
     "git_diff_check": true,
+    "installer_shell_syntax": true,
     "no_historical_pin_replacement": true,
     "no_new_enrollment_credential_owner": true,
-    "python_compile": true
+    "protected_head_observed": "351eb1c3a0ff0246b74785687f1dc9182280f563",
+    "protected_source_path_overlap": [],
+    "python_compile": true,
+    "python_compile_count": 40
   },
   "source_base": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "source_checkpoints": [
+    {
+      "commit": "a6b41bae56edde22cbfe12b350567a9afa735333",
+      "evidence_path": "review_evidence/fabric_application/glm-native-application-qualification-20261108.json",
+      "evidence_sha256": "37ddbc6a0b914e8f8eb8ef449d397e3fc097cd36d50dbce972ee6591f9fce51d"
+    }
+  ],
   "source_only": true,
   "source_sha256": {
+    "ops/executive_os/install.sh": "7c1b7147bf5236c68c043f20ad1bda37872c9fe13050a70374a44e433783324b",
     "ops/native_fabric/paid_canonical_glm/candidate/glm_lease_capability.py": "ccfe3c6f4f08778d6d179d60da67f393f000b66e4997a2502a7ad180c6a571a6",
     "ops/native_fabric/paid_canonical_glm/candidate/glm_lease_gateway.py": "2b2e47c2e9f01ba72a33603e17465c96c084e79a32c331a8d52d0f4039bfbef7",
     "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py": "d680789e7a184b7b882a57f6cc7b0337b6bebc4e27069ac8263aeffd456c5fed",
     "ops/native_fabric/paid_canonical_glm/external-preimages.json": "3f9ceac44c1bda56f7dc4c0556e877de1d1988c2cf3ce498fef2cbae28a3fb5e",
-    "ops/native_fabric/quota_continuity/GLM_APPLICATION_HTTP.md": "fb90d2a294f864cd02008c46d532c5cdf4ba80bae8902e96249273e6a5c1fe48",
+    "ops/native_fabric/quota_continuity/GLM_APPLICATION_HTTP.md": "e2b827a85f7869792de858125e33cdb307bb3c0dc0fdcabeade97333a307633f",
     "ops/native_fabric/quota_continuity/candidate/application_http_transports.py": "dab7542087c3bb19a74e35541f807c0aa4e791919e6f6286a371c12bccca8a1d",
     "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
     "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py": "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193",
@@ -100,7 +210,7 @@
     "ops/native_fabric/quota_continuity/candidate/lease_broker.py": "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004",
     "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878",
     "ops/native_fabric/quota_continuity/rollout/application_http_realm_projection.py": "218df194b08d8eb3fb8572b6e17f277f675f0d5acda730626f1e01b94e46f276",
-    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "5993d511b9f888fa731545cd38b2f5a47847506cc4dd44621c4e10aec080ce8c",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "2f8ed515a55ef30851fbff3abb7fb1836d37e512eddcc06fc4e0f2f5c81a21df",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py": "b602bfeb2dff3216b18417f1673f308221594d2c3274bb59bc7be1fe4c65c1ec",
     "ops/native_fabric/quota_continuity/rollout/native_install.py": "d9cf51664719d215dc62ee24befed0660e5deeb0642e8a9c3af9663c3dfa2d17",
     "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_capability.py": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
@@ -111,16 +221,25 @@
     "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker_provider_h2.py": "831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173",
     "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/native_generation.py": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
     "ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py": "d0f9997a3fb2b78db1093868a750a8f834654fb8d87be39ae7ff61691c6f3426",
+    "ops/native_fabric/quota_continuity/rollout/test_retired_credential_preimage.py": "8d7f6aba79e9f163975c504a836e01ba54041b3cc166fe6890e6506e455155c6",
     "ops/native_fabric/quota_continuity/tests/test_glm_application_admission.py": "92f85060435bfc492c95c1039cb2def7901c8fea0eba0ae38e24421ac1d48298",
     "ops/native_fabric/quota_continuity/tests/test_glm_application_handler_composition.py": "0c5b1af0467a8c095c6dfc06b15333a8b28eb0c492dbf14ac449613e2621f645",
     "ops/native_fabric/quota_continuity/tests/test_glm_application_transports.py": "40880ae10e365e2191cefccfa2a0f72f41a1e1a539be6dc7f1be7c825c73ad5b",
+    "ops/native_fabric/quota_continuity/tests/test_go_application_release_closure.py": "e59af75b5e793c617cf1b749df217b8e4a037d2c20d0f48db2e8223bc3eb4f60",
     "ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py": "a09d45d0bd08ae1b60170db7a7d8b275a959ef6be5a6aefadf9be3201756833e",
-    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "a811ce5032f62dd3117f2f082f9ee32790cffc12c116219a9f6f3e40cede91c9",
-    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py": "a044a075d7d1afdcc85072101f35f3ce113df59a9db40e5a0f21b8f451eed810",
-    "tests/executive_fabric_release_identity_review.py": "c6cfbaf67ccb365f0ef31b4e873b21e87ebe426e5a411f3408788fde1d704ec7",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "ba4a65379717d82fd6b416afa0b39ebd7e9b630ebb36d29aec3b9ab38a8f955f",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py": "4e8adcd35c8c4164497cd35d9612857a950903517d8e259a8b6b5e96baa01a75",
+    "tests/executive_fabric_release_identity_review.py": "749778c62ce9875fd6fafa69e320dd24c999e19e48a4b8f31cdc64248adfcd2f",
+    "tests/test_catalog_native_release_staging.py": "c1844d86164b77da32769485dc6948cd492ecdce547a0b082644b9fcf51d099b",
+    "tests/test_ceo_submit_armed_composition.py": "cae632f1554b48004b29e4d57c7279fbb90ea0bd75cdbb0104db8d1996fe3134",
     "tests/test_glm_native_application_enrollment.py": "ea3d2dcfb7a15fa45fb4d6c28e46b9d4c63115bb5822cd8d75a9d733051fd850",
+    "tests/test_glm_native_release_record_transition.py": "1feeadf29333b0f507a7a751e3d0d08e920d90dc68ac7477fde0430aca305894",
     "tests/test_host_pull_launchd_admission.py": "196c9cd0b8173c93aab23ea129bc3f2d34a247e2b29c302b07b24356f82377f1",
     "tests/test_paid_glm_canonical.py": "cdfbf3166f20c0affe2ec892b5bff9f3d0a97ae4c27400ba6152b77e2303a224",
-    "tests/test_paid_glm_external_source_inventory.py": "25ab05145139a4124ea1c4989637788ad60e0da8946085bf09ddc6065616a09e"
-  }
+    "tests/test_paid_glm_external_source_inventory.py": "25ab05145139a4124ea1c4989637788ad60e0da8946085bf09ddc6065616a09e",
+    "tests/test_paid_initializer.py": "76c88591f19ff366fbd868dc99bbac0b6f66150e819f26cc238464292578987a",
+    "tests/test_paid_provider_entry_linux.py": "36a96840aac7c62d90760ae18009347170522126362b4e016caf8cbe0ee1e931",
+    "tests/test_paid_release_archive_composition.py": "01f99e315941f6065c3c47991f53f1ac5a02867f07860ace5047f962d55ea67a"
+  },
+  "updated_at": "2026-11-08T17:37:28.031277+00:00"
 }

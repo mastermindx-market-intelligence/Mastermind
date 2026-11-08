@@ -611,6 +611,24 @@ def test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_pat
     stage=tmp_path/'source-snapshot';stage.mkdir()
     quota=ROOT/'ops/native_fabric/quota_continuity'
     inventory=json.loads((quota/'rollout/native-source-inventory.json').read_bytes())
+    # Project only the reviewed core successor into this DATA-only fixture.
+    # Preserve the frozen inventory and independently check both ends.
+    reviewed_core = {
+        "ext/go_lease_capability.py": (
+            "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940", 24577,
+            "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86", 25031),
+        "ext/go_lease_gateway.py": (
+            "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949", 45716,
+            "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193", 47610),
+        "ext/lease_broker.py": (
+            "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", 211236,
+            "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004", 217721),
+    }
+    assert len(inventory['files']) == inventory['native_code_files'] == 107
+    for name,(preimage,old_size,candidate,new_size) in reviewed_core.items():
+        row=inventory['files'][name]
+        assert (row['sha256'],row['bytes']) == (preimage,old_size)
+        inventory['files'][name]=dict(row,sha256=candidate,bytes=new_size)
     for name,row in inventory['files'].items():
         source=(quota/row['source']).resolve()
         assert source.is_relative_to(ROOT/'ops/native_fabric')

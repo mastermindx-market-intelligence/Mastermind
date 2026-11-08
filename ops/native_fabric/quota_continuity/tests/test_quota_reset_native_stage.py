@@ -113,6 +113,7 @@ def test_original_installer_validates_actual_composed_broker_and_complete_artifa
 @pytest.mark.parametrize("replacement", ["preimage", "foreign"])
 def test_partial_or_foreign_cohort_refuses_without_mutating_manifest(stages, member, replacement):
     actual = base_manifest(stages.base)
+    actual = builder.before_glm_application_core(actual)
     actual["ext/" + member] = (builder.QUOTA_RESET_PREIMAGES[member]
                               if replacement == "preimage" else "0" * 64)
     before = dict(actual)
@@ -175,6 +176,9 @@ def copy_sources(tmp_path):
         shutil.copyfile(ROOT / "candidate" / name, root / "candidate" / name)
         suffix = ".patch" if name in builder.QUOTA_RESET_PATCHES else ""
         shutil.copyfile(ROOT.parent / "grok47/quota_billing" / (name + suffix), overlay / (name + suffix))
+    historical = Path("rollout/preimages/glm_application_core_5c3d/lease_broker.py")
+    (root / historical).parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / historical, root / historical)
     # Copied candidates are the reviewed maintenance-composed parent.
     # Establish that valid fixture before any intentional source mutation.
     builder.quota_reset_sources(root, composed_parent=True)
@@ -184,22 +188,27 @@ def copy_sources(tmp_path):
 @pytest.mark.parametrize("surface", ["preimage", "patch", "overlay"])
 def test_changed_reviewed_source_refuses_before_any_stage_write(tmp_path, surface):
     root, overlay = copy_sources(tmp_path)
-    target = {"preimage": root / "candidate/lease_broker.py",
+    target = {"preimage": root / "rollout/preimages/glm_application_core_5c3d/lease_broker.py",
               "patch": overlay / "pick.py.patch",
               "overlay": overlay / "quota_remote.py"}[surface]
     target.write_bytes(target.read_bytes() + b"\n# unqualified drift\n")
-    with pytest.raises(ValueError, match="quota reset source digest"):
+    expected = ("GLM native core source commitment differs" if surface == "preimage"
+                else "quota reset source digest")
+    with pytest.raises(ValueError, match=expected):
         builder.quota_reset_sources(root, composed_parent=True)
 
 
 @pytest.mark.parametrize("member", sorted(builder.QUOTA_RESET_DIGESTS))
 def test_exact_bytes_through_symlink_are_not_a_qualified_source(tmp_path, member):
     root, _ = copy_sources(tmp_path)
-    source = root / "candidate" / member
+    source = (root / "rollout/preimages/glm_application_core_5c3d" / member
+              if member == "lease_broker.py" else root / "candidate" / member)
     retained = source.with_suffix(".retained")
     source.rename(retained)
     source.symlink_to(retained)
-    with pytest.raises(ValueError, match="regular file"):
+    expected = ("GLM native core requires an explicit source file"
+                if member == "lease_broker.py" else "regular file")
+    with pytest.raises(ValueError, match=expected):
         builder.quota_reset_sources(root, composed_parent=True)
 
 

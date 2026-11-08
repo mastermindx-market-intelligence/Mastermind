@@ -163,7 +163,12 @@ REVIEWED_FILES = {
  'ops/executive_os/bootstrap-host.sh': {'sha256': 'acb2c16a703b018fe110bf88ff576b60a32b2d029db24a769e58dac3d98daf60',
  'sites': ((784, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
            (786, 97, 120, 'str', '_mastermind_agent_relay'),
-           (792, 89, 92, 'int', '457'))}}
+           (792, 89, 92, 'int', '457'))},    # Application claim lifetime cap; this literal is not host identity.
+    "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py": {
+        "sha256": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
+        "sites": ((326, 113, 116, "int", "900"),),
+    },
+}
 
 # Candidate-only fixed finite publisher principal/mode postimage for independent
 # review: SHA and precise sites are frozen, not computed at runtime. This does

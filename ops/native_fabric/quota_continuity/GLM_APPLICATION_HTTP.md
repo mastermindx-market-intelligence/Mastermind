@@ -67,6 +67,28 @@ for the base, provider, H2, and provider-plus-H2 Broker variants. It does not
 change historical ancestry pins. `native_generation.py` remains validator
 source and is not a runtime payload member.
 
+## Archived release derivation
+
+The committed 107-member manifest and source inventory remain historical
+inputs. During ordinary Executive release staging, the existing installer
+captures both raw records and runs its archived builder once. Unchanged
+records retain the original raw-equality path. If the records change, a pure
+verifier from that same builder admits only the authenticated three-member
+core successor.
+
+The verifier derives both complete expected records from the captured
+originals. It checks the historical and candidate source commitments, original
+byte counts and source fields, and exact composition metadata. All other 104
+members, installed-preimage fields and top-level inventory values remain
+unchanged. Canonical raw-byte comparison rejects partial transitions,
+unrelated metadata changes and ambiguous encodings. Verification performs
+no process launch, record rewrite or second builder execution.
+
+The existing release seal then captures the actual derived records and
+payload bytes. The source commit/tree provenance and exclusive publication
+owner remain unchanged. This default 107-member derivation does not enable
+the optional GLM pair or select a native generation.
+
 ## Original finite enrollment
 
 The existing routed v9 service specification accepts an optional

@@ -380,6 +380,7 @@ raise SystemExit(not result.wasSuccessful() or bool(result.skipped))
 @pytest.mark.parametrize("replacement", ["preimage", "foreign"])
 def test_provider_quota_partial_or_foreign_quartet_refuses(combined_builds, member, replacement):
     actual = json.loads((combined_builds.quota_base / "native-manifest.json").read_bytes())
+    actual = builder.before_glm_application_core(actual)
     actual["ext/" + member] = (builder.PROVIDER_QUOTA_RESET_PREIMAGES[member]
                               if replacement == "preimage" else "0" * 64)
     before = dict(actual)
