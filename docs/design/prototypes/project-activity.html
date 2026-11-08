@@ -189,7 +189,7 @@
       <div class="app-bar"><span>Projects / Mastermind OS</span><span class="preview-tag">Design preview</span></div>
       <div class="workspace">
         <header class="project-head">
-          <div><h2>Mastermind OS</h2><p>One clear daily workflow.</p></div>
+          <div><h2 id="project-title" tabindex="-1">Mastermind OS</h2><p>One clear daily workflow.</p></div>
           <div class="project-actions">
             <button type="button" class="button" id="files-button" data-open="files" aria-controls="files-panel" aria-expanded="false">Files</button>
             <button type="button" class="button" id="details-button" data-open="details" aria-controls="details-panel" aria-expanded="false">Project details</button>
@@ -363,7 +363,7 @@
       document.querySelectorAll('[data-open]').forEach(button => button.setAttribute('aria-expanded','false'));
       disclosure = null;
       if (disclosureOpener && disclosureOpener.isConnected && !disclosureOpener.closest('[hidden]')) disclosureOpener.focus();
-      else $('details-button').focus();
+      else $('project-title').focus();
     }
     document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => {
       if (disclosure === button.dataset.open) closePanel();
