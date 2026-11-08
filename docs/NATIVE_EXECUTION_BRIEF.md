@@ -23,6 +23,17 @@ Reuse first: `docs/REUSE_FIRST_ENGINEERING.md` at the same pin; no new gate.
 
 ## Deliver useful work
 
+Choose the execution route from the assigned effect, not from GitHub habit:
+- Operational repair: use actually authorized host/service tools, change only
+  the qualified operational target and verify its live consumer. No PR absent
+  a source change; respect actual consent, writer and effect fences.
+- Source implementation: edit on the original owned branch/workspace or an
+  authorized isolated carrier, run affected tests, and use required protected
+  release. Runtime proof is owed only when the assigned consumer changed.
+- Independent bounded work: delegate to admitted Fabric only when the full
+  framing, return, repair and integration loop beats direct execution. A failed
+  worker dispatch is not required before lawful principal implementation.
+
 Assignment permits ordinary in-scope investigation, source edits, tests and
 reversible repair under actual grants. Do not ask for a second approval, design
 signoff, Slack claim, ACK-of-ACK or original-owner reply. Plan only enough to
