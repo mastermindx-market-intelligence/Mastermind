@@ -1,0 +1,57 @@
+{
+  "composed_paths": {
+    "ops/executive_os/install.sh": "7d2bf22e3e27f9d40bfc9aec4e025e53ad0e91088028eeee4244a7b54ade2e43",
+    "ops/executive_os/os_release_assets.py": "fbb84593ba28e63edf205323544db49bff71d7353ce3f57bc7ba1365af527f0c",
+    "tests/executive_fabric_release_identity_review.py": "8dd0f8169152f919564e02d5b3ba4e45f368809701beab70e6a87d1c7ba40cbd",
+    "tests/test_os_release_assets.py": "06e7228284fd83efae23dfcd4678c64367618ab5f5c0dac42cd2c4653c4f872c"
+  },
+  "governing_index_unchanged": true,
+  "installed": false,
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "preserved_paths": {
+    "app/mastermind_os/src-tauri/src/main.rs": "ee10512a0b376d50f4b108471a8bccdf60aa42560a69aa1411470ce294a4f2cf",
+    "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx": "222d4916cfd1168809ef71bfe68f23d0c528790a148fbdce68d5f8bd138dec63",
+    "integrations/mastermind_executive_app/os_assets.py": "ebfdb5a1041d94f8c4c35b4fb9580e0cd96a3434b7ba99e5d1c54f772fb44e40"
+  },
+  "protected_delta_files": 45,
+  "protected_disjoint_exact": 41,
+  "protected_parent": "036e8d26cb2b158856f1250b2dfc9cca9700f28a",
+  "provider_calls": 0,
+  "recorded_at": "2026-11-08T06:13:08.752936+00:00",
+  "schema": "mastermind.deepseek_c37_protected_composition.v1",
+  "semantic_union": [
+    "C34 exact archive inputs plus protected final output0755 under umask077",
+    "native Worker ACP stage-only support plus protected stage-only Codex isolation",
+    "exact composed installer/native/autonomy/provider identity rows plus protected Hermes browser protocol row",
+    "actual archive regression plus restrictive installer umask regression"
+  ],
+  "services_changed": false,
+  "source_parent": "625c13a29c9b471f91f0c1a8d77592b9a07a3fd5",
+  "test_receipt": {
+    "argv": [
+      "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-o",
+      "addopts=",
+      "tests/test_os_release_assets.py",
+      "tests/test_executive_release_stage_only.py",
+      "tests/test_executive_fabric_release_identity_review.py",
+      "tests/test_executive_release_identity_review.py"
+    ],
+    "base_sha": "625c13a29c9b471f91f0c1a8d77592b9a07a3fd5",
+    "changed_inputs": [],
+    "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+    "exit_code": 0,
+    "finished_at": "2026-11-08T06:11:36.591412+00:00",
+    "inputs_unchanged": true,
+    "log_sha256": "7de2f770dd8fe7ad193bfc82ecfe8a31f31910ea4046ff1b9f71db9f2e24b478",
+    "path": "/private/tmp/mmx-dsh-c37-master-tests-20261108-pro1.json",
+    "sha256": "225fbf5187766e970c342e21dd053c0ba199d26513040ff6f6a1b7c4452f30f1",
+    "source_inputs": 7125,
+    "started_at": "2026-11-08T06:08:35.007975+00:00"
+  },
+  "test_result": "434 passed",
+  "verified_governing_pin": "03512c5799a0f281a117be0d58babdd65101a46c"
+}
