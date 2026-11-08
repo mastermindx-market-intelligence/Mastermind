@@ -487,3 +487,217 @@ def test_installed_network_config_accepts_exact_v3_profile():
         "executive_mcp_profile": "web_ceo_v3",
     }
     assert entry.validate_document(raw) == raw
+
+
+# Reader failures are fixture responses; these tests open no socket and do not
+# invoke an installed provider, credential source, or MDM client.
+_DIAGNOSTIC_PRIVATE_DETAIL = "UNTRUSTED_READER_DETAIL /private/fixture-only"
+
+
+class _FailedReadIngressClient:
+    def __init__(self, response):
+        self.response = response
+        self.frames = []
+
+    async def send_frame(self, _path, frame):
+        self.frames.append(frame)
+        return self.response
+
+
+def _reader_failure_response(reason, boundary="outer"):
+    if boundary == "inner":
+        result = legacy.error_envelope(
+            "executive_state",
+            mode=legacy.ServerMode.READONLY,
+            generated_at="2026-09-23T06:00:00Z",
+            code=reason,
+            message=_DIAGNOSTIC_PRIVATE_DETAIL,
+        )
+        result["server_version"] = v2.WEB_CEO_V2_SERVER_VERSION
+        return CeoIngressResponse(
+            transport=TRANSPORT_SENT_OK, ok=True, result=result,
+            detail=_DIAGNOSTIC_PRIVATE_DETAIL,
+        )
+    return CeoIngressResponse(
+        transport=TRANSPORT_SENT_OK, ok=False,
+        error={"code": reason, "message": _DIAGNOSTIC_PRIVATE_DETAIL},
+        detail=_DIAGNOSTIC_PRIVATE_DETAIL,
+    )
+
+
+def _diagnostic_reader(response):
+    client = _FailedReadIngressClient(response)
+    mdm = FakeMdm()
+    reader = WebCeoV3CeoIngressReadGateway(
+        "/tmp/fixture-only.sock", client, mdm_reader=mdm
+    )
+    return reader, client, mdm
+
+
+@pytest.mark.parametrize(
+    "boundary,reason",
+    [
+        ("outer", "peer_credentials_unavailable"),
+        ("outer", "peer_denied"),
+        ("outer", "ingress_unavailable"),
+        ("outer", "unsupported_ingress_schema"),
+        ("outer", "backend_unavailable"),
+        ("outer", "grounding_unavailable"),
+        ("outer", "internal_error"),
+        ("inner", "backend_unavailable"),
+        ("inner", "grounding_unavailable"),
+        ("inner", "internal_error"),
+        ("inner", "timeout"),
+    ],
+)
+def test_reader_diagnostic_preserves_only_a_qualified_reason(boundary, reason):
+    reader, client, mdm = _diagnostic_reader(
+        _reader_failure_response(reason, boundary)
+    )
+    result = run(reader.call("executive_state", {}))
+    assert result["ok"] is False
+    assert result["mode"] == "readonly"
+    assert result["server_version"] == "1.5.0"
+    assert result["data"] is None
+    assert result["grounding"] == {}
+    assert set(result["error"]) == {"code", "message"}
+    assert result["error"]["code"] == "backend_unavailable"
+    assert result["error"]["message"] == (
+        "Executive reader is unavailable in the installed backend. "
+        "Read-only describes this read operation; submission and "
+        "execution readiness were not observed. "
+        f"Upstream reason: {reason}."
+    )
+    assert "UNTRUSTED_READER_DETAIL" not in json.dumps(result)
+    assert "/private/fixture-only" not in json.dumps(result)
+    assert len(client.frames) == 1
+    assert client.frames[0]["tool"] == "executive_state"
+    assert client.frames[0]["arguments"] == {}
+    assert mdm.calls == []
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "not_sent",
+        "sent_unknown",
+        "not_sent_with_error",
+        "sent_unknown_with_error",
+        "outer_timeout",
+        "unknown_code",
+        "non_string_code",
+        "outer_result_and_error",
+        "outer_non_boolean_ok",
+        "inner_extra_error_field",
+        "inner_wrong_version",
+    ],
+)
+def test_reader_diagnostic_does_not_qualify_an_untrusted_response(case):
+    from integrations.mastermind_executive_app.gateway import (
+        TRANSPORT_NOT_SENT,
+        TRANSPORT_SENT_UNKNOWN,
+    )
+
+    if case in {"not_sent", "sent_unknown"}:
+        response = CeoIngressResponse(
+            transport=(
+                TRANSPORT_NOT_SENT if case == "not_sent"
+                else TRANSPORT_SENT_UNKNOWN
+            ),
+            detail=_DIAGNOSTIC_PRIVATE_DETAIL,
+        )
+    elif case in {"not_sent_with_error", "sent_unknown_with_error"}:
+        response = CeoIngressResponse(
+            transport=(
+                TRANSPORT_NOT_SENT if case == "not_sent_with_error"
+                else TRANSPORT_SENT_UNKNOWN
+            ),
+            ok=False,
+            error={"code": "ingress_unavailable", "message": _DIAGNOSTIC_PRIVATE_DETAIL},
+        )
+    elif case in {"outer_timeout", "unknown_code", "non_string_code"}:
+        reason = {
+            "outer_timeout": "timeout",  # Not admitted by the outer wire.
+            "unknown_code": "ingress_unavailable UNTRUSTED_READER_DETAIL",
+            "non_string_code": ["ingress_unavailable"],
+        }[case]
+        response = _reader_failure_response(reason)
+    elif case in {"outer_result_and_error", "outer_non_boolean_ok"}:
+        response = CeoIngressResponse(
+            transport=TRANSPORT_SENT_OK,
+            ok=False if case == "outer_result_and_error" else 0,
+            result={} if case == "outer_result_and_error" else None,
+            error={"code": "ingress_unavailable", "message": _DIAGNOSTIC_PRIVATE_DETAIL},
+        )
+    else:
+        response = _reader_failure_response("backend_unavailable", "inner")
+        if case == "inner_extra_error_field":
+            response.result["error"]["upstream_reason"] = "ingress_unavailable"
+        else:
+            response.result["server_version"] = "unqualified"
+
+    reader, client, mdm = _diagnostic_reader(response)
+    result = run(reader.call("executive_state", {}))
+    assert result["ok"] is False
+    assert result["error"]["code"] == "backend_unavailable"
+    assert "Upstream reason:" not in result["error"]["message"]
+    assert "UNTRUSTED_READER_DETAIL" not in json.dumps(result)
+    assert "/private/fixture-only" not in json.dumps(result)
+    assert len(client.frames) == 1
+    assert mdm.calls == []
+
+
+@pytest.mark.parametrize(
+    "reason,public_code",
+    [
+        ("authority_refused", "backend_refused"),
+        ("backend_refused", "backend_refused"),
+        ("response_too_large", "output_too_large"),
+    ],
+)
+def test_reader_diagnostic_preserves_existing_refusal_classification(reason, public_code):
+    reader, client, mdm = _diagnostic_reader(_reader_failure_response(reason))
+    result = run(reader.call("executive_state", {}))
+    assert result["error"]["code"] == public_code
+    assert "Upstream reason:" not in result["error"]["message"]
+    assert "UNTRUSTED_READER_DETAIL" not in json.dumps(result)
+    assert len(client.frames) == 1
+    assert mdm.calls == []
+
+
+@pytest.mark.parametrize("profile", ["legacy", "web_ceo", "web_ceo_v2"])
+def test_reader_diagnostic_keeps_prior_profile_messages_frozen(profile):
+    from integrations.mastermind_executive_app.gateway import (
+        CeoIngressReadGateway,
+        WebCeoCeoIngressReadGateway,
+        WebCeoV2CeoIngressReadGateway,
+    )
+
+    cls = {
+        "legacy": CeoIngressReadGateway,
+        "web_ceo": WebCeoCeoIngressReadGateway,
+        "web_ceo_v2": WebCeoV2CeoIngressReadGateway,
+    }[profile]
+    response = _reader_failure_response("ingress_unavailable")
+    expected = (
+        "Executive reader is unavailable in the installed backend. "
+        "Read-only describes this read operation; submission and "
+        "execution readiness were not observed."
+    )
+    # Direct class invocation remains compatible with the prior static helper.
+    assert cls._read_failure(response) == ("backend_unavailable", expected)
+    client = _FailedReadIngressClient(response)
+    result = run(cls("/tmp/fixture-only.sock", client).call("executive_state", {}))
+    assert result["error"] == {"code": "backend_unavailable", "message": expected}
+    assert len(client.frames) == 1
+
+
+def test_reader_diagnostic_invalid_arguments_do_not_send():
+    reader, client, mdm = _diagnostic_reader(
+        _reader_failure_response("ingress_unavailable")
+    )
+    result = run(reader.call("executive_state", {"unexpected": True}))
+    assert result["error"]["code"] == "invalid_input"
+    assert "Upstream reason:" not in result["error"]["message"]
+    assert client.frames == []
+    assert mdm.calls == []

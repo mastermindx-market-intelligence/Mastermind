@@ -50,6 +50,16 @@ class WebCeoV3CeoIngressReadGateway(WebCeoV2CeoIngressReadGateway):
     ) -> dict[str, Any]:
         return validate_web_ceo_v3_tool_arguments(name, arguments)
 
+    @classmethod
+    def _classified_upstream_failure(
+        cls, upstream_code: str
+    ) -> tuple[str, str]:
+        code, message = super()._classified_upstream_failure(upstream_code)
+        # Add only the validated enum, never raw backend text or inferred readiness.
+        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+            message += f" Upstream reason: {upstream_code}."
+        return code, message
+
     async def call(
         self, name: str, arguments: Mapping[str, Any]
     ) -> dict[str, Any]:
