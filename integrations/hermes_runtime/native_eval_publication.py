@@ -167,21 +167,29 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         draft["timing"][target] = _utc_ms(execution[source])
     draft["timing"]["monotonic_duration_ms"] = execution["duration_ms"]
     draft["resources"]["elapsed_ms"] = execution["duration_ms"]
-    if transport["attempts"]:
+    from .native_transport_observation import APPLICATION_SCHEMA
+    application_observed = transport["schema"] == APPLICATION_SCHEMA
+    application_attempts = transport["application_attempts"] if application_observed else []
+    if transport["attempts"] or application_attempts:
         draft["observation_availability"]["coverage"]["provider_requests"] = {
             "status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
     # Scalar observations must cover every retained logical call and dispatch,
     # with no lost instrumentation record, unsupported route or in-flight span.
-    calls, dispatches, attempts = (transport[key] for key in ("calls", "dispatches", "attempts"))
+    calls, dispatches = transport["calls"], transport["dispatches"]
+    http_attempts = transport["attempts"]
+    attempts = [*http_attempts, *application_attempts]
     if (transport["installation"]["status"] != "qualified" or transport["overflow"]
             or transport["errors"] or observation["overflow"] or observation["errors"]
             or observation.get("metadata_overflow") or not calls or not dispatches or not attempts
             or any(row["state"] == "entered" or row["invalid_fields"] for row in (*calls, *dispatches))
             or any(row["state"] == "entered" or row["request"]["body_state"] != "observed_json_object"
-                   for row in attempts)
+                   for row in http_attempts)
+            or any(row["state"] != "returned" or row["response"] is None for row in application_attempts)
+            or application_observed and any(row["state"] != "headers_returned" for row in http_attempts)
             or {row["call_sequence"] for row in dispatches} != {row["sequence"] for row in calls}
             or {row["dispatch_sequence"] for row in attempts} != {row["sequence"] for row in dispatches}
-            or any(row["client_binding"] != "qualified_sync_httpx" for row in dispatches)
+            or any(row["client_binding"] not in ({"qualified_sync_httpx", "qualified_application"}
+                   if application_observed else {"qualified_sync_httpx"}) for row in dispatches)
             or selected_inputs is None or selected_inputs["errors"]):
         return
     # Native API retries can reuse api_request_id while rebuilding content.
@@ -222,7 +230,7 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
                 or attempt["request"]["content_fields"] != event["fields"]):
             return
     from .native_transport_observation import SCHEMA as CURRENT_TRANSPORT_OBSERVATION, PROVIDER_SCHEMAS
-    if transport["schema"] in PROVIDER_SCHEMAS:
+    if transport["schema"] in PROVIDER_SCHEMAS or application_observed:
         # Identify the frozen public runtime selector only when its label
         # matched samples at dispatch, original factory return and every
         # retained HTTP-send boundary. This does not attest factory inputs,
@@ -280,7 +288,7 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
             draft[group][key] = values[0]
 
     for field, path in (("seed", "randomness.seed"), ("reasoning_effort", "execution.reasoning_effort")):
-        uniform(path, [row[field].get("value") if row[field]["status"] == "present"
+        uniform(path, [row[field].get("value") if row.get(field, {}).get("status") == "present"
             and (field != "reasoning_effort" or row[field]["value"] in {"low", "medium", "high"})
             else None for row in requests])
     # Explicit wire sampling excludes implicit SDK/provider defaults. Retain
@@ -294,6 +302,9 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         draft["execution"]["model_requested"] = selected
     elif any(row["model"]["status"] == "observed_digest" and row["model"] != expected for row in requests):
         unavailable["execution.model_requested"] = "OBSERVATION_CONFLICT"
+    # APPLICATION request content is an entry snapshot, not an independently
+    # verified owner-wire request. Its source-qualified owner receipt remains
+    # separately retained in trace, including original/routed commitments.
     # A response-reported label is not verified serving-model identity.
 
 

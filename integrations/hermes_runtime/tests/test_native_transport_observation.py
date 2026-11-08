@@ -102,6 +102,9 @@ def engine(native, monkeypatch):
     middleware = sys.modules["hermes_cli.middleware"]
     monkeypatch.setattr(middleware, "run_llm_execution_middleware", lambda payload, next_call, **kw: next_call(payload), raising=False)
 
+    # Restore the optional original APPLICATION method alongside HTTPX hooks.
+    from integrations.hermes_application_fabric.client import HermesApplicationClient
+    monkeypatch.setattr(HermesApplicationClient, "create", HermesApplicationClient.create)
     # Restore global HTTPX hooks after each isolated qualification fixture.
     import httpx._client as client_module
     monkeypatch.setattr(httpx.Client, "_send_single_request", httpx.Client._send_single_request)

@@ -26,6 +26,8 @@ SCHEMA = "mastermind.hermes_native_transport_observation/v3"
 PROVIDER_SCHEMA_V2 = "mastermind.hermes_native_transport_observation/v2"
 PREVIOUS_SCHEMA = "mastermind.hermes_native_transport_observation/v1"
 PROVIDER_SCHEMAS = frozenset({SCHEMA, PROVIDER_SCHEMA_V2})
+APPLICATION_SCHEMA = "mastermind.hermes_native_transport_observation/v4"
+APPLICATION_COVERAGE = "selected_nonstream_httpx_and_application_owner_only"
 COVERAGE = "selected_nonstream_sync_httpx_only"
 EXECUTION_STAGE = "original_execute_admission_wrapper"
 HTTP_STAGE = "httpx_client_send_single_request"
@@ -54,6 +56,7 @@ ERRORS = frozenset({
     "unsupported_dispatch", "unsupported_client", "multiple_clients", "client_changed",
     "clock_unavailable", "clock_regression", "process_observation_unavailable",
     "process_changed", "wire_metadata_unavailable", "response_metadata_unavailable",
+    "application_identity_unavailable", "application_return_unavailable",
 })
 _call_context = ContextVar("mastermind_native_transport_call", default=None)
 _dispatch_context = ContextVar("mastermind_native_transport_dispatch", default=None)
@@ -229,6 +232,7 @@ def _process(launch):
 class _Span:
     record: dict
     monotonic_start: int | None
+    task_id: str | None = None
 
 
 class Contribution:
@@ -237,6 +241,7 @@ class Contribution:
     def __init__(self, scope, installation):
         self.scope, self.installation = scope, installation
         self.calls, self.dispatches, self.attempts = [], [], []
+        self.application_attempts, self.application_seen = [], False
         self.errors, self.overflow = set(), False
         credentials = installation.credential_installation
         self.credential_scope = None
@@ -285,7 +290,11 @@ class Contribution:
             return None
         wall, mono = self._clock_start()
         record = {"state": "entered", "started_at_ms": wall, "finished_at_ms": None, "duration_ms": None}
-        if kind == "attempt":
+        if kind == "application":
+            record.update(dispatch_sequence=dispatch_sequence, request=request, response=None,
+                          runtime_provider=_runtime_provider(agent))
+            records, maximum = self.application_attempts, MAX_ATTEMPTS
+        elif kind == "attempt":
             record.update(dispatch_sequence=dispatch_sequence, request=_request_projection(request), response=None,
                           runtime_provider=_runtime_provider(agent), auth_mechanism="unavailable")
             records, maximum = self.attempts, MAX_ATTEMPTS
@@ -314,17 +323,24 @@ class Contribution:
         with self.scope.live.event_stream.lock, self.scope.lock:
             if self.scope.closed or not self.scope.current() or not self.scope.adopted(agent):
                 return None
-            if len(records) >= maximum:
+            if len(records) >= maximum or (kind in {"attempt", "application"}
+                    and len(self.attempts) + len(self.application_attempts) >= MAX_ATTEMPTS):
                 self.overflow = True
                 return None
             record["sequence"] = len(records) + 1
-            size = _observation()._encoded_size(record) + UPDATE_RESERVE_BYTES
+            from .native_application_observation import UPDATE_RESERVE_BYTES as APPLICATION_RESERVE
+            size = _observation()._encoded_size(record) + (APPLICATION_RESERVE if kind == "application" else UPDATE_RESERVE_BYTES)
             if self.scope.metadata_bytes + size > _observation().MAX_METADATA_BYTES:
                 self.overflow = self.scope.metadata_overflow = True
                 return None
             self.scope.metadata_bytes += size
             records.append(record)
-        return _Span(record, mono)
+        return _Span(record, mono, (identifiers or {}).get("effective_task_id") if kind == "call" else None)
+
+    def mark_application(self, agent):
+        with self.scope.live.event_stream.lock, self.scope.lock:
+            if not self.scope.closed and self.scope.current() and self.scope.adopted(agent):
+                self.application_seen = True
 
     def finish(self, agent, span, state, **fields):
         if span is None or not self.scope._tool_current(agent):
@@ -408,7 +424,8 @@ class Contribution:
                 self.execution.update(process_end=end, same_process=same)
 
     def document(self, *, force_empty=False):
-        return copy.deepcopy({
+        from .native_application_observation import STAGE as APPLICATION_STAGE, CLIENT_SHA256
+        value = {
             "schema": SCHEMA, "coverage": COVERAGE, "http_stage": HTTP_STAGE,
             "installation": self.installation.description(), "complete_evaluation": False,
             "provider_delivery_proven": False, "model_identity_verified": False,
@@ -416,12 +433,18 @@ class Contribution:
             "dispatches": [] if force_empty else self.dispatches,
             "attempts": [] if force_empty else self.attempts,
             "errors": sorted(self.errors), "overflow": self.overflow or force_empty,
-        })
+        }
+        if self.application_seen:
+            value.update(schema=APPLICATION_SCHEMA, coverage=APPLICATION_COVERAGE,
+                         application_stage=APPLICATION_STAGE, application_client_source_sha256=CLIENT_SHA256,
+                         application_attempts=[] if force_empty else self.application_attempts)
+        return copy.deepcopy(value)
 
 
 class _Dispatch:
-    def __init__(self, contribution, agent, span):
+    def __init__(self, contribution, agent, span, task_id=None):
         self.contribution, self.agent, self.span = contribution, agent, span
+        self.task_id = task_id
         self.client = None
         self.credential = None
         try:
@@ -502,6 +525,9 @@ def prepare(binding, vendor):
     except Exception:
         return Installation(binding, reason="transport_source_unavailable")
 
+    from .native_application_observation import qualify as qualify_application
+    application_source = qualify_application()
+
     def scope():
         value = _observation()._current.get()
         return value if value is not None and value.binding is binding else None
@@ -569,7 +595,7 @@ def prepare(binding, vendor):
             contribution.error("unbound_logical_call")
         span = note(contribution, "begin", "dispatch", agent,
                     caller=caller_span)
-        context = _Dispatch(contribution, agent, span)
+        context = _Dispatch(contribution, agent, span, caller_span.task_id if caller_span is not None else None)
         qualified = (current() and getattr(agent, "api_mode", None) == "chat_completions"
                      and getattr(agent, "provider", None) != "moa")
         if not qualified:
@@ -582,11 +608,17 @@ def prepare(binding, vendor):
             client = make_client(*args, **kwargs)
             if qualified and not context.failed:
                 try:
-                    transport_client = getattr(client, "_client", None)
-                    supported = (isinstance(transport_client, client_class) and current()
-                        and all(getattr(getattr(transport_client, name, None), "__func__", None)
-                                is (observed_single if name == "_send_single_request" else method)
-                                for name, method in original_methods.items()))
+                    is_application = (application_source is not None
+                        and type(client) is application_source.client)
+                    if is_application:
+                        supported = current() and application_source.client_current(client, observed_application)
+                        transport_client = client
+                    else:
+                        transport_client = getattr(client, "_client", None)
+                        supported = (isinstance(transport_client, client_class) and current()
+                            and all(getattr(getattr(transport_client, name, None), "__func__", None)
+                                    is (observed_single if name == "_send_single_request" else method)
+                                    for name, method in original_methods.items()))
                 except Exception:
                     transport_client, supported = None, False
                 if not supported or (context.client is not None and context.client is not transport_client):
@@ -598,8 +630,12 @@ def prepare(binding, vendor):
                 else:
                     context.client = transport_client
                     note(contribution, "check_provider_client", agent, span)
-                    note(contribution, "update", agent, span, client_binding="qualified_sync_httpx")
-                    if context.credential is not None:
+                    note(contribution, "update", agent, span,
+                         client_binding="qualified_application" if is_application else "qualified_sync_httpx")
+                    if is_application:
+                        note(contribution, "mark_application", agent)
+                        note(contribution, "update", agent, span, auth_client_check="unavailable")
+                    if context.credential is not None and not is_application:
                         try:
                             context.credential.bind(client)
                             note(contribution, "update", agent, span,
@@ -625,8 +661,10 @@ def prepare(binding, vendor):
             context.responses.clear()
             if context.credential is not None:
                 try:
-                    note(contribution, "update", agent, span,
-                         auth_client_check=context.credential.client_status())
+                    status = ("unavailable" if application_source is not None
+                              and type(context.client) is application_source.client
+                              else context.credential.client_status())
+                    note(contribution, "update", agent, span, auth_client_check=status)
                 except Exception:
                     credential_failure(context)
                 finally:
@@ -635,6 +673,39 @@ def prepare(binding, vendor):
                     except Exception:
                         credential_failure(context)
             note(contribution, "finish", agent, span, state)
+
+    def observed_application(client, **kwargs):
+        context, owner = _dispatch_context.get(), scope()
+        if context is None or owner is None or context.contribution is not owner.transport:
+            return application_source.create(client, **kwargs)
+        contribution, agent = context.contribution, context.agent
+        snapshot, attempt = None, None
+        try:
+            if (context.failed or context.client is not client or context.span is None
+                    or not current() or not application_source.client_current(client, observed_application)):
+                raise ValueError("application binding changed")
+            snapshot = application_source.snapshot(context, kwargs)
+            attempt = note(contribution, "begin", "application", agent,
+                dispatch_sequence=context.span.record["sequence"], request=snapshot[2])
+        except Exception:
+            contribution.error("application_identity_unavailable")
+        try:
+            result = application_source.create(client, **kwargs)
+        except BaseException:
+            note(contribution, "finish", agent, attempt, "raised")
+            raise
+        projected = None
+        try:
+            if (snapshot is None or not current() or context.failed
+                    or not application_source.client_current(client, observed_application)
+                    or not application_source.unchanged(snapshot)):
+                raise ValueError("application return binding changed")
+            projected = application_source.project(result, snapshot)
+        except Exception:
+            contribution.error("application_return_unavailable")
+        note(contribution, "finish", agent, attempt,
+             "returned" if projected is not None else "returned_unobserved", response=projected)
+        return result
 
     original_single = original_methods["_send_single_request"]
     def observed_single(client, request):
@@ -677,7 +748,8 @@ def prepare(binding, vendor):
         binding.launch.check()
         if (calls.perform_api_call is not call or conversation.perform_api_call is not call
                 or helpers._dispatch_nonstreaming_api_request is not dispatch
-                or any(getattr(client_class, name) is not method for name, method in original_methods.items())):
+                or any(getattr(client_class, name) is not method for name, method in original_methods.items())
+                or application_source is not None and not application_source.current(application_source.create)):
             raise RuntimeRefusal("NATIVE_TRANSPORT_ORIGINAL_BINDING_CHANGED")
         # All objects are qualified native modules/classes, with no user setter.
         # A partial exceptional install is never retried or reported unavailable.
@@ -685,6 +757,8 @@ def prepare(binding, vendor):
         conversation.perform_api_call = observed_call
         helpers._dispatch_nonstreaming_api_request = observed_dispatch
         client_class._send_single_request = observed_single
+        if application_source is not None:
+            application_source.client.create = observed_application
         calls._mmx_transport_observation_bound = True
         helpers._mmx_transport_observation_bound = True
         client_module._mmx_transport_observation_bound = True
@@ -852,13 +926,19 @@ def _validate_response(value):
 
 def validate_document(value):
     """Closed historical projection, never a claim of producer authenticity."""
+    application_observed = type(value) is dict and value.get("schema") == APPLICATION_SCHEMA
+    extra = ("application_stage", "application_client_source_sha256", "application_attempts") if application_observed else ()
     _shape(value, ("schema", "coverage", "http_stage", "installation", "complete_evaluation",
                    "provider_delivery_proven", "model_identity_verified", "execution", "calls",
-                   "dispatches", "attempts", "errors", "overflow"))
-    _enum(value["schema"], {*PROVIDER_SCHEMAS, PREVIOUS_SCHEMA})
-    provider_observed = value["schema"] in PROVIDER_SCHEMAS
-    auth_observed = value["schema"] == SCHEMA
-    for key, expected in (("coverage", COVERAGE), ("http_stage", HTTP_STAGE)):
+                   "dispatches", "attempts", "errors", "overflow", *extra))
+    _enum(value["schema"], {*PROVIDER_SCHEMAS, PREVIOUS_SCHEMA, APPLICATION_SCHEMA})
+    provider_observed = value["schema"] in PROVIDER_SCHEMAS or application_observed
+    auth_observed = value["schema"] == SCHEMA or application_observed
+    if application_observed:
+        from .native_application_observation import STAGE as APPLICATION_STAGE, CLIENT_SHA256
+        _enum(value["application_stage"], {APPLICATION_STAGE})
+        _enum(value["application_client_source_sha256"], {CLIENT_SHA256})
+    for key, expected in (("coverage", APPLICATION_COVERAGE if application_observed else COVERAGE), ("http_stage", HTTP_STAGE)):
         _enum(value[key], {expected})
     if any(value[key] is not False for key in ("complete_evaluation", "provider_delivery_proven", "model_identity_verified")):
         raise ValueError("unsupported evidence promotion")
@@ -967,7 +1047,8 @@ def validate_document(value):
                             raise ValueError("logical call identity disagreement")
                     elif "unbound_logical_call" not in errors:
                         raise ValueError("missing unbound call error")
-                    _enum(record["client_binding"], {"pending", "unsupported", "multiple", "qualified_sync_httpx"})
+                    _enum(record["client_binding"], {"pending", "unsupported", "multiple", "qualified_sync_httpx"}
+                          | ({"qualified_application"} if application_observed else set()))
                     if record["client_binding"] == "multiple" and "multiple_clients" not in errors:
                         raise ValueError("missing multiple-client error")
                     if provider_observed:
@@ -975,6 +1056,39 @@ def validate_document(value):
                         _enum(check, {"pending", "matched", "unavailable", "conflicting"})
                         if check in {"matched", "conflicting"} and record["runtime_provider"]["status"] != "observed_digest":
                             raise ValueError("unobserved runtime provider comparison")
+    if application_observed:
+        from .native_application_observation import validate_entry, validate_return
+        records = value["application_attempts"]
+        if type(records) is not list or len(records) + counts["attempts"] > MAX_ATTEMPTS:
+            raise ValueError("shared transport attempt bound")
+        counts["application_attempts"] = len(records)
+        for sequence, record in enumerate(records, 1):
+            _shape(record, ("sequence", "state", "started_at_ms", "finished_at_ms", "duration_ms",
+                           "dispatch_sequence", "request", "response", "runtime_provider"))
+            if type(record["sequence"]) is not int or record["sequence"] != sequence:
+                raise ValueError("application sequence disagreement")
+            _enum(record["state"], {"entered", "raised", "returned", "returned_unobserved"})
+            _validate_timing(record)
+            if record["state"] == "entered" and any(record[key] is not None for key in ("finished_at_ms", "duration_ms")):
+                raise ValueError("unfinished application terminal time")
+            _integer(record["dispatch_sequence"], positive=True)
+            if record["dispatch_sequence"] > counts["dispatches"]:
+                raise ValueError("foreign application dispatch")
+            dispatch = value["dispatches"][record["dispatch_sequence"] - 1]
+            if dispatch["client_binding"] not in {"qualified_application", "multiple"}:
+                raise ValueError("application without qualified client")
+            validate_entry(record["request"])
+            native = record["request"]["native_identity"]
+            if dispatch["identity"] != {"agent_session_id": native["session_id"],
+                    "turn_id": native["turn_id"], "api_request_id": native["api_request_id"]}:
+                raise ValueError("application native identity disagreement")
+            _validate_scalar(record["runtime_provider"], "model")
+            if (record["state"] == "returned") != (record["response"] is not None):
+                raise ValueError("application returned evidence disagreement")
+            if record["state"] == "returned_unobserved" and "application_return_unavailable" not in errors:
+                raise ValueError("application unavailable evidence unmarked")
+            if record["response"] is not None:
+                validate_return(record["response"], record["request"])
     if installation["status"] == "unavailable" and any(counts.values()):
         raise ValueError("records from unavailable instrumentation")
     if _observation()._encoded_size(value) > _observation().MAX_METADATA_BYTES:

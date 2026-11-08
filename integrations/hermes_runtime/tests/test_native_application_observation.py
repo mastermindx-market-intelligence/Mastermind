@@ -1,0 +1,291 @@
+"""Actual pinned native worker and original APPLICATION adapter, without I/O.
+
+The admitted owner and its immutable response type are explicit fixtures.
+They do not qualify Broker behavior, credentials, a provider, or a live Trial.
+"""
+import copy
+from dataclasses import dataclass
+import hashlib
+import json
+from types import SimpleNamespace
+
+import httpx
+import pytest
+
+from integrations.hermes_application_fabric import client as application
+from integrations.hermes_runtime import native_application_observation as leaf
+from integrations.hermes_runtime import native_eval_publication as publication
+from integrations.hermes_runtime import native_request_observation as observation
+from integrations.hermes_runtime import native_transport_observation as transport
+from integrations.hermes_runtime.tests.test_native_transport_observation import (
+    engine, native, module, run_admission, sdk, success,
+)
+
+
+@dataclass(frozen=True)
+class OwnerObservationFixture:
+    encoded: str
+
+    @property
+    def document(self):
+        return json.loads(self.encoded)
+
+
+def bound_fixture(monkeypatch, agent, *, exact=False, automatic=True, task="task-A", change=None):
+    # Exact owner type is fixture-only; the original adapter still performs its
+    # actual typed-return, currentness, identity, model and response checks.
+    module(monkeypatch, "engine.fabric_inference_client", ApplicationObservation=OwnerObservationFixture)
+    binding = object.__new__(application.ApplicationBinding)
+    binding.operation_id = "original-operation"
+    binding.session_id, binding.turn_id = agent.session_id, "turn-A"
+    binding.model = "model-1" if exact or not automatic else None
+    binding.requested_model = "model-1" if exact else "host-selection"
+    binding.automatic, binding._max_output_tokens = automatic, 128
+    binding._authorized = lambda _: True
+    calls = []
+    def create(**kwargs):
+        calls.append(copy.deepcopy(kwargs))
+        scope = {"schema": "mastermind.application_route_scope.v1", "pools": ["go"]}
+        receipt = {
+            "schema": "mastermind.fabric_application_observation.v2",
+            "disposition": "terminal", "effect_unknown": False,
+            "turn_id": binding.operation_id, "request_id": kwargs["request_id"],
+            "routing": {
+                "schema": "mastermind.fabric_application_route.v2" if exact else "mastermind.fabric_application_route.v1",
+                "requested_model": binding.model, "route_scope": scope,
+                "route_scope_digest": transport._hash(scope),
+                "selection_digest": "a" * 64, "request_digest": "b" * 64,
+                "routed_request_digest": None if exact else "c" * 64,
+                "pool": "go", "selected_model": "model-1", "mode": "native",
+                "protocol": "chat", "driver": "fixture", "profile": "fixture",
+                "source": "fixture", "recipe_digest": None,
+                "output_contract": {"mode": "hard_maximum", "max_tokens": 128}},
+            "serving_model": "model-1", "usage": {"input_tokens": 11, "output_tokens": 7},
+        }
+        response = SimpleNamespace(model="model-1", stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="PRIVATE_ANSWER")],
+            usage=SimpleNamespace(input_tokens=11, output_tokens=7))
+        if change:
+            change(binding, receipt, response)
+        response.application_observation = OwnerObservationFixture(json.dumps(receipt))
+        return response
+    owner = SimpleNamespace(_closed=False, _timeout=5, messages=SimpleNamespace(create=create))
+    binding._owner = owner
+    call = application.NativeCall(agent.session_id, task, "turn-A", "request-A")
+    request = {"model": binding.requested_model, "messages": [{"role": "user", "content": "PRIVATE_INPUT"}],
+               "max_tokens": 128}
+    return SimpleNamespace(binding=binding, call=call, request=request, calls=calls)
+
+
+def invoke(engine, monkeypatch, *, after=None, before=None, **options):
+    seen = {}
+    async def handle(ref, row, agent):
+        bound = bound_fixture(monkeypatch, agent, **options)
+        seen.update(bound=bound, agent=agent)
+        if before:
+            before(bound, agent)
+        with application.call_scope(bound.binding, bound.call):
+            result = engine.invoke(agent, bound.request, application.HermesApplicationClient)
+        seen["result"] = result
+        if after:
+            after(result, bound, agent)
+        engine.results.execution_result.get()["result"] = {
+            "final_response": "PRIVATE_ANSWER", "completed": True, "messages": []}
+        return "PRIVATE_ANSWER"
+    ref, row, agent, result = run_admission(engine, behavior=handle)
+    seen["document"] = engine.authority.pending_results[row["admission_id"]].get(observation.RESULT_KEY)
+    return SimpleNamespace(**seen)
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_original_worker_detaches_owner_return_before_native_mutation(engine, monkeypatch, exact):
+    def mutate(result, *_):
+        result.application_observation.routing.request_digest = "f" * 64
+        result.application_observation.usage.input_tokens = 999
+    out = invoke(engine, monkeypatch, exact=exact, after=mutate)
+    value = out.document["transport"]
+    assert value["schema"] == transport.APPLICATION_SCHEMA
+    assert transport.validate_document(value) == value
+    row = value["application_attempts"][0]
+    assert row["response"]["owner_request_sha256"] == "b" * 64
+    assert row["response"]["usage"]["input_tokens"] == 11
+    assert row["request"]["native_identity"]["task_id"] == "task-A"
+    assert row["request"]["content_sha256"] != row["response"]["owner_request_sha256"]
+    assert row["state"] == "returned" and value["attempts"] == []
+    assert value["dispatches"][0]["client_binding"] == "qualified_application"
+    assert value["dispatches"][0]["auth_client_check"] == "unavailable"
+    assert value["errors"] == [] and len(out.bound.calls) == 1
+    assert len(engine.factories) == len(engine.cleanups) == 1
+    assert all(value[k] is False for k in ("complete_evaluation", "provider_delivery_proven", "model_identity_verified"))
+    raw = json.dumps(out.document)
+    assert "PRIVATE_INPUT" not in raw and "PRIVATE_ANSWER" not in raw and "host-selection" not in raw
+
+
+@pytest.mark.parametrize("options", [{"task": "wrong-task"}, {"automatic": False}])
+def test_original_success_with_unbound_or_missing_receipt_stays_successful(engine, monkeypatch, options):
+    out = invoke(engine, monkeypatch, **options)
+    value = out.document["transport"]
+    assert out.result.choices[0].message.content == "PRIVATE_ANSWER"
+    assert value["application_attempts"] == []
+    assert "application_identity_unavailable" in value["errors"]
+    assert len(out.bound.calls) == 1
+    assert transport.validate_document(value) == value
+
+
+@pytest.mark.parametrize("field,value", [
+    ("request_id", "hermes:wrong"), ("turn_id", "wrong-operation"), ("serving_model", "wrong-model")
+])
+def test_original_adapter_rejects_foreign_receipt_without_replay(engine, monkeypatch, field, value):
+    seen = []
+    def change(binding, receipt, response):
+        seen.append(receipt)
+        receipt[field] = value
+    from integrations.hermes_application_fabric.errors import HermesFabricError
+    with pytest.raises(HermesFabricError):
+        invoke(engine, monkeypatch, change=change)
+    assert len(seen) == 1
+
+
+def test_shape_failure_does_not_replace_original_result(engine, monkeypatch):
+    def change(binding, receipt, response):
+        receipt["routing"]["request_digest"] = "malformed"
+    out = invoke(engine, monkeypatch, change=change)
+    value = out.document["transport"]
+    assert out.result.choices[0].message.content == "PRIVATE_ANSWER"
+    assert value["application_attempts"][0]["state"] == "returned_unobserved"
+    assert value["application_attempts"][0]["response"] is None
+    assert value["errors"] == ["application_return_unavailable"]
+    assert transport.validate_document(value) == value
+
+
+def test_original_exception_identity_is_preserved(engine, monkeypatch):
+    original_error = KeyboardInterrupt("synthetic original interruption")
+    def change(*_):
+        raise original_error
+    with pytest.raises(KeyboardInterrupt) as caught:
+        # Avoid a thread: a BaseException deliberately is not an SDK Exception.
+        original_invoke = engine.invoke
+        engine.invoke = lambda *args, **kw: original_invoke(*args, threaded=False, **kw)
+        invoke(engine, monkeypatch, change=change)
+    assert caught.value is original_error
+
+
+def test_late_seal_does_not_add_return_evidence(engine, monkeypatch):
+    seen = {}
+    def change(binding, receipt, response):
+        scope = observation._current.get()
+        with scope.live.event_stream.lock, scope.lock:
+            seen.update(scope=scope, before=scope.transport.document())
+            scope.closed = True
+    out = invoke(engine, monkeypatch, change=change)
+    # The explicitly sealed fixture owner cannot later publish a new envelope.
+    # Its original returned object is preserved and the in-flight span stays
+    # unchanged; late observation does not manufacture a terminal receipt.
+    assert out.result.choices[0].message.content == "PRIVATE_ANSWER"
+    assert out.document is None
+    assert seen["scope"].transport.document() == seen["before"]
+    assert seen["before"]["application_attempts"][0]["state"] == "entered"
+
+
+def test_shared_metadata_limit_keeps_original_result(engine, monkeypatch):
+    def before(bound, agent):
+        scope = observation._current.get()
+        scope.metadata_bytes = observation.MAX_METADATA_BYTES - 1
+    out = invoke(engine, monkeypatch, before=before)
+    assert out.result.choices[0].message.content == "PRIVATE_ANSWER"
+    value = out.document["transport"]
+    assert value["overflow"] and value["application_attempts"] == []
+    assert len(json.dumps(out.document).encode()) <= observation.MAX_METADATA_BYTES
+
+
+def test_closed_v4_rejects_cross_kind_identity_auth_and_commitment_changes(engine, monkeypatch):
+    out = invoke(engine, monkeypatch)
+    base = out.document["transport"]
+    for change in (
+        lambda v: v["dispatches"][0].update(client_binding="qualified_sync_httpx"),
+        lambda v: v["dispatches"][0].update(auth_client_check="matched"),
+        lambda v: v["application_attempts"][0]["request"]["native_identity"].update(task_id="other"),
+        lambda v: v["application_attempts"][0]["response"].update(owner_routed_request_sha256=None),
+        lambda v: v["application_attempts"][0].update(extra=True),
+        lambda v: v.update(schema=transport.SCHEMA),
+    ):
+        value = copy.deepcopy(base)
+        change(value)
+        with pytest.raises(ValueError):
+            transport.validate_document(value)
+
+
+def test_mixed_original_paths_share_one_graph_and_publication_gate(engine, monkeypatch):
+    seen = {}
+    async def handle(ref, row, agent):
+        bound = bound_fixture(monkeypatch, agent)
+        with application.call_scope(bound.binding, bound.call):
+            engine.invoke(agent, bound.request, application.HermesApplicationClient)
+        engine.invoke(agent, bound.request, lambda: sdk(lambda _: httpx.Response(200, json=success())),
+                      request_id="http-request")
+        seen["bound"] = bound
+        engine.results.execution_result.get()["result"] = {"completed": True, "messages": [], "final_response": "done"}
+        return "done"
+    _, row, _, _ = run_admission(engine, behavior=handle)
+    doc = engine.authority.pending_results[row["admission_id"]][observation.RESULT_KEY]
+    value = doc["transport"]
+    assert len(value["application_attempts"]) == len(value["attempts"]) == 1
+    assert transport.validate_document(value) == value
+    assert {v["client_binding"] for v in value["dispatches"]} == {"qualified_sync_httpx", "qualified_application"}
+    # A missing assembly join prevents all request-scalar publication, while
+    # timing/process evidence and honest partial provider coverage survive.
+    draft = {"execution": {}, "timing": {}, "resources": {},
+             "observation_availability": {"coverage": {}}, "_selected_model": "host-selection"}
+    marker = {"source": {"release": "a" * 40}}
+    publication._wire_observations(draft, {}, doc, marker, None)
+    assert draft["observation_availability"]["coverage"]["provider_requests"]["status"] == "PARTIAL"
+    assert "model_requested" not in draft["execution"] and "provider" not in draft["execution"]
+
+
+@pytest.mark.parametrize("mutation", ["converter", "code", "defaults", "binding"])
+def test_source_or_binding_drift_cannot_retain_success_evidence(engine, monkeypatch, mutation):
+    def change(binding, receipt, response):
+        if mutation == "converter":
+            monkeypatch.setattr(application, "to_owner_request", lambda *a, **k: {})
+        elif mutation == "code":
+            original = application.to_owner_request
+            monkeypatch.setattr(original, "__code__", (lambda *a, **k: {}).__code__)
+        elif mutation == "defaults":
+            monkeypatch.setattr(application.to_owner_request, "__defaults__", ("changed",))
+        else:
+            binding._authorized = lambda _: True
+    out = invoke(engine, monkeypatch, change=change)
+    assert out.result.choices[0].message.content == "PRIVATE_ANSWER"
+    assert len(out.bound.calls) == 1
+    row = out.document["transport"]["application_attempts"][0]
+    assert row["state"] == "returned_unobserved" and row["response"] is None
+    assert "application_return_unavailable" in out.document["transport"]["errors"]
+
+
+def test_original_authorization_revocation_does_not_return_executable_result(engine, monkeypatch):
+    calls = []
+    def change(binding, receipt, response):
+        calls.append(receipt["request_id"])
+        binding._authorized = lambda _: False
+    from integrations.hermes_application_fabric.errors import HermesFabricError
+    with pytest.raises(HermesFabricError):
+        invoke(engine, monkeypatch, change=change)
+    assert len(calls) == 1
+
+
+def test_application_and_httpx_share_attempt_cap(engine, monkeypatch):
+    monkeypatch.setattr(transport, "MAX_ATTEMPTS", 1)
+    async def handle(ref, row, agent):
+        bound = bound_fixture(monkeypatch, agent)
+        with application.call_scope(bound.binding, bound.call):
+            engine.invoke(agent, bound.request, application.HermesApplicationClient)
+        result = engine.invoke(agent, bound.request, lambda: sdk(lambda _: httpx.Response(200, json=success())),
+                               request_id="second-request")
+        assert result.choices[0].message.content == "PRIVATE_OUTPUT"
+        engine.results.execution_result.get()["result"] = {"completed": True, "messages": [], "final_response": "done"}
+        return "done"
+    _, row, _, _ = run_admission(engine, behavior=handle)
+    value = engine.authority.pending_results[row["admission_id"]][observation.RESULT_KEY]["transport"]
+    assert len(value["application_attempts"]) == 1 and value["attempts"] == []
+    assert value["overflow"] is True
+    assert transport.validate_document(value) == value
