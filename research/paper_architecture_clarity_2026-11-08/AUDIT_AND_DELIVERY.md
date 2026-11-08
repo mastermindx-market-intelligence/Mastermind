@@ -350,3 +350,41 @@ The continued Chairman assignment remains active. This is a verified design incr
 - Paper read transport was intermittent during the early continuation. No modifying call was in flight. Bounded same-carrier reads later succeeded when narrowed and serialized; no restart, replacement tunnel, fallback Paper writer or unknown-effect replay occurred.
 
 Next active design units: explicit selected-bar → AI handoff, Scripts destination fidelity, GMI contextual issuer return, and two precise shared interaction-contract additions. Existing save/recovery work and held AXON destination remain preserved.
+
+
+## Continuation delivery 2 — explicit Terminal handoffs and shared interaction bindings
+
+### Terminal: source-grounded feature states
+
+Extended the existing editable behavior and Scripts studies in file `01M3NSZGE8JWN2EZCSF0DT05RM`, page `p-17-0`. No additional artboard or alternate chart, AI, script, navigation or state owner was created. The existing ten-board set and p-18-0 Macro capacity continuation were preserved.
+
+- Behavior board `1W4S-0` now contains section `1XV6-0`: selected reader bar → explicitly attached AI context → chart changed / reattach before Send. The original fixture identity is `002326.SZ · 3D · 15 Oct 2026`; the changed-chart specimen uses `D` without inventing another bar date, quote, timezone or market value. Existing identity components were cloned for consistent attribution.
+- `Ask about this bar` (`1XWM-0`) opens/binds through the existing Brain path; it does not send a question. Composer Send is disabled without a valid question/context. On a chart change, Send remains disabled until a valid bar is explicitly reattached. Completed answers retain captured identity and late old-context results cannot masquerade as current answers.
+- Unavailable-bar recovery `1XXD-0` withholds attachment and returns to the existing selection path; it never substitutes the latest bar.
+- Scripts board `1WI8-0`, existing content `1WIB-0`, now contains section `1XVC-0`: accepted destination, no accepted destination, and confirmed attachment. Fixture `My Momentum` and `002326.SZ · 3D` are preserved.
+- With no accepted destination, `Open Terminal to add` (`1XZJ-0`) is navigation only. A destination must be accepted before the existing Add intent is consumed; the current automatically consumed `addScript` query cannot be treated as passive selection state. No new picker or intent store was introduced.
+- `1Y36-0` explicitly distinguishes a saved script from unconfirmed chart attachment. Its “script was saved” branch requires a fresh matching save receipt; otherwise the existing save-reconciliation state takes precedence. Repeat Add is withheld during attachment.
+- Builder notes `1XXK-0` / `1Y3D-0` retain exact symbol/interval/pane/bar/data-generation checks, one-use navigation, dirty-buffer protection, legitimate focus restoration and existing owner boundaries.
+
+Source basis: Terminal PR [#1270](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1270), inspected head `357c32f1a330dda9362955361ae0ab30a3e54048`; `ChartPanel.tsx`, `TerminalShell.tsx`, `VisualIntelligencePanel.tsx`, `aiContext.ts`, `chartReadoutSnapshot.ts`, `visualIntelligence.ts`, `PineEditor.tsx`, and the committed D06 Paper exports. The D06 [interaction contract](https://github.com/mastermindx-market-intelligence/macro/blob/83db1e3043845da02db304d7b667e4fb455e0860/research/design_candidates/production_design_20261102/d06/INTERACTION_STATES.md) already identifies the explicit bar bridge as proposed owner work.
+
+All new sections visibly say **Proposed interaction · Illustrative data**. These are editable design/interaction improvements, not a claim that the code path is implemented or deployed. Root inspected screenshots of both sections, incorporated two substantive read-only advisory findings, and inspected their final screenshots. Text, controls and state distinctions are legible and unclipped. Owned artboards were explicitly released.
+
+### F02: two precise shared bindings
+
+Added two rows to builder board `4NV-0` in file `01M312VSDSZFVT45674GDVJVZN`, page `p-7-0`, using clones of the existing acceptance-card component:
+
+1. `9WR-0`: same-view Evidence & method jumps focus the named visible heading, preserve route/lens/filter/sort/compare state and router-owned hash, scroll immediately for reduced motion, and continue Tab within the destination.
+2. `9WV-0`: filters retain control focus and announce the current settled result count/scope or actual error once, including zero results and unknown coverage; no row-by-row noise or superseded response announcement.
+
+Both rows remain **proposed bindings** before the unchanged real-path acceptance section. Existing missing-origin fallback, no-focus-theft, modal/dock, reduced-motion, responsive and runtime verification rules were already covered and were not recreated.
+
+Source comparison: F02 branch `design/f02-system-v1-20261102-c2`, exact head `3b27c7b9c8382ac8f21161a37b833dd6cb4f4933`, `SYSTEM_CONTRACT.md` and `INTERACTION_STATES.md`. Supporting primary guidance: [W3C status messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html), [W3C focus not obscured](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum.html), [W3C section-navigation technique](https://www.w3.org/WAI/WCAG22/Techniques/general/G1) and [MDN reduced-motion preference](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-motion). The same-view focus rule is a product application of these principles, not a claim of static WCAG conformance.
+
+Root inspected both new card screenshots. Both are legible without overflow; explicit owned-board release completed. No candidate approval or existing release hold changed.
+
+### GMI source correction before further mutation
+
+The initial GMI source diagnosis used protected main snapshot `ba32f20ba306f9e75b7c400992138e736b904516`. An incumbent authored candidate was subsequently found: Draft Macro [#10676](https://github.com/mastermindx-market-intelligence/macro/pull/10676), actual current head `80d6ff71b9913524c4a381b543ec7a53383f50dc` (the body’s older `be851458...` is not its current head). That candidate already implements `gmi-companies.html`, URL/history behavior and multi-link issuer rendering. Therefore the earlier main-only `view=companies` proposal and primary-link-loop repair are **not selected** and must not duplicate or displace that writer.
+
+No GMI mutation or competing source branch has been dispatched in this continuation. Preserve #10676’s Draft/no-Ready/no-merge/no-enqueue/no-relabel holds and the original model-run `EFFECT_UNKNOWN / ROOT_UNVERIFIED` fence. Continue diagnosis against the actual candidate; do not replay or consume its fenced model result.
