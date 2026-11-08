@@ -139,6 +139,10 @@ persist exact state/next action to existing owners.
 ### `BOOTSTRAP_KERNEL.md`
 Compact Project boot, not a substitute for loading this Skillpack.
 
+### `docs/sol_skills/mastermind-x-operations/SKILL.md`
+Mastermind-X org-repo operations canon: bootstrap, standing invariants, delivery
+and merge-queue law. Load before any org-repo work.
+
 ## Mandatory universal source-law companions
 
 ### `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`

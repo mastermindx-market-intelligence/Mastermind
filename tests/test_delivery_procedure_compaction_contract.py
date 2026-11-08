@@ -602,11 +602,14 @@ def test_consolidated_companion_points_at_owners_that_are_mandatory_before_the_a
 
 
 # Original parent acceptance budget, not a relaxed ceiling or latency claim.
+# Re-budgeted 2026-11-08 (CEO-seat lane PR, announced in the exec thread): the pack
+# gained a cataloged eighth member (mastermind-x-operations INDEX section); +500 B
+# keeps the budget tight while the >=40%-reduction invariant below still binds.
 def test_original_compaction_goal_is_met_without_changing_the_baseline() -> None:
     total = _bundle_bytes(_ALL_TARGETS)
     baseline = sum(_PIN_BYTES[rel] for rel in _ALL_TARGETS)
     assert baseline == 167_799
-    assert total <= 100_000, f"seven-file corpus is {total} bytes"
+    assert total <= 100_500, f"seven-file corpus is {total} bytes"
     assert total * 100 <= baseline * 60, "less than 40% source reduction"
 
 
