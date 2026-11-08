@@ -25,6 +25,8 @@ from integrations.hermes_harness.native_executive_consumer import (
     CONSUMER_PLUGIN_NAME,
     CONSUMER_PLUGIN_SOURCE,
     ConsumerSlot,
+    ExecutiveContextConsumerPublication,
+    selected_child_publication,
     read_consumer_slot,
 )
 from integrations.hermes_harness.native_tool_registration import (
@@ -51,12 +53,35 @@ def _assert_mcp_allowed(ctx: Any, slot: ConsumerSlot) -> None:
 
 def register(ctx: Any):
     """Retain original registration owners before C28 can have an effect."""
+    # General PluginContext.register_memory_provider is intentionally inert.
+    # Only the real native memory collector can receive the actual provider.
+    if type(ctx).__module__ == "plugins.memory" and type(ctx).__name__ == "_ProviderCollector":
+        from plugins.memory import _ProviderCollector
+        if type(ctx) is not _ProviderCollector:
+            raise NativeToolRegistrationError("NATIVE_PLUGIN_CONTEXT_INVALID")
+        from integrations.hermes_runtime.native_agentos_memory import register_memory_provider
+        return register_memory_provider(ctx)
     owner = current_runtime_owner()
     if not owner:
         raise NativeToolRegistrationError("NATIVE_CONSUMER_OWNER_UNAVAILABLE")
     slot = read_consumer_slot(ctx, owner=owner, source=CONSUMER_PLUGIN_SOURCE,
                               plugin_id=CONSUMER_PLUGIN_NAME)
     _assert_mcp_allowed(ctx, slot)
+    if type(slot.publication) is ExecutiveContextConsumerPublication:
+        from integrations.hermes_runtime.native_agentos_memory import NativeAgentOsMemoryFactory
+        if (type(slot.memory_factory) is not NativeAgentOsMemoryFactory
+                or not slot.memory_factory.loader_ready() or slot.context_registration is not None):
+            raise NativeToolRegistrationError("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
+        slot.context_registration = ctx
+        if slot.publication.discovery:
+            from integrations.hermes_harness.native_discovery_tools import register_discovery_tools
+            try:
+                register_discovery_tools(ctx, slot)
+            except Exception as error:
+                slot.retain_registration_error(error)
+                raise
+        if selected_child_publication(slot.publication) is None:
+            return None
     slot.begin_registration(ctx)
     try:
         registration = register_native_delegate_tools(ctx, slot.startup)

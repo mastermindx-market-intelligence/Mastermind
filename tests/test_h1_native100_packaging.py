@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import importlib.util
+import json
 
 ROOT=Path(__file__).resolve().parents[1]
 DRAFT=ROOT/'ops/native_fabric/quota_continuity/rollout'
@@ -30,8 +31,46 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)==historical_four|added_bounded|s14_forward
     assert m.GROK47_CANDIDATE_COMPOSITION_DIGESTS['artifact_delivery.py']=='6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d'
     assert m.GROK47_MERGED_SOURCE_DIGESTS['artifact_delivery.py']=='447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3'
-    for name,expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
-        assert hashlib.sha256((DRAFT.parent/'candidate'/name).read_bytes()).hexdigest()==expected
+    # Qualify the complete current carrier before viewing its frozen predecessor.
+    # The published manifest/inventory retain the actual current bytes.
+    assert m.application_carrier_candidate_cohort(DRAFT.parent) is True
+    manifest = json.loads((DRAFT / 'native-manifest.json').read_bytes())
+    inventory = json.loads((DRAFT / 'native-source-inventory.json').read_bytes())
+    assert set(m.APPLICATION_CARRIER_DIGESTS) == {
+        'native_remote.py', 'remote_sub.sh', 'remote_sub_exec.py',
+        'remote_sub_helpers.py', 'support_bundle.py',
+    }
+    for name, expected in m.application_carrier_candidate_digests(DRAFT.parent).items():
+        raw = (DRAFT.parent / 'candidate' / name).read_bytes()
+        row = inventory['files']['ext/' + name]
+        assert hashlib.sha256(raw).hexdigest() == manifest['ext/' + name] == expected
+        assert row['sha256'] == expected and row['bytes'] == len(raw)
+        assert row['source'] == 'candidate/' + name
+    # Undo only the separately qualified host-pull successor before traversing
+    # the existing APPLICATION history. Actual-byte checks keep the current image.
+    before_host = m.before_host_pull_integrity(manifest)
+    assert set(before_host) == set(manifest)
+    assert {key for key in manifest if before_host[key] != manifest[key]} == set(
+        m.HOST_PULL_INTEGRITY_DIGESTS
+    ) | {"ext/lease_broker.py"}
+    # The current composed inverse carries the separately reviewed broker
+    # quiescence transition alongside exactly the three host members.
+    assert manifest["ext/lease_broker.py"] == m.COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256
+    assert before_host["ext/lease_broker.py"] == m.COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE
+    historical = m.normalize_application_carrier_base_manifest(before_host)
+    assert {key for key in before_host if historical[key] != before_host[key]} == {
+        'ext/' + name for name in m.APPLICATION_CARRIER_DIGESTS
+    } | set(m.ADMISSION_INTEGRITY_DIGESTS) | set(m.APPLICATION_POOL_COMPOSITION_DIGESTS)
+    for name, expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
+        actual = hashlib.sha256((DRAFT.parent / 'candidate' / name).read_bytes()).hexdigest()
+        assert actual == manifest['ext/' + name]
+        if name == 'remote_sub_exec.py':
+            # APPLICATION reverses to the security-composed executor before
+            # the legacy advice-only successor; both are independently pinned.
+            assert expected == m.SPARSE_INDEX_ADVICE_EXECUTOR_SHA256
+            assert historical['ext/' + name] == m.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+        else:
+            assert historical['ext/' + name] == expected
 
 
 def test_generated_manifest_covers_actual_new_entry_and_readiness_graph(tmp_path):

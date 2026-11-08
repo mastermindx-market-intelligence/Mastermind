@@ -157,3 +157,20 @@ def test_unavailable_is_explicit_and_has_no_policy_or_observation():
     assert value["policy"] is None and value["source_observation"] is None
     with pytest.raises(ValueError):
         wire.unavailable(SELECTED, "READY")
+
+
+@pytest.mark.parametrize("plan_version,admission_version,policy_version,count", [
+    (5, 2, 2, 0), (4, 3, 1, 0),
+    (5, 3, 1, 0), (4, 2, 2, 0),
+    (5, 3, 2, 17), (4, 2, 1, 9),
+])
+def test_policy_view_keeps_exact_version_policy_pair_and_step_bound(
+        plan_version, admission_version, policy_version, count):
+    body, _ = plan_body()
+    policy = CooCyclePolicy.load(version=policy_version)
+    body["plan"].update(
+        plan_schema_version=f"mastermind.execution_plan/v{plan_version}",
+        admission_schema_version=f"mastermind.coo_plan_admission/v{admission_version}",
+        policy_sha=policy.policy_sha256, steps=[{} for _ in range(count)])
+    with pytest.raises(ValueError, match="AUTONOMY_SOURCE_INVALID"):
+        compose_autonomy_policy_read(body, policy)

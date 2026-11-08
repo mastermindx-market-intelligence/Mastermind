@@ -50,6 +50,9 @@ def test_import_and_inspection_have_no_database_network_secret_or_service_effect
         startup = inspect(entry, published)
         assert Path(startup.handler.__file__) == published.release / "ext/go_application_handler.py"
         assert Path(startup.broker_module.__file__) == published.release / "ext/lease_broker.py"
+        codec = sys.modules["go_lease_capability"]
+        assert codec is entry._LOADED_MODULES["go_lease_capability"]
+        assert Path(codec.__file__) == published.release / "ext/go_lease_capability.py"
         assert startup.paths["db_path"] == published.ext / "broker/leases.sqlite"
         assert startup.paths["accounts_path"] == published.ext.parent / "orch/fabric/accounts.yaml"
         assert startup.paths["helper"] == published.ext / "glm_shim/glm_shim.py"
@@ -57,12 +60,14 @@ def test_import_and_inspection_have_no_database_network_secret_or_service_effect
         with mock.patch.object(startup.broker_module, "Broker", side_effect=AssertionError("inspection constructed broker")), \
                 mock.patch.object(startup.handler, "Router", side_effect=AssertionError("inspection constructed router")):
             assert inspect(entry, published).handler is startup.handler
+            assert sys.modules["go_lease_capability"] is codec
+            assert entry._LOADED_MODULES["go_lease_capability"] is codec
     assert before == {str(Path(p)): Path(p).read_bytes() for p in before}
     assert not (published.ext / "go_shim/shim.pid").exists()
     assert not (published.ext / "go_shim/shim.lock").exists()
 
 
-@pytest.mark.parametrize("name", ["lease_broker", "bailian_keys", "pool_ledger", "glm_shim"])
+@pytest.mark.parametrize("name", ["lease_broker", "go_lease_capability", "bailian_keys", "pool_ledger", "glm_shim"])
 def test_matching_filename_foreign_module_is_not_adopted(published, name):
     with loaded_entry(published) as entry:
         foreign = ModuleType(name)

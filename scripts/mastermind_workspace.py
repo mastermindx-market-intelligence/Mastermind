@@ -31,6 +31,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from control_plane.executive_workspace import (  # noqa: E402
     WorkspaceError,
+    LinkedWorkspaceReleaseEffectUnknown,
     inspect_linked_worktree,
     prepare_linked_worktree,
     release_linked_worktree,
@@ -971,8 +972,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "status":
             # The Git publisher calls this on every source-status/commit precheck.
             # Verify the exact .git <-> common/worktrees registration and managed
-            # lock without enumerating unrelated worktrees. Release still uses
-            # the existing full-fleet identity/custody checks.
+            # lock without enumerating unrelated worktrees. Release separately
+            # qualifies original target, native selection and recoverability.
             receipt = inspect_linked_worktree(
                 source, root, destination, expected_operation_id=args.operation_id,
                 status_direct_registration=True,
@@ -990,6 +991,16 @@ def main(argv: list[str] | None = None) -> int:
             effect="APPLIED" if receipt.removed else "NOT_APPLIED",
             repository=selected,
         )
+    except LinkedWorkspaceReleaseEffectUnknown as exc:
+        print(json.dumps({
+            "schema_version": SCHEMA if selected is None else "mastermind.workspace_cli/v2",
+            "action": args.action,
+            "effect": "EFFECT_UNKNOWN",
+            "error": str(exc),
+            **exc.details,
+            **({"repository": selected} if selected is not None else {}),
+        }, sort_keys=True), file=sys.stderr)
+        return 2
     except WorkspaceError as exc:
         print(
             json.dumps(

@@ -1,8 +1,8 @@
 """Qualify a pinned generic host patch plus consumer in an isolated native source fixture.
 
-Invoke with the installed hermes_cli._launchers.runtime_command(code=...), using
-runpy.run_path(this_file, run_name="__main__") as the entry code.
-The caller supplies a GitHub-read-back manifest and exact owner source fixture;
+Invoke with an already prepared private native-PM interpreter and isolated
+Hermes home. Do not use a live launcher merely to import qualification code.
+The caller supplies a verified source manifest and exact owner source fixture;
 this runner never clones, changes the installation, or contacts a provider.
 """
 from pathlib import Path
@@ -28,11 +28,11 @@ def main():
     args = parser.parse_args()
     root, owner, hermes = (Path(p).resolve() for p in (args.adapter_root, args.owner_root, args.hermes_root))
     expected_hermes = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
-    actual = subprocess.run(["git", "-C", str(hermes), "rev-parse", "HEAD"],
+    actual = subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(hermes), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     if actual != expected_hermes:
         raise RuntimeError("Installed Hermes source differs from the qualified ABI")
-    subprocess.run(["git", "-C", str(hermes), "diff", "--exit-code", "HEAD", "--"],
+    subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(hermes), "diff", "--exit-code", "HEAD", "--"],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
     manifest = json.loads(Path(args.manifest).read_text())
     if manifest["candidate"] != args.candidate:
@@ -42,8 +42,11 @@ def main():
         if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise RuntimeError("Candidate source checksum mismatch")
     owner_bytes = (owner / "engine/fabric_inference_client.py").read_bytes()
-    if hashlib.sha256(owner_bytes).hexdigest() != "3250f2ea9b56b4762619a960c23dd5cc57ae05c273fe8e2b63c89a0f868d0ce0":
+    if hashlib.sha256(owner_bytes).hexdigest() != "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e":
         raise RuntimeError("APPLICATION owner source checksum mismatch")
+    owner_modes = (owner / "engine/provider_production_modes.py").read_bytes()
+    if hashlib.sha256(owner_modes).hexdigest() != "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8":
+        raise RuntimeError("APPLICATION transport owner checksum mismatch")
     fixture = Path(args.hermes_fixture).resolve()
     if fixture == hermes or fixture.is_relative_to(hermes):
         raise RuntimeError("Qualification fixture must be separate from the installation")
@@ -83,9 +86,14 @@ def main():
     from gateway import session_provider_context
     if not Path(session_provider_context.__file__).resolve().is_relative_to(fixture):
         raise RuntimeError("Native host patch did not load from the immutable fixture")
+    import yaml
+    if yaml.__version__ != "6.0.3":
+        raise RuntimeError("Use the qualified APPLICATION YAML dependency")
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "2ef828e569b683b9dfaa94f81116da3ac55f6186", "owner_source_verified": True,
+        "owner": "25ba92bb52120fae550b54c29f82929c0b77d37b", "owner_source_verified": True,
+        "owner_verification_scope": "client_and_factory_bytes",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
+        "pyyaml": yaml.__version__,
         "mode": "pinned-native-host-patch-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
     for directory in (package / "tests", package / "qualification"):
@@ -95,7 +103,7 @@ def main():
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and not result.skipped and not sdk_constructions and not blocked_connections else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 115 and not result.skipped and not sdk_constructions and not blocked_connections else 1
 
 
 if __name__ == "__main__":

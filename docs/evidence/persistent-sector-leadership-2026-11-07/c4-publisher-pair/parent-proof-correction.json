@@ -1,0 +1,148 @@
+{
+  "acceptedProtectedPredecessor": "788cafa84feb8526cb8ad0c27cd460e793a0cdb6",
+  "changedSource": [
+    {
+      "bytes": 44803,
+      "path": "integrations/studio_direct_mcp/private_service_pin_enrollment.py",
+      "sha256": "89882b765aeee532371441cbac9181a1f3e95a31eed84197cd40f835430e0caa"
+    },
+    {
+      "bytes": 81326,
+      "path": "integrations/studio_direct_mcp/private_service_status_successor_test.py",
+      "sha256": "46178ba4cc0a3b9449d2e3f1da8fe14a64155d4a397eaa46caed16d51b58635d"
+    },
+    {
+      "bytes": 12580,
+      "path": "integrations/studio_direct_mcp/private_service_c4_parent_proof_test.py",
+      "sha256": "defe36b473e9d2d02586576a33a3a4b5a102c4a99d5ddc7dc9180099e1e55eb7"
+    },
+    {
+      "bytes": 31021,
+      "path": "docs/runbooks/c4-macro-publisher-enrollment.md",
+      "sha256": "cf6077480f63b19fafcf4cd58bee83fdf7b4a23f9841af7aaf53b101fa0f36ea"
+    }
+  ],
+  "checks": [
+    {
+      "bytes": 22831,
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "unittest",
+        "-v",
+        "private_service_c4_parent_proof_test"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/persistent-sector-leadership-publisher-20261107-c4/integrations/studio_direct_mcp",
+      "log": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/c4-parent-proof-parent/focused-before.log",
+      "name": "focused-before",
+      "passed": false,
+      "returncode": 1,
+      "sha256": "ad455c9057ea900309e1d2f455c916e282a10b47ec7ae7272e308665ab550b59",
+      "testsRun": 8
+    },
+    {
+      "bytes": 7588,
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "unittest",
+        "-v",
+        "private_service_c4_parent_proof_test"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/persistent-sector-leadership-publisher-20261107-c4/integrations/studio_direct_mcp",
+      "log": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/c4-parent-proof-parent/focused-after.log",
+      "name": "focused-after",
+      "passed": true,
+      "returncode": 0,
+      "sha256": "c18ef04e001b4b57305c0fdfdf99a596a9204b6467975701e9b474a0499c0b38",
+      "testsRun": 8
+    },
+    {
+      "bytes": 63936,
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "integrations/studio_direct_mcp",
+        "-p",
+        "private_service*_test.py",
+        "-q"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/persistent-sector-leadership-publisher-20261107-c4",
+      "elapsedSeconds": 70.911,
+      "log": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/c4-parent-proof-parent/installer-after.log",
+      "name": "installer-after",
+      "passed": true,
+      "returncode": 0,
+      "sha256": "5b4e896c131d515339da516d64a3c599dcbbd9c37c187ba2aeae982f7fa2cb41",
+      "testsRun": 598
+    },
+    {
+      "bytes": 99,
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "integrations/studio_direct_mcp",
+        "-p",
+        "control_bundle*_test.py",
+        "-q"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/persistent-sector-leadership-publisher-20261107-c4",
+      "elapsedSeconds": 10.254,
+      "log": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/c4-parent-proof-parent/control-bundle-after.log",
+      "name": "control-bundle-after",
+      "passed": true,
+      "returncode": 0,
+      "sha256": "56280053b359b3421777b31f2c2087b71dcf9e2be57dd0ecd60c722d556b5b16",
+      "testsRun": 53
+    },
+    {
+      "bytes": 2227,
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "unittest",
+        "-v",
+        "native_install_retained_successor_test"
+      ],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/persistent-sector-leadership-publisher-20261107-c4/ops/native_fabric/quota_continuity/rollout",
+      "elapsedSeconds": 0.318,
+      "log": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/c4-parent-proof-parent/native-retained-after.log",
+      "name": "native-retained-after",
+      "passed": true,
+      "returncode": 0,
+      "sha256": "95142847b4793108e7a1566b72e5526f682240167a7654e00839094ba150d47c",
+      "testsRun": 12
+    }
+  ],
+  "correction": "Authenticate the completed historical parent through existing status proof, acquire the existing canonical native publication lock on its verified store, require the complete binding unchanged under that lock, and retain it through the child and final parent fingerprint.",
+  "date": "2026-11-07",
+  "diffCheck": {
+    "returncode": 0
+  },
+  "mission": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/1202",
+  "observedInstalledRefusal": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2203#issuecomment-6706612328",
+  "operationId": "persistent-sector-leadership-publisher-20261107-c4",
+  "problem": "The closed C4 child selected native installation admission solely to acquire the native lock; the historical bootstrap is pruned.",
+  "qualificationLimits": [
+    "Focused 8 cases are included in the 598 installer cases; counts must not be added as unique tests.",
+    "Focused integration uses the real native proof subprocess, canonical lock and C4 filesystem transactions with isolated native-release fixture modules.",
+    "The separate 12-case native retained-reader suite exercises the real retained evidence verifier.",
+    "HOME and production path/admission guards are unchanged; TMPDIR=/private/tmp is test-only.",
+    "Generic native apply/reconcile remain strict. Preview/status do not create the native lock.",
+    "This receipt qualifies source only; it does not install the corrected control bundle or publisher pair, settle Macro actions, prove hosted CI or product acceptance."
+  ],
+  "remainingRelease": "Normal protected release, complete exact control-bundle adoption, confirm original target absence, fresh installed-owner preview, quiescent owner apply/status/start and live capability readback.",
+  "schema": "mastermind.c4_publisher_parent_proof_qualification.v1",
+  "sourceParent": "d4907cda255e051570a2fa9606e45fe2731fa0d9",
+  "unchangedCriticalSource": {
+    "integrations/studio_direct_mcp/git-publish.mjs": "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e",
+    "integrations/studio_direct_mcp/private_service.py": "1f0389dc50a1e6c16f652e0eea625e5aaf6124183da5e417cb5b894f1dd98706",
+    "integrations/studio_direct_mcp/workspace-access.mjs": "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c"
+  }
+}

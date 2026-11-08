@@ -483,6 +483,68 @@ def test_start_cycle_job_checks_real_v2_handoff_before_adapter_start(tmp_path, m
     assert runtime.jobs.get_cycle_handoff(root.job_id) == handoff
 
 
+@pytest.mark.parametrize("fault", [
+    "unavailable", "wrong_attempt", "foreign_parent", "role_digest",
+    "envelope_digest", "projection_budget", "parent_cancelled",
+])
+def test_parent_result_input_refuses_before_provider_start(tmp_path, monkeypatch, fault):
+    """Real handoff/claim; corrupt only the canonical projection response seam.
+
+    Cancellation is a real Runtime transition. The provider boundary and failed
+    preparation cleanup are inert, so this proves no START, not installed auth.
+    """
+    from control_plane.executive_runtime import RuntimeProofError
+    from control_plane import reviewed_role_input
+
+    runtime, root, handoff = _real_handoff(tmp_path)
+    adapter = _CountingAdapter()
+    supervisor = ExecutiveSupervisor(
+        runtime, adapter, runs_root=tmp_path / "runs", inspector=SimpleNamespace(),
+        require_complete_launch_attestation=False,
+    )
+    original_read = type(runtime).validated_role_completion
+    reads = []
+
+    def changed(owner, job_id, *, expected_attempt_id):
+        actual = original_read(owner, job_id, expected_attempt_id=expected_attempt_id)
+        if owner is not runtime:
+            return actual
+        reads.append((job_id, expected_attempt_id))
+        if fault == "unavailable":
+            raise RuntimeProofError("private child result must not escape")
+        if fault == "wrong_attempt":
+            return replace(actual, attempt=replace(actual.attempt, attempt_id="ATT-foreign"))
+        if fault == "foreign_parent":
+            return replace(actual, job=replace(actual.job, parent_job_id="JOB-foreign"))
+        if fault == "role_digest":
+            return replace(actual, role_result_digest="f" * 64)
+        if fault == "envelope_digest":
+            return replace(actual, result_envelope={**actual.result_envelope, "summary": "changed"})
+        if fault == "parent_cancelled":
+            current = runtime.jobs.get_job(root.job_id)
+            attempt = runtime.attempts.get_attempt(current.current_attempt_id)
+            runtime.jobs.cancel_job(root.job_id, expected_attempt_id=attempt.attempt_id,
+                                   expected_fence_generation=attempt.fence_generation)
+        return actual
+
+    monkeypatch.setattr(type(runtime), "validated_role_completion", changed)
+    if fault == "projection_budget":
+        # Tighten the existing projection allowance against actual retained
+        # content; required bytes must refuse whole rather than be truncated.
+        monkeypatch.setattr(reviewed_role_input, "MAX_PROJECTION_BYTES", 32)
+    monkeypatch.setattr(supervisor, "_seal_terminal_assignment", lambda **_kwargs: None)
+    monkeypatch.setattr(supervisor, "_fail_claim", lambda *_args: None)
+    command = f"coo-cycle:{root.job_id}:dispatch:{root.job_id}:attempt:1"
+    with pytest.raises(SupervisorError, match="^aggregation result input is unavailable$"):
+        asyncio.run(supervisor.start_cycle_job(root.job_id, command_id=command))
+    assert adapter.start_calls == []
+    selected = handoff["revisions"][0]
+    assert reads == [(selected["current_job_id"], selected["current_attempt_id"])]
+    assert runtime.jobs.get_cycle_handoff(root.job_id) == handoff
+    assert original_read(runtime, selected["current_job_id"],
+        expected_attempt_id=selected["current_attempt_id"]).role_result_digest == selected["current_result_digest"]
+
+
 def test_real_v1_handoff_survives_restart_with_current_default_policy_v2(tmp_path, monkeypatch):
     from control_plane.executive_coo_policy import CooCyclePolicy
     from control_plane.executive_runtime import Runtime
@@ -533,3 +595,58 @@ def test_real_v1_handoff_survives_restart_with_current_default_policy_v2(tmp_pat
         restarted._validate_aggregation_schema(job=same_job, attempt=same_attempt,
             effective_grant=same_grant, schema_path=retained_path)
     assert restarted.adapter.start_calls == []
+
+
+@pytest.mark.parametrize("fault", ["cancel_after_seal", "input_unavailable", "prompt_drift"])
+def test_parent_result_input_revalidates_after_sealing_before_start(tmp_path, monkeypatch, fault):
+    import control_plane.executive_supervisor as owner
+    from control_plane.executive_runtime import RuntimeProofError
+
+    runtime, root, handoff = _real_handoff(tmp_path)
+    adapter = _CountingAdapter()
+    supervisor = ExecutiveSupervisor(
+        runtime, adapter, runs_root=tmp_path / "runs", inspector=SimpleNamespace(),
+        require_complete_launch_attestation=False,
+    )
+    sealed = []
+    write = owner._write_private_recovery_prompt
+    def seal_then_correct(path, prompt):
+        write(path, prompt)
+        sealed.append((path, path.read_bytes()))
+        if fault == "cancel_after_seal":
+            job = runtime.jobs.get_job(root.job_id)
+            attempt = runtime.attempts.get_attempt(job.current_attempt_id)
+            runtime.jobs.cancel_job(
+                root.job_id, expected_attempt_id=attempt.attempt_id,
+                expected_fence_generation=attempt.fence_generation,
+            )
+    monkeypatch.setattr(owner, "_write_private_recovery_prompt", seal_then_correct)
+    read = type(runtime).validated_role_completion
+    def unavailable_after_seal(selected_owner, job_id, *, expected_attempt_id):
+        if sealed and selected_owner is runtime and fault == "input_unavailable":
+            raise RuntimeProofError("PRIVATE_PARENT_RESULT_MUST_NOT_ESCAPE")
+        return read(selected_owner, job_id, expected_attempt_id=expected_attempt_id)
+    monkeypatch.setattr(type(runtime), "validated_role_completion", unavailable_after_seal)
+    render = supervisor._prompt
+    def changed_prompt(*args, **kwargs):
+        result = render(*args, **kwargs)
+        return result + "\nPRIVATE_PARENT_PROMPT_DRIFT" if sealed and fault == "prompt_drift" else result
+    monkeypatch.setattr(supervisor, "_prompt", changed_prompt)
+    monkeypatch.setattr(supervisor, "_seal_terminal_assignment", lambda **_kwargs: None)
+    monkeypatch.setattr(supervisor, "_fail_claim", lambda *_args: None)
+    message = ("aggregation input changed after sealing" if fault == "prompt_drift"
+               else "aggregation result input is unavailable")
+    with pytest.raises(SupervisorError, match="^" + message + "$"):
+        asyncio.run(supervisor.start_cycle_job(
+            root.job_id, command_id=f"coo-cycle:{root.job_id}:dispatch:{root.job_id}:attempt:1",
+        ))
+    assert adapter.start_calls == [] and len(sealed) == 1
+    path, original = sealed[0]
+    assert path.read_bytes() == original and b"PRIVATE_PARENT_PROMPT_DRIFT" not in original
+    assert b"aggregation_result_inputs" in original
+    if fault == "cancel_after_seal":
+        assert runtime.jobs.get_job(root.job_id).status.value == "CANCEL_REQUESTED"
+    revision = handoff["revisions"][0]
+    assert read(runtime, revision["current_job_id"],
+                expected_attempt_id=revision["current_attempt_id"]).role_result_digest == (
+                    revision["current_result_digest"])

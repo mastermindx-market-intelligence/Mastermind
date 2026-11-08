@@ -1,0 +1,30 @@
+{
+  "dependency_overlay": "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages",
+  "interpreter": "/opt/homebrew/bin/python3",
+  "log_sha256": "e728709860d7da4b371eae8618fc024e59317dce20084284d3ad1cc332b4924d",
+  "returncode": 1,
+  "seconds": 108.96,
+  "state": "TESTS_FINISHED",
+  "summary": [
+    {
+      "errors": "0",
+      "failures": "2",
+      "skipped": "0",
+      "tests": "280",
+      "time": "105.299"
+    }
+  ],
+  "tests": [
+    "tests/test_hermes_primary_application_host.py",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_selected_recipe_and_config_refuse_unsupported_role_and_streaming_downgrade",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_public_eval_refuses_primary_profile_before_secret_or_source_work",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_unaccepted_primary_profile_still_refuses_at_public_parser",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_mixed_eval_release_refuses_before_directory_or_renderer",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py::test_mixed_eval_config_refuses_before_filesystem_read",
+    "integrations/hermes_runtime/tests/test_native_eval_operator.py::test_shared_enrollment_attaches_tcp_policy_once_before_asyncio",
+    "integrations/hermes_runtime/tests/test_operator_native_enrollment.py",
+    "integrations/hermes_harness/tests/test_native_byok.py",
+    "integrations/hermes_harness/tests/test_native_mcp_install.py",
+    "tests/test_os_release_assets.py"
+  ]
+}

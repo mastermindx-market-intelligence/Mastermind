@@ -286,7 +286,7 @@ def _grok_peer(data: Mapping[str, object]) -> dict[str, str]:
 
 def _agents(data: Mapping[str, object]) -> list[dict]:
     rows = data.get("hermes_agents")
-    if not isinstance(rows, list) or len(rows) < 2:
+    if not isinstance(rows, list) or len(rows) < 1:
         raise RosterConfigError("hermes_agents require one entry per always-on unit")
     names: set[str] = set()
     units: set[str] = set()

@@ -7,7 +7,7 @@ import { projectOffice, type OfficeInput, type ProjectionContext } from "./meta-
 import { decodeMission } from "./mission";
 import missionFixture from "./fixtures/mission-v2-current-128c46f6.json";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue({ state: "BUILT_NOT_PROVEN" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false, invoke: vi.fn().mockResolvedValue({ state: "BUILT_NOT_PROVEN" }) }));
 beforeEach(() => {
   history.replaceState(null, "", "/os/?work_ref=WS%3AONE&root_job_id=JOB-1");
   delete window.MastermindMissionHost;

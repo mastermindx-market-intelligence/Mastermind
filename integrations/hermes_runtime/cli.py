@@ -70,6 +70,15 @@ def main(argv: list[str] | None = None, *,
     meta_enroll_p.add_argument("--profile", type=Path, required=True)
     meta_enroll_p.add_argument("--hermes-bin", type=Path, required=True)
 
+    for command, help_text in (
+            ("eval-submit", "Admit one selected evaluation on the enrolled native session; stdin only"),
+            ("eval-read", "Read the exact original evaluation identity once; stdin only"),
+            ("eval-publish", "Publish one terminal original evaluation without inference; stdin only"),
+            ("eval-trial", "Read consumption eligibility of an already published original trial; stdin only")):
+        evaluation_p = sub.add_parser(command, help=help_text)
+        evaluation_p.add_argument("--profile", type=Path, required=True)
+        evaluation_p.add_argument("--hermes-bin", type=Path, required=True)
+
     text_p = sub.add_parser("text-turn", help="Host-invoked one text turn inside the installed role unit; stdin only")
     text_p.add_argument("--profile", type=Path, required=True)
     text_p.add_argument("--hermes-bin", type=Path, required=True)
@@ -120,6 +129,9 @@ def main(argv: list[str] | None = None, *,
             return _enroll_secretary_session(args.profile, args.hermes_bin, native_launch=native_launch)
         elif args.command == "enroll-meta-session":
             return _enroll_meta_session(args.profile, args.hermes_bin, native_launch=native_launch)
+        elif args.command in {"eval-submit", "eval-read", "eval-publish", "eval-trial"}:
+            return _native_evaluation(args.profile, args.hermes_bin,
+                operation=args.command.removeprefix("eval-"), native_launch=native_launch)
         elif args.command == "text-turn":
             return _text_turn(args.profile, args.hermes_bin)
         else:
@@ -253,21 +265,21 @@ def _enroll_meta_session(profile_path: Path, hermes_bin: Path, *, native_launch=
                                  native_launch=native_launch)
 
 
-def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_role: str,
-                           native_launch=None) -> int:
-    """One held-release, in-cgroup enrollment of the frozen native original."""
+def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_role: str,
+                           native_launch=None):
+    """Share the original held role/owner fences; create no session or admission."""
     import asyncio
+    from contextlib import asynccontextmanager
     from .constants import conversation_contract
     conversation_contract(expected_role)
     from .constants import PINNED_UPSTREAM_SHA
     from .native_session_control import (
-        NativeSecretaryClient, enrollment_result, validate_enrollment_capability,
-        validate_enrollment_result,
+        NativeSecretaryClient, _implementation, validate_enrollment_capability,
     )
     from .native_gateway_entry import prepare_vendor, _CAPABILITIES
     from .system_service import assert_root_service_cgroup, assert_role_network_profile
     from .role_isolation import assert_role_credential_isolation
-    from .tcp_sandbox import enforce_role_tcp_ports
+    from .tcp_sandbox import enforce_role_tcp_ports, role_tcp_ports
     from .supervisor import expected_disabled_mcp
     from .profile import dump_profile
     from ops.executive_os.hermes_role_metadata_observer import (
@@ -283,14 +295,17 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
             or not profile_path.is_absolute()
             or native_launch.recipe.get("schema") not in (
                 "mastermind.hermes_native_gateway_installation/v2",
-                "mastermind.hermes_native_gateway_installation/v3")):
+                "mastermind.hermes_native_gateway_installation/v3",
+                "mastermind.hermes_native_gateway_installation/v4")):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_INSTALLATION_REQUIRED")
-    capability = validate_enrollment_capability(native_launch.recipe.get("session_enrollment"), role=expected_role)
-    request_id = capability["request_id"]
+    # These existing v2/v3 recipes require a closed enrollment descriptor.
+    # Structural validation creates no enrollment and historical EVAL never
+    # requires its current session tip to equal the original attempt.
+    validate_enrollment_capability(native_launch.recipe.get("session_enrollment"), role=expected_role)
     implementation_sha = native_launch.owner.root.name
     # Validate identities before native imports; the release entry owns their
     # exact dependency roots, interpreter and source descriptors.
-    enrollment_result(implementation_sha, request_id, "UNAVAILABLE", role=expected_role)
+    _implementation(implementation_sha)
     saved_profile = dump_profile(profile)
 
     def qualify_profile():
@@ -301,14 +316,95 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
         assert_root_service_cgroup(current.role)
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
-        enforce_role_tcp_ports(current)
-        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"))
+        primary = native_launch.recipe.get("primary_application")
+        evaluation_inputs = native_launch.recipe.get("evaluation_inputs")
+        role_tcp_ports(current, primary_application=primary)
+        if primary is not None:
+            expected_disabled_mcp(
+                current, native_launch.recipe.get("executive_consumer"), primary,
+                evaluation_inputs=evaluation_inputs)
+        else:
+            expected_disabled_mcp(
+                current, native_launch.recipe.get("executive_consumer"),
+                evaluation_inputs=evaluation_inputs)
 
     qualify_profile()
+    # Landlock attaches once while this entry is still single-threaded and
+    # before asyncio creates a loop or executor. Children inherit it. Owner
+    # rechecks below retain the exact profile and must not reattach policy.
+    primary = native_launch.recipe.get("primary_application")
+    enforce_role_tcp_ports(
+        profile, **({"native_launch": native_launch} if primary is not None else {}))
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)
     prepare_vendor(Path(native_launch.recipe["vendor_root"]))
     from hermes_cli.gateway_runtime_discovery import query_identify
     from hermes_cli.gateway_runtime import _endpoint
+
+    @asynccontextmanager
+    async def connected():
+        with _HeldRoleQualification(implementation_sha) as held:
+            async def owner():
+                qualify_profile()
+                if (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True) != home:
+                    raise RuntimeRefusal("NATIVE_ENROLLMENT_PROFILE_HOME_CHANGED")
+                boot = _boot_id()
+                rows = await asyncio.wait_for(_query_fixed_pid1(role=expected_role), timeout=3)
+                if len(rows) != 1 or rows[0]["role"] != expected_role:
+                    raise RuntimeRefusal("NATIVE_ENROLLMENT_SUPERVISOR_UNQUALIFIED")
+                facts = held.role_facts(expected_role, rows[0]["unit_properties"], boot)
+                payload = await asyncio.to_thread(query_identify, home, timeout=2)
+                if (type(payload) is not dict or type(payload.get("pid")) is not int
+                        or payload["pid"] <= 0 or payload.get("hermes_home") != str(home)):
+                    raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_UNQUALIFIED")
+                observed = _endpoint(payload, home)
+                endpoint = observed.endpoint
+                if (observed.state != "ready" or endpoint is None
+                        or endpoint.profile_id != str(home)
+                        or endpoint.code_sha != PINNED_UPSTREAM_SHA
+                        or type(endpoint.authority_epoch) is not int or endpoint.authority_epoch < 1
+                        or type(endpoint.instance_id) is not str or not endpoint.instance_id
+                        or endpoint.runtime_protocol != 1 or endpoint.supervisor != "external"
+                        or endpoint.api_origin != f"http://{profile.gateway_host}:{profile.backend_port}"
+                        or not _CAPABILITIES <= endpoint.capabilities):
+                    raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_UNQUALIFIED")
+                child = native_launch.observe_child(payload["pid"])
+                if (child["parent_pid"] != facts["main_pid"]
+                        or child["boot_id"] != facts["boot_id"] or child["boot_id"] != boot):
+                    raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_LINEAGE_CHANGED")
+                if _boot_id() != boot:
+                    raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_CHANGED")
+                held.check()
+                native_launch.check()
+                stable_facts = {key: value for key, value in facts.items() if key != "gateway_listener"}
+                return {
+                    "supervisor": stable_facts,
+                    "child": {"pid": payload["pid"], **{key: child[key] for key in
+                              ("parent_pid", "boot_id", "start_identity")}},
+                    "endpoint": {key: getattr(endpoint, key) for key in (
+                        "profile_id", "instance_id", "authority_epoch", "code_sha",
+                        "runtime_protocol", "supervisor", "api_origin")},
+                }
+
+            before = await owner()
+            client = NativeSecretaryClient(home, expected_pid=before["child"]["pid"], role=expected_role)
+            yield client, before, owner
+
+    return profile, home, implementation_sha, connected
+
+
+def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_role: str,
+                           native_launch=None) -> int:
+    """One held-release, in-cgroup enrollment of the frozen native original."""
+    import asyncio
+    from .native_session_control import (
+        enrollment_result, validate_enrollment_capability, validate_enrollment_result,
+    )
+    if native_launch is None:
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_HELD_LAUNCH_REQUIRED")
+    profile, home, implementation_sha, connected = _prepare_native_operator(
+        profile_path, hermes_bin, expected_role=expected_role, native_launch=native_launch)
+    capability = validate_enrollment_capability(native_launch.recipe.get("session_enrollment"), role=expected_role)
+    request_id = capability["request_id"]
 
     def result(status):
         return enrollment_result(implementation_sha, request_id, status, role=expected_role)
@@ -316,51 +412,7 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
     async def execute():
         modifying = False
         try:
-            with _HeldRoleQualification(implementation_sha) as held:
-                async def owner():
-                    qualify_profile()
-                    if (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True) != home:
-                        raise RuntimeRefusal("NATIVE_ENROLLMENT_PROFILE_HOME_CHANGED")
-                    boot = _boot_id()
-                    rows = await asyncio.wait_for(_query_fixed_pid1(role=expected_role), timeout=3)
-                    if len(rows) != 1 or rows[0]["role"] != expected_role:
-                        raise RuntimeRefusal("NATIVE_ENROLLMENT_SUPERVISOR_UNQUALIFIED")
-                    facts = held.role_facts(expected_role, rows[0]["unit_properties"], boot)
-                    payload = await asyncio.to_thread(query_identify, home, timeout=2)
-                    if (type(payload) is not dict or type(payload.get("pid")) is not int
-                            or payload["pid"] <= 0 or payload.get("hermes_home") != str(home)):
-                        raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_UNQUALIFIED")
-                    observed = _endpoint(payload, home)
-                    endpoint = observed.endpoint
-                    if (observed.state != "ready" or endpoint is None
-                            or endpoint.profile_id != str(home)
-                            or endpoint.code_sha != PINNED_UPSTREAM_SHA
-                            or type(endpoint.authority_epoch) is not int or endpoint.authority_epoch < 1
-                            or type(endpoint.instance_id) is not str or not endpoint.instance_id
-                            or endpoint.runtime_protocol != 1 or endpoint.supervisor != "external"
-                            or endpoint.api_origin != f"http://{profile.gateway_host}:{profile.backend_port}"
-                            or not _CAPABILITIES <= endpoint.capabilities):
-                        raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_UNQUALIFIED")
-                    child = native_launch.observe_child(payload["pid"])
-                    if (child["parent_pid"] != facts["main_pid"]
-                            or child["boot_id"] != facts["boot_id"] or child["boot_id"] != boot):
-                        raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_LINEAGE_CHANGED")
-                    if _boot_id() != boot:
-                        raise RuntimeRefusal("NATIVE_ENROLLMENT_OWNER_CHANGED")
-                    held.check()
-                    native_launch.check()
-                    stable_facts = {key: value for key, value in facts.items() if key != "gateway_listener"}
-                    return {
-                        "supervisor": stable_facts,
-                        "child": {"pid": payload["pid"], **{key: child[key] for key in
-                                  ("parent_pid", "boot_id", "start_identity")}},
-                        "endpoint": {key: getattr(endpoint, key) for key in (
-                            "profile_id", "instance_id", "authority_epoch", "code_sha",
-                            "runtime_protocol", "supervisor", "api_origin")},
-                    }
-
-                before = await owner()
-                client = NativeSecretaryClient(home, expected_pid=before["child"]["pid"], role=expected_role)
+            async with connected() as (client, before, owner):
                 observed = await asyncio.to_thread(client.inspect_enrollment, implementation_sha, request_id)
                 # This also serves as the fresh, immediately pre-create fence.
                 if await owner() != before:
@@ -386,6 +438,37 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
     if value["status"] == "ENROLLED":
         return 0
     return 3 if value["status"] == "EFFECT_UNKNOWN" else POLICY_EXIT
+
+def _native_evaluation(profile_path: Path, hermes_bin: Path, *, operation: str, native_launch=None) -> int:
+    """One attended operation; input bodies stay off argv and out of receipts."""
+    import asyncio
+    from .native_eval_operator import (
+        MAX_REQUEST_BYTES, parse_request, recovery_for, result, execute,
+    )
+    recovery = None
+    try:
+        request = parse_request(operation, sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1))
+        if operation != "submit":
+            recovery = request
+        profile, home, implementation, connected = _prepare_native_operator(
+            profile_path, hermes_bin, expected_role="mmmeta", native_launch=native_launch)
+        recovery = recovery_for(operation, request, home)
+    except Exception:
+        value = result(operation, "REFUSED", recovery=recovery, reason="EVALUATION_OPERATOR_PREFLIGHT_REFUSED")
+    else:
+        try:
+            value = asyncio.run(execute(operation, request, recovery=recovery, profile=profile,
+                home=home, implementation=implementation, native_launch=native_launch, connected=connected))
+        except (Exception, KeyboardInterrupt):
+            # asyncio.run may fail during shutdown after the native call has
+            # committed. The inner coroutine cannot classify that outer loss.
+            value = result(operation, "UNAVAILABLE" if operation in {"read", "trial"} else "EFFECT_UNKNOWN",
+                recovery=recovery, reason="EVALUATION_OPERATOR_RUNNER_RECONCILIATION_REQUIRED")
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+    if value["status"] in {"ADMITTED", "OBSERVED", "PUBLISHED", "TRIAL_OBSERVED"}:
+        return 0
+    return 3 if value["status"] == "EFFECT_UNKNOWN" else POLICY_EXIT
+
 
 
 def _text_turn(profile_path: Path, hermes_bin: Path) -> int:
@@ -436,7 +519,8 @@ def _supervise(args: argparse.Namespace, *,
         from .role_isolation import assert_role_credential_isolation
         from .tcp_sandbox import enforce_role_tcp_ports
         assert_role_credential_isolation(profile)
-        enforce_role_tcp_ports(profile)
+        enforce_role_tcp_ports(profile, **({"native_launch": native_launch}
+            if profile.model_provider == "mastermind-fabric" else {}))
         from .role_status_publisher import publisher_from_process
         publisher = publisher_from_process(profile, custody_observer=custody_observer)
         if profile.gateway_backend == "native-session-authority":
@@ -483,3 +567,4 @@ def _supervise(args: argparse.Namespace, *,
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -1,0 +1,71 @@
+{
+  "observedAt": "2026-11-07T08:24:37.833490+00:00",
+  "source": "386578f66392ae79a1759a0d216c102509277fba",
+  "afterObservedRecovery": "actual native Local history succeeded at08:23:03Z",
+  "calls": {
+    "create": 0,
+    "send": 0,
+    "resume": 1,
+    "cancel": 0
+  },
+  "scope": "one identified existing-session preflight attachment; never submit/create/cancel; no new conversation or owner",
+  "runtime": {
+    "protocol": 1,
+    "instanceId": "a9115d5bee674ff98a3fac21d9ad5ca8",
+    "authorityEpoch": 3,
+    "version": "0.23.0",
+    "sourceRevision": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "localScope": "4ba9e8f9f956fcc71bd76011250ffaca3c011a517e9e08c7609f9d6784ed5119"
+  },
+  "capacitySourceQualified": true,
+  "preflightShape": {
+    "sessionId": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+    "storedId": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+    "running": false,
+    "pending": [],
+    "prompts": false,
+    "pendingConnection": false,
+    "messageFieldType": "list",
+    "executionGeneration": 0,
+    "messageCount": 0,
+    "info": {
+      "source": "tool",
+      "tool_count": 3,
+      "enabled_toolsets": [
+        "mastermind-fabric-capacity",
+        "mmx_omh"
+      ],
+      "tools": {
+        "other": [
+          "tool_search",
+          "tool_describe",
+          "tool_call"
+        ]
+      },
+      "launch_request": {
+        "accept_hooks": false,
+        "follow_profile_config": false,
+        "safe_mode": false,
+        "source": "tool",
+        "toolsets": []
+      }
+    }
+  },
+  "projected": {
+    "session": {
+      "id": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+      "storedId": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+      "title": "Mastermind OS \u00b7 Meta-CEO \u00b7 9fbc8f4abb944ab1a170b4990e59f729",
+      "requestedModel": "qwen3:14b",
+      "canSend": false,
+      "toolAccess": "UNQUALIFIED",
+      "running": false,
+      "executionGeneration": 0,
+      "messageCount": 0,
+      "messages": [],
+      "historyTruncated": false,
+      "pending": [],
+      "promptsPending": false
+    }
+  }
+}

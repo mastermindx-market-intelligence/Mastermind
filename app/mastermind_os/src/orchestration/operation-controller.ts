@@ -75,6 +75,15 @@ export interface OperationPointer {
   readonly targetKey: string | null;
 }
 
+/** Read-only provenance of this controller's actual original operation.
+ * Request acceptance is not lifecycle START, return or product acceptance. */
+export interface OriginalOperationObservation {
+  readonly pointer: Readonly<OperationPointer>;
+  readonly owner: Readonly<OwnerContext>;
+  readonly status: Exclude<OperationState["status"], "idle">;
+  readonly missionSelection: Readonly<MissionSelection> | null;
+}
+
 export interface EffectReceipt {
   readonly operationKey: string;
   readonly kind: OperationKind;
@@ -417,6 +426,8 @@ export class OperationController {
   private _epoch = 0;
 
   private _tracked: TrackedOperation | null = null;
+  private _receiptBasis: Readonly<{pointer: Readonly<OperationPointer>; scope: string;
+    generation: string; epoch: number}> | null = null;
 
   constructor(
     private readonly _port: FiniteCommandPort,
@@ -425,6 +436,24 @@ export class OperationController {
 
   getState(): OperationState {
     return this._state;
+  }
+
+  /** No effect, store access or lifecycle transition. A withdrawn context
+   * withholds even terminal provenance; the durable original hint is untouched. */
+  observeOriginalOperation(): OriginalOperationObservation | null {
+    const basis = this._receiptBasis;
+    if (!basis || basis.epoch !== this._epoch) return null;
+    try {
+      const context = this._port.context(), state = this._state;
+      if (!context || context.principalScope !== basis.scope || context.generation !== basis.generation
+          || this._receiptBasis !== basis || this._epoch !== basis.epoch || state.status === "idle") return null;
+      if (state.pointer && (state.pointer.operationKey !== basis.pointer.operationKey
+          || state.pointer.kind !== basis.pointer.kind || state.pointer.targetKey !== basis.pointer.targetKey)) return null;
+      return Object.freeze({pointer: basis.pointer,
+        owner: Object.freeze({principalScope: basis.scope, generation: basis.generation}),
+        status: state.status, missionSelection: state.status === "accepted" && state.missionSelection
+          ? Object.freeze({...state.missionSelection}) : null});
+    } catch {return null;}
   }
 
   /**
@@ -706,6 +735,7 @@ export class OperationController {
    * its original scope.
    */
   invalidate(): void {
+    this._receiptBasis = null;
     const tracked = this._tracked;
     const hadVisibleOperation = this._state.status !== "idle" || tracked !== null || this._inflight !== null;
 
@@ -760,6 +790,8 @@ export class OperationController {
     abort: AbortController | null,
   ): TrackedOperation {
     const op: TrackedOperation = { pointer, scope, generation, epoch, abort };
+    this._receiptBasis = Object.freeze({pointer: Object.freeze({operationKey: pointer.operationKey,
+      kind: pointer.kind, targetKey: pointer.targetKey}), scope, generation, epoch});
     this._tracked = op;
     return op;
   }
@@ -1008,6 +1040,7 @@ export class OperationController {
   }
 
   private _idle(reason: SafeReason): OperationState {
+    this._receiptBasis = null;
     const state: IdleState = { status: "idle", pointer: null, reason };
     this._state = state;
     return state;

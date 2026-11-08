@@ -1519,6 +1519,49 @@ def transport_verification():
                                   if layout_token != '-' else None))
 
 
+def application_dispatch_summary():
+    """Route one APPLICATION dispatch without granting it any authority.
+
+    Data validation is not authentication: the receiving executor authenticates
+    the dispatch against the trusted owner. This only refuses an incompatible
+    contract before any worker effect can begin.
+    """
+    import hashlib, json, sys
+    from pathlib import Path
+    import native_remote
+    raw = Path(sys.argv[1]).read_bytes()
+    if len(raw) > 262144:
+        raise ValueError('application_dispatch_too_large')
+    envelope = native_remote.application_scope(json.loads(raw.decode('utf-8')))
+    print(envelope['model'], envelope['invocation_digest'],
+          hashlib.sha256(raw).hexdigest(), envelope['host'],
+          native_remote.application_carrier_key(envelope))
+
+
+def application_result_valid():
+    """Validate the typed original and the actual collected output commitment."""
+    import hashlib, json, os, stat, sys
+    from pathlib import Path
+    import native_remote
+    terminal, envelope_path, output_path = sys.argv[1:4]
+    envelope = native_remote.application_scope(
+        json.loads(Path(envelope_path).read_text(encoding='utf-8')))
+    value = json.loads(Path(terminal).read_text(encoding='utf-8'))
+    rc = native_remote.application_carrier_returncode(value, envelope)
+    if value["output_complete"]:
+        fd = os.open(output_path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode)
+                    or info.st_size != value["capture"]["stdout_bytes"]
+                    or info.st_size > envelope["max_output_bytes"]):
+                raise ValueError("application_capture_refused")
+            raw = stream.read(envelope["max_output_bytes"] + 1)
+        if hashlib.sha256(raw).hexdigest() != value["capture"]["stdout_sha256"]:
+            raise ValueError("application_capture_digest_refused")
+    print(rc)
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit(2)
@@ -1547,11 +1590,20 @@ def main():
         'routing-env': routing_env,
         'native-window': native_window,
         'native-settle': native_settle,
+        'application-dispatch-summary': application_dispatch_summary,
+        'application-result-valid': application_result_valid,
         'validate-usage': validate_usage,
     }
     if command not in handlers:
         raise SystemExit(2)
-    if command.startswith('deadline-'):
+    if command.startswith('application-'):
+        try:
+            handlers[command]()
+        except (ValueError, TypeError, KeyError, OSError, UnicodeError) as exc:
+            print('APPLICATION_CONTRACT_REFUSED reason=' + type(exc).__name__,
+                  file=sys.stderr)
+            raise SystemExit(78)
+    elif command.startswith('deadline-'):
         from commission_deadline import CommissionDeadlineExpired
         try:
             handlers[command]()

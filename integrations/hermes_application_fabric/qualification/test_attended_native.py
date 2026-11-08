@@ -13,6 +13,8 @@ from integrations.hermes_application_fabric.native import PROVIDER
 class AttendedNativeTests(unittest.TestCase):
     def setUp(self):
         fixtures.OwnerLoopbackTests.setUp(self)
+        from integrations.hermes_application_fabric.native import register_native_provider
+        register_native_provider()  # Explicit native startup precedes construction.
         from hermes_cli.plugins import PluginContext, PluginManifest, _delivery_manager
         self.context = PluginContext(PluginManifest(name="mmx-attended-fixture"), _delivery_manager())
         self.host = AttendedHost(self.context)

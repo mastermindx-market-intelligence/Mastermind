@@ -427,7 +427,11 @@ def test_api_agenda_returns_readiness_contract_verbatim(monkeypatch) -> None:
             },
         }],
     }
-    monkeypatch.setattr(A, "latest", lambda: artifact)
+    def strict_latest(*, strict=False):
+        assert strict is True
+        return artifact
+
+    monkeypatch.setattr(A, "latest", strict_latest)
     app = FastAPI()
     app.include_router(router)
 

@@ -93,20 +93,26 @@ CLAUDE_PRINCIPAL_AUTH_REALM = "oauth-principal-account"
 OAUTH_PRINCIPAL_AUTH_REALM = CLAUDE_PRINCIPAL_AUTH_REALM
 # Hermes native principal surface: a second, explicitly named principal
 # execution surface for the same OAuth principal realm.  It is admitted for
-# exactly one reviewed profile id and joins no adapter mapping, no sealed
+# exactly two reviewed profile alternatives and joins no adapter mapping, no sealed
 # worker fence, no browser-resource path and no supervisor validation-resource
 # eligibility, so it can never be selected by an ordinary worker placement.
 # Naming it grants no admission, enrollment, token, credential or authority;
 # actual enrollment and serving remain separate installed owners.
 HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE = "hermes-native-principal"
 HERMES_NATIVE_PRINCIPAL_PROFILE_ID = "principal.hermes-native.executive-coo.v1"
+HERMES_NATIVE_CONTEXT_PROFILE_ID = "principal.hermes-native.executive-coo.context.v1"
+HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID = "principal.hermes-native.executive-coo.current-context.v1"
+HERMES_NATIVE_DISCOVERY_PROFILE_ID = "principal.hermes-native.executive-coo.discovery-correction.v1"
 # The incumbent principal policy's Executive COO OAuth grant identity and
-# transport contract -- the sole grant declared by the existing sole policy
-# file config/executive_claude_principal_capabilities.json.  The rich-Claude
+# transport contract. Two fixed catalogue alternatives use the same connection
+# name; a profile can resolve only one. The rich-Claude
 # candidate grant in common/claude_principal_capability_contract.py is a
 # different, inert loopback generation and is never borrowed here; only its
 # server identity, version and configuration name coincide.
 PRINCIPAL_COO_MCP_CAPABILITY_ID = "mastermind-executive-coo-v1"
+PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID = "mastermind-executive-coo-context-v1"
+PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID = "mastermind-executive-coo-current-context-v1"
+PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID = "mastermind-executive-coo-discovery-correction-v1"
 PRINCIPAL_COO_MCP_URL = "https://mcp.mastermind-x.com/mcp/coo"
 # Paid model-only sealed-input extension: exactly one reviewed surface/realm/
 # profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
@@ -229,7 +235,12 @@ _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
 )
 _MCP_APPROVAL_MODES = frozenset({"approve"})
-_NATIVE_HELPER_MECHANISMS = frozenset({"codex-multi-agent-v2-inherit-parent"})
+_NATIVE_HELPER_MECHANISMS = frozenset(
+    {
+        "codex-multi-agent-v2-inherit-parent",
+        "claude-code-agent-inherit-parent",
+    }
+)
 _REASONING_EFFORTS = frozenset(
     {"low", "medium", "high", "xhigh", "max", "ultra"}
 )
@@ -1640,9 +1651,11 @@ class ExecutionCapabilityRegistry:
         if not isinstance(mcp_raw, dict) or len(mcp_raw) > 32:
             raise CapabilityPolicyError("capability policy MCP registry is invalid")
         mcp_registry: dict[str, McpServerGrant] = {}
-        config_names: set[str] = set()
+        config_names: dict[str, str] = {}
         for raw_id, value in mcp_raw.items():
             capability_id = _identifier(raw_id, field="mcp_server capability_id")
+            if capability_id in mcp_registry:
+                raise CapabilityPolicyError("MCP capability identity is not unique")
             if not isinstance(value, dict):
                 raise CapabilityPolicyError(
                     f"MCP grant {capability_id!r} fields drifted"
@@ -1651,11 +1664,20 @@ class ExecutionCapabilityRegistry:
                 value.get("config_name"),
                 field=f"mcp_servers.{capability_id}.config_name",
             )
-            if config_name in config_names:
+            previous_id = config_names.get(config_name)
+            if previous_id is not None and not (
+                config_name == EXECUTIVE_COO_MCP_CONFIG_NAME
+                and {previous_id, capability_id} <= {
+                    PRINCIPAL_COO_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
+                }
+            ):
                 raise CapabilityPolicyError(
                     f"MCP config name {config_name!r} is not unique"
                 )
-            config_names.add(config_name)
+            config_names[config_name] = capability_id
             transport = _closed_choice(
                 value.get("transport"),
                 field=f"mcp_servers.{capability_id}.transport",
@@ -1846,6 +1868,29 @@ class ExecutionCapabilityRegistry:
                 tool_schema_digest=tool_schema_digest,
                 grant_digest=_digest(normalized_grant),
             )
+        context_grants = [mcp_registry[item] for item in (
+            PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
+            PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID)
+            if item in mcp_registry]
+        if context_grants:
+            # One authenticated connection, with fixed mutually exclusive
+            # catalogue grants. This exception is not a generic alias facility.
+            alternatives = list(context_grants)
+            legacy_grant = mcp_registry.get(PRINCIPAL_COO_MCP_CAPABILITY_ID)
+            if legacy_grant is not None:
+                alternatives.append(legacy_grant)
+            for grant in alternatives:
+                if (grant.config_name != EXECUTIVE_COO_MCP_CONFIG_NAME
+                        or grant.transport != "streamable-http"
+                        or grant.url != PRINCIPAL_COO_MCP_URL
+                        or grant.command is not None or grant.args
+                        or grant.auth_status != "oAuth"
+                        or grant.server_identity != EXECUTIVE_COO_MCP_SERVER_IDENTITY
+                        or grant.server_version != EXECUTIVE_COO_MCP_SERVER_VERSION
+                        or grant.default_tools_approval_mode != "approve"):
+                    raise CapabilityPolicyError(
+                        "Principal COO catalogue alternatives require the same reviewed connection"
+                    )
         resources_raw = raw.get("resources")
         if not isinstance(resources_raw, dict) or len(resources_raw) > 16:
             raise CapabilityPolicyError("capability policy resource registry is invalid")
@@ -2204,14 +2249,39 @@ class ExecutionCapabilityRegistry:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} native helper model is invalid"
                     )
-                default_effort = _closed_choice(
-                    native_helper_raw.get("default_reasoning_effort"),
-                    field=(
-                        f"profiles.{profile_id}.native_helper."
-                        "default_reasoning_effort"
-                    ),
-                    choices=_REASONING_EFFORTS,
-                )
+                if mechanism == "claude-code-agent-inherit-parent":
+                    if execution_surface != "claude-code":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Claude native helper mechanism "
+                            "requires claude-code execution surface"
+                        )
+                    if default_model != "inherit-parent":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Claude native helper must "
+                            "inherit the admitted parent model"
+                        )
+                    default_effort = str(
+                        native_helper_raw.get("default_reasoning_effort") or ""
+                    ).strip().lower()
+                    if default_effort != "inherit":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Claude native helper must "
+                            "inherit the admitted parent reasoning effort"
+                        )
+                else:
+                    if execution_surface != "codex-app-server":
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} Codex native helper mechanism "
+                            "requires codex-app-server execution surface"
+                        )
+                    default_effort = _closed_choice(
+                        native_helper_raw.get("default_reasoning_effort"),
+                        field=(
+                            f"profiles.{profile_id}.native_helper."
+                            "default_reasoning_effort"
+                        ),
+                        choices=_REASONING_EFFORTS,
+                    )
                 if native_helper_raw.get("inherit_parent_capabilities") is not True:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} native helper must inherit the "
@@ -2295,6 +2365,23 @@ class ExecutionCapabilityRegistry:
             resolved_mcp = tuple(
                 mcp_registry[item] for item in mcp_server_ids
             )
+            if len({grant.config_name for grant in resolved_mcp}) != len(resolved_mcp):
+                raise CapabilityPolicyError(
+                    "A profile cannot combine MCP catalogue alternatives"
+                )
+            if (PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != HERMES_NATIVE_CONTEXT_PROFILE_ID):
+                raise CapabilityPolicyError(
+                    "The context catalogue requires its exact native principal profile"
+                )
+            if (PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID):
+                raise CapabilityPolicyError(
+                    "The current-DATA catalogue requires its exact native principal profile"
+                )
+            if (PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != HERMES_NATIVE_DISCOVERY_PROFILE_ID):
+                raise CapabilityPolicyError("The discovery catalogue requires its exact native principal profile")
             resolved_resources = tuple(
                 resource_registry[item] for item in resource_ids
             )
@@ -2600,11 +2687,13 @@ class ExecutionCapabilityRegistry:
             # The OAuth principal realm is shared by exactly two principal
             # surfaces.  Every other surface keeps the incumbent refusal.
             is_oauth_principal_surface = is_claude_principal or is_hermes_native_principal
-            if is_hermes_native_principal and profile_id != HERMES_NATIVE_PRINCIPAL_PROFILE_ID:
+            hermes_principal_ids = {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
+                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID}
+            if is_hermes_native_principal and profile_id not in hermes_principal_ids:
                 raise CapabilityPolicyError(
                     "Hermes native principal surface requires its exact reviewed profile id"
                 )
-            if profile_id == HERMES_NATIVE_PRINCIPAL_PROFILE_ID and not is_hermes_native_principal:
+            if profile_id in hermes_principal_ids and not is_hermes_native_principal:
                 raise CapabilityPolicyError(
                     "Hermes native principal profile requires its exact reviewed surface"
                 )
@@ -2651,15 +2740,19 @@ class ExecutionCapabilityRegistry:
                     "capability shape"
                 )
             if is_hermes_native_principal:
-                # Exactly the incumbent principal policy's Executive COO OAuth
-                # grant, with its existing capability identity and transport
-                # contract.  The rich-Claude candidate grants and every
+                # Exactly the selected reviewed profile's Executive COO OAuth
+                # grant, on the incumbent transport. The original profile never
+                # inherits the new context grant. Rich-Claude candidates and
                 # arbitrary MCP server stay outside this ceiling, and the COO
                 # tool catalog itself is owned by the descriptor owner, so no
                 # tool list is frozen here.
                 hermes_grant = resolved_mcp[0]
+                expected_grant = {HERMES_NATIVE_CONTEXT_PROFILE_ID: PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
+                    HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
+                    HERMES_NATIVE_DISCOVERY_PROFILE_ID: PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID
+                    }.get(profile_id, PRINCIPAL_COO_MCP_CAPABILITY_ID)
                 if (
-                    hermes_grant.capability_id != PRINCIPAL_COO_MCP_CAPABILITY_ID
+                    hermes_grant.capability_id != expected_grant
                     or hermes_grant.config_name != EXECUTIVE_COO_MCP_CONFIG_NAME
                     or hermes_grant.transport != "streamable-http"
                     or hermes_grant.url != PRINCIPAL_COO_MCP_URL
@@ -2834,6 +2927,12 @@ __all__ = [
     "CLAUDE_PRINCIPAL_EXECUTION_SURFACE",
     "HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE",
     "HERMES_NATIVE_PRINCIPAL_PROFILE_ID",
+    "HERMES_NATIVE_CONTEXT_PROFILE_ID",
+    "HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID",
+    "HERMES_NATIVE_DISCOVERY_PROFILE_ID",
+    "PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID",
     "OAUTH_PRINCIPAL_AUTH_REALM",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",

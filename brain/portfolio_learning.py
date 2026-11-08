@@ -24,6 +24,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -50,7 +51,10 @@ LESSON_AUTHORITY = "research_request_only"
 APPLICATION_AUTHORITY = "observational_only"
 LESSON_TRACE_COHORT = "portfolio_v2_lesson_trace"
 _ACTIVE_PRESENTATIONS: dict[tuple[str, str], str] = {}
-_TRACE_JSONL_NAMES = frozenset({"applications.jsonl", "presentations.jsonl"})
+_STRICT_ATOMIC_JSONL_NAMES = frozenset({
+    "applications.jsonl", "presentations.jsonl", "context_requests.jsonl",
+})
+_CONTEXT_LOCAL_LOCK = threading.RLock()
 _LESSON_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _LESSON_ID_RE = re.compile(
     r"^lesson\.v1\.(US_ONLY|CN_ONLY|HK_ONLY|CROSS_MARKET_CANDIDATE)\."
@@ -168,13 +172,12 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    """Read JSONL, failing closed for lesson trace ledgers only.
+    """Read JSONL, failing closed for canonical trace and context-request ledgers.
 
-    Context-request history intentionally keeps its older best-effort semantics.  Presentation and
-    application rows are settlement lineage, so an existing malformed row is failed evidence rather
-    than an invitation to reason from a thinner ledger.
+    Existing malformed or unreadable canonical history is failed evidence rather than an
+    invitation to reason from a thinner ledger. Unrelated JSONL keeps best-effort semantics.
     """
-    strict = path.name in _TRACE_JSONL_NAMES
+    strict = path.name in _STRICT_ATOMIC_JSONL_NAMES
     try:
         if strict:
             try:
@@ -219,10 +222,10 @@ def _fsync_parent(path: Path, *, strict: bool = False) -> None:
             raise
 
 
-def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
-    """Atomically publish one complete lesson trace ledger."""
+def _replace_atomic_jsonl(path: Path, rows: list[dict]) -> None:
+    """Atomically publish one complete canonical JSONL ledger."""
     if not all(isinstance(value, dict) for value in rows):
-        raise ValueError("lesson trace rows must be mappings")
+        raise ValueError("canonical JSONL rows must be mappings")
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = "".join(
         json.dumps(value, default=str, ensure_ascii=False) + "\n"
@@ -253,12 +256,12 @@ def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
                 pass
 
 
-def _append_jsonl(path: Path, row: dict) -> bool:
+def _append_jsonl_unlocked(path: Path, row: dict) -> bool:
     """Append one complete transition and report whether it reached the local ledger."""
     try:
-        if path.name in _TRACE_JSONL_NAMES:
+        if path.name in _STRICT_ATOMIC_JSONL_NAMES:
             prior = _read_jsonl(path)
-            _replace_trace_jsonl(path, [*prior, row])
+            _replace_atomic_jsonl(path, [*prior, row])
             return True
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2056,7 +2059,28 @@ def application_finalization_status(
     }
 
 
-def request_context(book: str, plane: str, reason: str, ticker: str | None = None) -> dict:
+def _context_request_lock_path() -> Path:
+    return _DIR / ".context_requests.lock"
+
+
+@contextmanager
+def _context_request_lock():
+    """Serialize context-request read/decide/write transitions across threads and processes."""
+    with _CONTEXT_LOCAL_LOCK:
+        _DIR.mkdir(parents=True, exist_ok=True)
+        with _context_request_lock_path().open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
+def request_context(book: str, plane: str, reason: str, ticker: str | None = None,
+                    *, correlation: dict | None = None) -> dict:
     """Queue a bounded context-access request for later orchestrator review."""
     b = _clean_book(book)
     p = str(plane or "").strip().lower()
@@ -2066,17 +2090,31 @@ def request_context(book: str, plane: str, reason: str, ticker: str | None = Non
         return {"ok": False, "error": "plane must be a lowercase typed identifier"}
     if len(why) < 20:
         return {"ok": False, "error": "reason must explain the decision-relevant gap"}
-    existing = context_requests(limit=500)
-    dedupe = (b, p, tk, why.lower())
-    if any((r.get("book"), r.get("plane"), r.get("ticker"), str(r.get("reason") or "").lower()) == dedupe
-           for r in existing[-200:]):
-        return {"ok": True, "deduped": True}
-    row = {"schema": "portfolio.context_request.v1", "id": f"ctx-{uuid.uuid4().hex[:16]}",
-           "ts": _now(), "book": b, "plane": p, "ticker": tk, "reason": why,
-           "status": "queued_for_orchestrator_review", "authority": "request_only"}
-    if not _append_jsonl(_DIR / "context_requests.jsonl", row):
-        return {"ok": False, "error": "context_request_write_failed"}
-    return {"ok": True, "request": row}
+    if correlation is not None:
+        return _request_context_selected(b, p, why, tk, correlation)
+    with _context_request_lock():
+        existing = context_requests(limit=500)
+        dedupe = (b, p, tk, why.lower())
+        if any(
+            (r.get("book"), r.get("plane"), r.get("ticker"), str(r.get("reason") or "").lower())
+            == dedupe
+            for r in existing[-200:]
+        ):
+            return {"ok": True, "deduped": True}
+        row = {
+            "schema": "portfolio.context_request.v1",
+            "id": f"ctx-{uuid.uuid4().hex[:16]}",
+            "ts": _now(),
+            "book": b,
+            "plane": p,
+            "ticker": tk,
+            "reason": why,
+            "status": "queued_for_orchestrator_review",
+            "authority": "request_only",
+        }
+        if not _append_jsonl(_DIR / "context_requests.jsonl", row):
+            return {"ok": False, "error": "context_request_write_failed"}
+        return {"ok": True, "request": row}
 
 
 def context_requests(limit: int | None = 50) -> list[dict]:
@@ -2104,34 +2142,40 @@ def advance_context_request(
     status_value = str(status_value or "")
     if not rid.startswith("ctx-") or status_value not in _CONTEXT_STATUSES:
         return False
-    existing = next((row for row in context_requests(limit=None) if row.get("id") == rid), None)
-    if existing is None:
-        return False
-    if (existing.get("status") == status_value and
-            (not directive_id or existing.get("directive_id") == str(directive_id)[:40])):
-        return True
-    current_status = str(existing.get("status") or "")
-    current_rank = _CONTEXT_STATUS_RANK.get(current_status, -1)
-    target_rank = _CONTEXT_STATUS_RANK.get(status_value, -1)
-    # Reconciliation may observe an older directive delta after the request has already advanced.
-    # Treat that as satisfied, never append a regressive state transition. Conflicting terminal
-    # states remain fail-closed and require explicit operator resolution.
-    if current_rank > target_rank:
-        return True
-    if current_rank == target_rank and current_status != status_value:
-        return False
-    row = {
-        "schema": "portfolio.context_request_transition.v1",
-        "id": rid,
-        "ts": _now(),
-        "status": status_value,
-        "authority": "request_only",
-    }
-    if directive_id:
-        row["directive_id"] = str(directive_id)[:40]
-    if note:
-        row["note"] = " ".join(str(note).split())[:280]
-    return _append_jsonl(_DIR / "context_requests.jsonl", row)
+    with _context_request_lock():
+        existing = next(
+            (row for row in context_requests(limit=None) if row.get("id") == rid),
+            None,
+        )
+        if existing is None:
+            return False
+        if (
+            existing.get("status") == status_value
+            and (not directive_id or existing.get("directive_id") == str(directive_id)[:40])
+        ):
+            return True
+        current_status = str(existing.get("status") or "")
+        current_rank = _CONTEXT_STATUS_RANK.get(current_status, -1)
+        target_rank = _CONTEXT_STATUS_RANK.get(status_value, -1)
+        # Reconciliation may observe an older directive delta after the request has already advanced.
+        # Treat that as satisfied, never append a regressive state transition. Conflicting terminal
+        # states remain fail-closed and require explicit operator resolution.
+        if current_rank > target_rank:
+            return True
+        if current_rank == target_rank and current_status != status_value:
+            return False
+        row = {
+            "schema": "portfolio.context_request_transition.v1",
+            "id": rid,
+            "ts": _now(),
+            "status": status_value,
+            "authority": "request_only",
+        }
+        if directive_id:
+            row["directive_id"] = str(directive_id)[:40]
+        if note:
+            row["note"] = " ".join(str(note).split())[:280]
+        return _append_jsonl(_DIR / "context_requests.jsonl", row)
 
 
 def acknowledge_context_directives(directive_ids: set[str] | list[str] | tuple[str, ...]) -> int:
@@ -2162,3 +2206,154 @@ def status() -> dict:
         "note": ("This is Mastermind Portfolio learning. The public user chatbot remains Mastermind AI "
                  "and has separate state and authority."),
     }
+
+
+@contextmanager
+def _context_receipt_lock():
+    from control_plane import locks
+    lock = locks.acquire("global:portfolio_context_requests", root=_ROOT)
+    if lock is None:
+        from brain import runlog
+        raise runlog.PortfolioRunError("fabric_context_ledger_busy")
+    with lock:
+        yield
+
+
+def _append_jsonl(path: Path, row: dict) -> bool:
+    if Path(path) != _DIR / "context_requests.jsonl":
+        return _append_jsonl_unlocked(path, row)
+    try:
+        from brain import runlog
+        with _context_receipt_lock():
+            # All context transitions share serialization and preserve partial originals.
+            runlog.strict_rows(path, absent=True)
+            return _append_jsonl_unlocked(path, row)
+    except Exception:
+        return False
+
+
+def _context_correlation(correlation: dict) -> dict:
+    from brain import runlog
+    if (type(correlation) is not dict or set(correlation) != {"run_id", "tool_id"}
+            or type(correlation["tool_id"]) is not str
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}", correlation["tool_id"])):
+        raise runlog.PortfolioRunError("fabric_context_identity_invalid")
+    runlog.portfolio_id(correlation["run_id"])
+    return dict(correlation)
+
+
+def _context_original_identity(book: str, correlation: dict, *, pending: bool = False) -> dict:
+    """Resolve the trusted book's saved effect, without opening another original."""
+    from brain import runlog, fabric_portfolio
+    book = runlog.portfolio_book(book)
+    with runlog.portfolio_lock():
+        original = (runlog.portfolio_pending_locked(book) if pending else
+                    runlog.portfolio_original_locked(correlation["run_id"], book=book))
+        effect = next((row for row in (original or {}).get("state", {}).get("tools", [])
+                       if row.get("id") == correlation["tool_id"]), None)
+        if (original is None or original["state"]["run_id"] != correlation["run_id"]
+                or effect is None or effect.get("state") not in {"pending", "complete"}
+                or effect.get("name") != fabric_portfolio.tool_name(book, "request_context_upgrade")):
+            raise runlog.PortfolioRunError("fabric_context_intent_missing")
+        args = effect["input"]
+        return {"book": book, "plane": str(args.get("plane") or "").strip().lower(),
+                "reason": " ".join(str(args.get("reason") or "").split())[:_MAX_REASON],
+                "ticker": str(args.get("ticker") or "").upper().strip()[:16] or None}
+
+
+def _context_receipt_from_rows(rows: list[dict], correlation: dict) -> dict | None:
+    from brain import runlog
+    matches = [row for row in rows if row.get("schema") == "portfolio.context_receipt.v1"
+               and row.get("run_id") == correlation["run_id"]
+               and row.get("tool_id") == correlation["tool_id"]]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise runlog.PortfolioRunError("fabric_context_receipt_duplicate")
+    receipt = matches[0]
+    if (set(receipt) != {"schema", "run_id", "tool_id", "request_id", "base_digest",
+                         "input_digest", "requested_input_digest", "deduped"}
+            or type(receipt["deduped"]) is not bool):
+        raise runlog.PortfolioRunError("fabric_context_receipt_invalid")
+    bases = [row for row in rows if row.get("schema") == "portfolio.context_request.v1"
+             and row.get("id") == receipt["request_id"]]
+    if len(bases) != 1 or runlog.digest(bases[0]) != receipt["base_digest"]:
+        raise runlog.PortfolioRunError("fabric_context_original_missing")
+    base = bases[0]
+    identity = {key: base.get(key) for key in ("book", "plane", "reason", "ticker")}
+    if runlog.digest(identity) != receipt["input_digest"]:
+        raise runlog.PortfolioRunError("fabric_context_receipt_invalid")
+    return {"ok": True, "deduped": receipt["deduped"], "request": base, "receipt": receipt}
+
+
+def reconcile_context_request(correlation: dict, *, book: str = "autonomous") -> dict:
+    """Read/re-sync one committed base+receipt; no append or semantic re-request."""
+    from brain import runlog
+    correlation = _context_correlation(correlation)
+    identity = _context_original_identity(book, correlation)
+    path = _DIR / "context_requests.jsonl"
+    with _context_receipt_lock():
+        before = runlog.strict_read(path)
+        result = _context_receipt_from_rows(runlog.strict_rows(path), correlation)
+        if result is None:
+            raise runlog.PortfolioRunError("fabric_context_effect_unsettled")
+        if (result["request"].get("book") != identity["book"]
+                or result["receipt"]["requested_input_digest"] != runlog.digest(identity)):
+            raise runlog.PortfolioRunError("fabric_context_input_conflict")
+        runlog.durable_existing(path, before)
+        return result
+
+
+def _request_context_selected(book: str, plane: str, reason: str, ticker: str | None,
+                              correlation: dict) -> dict:
+    from brain import runlog
+    correlation = _context_correlation(correlation)
+    book = runlog.portfolio_book(book)
+    identity = {"book": book, "plane": plane, "reason": reason, "ticker": ticker}
+    if _context_original_identity(book, correlation, pending=True) != identity:
+        raise runlog.PortfolioRunError("fabric_context_input_conflict")
+    path = _DIR / "context_requests.jsonl"
+    with _context_receipt_lock():
+        old = runlog.strict_read(path, absent=True)
+        rows = runlog.strict_rows(path, absent=True)
+        prior = _context_receipt_from_rows(rows, correlation)
+        if prior is not None:
+            if prior["receipt"]["requested_input_digest"] != runlog.digest(identity):
+                raise runlog.PortfolioRunError("fabric_context_input_conflict")
+            runlog.durable_existing(path, old)
+            return prior
+        # Immutable creation rows, not folded status projections, own semantic dedupe.
+        bases = [row for row in rows if row.get("schema") == "portfolio.context_request.v1"]
+        matches = [row for row in bases if
+                   (row.get("book"), row.get("plane"), row.get("ticker"),
+                    str(row.get("reason") or "").lower()) == (book, plane, ticker, reason.lower())]
+        base = matches[0] if matches else {
+            "schema": "portfolio.context_request.v1", "id": "ctx-" + uuid.uuid4().hex[:16],
+            "ts": _now(), **identity,
+            "status": "queued_for_orchestrator_review", "authority": "request_only"}
+        # Exact original casing is retained when semantic dedupe selects a prior request.
+        receipt = {"schema": "portfolio.context_receipt.v1", **correlation,
+                   "request_id": base["id"], "base_digest": runlog.digest(base),
+                   "input_digest": runlog.digest({key: base.get(key) for key in identity}),
+                   "requested_input_digest": runlog.digest(identity),
+                   "deduped": bool(matches)}
+        additions = ([base] if not matches else []) + [receipt]
+        runlog.sync_directory(path.parent)
+        flags = os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        if old is None:
+            flags |= os.O_CREAT | os.O_EXCL
+        fd = os.open(path, flags, 0o600)
+        try:
+            raw = b"".join(runlog.canonical(row) + b"\n" for row in additions)
+            if os.write(fd, raw) != len(raw):
+                raise runlog.PortfolioRunError("fabric_context_partial_append")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        runlog.sync_directory(path.parent)
+        if runlog.strict_read(path) != (old or b"") + raw:
+            raise runlog.PortfolioRunError("fabric_context_readback_failed")
+        result = _context_receipt_from_rows(runlog.strict_rows(path), correlation)
+        if result is None:
+            raise runlog.PortfolioRunError("fabric_context_receipt_missing")
+        return result

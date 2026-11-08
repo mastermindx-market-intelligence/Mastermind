@@ -1,125 +1,279 @@
-# Existing-host activation and real-account acceptance
+# Native host integration and account acceptance
 
-This is the integration contract for the current APPLICATION and Hermes host
-owners. It does not enroll a role, install a runtime, create a session registry,
-or authorize provider calls. The current owner source does not yet issue a
-qualified Hermes factory. Activation remains closed until that owner supplies it.
+The implementation runs through the existing Hermes and APPLICATION owners.
+This document gives the source composition and concrete activation order. It
+does not authorize a new credential store, account ledger, service or retry path.
 
-## Smallest first live slice
+## Fixed ownership
 
-The first real-account qualification can use one host-authorized strict model
-and one eligible account through existing APPLICATION admission. It does not
-need to wait for the entire AUTO selector extension. The original programme still
-requires automatic routing and strict pool support before completion.
+| Native consumer | APPLICATION profile/lane | Internal credential reference | Relay |
+| --- | --- | --- | --- |
+| mmsecretary | hermes-secretary | HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN | 127.0.0.2:50142 |
+| mmmeta | hermes-meta-ceo | HERMES_META_FABRIC_APPLICATION_TOKEN | 127.0.0.3:50142 |
+| Ordinary attended | hermes-attended | HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN | 127.0.0.1:50142 |
 
-The APPLICATION owner accepts or replaces these proposed dedicated relations:
+The attended row is the distinct relation from the original Macro owner. It
+uses workload `hermes_attended`; the two role rows use `site_interactive`.
+Published a577 keeps all five Hermes fixed/AUTO descriptors source-disabled.
+The exact [source-support proposal](qualification/application_owner_support/README.md)
+supplies their missing support declarations through that same owner; adoption
+is pending. Source support alone does not enroll a service: the existing
+qualification, capability, internal credential and admission checks still apply.
+Neither a role credential nor the ordinary default Hermes profile substitutes
+for the attended identity.
 
-| Existing role profile | Proposed lane | Proposed service mode |
+The numeric addresses preserve the existing Linux role network isolation.
+All three APPLICATION remotes, including the original 127.0.0.1:50142, use the
+same incumbent tunnel client and native 127.0.0.1:4142 target. No public/provider
+endpoint is placed in Hermes.
+
+Source responsibilities:
+- Complete adapter/host/tunnel composition: Mastermind #2186, preserving the
+  primary #2155 and attended #2166 contributions.
+- Existing native enrollment extension: Mastermind #2186, stacked on #2175.
+- Existing Macro factory/client declarations: original Macro #10740, including
+  its incorporated #10818 repair and dedicated attended relation. #10832 adds
+  qualification evidence without replacing that production owner.
+- Final APPLICATION release/account/economic composition: #2175/#10740.
+- Native worker delegation #2147, shared-pool policy #2109 and protected model
+  packages keep their existing custody.
+
+## Implemented host join
+
+The existing installation v4 primary_application field holds a closed nonsecret
+publication. It names the exact native role, enrollment request, principal,
+held Macro root/commit, adapter package digest, model contract and token ceiling.
+Optional Executive consumer composition and qualified vendor derivation remain
+in their existing fields.
+
+The native entry binds the adapter after native authority initialization.
+The existing role/installation owner qualifies the publication and source.
+host.py wraps the current native TurnRunner entry and cleanup:
+
+1. Capture the actual enrolled session, native started admission, principal,
+   authority epoch and execution generation. Native LOCAL source, approval owner
+   and adopted-agent relationships must agree.
+2. Make the original role-specific APPLICATION factory under its existing
+   workload, qualification, entitlement and scope checks.
+3. At the first real native request, bind once using native admission_id as
+   APPLICATION operation_id; retain native session/task/turn/API IDs separately.
+4. Recheck currentness and the keyless/fallback-free agent route before each call
+   and before exposing executable tools.
+5. Retain the same original owner through native facade rebuilds and recovery.
+6. On exit, close only that owner. A local close or refused close does not prove
+   provider cancellation, settlement or permission for a replacement turn.
+
+The ordinary attended path instead uses the existing gateway admission and
+the registered attended plugin. Its native core patch preserves the
+`source=host_bound` marker through both gateway projections, outside constructor
+kwargs. A marked route must pass the native profile/runtime checks and claim
+its original admission before binding the attended APPLICATION factory. The
+role-host paths above remain unmarked and do not consume an additional claim.
+The ten-file patch and its exact pre/postimages are in `hermes_core/`; the plugin
+does not patch the running checkout.
+
+The existing native result/session owner remains authoritative. Serving receipts
+come from the original APPLICATION observation and are correlated to the exact
+native request. A configured AUTO label, capability ID or provider profile is not
+a physical-account receipt.
+
+The closed primary publication supports three distinct forms:
+
+| Publication | Native model | Owner contract |
 | --- | --- | --- |
-| `mmmeta` | `hermes-meta-ceo` | `hermes_meta_fabric` |
-| `mmsecretary` | `hermes-secretary` | `hermes_secretary_fabric` |
+| v1 | Named fixed model | Original fixed inspection/binding |
+| v2, routing.mode=auto | mastermind-fabric/auto | Null requested model, inspection/binding v2 |
+| v3, routing.mode=exact | Concrete host-authorized model | with_requested_model before inspection, inspection/binding v3 |
 
-The owner's closed relation, workload/capability policy, internal service-token
-resolution, entitlement, transport qualification and TTL remain authoritative.
-Changing a consumer constant does not create any of those facts. A changed
-owner-approved relation requires the corresponding narrow adapter update.
+V2/v3 routing also carries strict_pool, either null or a pool whose name must
+match the owner's complete singleton scope. Hermes cannot narrow a broader
+pool list itself. V3 never converts a concrete model to AUTO. Its original wire
+model is unchanged, the selected and served models must match, and the original
+owner's route v2 has routed_request_digest=null. Old v1/v2 publications are not
+reinterpreted. The additional Qwen plaintext control form is not qualified for
+Hermes tool conversations; unsupported reasoning kwargs still refuse.
 
-## Host composition
+## Existing dependency closure
 
-1. The incumbent installer/host verifies the selected Hermes source and adapter
-   qualification. The private native auth-type seam was tested only at Hermes
-   `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`. The adapter constant records that
-   revision; `create_primary_agent` does not independently verify a Git checkout.
-2. The existing authenticated host obtains the original operation/session/turn
-   identity and the qualified APPLICATION factory from its current owners.
-   It independently checks that a new admission is permitted. An uncertain or
-   previously admitted operation goes to original-owner recovery, not this
-   constructor with a convenient `False` value.
-3. The host creates one binding and retains that same binding in its existing
-   lifecycle. Do not add a separate adapter session map or restore-by-ID path.
+The real held launch already supplies PyYAML 6.0.3 through
+paid_yaml_runtime.held_yaml. release_manifest keeps that context alive around
+native_gateway_entry.run, so the original Macro capability loader uses that
+same verified module. Do not preload ambient YAML or add a second loader.
+The isolated conversation harness does not enter that production bootstrap;
+it installs the matching PyYAML version as an explicit fixture dependency.
 
-```python
-from integrations.hermes_application_fabric import ApplicationBinding
-from integrations.hermes_application_fabric.native import (
-    create_primary_agent, register_middleware,
-)
+Structured output additionally requires requirements.txt's jsonschema 4.26.0
+and its complete resolved dependency set for the selected interpreter/platform.
+The upstream Hermes lock does not guarantee those packages. Publish them in a
+fresh immutable version of the existing third-party dependency tree, through
+the current native import_roots and dependency_inventory fields. Preserve the
+four-root limit and the exact held Macro root; do not edit a live qualified tree
+or add a separate dependency registry. The current NativeSourceClosure verifies
+all files and directory membership, including resolved native-extension bytes.
 
-# All values/callbacks below are supplied by the incumbent authenticated host.
-# This becomes runnable only after that host receives a qualified owner factory.
-binding = ApplicationBinding.from_factory(
-    qualified_factory,
-    profile_id=authenticated_profile_id,
-    operation_id=original_operation_id,
-    session_id=original_session_id,
-    turn_id=original_turn_id,
-    requested_model=host_selected_model,
-    strict_model=host_selected_model,
-    authorized=current_role_session_grant_check,
-    prior_admission_possible=False,  # Only with actual original-owner proof.
-)
+The existing release dependency preparation verifies a previously frozen
+inventory; it does not download packages or bless new hashes discovered on the
+host. Final installed proof must exercise both factory.inspect() in the held
+YAML context and Draft202012Validator through that selected closure. An ordinary
+venv import proves only the isolated source fixture. Missing schema support
+already refuses before any provider request.
 
-# resolve_existing_binding(call) returns the retained binding using the existing
-# host's authenticated context and lifecycle, never request prose alone.
-middleware_handle = register_middleware(plugin_context, resolve_existing_binding)
-agent = create_primary_agent(model=host_selected_model)
-```
+## Enrollment through the incumbent publisher
 
-4. Before creating agents, register the provider and middleware through these
-   entrypoints. The provider refuses existing same-name custom/profile/auth-arm
-   collisions. The host owns the returned middleware handle; do not live-swap an
-   incumbent provider or install it via the naked CLI auth ladder.
-5. The host's authorization callback must verify the current role, session,
-   task/turn relationship, grant and revocation state for each `NativeCall`.
-   Native metadata carries correlation only. The adapter checks that callback
-   before dispatch and before returning executable tool calls. Host-selected
-   model and request capability requirements must come from trusted policy.
-6. Execute the original native conversation through the host's existing agent
-   lifecycle. Hermes generates its API request ID before its internal loop; the
-   adapter hashes it with the original operation/session/task/turn identity.
-   The original owner client holds attempted/active/uncertain state. Facade
-   eviction or rebuilding never replaces it.
-7. The same host owns normal completion, interruption and original close. A
-   downstream failure invokes the original local close fence. Preserve the
-   owner's final or unknown close disposition; it is not inferred settlement.
+The closed v9 service specification has two forms: one fixed grant, or a typed
+route scope plus bounded explicit grants. Both preserve role, principal, host,
+APPLICATION purpose, the role-specific workload, lane, enabled state and the
+original internal credential reference. Secretary and meta-CEO retain
+`site_interactive`; the dedicated attended relation uses `hermes_attended` in
+both service scope and grant. The original accounts parser validates
+models/accounts/grant overlap. The original operation owns token generation,
+private binding, account publication and recovery.
 
-No API key, endpoint, credential pool, fallback chain or provider auth store is
-supplied to Hermes. There is no auxiliary/vision/async inference admission in
-this primary synchronous slice. Host requirements needing streaming, opaque
-reasoning replay or other unsupported carriers must refuse until qualified.
+For a fresh Secretary or meta-CEO role, enroll its intended authorized scope
+once. The fixed factory can run the first strict Go canary; later legitimate
+new turns can use AUTO with that exact scope. The current attended relation is
+fixed-only; it must not inherit a role's AUTO transport or grant. A completed
+fixed slot cannot be rewritten into routed form.
+No token remint, file deletion or remembered-ID replacement is an upgrade path.
 
-## Live acceptance sequence
+v1–v8 family readers remain unchanged. Startup aggregates only completed role
+slots and original family receipts, including absence snapshots. Partial
+publication, conflicting physical owner or credential identity collision refuses.
 
-Use the existing owner to admit a bounded, non-sensitive canary with one enabled
-model/account. The host sets a small output budget within the account's approved
-budget. Use the existing role's harmless read-only tool, with an observable
-execution counter supplied by its current tool/test owner.
+## Same-owner tunnel successor
 
-| Step | Required canonical evidence |
+Use the original application_tunnel_control commands under their existing
+authorized deploy carrier. The v2 selection is the closed --role-aliases flag;
+there is no arbitrary address/port/destination input.
+
+Before the successor:
+- Retain the existing v1 client stage and apply receipts, server bundle/receipt,
+  original credential bytes AND file identity, and lifecycle outcome.
+- Qualify the exact existing Chisel client/server binaries for simultaneous
+  closed remotes as well as the original authfile reload semantics.
+- Build/verify the sealed source release carrying both compatible generations.
+
+The [real binary protocol receipt](qualification/chisel_protocol_receipt.json)
+qualifies Chisel v1.12.0 on a finite unprivileged Linux loopback fixture. Atomic
+authfile replacement refreshes new reverse-client admission and new forward
+channels on an existing authenticated SSH connection. It does **not** revoke an
+already-open reverse listener or an accepted stream. The original client stop
+below is therefore required before ACL replacement; reload alone is insufficient.
+The receipt separately records the existing M2 and Ubuntu1 binary digests and
+upstream source revision. It does not attest a production M2-to-Ubuntu1 session,
+the original server fingerprint, or the root-qualified activation receipt.
+
+Finite sequence:
+1. Stage v2 with --role-aliases and --predecessor-server-receipt. No --credential
+   is accepted. The source-selected stage-hermes-v2 slot commits original receipt
+   identities and retains the existing credential. Client staging consumes only
+   the carried server receipt; it never reads the server's filesystem.
+2. Stop/reconcile the original v1 client through its existing stop-client owner
+   while its original config/plist still exist. A qualified absent observation
+   after the original stop intent can settle an uncertain stop; it never causes
+   another stop command. An uncertain original start remains held.
+3. Carry the exact v2 server bundle to the original server owner. apply-server
+   verifies the original server journal, account-independent transport identity,
+   unchanged server process and exact authfile preimage. It preserves unrelated
+   ACLs and adds only the .2/.3 rules to the original application identity.
+   Existing listeners must be absent for the first ACL publication.
+4. apply-client --role-aliases publishes the successor config/plist only after
+   the original client is proven stopped. The credential is never replaced;
+   equal bytes on a different inode are refused.
+5. start-client --role-aliases uses the same launchd label and original
+   credential, exact three-remotes argv and successor journal.
+6. Reconcile the selected original journal after any lost reply. Committed
+   writes with missing receipts are read back; no second ACL write, new
+   credential, substitute service or repeated provider operation follows.
+
+V1 and v2 share their existing purpose lock and retain separate immutable
+generation journals beneath the same owner. V2 recovery uses its captured
+preimages and candidates after the first write; it does not demand obsolete v1
+live files. Empty/partial/full alias listeners are different from authenticated
+APPLICATION success. A grant-file receipt does not assert tunnel/provider proof.
+
+## Source integration and live qualification order
+
+The proposals are reviewable source; tests do not activate their held transports.
+
+1. Reconcile current #2175/#10740 and native/role writers, original request
+   effects and existing release holds. Compose exact reviewed source into those
+   original carriers, preserving newer protected changes and all historical
+   native generations.
+2. Obtain required protected-source/CI/release authorization under the existing
+   rules. Do not self-approve, self-merge or repurpose another role's factory.
+3. Build and qualify the existing native/release closures with role enrollment,
+   factory/client, host adapter and compatible tunnel source. Private runtime
+   credentials remain in their original owners.
+4. Qualify one actual account and route, then publish the internal role grant
+   through the original enrollment transaction and install through existing
+   native/Hermes/tunnel lifecycle owners.
+5. Enroll the actual Hermes session through the existing authenticated native
+   command and perform the bounded original admission.
+6. Execute and reconcile the acceptance journey below. Source success,
+   STARTED, deployment and acceptance remain separate observations.
+
+No part of this sequence authorizes bypassing active/unknown effects.
+
+## Financial boundary required before the canary
+
+The provider owner must supply a fresh receipt connecting the actual selected
+physical account to the qualifying Go transport/configuration, Extra Usage OFF,
+included headroom and its validity window. The source default Go endpoint is
+https://opencode.ai/zen/go/v1, but GO_UPSTREAM_BASE is configurable; account
+identity alone does not establish the financial boundary.
+
+The [current provider documentation](https://opencode.ai/docs/console/go)
+distinguishes included allowance from Extra Usage and documents different
+defaults for Go Teams. Teams service accounts are not covered by that plan;
+the upstream account type must therefore be verified. A Mastermind internal
+service identity does not establish the upstream provider account type. Current
+[inference documentation](https://opencode.ai/docs/console/api/inference/)
+describes a newer endpoint and separate cost, billing-source and allowance
+fields. Qualify the actual installed endpoint; do not silently migrate it or
+equate allowance consumption with billed USD. The original Go APPLICATION
+transport already emits its identifiable User-Agent and a stable provider
+session derived from the admitted lease, across all tool steps. Hermes adds no
+provider-selected header or alternate session owner.
+
+The existing owner must bind this policy to the original request/admission.
+Hermes must not assert it via prompt text, headers or model arguments. The
+declared quota scope can join multiple accounts/products, so another account's
+receipt is insufficient. Do not record a missing monetary amount as zero.
+
+For this one included-plan canary, the authoritative hard spending boundary and
+the original Broker's durable per-dispatch SQLite token-usage settlement can
+satisfy budget and usage acceptance. A new general USD reservation feature is
+not a prerequisite. Preserve any stricter applicable existing account or service
+budget; a prepaid balance without a verified hard no-overage boundary is not
+enough. Report monetary cost as unknown when no qualified cost receipt exists.
+Provider [request-start budget checks](https://opencode.ai/docs/console/budgets/)
+can permit in-flight overshoot; a displayed budget alone is not proof of a
+strict no-overage ceiling. This qualification uses the applicable existing
+owner receipts and policy, not a new runtime finance payload or ledger.
+
+On-demand or broader pooled rollout still needs its applicable original-owner
+budget admission and settlement, accurate physical/shared-account treatment and
+holds across uncertain effects. Optional JSONL/spend-report defects remain
+separate known limits. A capacity cooldown may expire and permit a probe; it
+cannot stand in for a required unresolved economic hold. Missing price evidence
+alone is not proof that the provider request itself has an unknown outcome.
+
+## Acceptance journey
+
+| Step | Required original-owner evidence |
 | --- | --- |
-| Admission | Current role/session grant; dedicated Hermes service relation; entitlement/qualification reference; original operation; approved model constraint. |
-| Selection/reservation | Actual provider, served model, physical account and quota bucket; one reservation through the existing lease/budget owner; actual policy/recipe revision. |
-| First model turn | Original request/operation correlation and authenticated internal call; real model output and provider usage. No provider key inside Hermes. |
-| Tool continuation | Original native tool-call ID, exactly one permitted tool execution, original result in next native request, same original APPLICATION owner. |
-| Bounded denial | Existing owner's deterministic budget/entitlement refusal before provider dispatch. Do not spend funds merely to exhaust a real account. |
-| Settlement | Actual usage/charge and original reservation settlement/close disposition from canonical owners. Synthetic token totals do not qualify. |
-| Recovery | Controlled timeout/disconnect using an owner-authorized fixture/canary; reconcile the original request, prove tool execution is not repeated, and retain unknown effects until the owner resolves them. |
+| Role/admission | Qualified dedicated role/session/principal, grant/entitlement, native admission and original request IDs. |
+| Selection | Actual provider, selected AND served model, physical account, applicable shared allowance scope, policy/recipe/configuration and original lease. |
+| Primary turn | Real authenticated APPLICATION dispatch through that account, bounded usable native output, observed usage. No provider credential inside Hermes. |
+| Tool continuation | Offered native tool ID, exactly one harmless read-only tool execution, original result in the next native request, same original owner/account commitment. |
+| Budget enforcement | Fresh owner evidence of the selected account's hard spending boundary and applicable admission policy, plus deterministic refusal evidence at its entitlement/budget limit. Do not consume a real account just to exhaust it. |
+| Settlement | Durable original dispatch/request-linked SQLite usage and truthful financial interpretation, original lease/close and any applicable reservation disposition. |
+| Recovery | Original result/unknown-effect readback after a controlled disruption, no second provider submission or duplicate tool effect. |
+| AUTO/strict policy | Eligible capability/complexity/latency/headroom/cost selection and strict model/pool refusal before effects, through the incumbent contract. |
 
-The public response need not initially carry every accounting field if existing
-canonical owner evidence supplies an exact request-linked readback. Do not
-interpret a capability ID as an account or invent an adapter accounting receipt.
-Record links to those owner facts in the programme/PR evidence. Never include
-service tokens, provider keys or credential file contents.
+Public responses need not carry every financial field if canonical owner
+evidence provides exact request-linked readback. Never relabel a model, profile
+or capability as a physical account. No synthetic fixture count qualifies as
+live usage. Record source/result references without secrets.
 
-## Routing extension after the first account
-
-AUTO and strict pool selection remain an extension of the current
-ModelRouter/APPLICATION/Fabric account contract. Apply trusted capability and
-strict constraints before ranking; use task complexity, expected latency,
-headroom and cost; deduplicate by physical quota bucket across all model/pool
-aliases; recheck and reserve atomically through the incumbent owner. The detailed
-design is in [README](README.md#routing-and-physical-account-design).
-
-Only original-owner proof that a new provider call is safe permits failover.
-Neither an HTTP 429, timeout, changed account headroom nor a newly constructed
-Hermes agent proves that fact. This adapter currently refuses strict pools and
-supplies no failover or cross-process recovery service.

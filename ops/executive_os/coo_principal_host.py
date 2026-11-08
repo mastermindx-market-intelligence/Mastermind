@@ -20,6 +20,12 @@ from control_plane.executive_agent_capabilities import (
     CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
     HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
     HERMES_NATIVE_PRINCIPAL_PROFILE_ID,
+    HERMES_NATIVE_CONTEXT_PROFILE_ID,
+    HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID,
+    HERMES_NATIVE_DISCOVERY_PROFILE_ID,
+    PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -109,6 +115,7 @@ class CooInstalledSource:
             _refuse()
         self._load_coo = load_coo
         self._registry_loader = registry_loader
+        self._context_source_callbacks = (load_coo, registry_loader)
         self._original_acceptance_target_reader = None
         self._selected_child_target_reader = None
 
@@ -151,7 +158,6 @@ class CooInstalledSource:
     def _snapshot(self, work_ref, coo, *, principal_binding_digest=None):
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_executive_app.coo_binding import coo_binding_records, _digest
-        from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS
         if not _check_work_ref(work_ref):
             _refuse()
         policy = load_resource_policy(coo["policy"])
@@ -175,22 +181,122 @@ class CooInstalledSource:
                 or profile.execution_surface not in {
                     CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE}
                 or (profile.execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
-                    and profile.profile_id != HERMES_NATIVE_PRINCIPAL_PROFILE_ID)
+                    and profile.profile_id not in {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
+                                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID})
                 or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
-        specs = {s.name: {"name": s.name, "inputSchema": s.input_schema,
-                         "annotations": s.annotations} for s in COO_TOOL_SPECS}
-        schema_digest = observed_mcp_tool_schema_digest({"tools": specs})
-        matches = [g for g in profile.mcp_server_grants
-            if g.server_identity == COO_SERVER_NAME and g.server_version == COO_SERVER_VERSION
-            and set(g.enabled_tools) == set(specs) and g.tool_schema_digest == schema_digest]
-        if len(matches) != 1:
-            _refuse()
+        self._profile_catalogue(profile)
         fact = PrincipalFact(policy_id=binding["policy_id"], issuer_digest=binding["issuer_digest"],
             subject_digest=binding["subject_digest"], client_ref=binding["client_ref"],
             resource_ref=binding["resource"], scopes=tuple(binding["scopes"]),
             principal_binding_digest=row["principal_binding_digest"])
         return row, fact, _authority(row)
+
+    @staticmethod
+    def _profile_catalogue(profile):
+        from common import coo_agentos_context_contract as wire
+        from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, catalogue_specs
+        found = []
+        context_profiles = {
+            wire.CATALOGUE: (HERMES_NATIVE_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID),
+            wire.CURRENT_CATALOGUE: (HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID),
+            wire.DISCOVERY_CATALOGUE: (HERMES_NATIVE_DISCOVERY_PROFILE_ID, PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID),
+        }
+        for catalogue in (wire.LEGACY_CATALOGUE, *context_profiles):
+            specs = {s.name: {"name": s.name, "inputSchema": s.input_schema, "annotations": s.annotations}
+                     for s in catalogue_specs(catalogue)}
+            schema_digest = observed_mcp_tool_schema_digest({"tools": specs})
+            for grant in profile.mcp_server_grants:
+                if (grant.server_identity == COO_SERVER_NAME and grant.server_version == COO_SERVER_VERSION
+                        and set(grant.enabled_tools) == set(specs) and grant.tool_schema_digest == schema_digest):
+                    if catalogue in context_profiles and (
+                            (profile.profile_id, grant.capability_id) != context_profiles[catalogue]):
+                        _refuse()
+                    found.append(catalogue)
+        if len(found) != 1:
+            _refuse()
+        for catalogue, (profile_id, _) in context_profiles.items():
+            if profile.profile_id == profile_id and found[0] != catalogue:
+                _refuse()
+        return found[0]
+
+    def catalogue_for_principal(self, principal, *, work_ref=None):
+        """One fixed catalogue per authenticated binding; never a tool union.
+
+        Active missions select the contract. With no enabled mission, retain the
+        legacy reconciliation surface without granting context access. Calling
+        existing tools does not require this new projection.
+        """
+        from common import coo_agentos_context_contract as wire
+        from integrations.business_mcp_auth.contracts import load_resource_policy
+        from integrations.mastermind_executive_app.coo_binding import select_coo_binding, _digest
+        self.require_context_source_current()
+        coo = self._load_coo()
+        binding = select_coo_binding(coo["binding"], load_resource_policy(coo["policy"]), principal)
+        if binding is None:
+            _refuse()
+        stamp = _digest(binding)
+        expected = {key: binding[key] for key in ("policy_id", "issuer_digest", "subject_digest", "client_ref", "resource", "scopes")}
+        if type(principal) is not dict or principal != expected:
+            _refuse()
+        rows = [row for row in validate_missions(coo.get("missions", [])) if row["principal_binding_digest"] == stamp]
+        selected = [row for row in rows if row["enabled"]]
+        if work_ref is not None:
+            # Internal per-read permission check, never a tools/list selector.
+            # AuthorityFact's generation deliberately excludes enabled.
+            scoped = [row for row in selected if row["work_ref"] == work_ref]
+            actions = {HERMES_NATIVE_CONTEXT_PROFILE_ID: wire.ACTION,
+                       HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: wire.CURRENT_ACTION,
+                       HERMES_NATIVE_DISCOVERY_PROFILE_ID: wire.CURRENT_ACTION}
+            if (not _check_work_ref(work_ref) or len(scoped) != 1
+                    or scoped[0]["capability_profile_id"] not in actions
+                    or actions[scoped[0]["capability_profile_id"]] not in _authority(scoped[0]).principal_actions):
+                _refuse()
+        catalogues = set()
+        for row in selected:
+            self.require_context_source_current()
+            self._snapshot(row["work_ref"], coo, principal_binding_digest=stamp)
+            self.require_context_source_current()
+            registry = self._registry_loader()
+            if type(registry) is not ExecutionCapabilityRegistry:
+                _refuse()
+            profile = registry.profiles.get(row["capability_profile_id"])
+            if profile is None or not profile.enabled or profile.profile_digest != row["capability_profile_digest"]:
+                _refuse()
+            catalogues.add(self._profile_catalogue(profile))
+        if len(catalogues) > 1 or self._load_coo() != coo:
+            _refuse()
+        self.require_context_source_current()
+        return next(iter(catalogues)) if catalogues else wire.LEGACY_CATALOGUE
+
+    def require_context_source_current(self):
+        if (self._load_coo is not self._context_source_callbacks[0]
+                or self._registry_loader is not self._context_source_callbacks[1]):
+            _refuse()
+
+    def has_context_read_grant(self):
+        """Installed composition selector, never an effect-admission arm."""
+        from common import coo_agentos_context_contract as wire
+        self.require_context_source_current()
+        coo = self._load_coo()
+        found = False
+        for row in validate_missions(coo.get("missions", [])):
+            alternatives = {HERMES_NATIVE_CONTEXT_PROFILE_ID: (wire.ACTION, wire.CATALOGUE),
+                            HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: (wire.CURRENT_ACTION, wire.CURRENT_CATALOGUE),
+                            HERMES_NATIVE_DISCOVERY_PROFILE_ID: (wire.CURRENT_ACTION, wire.DISCOVERY_CATALOGUE)}
+            if (row["enabled"] and row["capability_profile_id"] in alternatives):
+                _, fact, authority = self._snapshot(row["work_ref"], coo)
+                principal = {"policy_id": fact.policy_id, "issuer_digest": fact.issuer_digest,
+                    "subject_digest": fact.subject_digest, "client_ref": fact.client_ref,
+                    "resource": fact.resource_ref, "scopes": list(fact.scopes)}
+                action, catalogue = alternatives[row["capability_profile_id"]]
+                if (action in authority.principal_actions
+                        and self.catalogue_for_principal(principal) == catalogue):
+                    found = True
+        if self._load_coo() != coo:
+            _refuse()
+        self.require_context_source_current()
+        return found
 
     def for_principal(self, principal, work_ref):
         from integrations.business_mcp_auth.contracts import load_resource_policy
@@ -321,4 +427,26 @@ def validate_control_coo(raw):
             or not {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room", "ceo_ingress_app_peer_uid"} <= set(raw)))):
         _refuse()
     return arm
+
+
+def load_control_coo_source(raw, source, *, expected_uid, install_path=DEFAULT_INSTALL_PATH):
+    """Select the existing installed source for effects or an explicit read grant.
+
+    Unarmed installations retain their old behavior unless the sealed source and
+    registry independently prove a context-read mission. Failure of that optional
+    read selection never turns on effect admission or chooses another source.
+    """
+    if validate_control_coo(raw):
+        return CooInstalledSource.from_path(install_path, source, expected_uid=expected_uid)
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
+    if (raw.get("executive_mcp_profile") not in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}
+            or not {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room",
+                    "ceo_ingress_app_peer_uid"} <= set(raw)):
+        return None
+    try:
+        candidate = CooInstalledSource.from_path(install_path, source, expected_uid=expected_uid)
+        return candidate if candidate.has_context_read_grant() else None
+    except (OSError, ValueError):
+        return None
 

@@ -1,0 +1,361 @@
+{
+  "schema": "mastermind.hermes_primary_application_v10_join.v1",
+  "observed_at_utc": "2026-11-07T16:28:06Z",
+  "parents": {
+    "hermes": "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc",
+    "application_owner": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
+    "common_source": "552375cd288ebe3c417d10afa17f47114c6319db"
+  },
+  "consumed_original_paths": [
+    {
+      "path": ".github/workflows/hermes-application-enrollment.yml",
+      "git_blob": "9c4d3fccf8db8b40804174d87561d1252ee85db6",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+      "git_blob": "35596b34ce2f3b58a610421902c425e393517830",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/native_install.py",
+      "git_blob": "8decd5031b7262b248553346530b2b6d2b78e79c",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+      "git_blob": "84a4bc98e37648e87c4b75e44841a3f68f30f4d5",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py",
+      "git_blob": "730761b176373a297aa8d2700ac406f7900661e7",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "review_evidence/fabric_application/fresh-routed-family-20261107.json",
+      "git_blob": "bfc7a8189473d296d54a27ba6010dee6427e372e",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "review_evidence/fabric_application/fresh-routed-family-20261107.md",
+      "git_blob": "4d2a9258147a79c5b4e4aefd3820ac0d19887500",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "review_evidence/fabric_application/fresh-routed-family-composition-20261107.json",
+      "git_blob": "b2f2ebc8c292d0f3d7683858dbcf37fb5cf89913",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json",
+      "git_blob": "d402a10cb6e9a29c861e1176444e38d27ec70e8c",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "review_evidence/fabric_application/hosted-ci-failure-repair-20261107.json",
+      "git_blob": "a041ab1ff504da332569c2b51787563958bca2ca",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "review_evidence/fabric_application/metadata-fixture-scheduling-20261107.json",
+      "git_blob": "401ec9f49b8568858bf9a3ec8371d2e24277cdcf",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "tests/executive_fabric_release_identity_review.py",
+      "git_blob": "da94c95459b6f96c1c8de568dee2545449a7f7d5",
+      "composition": "exact_disjoint_three_way_join"
+    },
+    {
+      "path": "tests/test_experiential_account_metadata_proxy.py",
+      "git_blob": "aab1693ea6ea6d8fb401cd030a3ee38450b6b9ad",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "tests/test_hermes_primary_application_enrollment.py",
+      "git_blob": "174800064a610b2fc41f3cb953b1fb5ba73b28c5",
+      "composition": "original_blob_unchanged"
+    },
+    {
+      "path": "tests/test_hermes_primary_retained_enrollment.py",
+      "git_blob": "ca73c0697055b69109a8b438a08cb0fabfd4fd81",
+      "composition": "original_blob_unchanged"
+    }
+  ],
+  "registry_join": {
+    "schema": "mastermind.hermes_application_v10_registry_join.v1",
+    "inputs": {
+      "base": {
+        "git_blob": "a1121cd93c34e65d4ea85228b970d819290e7d5e",
+        "sha256": "9a7d010c81c820d10b73d48cf0707f2f661c1a91a83ba2b712b146ffa3186f23",
+        "bytes": 56971
+      },
+      "hermes": {
+        "git_blob": "460a7ca2bc6b15b24a2e0fd16ad72d3f1632b5bb",
+        "sha256": "5bb0e45e80660a9d885fcdf505ab04e8f8f57610f2a0df85183fa48c03b4e26c",
+        "bytes": 58304
+      },
+      "original72": {
+        "git_blob": "da94c95459b6f96c1c8de568dee2545449a7f7d5",
+        "sha256": "b4eac72e9628216c6203de2476f781306c3a1a1dbf05fddade7ca1a8a7cab8fd",
+        "bytes": 56971
+      }
+    },
+    "resolved": {
+      "git_blob": "97b9b771664b978d19a0f60e7dfbfeaea47f76f3",
+      "sha256": "696ffdbb5fbba12f1c7020fb20a23d28453b9ba7f744d3b52a5133656f0b54b5",
+      "bytes": 58304
+    },
+    "base_line_edit_spans": [
+      {
+        "source": "original72",
+        "start": 85,
+        "end": 86,
+        "replacement_lines": 1
+      },
+      {
+        "source": "original72",
+        "start": 87,
+        "end": 88,
+        "replacement_lines": 1
+      },
+      {
+        "source": "hermes",
+        "start": 836,
+        "end": 839,
+        "replacement_lines": 33
+      }
+    ],
+    "all_edit_spans_disjoint": true,
+    "all_published_source_bytes_preserved": true,
+    "git_three_way_merge_exit": 0,
+    "independent_line_composition_matches": true,
+    "python_syntax_valid": true,
+    "held_implementation_read": false,
+    "composed_tests_run": false
+  },
+  "repairs": {
+    "observed_job": 128449392693,
+    "observed_run": 42387677363,
+    "source_head": "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc",
+    "failure": "test_no_anonymous_macro_reads_in_executable_or_config_surfaces: two inert provenance URLs in original paired evidence",
+    "consumed_fix_blob": "d402a10cb6e9a29c861e1176444e38d27ec70e8c",
+    "guard_changed": false,
+    "exemptions_changed": false,
+    "original_namespace_and_v10_repairs_consumed": true
+  },
+  "prior_qualification": {
+    "schema": "mastermind.hermes_primary_qualification_return.v1",
+    "source_head": "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc",
+    "source_tree": "e096cf78752df5d0a5c2fc9e8dc546c0ac3dcd95",
+    "tested_merge": "c55bb67f559b769459161efe6a40e13c536169ad",
+    "workflow_run": 42387677399,
+    "workflow_conclusion": "success",
+    "jobs": [
+      {
+        "job_id": 128448426051,
+        "name": "Disposable Studio preflight observation with original assertions",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426106,
+        "name": "Hermes APPLICATION offline contract (3.12)",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426159,
+        "name": "Current paired APPLICATION text, AUTO and native tools",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426174,
+        "name": "Hermes APPLICATION offline contract (3.13)",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426178,
+        "name": "Hermes aliases through original tunnel custody",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426179,
+        "name": "Hermes attended gateway with original admission and role coexistence",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426190,
+        "name": "Hermes pinned v0.23 primary and tools",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426218,
+        "name": "Hermes primary native host composition",
+        "conclusion": "success"
+      },
+      {
+        "job_id": 128448426266,
+        "name": "Hermes native conversation through APPLICATION handler and Broker",
+        "conclusion": "success"
+      }
+    ],
+    "runtime_package_sha256": "c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa",
+    "native_patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+    "source_support_patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+    "native_owner_receipts": [
+      {
+        "sources": {
+          "adapter_root": "c55bb67f559b769459161efe6a40e13c536169ad",
+          "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+          "native_owner_root": "c55bb67f559b769459161efe6a40e13c536169ad",
+          "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+        },
+        "source_support_proposal": {
+          "original_owner_commit": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+          "contract_sha256": "7952878b5662a83687982ad4d86bed72c774fc3362115572a9ff42424c4e7d66",
+          "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+          "postimages": {
+            "engine/provider_production_modes.py": "4df41a878c1368ad3d18da3d6b4eda9f3e4a6ea2afcdf38429a29518bf6464e8",
+            "tests/test_hermes_application_source_support.py": "e3253732804c5adb33b1b2360b1366f9425026897a47e4e843877538d28133bd",
+            "tests/test_hermes_attended_fabric_identity.py": "f344443fd3325ddac1a91d6f77b4add154b40e2c4f6aaa1cf99eb19d50922866",
+            "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+          },
+          "fixture_files": 2539,
+          "source_materialization": {
+            "method": "verified_local_committed_blobs",
+            "files": 2538,
+            "unique_blobs": 2534,
+            "bytes": 74768348,
+            "lazy_fetch_permitted": false,
+            "worktree_content_used": false
+          },
+          "original_source_unchanged": true,
+          "runtime_enrollment": false,
+          "unit_qualification": {
+            "tests": 383,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "junit_sha256": "0b4633291db8ad609fbbd996e07705d64da9497b8f92298e78b4f398f32e02ac",
+            "live_acceptance": false
+          }
+        },
+        "fixture_overrides_source_flags": false,
+        "tests_run": 21,
+        "network_counter_scope": "native_conversation_process_after_source_preparation",
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "blocked_external_connections": 0,
+        "provider_sdk_constructions": 0,
+        "real_application_handler": true,
+        "real_broker": true,
+        "provider_is_fixture": true,
+        "live_provider_acceptance": false,
+        "monetary_acceptance": false
+      },
+      {
+        "sources": {
+          "adapter_root": "c55bb67f559b769459161efe6a40e13c536169ad",
+          "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+          "native_owner_root": "c55bb67f559b769459161efe6a40e13c536169ad",
+          "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+        },
+        "source_support_proposal": null,
+        "fixture_overrides_source_flags": true,
+        "tests_run": 21,
+        "network_counter_scope": "native_conversation_process_after_source_preparation",
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "blocked_external_connections": 0,
+        "provider_sdk_constructions": 0,
+        "real_application_handler": true,
+        "real_broker": true,
+        "provider_is_fixture": true,
+        "live_provider_acceptance": false,
+        "monetary_acceptance": false
+      }
+    ],
+    "other_observed_counts": {
+      "gateway": 100,
+      "native_abi": 85,
+      "host": 137,
+      "tunnel": 170,
+      "studio_discovery": 848,
+      "studio_baseline": 1,
+      "studio_observed": 1,
+      "offline_python_312": 66,
+      "offline_python_313": 66,
+      "paired_unittest_groups": [
+        52,
+        8,
+        32,
+        23,
+        32,
+        42,
+        16,
+        14,
+        3
+      ],
+      "paired_pytest": 42,
+      "paired_reported_subtests": 16
+    },
+    "suites_overlap": true,
+    "qualified_macro_return": {
+      "commit": "a43c7c2c71355521b837974d3e06430688527d00",
+      "tree": "f697c30d90d34c7c0e7a637d02646b2022f1e78b",
+      "actual_parents": [
+        "772eec5c55c364cd987bb8ccb00ac4b59c755e91",
+        "cc45757612addfdc496acbb3c233376ad4c28c78"
+      ],
+      "all_four_returned_hermes_blobs_match": true,
+      "actual_returned_unit_cases": 383,
+      "original_final_carrier_adoption": false
+    },
+    "general_ci": {
+      "run": 42387677363,
+      "observed": "in_progress"
+    },
+    "live_provider_acceptance": false,
+    "monetary_acceptance": false,
+    "installed_primary_acceptance": false
+  },
+  "macro": {
+    "current_final_carrier_at_observation": "cd2ba4792e68587505b2638b1bcf8e9a3f00ed1a",
+    "qualified_support_return": "a43c7c2c71355521b837974d3e06430688527d00",
+    "four_postimages_match": true,
+    "final_carrier_support_adoption_observed": false,
+    "ci_selection_proposal": {
+      "repository": "mastermindx-market-intelligence/macro",
+      "pull_request": 10740,
+      "comment_id": 6709710657,
+      "preimage_blob": "3fb58fac4264b9682fa710de58ac8e2775dea28c",
+      "prepared_postimage_blob": "d5a48aeb47eed675597348801a1067837bd9645e"
+    }
+  },
+  "runtime_package_sha256": "c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa",
+  "native_patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+  "source_custody": {
+    "held_implementation_read": false,
+    "original_implementation_modified": false,
+    "original_ci_blob": "441b4f2032edfaab367200e6d62c4ba67568c43b",
+    "h6_newer_production_composition": "remains_with_original_owner"
+  },
+  "resulting_head_tests_run": false,
+  "live_provider_acceptance": false,
+  "monetary_acceptance": false,
+  "installed_primary_acceptance": false,
+  "owner_returns": {
+    "application": {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pull_request": 2175,
+      "comment_id": 6709701215
+    },
+    "hermes_prior_proof": {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pull_request": 2186,
+      "comment_id": 6709501412
+    }
+  }
+}

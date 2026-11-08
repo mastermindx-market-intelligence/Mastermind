@@ -177,8 +177,8 @@ adds no new policy approval gate.
 ## Rich client artifact profile
 
 The previous protected 11-file profile (Noir nine plus the two exact third-party
-notices) remains fully supported. Exact admitted profiles are 3, 9, 11 and 13;
-only 13 adds the two SourceMarkdown lazy chunks, and publication index sizes
+notices) remains fully supported. Exact admitted profiles are 3, 9, 11, 12 and 13;
+only 12 adds the private-entry JPEG, only 13 adds the two SourceMarkdown lazy chunks, and publication index sizes
 include one additional manifest entry each. Neither notices nor chunks are
 optional within their respective profiles.
 
@@ -203,7 +203,7 @@ still use the existing accepted release owner and all of its custody gates.
 ### Staged public-edge publication compatibility
 
 The original publisher's staged file index contains the manifest *plus* each admitted
-asset, so the four closed asset profiles have 4, 10, 12 and 14 index entries.
+asset, so the five closed asset profiles have 4, 10, 12, 13 and 14 index entries.
 `ops/executive_os/os_public_edge_publication.py` obtains the allowed index
 cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
 closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*
@@ -218,3 +218,30 @@ prepare, cutover readiness and finalization. The test-host release switch and
 HTTP stand-in are fixtures only. These checks **do not** prove root-sealed
 production publication, permission activation, provider SEND or authentic
 original-parent consumption.
+
+
+## Licensed private-entry artifact profile
+
+The closed12 profile is the complete licensed11 profile plus exactly one
+`assets/private-entry-[A-Za-z0-9_-]+.jpg`, served as `image/jpeg`. It retains
+index HTML, one main JS and CSS file, the atelier JPEG, Manrope TTF, Inter WOFF2,
+all three font documents and both third-party notices. Its exact directories
+remain `assets`, `licenses`, `licenses/fonts` and `third-party`.
+
+This is a separate profile: removing just the private-entry JPEG yields valid
+licensed11. A raw seven-file Vite bundle, unlicensed10, a partial set, a second
+private-entry image, a same-count hybrid, or rich13 plus the JPEG (14 files)
+remains invalid. SourceMarkdown chunks belong only to rich13. No asset name is
+an arbitrary glob and callers cannot choose MIME types.
+
+The same `OS_ASSET_PROFILE_FILE_COUNTS` owner drives capture, manifest, immutable
+loading and staged publication. Twelve manifest files produce thirteen staged
+index entries including the manifest itself. The inert publication regression
+covers old9/11/13 to new12 through PREPARED, CUTOVER_READY and FINAL, preserving
+the original two configuration mutations and removing old-only routes.
+
+All prior byte limits, hashes, exact index references, source/input provenance,
+sealed ownership, ACL/link/special-file checks, import/compare rules and release
+holds remain binding. A disposable successful build is source evidence; actual
+production preparation still requires the exact qualified protected packaging
+generation and its supported explicit public inputs.

@@ -244,10 +244,14 @@ def test_get_route_coherence():
                                 + edge.PROJECT_CONVERSATION_READ_POST_ROUTES
                                 + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',)
                                 + edge.PROJECT_EXECUTION_POST_ROUTES)
-    assert edge.POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
+    assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
         "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
     )
+    assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + (
+        "/os/executive/company-priorities",
+    )
+    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in profiles
     assert not set(edge.SOURCE_POST_ROUTES) & set(edge.POST_ROUTES)
     template = edge._TEMPLATE.read_text(encoding="utf-8")
     get_line = "path " + " ".join(edge.GET_ROUTES) + " __ASSET_PATHS__"

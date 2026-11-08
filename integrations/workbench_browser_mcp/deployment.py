@@ -55,6 +55,7 @@ class BrowserDeployment:
     run_action: Callable[..., Any]
     reconcile_action: Callable[..., Any]
     cleanup_resource: Callable[..., Any]
+    prepare_credential_fill: Callable[..., Any] | None = None
 
 
 async def _run_existing(services: RuntimeServices, operation: Callable[[], object]) -> object:
@@ -90,6 +91,7 @@ def create_browser_ports(
     inspector: ProcessInspector | None = None,
     relay_requester: RelayRequester = relay_request,
     relay_command_builder: RelayCommandBuilder = default_relay_command,
+    resolve_credential_use: Callable[..., object] | None = None,
 ) -> BrowserPorts:
     """Create the shared browser ports without selecting a client transport."""
 
@@ -111,6 +113,8 @@ def create_browser_ports(
             or (require_resource_claim_for_fresh and resolve_recovery_binding is None)):
         raise ValueError("BROWSER_FRESH_RESOURCE_CLAIM_INVALID")
     selected_host = validate_host_config(host_config)
+    if selected_host.credential_runtime is not None and not callable(resolve_credential_use):
+        raise ValueError("CREDENTIAL_USE_OWNER_REQUIRED")
     selected_inspector = inspector or ProcessInspector()
     codec = BrowserRefCodec(action_token_key)
 
@@ -138,6 +142,7 @@ def create_browser_ports(
         relay_root=selected_host.relay_root,
         relay_requester=relay_requester,
         action_ttl_ms=action_ttl_ms,
+        resolve_credential_use=resolve_credential_use if selected_host.credential_runtime is not None else None,
     )
     return BrowserPorts(resource_port=resource_port, action_port=action_port)
 
@@ -178,6 +183,7 @@ def create_browser_deployment(
         inspector=inspector,
         relay_requester=relay_requester,
         relay_command_builder=relay_command_builder,
+        resolve_credential_use=services.resolve_browser_credential_use,
     )
     resource_port = ports.resource_port
     action_port = ports.action_port
@@ -220,6 +226,10 @@ def create_browser_deployment(
                 caller, browser_ref, tool, arguments
             ),
         )
+
+    async def prepare_credential_fill(caller, browser_ref, grant_ref):
+        return await _run_existing(services,
+            lambda: action_port.prepare_credential_fill(caller, browser_ref, grant_ref))
 
     async def run_action(caller, browser_ref, action_ref):
         return await _run_existing(
@@ -272,6 +282,7 @@ def create_browser_deployment(
         call_receipt_sink=services.call_receipt_sink,
         allowed_origins=services.allowed_origins,
         expected_tool_schema_digest=selected_host.expected_tool_schema_digest,
+        prepare_credential_fill=prepare_credential_fill if selected_host.credential_runtime is not None else None,
     )
 
     return BrowserDeployment(
@@ -287,6 +298,7 @@ def create_browser_deployment(
         run_action=run_action,
         reconcile_action=reconcile_action,
         cleanup_resource=cleanup_resource,
+        prepare_credential_fill=prepare_credential_fill if selected_host.credential_runtime is not None else None,
     )
 
 
