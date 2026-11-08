@@ -2,12 +2,13 @@
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from "@testing-library/react";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {App} from "./App";
+import nativeSource from "./auth-recovery/fixtures/native-authorization-continuation-source.json";
 import userEvent from "@testing-library/user-event";
 import {createNativeClient} from "./host";
 import {composeMissionHost} from "./compose-mission-host";
 vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn(async()=>{throw new Error("INERT_READINESS_UNAVAILABLE");})}));
 const partial={status:"error",reason:"AUTH_TRANSACTION_EXPIRED",acquisition:true,content:false};
-const yes={schema:"mastermind.native_authorization_continuation.v1",state:"ELIGIBLE",resource:"CONTENT",reason:"CONTENT_PENDING_TIMEOUT"};
+const yes=nativeSource.fixtures.eligible;
 const no={...yes,state:"INELIGIBLE",resource:null,reason:"NOT_ELIGIBLE"};
 let dispose=()=>{};
 beforeEach(()=>{history.replaceState(null,"","/os/");localStorage.clear();delete window.MastermindMissionHost;Object.defineProperty(window,"__TAURI_INTERNALS__",{configurable:true,value:{}});});
@@ -25,7 +26,7 @@ async function mount(locale:"en"|"zh-CN"="en",eligible=true) {
  const events=new Map<string,(event:{payload:unknown})=>void>();
  const client=await createNativeClient(invoke as never,async(name,handler)=>{events.set(name,handler);return()=>{events.delete(name);};});const composition=composeMissionHost(client,null,undefined,"native");dispose=composition.dispose;
  window.MastermindMissionHost=composition.host;const view=render(<App locale={locale}/>);
- return {invoke,client,expire:()=>events.get("mastermind-auth-state")!({payload:{status:"error",reason:"NATIVE_TOKEN_EXPIRED",acquisition:false,content:false}}),host:composition.host,footer:view.container.querySelector(".nav-account")!,
+ return {invoke,client,contentAuthorized:()=>events.get("mastermind-auth-state")!({payload:nativeSource.fixtures.success_status}),expire:()=>events.get("mastermind-auth-state")!({payload:{status:"error",reason:"NATIVE_TOKEN_EXPIRED",acquisition:false,content:false}}),host:composition.host,footer:view.container.querySelector(".nav-account")!,
   finish:()=>finish({...partial,status:"signing_in",reason:null}),refuse:()=>{capability=no;reject(new Error("AUTHORIZATION_IDENTITY_CHANGED"));},
   unknown:()=>reject(new Error("AUTH_CONTINUATION_EXCHANGE_UNCONFIRMED"))};
 }
@@ -88,4 +89,19 @@ it("does not steal focus from another user gesture while the browser handoff set
 it("refuses a no-render auth-reader substitution before any native handoff",async()=>{
  const f=await mount();const button=await screen.findByRole("button",{name:"Continue authorization"});f.host.auth!.getState=()=>{throw new Error("foreign owner");};
  fireEvent.click(button);expect(f.invoke.mock.calls.some(([n])=>n==="continue_authorization")).toBe(false);
+});
+
+it("consumes the genuine native unit metadata/status without treating handoff or Content completion as Executive authorization",async()=>{
+ const f=await mount();fireEvent.click(await screen.findByRole("button",{name:"Continue authorization"}));await waitFor(()=>expect(f.invoke.mock.calls.some(([n])=>n==="continue_authorization")).toBe(true));
+ await act(async()=>{f.finish();});expect(f.client.getState().content).toBe(false);
+ await act(async()=>{f.contentAuthorized();});expect(f.client.getState()).toEqual(nativeSource.fixtures.success_status);
+ expect((screen.getByRole("button",{name:"New conversation"}) as HTMLButtonElement).disabled).toBe(true);
+ expect(f.invoke.mock.calls.filter(([n])=>n==="continue_authorization")).toHaveLength(1);
+ expect(f.invoke.mock.calls.some(([n])=>["sign_in","sign_out","executive_submit","executive_project_planning","executive_fresh_conversation"].includes(n))).toBe(false);
+});
+
+it("does not label a detached command owner as current when the handoff settles",async()=>{
+ const f=await mount();fireEvent.click(await screen.findByRole("button",{name:"Continue authorization"}));await waitFor(()=>expect(f.invoke.mock.calls.some(([n])=>n==="continue_authorization")).toBe(true));
+ const foreign=vi.fn(async()=>{});f.host.authorizationContinuation!.continue=foreign;
+ await act(async()=>{f.finish();});expect(f.footer.textContent).not.toContain("Authorization request opened");expect(foreign).not.toHaveBeenCalled();
 });

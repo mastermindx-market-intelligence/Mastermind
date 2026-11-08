@@ -1,6 +1,6 @@
 import {useEffect, useLayoutEffect, useRef, useState} from "react";
 import type {AuthState, MissionHost} from "./host";
-import {incompleteAuthorization} from "./native-authorization-continuation-host";
+import {incompleteAuthorization, type NativeAuthorizationContinuationOwner} from "./native-authorization-continuation-host";
 const copy = {
   en: {action: "Continue authorization", sending: "Opening authorization…", opened: "Authorization request opened. Complete the requested step in your browser.",
     unavailable: "Additional authorization is unavailable here. Your account remains connected.",
@@ -18,7 +18,7 @@ export function NativeAuthorizationContinuationControl({host, state, revision, l
   const text = copy[locale], owner = host?.authorizationContinuation;
   const [eligible, setEligible] = useState(false), [pending, setPending] = useState(false);
   const [message, setMessage] = useState<keyof Pick<typeof text, "opened" | "unavailable" | "unconfirmed" | "changed"> | null>(null);
-  const frame = useRef<(() => boolean) | null>(null), busy = useRef(false), alive = useRef(true);
+  const frame = useRef<{current: () => boolean; command: () => Promise<void>; owner: NativeAuthorizationContinuationOwner} | null>(null), busy = useRef(false), alive = useRef(true);
   const action = useRef<HTMLButtonElement>(null);
   const notice = useRef<HTMLParagraphElement>(null), focusAfterGesture = useRef(false), uncertain = useRef(false);
   const refresh = useRef<() => void>(() => {});
@@ -47,19 +47,19 @@ export function NativeAuthorizationContinuationControl({host, state, revision, l
       Promise.resolve().then(() => read.call(owner, {signal: abort.signal})).then(value => {
         if (ticket !== sequence || !current() || busy.current) return;
         const allowed = value.state === "ELIGIBLE" && !uncertain.current;
-        frame.current = allowed ? current : null; setEligible(allowed);
+        frame.current = allowed ? {current, command, owner} : null; setEligible(allowed);
       }, () => {if (ticket === sequence && current() && !busy.current) setMessage(previous => previous ?? "unavailable");});
     };
     refresh.current = acquire; acquire();
     return () => {abort.abort(); sequence++; frame.current = null;};
   }, [host, owner, revision, state.status, state.reason, state.acquisition, state.content]);
   const send = async () => {
-    const current = frame.current; frame.current = null;
+    const captured = frame.current; frame.current = null;
     if (busy.current) return;
-    if (!current || !current() || !owner) {setEligible(false); focusAfterGesture.current = true; setMessage("changed"); return;}
+    if (!captured || !captured.current() || !owner) {setEligible(false); focusAfterGesture.current = true; setMessage("changed"); return;}
     busy.current = true; setPending(true); setEligible(false); setMessage(null);
     let outcome: "opened" | "unavailable" | "unconfirmed" = "opened";
-    try {await owner.continue();} catch (error) {
+    try {await captured.command.call(captured.owner);} catch (error) {
       const code = error instanceof Error ? error.message : error;
       outcome = typeof code === "string" && ["AUTH_CONTINUATION_INELIGIBLE", "AUTHORIZATION_IDENTITY_UNAVAILABLE",
         "AUTHORIZATION_IDENTITY_CHANGED", "AUTHENTICATION_CHANGED"].includes(code) ? "unavailable" : "unconfirmed";
@@ -68,7 +68,11 @@ export function NativeAuthorizationContinuationControl({host, state, revision, l
     finally {
       busy.current = false;
       if (alive.current && window.MastermindMissionHost === host) {
-        setPending(false); focusAfterGesture.current = document.activeElement === action.current || document.activeElement === document.body; setMessage(outcome); refresh.current();
+        if (host?.authorizationContinuation !== captured.owner || captured.owner.continue !== captured.command) {
+          setPending(false); setMessage(null);
+        } else {
+          setPending(false); focusAfterGesture.current = document.activeElement === action.current || document.activeElement === document.body; setMessage(outcome); refresh.current();
+        }
       }
     }
   };
