@@ -495,3 +495,51 @@ describe("live native chat interaction", () => {
     await waitFor(() => expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(1));
   });
 });
+
+describe("chat focus, history navigation and reader scrolling", () => {
+  it("focuses history search, selects the filtered original and restores the toggle focus", async () => {
+    const p = port(), base = p.request.getMockImplementation()!;
+    p.request.mockImplementation(async request => {
+      if (request.operation === "list") return view({ operation: "list", sessions: [
+        { id: "session-one", title: "Office conversation", running: false, messageCount: 3 },
+        { id: "archive-two", title: "Notes from Tuesday", running: false, messageCount: 7 },
+      ] });
+      if (request.operation === "read" && request.sessionId === "archive-two") return view({
+        operation: "read", session: { ...nativeSession(), id: "archive-two", storedId: "archive-two",
+          title: "Notes from Tuesday", messageCount: 1, messages: [{ role: "assistant", text: "Archived answer" }] },
+      });
+      return base(request);
+    });
+    await openChat(p);
+    const toggle = screen.getByRole("button", { name: "Local history" });
+    fireEvent.click(toggle);
+    const search = await screen.findByRole("textbox", { name: "Search conversations" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    fireEvent.change(search, { target: { value: "Tuesday" } });
+    expect(screen.queryByRole("button", { name: /Office conversation/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Notes from Tuesday/ }));
+    await screen.findByText("Archived answer");
+    expect(screen.queryByRole("textbox", { name: "Search conversations" })).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+    expect(p.request.mock.calls.some(([request]) => request.operation === "read" && request.sessionId === "archive-two")).toBe(true);
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(0);
+  });
+
+  it("holds the reader's scroll position until Jump to latest is selected", async () => {
+    await openChat();
+    const transcript = screen.getByRole("log", { name: "Native conversation messages" }) as HTMLDivElement;
+    Object.defineProperty(transcript, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 800 });
+    const nativeScroll = vi.fn();
+    Object.defineProperty(transcript, "scrollTo", { configurable: true, value: nativeScroll });
+    transcript.scrollTop = 600;
+    fireEvent.scroll(transcript);
+    transcript.scrollTop = 140;
+    fireEvent.scroll(transcript);
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeTruthy();
+    expect(nativeScroll).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+    expect(nativeScroll).toHaveBeenCalledWith({ top: 600, behavior: "smooth" });
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+});
