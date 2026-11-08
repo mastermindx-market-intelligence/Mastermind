@@ -56,7 +56,8 @@ def test_historical109_is_data_and_explicit_memory118_keeps_same_source_postimag
     assert set(inventory['files'])==set(manifest)
     owner=ROOT/'ops/native_fabric/provider_plans/memory118/native_owner'
     for name in (*b.MEMORY_OWNER_DIGESTS,*b.MEMORY_OWNER_ADDITIONS):
-        raw=(owner/Path(name).name).read_bytes()
+        raw=((frozen/(Path(name).name+'.txt')) if Path(name).name in ('lease_broker.py','fabric_task.py')
+             else (owner/Path(name).name)).read_bytes()
         assert hashlib.sha256(raw).hexdigest()==manifest[name]
     active=json.loads((ROOT/'ops/native_fabric/quota_continuity/rollout/native-manifest.json').read_bytes())
     assert len(active)==107 and not set(b.MEMORY_OWNER_ADDITIONS)&set(active)

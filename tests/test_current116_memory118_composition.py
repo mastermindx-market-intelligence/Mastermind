@@ -43,11 +43,11 @@ def test_exact116_to118_retains_every_incumbent_member(current_source, joined):
     base, final = profile["base_files"], profile["files"]
     assert len(base) == 116 and len(final) == 118
     assert set(final) - set(base) == ADDITIONS and set(base) <= set(final)
-    assert {name for name in base if base[name] != final[name]} == EXACT_REPLACEMENTS | {"ext/pick.py", "ext/remote_sub_exec.py"}
+    assert {name for name in base if base[name] != final[name]} == EXACT_REPLACEMENTS | {"ext/remote_sub_exec.py"}
     assert base == json.loads((current_source / "FILES.json").read_text())
     for name, expected in final.items():
         assert sha((joined / name).read_bytes()) == expected
-    assert set(profile["patches"]) == {"ext/fabric_task.py", "ext/lease_broker.py", "ext/pick.py", "ext/remote_sub_exec.py"}
+    assert set(profile["patches"]) == {"ext/fabric_task.py", "ext/lease_broker.py", "ext/remote_sub_exec.py"}
     assert set(profile["source_map"]) == (EXACT_REPLACEMENTS | ADDITIONS) - set(profile["patches"])
     assert not (joined / "CURRENT.json").exists() and not (joined / "ext/broker").exists()
 
@@ -222,3 +222,16 @@ def test_profile_privacy_delta_preserves_all_native_participant_and_pair_helpers
     assert set(new) - set(old) == {"_current_authorization_row"}
     assert {n for n in old if old[n] != new[n]} == {"require_generic_channel"}
     assert sha((ROOT / "ops/native_fabric/provider_plans/memory118/native_owner/fabric_memory_view.py").read_bytes()) == "a7bfc2567c8abc6c27e3fe2277d8b21669420d90e547aafc42e1186ea0740081"
+
+
+def test_fixed_control_owner_uses_the_same_full_broker_and_task_as_profile(joined):
+    # This exact join prevents a preserving runtime patch paired with a stale helper.
+    namespace=compose.HERE/'memory118/native_owner'
+    for name in ('lease_broker.py','fabric_task.py'):
+        assert (namespace/name).read_bytes()==(joined/'ext'/name).read_bytes()
+    profile=json.loads((compose.HERE/'memory118/profile.json').read_text())
+    assert profile['base_selection']['sequence']==39
+    assert profile['base_selection']['generation']=='774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea'
+    for name in ('experiential_bridge.py','experiential_host_context.py','experiential_plan_policy.py',
+                 'experiential_transport.py','native_plan_worker.py','pick.py'):
+        assert profile['files']['ext/'+name]==profile['base_files']['ext/'+name]

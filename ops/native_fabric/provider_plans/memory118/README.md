@@ -1,13 +1,14 @@
 # Preserving current116 with prospective Memory source
 
 `compose.py --profile current116-protected-memory` is an offline source
-composition over the exact public sequence37/generation9c557397 cohort. It does
+composition over the exact public sequence39/generation774f9869 cohort. It does
 not read CURRENT, select a generation, issue a grant, dispatch, or install.
 The base descriptor in tests is explicit inert data, never an installed receipt.
 
 The target has118 payloads. Every116 member remains. Against the original116,
-the seven Memory members change, the separately accepted picker and current-executor corrections also
-change, and two Memory helpers are added. Against RuntimePath's accepted
+the seven Memory members and the current-executor correction change, and two
+Memory helpers are added. The corrected picker and all five newer provider files
+are already present and remain exact. Against RuntimePath's accepted
 combined116 (including the one-command sparse-index advice suppression), exactly seven members change and two are added. The nine
 application/provider-only members are retained. The old107/109 manifest and
 preimages remain historical source proof, not this profile's base.
@@ -56,6 +57,6 @@ exact; this source fix alone does not establish installed worker adoption.
 
 The protected canonical native default remains its107-member APPLICATION source and exact carrier/pool/quota/placement validators. Memory does not change that default or its current source inventory. The old109 endpoint is retained solely as frozen source-test evidence under `tests/fixtures/memory-historical109-55f`; its builder is not the production builder, an installation source or a selected generation.
 
-The fixed `native_owner/` namespace retains the exact previously reviewed prospective Memory owner code. The explicit118 source map consumes its five unchanged replacement postimages; the existing task/Broker patches and private WAL helper remain unchanged. The fixed Control economic helper qualifies and imports this namespace first, then only its fixed incumbent dependencies. No path/owner/credential can be supplied by a caller. This is a source dependency move, not authentication or a new capability.
+The fixed `native_owner/` namespace retains the previously reviewed Memory source. Its Broker and task are the FULL current-native preserving7a713/c0f125 transplants, not the smaller historicalac55/ed05 versions. The explicit118 source map consumes its five unchanged replacement postimages; the existing task/Broker patches and private WAL helper remain unchanged. The fixed Control economic helper qualifies and imports this namespace first, then only its fixed incumbent dependencies. No path/owner/credential can be supplied by a caller. This is a source dependency move, not authentication or a new capability.
 
-The profile is still bound to its explicit historical116 source preimages and generation. A changed current selection must refuse; no source fixture or profile proves current installed custody. Root must reconcile the actual current generation and the complete Memory owner/private-helper/application closure before any installation, selection, activation or private study. All protocol/scientific flags remain false.
+The profile is bound to the exact public current39 source preimages and generation. A changed current selection must refuse; no source fixture or profile proves current installed custody. Root must reconcile the actual current generation and the complete Memory owner/private-helper/application closure before any installation, selection, activation or private study. All protocol/scientific flags remain false.

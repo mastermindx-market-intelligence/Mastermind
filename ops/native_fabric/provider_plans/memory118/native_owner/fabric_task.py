@@ -36,6 +36,7 @@ DEFAULT_RESULT_BYTES = 1_048_576
 MAX_RESULT_BYTES = 8_388_608
 _DONE_RE = re.compile(r"\bDONE rc=([0-9]+) signal=([A-Za-z0-9_.:-]+)")
 _REMOTE_DONE_RE = re.compile(r"\bREMOTE_DONE rc=([0-9]+)")
+_LOCAL_RETURNED_RE = re.compile(r"\bLOCAL_RETURNED rc=([0-9]+)")
 _PRELAUNCH_RC_RE = re.compile(r"\b(?:NO_HOST|[A-Z0-9_]+_(?:FAILED|REFUSED))\b[^\n]*\brc=([0-9]+)")
 _GLM_AUTH_GUARD_RE = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
@@ -738,14 +739,7 @@ def _inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any
         metadata_error = exc
     if missing_log:
         retained = here / "state" / "remote_sub" / f"{rid}.request.json"
-        retained_present, artifact_unverified = True, False
-        try:
-            retained.lstat()
-        except FileNotFoundError:
-            retained_present = False
-        except OSError:
-            retained_present, artifact_unverified = False, True
-        if retained_present:
+        if retained.exists() or retained.is_symlink():
             try:
                 row = json.loads(_bounded_regular(retained, 32768))
                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
@@ -781,26 +775,11 @@ def _inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any
                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
                     **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
-        # The packet is fsynced before its descriptor. A crash in that window
-        # still occupies the original run, as does an orphan result. Check only
-        # the fixed artifacts guarded by request(); their presence or unreadable
-        # metadata proves neither execution absence nor root identity. Never read
-        # their contents or turn a missing log into permission to redispatch.
-        if not artifact_unverified:
-            for artifact in (retained.with_name(f"{rid}.request.packet"), result_path):
-                try:
-                    artifact.lstat()
-                except FileNotFoundError:
-                    continue
-                except OSError:
-                    pass
-                artifact_unverified = True
-                break
         return {
             "schema": "mastermind.fabric_task_status.v1",
             "run_id": rid,
-            "state": "STATUS_UNREADABLE" if artifact_unverified else "NOT_FOUND",
-            **_acceptance_unknown("ARTIFACT_UNVERIFIED" if artifact_unverified else "EXECUTION_NOT_ELIGIBLE"),
+            "state": "NOT_FOUND",
+            **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
             "rc": None,
             "signal": None,
             "result_available": False,
@@ -896,7 +875,7 @@ def _inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any
             rc = int(last.group(1))
             signal = last.group(2)
             state = "TERMINAL" if signal != "effect_unknown" else "EFFECT_UNKNOWN"
-        elif _REMOTE_DONE_RE.search(text):
+        elif _REMOTE_DONE_RE.search(text) or _LOCAL_RETURNED_RE.search(text):
             state = "SETTLING"
 
     if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):
@@ -1097,6 +1076,27 @@ def preview_route(
 ) -> dict[str, object]:
     """Read-only incumbent picker and economic preflight; no lease, packet or worker."""
     rid = validate_run_id(run_id)
+    if isinstance(pool, str) and pool.strip().casefold() == "experiential":
+        if pool != "experiential":
+            raise FabricTaskError("EXPERIENTIAL_EXACT_MANUAL_ROUTE_REQUIRED")
+        import experiential_bridge
+        try:
+            return experiential_bridge.preview_command(
+                run_id=rid, task_class=task_class, pool=pool,
+                model=model, runtime_root=HERE)
+        except experiential_bridge.ExperientialBridgeRefused as exc:
+            raise FabricTaskError(str(exc)) from exc
+    if pool == "byteplus":
+        import byteplus_coding_plan
+        try:
+            route = byteplus_coding_plan.native_route(task_class=task_class, model=model)
+        except byteplus_coding_plan.BytePlusBindingRefused as exc:
+            raise FabricTaskError(str(exc)) from exc
+        return {"state": "PREVIEW_ONLY", "reserved": False, "run_id": rid,
+                "pool": route["POOL"], "model": route["MODEL"], "host": route["HOST"],
+                "mode": route["MODE"], "quota_remaining": None,
+                "admission_basis": route["admission_basis"],
+                "selection_rechecked_at_request": True, "strict_pin_enforced_at_request": True}
     selected_pool = _manual_token(pool)
     selected_model = _manual_token(model)
     if selected_model is not None and selected_pool is None:
@@ -1152,10 +1152,16 @@ def request(
     request_deadline_ns: int | None = None,
     not_before: str | None = None,
     strict_manual_pin: bool = False,
+    experiential_retention_acknowledged: bool = False,
+    experiential_sensitive_data_opt_in: bool = False,
+    experiential_proprietary_code: bool = False,
+    experiential_code_exposure_opt_in: bool = False,
+    experiential_response_only: bool = False,
 ) -> int:
     rid = validate_run_id(run_id)
     # Match preview: AUTO is never a literal provider/model pin. Validate
     # before retaining a packet or consulting any provider/runtime owner.
+    raw_pool, raw_model = pool, requested_model
     pool = _manual_token(pool)
     requested_model = _manual_token(requested_model)
     prefer = _manual_token(prefer)
@@ -1202,6 +1208,66 @@ def request(
                 remaining = min(remaining, request_remaining_seconds)
             env["POOL_COMMISSION_REMAINING_SECONDS"] = str(remaining)
     observed_root = resolve_request_root(root_id, env)
+    byteplus_active = raw_pool == "byteplus"
+    experiential_active = isinstance(raw_pool, str) and raw_pool.strip().casefold() == "experiential"
+    flags = (experiential_retention_acknowledged, experiential_sensitive_data_opt_in,
+             experiential_proprietary_code, experiential_code_exposure_opt_in)
+    if (any(type(value) is not bool for value in (*flags, experiential_response_only))):
+        raise FabricTaskError("PROVIDER_PLAN_TASK_FACTS_INVALID")
+    if (any(flags) or experiential_response_only) and pool is not None and not experiential_active:
+        raise FabricTaskError("EXPERIENTIAL_OPTIONS_REFUSED_NONEXPERIENTIAL_POOL")
+    provider_plan_context = None
+    if (pool is None and requested_model is None and not strict_manual_pin
+            and not qualification_host and not new_macro_worktree
+            and cpu_scope_percent is None and not artifact_names and not native_return
+            and not request_capacity_preflight and request_deadline_ns is None
+            and (max_turns is None or max_turns <= 64)
+            and not env.get("FABRIC_OPERATOR_CHILD_ID")
+            and env.get("POOL_OPERATOR_CHILD_BUDGET", "0") == "0"):
+        provider_plan_context = {
+            "schema": "mastermind.provider_plan_auto_context.v1",
+            "root_id": observed_root, "parent_run_id": parent_run_id,
+            "response_only": experiential_response_only,
+            "consents": dict(zip(("retention_acknowledged", "sensitive_data_opt_in",
+                "proprietary_code", "code_exposure_opt_in"), flags)),
+        }
+    if experiential_active:
+        if raw_pool != "experiential":
+            raise FabricTaskError("EXPERIENTIAL_EXACT_MANUAL_ROUTE_REQUIRED")
+        if not strict_manual_pin:
+            raise FabricTaskError("EXPERIENTIAL_STRICT_PIN_REQUIRED")
+        if (qualification_host or new_macro_worktree or cpu_scope_percent is not None
+                or artifact_names or native_return or max_turns is not None
+                or prefer or request_capacity_preflight or request_deadline_ns is not None
+                or not_before is not None):
+            raise FabricTaskError("EXPERIENTIAL_UNQUALIFIED_OPTION_REFUSED")
+        import experiential_bridge
+        try:
+            if raw_model is None or raw_model in {"free", "uncensored"}:
+                selected = experiential_bridge.qualified_route(
+                    run_id=rid, task_class=task_class, runtime_root=HERE, model=None,
+                    plan_lane="paid_uncensored" if raw_model == "uncensored" else "free")
+                raw_model = requested_model = selected["MODEL"]
+            experiential_bridge.request_gate(
+                run_id=rid, task_class=task_class, pool=raw_pool,
+                model=raw_model, root_id=observed_root,
+                parent_run_id=parent_run_id, runtime_root=HERE,
+                strict_manual_pin=strict_manual_pin,
+                retention_acknowledged=experiential_retention_acknowledged,
+                sensitive_data_opt_in=experiential_sensitive_data_opt_in,
+                proprietary_code=experiential_proprietary_code,
+                code_exposure_opt_in=experiential_code_exposure_opt_in)
+        except experiential_bridge.ExperientialBridgeRefused as exc:
+            raise FabricTaskError(str(exc)) from exc
+    if byteplus_active:
+        if not strict_manual_pin:
+            raise FabricTaskError("BYTEPLUS_STRICT_PIN_REQUIRED")
+        if (qualification_host or new_macro_worktree or cpu_scope_percent is not None
+                or artifact_names or native_return or prefer or request_capacity_preflight
+                or request_deadline_ns is not None or not_before is not None):
+            raise FabricTaskError("BYTEPLUS_UNQUALIFIED_OPTION_REFUSED")
+        if max_turns is not None and max_turns > 64:
+            raise FabricTaskError("BYTEPLUS_TURN_BOUND_REFUSED")
     # Freeze the input before route selection. Exhausted capacity or an ended
     # caller must not destroy the only copy of an unfinished commission. These
     # are per-run artifacts, not queued work or permission to resume a process.
@@ -1228,6 +1294,7 @@ def request(
         "packet_sha256": hashlib.sha256(source).hexdigest(),
         "packet_bytes": len(source), "created_at": time.time(),
         "automatic_background_execution": False,
+        **({"provider_plan_context": provider_plan_context} if provider_plan_context is not None else {}),
         **({"not_before": not_before} if not_before is not None else {}),
         **({"max_turns": max_turns} if max_turns is not None else {}),
     })
@@ -1265,8 +1332,25 @@ def request(
                 reason=reason, subject_pool=subject_pool,
                 root=observed_root, parent=parent_run_id,
             ))
+        elif experiential_active:
+            import experiential_bridge
+            try:
+                qualified = experiential_bridge.qualified_route(
+                    run_id=rid, task_class=task_class, runtime_root=HERE, model=raw_model)
+                route = {k: str(qualified[k])
+                         for k in ("POOL", "MODEL", "HOST", "MODE")}
+            except experiential_bridge.ExperientialBridgeRefused as exc:
+                raise FabricTaskError(str(exc)) from exc
+        elif byteplus_active:
+            import byteplus_coding_plan
+            try:
+                qualified = byteplus_coding_plan.native_route(task_class=task_class, model=requested_model)
+                route = {k: str(qualified[k]) for k in ("POOL", "MODEL", "HOST", "MODE")}
+            except byteplus_coding_plan.BytePlusBindingRefused as exc:
+                raise FabricTaskError(str(exc)) from exc
         else:
             route_options = dict(prefer=prefer, host="auto", pool=pool,
+                **({"provider_plan_context": provider_plan_context} if provider_plan_context is not None else {}),
                 **({"excluded_hosts": ["m2"]} if request_deadline_ns is not None else {}),
                 **({"subject_pool": subject_pool} if subject_pool is not None else {}),
                 task_complexity=complexity, escalation_reason=reason,
@@ -1280,8 +1364,8 @@ def request(
                 # Only these admitted remote wrappers enforce the existing Claude
                 # turn fuse. Never silently ignore the requested ceiling elsewhere.
                 route_options["required_modes"] = sorted(
-                    set(route_options.get("required_modes", ("glm", "minimax")))
-                    & {"glm", "minimax"})
+                    set(route_options.get("required_modes", ("glm", "minimax", "byteplus")))
+                    & {"glm", "minimax", "byteplus"})
             if request_deadline_ns is not None:
                 selection_line = _route_with_deadline(
                     task_class, route_options, request_deadline_ns, env, state_dir, rid)
@@ -1296,17 +1380,63 @@ def request(
                     task_class, observation_key=selection_key,
                     request_sha256=selection_request_sha, **route_options)
             route = _parse_route(selection_line)
+        plan_auto_selected = False
+        if not (byteplus_active or experiential_active) and route["POOL"] in {"byteplus", "experiential"}:
+            if (provider_plan_context is None or route.get("HOST") != "m2"
+                    or route.get("MODE") != route["POOL"]):
+                raise FabricTaskError("PROVIDER_PLAN_AUTO_ROUTE_UNQUALIFIED")
+            plan_auto_selected = True
+            byteplus_active = route["POOL"] == "byteplus"
+            experiential_active = route["POOL"] == "experiential"
+            requested_model = raw_model = route["MODEL"]
+            if experiential_active:
+                import experiential_bridge
+                from experiential_plan_policy import FREE_CHAT_MODELS
+                if not experiential_response_only or raw_model not in FREE_CHAT_MODELS:
+                    raise FabricTaskError("EXPERIENTIAL_AUTO_FREE_RESPONSE_REQUIRED")
+                try:
+                    experiential_bridge.request_gate(
+                        run_id=rid, task_class=task_class, pool="experiential",
+                        model=raw_model, root_id=observed_root, parent_run_id=parent_run_id,
+                        runtime_root=HERE, strict_manual_pin=True,
+                        retention_acknowledged=experiential_retention_acknowledged,
+                        sensitive_data_opt_in=experiential_sensitive_data_opt_in,
+                        proprietary_code=experiential_proprietary_code,
+                        code_exposure_opt_in=experiential_code_exposure_opt_in)
+                except experiential_bridge.ExperientialBridgeRefused as exc:
+                    raise FabricTaskError(str(exc)) from exc
+        if byteplus_active or experiential_active:
+            from native_plan_worker import resolve_local_cwd
+            cwd = resolve_local_cwd(cwd)
         if strict_manual_pin:
             _enforce_manual_route(route, pool, requested_model)
         check_deadline()
-        if max_turns is not None and route["MODE"] not in {"glm", "minimax"}:
+        if max_turns is not None and route["MODE"] not in {"glm", "minimax", "byteplus"}:
             raise FabricTaskError("REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED")
-        guard = pick.launch_policy(
-            route["MODE"], task_class, route["MODEL"],
-            escalation_reason=reason, task_complexity=complexity,
-        )
-        if not guard.get("allowed"):
-            raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
+        if experiential_active:
+            import experiential_bridge
+            try:
+                experiential_bridge.launch_policy_witness(
+                    route["MODE"], task_class, route["MODEL"])
+            except experiential_bridge.ExperientialBridgeRefused as exc:
+                raise FabricTaskError(str(exc)) from exc
+            env["POOL_RUN_ID"] = rid
+            env["EXPERIENTIAL_RETENTION_ACKNOWLEDGED"] = "1" if experiential_retention_acknowledged else "0"
+            env["EXPERIENTIAL_SENSITIVE_DATA_OPT_IN"] = "1" if experiential_sensitive_data_opt_in else "0"
+            env["EXPERIENTIAL_PROPRIETARY_CODE"] = "1" if experiential_proprietary_code else "0"
+            env["EXPERIENTIAL_CODE_EXPOSURE_OPT_IN"] = "1" if experiential_code_exposure_opt_in else "0"
+            # This flag enforces the frozen exact route. AUTO still requires
+            # its original request facts and an exact free-model owner selection.
+            env["EXPERIENTIAL_STRICT_MANUAL_PIN"] = "1" if (strict_manual_pin or plan_auto_selected) else "0"
+        elif byteplus_active:
+            env["POOL_RUN_ID"] = rid
+        else:
+            guard = pick.launch_policy(
+                route["MODE"], task_class, route["MODEL"],
+                escalation_reason=reason, task_complexity=complexity,
+            )
+            if not guard.get("allowed"):
+                raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
         if new_macro_worktree is not None:
             if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}:
                 raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
@@ -1397,7 +1527,9 @@ def request(
                 "schema": "mastermind.fabric_request_launch.v1", "run_id": rid,
                 "root_id": observed_root, "parent_run_id": parent_run_id,
                 "packet_sha256": hashlib.sha256(source).hexdigest(),
-                "state": "LAUNCH_ATTEMPT_RESERVED", "created_at": time.time(),
+                "state": "LAUNCH_ATTEMPT_RESERVED", "created_at": time.time(), "route": route,
+                **({"execution_cwd": cwd, "selection_mode": "AUTO" if plan_auto_selected else "EXPLICIT"}
+                   if byteplus_active or experiential_active else {}),
                 "request_sha256": request_sha,
                 **({"not_before": not_before} if not_before is not None else {}),
             }
@@ -1416,7 +1548,7 @@ def request(
                     provider_outcome.regular_bytes(launch_file, 32768))
             check_deadline()
             proc = subprocess.run(argv, env=env)
-            if request_capacity_preflight is True:
+            if request_capacity_preflight is True or byteplus_active or experiential_active:
                 refusal = state_dir / f"{rid}.prelease-quota.json"
                 log = state_dir / f"{rid}.log"
                 provider_outcome.write_new(state_dir / f"{rid}.request-return.json", {
@@ -1424,7 +1556,8 @@ def request(
                     "root_id": observed_root, "parent_run_id": parent_run_id,
                     "state": "NATIVE_CONTROLLER_RETURNED", "controller_rc": int(proc.returncode),
                     "request_sha256": request_sha,
-                    "launch_sha256": env["POOL_REQUEST_LAUNCH_SHA256"],
+                    "launch_sha256": provider_outcome.digest(
+                        provider_outcome.regular_bytes(launch_file, 32768)),
                     "prelease_sha256": provider_outcome.digest(provider_outcome.regular_bytes(refusal, 32768))
                         if refusal.exists() or refusal.is_symlink() else None,
                     "log_sha256": provider_outcome.digest(provider_outcome.regular_bytes(log, MAX_LOG_BYTES))
@@ -1740,6 +1873,12 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
     p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
+    p_request.add_argument("--experiential-retention-acknowledged", action="store_true")
+    p_request.add_argument("--experiential-sensitive-data-opt-in", action="store_true")
+    p_request.add_argument("--experiential-proprietary-code", action="store_true")
+    p_request.add_argument("--experiential-code-exposure-opt-in", action="store_true")
+    p_request.add_argument("--experiential-response-only", action="store_true",
+                           help="allow free-plan AUTO for a task completed solely from its packet")
     p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
@@ -2052,6 +2191,11 @@ def main(argv: list[str] | None = None) -> int:
                 new_macro_worktree=args.new_macro_worktree,
                 cpu_scope_percent=args.cpu_scope_percent,
                 strict_manual_pin=args.strict_manual_pin,
+                experiential_retention_acknowledged=args.experiential_retention_acknowledged,
+                experiential_sensitive_data_opt_in=args.experiential_sensitive_data_opt_in,
+                experiential_proprietary_code=args.experiential_proprietary_code,
+                experiential_code_exposure_opt_in=args.experiential_code_exposure_opt_in,
+                experiential_response_only=args.experiential_response_only,
                 **({"not_before": args.not_before} if args.not_before is not None else {}),
                 **({"max_turns": args.max_turns} if args.max_turns is not None else {}),
             )
