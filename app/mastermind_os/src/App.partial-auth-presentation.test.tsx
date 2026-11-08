@@ -22,11 +22,11 @@ async function mount(state:AuthState,locale:'en'|'zh-CN'='en'){
  const view=render(<App locale={locale}/>);
  return {invoke,client,footer:view.container.querySelector('.nav-account')!,container:view.container};
 }
-it.each(['en','zh-CN'] as const)('explains the observed Content timeout while preserving Workspace sign-in and the original control: %s',async locale=>{
+it.each(['en','zh-CN'] as const)('explains the observed incomplete authorization while preserving the connected account and original control: %s',async locale=>{
  const e=await mount({status:'error',reason:'AUTH_TRANSACTION_EXPIRED',acquisition:true,content:false},locale);
  const footer=within(e.footer as HTMLElement);
- expect(e.footer.textContent).toContain(locale==='en'?'Workspace signed in':'工作区已登录');
- expect(e.footer.textContent).toContain(locale==='en'?'Content authorization timed out.':'内容访问授权已超时');
+ expect(e.footer.textContent).toContain(locale==='en'?'Account connected':'账户已连接');
+ expect(e.footer.textContent).toContain(locale==='en'?'Additional authorization timed out.':'后续授权已超时');
  expect(e.footer.textContent).not.toContain(locale==='en'?'Please try again.':'请重试');
  expect(e.footer.textContent).not.toContain(locale==='en'?'Sign-in unavailable':'暂时无法登录');
  expect(footer.getByRole('button',{name:locale==='en'?'Sign out':'退出登录'})).toBeTruthy();
@@ -37,7 +37,7 @@ it.each(['en','zh-CN'] as const)('explains the observed Content timeout while pr
 });
 it('labels the same incomplete grant as pending only while the existing owner is signing in',async()=>{
  const e=await mount({status:'signing_in',reason:null,acquisition:true,content:false});
- expect(e.footer.textContent).toContain('Workspace signed in');expect(e.footer.textContent).toContain('Content authorization is still pending.');
+ expect(e.footer.textContent).toContain('Account connected');expect(e.footer.textContent).toContain('Additional authorization is still pending.');
  expect(within(e.footer as HTMLElement).getByRole('button',{name:'Cancel sign in'})).toBeTruthy();
  expect(e.invoke.mock.calls.some(([name])=>name==='sign_in'||name==='sign_out')).toBe(false);
 });
@@ -45,7 +45,7 @@ it('preserves the existing non-native footer for the same flags without inferrin
  delete (window as unknown as Record<string,unknown>).__TAURI_INTERNALS__;
  const e=await mount({status:'error',reason:'AUTH_TRANSACTION_EXPIRED',acquisition:true,content:false});
  expect(e.footer.textContent).toContain('Sign-in unavailable');
- expect(e.footer.textContent).not.toContain('Workspace signed in');
+ expect(e.footer.textContent).not.toContain('Account connected');
  expect(within(e.footer as HTMLElement).getByRole('button',{name:'Sign out'})).toBeTruthy();
  expect(e.invoke.mock.calls.some(([name])=>name==='sign_in'||name==='sign_out')).toBe(false);
 });

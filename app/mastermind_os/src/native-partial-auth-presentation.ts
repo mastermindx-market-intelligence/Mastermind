@@ -2,24 +2,24 @@ import type { AuthState } from "./host";
 
 const copy = {
   en: {
-    label: "Workspace signed in",
-    pending: "Content authorization is still pending.",
-    timeout: "Content authorization timed out. Workspace access remains signed in.",
-    expired: "Content access expired. Workspace access remains signed in.",
-    refused: "Content authorization was not granted. Workspace access remains signed in.",
-    unavailable: "Content access is unavailable. Workspace access remains signed in.",
+    label: "Account connected",
+    pending: "Additional authorization is still pending.",
+    timeout: "Additional authorization timed out. Your account remains connected.",
+    expired: "Additional access expired. Your account remains connected.",
+    refused: "Additional authorization was not granted. Your account remains connected.",
+    unavailable: "Authorization is incomplete. Your account remains connected.",
   },
   "zh-CN": {
-    label: "工作区已登录",
-    pending: "内容访问授权仍在进行中。",
-    timeout: "内容访问授权已超时；工作区登录仍然有效。",
-    expired: "内容访问权限已过期；工作区登录仍然有效。",
-    refused: "内容访问未获授权；工作区登录仍然有效。",
-    unavailable: "内容访问暂不可用；工作区登录仍然有效。",
+    label: "账户已连接",
+    pending: "后续授权仍在进行中。",
+    timeout: "后续授权已超时；您的账户仍保持连接。",
+    expired: "部分访问权限已过期；您的账户仍保持连接。",
+    refused: "后续授权未获批准；您的账户仍保持连接。",
+    unavailable: "授权尚未完成；您的账户仍保持连接。",
   },
 } as const;
 
-/** Presentation of the existing native flags only; confers no access or action. */
+/** The flags identify incomplete access, not which resource caused a general error. */
 export function nativePartialAuthPresentation(
   state: AuthState,
   locale: "en" | "zh-CN",
