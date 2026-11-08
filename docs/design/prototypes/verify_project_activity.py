@@ -138,6 +138,15 @@ async def verify():
         assert await page.evaluate("document.activeElement.id") == "project-title"
         checks.append("Unknown effects retain the original operation and cannot preview a stale follow-up or offer resend.")
 
+        await page.focus("#open-designs")
+        await page.evaluate("current = {state:'stale',mode:'attended'}; render(false)")
+        assert await page.evaluate("document.activeElement.id") == "project-title"
+        await page.locator("#draft").evaluate("node => { node.focus(); node.setSelectionRange(3,11); }")
+        await page.evaluate("current = {state:'disconnected',mode:'attended'}; render(false)")
+        assert await page.evaluate("document.activeElement.id") == "draft"
+        assert await page.locator("#draft").evaluate("node => node.selectionStart === 3 && node.selectionEnd === 11")
+        checks.append("A render preserves available focus and draft selection; a disappearing focused action falls back to the project heading.")
+
         await apply("partial")
         assert await page.locator("#review-task").is_hidden()
         assert await page.locator("#review-edge").get_attribute("visibility") == "hidden"
