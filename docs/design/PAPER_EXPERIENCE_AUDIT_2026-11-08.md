@@ -556,3 +556,31 @@ The newly authored AI states are now grouped in one native auto-placed review at
 Terminal's current recovery directory likewise now sits in a measured native wrapper **`216F-0`**, x1560/y−580, on [Personal Desk · Build](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0). Original content `1ZLS-0` and panel `1ZHN-0` retain their IDs and copy. Native full render and root-position JSX verified the adjacent placement; `portfolio-reference-position-finish-01` finished it.
 
 The four new Options compositions A05–A08 and the two Personal Desk atlases were also found at their existing measured positions; they were not moved or rebuilt. No original source board was altered to create these wrappers. Compatible native duplication supplied blank-area placement, after which only the new owned copy was replaced with the container and the existing owned design nodes were moved into it. No held style/token tool was invoked.
+
+
+## OS Conversations: source-qualified population, draft and project language
+
+On [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0), existing desktop CV01 `SD8-0` and mobile CV01M `SI5-0` now describe the mounted source accurately. The current projection supplies one associated conversation window plus a separate project catalogue; it does not enumerate retained history or supply a saved-draft receipt or generated reply summary.
+
+Twelve text nodes were corrected: `SKH-0` is **Current conversation**; `SKW-0` / `SM4-0` say **Mastermind OS · Unsent draft**; `SKY-0` / `SMA-0` say **Conversation available.** Desktop `SL9-0` / `SLA-0` / `SLB-0` identify the Terminal project and explain that its history is not loaded here. Mobile `SME-0` / `SMF-0` identify Terminal as **Project · Open workspace**. Coverage `SLH-0` / `SML-0` states that the list is incomplete, instead of suggesting completeness remains possible for this source.
+
+The first mobile render exposed wrapping of the Sources action when the coverage note grew. The existing coverage row `SMK-0` was replaced with scoped native stack `ZEG-0`: cloned note `ZEH-0` retains the corrected coverage text; `ZEI-0` gives the existing Sources and access path a separate 44px-minimum action row; `ZEJ-0` carries the full label. No navigation owner or new data action was introduced. The final full 390px render shows the complete header, current conversation, project row, coverage and unbroken action label; the 1600px desktop remains unclipped.
+
+Sources are pinned to Mastermind `5c3d3885234358aefb97ecdbc59be0864df14f8b`:
+
+| Source | Blob | Design implication |
+| --- | --- | --- |
+| `app/mastermind_os/src/conversations/conversation-list-source.ts` | `28f25934feb2bba27ef9386b69bc53074d00266c` | One current window, separate projects, `historyCoverage: NOT_ENUMERATED`, and only an unsent-draft signal. |
+| `app/mastermind_os/src/conversations/ConversationsList.tsx` | `f5d31c839062836f9c3df9bb5603a7bba491d48c` | Current conversation, unsent draft, available-conversation language and unconditional incomplete-history coverage. |
+| `app/mastermind_os/src/App.tsx` | `20d9ee460253ede4a992d6c02141850930270137` | The actual mounted route supplies the draft boolean and rechecks exact locators/current owner before opening. |
+| `app/mastermind_os/src/conversations/useConversationListNavigation.ts` | `9504228d5da44f4285cfa186d417c08408563d6f` | Existing query, selection, return/focus and host/auth invalidation remain the owner. |
+
+Root refreshed both board JSX before editing, verified all 12 copy changes, inspected full desktop/mobile and focused card renders, read back the final mobile hierarchy, and finished only `SD8-0` / `SI5-0` with `os-conversation-clarity-finish-01`. Builder UX06 `SMO-0` remains intact: metadata-only search, unknown counts on unavailable/access changes, binding recheck, exact permitted project resolution and conditional focus return. Its future complete-empty case is conditional and cannot be satisfied by the current NOT_ENUMERATED feed. Held Knowledge nodes `SPU-0`, `STU-0`, `T0J-0`, Today, directories and page order were not changed. This is a native design correction, not evidence of runtime execution.
+
+## Foundation F02: bounded no-change verification
+
+A read-only cross-product check of [Master Design System](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN) found no material new contradiction requiring a native repair. Existing authority `47Q-0` / `9QT-0`–`9QW-0`, read states `6Q3-0`, mutation states `6VU-0` / `6WB-0` / `6WS-0` / `6Z7-0` / `6ZC-0`, retained-evidence contract `905-0`, and evidence/return guidance `4JP-0` / `9ZS-0` already preserve the distinctions used by the Portfolio, AI, Ontology and Guide refinements.
+
+The native directory's candidate source was resolved and read at Macro `3b27c7b9c8382ac8f21161a37b833dd6cb4f4933`. `research/design_candidates/production_design_20261102/f02/INTERACTION_STATES.md` (blob `3d90cbd4e3b95513e54e46c36632b55dbd31192c`) retains earlier values only when source identity still matches the current context and uses the existing generation/race guard. `SOURCE_AND_DATA_CONTRACT.md` (blob `b5d0b68944683573b7af05a47c43242a4b1e0e43`) assigns user-owned data to the immutable account subject and gives actual consumer entitlement/data-retention rules precedence over the illustrative specimen policy. Root independently read these exact candidate excerpts.
+
+No new global retention, retry, navigation or write mechanism is warranted. No token, inactive component, G15 uncertainty or protected `9ZX-0` / `9ZS-0` / `9SE-0` / `9SM-0` was changed. This remains a candidate-source review, not foundation acceptance or production proof.
