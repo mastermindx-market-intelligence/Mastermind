@@ -9,7 +9,7 @@ pub fn valid_fields(operation: &str, keys: &[&str]) -> bool {
         "send" => &["operation", "sessionId", "requestId", "text"],
         "receipt" => &["operation", "sessionId", "admissionId"],
         "recover_create" => &["operation", "requestId"],
-        "recover_send" => &["operation", "sessionId", "requestId"],
+        "recover_send" | "stop_send" => &["operation", "sessionId", "requestId"],
         _ => return false,
     };
     keys.len() == expected.len() && expected.iter().all(|key| keys.contains(key))
@@ -63,6 +63,14 @@ mod tests {
         assert!(valid_fields("recover_create", &["operation", "requestId"]));
         assert!(valid_fields("recover_send", &["operation", "requestId", "sessionId"]));
         assert!(!valid_fields("recover_send", &["operation", "requestId", "sessionId", "text"]));
+    }
+    #[test]
+    fn stop_uses_only_the_original_send_identity() {
+        assert!(valid_fields("stop_send", &["operation", "sessionId", "requestId"]));
+        assert!(!valid_fields("stop_send", &["operation", "sessionId", "requestId", "admissionId"]));
+        assert!(!valid_fields("stop_send", &["operation", "sessionId"]));
+        assert!(!dispatch_generation_allowed(None, 7, true));
+        assert!(!dispatch_generation_allowed(Some(6), 7, true));
     }
     #[test]
     fn exact_identifiers_not_paths_or_authority() {

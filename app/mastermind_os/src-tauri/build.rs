@@ -2,6 +2,7 @@
 mod native_client;
 #[path = "src/terminal_public_config.rs"]
 mod terminal_public_config;
+mod application_commands;
 
 fn required(name: &str) -> String {
     let value = std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set at build time"));
@@ -55,5 +56,7 @@ fn main() {
         "cargo:rustc-env=MM_BUILD_IDENTITY={}",
         required("MM_BUILD_IDENTITY")
     );
-    tauri_build::build()
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(application_commands::APPLICATION_COMMANDS)
+    )).expect("native application permissions must be explicit")
 }

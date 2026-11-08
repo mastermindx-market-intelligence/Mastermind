@@ -718,5 +718,131 @@ class ExplicitSendPreflightTests(unittest.TestCase):
         self.assertEqual(sum(method == "prompt.submit" for method, _ in runtime.calls), 1)
 
 
+
+
+class StopRuntime(FakeRuntime):
+    def __init__(self, before="started", after="terminal", *, before_change=None,
+                 after_change=None, lookup_error=None, stop_error=None, source_error=None):
+        super().__init__()
+        self.before, self.after = before, after
+        self.before_change, self.after_change = before_change or {}, after_change or {}
+        self.lookup_error, self.stop_error, self.source_error = lookup_error, stop_error, source_error
+        self.source_checks = 0
+
+    def require_stop_source(self):
+        self.source_checks += 1
+        if self.source_error:
+            raise self.source_error
+
+    def resolve_original(self, operation, params):
+        self.lookups.append((operation, params))
+        if self.lookup_error:
+            raise self.lookup_error
+        return {"session_id": "session-1", "admission_id": "original-admission"}
+
+    async def rpc(self, method, **params):
+        self.calls.append((method, params))
+        if method not in {"prompt.receipt", "prompt.cancel"}:
+            raise AssertionError("Stop must not create, submit, resume or retry")
+        if method == "prompt.cancel" and self.stop_error:
+            raise self.stop_error
+        status = self.before if method == "prompt.receipt" else self.after
+        changes = self.before_change if method == "prompt.receipt" else self.after_change
+        return {"admission_id": "original-admission", "ref": {"session_id": "session-1"},
+                "status": status, "sequence": 1, "execution_generation": 3,
+                "outcome": "cancelled" if status == "terminal" else None, **changes}
+
+
+class StopTests(unittest.TestCase):
+    def setUp(self):
+        self.b = load()
+        self.request = {"operation": "stop_send", "sessionId": "session-1", "requestId": "a" * 32}
+
+    def run_stop(self, runtime):
+        return asyncio.run(self.b.execute_request(self.request, runtime))
+
+    def test_queued_and_started_stop_derive_exact_original_and_cancel_once(self):
+        for status in ("queued", "started"):
+            with self.subTest(status=status):
+                runtime = StopRuntime(before=status)
+                result = self.run_stop(runtime)
+                self.assertEqual(result["state"], "ADMITTED")
+                self.assertEqual(result["operation"], "stop")
+                self.assertEqual(result["requestId"], "a" * 32)
+                self.assertEqual(result["requestSessionId"], "session-1")
+                self.assertEqual(result["receipt"]["outcome"], "cancelled")
+                self.assertEqual(runtime.source_checks, 1)
+                self.assertEqual(runtime.lookups, [("recover_send", {"session_id": "session-1", "request_id": "a" * 32})])
+                expected = {"session_id": "session-1", "admission_id": "original-admission"}
+                self.assertEqual(runtime.calls, [("prompt.receipt", expected), ("prompt.cancel", expected)])
+
+    def test_terminal_completed_original_is_read_without_cancel_or_relabel(self):
+        runtime = StopRuntime(before="terminal", before_change={"outcome": "completed"})
+        result = self.run_stop(runtime)
+        self.assertEqual(result["receipt"]["outcome"], "completed")
+        self.assertEqual([method for method, _ in runtime.calls], ["prompt.receipt"])
+
+    def test_nonterminal_cancel_response_is_not_claimed_stopped(self):
+        result = self.run_stop(StopRuntime(after="started"))
+        self.assertEqual(result["state"], "ADMITTED")
+        self.assertEqual(result["receipt"]["status"], "started")
+        self.assertIsNone(result["receipt"]["outcome"])
+        self.assertFalse(result["retryAllowed"])
+
+    def test_unknown_original_is_held_without_cancel(self):
+        runtime = StopRuntime(before="unknown")
+        result = self.run_stop(runtime)
+        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+        self.assertEqual([method for method, _ in runtime.calls], ["prompt.receipt"])
+
+    def test_unqualified_source_and_missing_original_never_cancel(self):
+        for runtime in (StopRuntime(source_error=self.b.BridgeRefusal("NATIVE_STOP_SOURCE_CHANGED")),
+                        StopRuntime(lookup_error=self.b.BridgeRefusal("NATIVE_RECOVERY_UNRESOLVED"))):
+            with self.subTest(runtime=runtime):
+                result = self.run_stop(runtime)
+                self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+                self.assertEqual(runtime.calls, [])
+
+    def test_crossed_preflight_admission_or_session_never_cancel(self):
+        for change in ({"admission_id": "other-admission"}, {"ref": {"session_id": "other-session"}}):
+            with self.subTest(change=change):
+                runtime = StopRuntime(before_change=change)
+                result = self.run_stop(runtime)
+                self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+                self.assertEqual([method for method, _ in runtime.calls], ["prompt.receipt"])
+                self.assertNotIn("receipt", result)
+
+    def test_crossed_cancel_result_never_settles_original(self):
+        for change in ({"admission_id": "other-admission"}, {"ref": {"session_id": "other-session"}}):
+            with self.subTest(change=change):
+                runtime = StopRuntime(after_change=change)
+                result = self.run_stop(runtime)
+                self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+                self.assertEqual(len(runtime.calls), 2)
+                self.assertNotIn("receipt", result)
+
+    def test_interrupted_or_refused_cancel_is_held_without_retry_or_secret(self):
+        for error in (TimeoutError("PRIVATE_KEY"), self.b.NotSent("PRIVATE_KEY"),
+                      self.b.OwnerRefusal("permission_denied")):
+            with self.subTest(error=type(error).__name__):
+                runtime = StopRuntime(stop_error=error)
+                result = self.run_stop(runtime)
+                self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+                self.assertEqual(result["operation"], "stop")
+                self.assertFalse(result["retryAllowed"])
+                self.assertEqual([method for method, _ in runtime.calls].count("prompt.cancel"), 1)
+                self.assertNotIn("PRIVATE_KEY", str(result))
+                self.assertNotIn("receipt", result)
+
+    def test_stop_request_cannot_override_native_admission_or_authority(self):
+        for key in ("admissionId", "text", "model", "profile", "url", "method", "executionGeneration"):
+            with self.subTest(key=key), self.assertRaises(self.b.BridgeRefusal):
+                self.b.normalize_request({**self.request, key: "foreign"})
+        for key in ("sessionId", "requestId"):
+            request = dict(self.request); request.pop(key)
+            with self.subTest(missing=key), self.assertRaises(self.b.BridgeRefusal):
+                self.b.normalize_request(request)
+
+
 if __name__ == "__main__":
     unittest.main()

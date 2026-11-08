@@ -25,7 +25,9 @@ FIELDS = {"status": {"operation"}, "list": {"operation"},
           "send": {"operation", "sessionId", "requestId", "text"},
           "receipt": {"operation", "sessionId", "admissionId"},
           "recover_create": {"operation", "requestId"},
-          "recover_send": {"operation", "sessionId", "requestId"}}
+          "recover_send": {"operation", "sessionId", "requestId"},
+          "stop_send": {"operation", "sessionId", "requestId"},
+          "observe": {"operation", "sessionId", "admissionId", "authorityEpoch"}}
 
 
 class BridgeRefusal(ValueError):
@@ -78,7 +80,7 @@ def normalize_request(value):
                                 or not REQUEST_ID.fullmatch(value["requestId"])):
         raise BridgeRefusal("REQUEST_INVALID")
     session = {"session_id": identifier(value["sessionId"])} if "sessionId" in value else {}
-    if operation in {"recover_create", "recover_send"}:
+    if operation in {"recover_create", "recover_send", "stop_send"}:
         return operation, {**session, "request_id": value["requestId"]}
     if operation == "create":
         names = {"meta-ceo": "Meta-CEO", "secretary": "Secretary"}
@@ -91,6 +93,9 @@ def normalize_request(value):
         return operation, {**session, "text": bounded_text(value["text"]),
             "submission_id": value["requestId"], "input_id": value["requestId"],
             "queued": False, "finite": True}
+    if operation == "observe":
+        return operation, {**session, "admission_id": identifier(value["admissionId"]),
+                           "authority_epoch": integer(value["authorityEpoch"])}
     if operation == "receipt":
         return operation, {**session, "admission_id": identifier(value["admissionId"])}
     if operation == "list":
@@ -247,15 +252,19 @@ def envelope(state, **values):
 def bound_envelope(request, state, **values):
     # Correlate the public reply to this validated invocation. Successful native
     # identities are separately checked against the existing upstream owner.
-    if type(request) is dict and request.get("operation") in {"create", "send", "recover_create", "recover_send"}:
+    if type(request) is dict and request.get("operation") in {"create", "send", "recover_create", "recover_send", "stop_send"}:
         request_id = request.get("requestId")
         if type(request_id) is str and REQUEST_ID.fullmatch(request_id):
             values["requestId"] = request_id
-        if request.get("operation") in {"send", "recover_send"}:
+        if request.get("operation") in {"send", "recover_send", "stop_send"}:
             session_id = request.get("sessionId")
             if type(session_id) is str and IDENTIFIER.fullmatch(session_id):
                 values["requestSessionId"] = session_id
     return envelope(state, **values)
+
+
+def public_operation(operation):
+    return "stop" if operation == "stop_send" else "recover" if operation.startswith("recover_") else operation
 
 
 async def execute_request(request, runtime):
@@ -290,6 +299,29 @@ async def execute_request(request, runtime):
             if operation == "create":
                 original_create = await asyncio.to_thread(runtime.create_identity, request["requestId"])
         async with runtime.connect(endpoint) as client:
+            if operation == "stop_send":
+                # Native cancellation is a control of the exact original admission.
+                # Derive its identity from the incumbent ledger, never renderer data.
+                await asyncio.to_thread(runtime.require_stop_source)
+                target = await asyncio.to_thread(runtime.resolve_original, "recover_send", params)
+                if target["session_id"] != params["session_id"]:
+                    raise BridgeRefusal("NATIVE_SESSION_MISMATCH")
+                before = await client.rpc("prompt.receipt", session_id=target["session_id"], admission_id=target["admission_id"])
+                observed = project_result("receipt", before, target["session_id"])
+                if observed["receipt"]["id"] != target["admission_id"]:
+                    raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
+                if observed["receipt"]["status"] == "terminal":
+                    return bound_envelope(request, "ADMITTED", operation="stop", runtime=public, **observed)
+                if observed["receipt"]["status"] not in {"queued", "started"}:
+                    return bound_envelope(request, "EFFECT_UNKNOWN", operation="stop", code="NATIVE_STOP_UNRESOLVED")
+                mutation_sent = True
+                result = await client.rpc("prompt.cancel", session_id=target["session_id"], admission_id=target["admission_id"])
+                projected = project_result("receipt", result, target["session_id"])
+                if projected["receipt"]["id"] != target["admission_id"]:
+                    raise BridgeRefusal("NATIVE_RECEIPT_MISMATCH")
+                # A nonterminal receipt is not a stopped claim. Keep the original
+                # reservation; ordinary original-receipt reads alone may settle it.
+                return bound_envelope(request, "ADMITTED", operation="stop", runtime=public, **projected)
             if operation == "recover_send":
                 # Absence, pruning and read failure never prove no effect.
                 target = await asyncio.to_thread(runtime.resolve_original, operation, params)
@@ -325,27 +357,205 @@ async def execute_request(request, runtime):
             state = {"create": "OPENED", "send": "ADMITTED"}.get(operation, "READY")
             return bound_envelope(request, state, operation=operation, runtime=public, **projected)
     except OwnerRefusal as exc:
-        if operation.startswith("recover_"):
-            return bound_envelope(request, "EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
+        if operation.startswith("recover_") or operation == "stop_send":
+            return bound_envelope(request, "EFFECT_UNKNOWN", operation=public_operation(operation), code="NATIVE_RECOVERY_UNRESOLVED")
         if mutation_sent and not exc.proves_rejection():
             return bound_envelope(request, "EFFECT_UNKNOWN", operation=operation, code="NATIVE_OUTCOME_UNKNOWN")
         reason = str(exc)
         code = reason if re.fullmatch(r"[a-z_]{1,80}", reason) else "NATIVE_REFUSED"
         return bound_envelope(request, "REFUSED", operation=operation, code=code)
     except NotSent:
-        if operation.startswith("recover_"):
-            return bound_envelope(request, "EFFECT_UNKNOWN", operation="recover", code="NATIVE_RECOVERY_UNRESOLVED")
+        if operation.startswith("recover_") or operation == "stop_send":
+            return bound_envelope(request, "EFFECT_UNKNOWN", operation=public_operation(operation), code="NATIVE_RECOVERY_UNRESOLVED")
         return bound_envelope(request, "NOT_SENT", operation=operation, code="NATIVE_NOT_SENT")
     except BridgeRefusal as exc:
-        recovering = operation.startswith("recover_")
+        recovering = operation.startswith("recover_") or operation == "stop_send"
         return bound_envelope(request, "EFFECT_UNKNOWN" if mutation_sent or recovering else "REFUSED",
-                        operation="recover" if recovering else operation, code=str(exc))
+                        operation=public_operation(operation), code=str(exc))
     except Exception:
-        recovering = operation.startswith("recover_")
+        recovering = operation.startswith("recover_") or operation == "stop_send"
         not_sent = operation in {"create", "send"} and not mutation_sent
         return bound_envelope(request, "EFFECT_UNKNOWN" if mutation_sent or recovering else "NOT_SENT" if not_sent else "UNAVAILABLE",
-                        operation="recover" if recovering else operation,
+                        operation=public_operation(operation),
                         code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent or recovering else "NATIVE_NOT_SENT" if not_sent else "NATIVE_UNAVAILABLE")
+
+
+class NativeStreamProjection:
+    """Ephemeral render projection of one native admission. No persistence,
+    execution ownership, prompt resubmission, or session attachment lives here."""
+    def __init__(self, session_id, admission_id, authority_epoch):
+        self.session_id, self.admission_id = session_id, admission_id
+        self.authority_epoch = authority_epoch
+        self.epoch = None
+        self.sequence = 0
+        self.generation = None
+        self.turn = None
+        self.segments = [""]
+        self.segment = 0
+        self.activity = "working"
+
+    @property
+    def text(self):
+        value = "\n\n".join(part for part in self.segments if part)
+        return bounded_text(value, 262144, blank=True)
+
+    def receipt(self, value):
+        receipt = project_result("receipt", value, self.session_id)["receipt"]
+        epoch = value.get("ref", {}).get("authority_epoch")
+        if receipt["id"] != self.admission_id or type(epoch) is not int or epoch != self.authority_epoch:
+            raise BridgeRefusal("NATIVE_STREAM_OWNER_CHANGED")
+        generation = receipt["executionGeneration"]
+        if self.generation is not None and self.generation != generation:
+            raise BridgeRefusal("NATIVE_STREAM_OWNER_CHANGED")
+        if generation is not None:
+            self.generation = generation
+        return receipt["status"]
+
+    def bind_replay(self, value):
+        if type(value) is not dict:
+            raise BridgeRefusal("NATIVE_STREAM_INVALID")
+        self.epoch = identifier(value.get("replay_epoch"))
+
+    def apply(self, value):
+        if (type(value) is not dict or value.get("replay_epoch") != self.epoch
+                or value.get("snapshot_required") is not False or value.get("truncated") is not False
+                or type(value.get("events")) is not list or len(value["events"]) > 4096):
+            raise BridgeRefusal("NATIVE_STREAM_GAP")
+        latest = integer(value.get("latest_seq"))
+        if latest < self.sequence:
+            raise BridgeRefusal("NATIVE_STREAM_GAP")
+        for event in value["events"]:
+            if type(event) is not dict or event.get("session_id") != self.session_id or event.get("replay_epoch") != self.epoch:
+                raise BridgeRefusal("NATIVE_STREAM_OWNER_CHANGED")
+            sequence = integer(event.get("seq"))
+            if sequence <= self.sequence:
+                continue
+            if sequence > latest:
+                raise BridgeRefusal("NATIVE_STREAM_INVALID")
+            if event.get("admission_id") == self.admission_id:
+                if (type(event.get("authority_epoch")) is not int or event["authority_epoch"] != self.authority_epoch
+                        or self.generation is None or type(event.get("execution_generation")) is not int
+                        or event["execution_generation"] != self.generation):
+                    raise BridgeRefusal("NATIVE_STREAM_OWNER_CHANGED")
+                self.accept(event.get("type"), event.get("payload"))
+            self.sequence = sequence
+        # Native replay (not the renderer) proves that everything through latest
+        # was observed, including events for another admission in this session.
+        self.sequence = latest
+        self.text  # Enforce the aggregate display budget after every batch.
+
+    def accept(self, kind, payload):
+        if kind not in {"message.start", "message.delta", "message.interim", "message.complete", "tool.start", "tool.complete"}:
+            return  # Never forward raw reasoning, tool arguments or tool results.
+        if type(payload) is not dict:
+            raise BridgeRefusal("NATIVE_STREAM_INVALID")
+        turn = payload.get("turn_id")
+        if turn is not None:
+            turn = identifier(turn)
+            if self.turn is not None and self.turn != turn:
+                raise BridgeRefusal("NATIVE_STREAM_GAP")
+            self.turn = turn
+        if kind == "tool.start":
+            self.activity = "tool"
+            return
+        if kind in {"message.start", "tool.complete"}:
+            self.activity = "working"
+            return
+        if kind == "message.delta":
+            if payload.get("text") is None:
+                return  # Native null delta is a boundary, never the string null.
+            text = bounded_text(payload.get("text"), 262144, blank=True)
+            stamps = [key in payload and payload[key] is not None for key in ("turn_id", "segment", "offset")]
+            if any(stamps) and not all(stamps):
+                raise BridgeRefusal("NATIVE_STREAM_INVALID")
+            if all(stamps):
+                segment, offset = integer(payload["segment"]), integer(payload["offset"])
+                if segment > self.segment:
+                    raise BridgeRefusal("NATIVE_STREAM_GAP")
+                current = self.segments[segment].encode("utf-16-le")
+                chunk = text.encode("utf-16-le")
+                position = offset * 2
+                overlap = min(len(chunk), max(0, len(current) - position))
+                if position > len(current) or current[position:position + overlap] != chunk[:overlap]:
+                    raise BridgeRefusal("NATIVE_STREAM_GAP")
+                if segment < self.segment and position + len(chunk) > len(current):
+                    raise BridgeRefusal("NATIVE_STREAM_GAP")
+                self.segments[segment] = (current + chunk[overlap:]).decode("utf-16-le")
+            else:
+                # The qualified managed-worker publisher lacks segment stamps.
+                # Its native replay sequence still deduplicates every event.
+                self.segments[self.segment] += text
+            self.activity = "responding"
+        elif kind == "message.interim":
+            text = bounded_text(payload.get("text"), 262144, blank=True)
+            segment = integer(payload["segment"]) if payload.get("segment") is not None else self.segment
+            if segment > self.segment:
+                raise BridgeRefusal("NATIVE_STREAM_GAP")
+            if segment < self.segment:
+                if self.segments[segment] != text:
+                    raise BridgeRefusal("NATIVE_STREAM_GAP")
+                return
+            self.segments[segment] = text
+            self.segments.append("")
+            self.segment += 1
+            self.activity = "working"
+        elif kind == "message.complete":
+            # Native complete text is the final segment, not proof that an
+            # admission settled. Only prompt.receipt can signal that below.
+            if payload.get("response_reused") is not True and isinstance(payload.get("text"), str):
+                text = bounded_text(payload["text"], 262144, blank=True)
+                if text:
+                    self.segments[self.segment] = text
+
+    def frame(self, state="live", code=None):
+        return {"schema": "mastermind.hermes_native_stream.v1", "sessionId": self.session_id,
+            "admissionId": self.admission_id, "authorityEpoch": self.authority_epoch,
+            "executionGeneration": self.generation, "replayEpoch": self.epoch or "unavailable",
+            "sequence": self.sequence, "state": state, "text": self.text, "activity": self.activity, "code": code}
+
+
+async def observe_request(request, runtime, emit, *, duration=600, interval=0.1):
+    """One foreground, read-only connection over the existing event replay.
+    Receipt checks settle nothing here. Leaving the view closes this helper.
+    No session.resume/attach, starts, retries, control requests or durable cursors."""
+    _, params = normalize_request(request)
+    projection = NativeStreamProjection(params["session_id"], params["admission_id"], params["authority_epoch"])
+    previous = None
+    try:
+        endpoint, public = qualify_identity(await runtime.identify(), runtime.home)
+        if public["authorityEpoch"] != projection.authority_epoch:
+            raise BridgeRefusal("NATIVE_STREAM_OWNER_CHANGED")
+        await asyncio.to_thread(runtime.require_stream_source)
+        async with runtime.connect(endpoint) as client:
+            # The first query obtains an epoch without attaching a session. Its
+            # expected snapshot_required is NOT accepted as replay evidence.
+            cursor = await client.rpc("session.events.since", session_id=projection.session_id, last_sequence=0)
+            projection.bind_replay(cursor)
+            deadline = asyncio.get_running_loop().time() + duration
+            while asyncio.get_running_loop().time() < deadline:
+                status = projection.receipt(await client.rpc("prompt.receipt", session_id=projection.session_id, admission_id=projection.admission_id))
+                if status == "unknown":
+                    raise BridgeRefusal("NATIVE_STREAM_RECEIPT_UNKNOWN")
+                if projection.generation is not None:
+                    batch = await client.rpc("session.events.since", session_id=projection.session_id,
+                        replay_epoch=projection.epoch, last_sequence=projection.sequence)
+                    projection.apply(batch)
+                current = projection.frame("complete" if status == "terminal" else "live")
+                if current != previous:
+                    emit(current)
+                    previous = current
+                if status == "terminal":
+                    return
+                await asyncio.sleep(interval)
+            raise BridgeRefusal("NATIVE_STREAM_VIEW_EXPIRED")
+    except Exception as exc:
+        code = str(exc) if isinstance(exc, BridgeRefusal) and str(exc).startswith("NATIVE_STREAM_") else "NATIVE_STREAM_INTERRUPTED"
+        if previous is None:
+            projection.segments = [""]
+            projection.sequence = 0
+            previous = projection.frame()
+        # Invalid/oversized batches never release a half-applied projection.
+        emit({**previous, "state": "interrupted", "code": code})
 
 
 # Qualification of the already-installed read-only Mastermind OMH adapter and
@@ -433,6 +643,32 @@ class NativeRuntime:
             source = root / name
             if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
                 raise BridgeRefusal("NATIVE_RECOVERY_SOURCE_CHANGED")
+
+    def require_stop_source(self):
+        self.require_recovery_source()
+        hashes = {
+            "gateway/session_controls.py": "3e6797de16ee375f21221a5da1c589756c6d0c31f21cd342a16a020eba891b71",
+            "gateway/session_authority.py": "7902f0cdca329c229a41328bec2c84103d3c5adc01bea7020b7bc76e4b26404d",
+            "gateway/session_managed_worker.py": "4d51ca8d605ee3facc20e3ef6b8d9f3aeebe5ac14c849a7a4174937f9a5198f4",
+            "tui_gateway/contracts/canonical.py": "ecccf8d09673b5d5401a3ecd30adb70cb7a9be1ee7d221dec23cd34a3feaa853",
+        }
+        for name, expected in hashes.items():
+            path = self.home / "hermes-agent" / name
+            if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                raise BridgeRefusal("NATIVE_STOP_SOURCE_CHANGED")
+
+    def require_stream_source(self):
+        self.require_recovery_source()
+        hashes = {
+            "gateway/session_events.py": "f1bce013e38e64dbb74f3ee72b2f6d3fbf36a6290ac8f8e9932ec5c50dea97df",
+            "gateway/session_controls.py": "3e6797de16ee375f21221a5da1c589756c6d0c31f21cd342a16a020eba891b71",
+            "tui_gateway/stream_segments.py": "4c940a1f8fe8616376351480e439862539a7282420b73ef9591f587cb5846786",
+            "tui_gateway/contracts/events.py": "a00ee5eb6bed147f65ad9dce3fcc5a1b27fdc52051b9a55c9f539af09a7b7922",
+        }
+        for name, expected in hashes.items():
+            path = self.home / "hermes-agent" / name
+            if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                raise BridgeRefusal("NATIVE_STREAM_SOURCE_CHANGED")
 
     def require_history_source(self):
         self.require_recovery_source()
@@ -571,7 +807,8 @@ class NativeRuntime:
             if count < len(visible[-100:]) or self.owned_history(db, owner)[1] != receipt:
                 raise BridgeRefusal("NATIVE_HISTORY_CHANGED")
             result = {"id": identifier(owner), "storedId": identifier(row["id"]),
-                "title": display(row.get("title") or "", 512), "requestedModel": display(row.get("model") or "", 160),
+                "title": display(row.get("title") or "", 512),
+                "requestedModel": display(row.get("model") or "", 160),
                 "canSend": False, "toolAccess": "UNQUALIFIED", "sendCheckRequired": True,
                 "running": None, "executionGeneration": integer(logical.get("runtime_generation")),
                 "messageCount": count, "messages": visible[-100:],
@@ -752,6 +989,13 @@ def main():
     request = None
     operation = "unknown"
     execution_started = False
+    output = sys.stdout.buffer
+    def emit_stream(value):
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > 300000:
+            raise BridgeRefusal("NATIVE_STREAM_TOO_LARGE")
+        output.write(encoded + b"\n")
+        output.flush()
     try:
         raw = sys.stdin.buffer.read(65537)
         if len(raw) > 65536:
@@ -761,19 +1005,22 @@ def main():
         with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
             runtime = NativeRuntime()
             execution_started = True
+            if operation == "observe":
+                asyncio.run(observe_request(request, runtime, emit_stream))
+                return
             result = asyncio.run(execute_request(request, runtime))
     except Exception:
         mutating = operation in {"create", "send"}
-        recovering = operation.startswith("recover_")
+        recovering = operation.startswith("recover_") or operation == "stop_send"
         not_sent = mutating and not execution_started
         result = bound_envelope(request, "NOT_SENT" if not_sent else "EFFECT_UNKNOWN" if mutating or recovering else "UNAVAILABLE",
-                          operation="recover" if recovering else operation,
+                          operation=public_operation(operation),
                           code="NATIVE_NOT_SENT" if not_sent else "NATIVE_CLIENT_UNAVAILABLE")
     encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(encoded) > 1024 * 1024:
         mutating = type(request) is dict and request.get("operation") in {"create", "send"}
-        encoded = json.dumps(bound_envelope(request, "EFFECT_UNKNOWN" if mutating or operation.startswith("recover_") else "UNAVAILABLE",
-                                      operation="recover" if operation.startswith("recover_") else operation,
+        encoded = json.dumps(bound_envelope(request, "EFFECT_UNKNOWN" if mutating or operation.startswith("recover_") or operation == "stop_send" else "UNAVAILABLE",
+                                      operation=public_operation(operation),
                                       code="NATIVE_RESPONSE_TOO_LARGE")).encode()
     sys.stdout.buffer.write(encoded + b"\n")
 

@@ -12,6 +12,8 @@ mod terminal_public_config;
 mod terminal_request_handoff;
 mod terminal_session;
 mod terminal_sharing_navigation;
+#[cfg(test)]
+mod native_chat_acl_tests;
 use sha2::{Digest, Sha256};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -94,6 +96,10 @@ fn reopen_main_window(app: &tauri::AppHandle) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn application_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
@@ -126,7 +132,10 @@ fn main() {
             terminal_session::read_terminal_sharing_requests,
             terminal_sharing_navigation::open_terminal_sharing_request,
             auth::auth_status,
+            auth::deepseek_native::open_deepseek_chat,
             auth::hermes_native::hermes_native,
+            auth::hermes_native::hermes_native_observe,
+            auth::hermes_native::hermes_native_unobserve,
             auth::native_draft_identity::read_native_draft_continuity,
             auth::sign_in,
             auth::sign_out,
@@ -192,11 +201,12 @@ fn main() {
             auth::executive_session_references,
             auth::executive_project_session_references
         ])
-        .build(tauri::generate_context!())
+        .build(application_context())
         .expect("tauri runtime error");
     app.run(|_app, _event| {
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
+        // Another chat window may be visible while main is closed.
+        if let tauri::RunEvent::Reopen { .. } = _event {
             if let Err(code) = reopen_main_window(_app) {
                 // Only a fixed local window error is logged, never callback data.
                 eprintln!("Mastermind OS: {code}");

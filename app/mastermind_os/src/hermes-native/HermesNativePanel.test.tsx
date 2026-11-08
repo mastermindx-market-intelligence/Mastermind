@@ -6,6 +6,7 @@ import { createIndexedDbPendingPointerStore } from "../orchestration/indexeddb-p
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HermesNativePanel } from "./HermesNativePanel";
+import { nativePendingPointer } from "./pending-pointer";
 import { parseNativeView, type NativeHermesPort, type NativeOperation } from "./contract";
 
 function view(extra: Record<string, unknown> = {}) {
@@ -48,7 +49,7 @@ describe("thin native Hermes Office", () => {
     const p = await openChat();
     expect(p.request.mock.calls.some(([r]) => r.operation === "create" && r.role === "meta-ceo" && /^[a-f0-9]{32}$/.test(r.requestId))).toBe(true);
     expect(screen.getByText(/Capacity catalog and route preview only/i)).toBeTruthy();
-    expect(screen.getByText(/configured-model/)).toBeTruthy();
+    expect(screen.getAllByText(/configured-model/).length).toBeGreaterThan(0);
   });
   it("labels qualified OMH advice without claiming execution or capacity-only scope", async () => {
     const p = port(); const base = p.request.getMockImplementation()!;
@@ -202,7 +203,8 @@ describe("thin native Hermes Office", () => {
       for (let i = 0; i < 35; i++) await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
       expect(p.request.mock.calls.filter(([request]) => request.operation === "recover")).toHaveLength(30);
       expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(1);
-      expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+      expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Stop generation" })).toBeTruthy();
     } finally { vi.useRealTimers(); }
   });
 
@@ -302,10 +304,12 @@ describe("existing stored native conversations", () => {
     // The started original is still held after recovery clears stale send eligibility.
     p.request.mockResolvedValueOnce(started());
     p.request.mockRejectedValueOnce(new Error("NATIVE_CLIENT_UNAVAILABLE"));
-    fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
     await screen.findByText(/NATIVE_CLIENT_UNAVAILABLE/);
     expect(screen.getByText(/Sending is paused until the original request’s outcome is confirmed/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message Hermes" }), { key: "Enter", code: "Enter" });
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
 
     p.request.mockResolvedValueOnce({ ...view({ operation: "recover", state: "EFFECT_UNKNOWN" }), pendingOperation });
     fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
@@ -342,5 +346,152 @@ describe("existing stored native conversations", () => {
     expect(screen.queryByText(/Sending is paused until/)).toBeNull();
     expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
     expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(0);
+  });
+});
+
+
+
+describe("Hermes Stop interaction", () => {
+  const original = { kind: "send" as const, sessionId: "session-one", requestId: "a".repeat(32) };
+  const admitted = (operation: string, status = "started") => view({ operation, state: "ADMITTED",
+    requestId: original.requestId, requestSessionId: original.sessionId, receipt: {
+      id: "original-admission", sessionId: original.sessionId, status, sequence: 2,
+      outcome: status === "terminal" ? "cancelled" : null, executionGeneration: 1 } });
+  it("offers Stop for its running original and a rapid second click cannot dispatch twice", async () => {
+    const p = await openChat(), base = p.request.getMockImplementation()!;
+    let finish!: () => void;
+    p.request.mockImplementation(async request => {
+      if (request.operation === "send") return { ...admitted("send"), pendingOperation: original };
+      if (request.operation === "stop") return new Promise(resolve => {
+        finish = () => resolve({ ...admitted("stop", "terminal"), pendingOperation: null });
+      });
+      return base(request);
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "original" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const stop = await screen.findByRole("button", { name: "Stop generation" });
+    fireEvent.click(stop); fireEvent.click(stop);
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "stop")).toHaveLength(1);
+    await act(async () => { finish(); });
+    await screen.findByText(/terminal · cancelled/);
+    await waitFor(() => expect(p.request.mock.calls.some(([request]) => request.operation === "read")).toBe(true));
+    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(1);
+    expect((screen.getByRole("textbox", { name: "Message Hermes" }) as HTMLTextAreaElement).value).toBe("");
+  });
+  it("reopens a lost cancellation with Stop and new sends disabled and only reads the original", async () => {
+    const factory = new IDBFactory(), store = createIndexedDbPendingPointerStore(factory);
+    const scope = "e".repeat(64);
+    await store.reserve(scope, nativePendingPointer(original));
+    const invoke = vi.fn(async (_command: string, args: Record<string, unknown>) => {
+      const request = args.request as { operation: string };
+      if (request.operation === "stop_send") throw new Error("lost cancellation response");
+      if (request.operation === "recover_send") return admitted("recover");
+      if (request.operation === "read") return view({ operation: "read", session: nativeSession() });
+      return view({ operation: "status" });
+    });
+    const makePort = () => createNativeHermesPort({ invoke, available: () => true,
+      store: createIndexedDbPendingPointerStore(factory) });
+    const first = render(<HermesNativePanel port={makePort()} locale="en" />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Hermes" }));
+    await screen.findByRole("button", { name: "Check previous request" });
+    fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
+    const stop = await screen.findByRole("button", { name: "Stop generation" });
+    await waitFor(() => expect(stop.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(stop);
+    await screen.findByText(/NATIVE_CLIENT_UNAVAILABLE/);
+    expect(screen.getByRole("button", { name: "Stop generation" }).hasAttribute("disabled")).toBe(true);
+    first.unmount();
+    render(<HermesNativePanel port={makePort()} locale="en" />);
+    expect(invoke.mock.calls.filter(([, args]) => (args.request as { operation: string }).operation === "stop_send")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Hermes" }));
+    await screen.findByText(/Stop outcome is not confirmed/);
+    fireEvent.click(screen.getByRole("button", { name: "Check previous request" }));
+    const reopenedStop = await screen.findByRole("button", { name: "Stop generation" });
+    await waitFor(() => expect(screen.getByRole("region", { name: "Native Hermes" }).getAttribute("aria-busy")).toBe("false"));
+    expect(reopenedStop.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(reopenedStop);
+    expect(screen.getByRole("button", { name: "New conversation" }).hasAttribute("disabled")).toBe(true);
+    expect(invoke.mock.calls.filter(([, args]) => (args.request as { operation: string }).operation === "stop_send")).toHaveLength(1);
+    expect(invoke.mock.calls.some(([, args]) => ["send", "create"].includes((args.request as { operation: string }).operation))).toBe(false);
+  });
+  it("clears private state when auth changes during Stop and never retries cancellation", async () => {
+    const p = await openChat(), base = p.request.getMockImplementation()!;
+    p.request.mockImplementation(async request => {
+      if (request.operation === "send") return { ...admitted("send"), pendingOperation: original };
+      if (request.operation === "stop") throw new Error("AUTHENTICATION_CHANGED");
+      return base(request);
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "private message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop generation" }));
+    await screen.findByText(/Sign-in changed\. The previous conversation is hidden/);
+    expect(screen.queryByRole("textbox", { name: "Message Hermes" })).toBeNull();
+    expect(screen.queryByText("original-admission")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "stop")).toHaveLength(1);
+  });
+});
+
+describe("live native chat interaction", () => {
+  it("keeps the next draft editable while real partial text arrives and reconciles only the original receipt", async () => {
+    const p = port(), base = p.request.getMockImplementation()!;
+    let receive: ((frame: import("./live-stream").NativeLiveFrame) => void) | undefined;
+    const dispose = vi.fn();
+    const observed: NativeHermesPort = { ...p, observe: vi.fn((_target, onFrame) => { receive = onFrame; return dispose; }) };
+    let acceptSend: ((value: NativeView) => void) | undefined;
+    const original = { kind: "send" as const, sessionId: "session-one", requestId: "a".repeat(32) };
+    const receipt = { id: "stream-original", sessionId: "session-one", status: "started" as const, sequence: 1, outcome: null, executionGeneration: 1 };
+    p.request.mockImplementation(async request => {
+      if (request.operation === "send") return new Promise<NativeView>(resolve => { acceptSend = resolve; });
+      if (request.operation === "recover") return { ...view({ operation: "recover", state: "ADMITTED", receipt: { ...receipt, status: "terminal", outcome: "completed" } }), pendingOperation: null };
+      if (request.operation === "read") return { ...view({ operation: "read", session: { ...nativeSession(), messageCount: 2, messages: [{ role: "user", text: "Original message" }, { role: "assistant", text: "Canonical completed answer" }] } }), pendingOperation: null };
+      return base(request);
+    });
+    render(<HermesNativePanel locale="en" port={observed} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Hermes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "New conversation" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    const input = await screen.findByRole("textbox", { name: "Message Hermes" }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Original message" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(acceptSend).toBeDefined());
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "My next question" } });
+    await act(async () => acceptSend!({ ...view({ operation: "send", state: "ADMITTED", receipt }), pendingOperation: original }));
+    await waitFor(() => expect(receive).toBeDefined());
+    const update = { schema: "mastermind.hermes_native_stream.v1" as const, authGeneration: 2,
+      sessionId: "session-one", admissionId: receipt.id, authorityEpoch: 1, executionGeneration: 1,
+      replayEpoch: "native-epoch", sequence: 2, text: "A real partial answer", state: "live" as const, activity: "responding" as const, code: null };
+    await act(async () => receive!(update));
+    await screen.findByText("A real partial answer");
+    expect(input.value).toBe("My next question");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeTruthy();
+    await act(async () => receive!({ ...update, state: "complete" }));
+    await screen.findByText("Canonical completed answer");
+    expect(screen.queryByText("A real partial answer")).toBeNull();
+    expect(document.querySelector("[data-pending-message]")).toBeNull();
+    expect(input.value).toBe("My next question");
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(false);
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "recover")).toHaveLength(1);
+    expect(p.request).toHaveBeenLastCalledWith({ operation: "read", sessionId: "session-one" });
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not submit an IME confirmation or Shift+Enter as a new message", async () => {
+    const p = await openChat();
+    const input = screen.getByRole("textbox", { name: "Message Hermes" });
+    fireEvent.change(input, { target: { value: "中文" } });
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true, keyCode: 229 });
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyUp(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(0);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(p.request.mock.calls.filter(([request]) => request.operation === "send")).toHaveLength(1));
   });
 });

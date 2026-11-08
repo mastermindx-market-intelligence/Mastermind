@@ -2,6 +2,7 @@
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
 pub mod hermes_native;
+pub mod deepseek_native;
 pub mod control_room_read;
 pub mod company_priorities;
 mod draft_continuity;
@@ -480,6 +481,7 @@ fn parse_callback(raw: &str) -> Result<(String, Option<String>, bool)> {
 fn emit(app: &AppHandle) {
     if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
         let executive = inner.executive_status();
+        deepseek_native::auth_changed(app, inner.generation, inner.status().status == "signed_in" && inner.token(Resource::Acquisition).is_some());
         let _ = app.emit("mastermind-auth-state", inner.status());
         let _ = app.emit("mastermind-executive-auth-state", executive);
     }
@@ -512,8 +514,12 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
     Ok(())
 }
 #[tauri::command]
-pub fn auth_status(state: tauri::State<'_, NativeAuth>) -> Result<AuthStatus> {
-    Ok(state.lock()?.status())
+pub fn auth_status(app: AppHandle) -> Result<AuthStatus> {
+    let state = app.state::<NativeAuth>();
+    let inner = state.lock()?;
+    let status = inner.status();
+    deepseek_native::auth_changed(&app, inner.generation, status.status == "signed_in" && inner.token(Resource::Acquisition).is_some());
+    Ok(status)
 }
 #[tauri::command]
 pub fn sign_out(app: AppHandle) -> Result<AuthStatus> {

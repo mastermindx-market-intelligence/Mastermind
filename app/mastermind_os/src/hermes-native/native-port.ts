@@ -1,4 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import { liveFrameGuard } from "./live-stream";
 import { createIndexedDbPendingPointerStore, type DurablePendingPointerStore } from "../orchestration/indexeddb-pending-pointer-store";
 import type { OperationPointer } from "../orchestration/operation-controller";
 import { parseNativeView, type NativeHermesPort, type NativeOperation, type NativeView } from "./contract";
@@ -31,6 +32,7 @@ export function createNativeHermesPort(input: {
   invoke: NativeInvoke;
   available: () => boolean;
   store: DurablePendingPointerStore;
+  channel?: (receive: (value: unknown) => void) => { onmessage: (value: unknown) => void };
 }): NativeHermesPort {
   let current: { scope: string; generation: number } | null = null;
   let inFlight = false;
@@ -51,6 +53,46 @@ export function createNativeHermesPort(input: {
   };
   return {
     available: input.available,
+    ...(input.channel ? { observe: ((target, receive, failed) => {
+      const context = current;
+      if (!context || !input.available()) { failed("NATIVE_STREAM_UNAVAILABLE"); return () => {}; }
+      const observerId = crypto.randomUUID().replaceAll("-", "");
+      const guard = liveFrameGuard(target, context.generation);
+      let active = true;
+      let ended = false;
+      const channel = input.channel!((value: unknown) => {
+        if (!active || ended) return;
+        try {
+          if (!current || current.scope !== context.scope || current.generation !== context.generation) throw new Error("AUTHENTICATION_CHANGED");
+          const frame = guard(value);
+          ended = frame.state !== "live";
+          receive(frame);
+        } catch (error) {
+          ended = true;
+          failed(error instanceof Error && error.message === "AUTHENTICATION_CHANGED" ? error.message : "NATIVE_STREAM_INVALID");
+          void input.invoke("hermes_native_unobserve", { observerId }).catch(() => {});
+        }
+      });
+      // This command only reads the original native event ring. Its cancellation
+      // closes the view's pipe; it never invokes prompt.cancel or session lifecycle.
+      void input.invoke("hermes_native_observe", { observerId, request: {
+        operation: "observe", sessionId: target.sessionId, admissionId: target.admissionId,
+        authorityEpoch: target.authorityEpoch,
+      }, expectedAuthGeneration: context.generation, onEvent: channel }).then(() => {
+        if (active && !ended) { ended = true; failed("NATIVE_STREAM_INTERRUPTED"); }
+      }).catch((error: unknown) => {
+        if (!active || ended) return;
+        ended = true;
+        const code = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+        if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_AUTH_NOT_DISPATCHED") {
+          current = null; failed("AUTHENTICATION_CHANGED");
+        } else failed("NATIVE_STREAM_INTERRUPTED");
+      });
+      return () => {
+        active = false; channel.onmessage = () => {};
+        void input.invoke("hermes_native_unobserve", { observerId }).catch(() => {});
+      };
+    }) satisfies NonNullable<NativeHermesPort["observe"]> } : {}),
     async request(inputRequest: NativeOperation): Promise<NativeView> {
       const request = { ...inputRequest };
       if (!input.available()) throw new Error("NATIVE_PLATFORM_UNAVAILABLE");
@@ -101,7 +143,39 @@ export function createNativeHermesPort(input: {
             authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
             retryAllowed: false, pendingOperation: null };
         }
-        const wire = request.operation === "recover" && original
+        if (request.operation === "stop" && original?.kind !== "send") {
+          return { schema: "mastermind.hermes_native_view.v1", state: "REFUSED", operation: "stop",
+            authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
+            retryAllowed: false, code: "NATIVE_STOP_UNAVAILABLE", pendingOperation: original };
+        }
+        if (request.operation === "stop" && original?.kind === "send" && pointer) {
+          // Bind the click to the displayed original before reserving cancellation.
+          // Another view may have settled A and admitted B in this same session.
+          if (original.requestId !== request.requestId || original.sessionId !== request.sessionId) {
+            return { schema: "mastermind.hermes_native_view.v1", state: "REFUSED", operation: "stop",
+              authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
+              retryAllowed: false, code: "NATIVE_STOP_TARGET_CHANGED", pendingOperation: original };
+          }
+          if (original.stopReserved || !input.store.reserveNativeStop) {
+            return { schema: "mastermind.hermes_native_view.v1", state: "EFFECT_UNKNOWN", operation: "stop",
+              authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
+              retryAllowed: false, code: "NATIVE_RECOVERY_REQUIRED", pendingOperation: original };
+          }
+          if (!await input.store.reserveNativeStop(scope, pointer)) {
+            return { schema: "mastermind.hermes_native_view.v1", state: "EFFECT_UNKNOWN", operation: "stop",
+              authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
+              retryAllowed: false, code: "NATIVE_RECOVERY_REQUIRED", pendingOperation: pending(await input.store.read(scope)) };
+          }
+          original = { ...original, stopReserved: true };
+          pointer = nativePendingPointer(original);
+          // Never roll this fence back: interruption may occur before an IPC reply.
+          // Reopen and all failures can only read the original admission to settle it.
+        }
+        // Stop can name only the already reserved original send. No caller target,
+        // new request, replacement prompt, or additional durable owner is accepted.
+        const wire = request.operation === "stop" && original?.kind === "send"
+          ? { operation: "stop_send", sessionId: original.sessionId, requestId: original.requestId }
+          : request.operation === "recover" && original
           ? original.kind === "send"
             ? { operation: "recover_send", sessionId: original.sessionId, requestId: original.requestId }
             : { operation: "recover_create", requestId: original.requestId }
@@ -124,14 +198,14 @@ export function createNativeHermesPort(input: {
           throw new Error("NATIVE_RESPONSE_INVALID");
         }
         checkTarget(result, wire as { sessionId?: string; admissionId?: string });
-        const isRecovery = request.operation === "recover";
+        const isRecovery = request.operation === "recover" || request.operation === "stop";
         const settled = mutating && ["REFUSED", "NOT_SENT"].includes(result.state) ||
           (mutating || isRecovery) && original?.kind === "create" && result.state === "OPENED" && !!result.session ||
           (mutating || isRecovery) && original?.kind === "send" && result.state === "ADMITTED" &&
             result.receipt?.status === "terminal" && result.receipt.sessionId === original.sessionId;
         if (settled && pointer) {
           if (!await input.store.clearIfEqual(scope, pointer)) {
-            return { ...result, state: "EFFECT_UNKNOWN", code: "NATIVE_RECOVERY_REQUIRED", pendingOperation: original };
+            return { ...result, state: "EFFECT_UNKNOWN", code: "NATIVE_RECOVERY_REQUIRED", pendingOperation: pending(await input.store.read(scope)) };
           }
         }
         const remaining = pending(await input.store.read(scope));
@@ -166,6 +240,7 @@ export function createNativeHermesPort(input: {
 /** No browser fetch, native URL, bearer, profile picker or raw RPC escape hatch. */
 export const nativeHermesPort: NativeHermesPort = createNativeHermesPort({
   invoke,
+  channel: receive => new Channel<unknown>(receive),
   available: () => typeof window !== "undefined" && isTauri(),
   store: createIndexedDbPendingPointerStore(typeof indexedDB === "undefined" ? undefined : indexedDB),
 });
