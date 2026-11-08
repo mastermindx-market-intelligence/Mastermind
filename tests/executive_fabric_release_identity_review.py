@@ -1089,37 +1089,6 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
 
 # Fixed explicit Memory namespace: same reviewed source/operands; only private fixed
 # helper dependency locations move. Current default APPLICATION sources are separate.
-REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': 'fce6fb111e9c8bf0c3caf3dd57874b54cf06d7a69a9bfcf2407467f82e8276e0',
-                                                      'sites': [(62,
-                                                                 33,
-                                                                 36,
-                                                                 'int',
-                                                                 '501'),
-                                                                (142,
-                                                                 25,
-                                                                 28,
-                                                                 'int',
-                                                                 '450')]},
- 'ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py': {'sha256': 'c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70',
-                                                                                          'sites': [[40,
-                                                                                                     21,
-                                                                                                     24,
-                                                                                                     'int',
-                                                                                                     '501']]},
- 'scripts/protected_memory_economic_helper.py': {'sha256': 'cb49f73b511ca8905b35b4486572ee8304cac21e01b97e3add375298bb312b19',
-                                                 'sites': [(18,
-                                                            21,
-                                                            24,
-                                                            'int',
-                                                            '501'),
-                                                           (40,
-                                                            58,
-                                                            61,
-                                                            'int',
-                                                            '501')]}})
-
-# Fixed explicit Memory namespace: same reviewed source/operands; only private fixed
-# helper dependency locations move. Current default APPLICATION sources are separate.
 REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': '7ebcfae71e2eec1311b774ea2c501d9fb9acf5425d8653503cdbeab5a7ef3055',
                                                       'sites': [(63,
                                                                  33,
