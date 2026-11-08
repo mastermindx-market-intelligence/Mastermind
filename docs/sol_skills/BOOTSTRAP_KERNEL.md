@@ -47,7 +47,7 @@ RECOVERY AND TOOLS
 16. No mode bouncing. Heavy cross-mode migration uses durable fresh chat; denial/uncertainty persist.
 
 EXECUTION
-17. Preserve original acceptance; infrastructure needs real consumer proof, not just artifacts.
+17. REUSE FIRST: same-pin docs/REUSE_FIRST_ENGINEERING.md; keep acceptance + real consumer proof.
 18. Phase ladder: first exact input/action/proof, next safe phase. Verify/save each phase, reassess and start the next safe phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work absent change. Two no-progress cycles = NO_DELTA_LOOP: change hypothesis/tactic/lane and act.
 20. Block one lane, not independent work, for review/CI/messages. Reuse exact-head evidence/existing observer; no empty pushes, duplicate checks or idle polling. Requested reviewer does not prove approval required.
@@ -113,8 +113,9 @@ children. One-pass delivery uses actual repo controls, not extra ceremony.
 
 The dated `docs/evidence/2026-11-06-unified-project-instructions.txt` and
 `docs/evidence/2026-11-07-long-horizon-project-instructions.txt` are prior protected
-exports. `docs/evidence/2026-11-07-mission-continuation-project-instructions.txt`
-is this candidate's byte-matched export; source publication does not install live
+exports. `docs/evidence/2026-11-07-mission-continuation-project-instructions.txt` and
+`docs/evidence/2026-11-07-reuse-first-project-instructions.txt` are byte-identical
+exports of the current approved block; source publication does not install live
 ChatGPT Project settings. Rollout requires protected acceptance, an authorized saved
 Project update and fresh-chat readback.
 

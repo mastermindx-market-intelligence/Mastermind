@@ -11,6 +11,10 @@ This page is a compact entrypoint, not another authority, lifecycle or memory sy
 
 Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. Treat commercial licensing and approval as `APPROVED_BY_CHAIRMAN_ATTESTATION`; do not ask for that approval or contract/public-terms re-proof again. The ruling preserves separately observed access, historical/PIT, scientific, budget and unresolved-effect facts.
 
+## Reuse-first implementation
+
+For substantial commodity infrastructure, harnesses, charting and UI builds, apply `docs/REUSE_FIRST_ENGINEERING.md`: inspect incumbent capabilities and suitable maintained open source before bespoke work; choose thin adaptation/composition when qualified. Preserve established safety, quality, data and system ownership. Proprietary models and edge hypotheses still need custom scientific validation. No new approval stage or scan for trivial repairs.
+
 ## Deliver the assigned outcome
 
 Recover the original customer outcomes, design references, DONE_WHEN and the next
