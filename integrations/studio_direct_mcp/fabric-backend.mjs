@@ -11,7 +11,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
 const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
@@ -76,12 +76,24 @@ const ACCEPT_VERIFICATION_CODES = Object.freeze([
   'manual_result_review', 'independent_review_evidence'
 ]);
 const COMPLEXITIES = ['C0_MECHANICAL', 'C1_ROUTINE_BOUNDED', 'C2_COMPLEX_BOUNDED', 'C3_FRONTIER_JUDGMENT'];
-const MANUAL_POOLS = ['grok', 'glm', 'minimax', 'bailian', 'cursor', 'ocfree', 'go', 'experiential'];
-// Experiential uncensored pool: the exact slug is mandatory (never
-// glm-5.3-flash-uncensored, auto or omitted) and the provider retains prompts
-// and responses, so every request needs an explicit caller opt-in first.
+const MANUAL_POOLS = ['grok', 'glm', 'minimax', 'bailian', 'cursor', 'ocfree', 'go', 'byteplus', 'experiential'];
+// Closed interface selectors, not provider entitlement or a second route owner.
+// Native preview/admission owns the account, funding, model preference and quota.
+const BYTEPLUS_MODELS = ['deepseek-v4.1-flash', 'glm-5.3-flash'];
 const EXPERIENTIAL_POOL = 'experiential';
-const EXPERIENTIAL_MODEL = 'glm-5.3-uncensored';
+const EXPERIENTIAL_MODEL = 'glm-5.3-uncensored'; // Preserve the historical explicit route.
+const EXPERIENTIAL_INCLUDED_CHAT_MODELS = [
+  'deepseek-v4.1-flash', 'deepseek-v4.1-flash-1017', 'gpt-6-luna', 'clef', 'clef-flash',
+];
+const EXPERIENTIAL_INCLUDED_MODELS = [...EXPERIENTIAL_INCLUDED_CHAT_MODELS, 'jev-latest', 'gpt-6-luna-decisions'];
+const EXPERIENTIAL_PAID_MODELS = ['deepseek-v4.1-flash-uncensored', 'glm-5.3-flash-uncensored'];
+const EXPERIENTIAL_MODELS = [EXPERIENTIAL_MODEL, ...EXPERIENTIAL_INCLUDED_MODELS, ...EXPERIENTIAL_PAID_MODELS];
+const EXPERIENTIAL_CONSENTS = ['retention_opt_in', 'sensitive_data_opt_in', 'code_exposure_opt_in'];
+const EXPERIENTIAL_FLAGS = [
+  '--experiential-retention-acknowledged', '--experiential-sensitive-data-opt-in',
+  '--experiential-proprietary-code', '--experiential-code-exposure-opt-in',
+];
+const hasExperientialConsent = args => EXPERIENTIAL_CONSENTS.every(field=>args[field]===true);
 const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py');
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
 const identity = { run_id: idSchema, root_id: idSchema };
@@ -100,11 +112,13 @@ export const FABRIC_TOOLS = Object.freeze([
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
     work_packet:{type:'string',minLength:1,maxLength:16000,description:'In human-readable brief prose, abbreviate SHA-256 file hashes and git commit IDs to their first ~12 hex characters. Preserve complete values in explicit machine-verification fields, code, or commands requiring exact identity. Packets are forwarded unchanged; no content scanner or secret/key rejection is added.'}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
-    pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
-    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model. pool experiential accepts only the exact glm-5.3-uncensored; auto and every other slug are refused before dispatch.'},
-    retention_opt_in:{type:'boolean',description:'Experiential uncensored retains prompts and responses, including after storage settings are disabled. Required true for every explicit experiential manual request.'},
-    sensitive_data_opt_in:{type:'boolean',description:'Explicit approval for submitting this request to an external prompt-retaining provider. Required true for experiential only; not passed to the provider.'},
-    code_exposure_opt_in:{type:'boolean',description:'Explicit permission for potential proprietary code exposure by the worker to the retaining provider. Required true for experiential, even when the immediate packet is public, and independently rechecked by the native owner.'},
+    pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. Manual pins disable cross-provider quota continuation. byteplus selects ModelArk Coding Plan capacity. experiential requires all three explicit consent fields; native account and funding gates remain authoritative.'},
+    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. byteplus accepts deepseek-v4.1-flash, glm-5.3-flash, or auto. experiential accepts the enrolled plain included model IDs, two Flash Uncensored IDs, or free/uncensored selectors; omission means free. The native preview resolves selectors and the exact resolved model is pinned at request. The historical exact glm-5.3-uncensored route remains subject to native policy.'},
+    retention_opt_in:{type:'boolean',description:'Experiential retains prompts and responses. Required true for every experiential request or consent-qualified response-only AUTO request.'},
+    sensitive_data_opt_in:{type:'boolean',description:'Explicit approval for submitting this request to an external prompt-retaining provider. Required true together with the other Experiential consents; not passed to the provider.'},
+    code_exposure_opt_in:{type:'boolean',description:'Explicit permission for potential proprietary code exposure to Experiential, even when the immediate packet is public. Required with the other consents and independently rechecked by the native owner.'},
+    provider_plan_auto:{type:'boolean',description:'Opt into one native AUTO attempt for bounded C0/C1 mechanical or fix_build work. Lets native admission consider enrolled plans; no provider is guaranteed and no Experiential consent or paid selection is implied. Incompatible with a manual pool. Disables pre-task quota continuation for this request.'},
+    response_only:{type:'boolean',description:'For consent-qualified AUTO, explicitly declare that the work can be completed entirely from the submitted packet with only a returned answer, no tool actions or artifacts. Requires all three Experiential consents. Native AUTO may consider included chat models only; this never authorizes paid Uncensored selection.'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
@@ -135,6 +149,7 @@ function validate(name, args) {
     const s=spec.inputSchema.properties[k];
     if (s.type==='string' && (typeof v!=='string' || v.includes('\0') || (s.minLength && v.trim().length<s.minLength) || (s.maxLength && v.length>s.maxLength) || (s.pattern && !new RegExp(s.pattern).test(v)))) fail('INVALID_ARGUMENT',{field:k});
     if (s.type==='integer' && (!Number.isSafeInteger(v) || v<s.minimum || v>s.maximum)) fail('INVALID_ARGUMENT',{field:k});
+    if (s.type==='boolean' && typeof v!=='boolean') fail('INVALID_ARGUMENT',{field:k});
     if (s.enum && !s.enum.includes(v)) fail('INVALID_ARGUMENT',{field:k});
   }
   if (name==='fabric_accept') {
@@ -148,27 +163,35 @@ function validate(name, args) {
     if (Buffer.byteLength(args.work_packet)>MAX_PACKET_BYTES) fail('INVALID_ARGUMENT',{field:'work_packet'});
     if (args.task_complexity==='C3_FRONTIER_JUDGMENT' && !args.escalation_reason?.trim()) fail('INVALID_ARGUMENT',{field:'escalation_reason'});
     if (args.model && !args.pool) fail('INVALID_ARGUMENT',{field:'pool'});
-    // Native per-request turn limits are qualified for GLM/MiniMax modes only.
-    // Refuse incompatible manual pools before reserving a run or controller.
-    if (args.pool && args.max_turns!==undefined && !['glm','minimax'].includes(args.pool))
+    // ModelArk uses the native coding wrapper, with its stricter 64-turn bound.
+    if (args.pool && args.max_turns!==undefined && !['glm','minimax','byteplus'].includes(args.pool))
       fail('INVALID_ARGUMENT',{field:'max_turns'});
-    // Experiential uncensored retention gate, enforced before reserving a run
-    // or touching the native adapter: exact-model pin plus explicit per-request
-    // opt-in for the prompt+response-retaining provider, scoped to this pool.
+    if (args.pool==='byteplus') {
+      if (args.model!==undefined && args.model!=='auto' && !BYTEPLUS_MODELS.includes(args.model))
+        fail('INVALID_ARGUMENT',{field:'model'});
+      if (args.max_turns!==undefined && args.max_turns>64) fail('INVALID_ARGUMENT',{field:'max_turns'});
+      if (!['mechanical','fix_build'].includes(args.task_class)) fail('INVALID_ARGUMENT',{field:'task_class'});
+    }
     if (args.pool===EXPERIENTIAL_POOL) {
-      if (args.model!==EXPERIENTIAL_MODEL) fail('INVALID_ARGUMENT',{field:'model'});
-      if (args.retention_opt_in!==true) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
-      if (args.sensitive_data_opt_in!==true) fail('INVALID_ARGUMENT',{field:'sensitive_data_opt_in'});
-      // Treat the worker's potential code access as proprietary by default:
-      // never let the caller assert public-data-only to bypass code consent.
-      if (args.code_exposure_opt_in!==true) fail('INVALID_ARGUMENT',{field:'code_exposure_opt_in'});
-      // The native experiential53 source contract currently admits bounded labor only.
-      // Avoid misleading positive previews for reviewer/audit classes it cannot run.
-      if (!['mechanical','fix_build'].includes(args.task_class))
-        fail('INVALID_ARGUMENT',{field:'task_class'});
-    } else {
-      for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
-        if(args[field]!==undefined) fail('INVALID_ARGUMENT',{field});
+      if (args.model!==undefined && !['free','uncensored',...EXPERIENTIAL_MODELS].includes(args.model))
+        fail('INVALID_ARGUMENT',{field:'model'});
+      if (!['mechanical','fix_build'].includes(args.task_class)) fail('INVALID_ARGUMENT',{field:'task_class'});
+    }
+    if (args.provider_plan_auto!==undefined && args.pool) fail('INVALID_ARGUMENT',{field:'provider_plan_auto'});
+    if (!args.pool && (args.provider_plan_auto===true || args.response_only===true)) {
+      if (!['mechanical','fix_build'].includes(args.task_class)) fail('INVALID_ARGUMENT',{field:'task_class'});
+      if (!['C0_MECHANICAL','C1_ROUTINE_BOUNDED'].includes(args.task_complexity)) fail('INVALID_ARGUMENT',{field:'task_complexity'});
+      if (args.max_turns!==undefined && args.max_turns>64) fail('INVALID_ARGUMENT',{field:'max_turns'});
+    }
+    const consentPresent=EXPERIENTIAL_CONSENTS.some(field=>args[field]!==undefined);
+    if (args.pool===EXPERIENTIAL_POOL || consentPresent || args.response_only!==undefined) {
+      if (args.pool && args.pool!==EXPERIENTIAL_POOL)
+        fail('INVALID_ARGUMENT',{field:consentPresent?EXPERIENTIAL_CONSENTS.find(field=>args[field]!==undefined):'response_only'});
+      for (const field of EXPERIENTIAL_CONSENTS)
+        if (args[field]!==true) fail('INVALID_ARGUMENT',{field});
+      // AUTO can consider this provider only for explicitly response-only work.
+      // No consent inference from packet contents or automatic paid selection.
+      if (!args.pool && args.response_only!==true) fail('INVALID_ARGUMENT',{field:'response_only'});
     }
   }
 }
@@ -634,16 +657,22 @@ export function createFabricFacade(engine, options={}) {
       if(name==='fabric_capabilities') {
         const h=await runCapturedShort(['--help']);
         const continuity=await continuityAvailable();
-        let manualReady=false;
+        let manualReady=false,planAutoReady=false;
         if(h.exit_code===0 && h.stdout.includes('preview')) {
           try { const requestHelp=await runCapturedShort(['request','--help']);
-            manualReady=requestHelp.exit_code===0 && requestHelp.stdout.includes('--strict-manual-pin'); } catch {}
+            manualReady=requestHelp.exit_code===0 && requestHelp.stdout.includes('--strict-manual-pin');
+            planAutoReady=manualReady && requestHelp.stdout.includes('--experiential-response-only'); } catch {}
         }
         return response({action:'capabilities',adapter_available:h.exit_code===0 && ['request','status','result','accept'].every(x=>h.stdout.includes(x)),
           quota_continuity:{enabled:cfg.quotaFallback,adapter_available:continuity,max_attempts:3,
             replay_basis:'pre_task_capacity_rejection',mid_task_replay:false,native_parent_wake:false,background_execution:false},
           manual_routing:{available:manualReady,default:'AUTO',exact_model_requires_pool:true,
-            selection_preflight:'native_preview_no_reservation',strict_pin_required:true,cross_provider_fallback:false},
+            selection_preflight:'native_preview_no_reservation',strict_pin_required:true,cross_provider_fallback:false,
+            facade_pools:MANUAL_POOLS,provider_plan_selectors:true,
+            experiential_auto_requires:['response_only',...EXPERIENTIAL_CONSENTS],
+            tool_snapshot_verified:false},
+          provider_plan_auto:{available:planAutoReady,request_field:'provider_plan_auto',
+            execution:'native_single_attempt',provider_guaranteed:false,experiential_consent_implied:false,paid_auto:false},
           controller_tracking:{max_unresolved:MAX_CONTROLLERS,max_generation_identities:MAX_ATTEMPT_IDENTITIES,scope:'backend_process_generation_only',restart_persistent:false},
           worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
           tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
@@ -659,6 +688,10 @@ export function createFabricFacade(engine, options={}) {
         reservation=await reserve(args);
         const requestKey=reservation.run_id;
         let requestHelp=null;
+        let resolvedPlanModel=null;
+        const experientialConsent=hasExperientialConsent(args);
+        const planAuto=!args.pool && (args.provider_plan_auto===true || args.response_only===true);
+        const useContinuation=cfg.quotaFallback && !args.pool && !planAuto;
         if(args.max_turns!==undefined) {
           requestHelp=await runCapturedShort(['request','--help']);
           if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--max-turns')) fail('ADAPTER_TURN_LIMIT_UNAVAILABLE');
@@ -666,25 +699,32 @@ export function createFabricFacade(engine, options={}) {
         if(args.pool) {
           requestHelp ??= await runCapturedShort(['request','--help']);
           if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--strict-manual-pin')) fail('MANUAL_ROUTE_UNAVAILABLE');
-          // The native request entrypoint must independently own and attest the
-          // retention, sensitive-disclosure, and conservative code-exposure gates.
-          // Old adapters never receive this request, even if preview claims a route.
-          if(args.pool===EXPERIENTIAL_POOL && ![
-            '--experiential-retention-acknowledged',
-            '--experiential-sensitive-data-opt-in',
-            '--experiential-proprietary-code',
-            '--experiential-code-exposure-opt-in',
-          ].every(flag=>requestHelp.stdout.includes(flag))) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
-        if(cfg.quotaFallback && !args.pool && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
+        // The native entrypoint owns disclosure enforcement for both manual
+        // and consent-qualified AUTO requests. Old adapters fail before status.
+        if(experientialConsent) {
+          requestHelp ??= await runCapturedShort(['request','--help']);
+          const required=[...EXPERIENTIAL_FLAGS,...(args.response_only===true?['--experiential-response-only']:[])];
+          if(requestHelp.exit_code!==0 || !required.every(flag=>requestHelp.stdout.includes(flag)))
+            fail('MANUAL_ROUTE_UNAVAILABLE');
+        }
+        if(planAuto) {
+          requestHelp ??= await runCapturedShort(['request','--help']);
+          if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--experiential-response-only')
+            || !requestHelp.stdout.includes('--strict-manual-pin')) fail('PROVIDER_PLAN_AUTO_UNAVAILABLE');
+        }
+        if(useContinuation && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
         if(s.state!=='NOT_FOUND') fail(s.state==='EFFECT_UNKNOWN'?'EFFECT_UNKNOWN':'RUN_EXISTS');
         if(args.pool) {
           // Native preview cannot reserve capacity. The native strict pin MUST
           // recheck the same pool/model before any launch and refuse drift.
-          const previewArgs=['preview','--id',args.run_id,'--class',args.task_class,
-            '--pool',args.pool,'--model',args.model?.toLowerCase()==='auto'?'auto':args.model??'auto',
-            '--task-complexity',args.task_complexity];
+          const previewArgs=['preview','--id',args.run_id,'--class',args.task_class,'--pool',args.pool];
+          // BytePlus's native default is an omitted model, not the literal auto.
+          const previewModel=args.pool==='byteplus' && (args.model===undefined || args.model==='auto')
+            ?undefined:args.pool===EXPERIENTIAL_POOL?args.model??'free':args.model??'auto';
+          if(previewModel!==undefined) previewArgs.push('--model',previewModel);
+          previewArgs.push('--task-complexity',args.task_complexity);
           if(args.escalation_reason) previewArgs.push('--escalation-reason',args.escalation_reason);
           if(args.subject_pool) previewArgs.push('--subject-pool',args.subject_pool);
           let route;
@@ -712,26 +752,31 @@ export function createFabricFacade(engine, options={}) {
             || route.selection_rechecked_at_request!==true
             || route.run_id!==args.run_id || route.pool!==args.pool
             || typeof route.model!=='string' || !route.model
-            || (args.max_turns!==undefined && !['glm','minimax'].includes(route.mode))
-            || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
+            || (args.max_turns!==undefined && !['glm','minimax','byteplus'].includes(route.mode))
+            || (!['byteplus',EXPERIENTIAL_POOL].includes(args.pool) && args.model
+              && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
             fail('MANUAL_ROUTE_UNAVAILABLE');
-          // The experiential slug is checked exactly, not case-insensitively:
-          // the native recheck must witness the identical uncensored model.
-          if(args.pool===EXPERIENTIAL_POOL && (
-            route.model!==EXPERIENTIAL_MODEL || route.mode!==EXPERIENTIAL_POOL
-            || typeof route.host!=='string' || !/^[A-Za-z0-9_.:-]+$/.test(route.host)
-          )) fail('MANUAL_ROUTE_UNAVAILABLE');
+          if(['byteplus',EXPERIENTIAL_POOL].includes(args.pool)) {
+            const allowed=args.pool==='byteplus'?BYTEPLUS_MODELS:
+              args.model==='uncensored'?EXPERIENTIAL_PAID_MODELS:
+              args.model===undefined || args.model==='free'?EXPERIENTIAL_INCLUDED_CHAT_MODELS:EXPERIENTIAL_MODELS;
+            const isSelector=args.model===undefined
+              || (args.pool==='byteplus'?args.model==='auto':['free','uncensored'].includes(args.model));
+            if(!allowed.includes(route.model) || (!isSelector && route.model!==args.model)
+              || route.mode!==args.pool || typeof route.host!=='string' || !/^[A-Za-z0-9_.:-]+$/.test(route.host))
+              fail('MANUAL_ROUTE_UNAVAILABLE');
+            // Freeze the native selector result; request cannot reselect another
+            // model or cross from included to paid between preview and launch.
+            resolvedPlanModel=route.model;
+          }
         }
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
-        if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
+        if(useContinuation) argv.push('--quota-fallback');
         if(args.pool) argv.push('--pool',args.pool,'--strict-manual-pin');
-        if(args.pool===EXPERIENTIAL_POOL) argv.push(
-          '--experiential-retention-acknowledged',
-          '--experiential-sensitive-data-opt-in',
-          '--experiential-proprietary-code',
-          '--experiential-code-exposure-opt-in',
-        );
-        if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
+        if(experientialConsent) argv.push(...EXPERIENTIAL_FLAGS);
+        if(args.response_only===true) argv.push('--experiential-response-only');
+        if(resolvedPlanModel) argv.push('--model',resolvedPlanModel);
+        else if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
         if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
         if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
@@ -753,10 +798,11 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
-          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true,
-            ...(args.pool===EXPERIENTIAL_POOL?{
-              retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true,
-            }:{})}:{}),
+          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??(args.pool===EXPERIENTIAL_POOL?'free':'auto'),strict_manual_pin:true}:{}),
+          ...(resolvedPlanModel?{resolved_model:resolvedPlanModel}:{}),
+          ...(experientialConsent?{retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true}:{}),
+          ...(args.response_only===true?{response_only:true}:{}),
+          ...(planAuto?{provider_plan_auto:true,quota_continuation:false,attempt_limit:1}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }

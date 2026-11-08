@@ -749,14 +749,22 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 # C21 attended-parent source review combines native composition with the
 # accepted archive closure and inert gateway replacement. ensure_directories
 # retains its exact AST and whole permission token at the accepted moved site.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '0ada16eef382a9083b431caf305ee97c08e38b6b1547d193455dabe23a72404c',
-                                                              'sites': ((687, 71, 76, 'int', '0o750'),)}
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '925aa0d0aa6174d29653f189ffcf47c9550a53aaf303387cf6c0e77b3ac7c1a6',
+                                                              'sites': ((708, 71, 76, 'int', '0o750'),)}
 
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735",
+    "sha256": "716b934f77cdc377b769c6cf1cefcfbb199be3e71d885f4624c6e6dc0d93b9c9",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# Native EVAL marker v2 retains the original directory permission mode.
+# Exact historical root_identity["mode"] comparison, not a selected UID/GID.
+# Whole-source drift and any neighboring identity literal restore ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/native_eval_inputs.py"] = {
+    "sha256": "0739341fda7b0faa6d45cbe61a35587055e9da0fc1ccd5b5792e7cfaa95a1ae2",
+    "sites": ((96, 61, 66, "int", "0o700"),),
 }
 
 # HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
@@ -780,8 +788,8 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
 REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
+    'sha256': '73d00ddf64d29d17e0a677a87ee43cd4febfc9310f8127e9a6533e42ea6a28e3',
+    'sites': ((1675, 26, 31, 'int', '0o700'),),
 }
 
 
@@ -831,4 +839,12 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
     "sites": ((252, 46, 49, "int", "512"),),
+}
+
+# Select-option value length bound, not a UID/GID or account identity. Only this
+# complete protocol source and typed literal are reviewed; any byte drift restores
+# ordinary D8 scrutiny. This grants no browser permission or runtime authority.
+REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
+    "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
+    "sites": ((128, 72, 75, "int", "512"),),
 }

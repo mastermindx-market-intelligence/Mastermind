@@ -81,9 +81,17 @@ def test_get_overnight_tape_tool(monkeypatch):
     pytest.importorskip("claude_agent_sdk")
     from brain import bot_mcp
     from data_layer import overnight as ov
-    monkeypatch.setattr(ov, "tape", lambda force=False: {"risk": {"state": "calm"}, "groups": {}, "live": True})
+    observed_strict = []
+
+    def tape(force=False, *, strict=False):
+        observed_strict.append(strict)
+        return {"risk": {"state": "calm"}, "groups": {}, "live": True}
+
+    monkeypatch.setattr(ov, "tape", tape)
     out = asyncio.run(bot_mcp.get_overnight_tape.handler({}))
     payload = json.loads(out["content"][0]["text"])
+    assert len(observed_strict) == 1
+    assert observed_strict[0] is True
     assert payload["risk"]["state"] == "calm"
 
 
