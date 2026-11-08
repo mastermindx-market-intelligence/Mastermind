@@ -3398,7 +3398,7 @@ def test_d8_native_host_masks_only_two_exact_forbidden_status_tokens():
 
     source = (ROOT / _DSH_NATIVE_HOST_PATCH).read_text()
     assert hashlib.sha256(source.encode()).hexdigest() == (
-        "294011e6038b3d0f247d8fa892a6d447cab4fbc6a92e165a23fbeb1aadcfddcc"
+        "da377435bb68f886268227a5bdc724c5ba315b53bdc26ff2dfea85cdc62f829b"
     )
     spans = reviewed_literal_spans(_DSH_NATIVE_HOST_PATCH, source)
     assert len(spans) == 2

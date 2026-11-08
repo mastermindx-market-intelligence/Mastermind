@@ -12,14 +12,18 @@ PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 PACKAGES = ("packages/core/agent", "packages/core/agent-loop", "apps/cli",
             "packages/typert/protocol", "packages/api/remote-access",
             "packages/api/gateway", "packages/client/connection",
-            "packages/llm/llm", "packages/llm/llm-deepseek")
+            "packages/llm/llm", "packages/llm/llm-deepseek",
+            "packages/credentials/deepseek-account", "packages/credentials/deepseek-account-platform",
+            "packages/llm/llm-deepseek-account")
 CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[1] + "/src/index.ts",
                     PACKAGES[2] + "/src/profile-boot.ts", PACKAGES[3] + "/src/index.ts",
                     PACKAGES[4] + "/src/index.ts", PACKAGES[5] + "/src/index.ts",
                     PACKAGES[6] + "/src/rpc-host.ts", PACKAGES[1] + "/src/agent.ts",
                     PACKAGES[1] + "/src/inbox.ts", PACKAGES[7] + "/src/index.ts",
                     PACKAGES[8] + "/src/adapter.ts", PACKAGES[8] + "/src/host.ts",
-                    PACKAGES[8] + "/src/types.ts"))
+                    PACKAGES[8] + "/src/types.ts", PACKAGES[9] + "/src/index.ts",
+                    PACKAGES[10] + "/src/index.ts", PACKAGES[11] + "/src/index.ts",
+                    PACKAGES[11] + "/src/catalog.ts", PACKAGES[11] + "/src/listing.ts"))
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()

@@ -16,7 +16,7 @@ for(const [name,digest] of Object.entries({...manifest.source_sha256,...manifest
 const ts=createRequire(resolve(donor,"package.json"))("typescript");
 const base=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFile);
 if(base.error)throw Error("Original source path configuration unavailable");
-const patched=["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek"];
+const patched=["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek","packages/credentials/deepseek-account","packages/credentials/deepseek-account-platform","packages/llm/llm-deepseek-account"];
 const projectCache=new Map();
 function declarationPath(value){
  value=value.replace(/^\.\//,"");
@@ -37,7 +37,7 @@ function declarationPath(value){
 }
 const sourcePaths=Object.fromEntries(Object.entries(base.config.compilerOptions.paths).map(([key,values])=>[key,values.map(declarationPath)]));
 let total=0;
-for(const name of ["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek"]){
+for(const name of ["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek","packages/credentials/deepseek-account","packages/credentials/deepseek-account-platform","packages/llm/llm-deepseek-account"]){
  const project=resolve(donor,name),raw=ts.readConfigFile(resolve(project,"tsconfig.json"),ts.sys.readFile);
  if(raw.error)throw Error("Host TypeScript project unavailable");
  const parsed=ts.parseJsonConfigFileContent(raw.config,ts.sys,project);

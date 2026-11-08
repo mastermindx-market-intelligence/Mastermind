@@ -860,6 +860,461 @@
  }
  
  /**
+--- a/packages/credentials/deepseek-account-platform/src/index.ts
++++ b/packages/credentials/deepseek-account-platform/src/index.ts
+@@ -4,10 +4,10 @@
+ import type {} from '@deepseek-ai/dsh-host-webserver'
+ import { arch, platform, release } from 'node:os'
+ import { promises as streamPromises } from 'node:stream'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import Schema from '@deepseek-ai/schemastery'
+ import { z } from 'zod'
+-import { DeepSeekAccount, installAccountTaskCancellation, mergePlatformCookies, platformClientHeaders, platformWireLocale, type AccountBonusBatch, type AccountBonusOrderId, type AccountClientMetadata, type AccountDetails, type AccountUserId, type AccountView, type PlatformSession, type SignInAttemptId, type SignInAttemptView } from '@deepseek-ai/dsh-deepseek-account'
++import { DeepSeekAccount, installAccountTaskCancellation, mergePlatformCookies, platformClientHeaders, platformWireLocale, type AccountBonusBatch, type AccountBonusOrderId, type AccountClientMetadata, type AccountDetails, type AccountUserId, type AccountView, type InferenceCredential, type LocalInferenceAccountSnapshot, type PlatformSession, type SignInAttemptId, type SignInAttemptView } from '@deepseek-ai/dsh-deepseek-account'
+ import { credentialKey } from '@deepseek-ai/dsh-credentials'
+ import type { AuthorizationSession } from '@deepseek-ai/dsh-authorization'
+ import { profile, readAccountDetail, readUnnotifiedBonuses, sendBonusNotified } from './details.ts'
+@@ -369,9 +369,9 @@
+       requestHeaders }
+   }
+ 
+-  private async readCurrentGrant(lifetime: AbortController): Promise<z.infer<typeof grant> | null> {
++  private async readCurrentGrant(lifetime: AbortController, credentials: Context['credentials'] = this.ctx.credentials): Promise<z.infer<typeof grant> | null> {
+     if (this.closed) return null
+-    const record = await this.ctx.credentials.readRecord(KEY)
++    const record = await credentials.readRecord(KEY)
+     if (record === undefined || lifetime.signal.aborted) return null
+     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
+     const parsed = grant.safeParse(record.payload)
+@@ -379,6 +379,64 @@
+     // A private origin override must never forward a grant issued by another environment.
+     if (parsed.data.issuer !== this.origin) throw new PlatformAuthError('protocol')
+     return parsed.data
++  }
++
++  /** Reuse the original inference eligibility predicate for every local grant view. */
++  private inferenceGrantEligible(stored: z.infer<typeof grant>): boolean {
++    const issuer = new URL(stored.issuer)
++    if (stored.token.startsWith('dsh_mock_')) return false
++    if (this.inferenceOrigin === 'https://api.deepseek.com') {
++      if (['localhost', '127.0.0.1', '[::1]'].includes(issuer.hostname)) return false
++    } else if (issuer.origin !== this.origin) return false
++    return true
++  }
++
++  private async captureInferenceGrant(url: string): Promise<{
++    readonly stored: z.infer<typeof grant>
++    readonly signal: AbortSignal
++    isCurrent(): boolean
++  } | undefined> {
++    if (this.closed || this.removing !== undefined) return undefined
++    const destination = new URL(url)
++    if (destination.origin !== this.inferenceOrigin || destination.username || destination.password) return undefined
++    const lifetime = this.detailsLifetime
++    const identity = <T extends object>(value: T): T =>
++      (value as T & { [symbols.original]?: T })[symbols.original] ?? value
++    const capturedCredentials = this.ctx.credentials
++    const credentials = identity(capturedCredentials)
++    const isCurrent = (): boolean => !this.closed && this.removing === undefined
++      && this.detailsLifetime === lifetime && !lifetime.signal.aborted
++      && identity(this.ctx.credentials) === credentials
++    if (!isCurrent()) return undefined
++    const stored = await this.readCurrentGrant(lifetime, capturedCredentials)
++    // The public caller checks again after this method's own promise resolves.
++    if (stored === null || !isCurrent() || !this.inferenceGrantEligible(stored)) return undefined
++    return { stored, signal: lifetime.signal, isCurrent }
++  }
++
++  override async resolveInferenceCredential(url: string): Promise<InferenceCredential | undefined> {
++    const captured = await this.captureInferenceGrant(url)
++    if (captured === undefined || !captured.isCurrent()) return undefined
++    const result: InferenceCredential = Object.freeze({
++      token: captured.stored.token,
++      signal: captured.signal,
++      assertCurrent: (): true => {
++        if (!captured.isCurrent()) throw new PlatformAuthError('protocol')
++        return true
++      },
++    })
++    return captured.isCurrent() ? result : undefined
++  }
++
++  override async getLocalInferenceSnapshot(): Promise<LocalInferenceAccountSnapshot | null> {
++    const captured = await this.captureInferenceGrant(this.inferenceOrigin)
++    if (captured === undefined || !captured.isCurrent()) return null
++    const cached = this.lastProfile
++    const userId = cached?.token === captured.stored.token ? cached.profile.value.id || null : null
++    const isCurrent = (): boolean => captured.isCurrent() && this.lastProfile === cached
++      && (cached?.token === captured.stored.token ? cached.profile.value.id || null : null) === userId
++    const result = Object.freeze({ inferenceOrigin: this.inferenceOrigin, userId, isCurrent })
++    return isCurrent() ? result : null
+   }
+ 
+   override async resolveToken(url: string): Promise<string | undefined> {
+@@ -390,13 +448,9 @@
+     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
+     const result = grant.safeParse(record.payload)
+     if (!result.success) throw new PlatformAuthError('storage')
+-    // Development grants cannot authenticate production model or file requests.
+-    const issuer = new URL(result.data.issuer)
+-    if (result.data.token.startsWith('dsh_mock_')) return undefined
+-    if (this.inferenceOrigin === 'https://api.deepseek.com') {
+-      if (['localhost', '127.0.0.1', '[::1]'].includes(issuer.hostname)) return undefined
+-    } else if (issuer.origin !== this.origin) return undefined
+-    return result.data.token
++    // Keep the original ordinary-origin behavior; native capture also binds
++    // the exact configured issuer through readCurrentGrant.
++    return this.inferenceGrantEligible(result.data) ? result.data.token : undefined
+   }
+ 
+   override async startSignIn(client: AccountClientMetadata, callbackOrigin: string, loginSource: 'web' | 'desktop'): Promise<AccountView> {
+--- a/packages/credentials/deepseek-account/src/index.ts
++++ b/packages/credentials/deepseek-account/src/index.ts
+@@ -26,6 +26,19 @@
+   readonly embeddedPageDist?: string
+   /** Host-only deployment request headers; the consuming client adds its own dynamic identity, and neither reaches renderer bootstrap. */
+   readonly requestHeaders?: Readonly<Record<string, string>>
++}
++
++/** Original local grant lifetime; Host-only and never exposed by account RPC. */
++export interface InferenceCredential {
++  readonly token: string
++  readonly signal: AbortSignal
++  assertCurrent(): true
++}
++/** Passive local inference eligibility, not remote authentication acceptance. */
++export interface LocalInferenceAccountSnapshot {
++  readonly inferenceOrigin: string
++  readonly userId: AccountUserId | null
++  isCurrent(): boolean
+ }
+ 
+ /** Account operations; only Host consumers can obtain a request credential. */
+@@ -98,6 +111,14 @@
+    * @returns stored token, or undefined for other origins or a signed-out account.
+    */
+   abstract resolveToken(url: string): Promise<string | undefined>
++  /** Host-only native credential capture; unsupported owners fail closed. */
++  resolveInferenceCredential(_url: string): Promise<InferenceCredential | undefined> {
++    return Promise.resolve(undefined)
++  }
++  /** Read no network, device or new login state; unsupported owners report unknown. */
++  getLocalInferenceSnapshot(): Promise<LocalInferenceAccountSnapshot | null> {
++    return Promise.resolve(null)
++  }
+   /**
+    * Remove an inference-rejected token only while it still matches the stored login.
+    * @param token - token captured by the rejected inference request.
+--- a/packages/llm/llm-deepseek-account/src/catalog.ts
++++ b/packages/llm/llm-deepseek-account/src/catalog.ts
+@@ -1,5 +1,7 @@
+ /** Credential-scoped `/models` cache with single-flight loads, background refresh, and last-known-good retention. */
+ import { createHash } from 'node:crypto'
++import { LlmError } from '@deepseek-ai/dsh-llm'
++import type { InferenceCredential } from '@deepseek-ai/dsh-deepseek-account'
+ import { deadline } from '@deepseek-ai/dsh-timeout'
+ import type { CatalogSettings } from './config.ts'
+ import { LISTING_TIMEOUT } from './listing.ts'
+@@ -10,9 +12,9 @@
+   /** Current endpoint settings, re-read on every access. */
+   readonly settings: () => CatalogSettings
+   /** The account token allowed for `url`, or `undefined` while signed out. */
+-  readonly token: (url: string) => Promise<string | undefined>
++  readonly token: (url: string) => Promise<string | InferenceCredential | undefined>
+   /** Perform one listing request authenticated with `token`; `signal` carries the {@link LISTING_TIMEOUT} request deadline. */
+-  readonly load: (url: string, token: string, signal: AbortSignal) => Promise<ModelListing>
++  readonly load: (url: string, token: string, signal: AbortSignal, credential?: InferenceCredential) => Promise<ModelListing>
+   /** Wall clock used for listing age. */
+   readonly now: () => number
+   /** Report a loaded listing. */
+@@ -45,6 +47,8 @@
+ /** One account route's listing cache; each endpoint and credential pair has its own scope. */
+ export class AccountModelCatalog {
+   private scope: string | undefined
++  /** Retained with this original scope, not compared with each freshly wrapped credential. */
++  private nativeCredential: InferenceCredential | undefined
+   private listing: ModelListing | undefined
+   /** Settle time of the latest load in this scope; `undefined` before the first one settles. */
+   private settledAt: number | undefined
+@@ -62,6 +66,9 @@
+    * @returns the signed-in state and listing of the current scope.
+    */
+   current(): CatalogView {
++    if (this.nativeCredential !== undefined && !this.admitted(this.generation, this.nativeCredential)) {
++      return { signedIn: false, listing: undefined }
++    }
+     return { signedIn: this.scope !== undefined, listing: this.listing }
+   }
+ 
+@@ -74,14 +81,35 @@
+    */
+   async view(signal?: AbortSignal): Promise<CatalogView> {
+     const settings = this.dependencies.settings()
+-    const token = await this.dependencies.token(settings.url)
++    const authorization = await this.dependencies.token(settings.url)
++    const credential = typeof authorization === 'object' ? authorization : undefined
++    const token = typeof authorization === 'string' ? authorization : authorization?.token
++    const observedGeneration = this.generation, retained = this.nativeCredential
++    const previousCurrent = retained === undefined || this.admitted(observedGeneration, retained)
++    if (credential !== undefined && !this.admitted(observedGeneration, credential)) {
++      throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
++    }
+     signal?.throwIfAborted()
+     if (this.closed) return this.current()
++    if ((credential !== undefined || retained !== undefined) && this.generation !== observedGeneration) {
++      throw new LlmError('The original native catalog scope changed.', 'NATIVE_AUTHORITY')
++    }
+     const scope = token === undefined ? undefined : `${settings.url}\n${createHash('sha256').update(token).digest('hex')}`
+-    if (scope !== this.scope) this.rescope(scope)
++    if (scope !== this.scope || !previousCurrent || (retained === undefined && credential !== undefined)) {
++      this.rescope(scope, credential)
++    }
+     if (token !== undefined) {
+-      if (this.settledAt === undefined) await abandonable(this.start(settings, token), signal)
+-      else if (this.dependencies.now() - this.settledAt >= settings.maxAgeMs) void this.start(settings, token)
++      if (this.settledAt === undefined) await abandonable(this.start(settings, token, credential), signal)
++      else {
++        const generation = this.generation, stale = this.dependencies.now() - this.settledAt >= settings.maxAgeMs
++        if (credential !== undefined && !this.admitted(generation, credential)) {
++          throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
++        }
++        if (stale) void this.start(settings, token, credential)
++      }
++    }
++    if (credential !== undefined && !this.admitted(this.generation, credential)) {
++      throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
+     }
+     return this.current()
+   }
+@@ -93,38 +121,77 @@
+     this.request?.abort()
+   }
+ 
+-  private rescope(scope: string | undefined): void {
+-    this.request?.abort()
++  private admitted(generation: number, credential: InferenceCredential | undefined): boolean {
++    if (this.closed || generation !== this.generation) return false
++    if (credential !== undefined) {
++      try {
++        credential.signal.throwIfAborted()
++        const allowed: unknown = credential.assertCurrent()
++        if (allowed !== true) {
++          if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++            void Promise.resolve(allowed).catch(() => {})
++          }
++          return false
++        }
++        credential.signal.throwIfAborted()
++      } catch { return false }
++    }
++    return !this.closed && generation === this.generation
++  }
++
++  private rescope(scope: string | undefined, credential?: InferenceCredential): void {
++    const previous = this.request
++    const native = credential !== undefined || this.nativeCredential !== undefined
++    if (!native) previous?.abort()
+     this.scope = scope
++    this.nativeCredential = credential
+     this.listing = undefined
+     this.settledAt = undefined
+     this.inflight = undefined
+     this.failing = false
+     this.generation += 1
+-  }
+-
+-  private start(settings: CatalogSettings, token: string): Promise<void> {
++    // Native abort listeners may dispose/reenter. There are no state writes
++    // after that callback boundary, and start/view recheck the original scope.
++    if (native) previous?.abort()
++  }
++
++  private start(settings: CatalogSettings, token: string, credential?: InferenceCredential): Promise<void> {
+     if (this.inflight !== undefined) return this.inflight
++    if (credential !== undefined && !this.admitted(this.generation, credential)) {
++      return Promise.reject(new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY'))
++    }
+     this.generation += 1
+     const generation = this.generation
+     const request = new AbortController()
+     this.request = request
+-    const limit = deadline(request.signal, settings.timeoutMs, LISTING_TIMEOUT)
+-    const run = this.dependencies.load(settings.url, token, limit.signal)
++    const signal = credential === undefined ? request.signal : AbortSignal.any([request.signal, credential.signal])
++    const limit = deadline(signal, settings.timeoutMs, LISTING_TIMEOUT)
++    const load = credential === undefined
++      ? this.dependencies.load(settings.url, token, limit.signal)
++      : Promise.resolve().then(() => {
++        if (!this.admitted(generation, credential)) {
++          throw new LlmError('The native catalog credential retired.', 'NATIVE_AUTHORITY')
++        }
++        return this.dependencies.load(settings.url, token, limit.signal, credential)
++      })
++    const run = load
+       .then((listing) => {
+-        if (generation !== this.generation) return
++        const settledAt = this.dependencies.now()
++        const message = `model listing from ${settings.url} loaded ${listing.entries.length} model(s), skipped ${listing.skipped} row(s)`
++        if (!this.admitted(generation, credential)) return
+         this.listing = listing
+-        this.settledAt = this.dependencies.now()
++        this.settledAt = settledAt
+         this.failing = false
+-        this.dependencies.info(`model listing from ${settings.url} loaded ${listing.entries.length} model(s), skipped ${listing.skipped} row(s)`)
++        this.dependencies.info(message)
+       }, (error: unknown) => {
+-        if (generation !== this.generation) return
+-        if (!this.failing) {
+-          const fallback = this.listing === undefined ? 'using the bundled catalog' : 'keeping the previous catalog'
+-          this.dependencies.warn(`model listing from ${settings.url} failed (${String(error)}); ${fallback}`)
+-        }
+-        this.settledAt = this.dependencies.now()
++        const warn = !this.failing
++        const fallback = this.listing === undefined ? 'using the bundled catalog' : 'keeping the previous catalog'
++        const message = `model listing from ${settings.url} failed (${String(error)}); ${fallback}`
++        const settledAt = this.dependencies.now()
++        if (!this.admitted(generation, credential)) return
++        this.settledAt = settledAt
+         this.failing = true
++        if (warn) this.dependencies.warn(message)
+       })
+       .finally(() => {
+         limit[Symbol.dispose]()
+--- a/packages/llm/llm-deepseek-account/src/index.ts
++++ b/packages/llm/llm-deepseek-account/src/index.ts
+@@ -1,8 +1,8 @@
+ /** Account-token authentication, the account model listing, and version gating for the DeepSeek account route. */
+ import type {} from '@deepseek-ai/cordis-plugin-loader'
+-import type { Context } from '@deepseek-ai/cordis'
++import { symbols, type Context } from '@deepseek-ai/cordis'
+ import { ACCOUNT_QUOTA_EXCEEDED_CODE, APP_IDENTITY, LlmError, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+-import type {} from '@deepseek-ai/dsh-deepseek-account'
++import type { InferenceCredential } from '@deepseek-ai/dsh-deepseek-account'
+ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+ import { catalogModelInfo, registerDeepSeekProvider, resolveAdapterOptions } from '@deepseek-ai/dsh-llm-deepseek'
+@@ -52,11 +52,73 @@
+   settings()
+   const supported = resolveAdapterOptions({}).models
+   const account = () => ctx.get('deepseekAccount')
++  const nativeAdmission = ctx.root.get('nativeLlmAdmission')
++  const nativeCheck = nativeAdmission?.check, nativeSignal = nativeAdmission?.signal
++  const nativeRequired = nativeAdmission !== undefined
++  const identity = <T extends object>(value: T | undefined): T | undefined =>
++    value === undefined ? undefined : (value as T & { [symbols.original]?: T })[symbols.original] ?? value
++  const captureNativeCredential = async (
++    url: string, owner = account(),
++  ): Promise<InferenceCredential | undefined> => {
++    const original = identity(owner)
++    if (owner === undefined || original === undefined) return undefined
++    const resolve = original.resolveInferenceCredential
++    if (typeof resolve !== 'function') {
++      throw new LlmError('The account owner does not supply native credential currentness.', 'NATIVE_AUTHORITY')
++    }
++    let credential: InferenceCredential | undefined
++    try { credential = await resolve.call(owner, url) }
++    catch (cause) {
++      throw new LlmError('The original account credential could not be retained.',
++        nativeSignal?.aborted ? 'ABORTED' : 'NATIVE_AUTHORITY', { cause })
++    }
++    if (credential === undefined || nativeAdmission === undefined || nativeSignal === undefined) return undefined
++    const token = credential.token, accountSignal = credential.signal, method = credential.assertCurrent
++    if (typeof token !== 'string' || token.length === 0 || !(accountSignal instanceof AbortSignal)
++        || typeof method !== 'function') {
++      throw new LlmError('The account owner supplied no native credential lifetime.', 'NATIVE_AUTHORITY')
++    }
++    const check = method.bind(credential)
++    const signal = AbortSignal.any([nativeSignal, accountSignal])
++    const requireOwner = (): void => {
++      signal.throwIfAborted()
++      if (ctx.root.get('nativeLlmAdmission') !== nativeAdmission
++          || nativeAdmission.check !== nativeCheck || nativeAdmission.signal !== nativeSignal
++          || identity(account()) !== original || original.resolveInferenceCredential !== resolve
++          || credential!.token !== token || credential!.signal !== accountSignal
++          || credential!.assertCurrent !== method) {
++        throw new LlmError('The original account credential owner changed.', 'NATIVE_AUTHORITY')
++      }
++    }
++    const assertCurrent = (): true => {
++      try {
++        requireOwner()
++        const allowed: unknown = check()
++        if (allowed !== true) {
++          if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++            void Promise.resolve(allowed).catch(() => {})
++          }
++          throw new LlmError('The original account credential is no longer current.', 'NATIVE_AUTHORITY')
++        }
++        requireOwner()
++        return true
++      } catch (cause) {
++        if (cause instanceof LlmError) throw cause
++        throw new LlmError('The original account credential retired.',
++          signal.aborted ? 'ABORTED' : 'NATIVE_AUTHORITY', { cause })
++      }
++    }
++    assertCurrent()
++    return Object.freeze({ token, signal, assertCurrent })
++  }
+   const resolveAuth = async (connection: ResolvedDeepSeekOptions): Promise<DeepSeekRequestAuth> => {
+-    const token = await account()?.resolveToken(connection.baseURL)
++    const owner = account()
++    const credential = nativeRequired ? await captureNativeCredential(connection.baseURL, owner) : undefined
++    const token = nativeRequired ? credential?.token : await owner?.resolveToken(connection.baseURL)
+     if (token === undefined) throw new LlmError('Sign in to DeepSeek to use the account provider. The request destination must allow account authentication.', 'ACCOUNT_SIGN_IN_REQUIRED')
+     return {
+       headers: { [TOKEN_HEADER]: token },
++      ...credential === undefined ? {} : { signal: credential.signal, assertCurrent: credential.assertCurrent },
+       onRequestError: async (error) => {
+         if (!(error instanceof LlmError)) return error
+         if (error.code === QUOTA_EXCEEDED_CODE) {
+@@ -64,7 +126,7 @@
+         }
+         if (error.failure.status !== 401) return error
+         const rejected = new LlmError(error.message, 'ACCOUNT_TOKEN_INVALID', { ...error.failure, cause: error })
+-        try { await account()?.rejectToken(token) }
++        try { await owner?.rejectToken(token) }
+         catch (_credentialRemovalFailed) { /* Storage failure cannot replace the inference failure. */ }
+         return rejected
+       },
+@@ -72,8 +134,8 @@
+   }
+   const catalog = new AccountModelCatalog({
+     settings: () => settings().catalog,
+-    token: async url => account()?.resolveToken(url),
+-    load: (url, token, signal) => requestModelListing(url, { [TOKEN_HEADER]: token }, signal),
++    token: async url => nativeRequired ? captureNativeCredential(url) : account()?.resolveToken(url),
++    load: (url, token, signal, credential) => requestModelListing(url, { [TOKEN_HEADER]: token }, signal, credential),
+     now: () => Date.now(),
+     info: (message) => { console.info(LOG_TAG, message) },
+     warn: (message) => { console.warn(LOG_TAG, message) },
+--- a/packages/llm/llm-deepseek-account/src/listing.ts
++++ b/packages/llm/llm-deepseek-account/src/listing.ts
+@@ -149,16 +149,21 @@
+  */
+ export async function requestModelListing(
+   url: string, headers: Readonly<Record<string, string>>, signal: AbortSignal,
++  native?: { readonly signal: AbortSignal; assertCurrent(): true },
+ ): Promise<ModelListing> {
+   let response: Response
+   let text: string
+   try {
+-    response = await fetch(url, {
++    const request: RequestInit = {
+       method: 'GET', redirect: 'error', signal,
+       headers: { ...attributionHeaders(), accept: 'application/json', ...headers },
+-    })
++    }
++    native?.assertCurrent()
++    signal.throwIfAborted()
++    response = await fetch(url, request)
+     text = await response.text()
+   } catch (error) {
++    if (error instanceof LlmError && error.code === 'NATIVE_AUTHORITY') throw error
+     const expired = timeoutOf(signal, LISTING_TIMEOUT)
+     if (expired !== undefined) {
+       throw new LlmError(`DeepSeek model listing request to ${url} timed out after ${expired.timeoutMs} ms`, 'TIMEOUT', { cause: error })
 --- a/packages/llm/llm-deepseek/src/adapter.ts
 +++ b/packages/llm/llm-deepseek/src/adapter.ts
 @@ -1,7 +1,7 @@
@@ -893,9 +1348,10 @@
      const connection = await this.connection(signal)
      this.dependencies.admit?.(connection, model)
 -    return { model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) }
-+    return { model: modelInfo(connection, provider, model), stream: (options, native) => this.generate(options, connection, native) }
-   }
+-  }
 -  stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
++    return { model: modelInfo(connection, provider, model), stream: (options, native) => this.generate(options, connection, native) }
++  }
 +  stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk> {
      const connection = this.dependencies.options()
      this.dependencies.admit?.(connection, options.model)
@@ -931,7 +1387,7 @@
        if (options.signal?.aborted) throw new LlmError('DeepSeek Messages request aborted', 'ABORTED', { cause: error })
        if (error instanceof LlmError) throw error
        throw new LlmError('DeepSeek Messages transport failed', 'TRANSPORT', { cause: error })
-@@ -89,9 +97,15 @@
+@@ -89,13 +97,23 @@
    }
  
    private async * request(
@@ -948,7 +1404,15 @@
      const { messages, versions } = await prepareImages(
        options.messages, connection, options.model, this.dependencies.resolveAttachments?.(), this.imageAccess, signal,
      )
-@@ -135,7 +149,8 @@
+     const auth = await this.dependencies.resolveAuth(connection)
++    if (native !== undefined && (!(auth.signal instanceof AbortSignal) || typeof auth.assertCurrent !== 'function')) {
++      throw new LlmError('native account authentication lacks its original lifetime', 'NATIVE_AUTHORITY')
++    }
++    if (auth.signal !== undefined) signal = AbortSignal.any([signal, auth.signal])
+     try {
+       const files = new RequestFiles(this.files, {
+         baseURL: connection.baseURL, headers: auth.headers,
+@@ -135,7 +153,8 @@
              ? [MESSAGES_TOOL_CHANGES_BETA]
              : [],
          ]
@@ -958,7 +1422,7 @@
            method: 'POST', signal, body: extensions.payload, redirect: 'error',
            headers: {
              ...attributionHeaders(),
-@@ -147,7 +162,11 @@
+@@ -147,7 +166,25 @@
              ...options.sessionId === undefined ? {} : { 'x-deepseek-harness-session-id': String(options.sessionId) },
              ...options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {},
            },
@@ -966,11 +1430,49 @@
 +        }
 +        signal.throwIfAborted()
 +        requireNativeWrite?.()
++        if (auth.assertCurrent !== undefined) {
++          try {
++            const allowed: unknown = auth.assertCurrent()
++            if (allowed !== true) {
++              if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++                void Promise.resolve(allowed).catch(() => {})
++              }
++              throw new Error('credential currentness was not affirmed')
++            }
++          } catch (error) {
++            throw new LlmError('Native account authority retired', auth.signal?.aborted ? 'ABORTED' : 'NATIVE_AUTHORITY', { cause: error })
++          }
++        }
++        requireNativeWrite?.()
 +        signal.throwIfAborted()
 +        const response = await fetch(url, request)
          if (!response.ok) {
            const text = await response.text()
            let raw: unknown
+@@ -166,13 +203,20 @@
+         return
+       }
+     } catch (error) {
++      // An extension wrapper may classify its aborted await as REQUEST_EXTENSION.
++      // Preserve actual HTTP failure settlement; cancellation before an HTTP
++      // result must not become an error that the original retry owner can replay.
++      const failure = native !== undefined && auth.signal?.aborted
++        && !(error instanceof LlmError && error.failure.status !== undefined)
++        ? new LlmError('Native account authority retired', 'ABORTED', { cause: error })
++        : error
+       if (auth.onRequestError !== undefined) {
+         let mapped: unknown
+-        try { mapped = await auth.onRequestError(error) }
+-        catch (_credentialUpdateFailed) { throw error }
++        try { mapped = await auth.onRequestError(failure) }
++        catch (_credentialUpdateFailed) { throw failure }
+         throw mapped
+       }
+-      throw error
++      throw failure
+     }
+   }
+ }
 --- a/packages/llm/llm-deepseek/src/host.ts
 +++ b/packages/llm/llm-deepseek/src/host.ts
 @@ -26,6 +26,7 @@
@@ -983,7 +1485,17 @@
        const key = `${provider}/${model}\u0000${reason}`
 --- a/packages/llm/llm-deepseek/src/types.ts
 +++ b/packages/llm/llm-deepseek/src/types.ts
-@@ -91,6 +91,8 @@
+@@ -83,6 +83,9 @@
+ 
+ /** Authentication captured by the provider for one request and its file operations. */
+ export interface DeepSeekRequestAuth {
++  /** Original account grant lifetime, required by native company requests. */
++  readonly signal?: AbortSignal
++  assertCurrent?(): true
+   /** Credential headers sent unchanged to the resolved endpoint. */
+   headers: Readonly<Record<string, string>>
+   /** Classify a failure using the captured credential; callback failure preserves the original error. */
+@@ -91,6 +94,8 @@
  
  /** Constructor options for {@link DeepSeekAdapter}: the operation-local resolution hooks the plugin owns. */
  export interface DeepSeekAdapterOptions<Connection extends DeepSeekConnectionOptions = DeepSeekConnectionOptions> {

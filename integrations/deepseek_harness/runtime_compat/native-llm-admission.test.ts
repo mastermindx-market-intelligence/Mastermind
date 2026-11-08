@@ -112,7 +112,12 @@ it("native attachment refusal retains original content before provider dispatch"
 
 async function httpHost(dependencies:Record<string,unknown>={}){
   const h=await host();h.registration();
-  const adapter=deepseek({}, {...dependencies,nativeRequired:true});
+  const credentialLifetime=new AbortController();
+  const resolveAuth=dependencies.resolveAuth??(async()=>({headers:{"x-test":"inert"}}));
+  const adapter=deepseek({}, {...dependencies,resolveAuth:async(connection:any)=>({
+    signal:credentialLifetime.signal,assertCurrent:()=>true as const,
+    ...await (resolveAuth as any)(connection),
+  }),nativeRequired:true});
   const registration=h.ctx.llm.registerAdapter(["deepseek-official"],adapter);
   const fetch=vi.fn<typeof globalThis.fetch>().mockImplementation(async()=>new Response(sse(textEvents)));
   vi.stubGlobal("fetch",fetch);
@@ -172,4 +177,11 @@ it("passive registration currentness requires the original root runtime",async()
   const original=h.ctx.get.bind(h.ctx);
   vi.spyOn(h.ctx,"get").mockImplementation(((name:any)=>name==="llm"?undefined:original(name)) as any);
   expect(()=>observation.assertCurrent()).toThrow("runtime changed");
+});
+
+it("credential currentness callbacks cannot retire the native request owner and still write",async()=>{
+  let h:Awaited<ReturnType<typeof httpHost>>;
+  h=await httpHost({resolveAuth:async()=>({headers:{"x-test":"inert"},signal:new AbortController().signal,
+    assertCurrent:()=>{h.state.current=false;return true as const;}})});
+  expect(failure(await h.run()).reason.kind).toBe("error");expect(h.fetch).not.toHaveBeenCalled();
 });
