@@ -48,3 +48,27 @@ Design carrier: Studio Direct C2 Business guarded Paper actions. Current OS file
 Initial plan saved before substantive canvas effects. Source inspection is not deployed proof. Paper inventory returned 39 resources including folders, archived copies and tool-acceptance files; this is not 39 audited products.
 
 Further results, exact edits, screenshots reviewed and remaining implementation proof will be appended to this same document. This branch is a reviewable source amendment, not protected adopted law. PLAN_NOT_ORG_LINKED: no unique existing design workstream identity established; no substitute workstream was invented.
+
+## Applied milestone — project journeys
+
+Guarded Paper edits returned APPLIED_RESPONSE_OBSERVED for the following targets:
+
+| Journey | Desktop | Mobile | Effect |
+|---|---|---|---|
+| Active project | MHD-0 | N29-0 | Replaced the vague progress card with a compact coordinator/task hierarchy, activity destination, attended-execution consequence and recent-run entry. |
+| Returned result | XLQ-0 / AT35 | XT2-0 / AT35M | Added a concrete result state with artifact inspection, explicit follow-up draft entry and contextual run details. |
+| Project details | XYO-0 / AT34 | Y60-0 / AT34M | Added the six current source destinations with a focused return path and a concise project goal. |
+
+All are on OS page p-H-0. Active and result desktop/mobile screenshots were reviewed; the result mobile composer and safe area remain visible. The first Details screenshot caught a Paper text-inheritance contrast defect; explicit token colors repaired all affected labels, and final visual readback remains part of P6. Old hidden mobile details W8B-0 and its new-screen clones were marked REF ONLY rather than silently retaining competing extraction guidance.
+
+One rename attempt returned DOCUMENT_CHANGED before application. Exact target XYO-0 was read back with its original name; the same carrier prepared the original OS file and a newly planned exact-target operation succeeded. No unknown effect or cross-carrier replay was introduced.
+
+The team illustration is an example state, not proof that these named agents are running. The actual coordinator identity, descendant status, dependency and execution mode must be supplied by qualified existing owners. Without task-level facts, show a root-level summary and partial coverage, not invented roles. The returned-artifact action requires a qualified usable destination; otherwise the current result reader is the fallback. Continue from result opens an unsent draft; the existing preview/submission path revalidates the parent witness and creates a new same-project self-root.
+
+### Source comparison clarified
+
+ProjectWorkspace currently renders Files/Details disclosures after the mounted composer. AT34/AT34M depict the focused/scrolled Details content, not a replacement route, new modal authority or remounted workspace. Close/Back returns to the actual Details opener. ProjectDetailsNavigator changes presentation selection only and keeps its supplied owner sections mounted while navigating. Use its six sections; do not restore the old default seven-tab workspace.
+
+### Cross-product audit findings accepted
+
+A read-only representative audit found eight obsolete decorative colored inset rails in Intelligence Hub, cryptic ranking/desk labels, News teasers exceeding the current R3 two-line contract, and old News references visually preceding the current composition. Sector's new Explore routes, source-basis distinctions and keyboard-focus outline are useful current work and must be preserved. Bounded repairs and exact receipts will follow here.
