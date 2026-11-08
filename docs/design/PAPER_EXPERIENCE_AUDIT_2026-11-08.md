@@ -1154,3 +1154,33 @@ Root inspected both complete390px detail renders and the final1440px build note.
 The native controls retain the original44px Close, source and Return geometry; root separately read the exact44×104 origin Evidence controls. All operations, including the initial scoped finish and the subsequent clipping repair/finish, returned **APPLIED_RESPONSE_OBSERVED** with known effects. No unknown mutation or replay remains.
 
 This closes the **000030.SZ / light EN–ZH / list-origin representation** gap. It is not completion of every7U case:000829.SZ, dark, filtered and prior-snapshot origins remain governed by the shared contract and their own records. Actual document access, navigation, browser back-stack, keyboard focus and refresh behavior still require consumer proof. p4/p5/p6 remain candidate_unqualified; held p7, source-only p8 and all other writers' structures are preserved.
+
+
+## Intelligence Hub: numeric Edge index is separate from the categorical stage
+
+A follow-through audit found that all eight current p4 detail specimens still called the numeric edge measure **Early-stage index / 早期阶段指数**. Native score contract **72P-0**, read with **6Z2-0**, instead maps **Edge index = edge_remaining × 100**; **Early / 早期** is the independent categorical stage. Root corrected the label in those eight current details and the two newly owned list-origin companions. The preceding section's unchanged-original verification describes the earlier return-composition phase; this section records the subsequent, intentional label-only delta.
+
+| Detail | Locale / theme | Exact edited label | Numeric value, unchanged |
+| --- | --- | --- | --- |
+| 1PU-0 | EN light · 000829.SZ | 1RW-0 → Edge index | 81.1 |
+| 1SC-0 | EN light · 000030.SZ | 1UH-0 → Edge index | 93.1 |
+| 1V9-0 | ZH light · 000829.SZ | 1XB-0 → 剩余边际指数 | 81.1 |
+| 1XR-0 | ZH light · 000030.SZ | 1ZW-0 → 剩余边际指数 | 93.1 |
+| 27J-0 | ZH dark · 000829.SZ | 29L-0 → 剩余边际指数 | 81.1 |
+| 2A1-0 | ZH dark · 000030.SZ | 2C6-0 → 剩余边际指数 | 93.1 |
+| 2JT-0 | EN dark · 000829.SZ | 2LV-0 → Edge index | 81.1 |
+| 2MB-0 | EN dark · 000030.SZ | 2OG-0 → Edge index | 93.1 |
+| 7QG-0 | EN light · 000030.SZ, list origin | 7QZ-0 → Edge index | 93.1 |
+| 7SY-0 | ZH light · 000030.SZ, list origin | 7TH-0 → 剩余边际指数 | 93.1 |
+
+The Chinese term is the **proposed localization** of the current field contract, not a previously established native glossary label. It follows the historical producer's own **剩余边际** wording in read_zh and preserves the original six-character label length.
+
+The exact fixture remains Macro **bb310311b716ac3c7db7b7ed64d40039dd02bff7**, `site/china_intel/command.json`, blob **692e0238c7c500ca2fa1d5ae73ccf2c54af3a878**, generated **2026-09-27T13:00:52.369955+00:00**. Root verified 000829.SZ edge_remaining **0.811**, opportunity **74.4**, stage **early** and 000030.SZ edge_remaining **0.931**, opportunity **73.1**, stage **early**. The visible81.1/93.1 therefore remain unchanged. No percent sign, probability interpretation, recalculation, cross-market normalization or freshness claim was added.
+
+### Native verification and contract
+
+Root read complete before/after JSX for all ten details. Masking **only each single label div** makes every entire board identical modulo whitespace. Values, opportunity metric, categorical stage, entry-check uncertainty, source dates, SVGs and every return control remain intact. Focused rendered checks cover both values, both languages and both themes; a stale concurrent screenshot of the new English companion was resolved by a sequential read of its exact metric group **7QW-0**, which displays **Opportunity index73.1 / Edge index93.1**. No additional edit was needed.
+
+The supplement **7VG-0**, inside content-driven wrapper **7XY-0**, now contains **7Y1-0** with the exact field/localization mapping. Owned introduction **7VJ-0** was clarified to distinguish retained command-origin layouts/returns from this numeric-label correction. The new note renders fully and the complete wrapper JSX was read back.
+
+The ten-label edit, owned-note updates and scoped **hub-edge-label-finish-01** returned **APPLIED_RESPONSE_OBSERVED** with no per-node errors. This closes the inspected p4 and newly added p5 label inconsistency only. It does not promote candidate_unqualified designs, change a source model or establish implemented UI behavior; held/source-only lanes remain untouched.
