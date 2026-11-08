@@ -37,6 +37,11 @@ def _now() -> str:
 
 
 def _run_path(run_id: str) -> Path:
+    # run_id reaches here from API query parameters; refuse anything that is
+    # not a plain token so it can never traverse outside the runs directory.
+    # Same charset as the portfolio-book validator below keeps ids compatible.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}", run_id):
+        raise ValueError("invalid run_id")
     return _RUNS_DIR / f"{run_id}.jsonl"
 
 
