@@ -19,12 +19,14 @@ import sys
 import tempfile
 import threading
 import time
+from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.parse import urljoin, urlsplit
+from urllib.request import HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 DEFAULT_DSH_SHA = "687f282e8625c6b8d11ff58211a90524be2e4317"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
-URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})(?:/|\b)")
+URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})/\?token=([A-Za-z0-9_-]{20,220})(?![A-Za-z0-9_-])")
 SCHEMA = "mastermind.dsh_web_native_smoke.v1"
 MAX_RESPONSE_BYTES = 256 * 1024
 
@@ -35,6 +37,67 @@ class Refused(Exception):
     def __init__(self, status: str, reason: str):
         super().__init__(reason)
         self.status = status
+
+
+
+class OriginBoundRedirectHandler(HTTPRedirectHandler):
+    """Keep the ephemeral token/cookie exchange on its admitted numeric origin."""
+
+    def __init__(self, port: int):
+        super().__init__()
+        self.port = port
+
+    def require_origin(self, url: str) -> None:
+        try:
+            # urlsplit normalizes some control characters; refuse them first.
+            if any(ord(char) <= 32 or ord(char) == 127 for char in url):
+                raise ValueError("malformed URL")
+            parsed = urlsplit(url)
+            port = parsed.port if parsed.port is not None else 80
+            if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
+                    or port != self.port or parsed.username is not None
+                    or parsed.password is not None
+                    or re.fullmatch(r"127\.0\.0\.1(?::[0-9]+)?", parsed.netloc) is None):
+                raise ValueError("foreign origin")
+        except (TypeError, ValueError):
+            # Never put a launch token, cookie, or untrusted URL into a receipt.
+            raise Refused("UNTRUSTED_ORIGIN", "Web response left the admitted loopback origin") from None
+
+    def _checked_target(self, request_url: str, newurl: str) -> str:
+        if not isinstance(newurl, str) or any(
+                ord(char) <= 32 or ord(char) == 127 for char in newurl):
+            raise Refused("UNTRUSTED_ORIGIN", "Web redirect has a malformed target")
+        try:
+            target = urljoin(request_url, newurl)
+        except ValueError:
+            raise Refused("UNTRUSTED_ORIGIN", "Web redirect has a malformed target") from None
+        self.require_origin(target)
+        return target
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        # urllib normalizes Location before redirect_request; inspect the
+        # actual selected header first so malformed input cannot disappear.
+        for field in ("location", "uri"):
+            if field in headers:
+                try:
+                    self._checked_target(req.full_url, headers[field])
+                except Refused:
+                    try:
+                        fp.close()
+                    except (OSError, ValueError):
+                        pass
+                    raise
+                break
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = self._checked_target(req.full_url, newurl)
+        return super().redirect_request(req, fp, code, msg, headers, target)
 
 
 def command(argv: list[str], *, timeout: float = 8) -> str:
@@ -89,8 +152,10 @@ def clean_env(scratch: Path, node: Path) -> dict[str, str]:
 
 def wait_for_web(process: subprocess.Popen[str], lines: queue.Queue[str],
                  deadline: float) -> dict:
-    opener = build_opener(ProxyHandler({}))  # Never use ambient HTTP proxy.
+    opener = None
+    redirect_guard = None
     announced_port = None
+    launch_url = None
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise Refused("STARTUP_EXITED", "Web CLI exited before serving the application")
@@ -98,16 +163,29 @@ def wait_for_web(process: subprocess.Popen[str], lines: queue.Queue[str],
             line = lines.get(timeout=min(0.15, max(0.01, deadline-time.monotonic())))
             matches = URL.findall(line)
             if matches:
-                announced_port = int(matches[-1])
-                if announced_port > 65535:
+                raw_port, launch_token = matches[0]
+                advertised_port = int(raw_port)
+                if advertised_port > 65535:
                     raise Refused("UNTRUSTED_ORIGIN", "app advertised an invalid port")
+                if announced_port is not None and advertised_port != announced_port:
+                    raise Refused("UNTRUSTED_ORIGIN", "app changed its admitted loopback origin")
+                if announced_port is None:
+                    announced_port = advertised_port
+                    redirect_guard = OriginBoundRedirectHandler(announced_port)
+                    opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()),
+                                          redirect_guard)
+                    # DSH requires one short-lived launch-token -> signed-cookie exchange.
+                    # Keep the first token only in memory; receipts contain origin only.
+                    launch_url = f"http://127.0.0.1:{announced_port}/?token={launch_token}"
         except queue.Empty:
             pass
         if announced_port is None:
             continue
         origin = f"http://127.0.0.1:{announced_port}/"
+        assert opener is not None and redirect_guard is not None
         try:
-            with opener.open(Request(origin, method="GET"), timeout=0.45) as response:
+            with opener.open(Request(launch_url, method="GET"), timeout=0.45) as response:
+                redirect_guard.require_origin(response.geturl())
                 code = response.status
                 media_type = response.headers.get_content_type()
                 data = response.read(MAX_RESPONSE_BYTES + 1)
@@ -174,35 +252,54 @@ def execute(source: Path, expected_sha: str, node: Path, timeout: float) -> dict
                                            bufsize=1, start_new_session=True)
             except OSError as error:
                 raise Refused("STARTUP_UNAVAILABLE", "cannot start pinned native CLI") from error
-            messages: queue.Queue[str] = queue.Queue(maxsize=4096)
-            def consume() -> None:
-                assert process.stdout is not None
-                while line := process.stdout.readline(4096):
-                    try:
-                        messages.put_nowait(line)
-                    except queue.Full:
-                        break
-            reader = threading.Thread(target=consume, daemon=True)
-            reader.start()
+            # A launched process remains uncertain until reaping is positively observed.
+            receipt["owned_process_stopped"] = False
+            reader = None
             try:
-                observation = wait_for_web(process, messages, time.monotonic() + timeout)
-                receipt.update(observation)
+                messages: queue.Queue[str] = queue.Queue(maxsize=4096)
+                def consume() -> None:
+                    assert process.stdout is not None
+                    while line := process.stdout.readline(4096):
+                        try:
+                            messages.put_nowait(line)
+                        except queue.Full:
+                            break
+                reader = threading.Thread(target=consume, daemon=True)
+                reader.start()
+                receipt.update(wait_for_web(process, messages, time.monotonic() + timeout))
             finally:
-                receipt["owned_process_stopped"] = terminate_own_process(process)
-                reader.join(timeout=1)
-                if process.stdout is not None:
-                    process.stdout.close()
-                if not receipt["owned_process_stopped"]:
-                    receipt["status"] = "CLEANUP_UNKNOWN"
-                    receipt["reason"] = "owned startup process could not be reaped"
-            if receipt["status"] == "WEB_HTML_READ":
-                receipt["status"] = "NATIVE_WEB_SHELL_PASS"
+                try:
+                    receipt["owned_process_stopped"] = terminate_own_process(process)
+                except (OSError, ValueError) as error:
+                    receipt["cleanup_error"] = type(error).__name__
+                # Cleanup failures must not replace an already pending probe exception.
+                try:
+                    if reader is not None and reader.ident is not None:
+                        reader.join(timeout=1)
+                    if reader is not None and reader.is_alive():
+                        receipt["owned_process_stopped"] = False
+                        receipt["cleanup_error"] = "ReaderNotStopped"
+                    elif process.stdout is not None:
+                        process.stdout.close()
+                except (OSError, ValueError) as error:
+                    receipt["owned_process_stopped"] = False
+                    receipt["cleanup_error"] = type(error).__name__
     except Refused as error:
         receipt["status"] = error.status
         receipt["reason"] = str(error)
     except (OSError, ValueError) as error:
         receipt["status"] = "INPUT_UNAVAILABLE"
         receipt["reason"] = type(error).__name__
+    # Finalize only after the probe exception has been classified. An uncertain
+    # cleanup dominates both a refusal and an otherwise successful observation.
+    if receipt.get("owned_process_stopped") is False:
+        receipt["probe_status"] = receipt["status"]
+        if "reason" in receipt:
+            receipt["probe_reason"] = receipt["reason"]
+        receipt["status"] = "CLEANUP_UNKNOWN"
+        receipt["reason"] = "owned startup process cleanup could not be confirmed"
+    elif receipt["status"] == "WEB_HTML_READ":
+        receipt["status"] = "NATIVE_WEB_SHELL_PASS"
     return receipt
 
 
