@@ -2,7 +2,7 @@
 
 ## Applied outcome
 
-The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide, Mastermind AI and News. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
+The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide, Mastermind AI, News, Policy Monitor and Ontology. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
 
 | Current design entry | Verified continuation improvement |
 |---|---|
@@ -16,6 +16,8 @@ The first verified pass changed **44 artboards across 16 files**. The continuing
 | [Market Memory comparison](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) | Selected source-version unavailability preserves both record references and the exact comparison return. |
 | [Options D08C companion](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0) | Explicit assessment target, new-firing notice, General assessment, receipt/revision recovery and 320px study. |
 | [News current-report recovery](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-3-0) | EN/ZH read-failure states retain the saved basis and use the existing story-detail request after a settled, eligible failure. |
+| [Policy expanded rate disclosure](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-2-0) | EN/ZH 390px numeric tables expose the existing four horizons, source and date without inventing a current rate or Fed comparison. |
+| [Ontology answer receipts](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) | Readable series/value rows identify independent lookbacks and the QQQ-versus-SPY return difference. |
 
 These are editable Paper improvements with visual/readback evidence. Proposed interactions remain explicitly qualified; source observations are not runtime reproductions or production acceptance. Existing owners, held files and release constraints remain preserved. Detailed deliveries below contain exact node IDs, sources, verification and reconciled effects.
 
@@ -56,9 +58,9 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The Chairman explicitly requested autonomous continuation beyond the initial pass. Ten material continuation product areas are verified above. The News current-report recovery increment is complete. Terminal replay retains D08D custody because its editable target is unconfirmed. Bounded read-only reviews now examine International, Ontology and OS decision/evidence paths for one concrete uncovered gap in each; existing complete contracts are preserved. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Twelve material continuation product areas are verified above. Policy’s expanded numeric disclosure and Ontology’s qualified receipt windows are complete. International’s inspected detail/filter/return/recovery journey and the OS Decision/Evidence path already cover the examined states; they were preserved. Terminal replay retains D08D custody because its editable target is unconfirmed. Bounded reviews now examine the remaining Hub, Risk Radar and Prophet journeys for grounded, disjoint gaps. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
 
-Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the News current-report recovery companion are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
+Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Policy and Ontology refinements are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -89,7 +91,7 @@ All changes are editable Paper designs. Screenshot proof validates design layout
 
 ## Verified milestone — OS workflow continuity
 
-File: [Mastermind OS](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0). Current canonical scope is **86 boards across five pages**: daily 23, Projects & Evidence 14, Decisions 12, Meta-CEO 21, Sessions 16. Corrected index KSG-0 on KSB-0 from 80 to 86.
+File: [Mastermind OS](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0). At the first-pass inventory, canonical scope was **86 boards across five pages**: daily 23, Projects & Evidence 14, Decisions 12, Meta-CEO 21, Sessions 16. Corrected index KSG-0 on KSB-0 from 80 to 86.
 
 - Session action preview O5Q-0: moved three duplicate legacy sidebar labels O6N-0/O6Q-0/O6R-0 into the existing hidden reference O5U-0, preserving IDs. OBK-0 now says **Review permission details** and OBH-0 names the blocked sending condition and session-details recovery. The layer for the destination names the existing O8O-0 identity/permission disclosure. Sending stays unavailable; the unsent draft stays intact.
 - Work return LF7-0: stage TDB-0 now says **Review**, compatible with the existing outcome **Changes requested**. Receipt, acceptance and release remain separate.
@@ -708,3 +710,106 @@ Root also read current Terminal source at `f0af84bbd6c28c2f6477bd8ffc03190397902
 D08D already specifies access recovery and the independent replay owners. Its next native specimen should discriminate trusted signed-out status from denied/rate-limited/source outcomes, clear protected evidence, and use the existing account owner. That remains with the incumbent D08D work until a valid target is established.
 
 A prior possible criticism was withdrawn: **Refresh source already calls `setIndex(-1)`**, so current ordinary refresh resets to latest. The audit does not claim that it silently preserves an old index.
+
+
+## Continuation delivery 10 — Policy Monitor expanded numeric disclosure
+
+### Existing behavior, now visible in Paper
+
+The main Policy boards offered **Rate values and sources** only as a collapsed entry. The existing implementation already owns a native details/summary disclosure with an equivalent data table. This addition makes that narrow reading state reviewable without creating another feature or recovery owner.
+
+Current #10493 head was observed as `c742039f32d3ae73b557b8b2b5f6ff4df36b23c2`, Open/Ready/unmerged with **merge-on-green + merge-blocked** retained. Root read:
+
+| Source | Blob | Grounding |
+|---|---|---|
+| [Policy dialog](https://github.com/mastermindx-market-intelligence/Macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/templates/_policy_monitor_dialog.html.j2) | `3b79568eb00e007d49ea4cde66a83c588d51ecc3` | Native disclosure, table caption, scoped column/row headers, known/unavailable values and source/date note. Separate target midpoint and Fed comparison. |
+| [Policy view model](https://github.com/mastermindx-market-intelligence/Macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/lib/policy_monitor_view.py) | `8e00a6fc97687c94160a5858233ce1b5b964f8f6` | Configured futures horizons start at month 1; source and observation date come from the selected source metadata. |
+| [Policy fixture](https://github.com/mastermindx-market-intelligence/Macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/tests/test_policy_monitor_view.py) | `01308cefaa7219bd08a9181cbf5e059c6f6b17b6` | Existing 30 Oct 2026 ZQ rates, four horizons and stored +56 bp basis. Test code inspected, not executed. |
+| [Disclosure styles](https://github.com/mastermindx-market-intelligence/Macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/templates/_policy_monitor.css.j2) | `b261a890918748bf7e588379736a7ae4be8b2cff` | Plus/minus state marker, focus outline and contained disclosure body. |
+
+### Exact editable addition
+
+File `01M6Q4WK0EMPV1G2KDGGRQBC1B`, [Build · Evidence states & interaction](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-2-0), existing board `MH-0`.
+
+- Section `PJ-0`: **Read the exact rate without tracing the chart**.
+- `PP-0`: 390px English/light expanded disclosure.
+- `PR-0`: 390px Chinese/dark expanded disclosure.
+- `PT-0` / `R6-0`: narrow implementation/acceptance binding.
+- `RC-0` / `RE-0`: qualified source note and immutable source link.
+
+Both tables preserve **1, 3, 6 and 12 months → 3.88%, 4.04%, 4.23%, 4.44%**, with the original ZQ source and **observed 2026-10-30**. They use an expanded minus marker, full-width numeric rows and readable source text. No “Now” row was added: the target midpoint remains a separate policy observation. The stored +56 bp remains versus effective fed funds; this disclosure does not invent or qualify a Fed projection comparison.
+
+The existing access, partial-horizon, keyboard, stale-commentary and section-return contracts remain unchanged. Missing configured horizons still show unavailable rather than zero. The four main monitor boards and the independently corrected stance/activity content were preserved.
+
+Root inspected both 390px cards and the full fit-content `MH-0` artboard after composition. All rows, units, dates and source notes fit without clipping. Seven own operations, including explicit finish, returned **APPLIED_RESPONSE_OBSERVED**. Native disclosure behavior is source-grounded; this Paper pass did not execute browser tests.
+
+### Custody qualification
+
+Root read the existing [#10493 custody receipt](https://github.com/mastermindx-market-intelligence/Macro/pull/10493#issuecomment-6719783586). Its current source/evidence-binding regression, missing-fragment UNKNOWNs, original R6 facade uncertainty, pack-10 settlement and separate release-controller 403 remain distinct. No source repair, guarded capture, process replay, receipt rewrite, hold removal or release action was attempted here. The new Paper states do not replace or qualify that implementation lane’s required proof.
+
+The China row’s **Observed: Not observed** wording was examined. Its source meaning is absent usable technical setup, distinct from valid Quiet. The source and test intentionally pin that wording; it was preserved during this bounded source-parity addition.
+
+## Continuation delivery 11 — Ontology receipt windows and readable values
+
+### Specific clarity defect
+
+In R25’s matched-answer card, the nearby selected context named the oil reading’s 60-session return, while the four answer receipts omitted their separate windows. **QQQ/SPY** also visually suggested a price ratio, although the incumbent owner calculates a return difference in percentage points.
+
+This refinement preserves the historical fixture and existing noncausal answer. It does not introduce another data schema, request owner, Brain, history, or evidence lifecycle.
+
+### Source qualification
+
+At Macro `069f4a102de251433544d2423ef5df5f1e576454`, root read:
+
+| Source | Blob | Relevant meaning |
+|---|---|---|
+| [Oil transmission definition](https://github.com/mastermindx-market-intelligence/Macro/blob/069f4a102de251433544d2423ef5df5f1e576454/knowledge/transmission/oil_inflation_duration_derate.yaml) | `d74c036634b48e002afb74ca8671e1304b433f40` | Oil return 60; breakeven change 22; real-yield 63 field; QQQ versus SPY relative return 63. |
+| [Series metric implementation](https://github.com/mastermindx-market-intelligence/Macro/blob/069f4a102de251433544d2423ef5df5f1e576454/engine/transmission_chains.py) | `f1f12b6e594a8198f86907f23c157a96ead1748f` | Uses indexed lookback offsets. Relative strength is own return minus benchmark return, ×100, emitted as pp; ratio return is a separate metric. |
+| [Real-yield producer](https://github.com/mastermindx-market-intelligence/Macro/blob/069f4a102de251433544d2423ef5df5f1e576454/engine/rate_inflation_transmission.py) | `deb29b00fde1ef8b32dc3d395ab56236900f50d3` | Real-yield change uses a 63-position shift of its feature series. |
+| [Feature index and input alignment](https://github.com/mastermindx-market-intelligence/Macro/blob/069f4a102de251433544d2423ef5df5f1e576454/engine/inputs.py) | `3e03d338c20f9383a9d0153f277a9ab9f98026df` | Weekday index, deduplicated input, union alignment and bounded forward fill; real-yield positions can contain carried-forward readings. |
+
+The early suggestion **63 observations** for real yields was withdrawn after this producer check. The implemented copy uses **period lookback**, with a shared explanation. An offset N compares endpoint positions; it does not promise N fresh observations or N elapsed calendar days.
+
+Root also read the current [#10704 receipt presentation](https://github.com/mastermindx-market-intelligence/Macro/blob/00ca5d8a23d99825b26c78016ded73ac09a8fc69/templates/ontology.js), blob `d78b8536e7013049d54dc8db4044f83cc8a66c1b`. It already carries units, window and vs fields, although its receipt strings still say “N-day reading.” No runtime label repair is claimed. Fresh PR metadata was Open/non-Draft at that exact head, with its existing author/custody preserved. A separate synthetic January fixture was not used to replace the September Paper values.
+
+### Exact Paper result
+
+File `01M3P1X4FR6BRTB13KA736Y1HT`, [R25 on the current product page](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0), board `4SA-0`, matched card `4SI-0`, stable receipt container `4SP-0`.
+
+| Series | Preserved value | New window label |
+|---|---:|---|
+| CL=F | +17.8% | 60-period lookback |
+| T10YIE | +2 bp | 22-period lookback |
+| Real 10y | +65 bp | 63-period lookback |
+| QQQ vs SPY | −0.59 pp | 63-period lookback |
+
+The initial text-only correction fit, but retained 9px chips. Visual review justified replacing just that receipt component with readable series/value rows: `ACW-0`, row owners `ACX-0` / `AD2-0` / `AD7-0` / `ADC-0`. The heading is now `ADI-0`. Values use 14px type, series 13px, and window/explanation 12px. The local palette and existing font were reused.
+
+Explanation `ACU-0` says: **Lookbacks count positions in each source series, not calendar days. Real-yield periods may include carried-forward readings.**
+
+The selected evidence date **25 Sep 2026**, selected path, corrected snapshot answer, composer, unverified-recovery card, exact-return rules, R22/R23/R24 references and `4V9-0` / `4VA-0` release-held annotation remain unchanged.
+
+Root inspected the final 390px matched card and full R25 board. The four readings and windows are legible, the shared explanation wraps cleanly, and the fit-content card contains the composer and footer. Five own edit operations plus explicit finish returned **APPLIED_RESPONSE_OBSERVED**. No data value or precision was changed.
+
+## Continuation audit — preserve covered International and OS journeys
+
+### International
+
+The read-only review traced current R10 overview → country inspector → exact evidence/revision → return, plus filtered-empty, rights denial, source failure and recovery. These already have concrete designs:
+
+- Inspector/evidence owners: `805-0`, `8KL-0`, `50H-0`, `8AM-0` and `547-0` on [Country Inspector & Follow](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-E-0).
+- Builder binding `P9-0` / `PK-0`, with migration `Q1-0` explicitly **NOT VERIFIED**; source audit dates remain qualified.
+- Exact record/revision and field return: `8K8-0` through `8KJ-0`; root read the current controls and illustrative-source qualification.
+- Context return `5IR-0` / `8OS-0`; local-filter recovery and access/source distinctions in `2FN-0`.
+
+No material missing design state was established in this bounded slice. R14’s separate freeze, unreconciled History287, unaccepted74/76 and blocked Comparison164 remain intact. No mutation or implementation acceptance is claimed.
+
+### Mastermind OS
+
+The review traced Inbox → exact brief decision → evidence detour → outcome → return. AT20 `OU0-0` / `P0I-0`, current review `VZC-0`, AT21 `P2V-0` / `P8L-0`, UX03 `PAY-0` and UX11 `T7K-0` already cover changed evidence, original-operation uncertainty, matched outcome receipts, revoked access, cancelled reads and late-response rejection.
+
+Root read [the pinned Daily Flow Spec](https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md), blob `8be040d1c66c416bb259467c66fc932d4bc81678`, §9–9.1. It retains exact packet/preflight, one final owner action, distinct pending/unknown/no-effect states, and the prototype-versus-actual-owner boundary. Adding another confirmation or recovery mechanism would duplicate existing responsibility.
+
+The fresh advisory inventory found **90 artboards across canonical pages 12–12D**: 23 daily, 18 Projects & Evidence, 12 Decisions, 21 Meta-CEO and 16 Sessions. This is an artboard count including indexes/contracts/states, not 90 distinct product screens. The first-pass count of 86 was its earlier observation. AT34/AT35’s four concurrent boards were preserved.
+
+Root read the current directory `KSG-0`: **Current product screens · Desktop and mobile**. It no longer carries a numeric total, so no count edit was needed. No OS canvas amendment was made in this continuation audit.
