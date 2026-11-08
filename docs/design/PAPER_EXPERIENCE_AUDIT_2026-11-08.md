@@ -10,7 +10,7 @@ This map points to the editable designs and current continuation sections. All c
 | Review area | Native destination and visible improvement |
 | --- | --- |
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
-| Options Plan and Compare | [D08C comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0): C02 `1OGC-0` now states the assumed100-share multiplier for its illustrative dollar outcomes; prior expiry-loss and phone-control corrections remain. |
+| Options Plan and Compare | [D08C comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0): C02 retains explicit illustrative units and now opens a scenario choice. C11–C15 add a neutral chooser, exact Higher/Lower change reviews, updated local draft with cleared payoff, and changed-draft refusal; native build mapping is on p15. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
 | Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I/M `22CM-0` / `22SU-0` explain the historical source/calculation in EN dark and ZH light; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
@@ -1034,3 +1034,83 @@ The remaining p6 pass identified the same missing field label in **`4GG-0`** (da
 Root inspected full390px before/after renders. JSX changed13,116→13,221 and13,384→13,480 characters; masking only the respective text div proves the entire remaining JSX is unchanged modulo whitespace. `hub-combined-locale-index-01` and scoped `hub-combined-locale-finish-01` both returned **APPLIED_RESPONSE_OBSERVED**.
 
 The bounded remainder review found existing score labels/explanations in other score-bearing p6 variants (468/4HZ/51M, Chinese search4SX and4UE), and no contradiction in the inspected count/clear combinations. Those variants were preserved. This closes the identified label-consistency issue across the inspected p6 states without homogenizing their distinct update, filter or locale behavior.
+
+
+## Options comparison: explicit selection, exact changes and current-draft protection
+
+The comparison's next action previously read **Edit comparison assumptions**, without specifying which of three scenarios it would edit or adopt. The baseline subtitle **Pinned draft** also omitted the session-only context carried by C01. This phase makes the existing proposed comparison interaction visible through five native companions, while retaining the original generic editor and the comparison's numerical content.
+
+### Existing C02 changes and new destinations
+
+On [D08C Plan, Compare and Review](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0), C02 `1OGC-0` has only three changed text nodes:
+
+- `1OHS-0`: **Session baseline · solid line**.
+- `1RLR-0`: **Back to plan draft**, within existing control `1RLQ-0`.
+- `1RLT-0`: **Choose a scenario**, within existing 44px control `1RLS-0`.
+
+The three-column table, per-leg entries, all dollar outcomes and breakevens, SVG path/axis data, hypothetical-entry copy, assumed 100 multiplier and unavailable-cost/before-expiry qualifications remain unchanged.
+
+| New native state | Root | Position / size | Purpose |
+| --- | --- | --- | --- |
+| C11 · Choose comparison scenario | **`23BH-0`** | x5014,y1104;768×1024 | Neutral Baseline/Higher/Lower choices name their exact long/short entries. No scenario is applied by viewing the chooser. |
+| C12 · Review higher entry | **`23DM-0`** | x5014,y2208;768×1024 | Buy 1 SPY600 Call changes5.20→5.40 USD/unit; Sell 1 SPY610 Call remains2.00. |
+| C13 · Review lower entry | **`23FL-0`** | x5862,y2208;768×1024 | The paired review changes only the long entry5.20→5.00. |
+| C14 · Higher-entry draft applied / payoff cleared | **`23IV-0`** | x6710,y2208;768×1024 | Shows the new5.40/2.00 local inputs and retained research; old numerical output is absent. |
+| C15 · Same-owner draft changed | **`23K7-0`** | x9772,y0;768×1024 | Removes stale Use, preserves current inputs and provides Back to current draft. |
+
+All belong to the same exact SPY600/610 Call fixture,20 November2026, Buy1/Sell1, USD, assumed 100 shares per contract. The choices have equal visual treatment; the design introduces no best-scenario ranking, recommendation, new terms, quote or payoff calculation.
+
+### Deliberate choice and local effect
+
+C11's baseline control `23D3-0` returns to the original plan only while the retained comparison base is still current. Higher `23D9-0` opens C12; Lower `23DF-0` opens C13. Chooser and review replace the content of **one 440px modal**. They do not stack overlays or create new navigation routes.
+
+C12/C13 are read-only change reviews. They show the exact dated leg identity, unchanged direction/quantity, premium currency and the changed long-leg input before the **Use in plan draft** controls `23FI-0` / `23HM-0`. Research question, invalidation and horizon are displayed and retained verbatim from the existing C06 fixture. Original source snapshots remain separate from authored entry assumptions. The complete 20 November2026 contract expiry and independent10 November2026 research horizon are preserved.
+
+Cancel, Close and Escape apply nothing and return to the actual C02 chooser trigger when it still belongs to the same context. Ordinary comparison exit returns to the originating plan and surviving Compare trigger (C01 examples `1O1O-0` / `1O78-0`) with its scroll context. Navigation must never restore an old captured baseline over newer inputs.
+
+C14 represents the **proposed after-local-apply state**, not an operation executed in the application. The5.40/2.00 inputs remain visible while the obsolete curve, extrema and603.20 breakeven are absent. **Calculate expiry payoff** `23JM-0` is a separate deliberate action through existing qualification. **Compare again** `23K2-0` captures the current draft anew; **Adjust assumptions** `23K4-0` supplies current values to the incumbent editor. Lower adoption uses the same state contract with5.00/2.00. These controls do not authorize Save or a watch.
+
+### Changed inputs and custody
+
+C15 provides the missing same-owner interruption: **Your draft changed**, **This review is out of date**, and **Nothing from this scenario has been applied**. The sole resolution **Back to current draft** `23LG-0` preserves the live editor. It does not rebase the captured alternative or expose a stale Use action.
+
+The implementation requirement is broader than comparing two valid canonical drafts. Current editor source keeps raw entry/quantity strings and calls `onEdit(null)` while invalid. Any side, quantity, entry or thesis/invalidation/horizon edit must invalidate an open review, including unfinished input. Before any continuation, the existing owner must check the same account/editor, retained selection, exact source snapshots and live edit generation. No positional-index leg merge is permitted. Refusing the stale review must not erase an independently valid result belonging to newer inputs.
+
+An account/retained-selection scope change unmounts the former review and removes its old owner's content from the current surface. Reuse existing `scopeKey` and owner notifications; do not add owner/revision fields to `options_plan_draft.v1`, a persistent comparison record, another store, a Save operation or a retry lifecycle.
+
+### Source evidence and current implementation limit
+
+Root read the candidate at Macro **`291f21aa8e9d757466412549a8d6537d889ab4d8`**:
+
+| Source | Blob | Governing distinction |
+| --- | --- | --- |
+| `d08c/INTERACTIONS.md` | `13ce2e7d3a8a79873a890000aafaa70afaaea516` | Explicit local scenario choice, dirty-state review, exact per-leg copying, cancel/return and separate calculation. |
+| `d08c/PRODUCT_AND_RETENTION.md` | `09d58e076be6a0820f581ba139b1bd853d57c8b4` | §B's exact three alternatives and baseline preservation; adoption remains conditional on D08-host admission. |
+| `d08c/SOURCE_AUDIT.md` | `3e4aeaea3a8cde4d7c1cbc7a61c1c5f98462ae73` | Source/candidate/held distinctions and incumbent ownership. |
+
+At Terminal **`f0af84bbd6c28c2f6477bd8ffc031903979023bd`**, root independently read:
+
+| Source | Blob | Observed behavior |
+| --- | --- | --- |
+| `terminal/lib/optionsPlanDraft.ts` | `1b02689501cd26226b61e7a5d3fa8f5868552f7b` | Data-only immutable validation, exact snapshots, one root, unique contracts, per-leg assumptions and research. |
+| `terminal/components/options/OptionsPlanDraftEditor.tsx` | `e2b76e30ed12c12efa751d589b0820f7ae5c57aa` | Raw editing strings and valid/null notifications; owner-supplied continuation; editor itself performs no fetch, Save, storage or valuation. |
+| `terminal/components/options/OptionsPlanPayoffPanel.tsx` | `fb46e15b98e8221beb402f5558651a943b3f981f` | Account/selection scope, obsolete-request invalidation and result/coverage clearing; current onApply calls calculate and can send the expiry POST. |
+| `terminal/components/options/OptionsPlanInvestigationHost.tsx` | `a6c5b16567f493ed4acb588e19d4123b4b751c59` | Preparatory focus/visibility host, without a second draft, Save owner or route registry. |
+
+**Use in plan draft needs a separately admitted local-only continuation. It cannot be implemented by relabeling the current payoff-panel Calculate callback.** Native C11–C15 make the desired interaction reviewable; they do not establish that this seam or its stale-review guard is implemented. A first filename lookup for PRODUCT.md returned404; root used the actual linked PRODUCT_AND_RETENTION.md and verified the exact source above. No source defect or permission denial was inferred from that filename miss.
+
+### Native build map and verification
+
+A new continuation **`23LJ-0`** was appended to existing D08C readme content **`1S0S-0`** on [p15](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0). It maps each target, exact return, input-change guard, local-vs-calculation seam, same-owner interruption and account-custody boundary. All prior readme content and other writers' additions remain intact.
+
+Root inspected all five full renders, the updated C02 and the complete new contract. C11–C13/C15 retain the768px/56px shell and440px modal; C14 uses728px content inside20px gutters. All modal/footer choice actions have44px minimum height, and the owned header-menu and modal-close targets are44×44. No type reduction or clipped footer was needed. Native inventory verifies exactly five added, nonoverlapping boards; original C06 `1PU1-0` is byte-identical in11,154-character JSX.
+
+Verification also proves:
+
+- Masking only the three changed C02 text divs makes its entire27,236→27,230-character JSX identical modulo whitespace, including the SVG and table.
+- Higher and Lower review JSX are identical after normalizing generated node IDs and the two intended scenario/value strings.
+- Each final header-target correction changed only its own glyph node and44px geometry; the rest of each companion remains identical.
+- Removing only new readme child23LJ reproduces the entire prior readme JSX modulo whitespace.
+- C14 contains the correct5.40/2.00 entries and no old SVG,320/680 output or603.20 breakeven. C15 contains no operative Use control.
+
+All edits and scoped `options-scenario-flow-finish-01` returned **APPLIED_RESPONSE_OBSERVED**. Current final JSX sizes are C11:9,392; C12:10,435; C13:10,434; C14:11,419; C15:4,994 characters. This is editable design and build-contract proof, not keyboard/ARIA/runtime callback proof, qualified producer output, account admission or production acceptance. Original C06, D08D and Plan#804 release holds, candidate status and foundation qualifications remain preserved.
