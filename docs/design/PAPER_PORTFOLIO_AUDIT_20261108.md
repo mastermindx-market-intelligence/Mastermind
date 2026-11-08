@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. The next foreground is a bounded read-only audit of current Discover/Heatmaps source-population and timing transitions. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. The next foreground is a bounded research-assistant draft-context audit, checking whether editing or removing an @mention changes the context actually sent. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -949,3 +949,92 @@ Accordingly, **real-browser rendering, responsive layout, keyboard/focus and acc
 The F03 original `01M2WGNCX9475G79JRKJTCM08P` remains **READ ONLY / NO MODIFY** due to the recorded data-loss warning. This continuation performed **zero F03 Paper writes, clones, moves, archives or physical organization actions**. The existing recorded Draft/HOLD and stacked `unsupported_base_ref` CI restrictions remain. Live #10631 metadata was not established; no current PR state was invented and no duplicate PR was created. No Ready/un-draft/enqueue/relabel/merge, runtime admission, production change, release or deployment was performed.
 
 **Next safe phase:** continue the bounded read-only Discover/Heatmaps audit. Current D04 discovery points to Terminal `p-8-1 / N71-1` and overview `LMF-1`; the readme already covers many cohort/return/save concerns, so those are not automatically reopened. Investigate a consequential current source/population/time transition before proposing any new design change. Preserve warned originals, live writers and all accepted work.
+
+## Continuation — ordinary Heatmap selected-reading consistency
+
+### Observed defect and source boundary
+
+The ordinary `/discover?tab=heatmap` route mounts `HeatmapPageRoot → HeatmapView`; `tab=sectors` is a separate integration. At protected Terminal master `d7a83d3348a4fcb762d93221f19c4e94cbe4505e`, `HeatmapView` stores the clicked whole tile as `selected`. Manifest/quote refreshes rebuild the displayed map tiles, while `DetailPanel` still receives that earlier selected object. This is a source-based consistency defect, not a browser reproduction.
+
+The quote result’s `complete` flag is chunk-level. It does not prove a usable result for every requested name. Null, omitted or non-finite entries are skipped; the subsequent merge retains earlier values. MU can also be outside the bounded top-200 request. A held MU percentage or a successful peer batch therefore does not establish a new MU observation. The quote overlay lacks the manifest/flow-style request-generation fence.
+
+Only `chg1d` receives the quote overlay. Price and 52-week fields retain manifest provenance; flow has its own `flowAsof`. Quote source time is not retained by this consumer. The manifest’s `as_of` and the browser’s poll time cannot stand in for the quote clock. No canonical security/listing ID or local account-generation field is asserted.
+
+Exact source anchors in `mastermindx-market-intelligence/mastermind-terminal` at that pin:
+
+| Source | Blob SHA |
+|---|---|
+| `terminal/components/workspaces/DiscoverWorkspace.tsx` | `78a54f0a14a1851fbe5f3eb962c71d9eb6a8883f` |
+| `terminal/components/heatmap/HeatmapPageRoot.tsx` | `3a07d4d936900b08203448d9d0c3cdd7b85929c6` |
+| `terminal/components/heatmap/HeatmapView.tsx` | `25b5ad5644eee6f2ad268efd1b9521d2e4a29824` |
+| `terminal/components/heatmap/DetailPanel.tsx` | `171b5855aae81dd27b87f7869399b8235dabe2c0` |
+| `terminal/components/heatmap/types.ts` | `261d0567efd308f41a1c1938826fcd6de7428277` |
+| `terminal/lib/heatmapStrings.ts` | `9a212f7b5b6a51dcc2ea4884613edcf784cbd86e` |
+
+### Native design delivered
+
+File: Terminal `01M3NSZGE8JWN2EZCSF0DT05RM`.
+
+New containing page: [Proposed · Heatmap inspector refresh](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1D-0), `p-1D-0`. Board: `22UK-0`, **PROPOSED · Heatmap selected reading · EN/ZH**, 1440px wide and auto-height. Semantic body: `2326-0`. It is a disjoint proposal, not an addition to the accepted count of the existing 37-board main journey.
+
+| Section | Exact node | Behavior specified |
+|---|---|---|
+| Scope and illustrative status | `2327-0` | Clearly proposed; no runtime or current quote claim |
+| Available desktop | `232M-0` | Map/inspector share a qualified 1D reading; quote clock remains unavailable |
+| Requested but unusable, EN light / ZH dark | `2345-0` | Current dash; visibly previous +3.42%; unknown prior basis/time disclosed |
+| Not requested, EN dark / ZH light | `236D-0` | Distinguishes request exclusion from request failure; explicitly assumes no separate qualified current reading |
+| No usable current or previous reading, EN dark / ZH light | `238B-0` | Retains selected identity; no zero, removal claim or automatic company replacement |
+| Existing owner and quote fence | `23A9-0` | Resolve selected observation in HeatmapView; extend its request-fence pattern |
+| Metric provenance and access boundary | `23AI-0` | Separate field clocks; no new auth/cache/polling/persistence owner |
+| Per-symbol outcomes and interactions | `23AR-0` | Membership/result qualification; eligible bounded MU retry; no late reopen |
+| Source pin and proof owed | `23B0-0` | Explicit runtime, focus and access proof requirements |
+
+The values MU +3.42%, NVDA +1.84% and AAPL −0.62% are reused from the original Paper overview and prominently marked illustrative. No newly observed quote, source timestamp, price, current universe census, or 1W/1M/YTD availability is invented.
+
+The illustrated refresh actions assume MU is eligible for the existing quote source/access context and selected-name inclusion can be supported within the bounded request. Otherwise the design requires a specific limitation without an active promised refresh action. Exclusion from one request alone must not invalidate an otherwise qualified retained reading. The selected record must be assessed in the retained manifest before render pruning/filtering; even `scopedTiles` can exclude records with invalid numeric fields.
+
+Unavailable 1D state withholds current directional color, score ring and price/flow divergence. A finite zero remains valid. Close preserves the current view/filter/search/sizing state; proposed focus return targets the still-valid opener or a stable current-view target. A late read cannot reopen a closed inspector.
+
+### Main Readme clarification and preservation
+
+Original `p-8-1 / N71-1` changed only these three existing text leaves:
+
+- `N7A-1`: “Paper: 37 boards · 3 focused pages” → “Main journey: 37 boards · 3 focused pages”.
+- `N7O-1`: “Existing representation owner” → “Sector route integration”.
+- `N7Q-1`: labels the six-view sharing behavior a proposed Sector integration requirement.
+
+New source/proposal note `23B7-0` was inserted immediately after `N79-1`, before the existing journey index. It contains eight text leaves `23B8-0` through `23BF-0`, the actual ordinary Heatmap owner, proposal page/board identity, field-specific clock limits and proof obligations.
+
+Readback comparison: Readme 170 original simple text leaves → 178, with exactly the three intended existing-leaf changes and eight additions. Original desktop overview `LMF-1` (129 simple text leaves) and original mobile/table board `N2Y-1` (89 leaves) are byte-identical in full JSX to their pre-phase snapshots. The original safety/source hold text `N82-1` and `N83-1` is unchanged.
+
+### Verification and effect receipts
+
+- New proposal read back: **195 simple text leaves**, six mobile panes with 390px width, 20 controls declaring minimum 44px height.
+- Visually inspected the desktop, each of the three EN/ZH mobile rows, all three contract rows, the full board overview, new Readme note and original source-owner section. Final retained-reading row was re-rendered after wording/contrast refinement; no clipping was observed.
+- Three light-theme status labels use the existing `--mx-light-ink-warn` text token. Calculated text/background contrast for those specified colors increased from 3.19:1 to 5.58:1. This is a bounded color check, not a claim of whole-product accessibility acceptance.
+- Reasoning-only semantic review found and resolved the not-requested qualification and retry-eligibility conditions, plus Chinese wording that otherwise implied temporary recovery.
+- Native screenshots/JSX are design evidence. No application test, hosted browser proof, deployment, source write, account effect or market action is claimed.
+
+All mutations remained on the Mastermind Paper carrier and returned `APPLIED_RESPONSE_OBSERVED`. Stable operation IDs:
+
+- `paper-portfolio-20261108-heatmap-inspector-page-01`
+- `paper-portfolio-20261108-heatmap-inspector-board-01`
+- `paper-portfolio-20261108-heatmap-inspector-composition-01`
+- `paper-portfolio-20261108-heatmap-inspector-names-01`
+- `paper-portfolio-20261108-heatmap-owner-copy-01`
+- `paper-portfolio-20261108-heatmap-readme-note-01`
+- `paper-portfolio-20261108-heatmap-readme-note-position-01`
+- `paper-portfolio-20261108-heatmap-semantic-refinement-01`
+- `paper-portfolio-20261108-heatmap-finish-01`
+- `paper-portfolio-20261108-heatmap-status-clarity-01`
+- `paper-portfolio-20261108-heatmap-finish-status-02`
+
+The initial clone response was reconciled from its original result before further work; no duplicate replay occurred. Scoped finish first released only `22UK-0` and `N71-1`; the subsequent status refinement was followed by a second finish for `22UK-0` only. Disjoint concurrent writers and prior Options/Company work were preserved.
+
+### Remaining proof and next foreground
+
+Implementation remains proposed. Runtime proof owed: select → refresh agreement; finite zero; omitted/null MU with successful peers; MU outside requested set; failed chunk; out-of-order completion; present manifest record with invalid metric fields; filtering/pruning; close while pending; access-context change at its actual owner; keyboard focus return and EN/ZH behavior.
+
+No permission to modify the held `marketHeatmap.ts`, `recoveredHeatmapThemes.json` or `heatmapStrings.ts` is inferred. No held F03 original, source restriction, PR hold or release control changed.
+
+This phase is complete as native design and source-owner clarification. The continuing mission immediately advances to a bounded Mastermind AI draft-context audit. Early source inspection identifies a possible gap between explicit context acceptance and a sticky draft-detected @mention; this is not yet a completed repair or a runtime finding.
