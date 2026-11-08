@@ -12,6 +12,11 @@ ROOT=Path(__file__).resolve().parents[1]
     'control_plane/protected_memory_evaluation_source.py',
     'control_plane/protected_memory_evaluation_execution.py',
     'integrations/mastermind_executive_app/coo.py',
+    'ops/native_fabric/provider_plans/memory118/native_owner/artifact_delivery.py',
+    'ops/native_fabric/provider_plans/memory118/native_owner/fabric_task.py',
+    'ops/native_fabric/provider_plans/memory118/native_owner/lease_broker.py',
+    'ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py',
+    'ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py',
 ])
 def test_exact_evaluation_site_boundaries(name,monkeypatch):
     source=(ROOT/name).read_text();record=REVIEWED_FILES[name]
