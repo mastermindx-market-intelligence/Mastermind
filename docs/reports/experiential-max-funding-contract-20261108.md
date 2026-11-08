@@ -85,3 +85,22 @@ The sidecar source profiles and publication authority are unchanged.
 After integrating the concurrent protected changes, all 197 focused tests passed,
 including the fixed-parent router, maintenance-guard and sparse Git qualifications.
 Their original hash and behavioral assertions remain enforced.
+
+
+## CI composition repair
+
+Required CI exposed the paired application test's explicit gateway Git-blob pin.
+The pin now identifies the corrected gateway bytes, and the paired test executes
+that actual source against CI's exact Macro owner commit. All 46 inference
+composition cases passed, followed by eight buffered-delivery, five native-text,
+and 24 translation composition cases. Browser qualification remains with the
+required hosted job; no local browser result is claimed here.
+
+The historical overlay fixture failures above are also resolved. A test-only
+75-member map was derived from the original protected release and verified
+against its unchanged content seal. Every original member remains byte-identical
+in current source; the three later auxiliary files are outside that old release.
+Tests now reconstruct the exact sealed parent before invoking the unchanged
+production composer. All 53 historical bridge cases passed, including the
+existing tampered-tree and moved-head refusals. No release manifest, production
+CAS gate or runtime payload changed in this repair.
