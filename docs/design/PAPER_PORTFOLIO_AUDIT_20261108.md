@@ -1646,3 +1646,38 @@ Remaining implementation proof is specific: exact cross-app navigation binding a
 **Continue the parent mission:** publish qualified D22 and D25 proposal discovery into the existing F03 source directory, using current exact Paper readback and note-first source publication. Preserve its original warned canvas, frozen census, prior exact returns and all product release holds. This is the next safe phase, not a task-completion or stopping checkpoint.
 
 Artifact-byte qualification: the GitHub text-only connector rejects JPEG decoding. The exact native JPEG and JSX bytes were independently hashed with the Git blob header; all ten computed object IDs match the created blob receipts. Canonical path-to-blob identities are read back after publication. Text bodies are compared exactly; no decoded JPEG body readback is claimed.
+
+## Continuation — F03 portfolio and Guide discovery, 2026-11-08
+
+### Delivered source improvement
+
+The existing F03 directory now carries fourteen immutable return observations. D22 points to Terminal `01M3NSZGE8JWN2EZCSF0DT05RM / p-1F-0 / 261Q-0`; D25 points to Guide `01M32XYWDYSFTNDZVJKQ5QHT33 / p-8-0 / 44J-0`. Both are bounded, unqualified proposals. D22 supplementary `26NL-0` and Guide directory `37N-0` are not full Read me entries; all four Read me fields and retained-original URLs remain null. Draft RIG, null receipts, null foundation versions and null observed product PR heads remain explicit.
+
+Short IDs and exact file/page/board tuples work in Assignments and Paper references. A reproduced inconsistency in semantic search is fixed through the existing `returnSearchText` and `returnedRefText` helpers: both views now index source status and labels. Queries such as “personal holdings”, “provisional valuation”, “guide return” and “horizon wording” find their intended proposals. Escaped, language-marked proposal labels now appear beneath broad result titles, explaining why each result matched. No new index, route registry, state owner or board-focus promise was introduced.
+
+### Publication and exact readback
+
+Repository: `mastermindx-market-intelligence/macro`; owned existing branch: `design/f03-paper-directory-20261102-c2`; subtree: `research/design_candidates/production_design_20261102/f03/`.
+
+| Phase | Actual immutable commit | Evidence |
+| --- | --- | --- |
+| Observation publication before curation | `aca1d87854bfc643f5a01f0892b383ebc8baf6d6` | Two notes, exact native metadata, prior-twelve baseline, Guide JSX and four original native JPEG captures. Text exact readback and all artifact path/blob identities verified before curation. |
+| Directory integration and search clarity | `9be3e7a68722b9a738ddd8d78c0eb920330e6c7b` | Sixteen changed files; every UTF-8 body and Git blob matched exact readback. Branch head matched the committed head. CAS advanced only from the observation-publication head. |
+
+D22 observation-note blob: `80885356c954fbec76004478fee8c9ce1b61a30d`. D25 note: `1dda08732c4b614bb37f270e229cbf55492a497a`. Current curation: `9d7b4b3677f28a981e578602d4649cb76fcbdf7c`; generated directory: `2b6d68815d25d4496f88c4ee46258098bd5f50fc`; source behavior record: `b1ecbecb09c2123a360ecae04c89da382ce8b477`; verification receipt: `fa5d85c8f3f471c65324ff60ee2c1cb2980bc3ec`; active manifest: `990da65ac82ec05d0696c0b3913b8e4d2468d826`.
+
+[Behavior and scope](https://github.com/mastermindx-market-intelligence/macro/blob/9be3e7a68722b9a738ddd8d78c0eb920330e6c7b/research/design_candidates/production_design_20261102/f03/evidence/portfolio-guide-reference-discovery-20261108.md) and [verification receipt](https://github.com/mastermindx-market-intelligence/macro/blob/9be3e7a68722b9a738ddd8d78c0eb920330e6c7b/research/design_candidates/production_design_20261102/f03/evidence/portfolio-guide-reference-discovery-verification-20261108.json) retain actual commands and results.
+
+### Verification and preservation
+
+**191 return/identity checks, 98 directory source-logic probes and 26 structural-evidence checks PASS.** The new semantic-query assertion checks the correct assignment destination rather than inventing an exact-board label for every summary card; separate exact-ID, wrong-file/page, containing-page, bilingual, null-role and History/Back tests remain intact. An escaped-markup falsifier covers the new visible source labels. The generated inline script equals its source. A bounded non-author reasoning review found no must-fix; its useful result-label suggestion was implemented and checked, without treating review as a mandatory gate.
+
+The prior twelve return objects, source pins and timestamps are exact. Only D22/D25 assignment rows changed, and provenance adds exactly those two observations. All 36 non-evidence assignment identities, nine frozen artifacts, 348 routes, nine null-ID deltas, 301 NOT_DISPATCHED rows, 2,450 original boards, 144 APPLIED/zero unresolved original F03 operations, 106 structural observations, prior captures and historical root manifest remain preserved. The active manifest has 302 entries, preserving 287 unaffected records from the 300-entry observation phase; assets not re-downloaded remain preserved by the existing base tree and unchanged records.
+
+This F03 phase made zero Paper edits and zero product-runtime calls. Browser interaction remains UNVERIFIED at the recorded loopback-preview transport boundary; no alternate carrier, guessed host, hosted deployment or unchanged retry was used. Source checks and source publication are not hosted CI, runtime consumer acceptance, full-domain delivery, native RIG or release.
+
+### Reassessment and immediate next work
+
+The continuing audit identified a bounded D23 handoff gap. The current original pointer `01M2WGNCX9475G79JRKJTCM08P / p-1T-0 / 74YE-0` identifies standalone Watchlists/Save States `01M6Y309YH7PJZMF23R7EDH3CM / p-1-0`. Its successful receipt `L3-0` names AI research / NVDA but offers Done and Undo without a qualified action to that list. Existing save/failure/uncertainty/undo/access specimens remain accepted and will be preserved. The current Monitor reference is Shared Shell `01M6Y2GT8S3YP4TK052PPESZEC / p-2-0 / 1O0-0`.
+
+Next: inspect the existing save caller, list identity and Monitor owner at the current Terminal source pin; then implement a disjoint native study for confirmed-save-to-exact-membership navigation. Preserve account/list/symbol identity, current-state-versus-past-receipt meaning, renamed/missing list states and original recovery work. Do not assume that a generic /monitor link restores a selected membership. The warned original remains no-modify, and all existing product/organization/release holds remain unchanged. No checkpoint-only stop is requested or required.
