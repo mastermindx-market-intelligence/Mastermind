@@ -238,3 +238,12 @@ Current foreground phases:
 Principal does visual composition and guarded Paper edits for **PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD / UNIQUE_APPROVED_ACCESS**. Three native children supply bounded architecture/critique reasoning only (Memory source, Options context, Prophet workflow); none is a canvas/source writer or substitute implementation worker. Existing Paper carrier and tool-scoped schema are requalified; no effect is uncertain.
 
 Proposed Options detail states use only facts already visible in the original atlas: AAPL opened at 2 of 10 on 16 Oct; current list 3 of 11 on 17 Oct; previous/next NVDA/AMD versus AVGO/NVDA. The source hash/order may differ, but a count difference does not establish which members were added/removed. The inspection must say exactly what is known and retain the current list for stepping.
+
+
+### Options decision corrected by verified implementation evidence
+
+Verified Terminal `mastermindx-market-intelligence/mastermind-terminal` protected master `d7a83d3348a4fcb762d93221f19c4e94cbe4505e`: `terminal/lib/exposureOrigin.ts`, `ExposureOriginStrip.tsx` and `useExposureOriginRoster.ts`. The current app only permits stepping for `roster.state === "exact"`; changed lists are paused. The original Paper automatic-current-list statement is a design/implementation mismatch, not shipped behavior.
+
+The next atlas revision therefore preserves paused stepping and adds a proposed explicit **Use current list** recovery, after a read-only review. The review uses only retained origin index/count/date and qualified current index/count/date. Earlier neighbors and full old membership are not retained in origin v1 and will not be fabricated. A missing current hash is unverified, not definitive evidence of membership change.
+
+The proposed action stays in the existing origin owner: coherent index/count/asOf/hash update for the same selected company, validated existing returnHref preserved, 1–500 count and 1024 encoded-envelope budgets retained, chart/hash/lens/strike unchanged. No new roster reader/cache/control plane or automatic adoption. Company-absent, missing-hash, unavailable and loading states do not offer adoption. This evidence changes the earlier provisional “current-list stepping” idea; the original selection/return purpose is preserved.
