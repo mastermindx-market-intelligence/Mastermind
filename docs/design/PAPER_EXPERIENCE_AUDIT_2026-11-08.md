@@ -341,3 +341,43 @@ On the existing [Portfolio builder page](https://app.paper.design/file/01M3NSZGE
 - A trial insertion into the fixed-height acceptance board clipped its lower section. The new reference panel was moved to the adjacent board; the full original acceptance board was then re-read and screenshot-verified without clipping. The reference controls are visual Paper destination references; their href was not retained in JSX, so working prototype navigation is not claimed.
 
 Root inspected the two retention cards, removal row, full extended Targets atlas, source-census block, reference panel and final complete acceptance board. Native JSX verified eligibility, all four removal states and owner/return requirements. `portfolio-design-continuation-finish-01` finished exactly `1L19-0`, `1L4E-0`, `1ZLS-0` and `1ZET-0`. All associated operation responses were observed applied. No product implementation, target mutation or account change occurred. Continued work moves to two source-backed News corrections and the next GMI recovery-state differences.
+
+
+## Continuation: News recovery, evidence order and Chinese access clarity
+
+On the existing [News state reference](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-1-0), P4 unavailable specimen `ZD-0` had no Retry and retained the obsolete annotation “no retry theatre.” The current R2 specification explicitly overrules that note, and the current Terminal consumer still renders Retry for unavailable while withholding it for restricted access.
+
+- Replaced annotation `ZF-0` with “No snapshot · strip hidden · retry the current request in place.”
+- Added one native bilingual Retry / 重试 specimen, `2RF-0`, inside `ZL-0`, with a 44px minimum target.
+- Updated restricted-state Chinese node `VZ-0` to the current consumer’s explicit access wording, 此账户或新闻源暂无新闻访问权限。 Its geometry and no-Retry distinction remain intact.
+- The degraded Chinese text `XN-0` was already correct on fresh read and was preserved.
+
+On the [R3 News rail](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-2-0), expanded story evidence `2A6-0` now follows the current consumer and R3 contract: clocks `2A7-0`, provisional-group note `2RI-0`, member reports `2AJ-0`, then Show 1 more report `2AQ-0`. The qualification was natively cloned from the existing builder text `2AI-0`; that source remains in place. Its copy is “Provisional event group. Compare transaction, stage and valuation basis in the original reports.” Published, Updated and Received clocks remain distinct, and both original publisher/title identities remain unchanged.
+
+The complete rail still has exactly three eligible row-level Mark reviewed controls. The reviewed and ordinary rows remain without enabled actions. Current scope-unverified wording, comparison question, claim-comparison board, saved-story/current-read recovery additions and count-detail return amendment were not edited. No NEXT CHECK was added to the live Comparison limited row; R3 explicitly excludes it.
+
+Sources:
+- [R2 specification](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/research/product_intelligence_local_delivery/NEWS_INTELLIGENCE_RAIL_R2_SPEC_2026-10-22.md), blob `97d4dddfc96045223bb89c356f893db6f0a8c90f`.
+- [R3 specification](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md), blob `129b9b8991b8359a1c27f7402c92f1a51ca7977b`.
+- [Current TickerNewsPanel consumer](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/news/TickerNewsPanel.tsx), blob `0b0facb3839e84d54ddbf99937c74283479c120c`, independently confirms unavailable-only Retry, Chinese access copy, and clocks → group note → members.
+
+Root reviewed focused unavailable and expanded-story screenshots, the entire R3 rail, the entire state board and the changed Chinese text. JSX confirmed the evidence order and all three eligible review actions. `news-recovery-evidence-finish-01` finished only `ZD-0`, `2A6-0` and `VZ-0`. The Paper changes illustrate the existing recovery and disclosure owner; no new retry queue, request lifecycle, save behavior or runtime proof was introduced.
+
+## Continuation: GMI recovery and permitted research paths
+
+Fresh GMI inspection confirmed that the earlier company→theme return, exact-context storyboard `71U-0` and source bridge `73G-0` were already present. Those accepted design repairs were not repeated. The next exact targets were four neighboring recovery-state cards on [Foundations · Tokens & state reference](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0):
+
+| State | Noir / Day card | Change |
+| --- | --- | --- |
+| Failed read with retained view | `5OX-0` / `5Z2-0` | The visible label and reference note explicitly require a retained usable view. Copy preserves that view’s original source dates and limitations. Existing 44px actions now read Open full index, targeting the existing `gmi-index.html` route. |
+| Use restricted to research | `5PC-0` / `5YN-0` | Heading Limited to research use; theme map and coverage remain available. Removed the unsupported assertion that the link was reviewed. Existing 44px actions now read Open theme map, targeting `gmi.html`. The footnote preserves the graph-use restriction. |
+
+This distinction follows the current owner. `templates/gmi.js` is presentation-only and owns no network or storage; the noindex state template includes a visual Retry specimen, but the concrete generated index route already exists. The updated Paper variant therefore does not advertise an unbound retry controller. An initial load with no retained view must use the existing incomplete-payload/full-index recovery; it cannot inherit this variant’s previous-view claim. A future Retry variant requires an actually bound request owner, without adding another fetch lifecycle.
+
+Sources at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`:
+- [GMI interactions](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/gmi.js), blob `74eff5ef5cb93ddac8693ff4e621a6c5971c4e51`.
+- [GMI state reference template](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/gmi_states.html.j2), blob `f6640741373b273758c245d2f8d5c93433cd58d6`.
+- [Existing generated routes](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/scripts/build_gmi_explorer.py), blob `510da4a5ba52e86abd50a1ee358708a447a60b02`.
+- [GMI state matrix](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/mockups/refs/gmi_explorer/SPECS.md), blob `3a5341d7e8416dc75a97c9e1e4814dabb226f88a`.
+
+Sixteen text nodes were updated with all four native card structures, icons, 44px controls and theme tokens preserved. Root checked all four rendered cards and read back their JSX. `gmi-recovery-states-finish-01` finished exactly those four cards. All News and GMI mutation receipts were observed applied. These changes align editable design states with existing source meanings and routes; browser binding, release and production acceptance are not claimed.
