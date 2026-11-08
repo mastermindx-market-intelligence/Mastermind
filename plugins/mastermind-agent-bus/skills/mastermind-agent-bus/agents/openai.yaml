@@ -1,3 +1,0 @@
-interface:
-  display_name: "Mastermind Agent Bus"
-  short_description: "Message enrolled Hermes bots and read canonical replies"
