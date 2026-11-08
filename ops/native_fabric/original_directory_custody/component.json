@@ -1,6 +1,6 @@
 {
   "admission_issued": false,
-  "control_dependency": "Actual incumbent native owner registration must verify existing scoped OS/tool action permission, original metadata/source/namespace and same SSH account; reserve existing exclusive durable diagnostic intent and rejoin before/after transport. No such runtime registration/grant exists in this source proposal.",
+  "control_dependency": "Concrete private factory/carrier/exclusive-intent source wiring implemented; genuine native-tool scoped permission/account-UID export unsupported/default-deny. No CLI/runtime registration, remote or original collection effect.",
   "directory_scope": "Account pwd-derived full chain ending lanes/ext/lanes; no artifact or original result file leaves.",
   "existing_dependency_sources": {
     "artifact_delivery.py": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
@@ -16,6 +16,44 @@
   },
   "original_collector_source_sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
   "original_request_metadata_sha256": "1071c59b3cea43fc5ea15399c1d3bdd27ac2cbf52e61bf7309c7d8fc5ddff54f",
+  "owner_wiring": {
+    "default": "REFUSE_BEFORE_METADATA_INTENT_TRANSPORT",
+    "factory": "fabric_task._original_directory_owner_factory",
+    "focused_tests_sha256": "538987038fd9f39ff49898082e74442dec0d3f8e5733d7fef9e3859fb9de5346",
+    "forward_patch_targets": {
+      "protected_proposal_base": {
+        "inputs": {
+          "artifact_delivery.py": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
+          "fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
+        },
+        "outputs": {
+          "artifact_delivery.py": "24cd63ad45723c42779a2110a3e00dffa2390751d590bc593761d3b066702e3e",
+          "fabric_task.py": "b5cdd24121decd391859068971b3fc22e0ae1737161cdccddfd9d233e04b641c"
+        }
+      },
+      "selected40": {
+        "inputs": {
+          "artifact_delivery.py": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
+          "fabric_task.py": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28"
+        },
+        "outputs": {
+          "artifact_delivery.py": "24cd63ad45723c42779a2110a3e00dffa2390751d590bc593761d3b066702e3e",
+          "fabric_task.py": "d8304a939ba55a3937c20a2c7768cd040548ff4df666421a159fa0ed71223487"
+        }
+      }
+    },
+    "host_permission_interface": "NativeMetadataPermissionSource(open_permission,current,binding)",
+    "permission_issued": false,
+    "runtime_registered": false,
+    "schema": "mastermind.original_directory_owner_wiring_source_proposal.v1",
+    "sources": {
+      "OWNER_WIRING.md": "e223f25968e95b21f3e2eb8702e062242029877925016f1e0c13ffced6f7452b",
+      "owner-registration.forward.patch": "5b9a83a1da8d2c5c039142dac40392025562ab0d588283e071eba519d3f8a9bd",
+      "owner.py": "87d76a6e6a2230361bc579a4d5ade8fe926ce868495f3fcd74bb96ab19f394aa",
+      "reader.py": "aafbb2c0c01e95a1b49c6f0497ce8776d815435e1561e8b6ebd7b605cc553892"
+    },
+    "status": "SOURCE_WIRING_IMPLEMENTED_NATIVE_PERMISSION_EXPORT_UNSUPPORTED"
+  },
   "registration_installed": false,
   "remote_effects": false,
   "schema": "mastermind.original_directory_custody_source_proposal.v1",
