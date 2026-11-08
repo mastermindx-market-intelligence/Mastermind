@@ -29,6 +29,8 @@ def compose(base, output, *, profile_name="provider-plans"):
         profile_root = HERE / "maintenance_guard"
     elif profile_name == "current116-remote-placement":
         profile_root = HERE / "remote_placement"
+    elif profile_name == "current116-terminal-diagnostics":
+        profile_root = HERE / "terminal_diagnostics" / "current40"
     else:
         raise ValueError("unknown native source profile")
     profile = json.loads((profile_root / "profile.json").read_text())
@@ -75,7 +77,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--profile", choices=("provider-plans", "current116-maintenance-guard", "current116-remote-placement"),
+    parser.add_argument("--profile", choices=("provider-plans", "current116-maintenance-guard", "current116-remote-placement", "current116-terminal-diagnostics"),
                         default="provider-plans")
     args = parser.parse_args()
     print(json.dumps(compose(args.base, args.output, profile_name=args.profile), sort_keys=True))
