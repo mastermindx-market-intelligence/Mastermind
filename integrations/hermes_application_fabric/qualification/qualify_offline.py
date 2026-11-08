@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 
-OWNER_COMMIT = "9eb5cb6b28b510ea9e2bf05ae9040528523339df"
+OWNER_COMMIT = "25ba92bb52120fae550b54c29f82929c0b77d37b"
 OWNER_SHA256 = "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e"
 
 
@@ -59,11 +59,12 @@ def main():
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         print(json.dumps({"mode": "offline-original-client-loopback-fixture",
             "owner": OWNER_COMMIT, "owner_client_sha256": OWNER_SHA256,
+            "owner_verification_scope": "client_bytes_only",
             "python": sys.version.split()[0], "jsonschema": validator,
             "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),
             "blocked_external_connections": len(blocked), "live_provider_acceptance": False}, sort_keys=True))
-        return 0 if result.wasSuccessful() and result.testsRun == 54 and not result.skipped and not blocked else 1
+        return 0 if result.wasSuccessful() and result.testsRun == 68 and not result.skipped and not blocked else 1
 
 
 if __name__ == "__main__":

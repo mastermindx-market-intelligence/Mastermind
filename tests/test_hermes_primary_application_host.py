@@ -23,6 +23,7 @@ from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.secrets import Secrets
 from integrations.hermes_runtime import native_session_control as control
 from integrations.hermes_runtime import tcp_sandbox
+from integrations.hermes_runtime.tests.test_operator_native_enrollment import enrollment_command
 
 
 def document(role="mmsecretary"):
@@ -351,3 +352,81 @@ def test_new_admission_after_original_proven_close_preserves_native_owner(monkey
         assert successor.admission_id == "next-admission" and successor.binding is None
         assert case.cap.binding is original
     asyncio.run(check())
+
+
+def test_accepted_primary_profile_refuses_mixed_eval_before_credentials(tmp_path, monkeypatch):
+    from integrations.hermes_runtime.tests.test_native_eval_inputs import selected_recipe
+    from dataclasses import replace
+    from integrations.hermes_harness.stack import compose_profile
+    from integrations.hermes_runtime import install as installer
+    from integrations.hermes_runtime.profile import dump_profile
+
+    _, recipe, _ = selected_recipe()
+    selected = replace(compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
+        secrets_file=tmp_path / "unread-secrets.env"),
+        model_provider="mastermind-fabric", native_provider_id=None,
+        gateway_backend="native-session-authority")
+    path = tmp_path / "primary-profile.yaml"
+    path.write_text(dump_profile(selected))
+    monkeypatch.setattr(installer, "load_secrets",
+        lambda *a, **kw: pytest.fail("unsupported profile reached credentials"))
+    with pytest.raises(RuntimeRefusal) as refused:
+        installer.install(profile_path=path, state_dir=selected.state_dir,
+            systemd_user_dir=tmp_path / "uncreated-units", secrets_file=selected.secrets_file,
+            hermes_bin=tmp_path / "unread-launcher", upstream_source=Path(recipe["vendor_root"]),
+            native_installation=recipe)
+    # The APPLICATION composition accepts the primary profile. Its explicit
+    # mixed-EVAL guard must still refuse before any credential or state access.
+    assert refused.value.code == "NATIVE_EVAL_INPUTS_UNQUALIFIED"
+    assert not selected.state_dir.exists()
+
+
+@pytest.mark.parametrize("application_profile,with_primary", [(True, False), (True, True), (False, True)])
+@pytest.mark.parametrize("empty_inputs", [False, True])
+def test_mixed_eval_config_refuses_before_filesystem_read(
+        tmp_path, monkeypatch, application_profile, with_primary, empty_inputs):
+    from integrations.hermes_runtime.tests.test_native_eval_inputs import selected_recipe
+    from dataclasses import replace
+    from integrations.hermes_harness.stack import compose_profile
+    from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+
+    _, recipe, consumer = selected_recipe()
+    selected = compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
+        secrets_file=tmp_path / "unread-secrets.env")
+    if application_profile:
+        selected = replace(selected, model_provider="mastermind-fabric", native_provider_id=None)
+    primary = {"schema": "unaccepted-primary-fixture"} if with_primary else None
+    evaluation_inputs = {} if empty_inputs else recipe["evaluation_inputs"]
+    with monkeypatch.context() as fence:
+        fence.setattr(Path, "exists", lambda *_: pytest.fail("mixed selection inspected config"))
+        fence.setattr(Path, "is_symlink", lambda *_: pytest.fail("mixed selection inspected config"))
+        with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
+            expected_disabled_mcp(selected, consumer, primary, evaluation_inputs=evaluation_inputs)
+
+
+@pytest.mark.parametrize("with_primary", [False, True])
+def test_shared_enrollment_attaches_tcp_policy_once_before_asyncio(
+    enrollment_command, monkeypatch, capsys, with_primary,
+):
+    import asyncio
+    import json
+    from integrations.hermes_runtime import cli
+    enforce = tcp_sandbox.enforce_role_tcp_ports
+    world = enrollment_command(
+        role="mmmeta", primary_application=document("mmmeta") if with_primary else None)
+    calls = []
+    expected_ports = tcp_sandbox.role_tcp_ports(
+        world.profile, primary_application=world.launch.recipe.get("primary_application"))
+
+    def policy(bind_ports, connect_ports):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        calls.append((bind_ports, connect_ports))
+
+    # Exercise the real launch-aware qualifier; replace only kernel attachment.
+    monkeypatch.setattr(tcp_sandbox, "enforce_role_tcp_ports", enforce)
+    monkeypatch.setattr(tcp_sandbox, "apply_tcp_port_policy", policy)
+    assert cli._enroll_meta_session(world.path, world.binary, native_launch=world.launch) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "ENROLLED"
+    assert calls == [expected_ports]
+    assert world.state.creations == 1 and world.state.qualifications >= 4

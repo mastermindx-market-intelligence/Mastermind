@@ -1,0 +1,28 @@
+{
+  "dependency_overlay": "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages",
+  "interpreter": "/opt/homebrew/bin/python3",
+  "log_sha256": "75ff9d4951fe1ac3ed67846ca30fbf3321202318a63b430e6923daa1a8cccf63",
+  "returncode": 1,
+  "seconds": 51.6,
+  "state": "TESTS_FINISHED",
+  "summary": [
+    {
+      "errors": "0",
+      "failures": "1",
+      "skipped": "27",
+      "tests": "474",
+      "time": "50.050"
+    }
+  ],
+  "tests": [
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py",
+    "tests/integration/test_fabric_translation_composition.py",
+    "tests/test_catalog_native_release_staging.py",
+    "tests/test_fabric_native_security_composition_20261018.py",
+    "tests/test_host_pull_launchd_admission.py",
+    "tests/test_paid_initializer.py",
+    "tests/test_native_pool_policy_publication.py",
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py"
+  ]
+}

@@ -83,11 +83,14 @@ class InstalledClosureTests(unittest.TestCase):
         return bundle.install(source=HERE, control_root=self.control,
                               launcher=self.launcher, expected_bundle_digest=prior)
 
-    def _child(self, code, *args, loader=LOAD, timeout=15, home=None):
+    def _child(self, code, *args, loader=LOAD, timeout=15, home=None, interpreter=None):
+        env = {"HOME": str(home or self.home), "PATH": "/usr/bin:/bin", "LANG": "C"}
+        if "LD_LIBRARY_PATH" in os.environ:
+            env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
         return subprocess.run(
-            [sys.executable, "-I", "-S", "-B", "-c", loader + code,
+            [str(interpreter or sys.executable), "-I", "-S", "-B", "-c", loader + code,
              str(self.control), *map(str, args)],
-            cwd=self.empty, env={"HOME": str(home or self.home), "PATH": "/usr/bin:/bin", "LANG": "C"},
+            cwd=self.empty, env=env,
             capture_output=True, text=True, timeout=timeout,
         )
 

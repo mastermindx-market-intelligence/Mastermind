@@ -76,18 +76,23 @@ def main():
 
     openai.OpenAI, openai.AsyncOpenAI = ForbiddenOpenAI, ForbiddenAsyncOpenAI
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "9eb5cb6b28b510ea9e2bf05ae9040528523339df", "owner_source_verified": True,
+        "owner": "25ba92bb52120fae550b54c29f82929c0b77d37b", "owner_source_verified": True,
+        "owner_verification_scope": "client_bytes_only",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
-    for directory in (package / "tests", package / "qualification"):
-        suite.addTests(unittest.TestLoader().discover(str(directory), pattern="test_*.py"))
+    suite.addTests(unittest.TestLoader().discover(str(package / "tests"), pattern="test_*.py"))
+    # The original unpatched ABI and the attended patched ABI have separate
+    # exact-source jobs. Keep every unpatched case, including attended agent
+    # construction; the gateway extension is exercised by qualify_gateway.py.
+    for pattern in ("test_installed_native.py", "test_native_schema.py", "test_attended_native.py"):
+        suite.addTests(unittest.TestLoader().discover(str(package / "qualification"), pattern=pattern))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({"tests_run": result.testsRun, "failures": len(result.failures),
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and result.testsRun == 69 and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 87 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":
