@@ -76,11 +76,12 @@ class CeoIngressWorkspaceClient:
         from common import workspace_resource_capacity_contract as capacity_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
+        knowledge_context = type(frame) is dict and frame.get("schema") == context_wire.KNOWLEDGE_FRAME_SCHEMA
         discovery_context = type(frame) is dict and frame.get("schema") == context_wire.DISCOVERY_FRAME_SCHEMA
-        current_context = discovery_context or type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
+        current_context = knowledge_context or discovery_context or type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
         context_read = current_context or type(frame) is dict and frame.get("schema") == context_wire.FRAME_SCHEMA
         if context_read:
-            validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+            validator = context_wire.validate_knowledge_frame if knowledge_context else context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
             validator(frame)
             ceiling = context_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
@@ -186,7 +187,7 @@ class CeoIngressWorkspaceClient:
                     if set(value) != {"ok", "result"} or type(value["result"]) is not dict:
                         raise ValueError("source_unavailable")
                     if context_read:
-                        validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
+                        validator = context_wire.validate_knowledge_result if knowledge_context else context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
                         validator(value["result"], expected_context=frame["principal_context"],
                             capability_profile_digest=frame["capability_profile_digest"],
                             **({"expected_workspace_principal": frame["workspace_principal"]} if current_context else {}))

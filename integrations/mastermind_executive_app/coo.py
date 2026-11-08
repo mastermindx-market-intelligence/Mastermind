@@ -65,6 +65,7 @@ class CooAppSettings:
     agentos_context_provider: Callable[..., Mapping[str, Any]] | None = None
     agentos_current_context_provider: Callable[..., Mapping[str, Any]] | None = None
     agentos_discovery_context_provider: Callable[..., Mapping[str, Any]] | None = None
+    agentos_knowledge_context_provider: Callable[..., Mapping[str, Any]] | None = None
 
     def __post_init__(self):
         policy = validate_resource_policy(self.policy)
@@ -84,7 +85,7 @@ class CooAppSettings:
         if not all(callable(x) for x in (self.load_binding, self.authority_provider, self.mission_provider)):
             raise ValueError("COO requires explicit installed binding and canonical fact providers")
         if any(value is not None and not callable(value) for value in
-               (self.catalogue_provider, self.agentos_context_provider, self.agentos_current_context_provider, self.agentos_discovery_context_provider)):
+               (self.catalogue_provider, self.agentos_context_provider, self.agentos_current_context_provider, self.agentos_discovery_context_provider, self.agentos_knowledge_context_provider)):
             raise ValueError("COO context requires explicit installed providers")
         if (self.selected_child_target is not None
                 and type(self.selected_child_target) is not ExecutiveSelectedChildTarget):
@@ -135,7 +136,7 @@ class CooApp:
         self._context_settings = settings
         self._context_callbacks = (settings.load_binding, settings.authority_provider,
                                    settings.catalogue_provider, settings.agentos_context_provider,
-                                   settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)
+                                   settings.agentos_current_context_provider, settings.agentos_discovery_context_provider, settings.agentos_knowledge_context_provider)
         if workspace_app is not None:
             from integrations.executive_mcp.server import AuditedWorkspaceApp
             if type(workspace_app) is not AuditedWorkspaceApp:
@@ -231,7 +232,7 @@ class CooApp:
         if (self.settings is not settings or any(a is not b for a, b in zip(
                 self._context_callbacks, (settings.load_binding, settings.authority_provider,
                                          settings.catalogue_provider, settings.agentos_context_provider,
-                                         settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)))):
+                                         settings.agentos_current_context_provider, settings.agentos_discovery_context_provider, settings.agentos_knowledge_context_provider)))):
             raise ValueError("authority_refused")
 
     async def catalogue(self, principal, stamp, *, work_ref=None):
@@ -243,7 +244,7 @@ class CooApp:
             return wire.LEGACY_CATALOGUE
         value = await _owner_call(provider, principal, *(() if work_ref is None else (work_ref,)))
         self.require_context_current()
-        if (type(value) is not str or value not in {wire.LEGACY_CATALOGUE, wire.CATALOGUE, wire.CURRENT_CATALOGUE, wire.DISCOVERY_CATALOGUE}
+        if (type(value) is not str or value not in {wire.LEGACY_CATALOGUE, wire.CATALOGUE, wire.CURRENT_CATALOGUE, wire.DISCOVERY_CATALOGUE, wire.KNOWLEDGE_CATALOGUE}
                 or self.settings is not settings or settings.catalogue_provider is not provider
                 or not self._policy_current() or self.authorizer.binding_digest(principal) != stamp):
             raise ValueError("authority_refused")
@@ -282,17 +283,17 @@ class CooApp:
         self.require_current_context_auth(authenticated, workspace_authenticated)
         return authenticated, workspace_authenticated
 
-    async def _agentos_context(self, request, authenticated, validated, *, current_data=False, discovery=False):
+    async def _agentos_context(self, request, authenticated, validated, *, current_data=False, discovery=False, knowledge=False):
         from common import coo_agentos_context_contract as wire
         from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
         settings = self.settings
         callbacks = (settings.load_binding, settings.authority_provider,
                      settings.catalogue_provider, settings.agentos_context_provider,
-                     settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)
+                     settings.agentos_current_context_provider, settings.agentos_discovery_context_provider, settings.agentos_knowledge_context_provider)
         principal, stamp = authenticated
         workspace_owner = self._context_workspace_app
-        provider = settings.agentos_discovery_context_provider if discovery else settings.agentos_current_context_provider if current_data else settings.agentos_context_provider
-        catalogue = wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE if current_data else wire.CATALOGUE
+        provider = settings.agentos_knowledge_context_provider if knowledge else settings.agentos_discovery_context_provider if discovery else settings.agentos_current_context_provider if current_data else settings.agentos_context_provider
+        catalogue = wire.KNOWLEDGE_CATALOGUE if knowledge else wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE if current_data else wire.CATALOGUE
         action = wire.CURRENT_ACTION if current_data else wire.ACTION
         tool = wire.CURRENT_TOOL if current_data else wire.TOOL
         def current():
@@ -300,7 +301,7 @@ class CooApp:
             if (self.settings is not settings or any(a is not b for a, b in zip(callbacks,
                     (settings.load_binding, settings.authority_provider,
                      settings.catalogue_provider, settings.agentos_context_provider,
-                     settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)))):
+                     settings.agentos_current_context_provider, settings.agentos_discovery_context_provider, settings.agentos_knowledge_context_provider)))):
                 raise ValueError("authority_refused")
             if current_data:
                 now = settings.executive.clock()
@@ -345,7 +346,7 @@ class CooApp:
             else:
                 data = await _owner_call(provider, principal, context, authority.capability_profile_digest)
             current()
-            validator = wire.validate_discovery_result if discovery else wire.validate_current_result if current_data else wire.validate_result
+            validator = wire.validate_knowledge_result if knowledge else wire.validate_discovery_result if discovery else wire.validate_current_result if current_data else wire.validate_result
             validator(data, expected_context=dataclasses.asdict(context),
                 capability_profile_digest=authority.capability_profile_digest,
                 **({"expected_workspace_principal": workspace_projection} if current_data else {}))
@@ -577,9 +578,9 @@ class CooApp:
         name = request.path_params["tool"]
         from common import coo_agentos_context_contract as context_wire
         from integrations.executive_mcp.coo import validate_coo_context_tool_arguments
-        from common import coo_discovery_contract as discovery_wire
+        from common import coo_project_knowledge_contract as knowledge_wire
         context_tools = (context_wire.TOOL, context_wire.CURRENT_TOOL)
-        extended_tools = (*context_tools, *discovery_wire.TOOLS)
+        extended_tools = (*context_tools, *knowledge_wire.TOOLS)
         if name not in (*COO_TOOL_NAMES, *extended_tools):
             return refused("invalid_input", 404)
         authenticated = await self._auth(request)
@@ -594,7 +595,7 @@ class CooApp:
                          else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return refused(exc.code, 400)
-        if name in discovery_wire.TOOLS:
+        if name in knowledge_wire.TOOLS:
             from .coo_discovery import forward_discovery
             return await forward_discovery(self, request, authenticated, name, validated)
         if name in context_tools:
@@ -604,7 +605,8 @@ class CooApp:
                 return refused()
             return await self._agentos_context(request, authenticated, validated,
                 current_data=name == context_wire.CURRENT_TOOL,
-                discovery=name == context_wire.CURRENT_TOOL and catalogue == context_wire.DISCOVERY_CATALOGUE)
+                discovery=name == context_wire.CURRENT_TOOL and catalogue == context_wire.DISCOVERY_CATALOGUE,
+                knowledge=name == context_wire.CURRENT_TOOL and catalogue == context_wire.KNOWLEDGE_CATALOGUE)
         if name in COO_READ_NAMES:
             try:
                 result = await self._read_gateway.call(name, validated)
@@ -661,11 +663,11 @@ class CooApp:
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
             from common.coo_agentos_context_contract import TOOL as context_tool, CURRENT_TOOL as current_context_tool
-            from common.coo_discovery_contract import TOOLS as discovery_tools
+            from common.coo_project_knowledge_contract import TOOLS as project_tools
             path = scope.get("path", "")
             if (not path.isascii() or scope.get("raw_path") != path.encode("ascii")
                     or scope.get("query_string") or scope.get("method") != "POST"
-                    or path not in {"/v1/tools/" + name for name in (*COO_TOOL_NAMES, context_tool, current_context_tool, *discovery_tools)}):
+                    or path not in {"/v1/tools/" + name for name in (*COO_TOOL_NAMES, context_tool, current_context_tool, *project_tools)}):
                 await refused("invalid_input", 404)(scope, receive, send)
                 return
         await self._bounded(scope, receive, send)

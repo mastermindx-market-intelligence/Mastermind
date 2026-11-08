@@ -427,9 +427,10 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
         owner=owner, profile_id=get_active_profile_name(), source=CONSUMER_PLUGIN_SOURCE,
         plugin_id=CONSUMER_PLUGIN_NAME, publication=publication))
     from common.coo_discovery_contract import TOOLS as discovery_tools
+    from common.coo_project_knowledge_contract import TOOLS as knowledge_tools
     provided = [] if selected_child_publication(publication) is None else ["mmx_delegate"]
     if getattr(publication, "discovery", False):
-        provided.extend(discovery_tools)
+        provided.extend(knowledge_tools if publication.knowledge else discovery_tools)
     manifest = PluginManifest(
         name=CONSUMER_PLUGIN_NAME, version="1.0.0", source=CONSUMER_PLUGIN_SOURCE,
         path=str(package), provides_tools=provided, key=CONSUMER_PLUGIN_NAME)

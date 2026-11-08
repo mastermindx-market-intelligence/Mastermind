@@ -6438,15 +6438,16 @@ class ExecutiveControlService:
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
             from common import coo_agentos_context_contract as context_wire
-            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA, context_wire.KNOWLEDGE_FRAME_SCHEMA}:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
                     return
                 try:
                     parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
+                    knowledge_context = parsed["schema"] == context_wire.KNOWLEDGE_FRAME_SCHEMA
                     discovery_context = parsed["schema"] == context_wire.DISCOVERY_FRAME_SCHEMA
-                    current_context = discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
-                    validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+                    current_context = knowledge_context or discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    validator = context_wire.validate_knowledge_frame if knowledge_context else context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
                     validator(parsed)
                     factory = app_binding.principal_facts_factory
                     runtime = self._require_runtime()
@@ -6474,14 +6475,14 @@ class ExecutiveControlService:
                     data_binding = workspace._canonical_project_data
                     require_context_host_current()
                     from control_plane.workspace_owned_task import await_owned
-                    context_read = provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                    context_read = provider.read_knowledge_agentos_context if knowledge_context else provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
                     result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
                     require_context_host_current()
                     if (provider.source is not source or provider.workspace is not workspace
                             or provider.agentos_context_reader is not context_reader or workspace.runtime is not runtime
                             or workspace._canonical_project_data is not data_binding):
                         raise ValueError("COO context owner changed")
-                    validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                    validator = context_wire.validate_knowledge_result if knowledge_context else context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
                     validator(result, expected_context=parsed["principal_context"],
                         capability_profile_digest=parsed["capability_profile_digest"],
                         **({"expected_workspace_principal": parsed["workspace_principal"]} if current_context else {}))

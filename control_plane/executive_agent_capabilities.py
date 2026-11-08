@@ -103,6 +103,7 @@ HERMES_NATIVE_PRINCIPAL_PROFILE_ID = "principal.hermes-native.executive-coo.v1"
 HERMES_NATIVE_CONTEXT_PROFILE_ID = "principal.hermes-native.executive-coo.context.v1"
 HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID = "principal.hermes-native.executive-coo.current-context.v1"
 HERMES_NATIVE_DISCOVERY_PROFILE_ID = "principal.hermes-native.executive-coo.discovery-correction.v1"
+HERMES_NATIVE_KNOWLEDGE_PROFILE_ID = "principal.hermes-native.executive-coo.project-knowledge.v1"
 # The incumbent principal policy's Executive COO OAuth grant identity and
 # transport contract. Two fixed catalogue alternatives use the same connection
 # name; a profile can resolve only one. The rich-Claude
@@ -113,6 +114,7 @@ PRINCIPAL_COO_MCP_CAPABILITY_ID = "mastermind-executive-coo-v1"
 PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID = "mastermind-executive-coo-context-v1"
 PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID = "mastermind-executive-coo-current-context-v1"
 PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID = "mastermind-executive-coo-discovery-correction-v1"
+PRINCIPAL_COO_KNOWLEDGE_MCP_CAPABILITY_ID = "mastermind-executive-coo-project-knowledge-v1"
 PRINCIPAL_COO_MCP_URL = "https://mcp.mastermind-x.com/mcp/coo"
 # Paid model-only sealed-input extension: exactly one reviewed surface/realm/
 # profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
@@ -1672,6 +1674,7 @@ class ExecutionCapabilityRegistry:
                     PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
                     PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
                     PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_KNOWLEDGE_MCP_CAPABILITY_ID,
                 }
             ):
                 raise CapabilityPolicyError(
@@ -1870,7 +1873,7 @@ class ExecutionCapabilityRegistry:
             )
         context_grants = [mcp_registry[item] for item in (
             PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
-            PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID)
+            PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID, PRINCIPAL_COO_KNOWLEDGE_MCP_CAPABILITY_ID)
             if item in mcp_registry]
         if context_grants:
             # One authenticated connection, with fixed mutually exclusive
@@ -2382,6 +2385,9 @@ class ExecutionCapabilityRegistry:
             if (PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID in mcp_server_ids
                     and profile_id != HERMES_NATIVE_DISCOVERY_PROFILE_ID):
                 raise CapabilityPolicyError("The discovery catalogue requires its exact native principal profile")
+            if (PRINCIPAL_COO_KNOWLEDGE_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != HERMES_NATIVE_KNOWLEDGE_PROFILE_ID):
+                raise CapabilityPolicyError("The project knowledge catalogue requires its exact native principal profile")
             resolved_resources = tuple(
                 resource_registry[item] for item in resource_ids
             )
@@ -2688,7 +2694,8 @@ class ExecutionCapabilityRegistry:
             # surfaces.  Every other surface keeps the incumbent refusal.
             is_oauth_principal_surface = is_claude_principal or is_hermes_native_principal
             hermes_principal_ids = {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
-                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID}
+                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID,
+                                   HERMES_NATIVE_KNOWLEDGE_PROFILE_ID}
             if is_hermes_native_principal and profile_id not in hermes_principal_ids:
                 raise CapabilityPolicyError(
                     "Hermes native principal surface requires its exact reviewed profile id"
@@ -2749,7 +2756,8 @@ class ExecutionCapabilityRegistry:
                 hermes_grant = resolved_mcp[0]
                 expected_grant = {HERMES_NATIVE_CONTEXT_PROFILE_ID: PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
                     HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
-                    HERMES_NATIVE_DISCOVERY_PROFILE_ID: PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID
+                    HERMES_NATIVE_DISCOVERY_PROFILE_ID: PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
+                    HERMES_NATIVE_KNOWLEDGE_PROFILE_ID: PRINCIPAL_COO_KNOWLEDGE_MCP_CAPABILITY_ID
                     }.get(profile_id, PRINCIPAL_COO_MCP_CAPABILITY_ID)
                 if (
                     hermes_grant.capability_id != expected_grant
@@ -2930,9 +2938,11 @@ __all__ = [
     "HERMES_NATIVE_CONTEXT_PROFILE_ID",
     "HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID",
     "HERMES_NATIVE_DISCOVERY_PROFILE_ID",
+    "HERMES_NATIVE_KNOWLEDGE_PROFILE_ID",
     "PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID",
     "PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID",
     "PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_KNOWLEDGE_MCP_CAPABILITY_ID",
     "OAUTH_PRINCIPAL_AUTH_REALM",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",

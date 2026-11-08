@@ -34,8 +34,8 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "14f94ba9fed9378d3d05b6c99f81e5eda23ca0da7d242a81228b0cf16b374017",
-        "ast_sha256": "d3a6f3851c6ec7383739c3ad962c8fdaa8b7710d3668f112d53aeafd24e05745",
+        "source_sha256": "f9c371d3eca6ab1f3572c66d8eea38e663defb06192e77070ff76f2a56283b06",
+        "ast_sha256": "27fcfd5595d71bd938b68546b28427e5ed9297099e71d93942c1d1abe6c164f6",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -80,3 +80,11 @@ REVIEWED_ANCHORS = {
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
+
+# V5 ProjectKnowledge keeps the same App-peer context owner and validates each
+# v3/v4/v5 result with its matching contract. Parent compared the accepted
+# 1890f608 source to this postimage: the complete Company listener AST, all six
+# original Constant tokens and all AST paths/columns are identical. Only the
+# whole-source and enclosing ingress-method digests change; no new literal site
+# or runtime authority is admitted. In-process protocol proof is not socket or
+# installed-service acceptance.

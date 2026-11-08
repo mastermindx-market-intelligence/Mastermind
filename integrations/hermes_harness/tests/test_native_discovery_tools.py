@@ -36,13 +36,14 @@ from tests.test_project_discovery_correction import correction_owner, selection
 from tests.test_workspace_project_git_publisher import env, isolated_git_env
 
 
-def publication_for(o):
+def publication_for(o, *, knowledge=False):
     workspace = principal_frame(o["who"])
     record = dict(workspace, policy_id="discovery-executive-fixture", resource=consumer._CURRENT_PRIMARY_RESOURCE,
         scopes=consumer._CURRENT_PRIMARY_SCOPE.split(), permission_digest="d" * 64)
     document = current_document(record=record, workspace=workspace)
-    document.update(work_ref=o["request"]["work_ref"], schema=consumer.DISCOVERY_CONSUMER_SCHEMA,
-                    tools_schema_digest=consumer.DISCOVERY_TOOLS_SCHEMA_DIGEST)
+    document.update(work_ref=o["request"]["work_ref"],
+        schema=consumer.KNOWLEDGE_CONSUMER_SCHEMA if knowledge else consumer.DISCOVERY_CONSUMER_SCHEMA,
+        tools_schema_digest=consumer.KNOWLEDGE_TOOLS_SCHEMA_DIGEST if knowledge else consumer.DISCOVERY_TOOLS_SCHEMA_DIGEST)
     return consumer.publication_from_document(document), document
 
 
@@ -83,7 +84,7 @@ def native_binding(correction_owner, tmp_path, monkeypatch):
     return build(o, publication, document, registry, manager, ctx)
 
 
-def build(o, publication, document, registry, manager, ctx, *, register=True):
+def build(o, publication, document, registry, manager, ctx, *, register=True, contract=wire):
     loop = _McpLoop()
     session = _Session()
     owner = _Owner(session)
@@ -107,14 +108,15 @@ def build(o, publication, document, registry, manager, ctx, *, register=True):
         enabled=True, error=None, manifest=ctx.manifest)
     slot.load_outcome = "CONTEXT_REGISTERED"
     preview = o["service"].prepare(o["request"], o["who"])
-    selection_value = correction.request_lookup(o["request"])
     args = {"operation": "prepare", "request": o["request"]}
+    author_tool = contract.AUTHOR_TOOL if publication.knowledge else wire.CORRECTION_TOOL
+    selection_value = contract.lookup(author_tool, args)
     def wrapped(tool, value, data):
-        body = wire.result(tool, value, state="OBSERVED", reason="OWNER_RESULT",
+        body = contract.result(tool, value, state="OBSERVED", reason="OWNER_RESULT",
             principal_context=expected_context(publication), capability_profile_digest=publication.capability_profile_digest,
             workspace_principal=consumer.workspace_principal_frame(publication), data=data)
         return sdk.CallToolResult(content=[sdk.TextContent(type="text", text=context.encode(body).decode())], isError=False)
-    session.results = [wrapped(wire.CORRECTION_TOOL, args, preview)]
+    session.results = [wrapped(author_tool, args, preview)]
     result = dict(o=o, publication=publication, document=document, registry=registry, manager=manager, ctx=ctx,
         loop=loop, session=session, owner=owner, state=state, gates=gates, slot=slot, binding=binding,
         registered=registered, args=args, lookup=selection_value, preview=preview, wrapped=wrapped)
