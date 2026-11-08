@@ -94,12 +94,6 @@ def install(
             native = _hermes_native_gateway(native_installation, role=profile.role)
         except (ReleaseManifestError, TypeError, ValueError):
             raise RuntimeRefusal("NATIVE_INSTALLATION_REQUIRED") from None
-        if profile.model_provider == "mastermind-fabric" and native.get("primary_application") is None:
-            # Native application profile without a primary application selection:
-            # the public parser defers this refusal to install time (the native
-            # parser admits application profiles without native_provider_id), so
-            # refuse here with the model-selection codes master's parser uses.
-            raise RuntimeRefusal("NATIVE_GATEWAY_MODEL_SELECTION_REQUIRED,UNQUALIFIED_MODEL_ROUTE")
         if native.get("evaluation_inputs") is not None and (
                 native.get("primary_application") is not None
                 or profile.model_provider == "mastermind-fabric"):
@@ -107,6 +101,12 @@ def install(
         if (fetch or upstream_source is None
                 or upstream_source.resolve() != Path(native["vendor_root"])):
             raise RuntimeRefusal("NATIVE_VENDOR_SELECTION_MISMATCH")
+        if profile.model_provider == "mastermind-fabric" and native.get("primary_application") is None:
+            # Native application profile without a primary application selection:
+            # the public parser defers this refusal to install time (the native
+            # parser admits application profiles without native_provider_id), so
+            # refuse here with the model-selection codes master's parser uses.
+            raise RuntimeRefusal("NATIVE_GATEWAY_MODEL_SELECTION_REQUIRED,UNQUALIFIED_MODEL_ROUTE")
     elif native_installation is not None:
         raise RuntimeRefusal("NATIVE_INSTALLATION_NOT_SELECTED")
     _assert_secrets_outside_state(profile.secrets_file, state_dir)

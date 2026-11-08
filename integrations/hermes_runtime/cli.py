@@ -280,7 +280,7 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
     from .system_service import assert_root_service_cgroup, assert_role_network_profile
     from .role_isolation import assert_role_credential_isolation
     from .tcp_sandbox import enforce_role_tcp_ports
-    from .supervisor import expected_disabled_mcp
+    from .supervisor import expected_disabled_mcp, expected_disabled_mcp_with_application
     from .profile import dump_profile
     from ops.executive_os.hermes_role_metadata_observer import (
         _HeldRoleQualification, _query_fixed_pid1, _boot_id,
@@ -316,10 +316,14 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
         assert_root_service_cgroup(current.role)
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
-        primary = native_launch.recipe.get("primary_application")
-        enforce_role_tcp_ports(current, **({"native_launch": native_launch} if primary is not None else {}))
-        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"), primary,
+        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"),
                               evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
+        primary = native_launch.recipe.get("primary_application")
+        if primary is not None:
+            enforce_role_tcp_ports(current, native_launch=native_launch)
+            expected_disabled_mcp_with_application(current, native_launch.recipe.get("executive_consumer"),
+                                                   primary_application=primary,
+                                                   evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
 
     qualify_profile()
     # Landlock attaches once while this entry is still single-threaded and
