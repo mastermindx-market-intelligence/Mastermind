@@ -25,12 +25,14 @@ function source(name) {
  return text;
 }
 const cap = {schema:'mastermind.web_sol_transport_capabilities.v1',protocol_major:1,
- package_version:'0.2.0',roles:['client','extension'],actions:['FOREGROUND','INSPECT','TYPED_REENTRY'],
+ package_version:'0.3.0',roles:['client','extension'],actions:['FOREGROUND','INSPECT','TYPED_REENTRY'],
+ browser_actions:['status','tabs','snapshot','screenshot','diagnostics','click','fill','select','press','scroll',
+ 'open','navigate','reload','back','forward','close','focus'].sort(),
  schemas:['mastermind.web_sol_surface_action.v1','mastermind.web_sol_transport_hello_ack.v1',
  'mastermind.web_sol_transport_hello.v1','mastermind.web_sol_instance_config.v1',
  'mastermind.web_sol_surface_probe.v1','mastermind.web_sol_surface_receipt.v1',
  'mastermind.web_sol_census_request.v1','mastermind.web_sol_census_receipt.v1',
- 'mastermind.web_sol_census_table.v1'].sort()};
+ 'mastermind.web_sol_census_table.v1','mastermind.web_sol_browser_request.v1','mastermind.web_sol_browser_receipt.v1'].sort()};
 const DIGEST = createHash('sha256').update(JSON.stringify(cap,Object.keys(cap).sort())).digest('hex');
 const tick = () => new Promise(r=>setImmediate(r));
 function delayedCrypto(delayMs) {
@@ -67,7 +69,7 @@ function harness({count=1, queryFailure=false, pending=false, instance=INSTANCE,
  },onUpdated:emitter(),onRemoved:emitter()};
  const config={schema:'mastermind.web_sol_instance_config.v1',instanceId:instance,
  nativeHost:'com.mastermind.web_sol_surface.'+instance.slice(0,24),protocolMajor:1,
- clientPackageVersion:'0.2.0',nativePackageVersion:'0.2.0',extensionPackageVersion:'0.2.0',capabilityDigest:DIGEST,...configPatch};
+ clientPackageVersion:'0.3.0',nativePackageVersion:'0.3.0',extensionPackageVersion:'0.3.0',capabilityDigest:DIGEST,...configPatch};
  const runtime={id:ID,getURL:p=>'chrome-extension://'+ID+'/'+p,onMessage:events,
  connectNative(){const port={messages:[],onMessage:emitter(),onDisconnect:emitter(),
  postMessage:x=>{port.messages.push(plain(x));if(postNative)postNative(x);},disconnect:()=>port.onDisconnect.fire()};ports.push(port);return port;}};

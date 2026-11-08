@@ -1071,12 +1071,12 @@ _MAX_WALK_ENTRIES = 8192
 # assets (install.sh stage_sealed_release), so its entry count tracks the
 # repository: about 9,800 tree entries on master when this bound was set, already
 # past the 8,192 runtime-walk bound above. Bound the release walk on its own.
-# The same install.sh step runs release_manifest.py create/verify on the release,
-# and that reader refuses a manifest over 16,384 entries, so no staged release can
-# exceed it; keep the two equal rather than advertise headroom no reader accepts.
-# Measured cost of this walk is ~0.13 ms/entry hashed and ~0.04 ms/entry for the
-# drift recheck, so a full bound stays far inside _SERVICE_BUDGET_SECONDS; a slower
-# host still fails closed on that budget.
+# This deliberate ceiling matches the 16,384-entry limit enforced by
+# release_manifest.py's Linux _HeldReleaseSources consumer. General manifest
+# create/verify do not impose that count; staging alone does not prove it.
+# Author-reported warm-cache observations were ~0.13 ms/entry hashed and ~0.04
+# ms/entry for the drift recheck. They do not qualify a cold/root host or imply
+# a guaranteed deadline; the unchanged service budget still fails closed.
 _MAX_RELEASE_ENTRIES = 16384
 _MAX_NAME_BYTES = 255
 _SERVICE_BUDGET_SECONDS = 25.0
