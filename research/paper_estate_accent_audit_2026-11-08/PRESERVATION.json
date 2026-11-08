@@ -1,0 +1,1131 @@
+{
+  "schema": "PAPER_NATIVE_PRESERVATION_AND_RECONCILIATION_V1",
+  "principle": "Native full-target backup before HTML replacement. Reconcile each partial effect, verify content/styles/order/visibility, and clear only root-owned copies. No standalone node deletion or held update_styles used.",
+  "ownHiddenRoot31R": {
+    "type": "root-only-opacity-zero",
+    "sourceCase": "31R-0",
+    "sourceCount": 16,
+    "newRoot": "267I-0",
+    "stylesContentGeometryPreserved": true,
+    "emptyTemplate": "269U-0",
+    "backupDispositionVerified": true,
+    "scope": "Explicit own opacity zero; no hidden descendants; exact fresh source and full post-read parity still required.",
+    "verification": {
+      "nodeCount": 16,
+      "allOtherStylesTextOrderAndGeometryPreserved": true,
+      "ownOpacity": "0",
+      "currentRoot": "267I-0",
+      "raw": "(\n    <div id=\"267I-0\" style={{ backgroundColor: '#14181DF0', borderColor: '#29333D', borderRadius: '9px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', fontSize: '12px', fontSynthesis: 'none', gap: '6px', height: '94px', left: '60px', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', opacity: '0', overflowWrap: 'anywhere', paddingBlock: '12px', paddingInline: '13px', position: 'absolute', top: '446px', WebkitFontSmoothing: 'antialiased', width: '253px' }}>\n      <div id=\"267J-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex' }}>\n        <div id=\"267K-0\" style={{ boxSizing: 'border-box', color: '#8E98A6', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '10.5px', lineHeight: '14px' }}>\n          Revenue growth\n        </div>\n        <div id=\"267L-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"267M-0\" style={{ boxSizing: 'border-box', color: '#647082', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9px', lineHeight: '12px' }}>\n          YoY\n        </div>\n      </div>\n      <div id=\"267N-0\" style={{ alignItems: 'end', boxSizing: 'border-box', display: 'flex', gap: '9px' }}>\n        <div id=\"267O-0\" style={{ boxSizing: 'border-box', color: '#E1E6EC', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontWeight: 700, lineHeight: '26px' }}>\n          85.0%\n        </div>\n        <div id=\"267P-0\" style={{ boxSizing: 'border-box', display: 'inline-block', paddingBottom: '2px' }}>\n          <div id=\"267Q-0\" style={{ boxSizing: 'border-box', color: '#58B77A', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '10.5px', lineHeight: '14px' }}>\n            +12.0 pp\n          </div>\n        </div>\n        <div id=\"267R-0\" style={{ alignItems: 'end', boxSizing: 'border-box', display: 'flex', flexBasis: '0%', flexGrow: '1', gap: '3px', height: '24px', justifyContent: 'end' }}>\n          <div id=\"267S-0\" style={{ backgroundColor: '#394B69', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '7px', width: '6px' }} />\n          <div id=\"267T-0\" style={{ backgroundColor: '#3D5378', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '11px', width: '6px' }} />\n          <div id=\"267U-0\" style={{ backgroundColor: '#45618F', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '15px', width: '6px' }} />\n          <div id=\"267V-0\" style={{ backgroundColor: '#5275B2', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '20px', width: '6px' }} />\n          <div id=\"267W-0\" style={{ backgroundColor: '#6489CD', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '24px', width: '6px' }} />\n        </div>\n      </div>\n      <div id=\"267X-0\" style={{ boxSizing: 'border-box', color: '#6F7A89', fontFamily: 'system-ui, sans-serif', fontSize: '9.5px', lineHeight: '12px' }}>\n        Top-line acceleration\n      </div>\n    </div>\n  )"
+    }
+  },
+  "rContainer": {
+    "operationId": "paper-accent-estate-20261108-c4-t05rm-r-0-accent-refinement-1631-v1",
+    "verified": true,
+    "onlyRootShadowChanged": true,
+    "cleanupVerified": true,
+    "emptyUtility": "26ND-0",
+    "sourceRaw": "(\n    <div id=\"R-0\" style={{ backgroundImage: 'linear-gradient(in oklab 135deg, #161B22F5 0%, #10161CE6 100%)', backgroundOrigin: 'border-box', borderColor: '#2E3A46', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF0A 0px 1px 0px inset, #00000047 0px 14px 36px, #3970CF1A 0px 0px 30px, #3DA5640F 0px 0px 24px', boxSizing: 'border-box', display: 'flex', fontSize: '12px', fontSynthesis: 'none', height: '190px', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', WebkitFontSmoothing: 'antialiased', width: '1036px' }}>\n      <div id=\"S-0\" style={{ boxSizing: 'border-box', display: 'flex', flexDirection: 'column', flexShrink: 0, gap: '8px', height: '100%', paddingBlock: '16px', paddingInline: '18px', width: '670px' }}>\n        <div id=\"T-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '8px' }}>\n          <div id=\"U-0\" style={{ boxSizing: 'border-box', color: '#79A7FF', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.13em', lineHeight: '16px' }}>\n            30-SECOND BRIEF · SYNTHESIS\n          </div>\n          <div id=\"V-0\" style={{ backgroundColor: '#4C5664', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '4px', width: '4px' }} />\n          <div id=\"W-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Q1 FY2027 · May 20, 2026\n          </div>\n        </div>\n        <div id=\"X-0\" style={{ boxSizing: 'border-box', color: '#E4E8EE', fontFamily: 'system-ui, sans-serif', fontSize: '23px', fontWeight: 700, letterSpacing: '-0.025em', lineHeight: '28px', maxWidth: '620px' }}>\n          AI demand keeps accelerating. Durability is now the question.\n        </div>\n        <div id=\"Y-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', fontFamily: 'system-ui, sans-serif', fontSize: '13px', lineHeight: '19px', maxWidth: '630px' }}>\n          Blackwell-led data-center demand continues to broaden across cloud and enterprise. Management is stepping up supply and R&amp;D investment; China restrictions and rising competition remain the clearest constraints.\n        </div>\n        <div id=\"Z-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '7px', paddingTop: '2px' }}>\n          <div id=\"10-0\" style={{ backgroundColor: '#17231C', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '4px', paddingInline: '8px' }}>\n            <div id=\"11-0\" style={{ boxSizing: 'border-box', color: '#69BF8A', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 600, lineHeight: '16px' }}>\n              Demand accelerating\n            </div>\n          </div>\n          <div id=\"12-0\" style={{ backgroundColor: '#17202C', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '4px', paddingInline: '8px' }}>\n            <div id=\"13-0\" style={{ boxSizing: 'border-box', color: '#7EAAF3', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 600, lineHeight: '16px' }}>\n              Guidance raised\n            </div>\n          </div>\n          <div id=\"14-0\" style={{ backgroundColor: '#262117', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '4px', paddingInline: '8px' }}>\n            <div id=\"15-0\" style={{ boxSizing: 'border-box', color: '#D6A955', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 600, lineHeight: '16px' }}>\n              China constrained\n            </div>\n          </div>\n        </div>\n      </div>\n      <div id=\"16-0\" style={{ backgroundImage: 'linear-gradient(in oklab 145deg, #11161A 0%, #171E23 62%, #111418 100%)', boxSizing: 'border-box', flexShrink: 0, height: '100%', overflow: 'clip', position: 'relative', width: '366px' }}>\n        <div id=\"17-0\" style={{ backgroundColor: '#151C21', borderColor: '#27313A', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', height: '130px', left: 0, opacity: '0', position: 'absolute', rotate: '-4deg', top: 0, transformOrigin: '0% 0%', width: '260px' }} />\n        <div id=\"18-0\" style={{ alignItems: 'center', backgroundImage: 'linear-gradient(in oklab 145deg, #2A3137 0%, #14191E 65%, #20262B 100%)', backgroundOrigin: 'border-box', borderColor: '#3A434B', borderRadius: '10px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#00000038 0px 14px 26px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '5px', height: '104px', justifyContent: 'center', left: 72, opacity: '0', position: 'absolute', top: 30, width: '168px' }}>\n          <div id=\"19-0\" style={{ alignItems: 'center', borderColor: '#4B5A55', borderRadius: '10px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '44px', justifyContent: 'center', width: '44px' }}>\n            <div id=\"1A-0\" style={{ boxSizing: 'border-box', color: '#A9C2B5', fontFamily: 'system-ui, sans-serif', fontSize: '17px', fontWeight: 700, lineHeight: '22px' }}>\n              NV\n            </div>\n          </div>\n          <div id=\"1B-0\" style={{ boxSizing: 'border-box', color: '#728079', fontFamily: 'system-ui, sans-serif', fontSize: '9px', letterSpacing: '0.18em', lineHeight: '12px' }}>\n            ACCELERATED COMPUTE\n          </div>\n        </div>\n        <div id=\"1C-0\" style={{ backgroundColor: '#2F6A4D', boxSizing: 'border-box', height: '112px', left: 40, opacity: '0', position: 'absolute', top: 24, width: '2px' }} />\n        <div id=\"1D-0\" style={{ alignItems: 'end', backdropFilter: 'blur(5px)', backgroundColor: '#0C111594', borderRadius: '7px', bottom: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '3px', opacity: '0', paddingBlock: '6px', paddingInline: '8px', position: 'absolute', right: 366, width: 'max-content' }}>\n          <div id=\"1E-0\" style={{ boxSizing: 'border-box', color: '#829087', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9px', letterSpacing: '0.12em', lineHeight: '12px' }}>\n            BLACKWELL\n          </div>\n          <div id=\"1F-0\" style={{ boxSizing: 'border-box', color: '#A9B0BA', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '10px', lineHeight: '12px' }}>\n            AI systems · networking · software\n          </div>\n        </div>\n        <div id=\"1G-0\" style={{ boxSizing: 'border-box', height: '168px', left: 0, opacity: '0', position: 'absolute', top: 0, width: '366px' }}>\n          <div id=\"1H-0\" style={{ backgroundColor: '#2F3C3A', boxSizing: 'border-box', height: '1px', left: '10px', position: 'absolute', top: '38px', width: '74px' }} />\n          <div id=\"1I-0\" style={{ backgroundColor: '#25322F', boxSizing: 'border-box', height: '1px', left: '10px', position: 'absolute', top: '76px', width: '42px' }} />\n          <div id=\"1J-0\" style={{ backgroundColor: '#2D3937', boxSizing: 'border-box', height: '1px', left: '252px', position: 'absolute', top: '40px', width: '92px' }} />\n          <div id=\"1K-0\" style={{ backgroundColor: '#25312F', boxSizing: 'border-box', height: '1px', left: '274px', position: 'absolute', top: '84px', width: '70px' }} />\n          <div id=\"1L-0\" style={{ backgroundColor: '#2D3937', boxSizing: 'border-box', height: '44px', left: '300px', position: 'absolute', top: '40px', width: '1px' }} />\n          <div id=\"1M-0\" style={{ backgroundColor: '#446557', borderRadius: '999px', boxSizing: 'border-box', height: '4px', left: '18px', position: 'absolute', top: '34px', width: '4px' }} />\n          <div id=\"1N-0\" style={{ backgroundColor: '#3B584D', borderRadius: '999px', boxSizing: 'border-box', height: '4px', position: 'absolute', right: '18px', top: '81px', width: '4px' }} />\n          <div id=\"1O-0\" style={{ boxSizing: 'border-box', color: '#65746F', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', left: '262px', letterSpacing: '0.12em', lineHeight: '12px', position: 'absolute', top: '24px', width: 'max-content' }}>\n            NVDA / FY27 Q1\n          </div>\n        </div>\n        <div id=\"1P-0\" style={{ backgroundImage: 'url(https://app.paper.design/file-assets/01M3NSZGE8JWN2EZCSF0DT05RM/01M31EFNPK93R7CWACGGCPZ9MZ.png)', backgroundPosition: '50%', backgroundSize: 'cover', boxSizing: 'border-box', height: '188px', left: 0, maskImage: 'linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.35) 12%, rgb(0, 0, 0) 42%, rgb(0, 0, 0) 100%)', position: 'absolute', top: 0, width: '366px' }} />\n        <div id=\"2575-0\" style={{ backgroundImage: 'linear-gradient(in oklab 90deg, #10161C42 0%, #10161C05 46%, #0B0F1338 100%)', boxSizing: 'border-box', height: '188px', left: 0, position: 'absolute', top: 0, width: '366px' }} />\n        <div id=\"1R-0\" style={{ alignItems: 'end', backdropFilter: 'blur(5px)', backgroundColor: '#0C111585', borderColor: '#7AA7E029', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', bottom: '11px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '2px', paddingBlock: '6px', paddingInline: '8px', position: 'absolute', right: '12px', width: 'max-content' }}>\n          <div id=\"1S-0\" style={{ boxSizing: 'border-box', color: '#8FA6B9', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', letterSpacing: '0.13em', lineHeight: '16px' }}>\n            BLACKWELL\n          </div>\n          <div id=\"1T-0\" style={{ boxSizing: 'border-box', color: '#C3CBD5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            AI systems · networking · software\n          </div>\n        </div>\n        <div id=\"1U-0\" style={{ backdropFilter: 'blur(8px)', backgroundImage: 'linear-gradient(in oklab 90deg, #14191F 0%, #14191FF0 18%, #14191FB8 42%, #14191F52 70%, #14191F00 100%)', boxSizing: 'border-box', height: '188px', left: '0px', maskImage: 'linear-gradient(90deg, rgb(0, 0, 0) 0%, rgba(0, 0, 0, 0.92) 52%, rgba(0, 0, 0, 0.32) 82%, transparent 100%)', position: 'absolute', top: '0px', width: '188px' }} />\n        <div id=\"1V-0\" style={{ backgroundImage: 'linear-gradient(in oklab 180deg, #070B0F38 0%, #070B0F00 18%, #070B0F00 76%, #070B0F3D 100%), linear-gradient(in oklab 270deg, #070B0F1F 0%, #070B0F00 22%)', boxSizing: 'border-box', height: '188px', left: '0px', position: 'absolute', top: '0px', width: '366px' }} />\n      </div>\n    </div>\n  )",
+    "map": {
+      "R-0": "26LP-0",
+      "S-0": "26LQ-0",
+      "T-0": "26LR-0",
+      "U-0": "26LS-0",
+      "V-0": "26LT-0",
+      "W-0": "26LU-0",
+      "X-0": "26LV-0",
+      "Y-0": "26LW-0",
+      "Z-0": "26LX-0",
+      "10-0": "26LY-0",
+      "11-0": "26LZ-0",
+      "12-0": "26M0-0",
+      "13-0": "26M1-0",
+      "14-0": "26M2-0",
+      "15-0": "26M3-0",
+      "16-0": "26M4-0",
+      "1P-0": "26MN-0",
+      "2575-0": "26MO-0",
+      "1R-0": "26MP-0",
+      "1S-0": "26MQ-0",
+      "1T-0": "26MR-0",
+      "1U-0": "26MS-0",
+      "1V-0": "26MT-0",
+      "17-0": "26MV-0",
+      "18-0": "26MW-0",
+      "19-0": "26MY-0",
+      "1A-0": "26MZ-0",
+      "1B-0": "26MX-0",
+      "1C-0": "26N0-0",
+      "1D-0": "26N1-0",
+      "1E-0": "26N3-0",
+      "1F-0": "26N2-0",
+      "1G-0": "26N4-0",
+      "1H-0": "26NC-0",
+      "1I-0": "26NB-0",
+      "1J-0": "26NA-0",
+      "1K-0": "26N9-0",
+      "1L-0": "26N8-0",
+      "1M-0": "26N7-0",
+      "1N-0": "26N6-0",
+      "1O-0": "26N5-0"
+    },
+    "backupReceipt": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-r-complete-context-backup-v1",
+      "tool": "duplicate_nodes",
+      "beforeSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "afterSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "data": {
+        "duplicatedNodes": [
+          {
+            "sourceId": "R-0",
+            "newId": "26JE-0",
+            "name": "30-Second Brief",
+            "component": "Frame",
+            "worldX": 120,
+            "worldY": 3862,
+            "x": 60,
+            "y": 176,
+            "descendantIdMap": {
+              "S-0": "26K5-0",
+              "16-0": "26JF-0",
+              "17-0": "26K4-0",
+              "18-0": "26K0-0",
+              "1C-0": "26JZ-0",
+              "1D-0": "26JW-0",
+              "1G-0": "26JN-0",
+              "1P-0": "26JM-0",
+              "2575-0": "26JL-0",
+              "1R-0": "26JI-0",
+              "1U-0": "26JH-0",
+              "1V-0": "26JG-0",
+              "1S-0": "26JK-0",
+              "1T-0": "26JJ-0",
+              "1H-0": "26JV-0",
+              "1I-0": "26JU-0",
+              "1J-0": "26JT-0",
+              "1K-0": "26JS-0",
+              "1L-0": "26JR-0",
+              "1M-0": "26JQ-0",
+              "1N-0": "26JP-0",
+              "1O-0": "26JO-0",
+              "1E-0": "26JY-0",
+              "1F-0": "26JX-0",
+              "19-0": "26K2-0",
+              "1B-0": "26K1-0",
+              "1A-0": "26K3-0",
+              "T-0": "26KF-0",
+              "X-0": "26KE-0",
+              "Y-0": "26KD-0",
+              "Z-0": "26K6-0",
+              "10-0": "26KB-0",
+              "12-0": "26K9-0",
+              "14-0": "26K7-0",
+              "15-0": "26K8-0",
+              "13-0": "26KA-0",
+              "11-0": "26KC-0",
+              "U-0": "26KI-0",
+              "V-0": "26KH-0",
+              "W-0": "26KG-0"
+            }
+          }
+        ]
+      }
+    },
+    "restoreReceipt": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-r-hidden-restore-v1",
+      "tool": "duplicate_nodes",
+      "beforeSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "afterSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "data": {
+        "duplicatedNodes": [
+          {
+            "sourceId": "26K4-0",
+            "newId": "26MV-0",
+            "name": "Rectangle",
+            "component": "Rectangle",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null,
+            "descendantIdMap": {}
+          },
+          {
+            "sourceId": "26K0-0",
+            "newId": "26MW-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": 72,
+            "y": 30,
+            "descendantIdMap": {
+              "26K2-0": "26MY-0",
+              "26K1-0": "26MX-0",
+              "26K3-0": "26MZ-0"
+            }
+          },
+          {
+            "sourceId": "26JZ-0",
+            "newId": "26N0-0",
+            "name": "Rectangle",
+            "component": "Rectangle",
+            "worldX": null,
+            "worldY": null,
+            "x": 40,
+            "y": 24,
+            "descendantIdMap": {}
+          },
+          {
+            "sourceId": "26JW-0",
+            "newId": "26N1-0",
+            "name": "Frame",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null,
+            "descendantIdMap": {
+              "26JY-0": "26N3-0",
+              "26JX-0": "26N2-0"
+            }
+          },
+          {
+            "sourceId": "26JN-0",
+            "newId": "26N4-0",
+            "name": "Circuit Detail",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": 0,
+            "y": 0,
+            "descendantIdMap": {
+              "26JV-0": "26NC-0",
+              "26JU-0": "26NB-0",
+              "26JT-0": "26NA-0",
+              "26JS-0": "26N9-0",
+              "26JR-0": "26N8-0",
+              "26JQ-0": "26N7-0",
+              "26JP-0": "26N6-0",
+              "26JO-0": "26N5-0"
+            }
+          }
+        ]
+      }
+    },
+    "orderReceipt": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-r-hidden-order-v1",
+      "tool": "move_nodes",
+      "beforeSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "afterSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "data": {
+        "moves": [
+          {
+            "nodeId": "26MV-0",
+            "parentId": "26M4-0",
+            "index": 0
+          },
+          {
+            "nodeId": "26MW-0",
+            "parentId": "26M4-0",
+            "index": 1
+          },
+          {
+            "nodeId": "26N0-0",
+            "parentId": "26M4-0",
+            "index": 2
+          },
+          {
+            "nodeId": "26N1-0",
+            "parentId": "26M4-0",
+            "index": 3
+          },
+          {
+            "nodeId": "26N4-0",
+            "parentId": "26M4-0",
+            "index": 4
+          }
+        ],
+        "affectedParents": [
+          {
+            "parentId": "26M4-0",
+            "childIds": [
+              "26MV-0",
+              "26MW-0",
+              "26N0-0",
+              "26N1-0",
+              "26N4-0",
+              "26MN-0",
+              "26MO-0",
+              "26MP-0",
+              "26MS-0",
+              "26MT-0"
+            ]
+          }
+        ]
+      }
+    },
+    "cleanupReceipt": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-r-preservation-cleanup-v1",
+      "tool": "write_html",
+      "beforeSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "afterSnapshot": "8b638a925af67a0029d63a3229d23e8b6dea8b5f3f1cf115277075e211c2a1b6",
+      "data": {
+        "createdNodes": [
+          {
+            "id": "26ND-0",
+            "name": "Empty audit preservation template",
+            "component": "Frame",
+            "worldX": 60,
+            "worldY": 3686,
+            "x": 60,
+            "y": 446
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "key": "preservation_case_paper-accent-estate-20261108-c4-t05rm-14f-0-accent-refinement-1631-v1",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-14f-0-accent-refinement-1631-v1",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "plan": {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "fileName": "Terminal",
+        "pageId": "p-9-1",
+        "pageName": "06 · Company · Navigation + Interaction",
+        "artboardId": "MO-0",
+        "artboardName": "20A · STATE of 20 · Desktop · Company Switcher Open",
+        "nodeId": "14F-0",
+        "kind": "accent-refinement-1631",
+        "expected": {
+          "boxShadow": "#FFFFFF06 0px 1px 0px inset, #00000029 0px 10px 26px",
+          "paddingInline": "12px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000029 0px 10px 26px;",
+        "verify": {
+          "boxShadow": "#00000029 0px 10px 26px"
+        },
+        "change": "Remove the crisp decorative edge component; preserve the existing broad depth, image, fill, text and visibility."
+      },
+      "stage": "COMPLETE",
+      "sourceRoot": "14F-0",
+      "currentRoot": "26RJ-0",
+      "sourceRaw": "(\n    <div id=\"14F-0\" style={{ backgroundColor: '#12161BEB', borderColor: '#2B3540', borderRadius: '9px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF06 0px 1px 0px inset, #00000029 0px 10px 26px', boxSizing: 'border-box', display: 'none', fontSize: '12px', fontSynthesis: 'none', height: '52px', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflowWrap: 'anywhere', paddingInline: '12px', WebkitFontSmoothing: 'antialiased', width: '1364px' }}>\n      <div id=\"14Z-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '5px', height: '32px' }}>\n        <div id=\"150-0\" style={{ boxSizing: 'border-box', display: 'inline-block', paddingRight: '3px' }}>\n          <div id=\"151-0\" style={{ boxSizing: 'border-box', color: '#5F6B79', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8px', letterSpacing: '0.08em', lineHeight: '10px' }}>\n            INTELLIGENCE\n          </div>\n        </div>\n        <div id=\"255D-0\" style={{ alignItems: 'center', backgroundImage: 'linear-gradient(in oklab 180deg, #1D3152 0%, #192942 100%)', backgroundOrigin: 'border-box', borderColor: '#31527F', borderRadius: '6px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"255E-0\" style={{ boxSizing: 'border-box', color: '#A7C2F2', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', fontWeight: 700, lineHeight: '12px' }}>\n            Brief\n          </div>\n        </div>\n        <div id=\"154-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"155-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Results\n          </div>\n        </div>\n        <div id=\"156-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"157-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Call + Q&amp;A\n          </div>\n        </div>\n        <div id=\"158-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"159-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Ownership\n          </div>\n        </div>\n        <div id=\"15A-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"15B-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Sources\n          </div>\n        </div>\n      </div>\n      <div id=\"V6-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '7px' }}>\n        <div id=\"V7-0\" style={{ boxSizing: 'border-box', color: '#697482', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.4px', lineHeight: '12px' }}>\n          EVENT\n        </div>\n        <div id=\"V8-0\" style={{ alignItems: 'center', borderColor: '#303944', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '9px', height: '26px', paddingInline: '9px' }}>\n          <div id=\"V9-0\" style={{ boxSizing: 'border-box', color: '#C7CED8', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9.3px', fontWeight: 600, lineHeight: '12px' }}>\n            Q1 FY2027\n          </div>\n          <div id=\"VA-0\" style={{ boxSizing: 'border-box', color: '#667280', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9.3px', fontWeight: 600, lineHeight: '12px' }}>\n            ⌄\n          </div>\n        </div>\n        <div id=\"VB-0\" style={{ boxSizing: 'border-box', color: '#778291', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n          May 20, 2026\n        </div>\n      </div>\n      <div id=\"VD-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '6px' }}>\n        <div id=\"VE-0\" style={{ backgroundColor: '#E0A030', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '6px', width: '6px' }} />\n        <div id=\"VF-0\" style={{ boxSizing: 'border-box', color: '#D4A553', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9.2px', fontWeight: 600, lineHeight: '12px' }}>\n          Partial coverage\n        </div>\n        <div id=\"VG-0\" style={{ boxSizing: 'border-box', color: '#65707E', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.4px', lineHeight: '12px' }}>\n          as known 03:54 UTC\n        </div>\n      </div>\n      <div id=\"15C-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '5px', height: '32px', marginLeft: 'auto' }}>\n        <div id=\"15D-0\" style={{ alignItems: 'center', borderColor: '#303A45', borderRadius: '6px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '5px', height: '26px', paddingInline: '8px' }}>\n          <div id=\"15E-0\" style={{ boxSizing: 'border-box', color: '#9DA8B5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', lineHeight: '12px' }}>\n            Evidence\n          </div>\n          <div id=\"15F-0\" style={{ backgroundColor: '#172341', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '2px', paddingInline: '5px' }}>\n            <div id=\"15G-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '7.5px', lineHeight: '10px' }}>\n              4\n            </div>\n          </div>\n        </div>\n        <div id=\"15H-0\" style={{ alignItems: 'center', borderColor: '#303A45', borderRadius: '6px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"15I-0\" style={{ boxSizing: 'border-box', color: '#9DA8B5', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', lineHeight: '12px' }}>\n            Read transcript\n          </div>\n        </div>\n        <div id=\"15J-0\" style={{ alignItems: 'center', backgroundImage: 'linear-gradient(in oklab 180deg, #356BD8 0%, #2E5FC5 100%)', borderRadius: '6px', boxShadow: '#315EBD29 0px 6px 16px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '10px' }}>\n          <div id=\"15K-0\" style={{ boxSizing: 'border-box', color: '#FFFFFF', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', fontWeight: 700, lineHeight: '12px' }}>\n            Ask Mastermind\n          </div>\n        </div>\n      </div>\n    </div>\n  )",
+      "backupRoot": "26QM-0",
+      "backupErrors": [],
+      "finalRaw": "(\n    <div id=\"26RJ-0\" style={{ backgroundColor: '#12161BEB', borderColor: '#2B3540', borderRadius: '9px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#00000029 0px 10px 26px', boxSizing: 'border-box', display: 'none', fontSize: '12px', fontSynthesis: 'none', height: '52px', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflowWrap: 'anywhere', paddingInline: '12px', WebkitFontSmoothing: 'antialiased', width: '1364px' }}>\n      <div id=\"26RK-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '5px', height: '32px' }}>\n        <div id=\"26RL-0\" style={{ boxSizing: 'border-box', display: 'inline-block', paddingRight: '3px' }}>\n          <div id=\"26RM-0\" style={{ boxSizing: 'border-box', color: '#5F6B79', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8px', letterSpacing: '0.08em', lineHeight: '10px' }}>\n            INTELLIGENCE\n          </div>\n        </div>\n        <div id=\"26RN-0\" style={{ alignItems: 'center', backgroundImage: 'linear-gradient(in oklab 180deg, #1D3152 0%, #192942 100%)', backgroundOrigin: 'border-box', borderColor: '#31527F', borderRadius: '6px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26RO-0\" style={{ boxSizing: 'border-box', color: '#A7C2F2', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', fontWeight: 700, lineHeight: '12px' }}>\n            Brief\n          </div>\n        </div>\n        <div id=\"26RP-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26RQ-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Results\n          </div>\n        </div>\n        <div id=\"26RR-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26RS-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Call + Q&amp;A\n          </div>\n        </div>\n        <div id=\"26RT-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26RU-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Ownership\n          </div>\n        </div>\n        <div id=\"26RV-0\" style={{ alignItems: 'center', borderRadius: '6px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26RW-0\" style={{ boxSizing: 'border-box', color: '#7E8997', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n            Sources\n          </div>\n        </div>\n      </div>\n      <div id=\"26RX-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '7px' }}>\n        <div id=\"26RY-0\" style={{ boxSizing: 'border-box', color: '#697482', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.4px', lineHeight: '12px' }}>\n          EVENT\n        </div>\n        <div id=\"26RZ-0\" style={{ alignItems: 'center', borderColor: '#303944', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '9px', height: '26px', paddingInline: '9px' }}>\n          <div id=\"26S0-0\" style={{ boxSizing: 'border-box', color: '#C7CED8', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9.3px', fontWeight: 600, lineHeight: '12px' }}>\n            Q1 FY2027\n          </div>\n          <div id=\"26S1-0\" style={{ boxSizing: 'border-box', color: '#667280', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9.3px', fontWeight: 600, lineHeight: '12px' }}>\n            ⌄\n          </div>\n        </div>\n        <div id=\"26S2-0\" style={{ boxSizing: 'border-box', color: '#778291', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.8px', lineHeight: '12px' }}>\n          May 20, 2026\n        </div>\n      </div>\n      <div id=\"26S3-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '6px' }}>\n        <div id=\"26S4-0\" style={{ backgroundColor: '#E0A030', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', flexShrink: 0, height: '6px', width: '6px' }} />\n        <div id=\"26S5-0\" style={{ boxSizing: 'border-box', color: '#D4A553', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '9.2px', fontWeight: 600, lineHeight: '12px' }}>\n          Partial coverage\n        </div>\n        <div id=\"26S6-0\" style={{ boxSizing: 'border-box', color: '#65707E', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.4px', lineHeight: '12px' }}>\n          as known 03:54 UTC\n        </div>\n      </div>\n      <div id=\"26S7-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', gap: '5px', height: '32px', marginLeft: 'auto' }}>\n        <div id=\"26S8-0\" style={{ alignItems: 'center', borderColor: '#303A45', borderRadius: '6px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '5px', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26S9-0\" style={{ boxSizing: 'border-box', color: '#9DA8B5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', lineHeight: '12px' }}>\n            Evidence\n          </div>\n          <div id=\"26SA-0\" style={{ backgroundColor: '#172341', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '2px', paddingInline: '5px' }}>\n            <div id=\"26SB-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '7.5px', lineHeight: '10px' }}>\n              4\n            </div>\n          </div>\n        </div>\n        <div id=\"26SC-0\" style={{ alignItems: 'center', borderColor: '#303A45', borderRadius: '6px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '8px' }}>\n          <div id=\"26SD-0\" style={{ boxSizing: 'border-box', color: '#9DA8B5', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', lineHeight: '12px' }}>\n            Read transcript\n          </div>\n        </div>\n        <div id=\"26SE-0\" style={{ alignItems: 'center', backgroundImage: 'linear-gradient(in oklab 180deg, #356BD8 0%, #2E5FC5 100%)', borderRadius: '6px', boxShadow: '#315EBD29 0px 6px 16px', boxSizing: 'border-box', display: 'flex', height: '26px', paddingInline: '10px' }}>\n          <div id=\"26SF-0\" style={{ boxSizing: 'border-box', color: '#FFFFFF', fontFamily: 'system-ui, sans-serif', fontSize: '8.5px', fontWeight: 700, lineHeight: '12px' }}>\n            Ask Mastermind\n          </div>\n        </div>\n      </div>\n    </div>\n  )",
+      "finalErrors": [],
+      "originalRestorationVerified": false,
+      "cleanupVerified": true,
+      "utilityAfter": "26SH-0",
+      "extraOperations": [
+        {
+          "tool": "duplicate_nodes",
+          "operationId": "paper-accent-estate-20261108-c4-t05rm-14f-0-accent-refinement-1631-preserve-before-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "duplicatedNodes": [
+              {
+                "sourceId": "14F-0",
+                "newId": "26QM-0",
+                "name": "Research Navigation Dock · Preferred",
+                "component": "Frame",
+                "worldX": 120,
+                "worldY": 3790,
+                "x": 60,
+                "y": 104,
+                "descendantIdMap": {
+                  "14Z-0": "26R6-0",
+                  "V6-0": "26R0-0",
+                  "VD-0": "26QW-0",
+                  "15C-0": "26QN-0",
+                  "15D-0": "26QS-0",
+                  "15H-0": "26QQ-0",
+                  "15J-0": "26QO-0",
+                  "15K-0": "26QP-0",
+                  "15I-0": "26QR-0",
+                  "15E-0": "26QV-0",
+                  "15F-0": "26QT-0",
+                  "15G-0": "26QU-0",
+                  "VE-0": "26QZ-0",
+                  "VF-0": "26QY-0",
+                  "VG-0": "26QX-0",
+                  "V7-0": "26R5-0",
+                  "V8-0": "26R2-0",
+                  "VB-0": "26R1-0",
+                  "V9-0": "26R4-0",
+                  "VA-0": "26R3-0",
+                  "150-0": "26RH-0",
+                  "255D-0": "26RF-0",
+                  "154-0": "26RD-0",
+                  "156-0": "26RB-0",
+                  "158-0": "26R9-0",
+                  "15A-0": "26R7-0",
+                  "15B-0": "26R8-0",
+                  "159-0": "26RA-0",
+                  "157-0": "26RC-0",
+                  "155-0": "26RE-0",
+                  "255E-0": "26RG-0",
+                  "151-0": "26RI-0"
+                }
+              }
+            ]
+          },
+          "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+          "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01"
+        },
+        {
+          "tool": "write_html",
+          "operationId": "paper-accent-estate-20261108-c4-t05rm-14f-0-accent-refinement-1631-clear-owned-backup-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "createdNodes": [
+              {
+                "id": "26SH-0",
+                "name": "Empty audit preservation template",
+                "component": "Frame",
+                "worldX": 60,
+                "worldY": 3686,
+                "x": 60,
+                "y": 446
+              }
+            ]
+          },
+          "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+          "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01"
+        }
+      ]
+    },
+    {
+      "key": "preservation_case_paper-accent-estate-20261108-c4-t05rm-xl-0-accent-refinement-1631-v1",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-xl-0-accent-refinement-1631-v1",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "plan": {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "fileName": "Terminal",
+        "pageId": "p-9-1",
+        "pageName": "06 · Company · Navigation + Interaction",
+        "artboardId": "MO-0",
+        "artboardName": "20A · STATE of 20 · Desktop · Company Switcher Open",
+        "nodeId": "XL-0",
+        "kind": "accent-refinement-1631",
+        "expected": {
+          "boxShadow": "#FFFFFF06 0px 1px 0px inset, #0000003D 0px 14px 34px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#0000003D 0px 14px 34px;",
+        "verify": {
+          "boxShadow": "#0000003D 0px 14px 34px"
+        },
+        "change": "Remove the crisp decorative edge component; preserve the existing broad depth, image, fill, text and visibility."
+      },
+      "stage": "COMPLETE",
+      "sourceRoot": "XL-0",
+      "currentRoot": "26UP-0",
+      "sourceRaw": "(\n    <div id=\"XL-0\" style={{ backgroundColor: '#12161BF0', borderColor: '#2A3540', borderRadius: '11px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF06 0px 1px 0px inset, #0000003D 0px 14px 34px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', flexShrink: '0', fontSize: '12px', fontSynthesis: 'none', height: 'fit-content', left: '1108px', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', position: 'relative', top: '0px', WebkitFontSmoothing: 'antialiased', width: '316px' }}>\n      <div id=\"XM-0\" style={{ alignItems: 'center', borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '74px', paddingInline: '14px' }}>\n        <div id=\"XN-0\" style={{ backgroundColor: '#17233A', borderColor: '#2A4672', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'none', flexShrink: 0, height: '28px', width: '28px' }}>\n          <div id=\"XO-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '16px' }}>\n            ◇\n          </div>\n        </div>\n        <div id=\"XP-0\" style={{ boxSizing: 'border-box', display: 'flex', flexBasis: '0%', flexDirection: 'column', flexGrow: '1', gap: '2px', minWidth: '0px' }}>\n          <div id=\"XQ-0\" style={{ boxSizing: 'border-box', color: '#E0E5EC', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Evidence &amp; sources\n          </div>\n          <div id=\"XR-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Selected claim · Q1 FY2027\n          </div>\n        </div>\n        <div id=\"XS-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"XT-0\" style={{ backgroundColor: '#172341', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', flexShrink: '0', paddingBlock: '3px', paddingInline: '7px' }}>\n          <div id=\"XU-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            context only\n          </div>\n        </div>\n      </div>\n      <div id=\"XV-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '9px', height: 'fit-content', paddingBlock: '12px', paddingInline: '14px' }}>\n        <div id=\"XW-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex' }}>\n          <div id=\"XX-0\" style={{ backgroundColor: '#172341', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '4px', paddingInline: '8px' }}>\n            <div id=\"XY-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 600, lineHeight: '16px' }}>\n              Structured event context\n            </div>\n          </div>\n          <div id=\"XZ-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"Y0-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"24OQ-0\" style={{ borderLeftColor: '#00000000', borderLeftStyle: 'solid', borderLeftWidth: '2px', boxSizing: 'border-box', paddingLeft: '11px' }}>\n          <div id=\"24OR-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', fontFamily: 'system-ui, sans-serif', fontSize: '13px', lineHeight: '19px' }}>\n            “Demand has gone parabolic. The reason is simple. Agentic AI has arrived.”\n          </div>\n        </div>\n        <div id=\"Y3-0\" style={{ alignItems: 'start', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '2px' }}>\n          <div id=\"Y4-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Source-authored context\n          </div>\n          <div id=\"Y5-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"Y6-0\" style={{ boxSizing: 'border-box', color: '#D4A553', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            exact span pending\n          </div>\n        </div>\n      </div>\n      <div id=\"Y7-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '7px', height: 'fit-content', paddingBlock: '10px', paddingInline: '14px' }}>\n        <div id=\"Y8-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex' }}>\n          <div id=\"Y9-0\" style={{ boxSizing: 'border-box', color: '#C8D6ED', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Source status\n          </div>\n          <div id=\"YA-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"YB-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            receipt 386109f4…\n          </div>\n        </div>\n        <div id=\"YC-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '34px' }}>\n          <div id=\"YD-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '102px' }}>\n            Source family\n          </div>\n          <div id=\"YE-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px', textAlign: 'right' }}>\n            Event Analysis\n          </div>\n        </div>\n        <div id=\"YF-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '34px' }}>\n          <div id=\"YG-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '102px' }}>\n            Coverage\n          </div>\n          <div id=\"YH-0\" style={{ boxSizing: 'border-box', color: '#D4A553', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', textAlign: 'right' }}>\n            Metadata only\n          </div>\n        </div>\n        <div id=\"YI-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '34px' }}>\n          <div id=\"YJ-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '102px' }}>\n            Source date\n          </div>\n          <div id=\"YK-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px', textAlign: 'right' }}>\n            2026-05-21\n          </div>\n        </div>\n      </div>\n      <div id=\"YL-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '6px', height: 'fit-content', paddingBlock: '10px', paddingInline: '14px' }}>\n        <div id=\"YM-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '32px' }}>\n          <div id=\"YN-0\" style={{ boxSizing: 'border-box', color: '#C8D6ED', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Related evidence\n          </div>\n          <div id=\"YO-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"YP-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-link)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            Open all ›\n          </div>\n        </div>\n        <div id=\"YQ-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"YR-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            01\n          </div>\n          <div id=\"YS-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Data center revenue reached $75B, +92% YoY\n          </div>\n          <div id=\"YT-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"YU-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"YV-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            02\n          </div>\n          <div id=\"YW-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Full-year OpEx outlook raised\n          </div>\n          <div id=\"YX-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"YY-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"YZ-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            03\n          </div>\n          <div id=\"Z0-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            China compute revenue remains excluded\n          </div>\n          <div id=\"Z1-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"Z2-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"Z3-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            04\n          </div>\n          <div id=\"Z4-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Vera expands the agentic AI platform roadmap\n          </div>\n          <div id=\"Z5-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"Z6-0\" style={{ alignItems: 'center', borderColor: '#34404B', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '40px', justifyContent: 'center' }}>\n          <div id=\"Z7-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Read full transcript\n          </div>\n        </div>\n      </div>\n      <div id=\"Z8-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '7px', height: 'fit-content', paddingBlock: '10px', paddingInline: '14px' }}>\n        <div id=\"Z9-0\" style={{ boxSizing: 'border-box', color: '#C8D6ED', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n          What this receipt proves\n        </div>\n        <div id=\"ZA-0\" style={{ alignItems: 'start', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '7px', paddingTop: '7px' }}>\n          <div id=\"ZB-0\" style={{ alignItems: 'center', backgroundColor: '#173125', borderRadius: '999px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '15px', justifyContent: 'center', width: '15px' }}>\n            <div id=\"ZC-0\" style={{ boxSizing: 'border-box', color: '#63C38A', fontFamily: 'system-ui, sans-serif', fontSize: '7px', lineHeight: '10px' }}>\n              ✓\n            </div>\n          </div>\n          <div id=\"ZD-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            The normalized field belongs to this source family and event generation.\n          </div>\n        </div>\n        <div id=\"ZE-0\" style={{ alignItems: 'start', boxSizing: 'border-box', display: 'flex', gap: '7px' }}>\n          <div id=\"ZF-0\" style={{ alignItems: 'center', backgroundColor: '#2B251A', borderRadius: '999px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '15px', justifyContent: 'center', width: '15px' }}>\n            <div id=\"ZG-0\" style={{ boxSizing: 'border-box', color: '#D4A553', fontFamily: 'system-ui, sans-serif', fontSize: '7px', lineHeight: '10px' }}>\n              !\n            </div>\n          </div>\n          <div id=\"ZH-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            It does not yet claim exact paragraph or line-level pinning.\n          </div>\n        </div>\n        <div id=\"ZI-0\" style={{ alignItems: 'start', boxSizing: 'border-box', display: 'flex', gap: '7px' }}>\n          <div id=\"ZJ-0\" style={{ alignItems: 'center', backgroundColor: '#1B222B', borderRadius: '999px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '15px', justifyContent: 'center', width: '15px' }}>\n            <div id=\"ZK-0\" style={{ boxSizing: 'border-box', color: '#8D98A7', fontFamily: 'system-ui, sans-serif', fontSize: '7px', lineHeight: '10px' }}>\n              —\n            </div>\n          </div>\n          <div id=\"ZL-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            No signal, target, ranking or trade authority is created by the receipt.\n          </div>\n        </div>\n      </div>\n      <div id=\"ZM-0\" style={{ boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '7px', height: 'fit-content', paddingBlock: '12px', paddingInline: '14px' }}>\n        <div id=\"ZN-0\" style={{ alignItems: 'center', borderColor: '#34404B', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '40px', justifyContent: 'center', minHeight: '40px', width: '100%' }}>\n          <div id=\"ZO-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Open source manifest\n          </div>\n        </div>\n        <div id=\"ZP-0\" style={{ alignItems: 'center', backgroundColor: '#1B2C49', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '40px', justifyContent: 'center', minHeight: '40px', width: '100%' }}>\n          <div id=\"ZQ-0\" style={{ boxSizing: 'border-box', color: '#A7C2F2', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 600, lineHeight: '18px' }}>\n            View all evidence\n          </div>\n        </div>\n      </div>\n    </div>\n  )",
+      "backupRoot": "26SJ-0",
+      "backupErrors": [],
+      "finalRaw": "(\n    <div id=\"26UP-0\" style={{ backgroundColor: '#12161BF0', borderColor: '#2A3540', borderRadius: '11px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#0000003D 0px 14px 34px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', flexShrink: '0', fontSize: '12px', fontSynthesis: 'none', height: 'fit-content', left: '1108px', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', position: 'relative', top: '0px', WebkitFontSmoothing: 'antialiased', width: '316px' }}>\n      <div id=\"26UQ-0\" style={{ alignItems: 'center', borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '74px', paddingInline: '14px' }}>\n        <div id=\"26UR-0\" style={{ backgroundColor: '#17233A', borderColor: '#2A4672', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'none', flexShrink: 0, height: '28px', width: '28px' }}>\n          <div id=\"26US-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '16px' }}>\n            ◇\n          </div>\n        </div>\n        <div id=\"26UT-0\" style={{ boxSizing: 'border-box', display: 'flex', flexBasis: '0%', flexDirection: 'column', flexGrow: '1', gap: '2px', minWidth: '0px' }}>\n          <div id=\"26UU-0\" style={{ boxSizing: 'border-box', color: '#E0E5EC', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Evidence &amp; sources\n          </div>\n          <div id=\"26UV-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Selected claim · Q1 FY2027\n          </div>\n        </div>\n        <div id=\"26UW-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"26UX-0\" style={{ backgroundColor: '#172341', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', flexShrink: '0', paddingBlock: '3px', paddingInline: '7px' }}>\n          <div id=\"26UY-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            context only\n          </div>\n        </div>\n      </div>\n      <div id=\"26UZ-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '9px', height: 'fit-content', paddingBlock: '12px', paddingInline: '14px' }}>\n        <div id=\"26V0-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex' }}>\n          <div id=\"26V1-0\" style={{ backgroundColor: '#172341', borderRadius: '999px', boxSizing: 'border-box', display: 'inline-block', paddingBlock: '4px', paddingInline: '8px' }}>\n            <div id=\"26V2-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 600, lineHeight: '16px' }}>\n              Structured event context\n            </div>\n          </div>\n          <div id=\"26V3-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"26V4-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"26V5-0\" style={{ borderLeftColor: '#00000000', borderLeftStyle: 'solid', borderLeftWidth: '2px', boxSizing: 'border-box', paddingLeft: '11px' }}>\n          <div id=\"26V6-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', fontFamily: 'system-ui, sans-serif', fontSize: '13px', lineHeight: '19px' }}>\n            “Demand has gone parabolic. The reason is simple. Agentic AI has arrived.”\n          </div>\n        </div>\n        <div id=\"26V7-0\" style={{ alignItems: 'start', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '2px' }}>\n          <div id=\"26V8-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Source-authored context\n          </div>\n          <div id=\"26V9-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"26VA-0\" style={{ boxSizing: 'border-box', color: '#D4A553', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            exact span pending\n          </div>\n        </div>\n      </div>\n      <div id=\"26VB-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '7px', height: 'fit-content', paddingBlock: '10px', paddingInline: '14px' }}>\n        <div id=\"26VC-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex' }}>\n          <div id=\"26VD-0\" style={{ boxSizing: 'border-box', color: '#C8D6ED', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Source status\n          </div>\n          <div id=\"26VE-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"26VF-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            receipt 386109f4…\n          </div>\n        </div>\n        <div id=\"26VG-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '34px' }}>\n          <div id=\"26VH-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '102px' }}>\n            Source family\n          </div>\n          <div id=\"26VI-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px', textAlign: 'right' }}>\n            Event Analysis\n          </div>\n        </div>\n        <div id=\"26VJ-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '34px' }}>\n          <div id=\"26VK-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '102px' }}>\n            Coverage\n          </div>\n          <div id=\"26VL-0\" style={{ boxSizing: 'border-box', color: '#D4A553', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', textAlign: 'right' }}>\n            Metadata only\n          </div>\n        </div>\n        <div id=\"26VM-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '34px' }}>\n          <div id=\"26VN-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '102px' }}>\n            Source date\n          </div>\n          <div id=\"26VO-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px', textAlign: 'right' }}>\n            2026-05-21\n          </div>\n        </div>\n      </div>\n      <div id=\"26VP-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '6px', height: 'fit-content', paddingBlock: '10px', paddingInline: '14px' }}>\n        <div id=\"26VQ-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '32px' }}>\n          <div id=\"26VR-0\" style={{ boxSizing: 'border-box', color: '#C8D6ED', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Related evidence\n          </div>\n          <div id=\"26VS-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"26VT-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-link)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            Open all ›\n          </div>\n        </div>\n        <div id=\"26VU-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"26VV-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            01\n          </div>\n          <div id=\"26VW-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Data center revenue reached $75B, +92% YoY\n          </div>\n          <div id=\"26VX-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"26VY-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"26VZ-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            02\n          </div>\n          <div id=\"26W0-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Full-year OpEx outlook raised\n          </div>\n          <div id=\"26W1-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"26W2-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"26W3-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            03\n          </div>\n          <div id=\"26W4-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            China compute revenue remains excluded\n          </div>\n          <div id=\"26W5-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"26W6-0\" style={{ alignItems: 'center', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '64px' }}>\n          <div id=\"26W7-0\" style={{ boxSizing: 'border-box', color: '#6F7B8B', display: 'inline-block', flexShrink: 0, fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '18px' }}>\n            04\n          </div>\n          <div id=\"26W8-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Vera expands the agentic AI platform roadmap\n          </div>\n          <div id=\"26W9-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n            2027Q1\n          </div>\n        </div>\n        <div id=\"26WA-0\" style={{ alignItems: 'center', borderColor: '#34404B', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '40px', justifyContent: 'center' }}>\n          <div id=\"26WB-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Read full transcript\n          </div>\n        </div>\n      </div>\n      <div id=\"26WC-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '7px', height: 'fit-content', paddingBlock: '10px', paddingInline: '14px' }}>\n        <div id=\"26WD-0\" style={{ boxSizing: 'border-box', color: '#C8D6ED', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n          What this receipt proves\n        </div>\n        <div id=\"26WE-0\" style={{ alignItems: 'start', borderTopColor: '#252D36', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '7px', paddingTop: '7px' }}>\n          <div id=\"26WF-0\" style={{ alignItems: 'center', backgroundColor: '#173125', borderRadius: '999px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '15px', justifyContent: 'center', width: '15px' }}>\n            <div id=\"26WG-0\" style={{ boxSizing: 'border-box', color: '#63C38A', fontFamily: 'system-ui, sans-serif', fontSize: '7px', lineHeight: '10px' }}>\n              ✓\n            </div>\n          </div>\n          <div id=\"26WH-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            The normalized field belongs to this source family and event generation.\n          </div>\n        </div>\n        <div id=\"26WI-0\" style={{ alignItems: 'start', boxSizing: 'border-box', display: 'flex', gap: '7px' }}>\n          <div id=\"26WJ-0\" style={{ alignItems: 'center', backgroundColor: '#2B251A', borderRadius: '999px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '15px', justifyContent: 'center', width: '15px' }}>\n            <div id=\"26WK-0\" style={{ boxSizing: 'border-box', color: '#D4A553', fontFamily: 'system-ui, sans-serif', fontSize: '7px', lineHeight: '10px' }}>\n              !\n            </div>\n          </div>\n          <div id=\"26WL-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            It does not yet claim exact paragraph or line-level pinning.\n          </div>\n        </div>\n        <div id=\"26WM-0\" style={{ alignItems: 'start', boxSizing: 'border-box', display: 'flex', gap: '7px' }}>\n          <div id=\"26WN-0\" style={{ alignItems: 'center', backgroundColor: '#1B222B', borderRadius: '999px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '15px', justifyContent: 'center', width: '15px' }}>\n            <div id=\"26WO-0\" style={{ boxSizing: 'border-box', color: '#8D98A7', fontFamily: 'system-ui, sans-serif', fontSize: '7px', lineHeight: '10px' }}>\n              —\n            </div>\n          </div>\n          <div id=\"26WP-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            No signal, target, ranking or trade authority is created by the receipt.\n          </div>\n        </div>\n      </div>\n      <div id=\"26WQ-0\" style={{ boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '7px', height: 'fit-content', paddingBlock: '12px', paddingInline: '14px' }}>\n        <div id=\"26WR-0\" style={{ alignItems: 'center', borderColor: '#34404B', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '40px', justifyContent: 'center', minHeight: '40px', width: '100%' }}>\n          <div id=\"26WS-0\" style={{ boxSizing: 'border-box', color: '#8FB2F5', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Open source manifest\n          </div>\n        </div>\n        <div id=\"26WT-0\" style={{ alignItems: 'center', backgroundColor: '#1B2C49', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: '0', height: '40px', justifyContent: 'center', minHeight: '40px', width: '100%' }}>\n          <div id=\"26WU-0\" style={{ boxSizing: 'border-box', color: '#A7C2F2', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 600, lineHeight: '18px' }}>\n            View all evidence\n          </div>\n        </div>\n      </div>\n    </div>\n  )",
+      "finalErrors": [],
+      "originalRestorationVerified": false,
+      "cleanupVerified": true,
+      "utilityAfter": "26WW-0",
+      "extraOperations": [
+        {
+          "tool": "duplicate_nodes",
+          "operationId": "paper-accent-estate-20261108-c4-t05rm-xl-0-accent-refinement-1631-preserve-before-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "duplicatedNodes": [
+              {
+                "sourceId": "XL-0",
+                "newId": "26SJ-0",
+                "name": "Evidence & Sources · Preferred",
+                "component": "Frame",
+                "worldX": null,
+                "worldY": null,
+                "x": null,
+                "y": null,
+                "descendantIdMap": {
+                  "XM-0": "26UG-0",
+                  "XV-0": "26U4-0",
+                  "Y7-0": "26TQ-0",
+                  "YL-0": "26T3-0",
+                  "Z8-0": "26SP-0",
+                  "ZM-0": "26SK-0",
+                  "ZN-0": "26SN-0",
+                  "ZP-0": "26SL-0",
+                  "ZQ-0": "26SM-0",
+                  "ZO-0": "26SO-0",
+                  "Z9-0": "26T2-0",
+                  "ZA-0": "26SY-0",
+                  "ZE-0": "26SU-0",
+                  "ZI-0": "26SQ-0",
+                  "ZJ-0": "26SS-0",
+                  "ZL-0": "26SR-0",
+                  "ZK-0": "26ST-0",
+                  "ZF-0": "26SW-0",
+                  "ZH-0": "26SV-0",
+                  "ZG-0": "26SX-0",
+                  "ZB-0": "26T0-0",
+                  "ZD-0": "26SZ-0",
+                  "ZC-0": "26T1-0",
+                  "YM-0": "26TM-0",
+                  "YQ-0": "26TI-0",
+                  "YU-0": "26TE-0",
+                  "YY-0": "26TA-0",
+                  "Z2-0": "26T6-0",
+                  "Z6-0": "26T4-0",
+                  "Z7-0": "26T5-0",
+                  "Z3-0": "26T9-0",
+                  "Z4-0": "26T8-0",
+                  "Z5-0": "26T7-0",
+                  "YZ-0": "26TD-0",
+                  "Z0-0": "26TC-0",
+                  "Z1-0": "26TB-0",
+                  "YV-0": "26TH-0",
+                  "YW-0": "26TG-0",
+                  "YX-0": "26TF-0",
+                  "YR-0": "26TL-0",
+                  "YS-0": "26TK-0",
+                  "YT-0": "26TJ-0",
+                  "YN-0": "26TP-0",
+                  "YO-0": "26TO-0",
+                  "YP-0": "26TN-0",
+                  "Y8-0": "26U0-0",
+                  "YC-0": "26TX-0",
+                  "YF-0": "26TU-0",
+                  "YI-0": "26TR-0",
+                  "YJ-0": "26TT-0",
+                  "YK-0": "26TS-0",
+                  "YG-0": "26TW-0",
+                  "YH-0": "26TV-0",
+                  "YD-0": "26TZ-0",
+                  "YE-0": "26TY-0",
+                  "Y9-0": "26U3-0",
+                  "YA-0": "26U2-0",
+                  "YB-0": "26U1-0",
+                  "XW-0": "26UB-0",
+                  "24OQ-0": "26U9-0",
+                  "Y3-0": "26U5-0",
+                  "Y4-0": "26U8-0",
+                  "Y5-0": "26U7-0",
+                  "Y6-0": "26U6-0",
+                  "24OR-0": "26UA-0",
+                  "XX-0": "26UE-0",
+                  "XZ-0": "26UD-0",
+                  "Y0-0": "26UC-0",
+                  "XY-0": "26UF-0",
+                  "XN-0": "26UN-0",
+                  "XP-0": "26UK-0",
+                  "XS-0": "26UJ-0",
+                  "XT-0": "26UH-0",
+                  "XU-0": "26UI-0",
+                  "XQ-0": "26UM-0",
+                  "XR-0": "26UL-0",
+                  "XO-0": "26UO-0"
+                }
+              }
+            ]
+          },
+          "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+          "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01"
+        },
+        {
+          "tool": "write_html",
+          "operationId": "paper-accent-estate-20261108-c4-t05rm-xl-0-accent-refinement-1631-clear-owned-backup-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "createdNodes": [
+              {
+                "id": "26WW-0",
+                "name": "Empty audit preservation template",
+                "component": "Frame",
+                "worldX": 60,
+                "worldY": 3686,
+                "x": 60,
+                "y": 446
+              }
+            ]
+          },
+          "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+          "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01"
+        }
+      ]
+    },
+    {
+      "key": "preservation_case_paper-accent-estate-20261108-c4-t05rm-16t-0-accent-refinement-1631-v1",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-16t-0-accent-refinement-1631-v1",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "plan": {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "fileName": "Terminal",
+        "pageId": "p-9-1",
+        "pageName": "06 · Company · Navigation + Interaction",
+        "artboardId": "MO-0",
+        "artboardName": "20A · STATE of 20 · Desktop · Company Switcher Open",
+        "nodeId": "16T-0",
+        "kind": "accent-refinement-1631",
+        "expected": {
+          "boxShadow": "#FFFFFF08 0px 1px 0px inset, #00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px;",
+        "verify": {
+          "boxShadow": "#00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px"
+        },
+        "change": "Remove the crisp decorative edge component; preserve the existing broad depth, image, fill, text and visibility."
+      },
+      "stage": "ORIGINAL_RESTORED_ACCENT_HELD",
+      "sourceRoot": "16T-0",
+      "currentRoot": "273K-0",
+      "sourceRaw": "(\n    <div id=\"16T-0\" style={{ backgroundColor: '#11161C', borderColor: '#34414D', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF08 0px 1px 0px inset, #00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', fontSize: '12px', fontSynthesis: 'none', height: 'fit-content', isolation: 'isolate', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', WebkitFontSmoothing: 'antialiased', width: '430px', zIndex: '100' }}>\n      <div id=\"16U-0\" style={{ alignItems: 'center', borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '12px', height: '70px', paddingInline: '13px' }}>\n        <div id=\"16V-0\" style={{ boxSizing: 'border-box', display: 'flex', flexBasis: '0%', flexDirection: 'column', flexGrow: '1', gap: '2px', minWidth: '0px' }}>\n          <div id=\"16W-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Switch company\n          </div>\n          <div id=\"16X-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Research Workspace company context\n          </div>\n        </div>\n        <div id=\"16Y-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"16Z-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '142px' }}>\n          ⌘ K also searches globally\n        </div>\n      </div>\n      <div id=\"170-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', flexShrink: 0, height: '64px', paddingBlock: '10px', paddingInline: '12px' }}>\n        <div id=\"171-0\" style={{ alignItems: 'center', backgroundColor: '#111823', borderColor: '#34404B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '7px', height: '44px', paddingInline: '10px' }}>\n          <div id=\"172-0\" style={{ boxSizing: 'border-box', color: '#667280', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '14px' }}>\n            ⌕\n          </div>\n          <div id=\"173-0\" style={{ boxSizing: 'border-box', color: '#6F7988', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Search ticker or company…\n          </div>\n          <div id=\"174-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"175-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Enter\n          </div>\n        </div>\n      </div>\n      <div id=\"176-0\" style={{ boxSizing: 'border-box', display: 'flex', flexDirection: 'column', flexShrink: 0, gap: '5px', height: '248px', paddingBlock: '10px', paddingInline: '12px' }}>\n        <div id=\"177-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px' }}>\n          <div id=\"178-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.09em', lineHeight: '16px' }}>\n            RECENT COMPANIES\n          </div>\n          <div id=\"179-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"17A-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            4\n          </div>\n        </div>\n        <div id=\"17B-0\" style={{ alignItems: 'center', backgroundColor: '#142039', borderColor: '#31527F', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"17C-0\" style={{ alignItems: 'center', backgroundColor: '#14191E', borderColor: '#34404A', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"256Q-0\" style={{ alignItems: 'center', backgroundColor: '#14191E', borderColor: '#34404A', borderRadius: '9px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '21px', justifyContent: 'center', width: '21px' }}>\n              <div id=\"256R-0\" style={{ backgroundImage: 'url(https://app.paper.design/file-assets/01M3NSZGE8JWN2EZCSF0DT05RM/40AQ18ZH39PVSPGF8ATYPF3QNV.svg)', backgroundPosition: '50%', backgroundRepeat: 'no-repeat', backgroundSize: '100% 100%', boxSizing: 'border-box', flexShrink: 0, height: '26px', width: '26px' }} />\n            </div>\n          </div>\n          <div id=\"17F-0\" style={{ boxSizing: 'border-box', color: '#DCE2E9', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            NVDA\n          </div>\n          <div id=\"17G-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            NVIDIA Corporation\n          </div>\n          <div id=\"17H-0\" style={{ boxSizing: 'border-box', color: '#7EA8FF', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            current\n          </div>\n        </div>\n        <div id=\"17I-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"17J-0\" style={{ alignItems: 'center', backgroundColor: '#17233A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"17K-0\" style={{ boxSizing: 'border-box', color: '#AFC7F4', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              6\n            </div>\n          </div>\n          <div id=\"17L-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            600519.SS\n          </div>\n          <div id=\"17M-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Kweichow Moutai\n          </div>\n          <div id=\"17N-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            China\n          </div>\n        </div>\n        <div id=\"17O-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"17P-0\" style={{ alignItems: 'center', backgroundColor: '#17202A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"17Q-0\" style={{ boxSizing: 'border-box', color: '#B7C0CB', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              A\n            </div>\n          </div>\n          <div id=\"17R-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            AAPL\n          </div>\n          <div id=\"17S-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Apple Inc.\n          </div>\n          <div id=\"17T-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            Nasdaq\n          </div>\n        </div>\n        <div id=\"17U-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"17V-0\" style={{ alignItems: 'center', backgroundColor: '#17202A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"17W-0\" style={{ boxSizing: 'border-box', color: '#B7C0CB', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              M\n            </div>\n          </div>\n          <div id=\"17X-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            MSFT\n          </div>\n          <div id=\"17Y-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Microsoft Corporation\n          </div>\n          <div id=\"17Z-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            Nasdaq\n          </div>\n        </div>\n      </div>\n      <div id=\"180-0\" style={{ alignItems: 'center', borderTopColor: '#29323B', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '12px', height: '64px', paddingInline: '12px' }}>\n        <div id=\"181-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', minWidth: '0px' }}>\n          Switching company resets event-specific evidence selection.\n        </div>\n        <div id=\"182-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"183-0\" style={{ boxSizing: 'border-box', color: '#6F8EBF', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n          Esc to close\n        </div>\n      </div>\n    </div>\n  )",
+      "backupRoot": "26WY-0",
+      "backupErrors": [],
+      "finalRaw": "(\n    <div id=\"273K-0\" style={{ backgroundColor: '#11161C', borderColor: '#34414D', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF08 0px 1px 0px inset, #00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', fontSize: '12px', fontSynthesis: 'none', height: 'fit-content', isolation: 'isolate', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', WebkitFontSmoothing: 'antialiased', width: '430px', zIndex: '100' }}>\n      <div id=\"274P-0\" style={{ alignItems: 'center', borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '12px', height: '70px', paddingInline: '13px' }}>\n        <div id=\"274S-0\" style={{ boxSizing: 'border-box', display: 'flex', flexBasis: '0%', flexDirection: 'column', flexGrow: '1', gap: '2px', minWidth: '0px' }}>\n          <div id=\"274U-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Switch company\n          </div>\n          <div id=\"274T-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Research Workspace company context\n          </div>\n        </div>\n        <div id=\"274R-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"274Q-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '142px' }}>\n          ⌘ K also searches globally\n        </div>\n      </div>\n      <div id=\"274J-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', flexShrink: 0, height: '64px', paddingBlock: '10px', paddingInline: '12px' }}>\n        <div id=\"274K-0\" style={{ alignItems: 'center', backgroundColor: '#111823', borderColor: '#34404B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '7px', height: '44px', paddingInline: '10px' }}>\n          <div id=\"274O-0\" style={{ boxSizing: 'border-box', color: '#667280', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '14px' }}>\n            ⌕\n          </div>\n          <div id=\"274N-0\" style={{ boxSizing: 'border-box', color: '#6F7988', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Search ticker or company…\n          </div>\n          <div id=\"274M-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"274L-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Enter\n          </div>\n        </div>\n      </div>\n      <div id=\"273P-0\" style={{ boxSizing: 'border-box', display: 'flex', flexDirection: 'column', flexShrink: 0, gap: '5px', height: '248px', paddingBlock: '10px', paddingInline: '12px' }}>\n        <div id=\"274F-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px' }}>\n          <div id=\"274I-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.09em', lineHeight: '16px' }}>\n            RECENT COMPANIES\n          </div>\n          <div id=\"274H-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"274G-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            4\n          </div>\n        </div>\n        <div id=\"2748-0\" style={{ alignItems: 'center', backgroundColor: '#142039', borderColor: '#31527F', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"274C-0\" style={{ alignItems: 'center', backgroundColor: '#14191E', borderColor: '#34404A', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"274D-0\" style={{ alignItems: 'center', backgroundColor: '#14191E', borderColor: '#34404A', borderRadius: '9px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '21px', justifyContent: 'center', width: '21px' }}>\n              <div id=\"274E-0\" style={{ backgroundImage: 'url(https://app.paper.design/file-assets/01M3NSZGE8JWN2EZCSF0DT05RM/40AQ18ZH39PVSPGF8ATYPF3QNV.svg)', backgroundPosition: '50%', backgroundRepeat: 'no-repeat', backgroundSize: '100% 100%', boxSizing: 'border-box', flexShrink: 0, height: '26px', width: '26px' }} />\n            </div>\n          </div>\n          <div id=\"274B-0\" style={{ boxSizing: 'border-box', color: '#DCE2E9', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            NVDA\n          </div>\n          <div id=\"274A-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            NVIDIA Corporation\n          </div>\n          <div id=\"2749-0\" style={{ boxSizing: 'border-box', color: '#7EA8FF', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            current\n          </div>\n        </div>\n        <div id=\"2742-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"2746-0\" style={{ alignItems: 'center', backgroundColor: '#17233A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"2747-0\" style={{ boxSizing: 'border-box', color: '#AFC7F4', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              6\n            </div>\n          </div>\n          <div id=\"2745-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            600519.SS\n          </div>\n          <div id=\"2744-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Kweichow Moutai\n          </div>\n          <div id=\"2743-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            China\n          </div>\n        </div>\n        <div id=\"273W-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"2740-0\" style={{ alignItems: 'center', backgroundColor: '#17202A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"2741-0\" style={{ boxSizing: 'border-box', color: '#B7C0CB', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              A\n            </div>\n          </div>\n          <div id=\"273Z-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            AAPL\n          </div>\n          <div id=\"273Y-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Apple Inc.\n          </div>\n          <div id=\"273X-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            Nasdaq\n          </div>\n        </div>\n        <div id=\"273Q-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"273U-0\" style={{ alignItems: 'center', backgroundColor: '#17202A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"273V-0\" style={{ boxSizing: 'border-box', color: '#B7C0CB', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              M\n            </div>\n          </div>\n          <div id=\"273T-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            MSFT\n          </div>\n          <div id=\"273S-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Microsoft Corporation\n          </div>\n          <div id=\"273R-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            Nasdaq\n          </div>\n        </div>\n      </div>\n      <div id=\"273L-0\" style={{ alignItems: 'center', borderTopColor: '#29323B', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '12px', height: '64px', paddingInline: '12px' }}>\n        <div id=\"273O-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', minWidth: '0px' }}>\n          Switching company resets event-specific evidence selection.\n        </div>\n        <div id=\"273N-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"273M-0\" style={{ boxSizing: 'border-box', color: '#6F8EBF', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n          Esc to close\n        </div>\n      </div>\n    </div>\n  )",
+      "finalErrors": [
+        "final style 16T-0 zIndex"
+      ],
+      "originalRestorationVerified": true,
+      "cleanupVerified": true,
+      "utilityAfter": "274V-0",
+      "extraOperations": [
+        {
+          "tool": "duplicate_nodes",
+          "operationId": "paper-accent-estate-20261108-c4-t05rm-16t-0-accent-refinement-1631-preserve-before-v1",
+          "state": "APPLIED_RESPONSE_OBSERVED",
+          "data": {
+            "duplicatedNodes": [
+              {
+                "sourceId": "16T-0",
+                "newId": "26WY-0",
+                "name": "Company Switcher Popover",
+                "component": "Frame",
+                "worldX": 172,
+                "worldY": 3792,
+                "x": 112,
+                "y": 106,
+                "descendantIdMap": {
+                  "16U-0": "26Y3-0",
+                  "170-0": "26XX-0",
+                  "176-0": "26X3-0",
+                  "180-0": "26WZ-0",
+                  "181-0": "26X2-0",
+                  "182-0": "26X1-0",
+                  "183-0": "26X0-0",
+                  "177-0": "26XT-0",
+                  "17B-0": "26XM-0",
+                  "17I-0": "26XG-0",
+                  "17O-0": "26XA-0",
+                  "17U-0": "26X4-0",
+                  "17V-0": "26X8-0",
+                  "17X-0": "26X7-0",
+                  "17Y-0": "26X6-0",
+                  "17Z-0": "26X5-0",
+                  "17W-0": "26X9-0",
+                  "17P-0": "26XE-0",
+                  "17R-0": "26XD-0",
+                  "17S-0": "26XC-0",
+                  "17T-0": "26XB-0",
+                  "17Q-0": "26XF-0",
+                  "17J-0": "26XK-0",
+                  "17L-0": "26XJ-0",
+                  "17M-0": "26XI-0",
+                  "17N-0": "26XH-0",
+                  "17K-0": "26XL-0",
+                  "17C-0": "26XQ-0",
+                  "17F-0": "26XP-0",
+                  "17G-0": "26XO-0",
+                  "17H-0": "26XN-0",
+                  "256Q-0": "26XR-0",
+                  "256R-0": "26XS-0",
+                  "178-0": "26XW-0",
+                  "179-0": "26XV-0",
+                  "17A-0": "26XU-0",
+                  "171-0": "26XY-0",
+                  "172-0": "26Y2-0",
+                  "173-0": "26Y1-0",
+                  "174-0": "26Y0-0",
+                  "175-0": "26XZ-0",
+                  "16V-0": "26Y6-0",
+                  "16Y-0": "26Y5-0",
+                  "16Z-0": "26Y4-0",
+                  "16W-0": "26Y8-0",
+                  "16X-0": "26Y7-0"
+                }
+              }
+            ]
+          },
+          "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+          "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01"
+        }
+      ]
+    }
+  ],
+  "popover16TRestoration": {
+    "originalRestored": true,
+    "accentCorrectionPending": true,
+    "nodeId": "273K-0",
+    "nodes": 47,
+    "zIndex": "100",
+    "cleanupVerified": true,
+    "utilityId": "274V-0",
+    "proof": {
+      "beforeCount": 47,
+      "afterCount": 47,
+      "diff": [],
+      "verified": true,
+      "raw": "(\n    <div id=\"273K-0\" style={{ backgroundColor: '#11161C', borderColor: '#34414D', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF08 0px 1px 0px inset, #00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', fontSize: '12px', fontSynthesis: 'none', height: 'fit-content', isolation: 'isolate', lineHeight: '16px', MozOsxFontSmoothing: 'grayscale', overflow: 'clip', overflowWrap: 'anywhere', WebkitFontSmoothing: 'antialiased', width: '430px', zIndex: '100' }}>\n      <div id=\"274P-0\" style={{ alignItems: 'center', borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '12px', height: '70px', paddingInline: '13px' }}>\n        <div id=\"274S-0\" style={{ boxSizing: 'border-box', display: 'flex', flexBasis: '0%', flexDirection: 'column', flexGrow: '1', gap: '2px', minWidth: '0px' }}>\n          <div id=\"274U-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontWeight: 700, lineHeight: '19px' }}>\n            Switch company\n          </div>\n          <div id=\"274T-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Research Workspace company context\n          </div>\n        </div>\n        <div id=\"274R-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"274Q-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: '142px' }}>\n          ⌘ K also searches globally\n        </div>\n      </div>\n      <div id=\"274J-0\" style={{ borderBottomColor: '#29323B', borderBottomStyle: 'solid', borderBottomWidth: '1px', boxSizing: 'border-box', flexShrink: 0, height: '64px', paddingBlock: '10px', paddingInline: '12px' }}>\n        <div id=\"274K-0\" style={{ alignItems: 'center', backgroundColor: '#111823', borderColor: '#34404B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', gap: '7px', height: '44px', paddingInline: '10px' }}>\n          <div id=\"274O-0\" style={{ boxSizing: 'border-box', color: '#667280', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '14px' }}>\n            ⌕\n          </div>\n          <div id=\"274N-0\" style={{ boxSizing: 'border-box', color: '#6F7988', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px' }}>\n            Search ticker or company…\n          </div>\n          <div id=\"274M-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"274L-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            Enter\n          </div>\n        </div>\n      </div>\n      <div id=\"273P-0\" style={{ boxSizing: 'border-box', display: 'flex', flexDirection: 'column', flexShrink: 0, gap: '5px', height: '248px', paddingBlock: '10px', paddingInline: '12px' }}>\n        <div id=\"274F-0\" style={{ alignItems: 'center', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px' }}>\n          <div id=\"274I-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.09em', lineHeight: '16px' }}>\n            RECENT COMPANIES\n          </div>\n          <div id=\"274H-0\" style={{ boxSizing: 'border-box', display: 'inline-block', flexBasis: '0%', flexGrow: '1' }} />\n          <div id=\"274G-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px' }}>\n            4\n          </div>\n        </div>\n        <div id=\"2748-0\" style={{ alignItems: 'center', backgroundColor: '#142039', borderColor: '#31527F', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"274C-0\" style={{ alignItems: 'center', backgroundColor: '#14191E', borderColor: '#34404A', borderRadius: '7px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"274D-0\" style={{ alignItems: 'center', backgroundColor: '#14191E', borderColor: '#34404A', borderRadius: '9px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '21px', justifyContent: 'center', width: '21px' }}>\n              <div id=\"274E-0\" style={{ backgroundImage: 'url(https://app.paper.design/file-assets/01M3NSZGE8JWN2EZCSF0DT05RM/40AQ18ZH39PVSPGF8ATYPF3QNV.svg)', backgroundPosition: '50%', backgroundRepeat: 'no-repeat', backgroundSize: '100% 100%', boxSizing: 'border-box', flexShrink: 0, height: '26px', width: '26px' }} />\n            </div>\n          </div>\n          <div id=\"274B-0\" style={{ boxSizing: 'border-box', color: '#DCE2E9', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            NVDA\n          </div>\n          <div id=\"274A-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            NVIDIA Corporation\n          </div>\n          <div id=\"2749-0\" style={{ boxSizing: 'border-box', color: '#7EA8FF', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            current\n          </div>\n        </div>\n        <div id=\"2742-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"2746-0\" style={{ alignItems: 'center', backgroundColor: '#17233A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"2747-0\" style={{ boxSizing: 'border-box', color: '#AFC7F4', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              6\n            </div>\n          </div>\n          <div id=\"2745-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            600519.SS\n          </div>\n          <div id=\"2744-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Kweichow Moutai\n          </div>\n          <div id=\"2743-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            China\n          </div>\n        </div>\n        <div id=\"273W-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"2740-0\" style={{ alignItems: 'center', backgroundColor: '#17202A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"2741-0\" style={{ boxSizing: 'border-box', color: '#B7C0CB', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              A\n            </div>\n          </div>\n          <div id=\"273Z-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            AAPL\n          </div>\n          <div id=\"273Y-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Apple Inc.\n          </div>\n          <div id=\"273X-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            Nasdaq\n          </div>\n        </div>\n        <div id=\"273Q-0\" style={{ alignItems: 'center', backgroundColor: '#12161B', borderColor: '#29323B', borderRadius: '8px', borderStyle: 'solid', borderWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '8px', height: '46px', paddingInline: '8px' }}>\n          <div id=\"273U-0\" style={{ alignItems: 'center', backgroundColor: '#17202A', borderRadius: '7px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, height: '24px', justifyContent: 'center', width: '24px' }}>\n            <div id=\"273V-0\" style={{ boxSizing: 'border-box', color: '#B7C0CB', fontFamily: 'system-ui, sans-serif', fontSize: '9px', fontWeight: 700, lineHeight: '12px' }}>\n              M\n            </div>\n          </div>\n          <div id=\"273T-0\" style={{ boxSizing: 'border-box', color: '#D7DDE5', display: 'inline-block', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '18px', minWidth: 'max-content', width: 'max-content' }}>\n            MSFT\n          </div>\n          <div id=\"273S-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-text)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '12px', lineHeight: '18px', minWidth: '0px' }}>\n            Microsoft Corporation\n          </div>\n          <div id=\"273R-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', textAlign: 'right', width: 'max-content' }}>\n            Nasdaq\n          </div>\n        </div>\n      </div>\n      <div id=\"273L-0\" style={{ alignItems: 'center', borderTopColor: '#29323B', borderTopStyle: 'solid', borderTopWidth: '1px', boxSizing: 'border-box', display: 'flex', flexShrink: 0, gap: '12px', height: '64px', paddingInline: '12px' }}>\n        <div id=\"273O-0\" style={{ boxSizing: 'border-box', color: 'var(--mx-dark-muted)', display: 'inline-block', flexBasis: '0%', flexGrow: '1', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', minWidth: '0px' }}>\n          Switching company resets event-specific evidence selection.\n        </div>\n        <div id=\"273N-0\" style={{ boxSizing: 'border-box', display: 'none', flexBasis: '0%', flexGrow: '1' }} />\n        <div id=\"273M-0\" style={{ boxSizing: 'border-box', color: '#6F8EBF', display: 'inline-block', flexShrink: '0', fontFamily: 'system-ui, sans-serif', fontSize: '11px', lineHeight: '16px', width: 'max-content' }}>\n          Esc to close\n        </div>\n      </div>\n    </div>\n  )",
+      "oldIds": [
+        "16T-0",
+        "16U-0",
+        "16V-0",
+        "16W-0",
+        "16X-0",
+        "16Y-0",
+        "16Z-0",
+        "170-0",
+        "171-0",
+        "172-0",
+        "173-0",
+        "174-0",
+        "175-0",
+        "176-0",
+        "177-0",
+        "178-0",
+        "179-0",
+        "17A-0",
+        "17B-0",
+        "17C-0",
+        "256Q-0",
+        "256R-0",
+        "17F-0",
+        "17G-0",
+        "17H-0",
+        "17I-0",
+        "17J-0",
+        "17K-0",
+        "17L-0",
+        "17M-0",
+        "17N-0",
+        "17O-0",
+        "17P-0",
+        "17Q-0",
+        "17R-0",
+        "17S-0",
+        "17T-0",
+        "17U-0",
+        "17V-0",
+        "17W-0",
+        "17X-0",
+        "17Y-0",
+        "17Z-0",
+        "180-0",
+        "181-0",
+        "182-0",
+        "183-0"
+      ],
+      "newIds": [
+        "273K-0",
+        "274P-0",
+        "274S-0",
+        "274U-0",
+        "274T-0",
+        "274R-0",
+        "274Q-0",
+        "274J-0",
+        "274K-0",
+        "274O-0",
+        "274N-0",
+        "274M-0",
+        "274L-0",
+        "273P-0",
+        "274F-0",
+        "274I-0",
+        "274H-0",
+        "274G-0",
+        "2748-0",
+        "274C-0",
+        "274D-0",
+        "274E-0",
+        "274B-0",
+        "274A-0",
+        "2749-0",
+        "2742-0",
+        "2746-0",
+        "2747-0",
+        "2745-0",
+        "2744-0",
+        "2743-0",
+        "273W-0",
+        "2740-0",
+        "2741-0",
+        "273Z-0",
+        "273Y-0",
+        "273X-0",
+        "273Q-0",
+        "273U-0",
+        "273V-0",
+        "273T-0",
+        "273S-0",
+        "273R-0",
+        "273L-0",
+        "273O-0",
+        "273N-0",
+        "273M-0"
+      ]
+    },
+    "duplicate": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-16t-native-original-restore-v1",
+      "tool": "duplicate_nodes",
+      "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+      "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+      "data": {
+        "duplicatedNodes": [
+          {
+            "sourceId": "26WY-0",
+            "newId": "273K-0",
+            "name": "Company Switcher Popover",
+            "component": "Frame",
+            "worldX": 112,
+            "worldY": 2556,
+            "x": 112,
+            "y": 106,
+            "descendantIdMap": {
+              "26Y3-0": "274P-0",
+              "26XX-0": "274J-0",
+              "26X3-0": "273P-0",
+              "26WZ-0": "273L-0",
+              "26X2-0": "273O-0",
+              "26X1-0": "273N-0",
+              "26X0-0": "273M-0",
+              "26XT-0": "274F-0",
+              "26XM-0": "2748-0",
+              "26XG-0": "2742-0",
+              "26XA-0": "273W-0",
+              "26X4-0": "273Q-0",
+              "26X8-0": "273U-0",
+              "26X7-0": "273T-0",
+              "26X6-0": "273S-0",
+              "26X5-0": "273R-0",
+              "26X9-0": "273V-0",
+              "26XE-0": "2740-0",
+              "26XD-0": "273Z-0",
+              "26XC-0": "273Y-0",
+              "26XB-0": "273X-0",
+              "26XF-0": "2741-0",
+              "26XK-0": "2746-0",
+              "26XJ-0": "2745-0",
+              "26XI-0": "2744-0",
+              "26XH-0": "2743-0",
+              "26XL-0": "2747-0",
+              "26XQ-0": "274C-0",
+              "26XP-0": "274B-0",
+              "26XO-0": "274A-0",
+              "26XN-0": "2749-0",
+              "26XR-0": "274D-0",
+              "26XS-0": "274E-0",
+              "26XW-0": "274I-0",
+              "26XV-0": "274H-0",
+              "26XU-0": "274G-0",
+              "26XY-0": "274K-0",
+              "26Y2-0": "274O-0",
+              "26Y1-0": "274N-0",
+              "26Y0-0": "274M-0",
+              "26XZ-0": "274L-0",
+              "26Y6-0": "274S-0",
+              "26Y5-0": "274R-0",
+              "26Y4-0": "274Q-0",
+              "26Y8-0": "274U-0",
+              "26Y7-0": "274T-0"
+            }
+          }
+        ]
+      }
+    },
+    "order": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-16t-native-restore-order-v1",
+      "tool": "move_nodes",
+      "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+      "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+      "data": {
+        "moves": [
+          {
+            "nodeId": "273K-0",
+            "parentId": "MO-0",
+            "index": 30
+          },
+          {
+            "nodeId": "2728-0",
+            "parentId": "26WW-0",
+            "index": 2
+          }
+        ],
+        "affectedParents": [
+          {
+            "parentId": "MO-0",
+            "childIds": [
+              "MP-0",
+              "24VA-0",
+              "24VZ-0",
+              "24WG-0",
+              "24WX-0",
+              "24XE-0",
+              "PU-0",
+              "QF-0",
+              "QV-0",
+              "RG-0",
+              "S8-0",
+              "24XV-0",
+              "TN-0",
+              "UA-0",
+              "UT-0",
+              "VR-0",
+              "24YP-0",
+              "26UP-0",
+              "250G-0",
+              "250X-0",
+              "251E-0",
+              "251V-0",
+              "252C-0",
+              "252W-0",
+              "253D-0",
+              "253X-0",
+              "254K-0",
+              "26RJ-0",
+              "255G-0",
+              "2564-0",
+              "273K-0",
+              "184-0",
+              "18N-0",
+              "19L-0"
+            ]
+          },
+          {
+            "parentId": "26WW-0",
+            "childIds": [
+              "26ZL-0",
+              "26WY-0",
+              "2728-0"
+            ]
+          }
+        ]
+      }
+    },
+    "cleanup": {
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-16t-clear-owned-recovery-copies-v1",
+      "tool": "write_html",
+      "beforeSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+      "afterSnapshot": "1a68ac7feb1d5df5921acf7a7516f3052603982f568e71eeaeec4fe5a7c20a01",
+      "data": {
+        "createdNodes": [
+          {
+            "id": "274V-0",
+            "name": "Empty audit preservation template",
+            "component": "Frame",
+            "worldX": 60,
+            "worldY": 3686,
+            "x": 60,
+            "y": 446
+          }
+        ]
+      }
+    }
+  },
+  "fencedPending": [
+    {
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-16t-0-accent-refinement-1631-v1",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "nodeId": "16T-0",
+      "currentNode": "273K-0",
+      "reason": "write_html drops native zIndex100; original restored exactly, inset highlight remains; update_styles currently schema held",
+      "plan": {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "fileName": "Terminal",
+        "pageId": "p-9-1",
+        "pageName": "06 · Company · Navigation + Interaction",
+        "artboardId": "MO-0",
+        "artboardName": "20A · STATE of 20 · Desktop · Company Switcher Open",
+        "nodeId": "16T-0",
+        "kind": "accent-refinement-1631",
+        "expected": {
+          "boxShadow": "#FFFFFF08 0px 1px 0px inset, #00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px"
+        },
+        "expectedAbsent": [],
+        "css": "box-shadow:#00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px;",
+        "verify": {
+          "boxShadow": "#00000061 0px 20px 54px, #5B9BF00A 0px 0px 28px"
+        },
+        "change": "Remove the crisp decorative edge component; preserve the existing broad depth, image, fill, text and visibility."
+      }
+    }
+  ],
+  "zIndexPreflight": [
+    "01M3NSZGE8JWN2EZCSF0DT05RM_16T-0"
+  ],
+  "schemaHoldDiagnosis": {
+    "sha256": "351271826f5b987cd15dfd221a296364c36bf9f81a1e7ddfe507b025d4681d43",
+    "data": {
+      "schema": "paper_update_styles_schema_hold_diagnosis_v1",
+      "assessedAt": "2026-11-08T19:51:24.626Z",
+      "sourcePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+      "status": "EXACT_REPRESENTATION_MISMATCH_CONFIRMED_NO_EXISTING_MATCHING_PROFILE",
+      "scope": "Bounded read-only source diagnosis. No held tool attempt, no native Paper call, no protected source/runtime/control mutation, no alternative carrier.",
+      "nativeObservation": {
+        "catalogSha256": "f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb",
+        "tool": "update_styles",
+        "classification": "edit_held_schema",
+        "observedDescriptorSource": "Cached native catalog in the shared session and paper_style_clone_batch_compatibility_20261108.json"
+      },
+      "sourceIdentity": {
+        "path": "integrations/paper_desktop/bridge.py",
+        "gitBlobSha": "fa74470154925e15abf33cb21747ed846ef30584",
+        "sha256": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/bridge.py",
+        "laterObservedCommit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+        "laterObservedSameBlob": true,
+        "laterObservationLimit": "This exact-path comparison is not an authority-pin refresh or an exhaustive search of unmerged proposals."
+      },
+      "exactMismatch": {
+        "schemaLocation": "inputSchema.properties.updates.items.properties.styles.additionalProperties",
+        "reviewed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "native": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "reviewedProfilesAtPin": 1,
+        "annotationsMatch": true,
+        "otherNormalizedSchemaFieldsMatch": true,
+        "semanticAssessment": "For these constraint-free primitive branches, both forms admit string or number style values. The implemented checker does not canonicalize between these forms."
+      },
+      "checkChain": [
+        {
+          "source": "integrations/paper_desktop/bridge.py",
+          "lines": [
+            501,
+            516
+          ],
+          "behavior": "The single reviewed update_styles profile encodes styles.additionalProperties with anyOf."
+        },
+        {
+          "source": "integrations/paper_desktop/bridge.py",
+          "lines": [
+            528,
+            555
+          ],
+          "behavior": "semantic_schema removes description/title/examples/$comment prose and sorts required/enum arrays. It preserves $schema, legitimate named fields, union encodings and nested shapes."
+        },
+        {
+          "source": "integrations/paper_desktop/bridge.py",
+          "lines": [
+            558,
+            604
+          ],
+          "behavior": "_same_reviewed_json compares canonical encoded JSON. compatible_tool_contract accepts equality or a narrowly defined optional top-level extension whose removal yields equality. This nested representation difference yields None."
+        },
+        {
+          "source": "integrations/paper_desktop/bridge.py",
+          "lines": [
+            978,
+            1025
+          ],
+          "behavior": "schema_receipt computes eligibility separately for each edit tool. Any qualified writer plus the critical snapshot/server checks can make accepted_for_write true while update_styles remains incompatible."
+        },
+        {
+          "source": "integrations/paper_desktop/bridge.py",
+          "lines": [
+            1112,
+            1122
+          ],
+          "behavior": "paper_catalog projects incompatible edit tools as edit_held_schema."
+        },
+        {
+          "source": "integrations/paper_desktop/bridge.py",
+          "lines": [
+            1029,
+            1043
+          ],
+          "behavior": "If called, qualify_call_arguments would refuse this tool as TOOL_SCHEMA_CHANGED before requested dispatch. No such call was made in this diagnosis."
+        }
+      ],
+      "offlineProof": {
+        "path": "/workspace/scratch/5ad934bc9c22/paper_update_styles_schema_hold_offline_proof.json",
+        "sha256": "537f277af32fe998419541515251201f70c265a810c3e56da1db07c698dfa7fc",
+        "method": "Execute only the unmodified pinned pure comparison functions/constants against the cached native descriptor, outside the bridge runtime.",
+        "results": {
+          "actualUpdateStylesQualified": false,
+          "controlWriteHtmlQualified": true,
+          "nativeSafetyAnnotationsMatch": true,
+          "onlyNestedUnionEncodingDiffers": true,
+          "inMemoryEncodingOnlyCounterfactualQualified": true
+        },
+        "limit": "The diagnostic counterfactual is not a runtime repair, installed profile or authorization to dispatch."
+      },
+      "alreadyQualifiedPaths": [
+        {
+          "path": "paper_catalog",
+          "kind": "read-only preflight",
+          "use": "Reports the current actual descriptor and per-tool write classification. A fresh observation can prove a genuinely changed compatible state; re-reading unchanged f200 does not repair this mismatch."
+        },
+        {
+          "path": "paper_inspect",
+          "kind": "read-only status/snapshot",
+          "use": "The pinned source exposes write_schema readiness and checks the critical snapshot getter. Readiness is not per-tool permission and does not make the held update_styles callable."
+        },
+        {
+          "path": "Existing already-qualified Paper operations",
+          "kind": "independent work",
+          "use": "Continue only where the actual operation preserves the target's required content, geometry and stacking. Tool admission does not certify clone fidelity."
+        }
+      ],
+      "repairAssessment": {
+        "existingMatchingProfileAtProtectedPin": false,
+        "existingMatchingProfileAtLaterCheckedSamePath": false,
+        "existingNormalizationOrCallerOption": false,
+        "reason": "There is one update_styles reviewed profile and no primitive-union normalization. Optional-root-field tolerance cannot apply to this nested field.",
+        "boundedSourceRepairCandidate": "A source-owned additional update_styles profile for this exact native union encoding, with all other types/constraints/required fields and destructive annotations unchanged, would address the isolated mismatch more narrowly than broad schema-equivalence normalization. This report does not add or activate that profile.",
+        "existingProcess": "docs/PAPER_DESIGN_INTEGRATION.md lines116–120 requires an explicit source-reviewed update for a changed qualified contract. docs/PAPER_DIRECT_CHATGPT.md lines54–56 separates reviewed source merge, installer selection and real guarded acceptance. The existing runtime owner/release path must apply; no checksum override, hotpatch, private test seam or newly invented control is qualified here.",
+        "sourceReferences": [
+          "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DESIGN_INTEGRATION.md#L90-L120",
+          "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DIRECT_CHATGPT.md#L42-L56",
+          "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DIRECT_CHATGPT.md#L386-L414"
+        ],
+        "privateSeamBoundary": "bridge.py lines989–1003 and1126–1129 explicitly identify custom catalog-pin behavior as an internal test seam, unavailable to normal MCP/CLI callers. It is not a repair path."
+      },
+      "zIndexImplication": {
+        "parentReported": "A style-only clone and an explicit clone z-index override both yielded fully observed 47-node replacements that lost original zIndex100; two native backups are verified.",
+        "scope": "This is separate from descriptor qualification: the schema hold prevents the intended targeted style API from being admitted, while the clone result is an upstream preservation failure after an admitted operation.",
+        "noGuarantee": "Even a subsequently qualified update_styles would still need exact zIndex and graph readback on the real target. Its native description says context-inert styles can be ignored and returned in ignoredStyles; schema equivalence alone cannot promise runtime style behavior."
+      },
+      "artifacts": {
+        "sources": "/workspace/scratch/5ad934bc9c22/paper_update_styles_schema_hold_sources.json",
+        "sourcesSha256": "04015ef09b1a184b0aab2904e9fe5bc34db7f325ca683d070686bb45bd357925"
+      },
+      "unperformed": [
+        "No held update_styles call.",
+        "No live schema alteration or counterfactual dispatch.",
+        "No source edit or runtime install/activation.",
+        "No host, credential, selector or alternative-carrier action."
+      ]
+    }
+  }
+}
