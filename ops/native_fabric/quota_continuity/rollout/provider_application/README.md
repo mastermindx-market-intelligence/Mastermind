@@ -150,3 +150,54 @@ Its fixtures exercise both existing installer owners, interrupted selection and
 receipt recovery, sealed quota-reader loading, mixed-cohort refusal, the original
 GLM claim/settlement cases, and APPLICATION v3/artifact custody on the actual
 emitted source. Existing CI owners run these tests and both provider consumers.
+
+## Preserve the selected remote-placement provider family
+
+The opt-in --include-provider-plan-remote-placement composes the exact
+protected current116-remote-placement provider family with APPLICATION.
+It requires --include-provider-plan-application and keeps the existing
+116/118/121 member counts. The live sequence-39 observation motivated this
+source join; acceptance depends on the complete file map, not sequence 39
+alone.
+
+The selected provider picker is
+f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019.
+The source-owned remote-placement.json authenticates the unchanged original
+APPLICATION composition, the protected provider profile and its exact forward
+patch. The builder first verifies the complete original combined parent, then
+applies that patch to a copied picker and verifies the entire new postimage.
+Every other payload remains byte-identical to its corresponding existing
+provider/APPLICATION variant. The inventory retains both composition steps
+and their distinct source, intermediate and installed preimages.
+
+| Variant with both provider flags | Members | Manifest SHA256 |
+| --- | ---: | --- |
+| Base | 116 | 75ad0d9aad8361de2b2d11734f90b2f08906f6a731062393f0b10f0eb29a4819 |
+| Go APPLICATION | 118 | 0784394d60fbc858729dd64cd2877826c229cf471d82eaf3631fca51357f3cad |
+| Go APPLICATION plus HTTP | 121 | be0143144b8da556fc7b83690da1ff68e9bd4e67d9e8f4a16483621be0258cef |
+
+Both existing installer paths require the complete remote-placement provider
+predecessor and a complete matching APPLICATION target. They reject a picker
+rollback, an unqualified older provider predecessor, a partial or changed map,
+and a mixed target. The inverse authenticates the complete input before
+normalizing a copy for the unchanged original guard. The caller's map is never
+modified.
+
+Example source-only HTTP build:
+
+    python ops/native_fabric/quota_continuity/rollout/build_review_stage.py \
+      --output /tmp/reviewed-remote-provider-application \
+      --include-provider-plan-application \
+      --include-provider-plan-remote-placement \
+      --include-go-application --include-application-http
+
+This option cannot be combined with --include-quota-reset-recovery: the
+existing H2 composition changes the same picker and has its own exact source
+family. The builder refuses that unqualified pair before preparing output.
+Existing default and H2 families retain their original bytes and identities.
+
+Installation uses the intended complete 118- or 121-member target in the
+original Go transaction. Selecting the 116-member base first does not qualify
+a later Go transition. Actual protected release, original installer-bundle
+custody, full current native selection and account/grant eligibility remain
+required. Building and disposable-owner tests do not activate a live service.

@@ -413,3 +413,183 @@ class TestProviderQuotaResetBrokerJourney(quota_proof.TestEmittedGlmResetBrokerJ
         cls.stage = quota_proof.build(Path(cls.stage_temp.name).resolve() / "http",
             "--include-provider-plan-application", "--include-go-application", "--include-application-http")
         cls.stage_manifest = quota_proof.manifest(cls.stage)
+
+
+# Sequence-39 keeps the protected remote picker while the original installer
+# owns one complete provider/APPLICATION transaction. These are inert fixtures.
+@pytest.fixture(scope="module")
+def remote_placement_provider_stage(provider_stage, tmp_path_factory):
+    repository = ROOT.parents[2]
+    sys.path.insert(0, str(repository))
+    try:
+        from ops.native_fabric.provider_plans import compose
+    finally:
+        sys.path.pop(0)
+    profile = json.loads((compose.HERE / "remote_placement/profile.json").read_bytes())
+    assert provider_stage.files == profile["base_files"]
+    root = tmp_path_factory.mktemp("provider-remote-placement-input").resolve()
+    base, stage = root / "base", root / "provider"
+    shutil.copytree(provider_stage.stage, base)
+    (base / "RELEASE.json").write_text(json.dumps({
+        "digest": profile["base_selection"]["generation"], "files": profile["base_files"],
+    }))
+    compose.compose(base, stage, profile_name="current116-remote-placement")
+    assert {key: g.digest((stage / key).read_bytes()) for key in profile["files"]} == profile["files"]
+    return SimpleNamespace(root=root, stage=stage, files=profile["files"])
+
+
+@pytest.fixture(scope="module")
+def remote_placement_builds(tmp_path_factory):
+    root = tmp_path_factory.mktemp("provider-remote-application-build").resolve()
+    outputs = {}
+    for name, flags in (
+        ("base", []), ("application", ["--include-go-application"]),
+        ("http", ["--include-go-application", "--include-application-http"]),
+    ):
+        output = root / name
+        argv = [
+            "builder", "--output", str(output), "--include-provider-plan-application",
+            "--include-provider-plan-remote-placement", *flags,
+        ]
+        with mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+            builder.main()
+        outputs[name] = output
+    return SimpleNamespace(**outputs)
+
+
+@pytest.mark.parametrize("extension,count", [("base", 116), ("application", 118), ("http", 121)])
+def test_remote_placement_complete_build_and_real_dependency_bytes(
+        extension, count, remote_placement_builds, combined_builds, builds):
+    output = getattr(remote_placement_builds, extension)
+    old_output = getattr(combined_builds, extension)
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    old = json.loads((old_output / "native-manifest.json").read_bytes())
+    expected = dict(old)
+    expected["ext/pick.py"] = builder.PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+    assert manifest == expected and len(manifest) == count
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    for key, digest in manifest.items():
+        raw = (output / "native-code-stage" / key).read_bytes()
+        assert g.digest(raw) == digest == inventory["files"][key]["sha256"]
+        assert len(raw) == inventory["files"][key]["bytes"]
+        if key != "ext/pick.py":
+            assert raw == (old_output / "native-code-stage" / key).read_bytes()
+    row = inventory["files"]["ext/pick.py"]
+    record, providers, _ = builder.provider_remote_placement_record()
+    chain = row["composition"]
+    assert chain["preimage_sha256"] == record["picker"]["preimage_sha256"]
+    assert chain["patch_sha256"] == record["picker"]["patch_sha256"]
+    assert chain["provider_preimage"]["composition_sha256"] == builder.PROVIDER_APPLICATION_RECORD_SHA256
+    assert chain["provider_preimage"]["sha256"] == record["picker"]["preimage_sha256"]
+    assert chain["successor_composition_sha256"] == builder.PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256
+    base = {key: value for key, value in manifest.items()
+            if key not in {g.GO_ENTRY, g.GO_HANDLER} | builder.HTTP_GENERATION_MEMBERS}
+    original = json.loads((builds.default / "native-manifest.json").read_bytes())
+    unchanged = dict(base)
+    assert builder.before_provider_application(base) == original
+    assert base == unchanged
+    if extension != "base":
+        component = json.loads((output / "external-go-component/component.json").read_bytes())
+        for name, digest in component["native_stage_dependencies"].items():
+            assert digest == manifest["ext/" + name]
+        assert installer._go_component(output / "external-go-component",
+                                       Path(component["stable_ext"]), manifest)
+        before, after = dict(providers), dict(manifest)
+        builder.validate_go_source_transition(before, after)
+        assert before == providers and after == manifest
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "http"])
+def test_remote_placement_original_installer_commit_and_recovery(
+        owner_name, extension, request, remote_placement_provider_stage, remote_placement_builds):
+    test_combined_application_commits_and_recovers_original_transaction(
+        owner_name, extension, request, remote_placement_provider_stage, remote_placement_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "http"])
+@pytest.mark.parametrize("direction", ["rollback-picker", "unqualified-old-predecessor"])
+def test_remote_placement_transition_does_not_cross_cohorts(
+        owner_name, extension, direction, request, provider_stage,
+        remote_placement_provider_stage, combined_builds, remote_placement_builds):
+    case = request.getfixturevalue(owner_name)
+    before = remote_placement_provider_stage if direction == "rollback-picker" else provider_stage
+    after = combined_builds if direction == "rollback-picker" else remote_placement_builds
+    selected = select_provider(case, before)
+    target, component = application_target(case, getattr(after, extension))
+    refuse_prepare(case, owner_name, target, component, selected)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("fault", ["changed", "partial", "no-additions"])
+def test_remote_placement_foreign_provider_predecessor_refuses(
+        owner_name, fault, request, remote_placement_provider_stage, remote_placement_builds):
+    case = request.getfixturevalue(owner_name)
+    selected = select_provider(case, remote_placement_provider_stage, fault=fault)
+    target, component = application_target(case, remote_placement_builds.http)
+    refuse_prepare(case, owner_name, target, component, selected)
+
+
+@pytest.mark.parametrize("fault", ["broker-preimage", "missing-addition", "changed-retained", "unexpected"])
+def test_remote_placement_original_map_is_checked_before_inverse(remote_placement_builds, fault):
+    manifest = json.loads((remote_placement_builds.base / "native-manifest.json").read_bytes())
+    legacy, _ = builder.provider_application_record()
+    if fault == "broker-preimage":
+        manifest["ext/lease_broker.py"] = legacy["replacements"]["ext/lease_broker.py"]["preimage_sha256"]
+    elif fault == "missing-addition":
+        del manifest["ext/experiential_transport.py"]
+    elif fault == "changed-retained":
+        manifest["ext/model_tier.py"] = "0" * 64
+    else:
+        manifest["ext/foreign.py"] = "0" * 64
+    unchanged = dict(manifest)
+    with pytest.raises(ValueError, match="remote placement APPLICATION closure"):
+        builder.before_provider_application(manifest)
+    assert manifest == unchanged
+
+
+@pytest.mark.parametrize("path", [
+    "rollout/provider_application/remote-placement.json",
+    "rollout/provider_application/composition.json",
+    "../provider_plans/profile.json",
+    "../provider_plans/remote_placement/profile.json",
+    "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
+])
+@pytest.mark.parametrize("fault", ["changed", "symlink"])
+def test_remote_placement_source_commitments_refuse_drift(tmp_path, path, fault):
+    root = tmp_path / "native_fabric/quota_continuity"
+    paths = [
+        "rollout/provider_application/remote-placement.json",
+        "rollout/provider_application/composition.json",
+        "../provider_plans/profile.json",
+        "../provider_plans/remote_placement/profile.json",
+        "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    ]
+    for relative in paths:
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+    target = root / path
+    if fault == "changed":
+        target.write_bytes(target.read_bytes() + b"\n")
+    else:
+        retained = tmp_path / "retained-source"
+        retained.write_bytes(target.read_bytes())
+        target.unlink()
+        target.symlink_to(retained)
+    with pytest.raises(ValueError):
+        builder.provider_remote_placement_record(root)
+
+
+@pytest.mark.parametrize("flags", [
+    ["--include-provider-plan-remote-placement"],
+    ["--include-provider-plan-application", "--include-provider-plan-remote-placement",
+     "--include-quota-reset-recovery"],
+])
+def test_remote_placement_unqualified_flag_pairs_refuse_before_output(tmp_path, flags):
+    output = tmp_path / "must-not-exist"
+    with mock.patch.object(sys, "argv", ["builder", "--output", str(output), *flags]):
+        with pytest.raises(SystemExit) as stopped:
+            builder.main()
+    assert stopped.value.code == 2 and not output.exists()

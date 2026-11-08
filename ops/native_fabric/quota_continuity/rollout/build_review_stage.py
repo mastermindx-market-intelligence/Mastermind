@@ -453,12 +453,59 @@ def provider_application_record(root=None):
     return record, profile["files"]
 
 
+PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256 = "4b6996bf22917a65cc7d3f4b050e853e6dd4affe5ae08f34c633421b0f7784b8"
+PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256 = "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019"
+
+
+def provider_remote_placement_record(root=None):
+    """Authenticate the exact protected sequence-39 provider/APPLICATION join."""
+    root = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    legacy, providers = provider_application_record(root)
+    record = json.loads(_provider_source(
+        root / "rollout/provider_application/remote-placement.json",
+        PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256,
+    ))
+    if record.get("schema") != "native-provider-application-remote-placement.v1":
+        raise ValueError("provider remote placement composition schema differs")
+    profile = json.loads(_provider_source(
+        root / record["provider_profile_source"], record["provider_profile_sha256"],
+    ))
+    row = record["picker"]
+    if (
+        profile.get("schema") != "mastermind.provider_plan_native_profile/v1"
+        or profile.get("base_files") != providers
+        or set(profile.get("patches", {})) != {"ext/pick.py"}
+        or set(profile.get("files", {})) != set(providers)
+        or len(providers) != 116
+        or _manifest_digest(providers) != record["provider_before_manifest_sha256"]
+        or _manifest_digest(profile["files"]) != record["provider_after_manifest_sha256"]
+        or legacy["manifest_sha256"] != record["application_before_manifest_sha256"]
+        or row["path"] != "ext/pick.py"
+        or row["sha256"] != PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+        or providers[row["path"]] != row["preimage_sha256"]
+        or profile["files"][row["path"]] != row["sha256"]
+        or any(profile["files"][key] != digest for key, digest in providers.items()
+               if key != row["path"])
+    ):
+        raise ValueError("provider remote placement whole source closure differs")
+    expected_patch = {
+        "before": row["preimage_sha256"], "after": row["sha256"],
+        "patch": row["patch_source"].removeprefix("../provider_plans/"),
+        "patch_sha256": row["patch_sha256"],
+    }
+    if profile["patches"][row["path"]] != expected_patch:
+        raise ValueError("provider remote placement protected patch binding differs")
+    patch = _provider_source(root / row["patch_source"], row["patch_sha256"])
+    return record, dict(profile["files"]), patch
+
+
+
 def _has_provider_members(manifest):
     return bool(PROVIDER_APPLICATION_MEMBERS & set(manifest)) or any(
         manifest.get(key) == digest for key, digest in PROVIDER_ROUTING_DIGESTS.items())
 
 
-def before_provider_application(manifest):
+def _before_provider_application_without_remote_placement(manifest):
     """Invert only the complete116 source; never mutate the actual manifest."""
     if type(manifest) is not dict:
         raise ValueError("provider APPLICATION manifest differs")
@@ -475,6 +522,18 @@ def before_provider_application(manifest):
     if len(previous) != 107 or _manifest_digest(previous) != record["application_manifest_sha256"]:
         raise ValueError("provider APPLICATION parent closure differs")
     return previous
+
+
+def before_provider_application(manifest):
+    if type(manifest) is dict and manifest.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256:
+        record, _, _ = provider_remote_placement_record()
+        if len(manifest) != 116 or _manifest_digest(manifest) != record["application_after_manifest_sha256"]:
+            raise ValueError("provider remote placement APPLICATION closure differs")
+        normalized = dict(manifest)
+        normalized["ext/pick.py"] = record["picker"]["preimage_sha256"]
+        return _before_provider_application_without_remote_placement(normalized)
+    return _before_provider_application_without_remote_placement(manifest)
+
 
 
 def _application_base(manifest):
@@ -503,7 +562,7 @@ def go_staged_dependency_hashes(manifest, candidate_hashes):
     return result
 
 
-def validate_go_source_transition(before, after):
+def _validate_go_source_transition_without_remote_placement(before, after):
     """Check the frozen verified pair; CURRENT/CAS remains with the installer."""
     if not (_has_provider_members(before) or _has_provider_members(after)):
         return
@@ -520,6 +579,24 @@ def validate_go_source_transition(before, after):
             or http_members and http_members != HTTP_GENERATION_MEMBERS
             or len(base) != 116 or _manifest_digest(parent) != record["manifest_sha256"]):
         raise ValueError("provider APPLICATION source transition differs")
+
+
+def validate_go_source_transition(before, after):
+    if type(before) is dict and type(after) is dict and (
+        before.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+        or after.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
+    ):
+        record, providers, _ = provider_remote_placement_record()
+        if before != providers or after.get("ext/pick.py") != record["picker"]["sha256"]:
+            raise ValueError("provider remote placement source transition differs")
+        normalized_before, normalized_after = dict(before), dict(after)
+        normalized_before["ext/pick.py"] = record["picker"]["preimage_sha256"]
+        normalized_after["ext/pick.py"] = record["picker"]["preimage_sha256"]
+        return _validate_go_source_transition_without_remote_placement(
+            normalized_before, normalized_after,
+        )
+    return _validate_go_source_transition_without_remote_placement(before, after)
+
 
 
 def compose_provider_application_stage(root, output, manifest, files):
@@ -569,6 +646,60 @@ def compose_provider_application_stage(root, output, manifest, files):
             row = record["additions"][key]
             files[key] = dict(row, installed_preimage_sha256=None)
     manifest.update(composed)
+
+
+def compose_provider_remote_placement_stage(root, output, manifest, files):
+    """Preserve the protected picker through one fixed APPLICATION source join."""
+    import subprocess
+    from tempfile import TemporaryDirectory
+
+    record, _, patch = provider_remote_placement_record(root)
+    row = record["picker"]
+    if type(manifest) is not dict or len(manifest) != 116 or _manifest_digest(manifest) != record["application_before_manifest_sha256"]:
+        raise ValueError("provider remote placement APPLICATION predecessor differs")
+    target = output / "native-code-stage" / row["path"]
+    original = _provider_source(target, row["preimage_sha256"])
+    prior = dict(files[row["path"]])
+    if prior["sha256"] != row["preimage_sha256"] or prior["bytes"] != len(original):
+        raise ValueError("provider remote placement inventory predecessor differs")
+    with TemporaryDirectory(prefix="native-provider-remote-placement-") as temporary:
+        work = Path(temporary)
+        member = work / row["path"]
+        member.parent.mkdir(parents=True)
+        member.write_bytes(original)
+        applied = subprocess.run(
+            ["git", "apply", "--whitespace=nowarn", "-"], input=patch, cwd=work,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if applied.returncode:
+            raise ValueError("provider remote placement exact patch failed")
+        successor = member.read_bytes()
+    if sha(successor) != row["sha256"] or len(successor) != row["bytes"]:
+        raise ValueError("provider remote placement picker successor differs")
+    normalized = dict(manifest)
+    normalized[row["path"]] = row["sha256"]
+    if _manifest_digest(normalized) != record["application_after_manifest_sha256"]:
+        raise ValueError("provider remote placement final whole closure differs")
+    target.write_bytes(successor)
+    _provider_source(target, row["sha256"])
+    manifest[row["path"]] = row["sha256"]
+    files[row["path"]] = {
+        "source": "candidate/pick.py", "sha256": row["sha256"], "bytes": len(successor),
+        "installed_preimage_sha256": prior["installed_preimage_sha256"],
+        "composition": {
+            "schema": "native-exact-forward-patch.v1",
+            "preimage_sha256": row["preimage_sha256"],
+            "patch_source": row["patch_source"], "patch_sha256": row["patch_sha256"],
+            "successor_composition_sha256": PROVIDER_REMOTE_PLACEMENT_RECORD_SHA256,
+            "provider_preimage": {
+                "composition_sha256": PROVIDER_APPLICATION_RECORD_SHA256,
+                "preimage_sha256": prior["composition_preimage_sha256"],
+                "sha256": prior["sha256"], "source": prior["source"],
+                "patch_sha256": prior["patch_sha256"],
+            },
+        },
+    }
+
 
 
 # One exact command-scoped advice setting extends the complete accepted72
@@ -1422,7 +1553,12 @@ def main():
                         help='preserve the exact selected provider plan in the reviewed APPLICATION source')
     parser.add_argument('--include-quota-reset-recovery', action='store_true',
                         help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
+    parser.add_argument("--include-provider-plan-remote-placement", action="store_true", help="preserve the exact sequence-39 picker in the provider/APPLICATION source; requires provider plan and excludes the separately qualified H2 composition")
     args = parser.parse_args()
+    if args.include_provider_plan_remote_placement and not args.include_provider_plan_application:
+        parser.error("--include-provider-plan-remote-placement requires --include-provider-plan-application")
+    if args.include_provider_plan_remote_placement and args.include_quota_reset_recovery:
+        parser.error("remote placement plus quota reset requires its separately qualified exact composition")
     if args.include_application_http and not args.include_go_application:
         parser.error('--include-application-http requires --include-go-application')
     output = args.output
@@ -1518,6 +1654,8 @@ def main():
                 raise ValueError('qualified pure YAML member differs')
     if args.include_provider_plan_application:
         compose_provider_application_stage(root, output, manifest, files)
+    if args.include_provider_plan_remote_placement:
+        compose_provider_remote_placement_stage(root, output, manifest, files)
     if args.include_quota_reset_recovery:
         compose_quota_reset_stage(root, output, manifest, files)
     normalize_application_carrier_base_manifest(
