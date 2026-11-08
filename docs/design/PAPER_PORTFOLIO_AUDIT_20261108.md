@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. The next foreground is the Terminal's current Company journey audit. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. The next foreground is the existing F03 source-directory pipeline, where the Sector pointer still lands on an older reference instead of the current provisional journey and return proposal. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -803,3 +803,86 @@ All mutations returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed on
 **Required consumer proof:** the real comparison → native Cycles/inline Dossier → qualified Central return; A/B reversal; supported 21/63/126 windows; benchmark/basis/population mismatch; missing generation; same-date source replacement; absent pair/unknown group; direct entry and browser history; full pair/basis readback and later-source recheck; later-input cancellation; actual focus/scroll readback; correct partial/rejected copy; explicit current-data review/adoption; EN/ZH and 390px keyboard/touch behavior.
 
 **Next safe phase:** a bounded read-only audit of the Terminal's current Company journey is running. Preserve D07/current-study/source-only/held Returns distinctions and all already accepted Options, News, Memory and Prophet flows. Require a new consequential destination, identity or state gap before editing.
+
+
+## Continuing phase — Company historical benchmark availability
+
+**State:** the Brief correction and a six-pane EN/ZH proposal are completed, visually inspected, read back and scoped-finished. Terminal file `01M3NSZGE8JWN2EZCSF0DT05RM`; new page **`p-1C-0`**, “Proposed · Historical benchmarks”; new artboard **`21ZR-0`**, “PROPOSED · Historical benchmark chooser · EN/ZH”.
+
+### Corrected ambiguity in the current Brief
+
+The current Company R3 Brief `1BEK-0` shows the retained NVDA **Q2 FY2026 / 27 August 2025** case, but `1BKL-0` labelled its consensus snapshot **“Not loaded.”** The existing Expectations destination `1CD3-0` correctly states **“Consensus snapshot unavailable”** and that management guidance is used.
+
+The one exact Brief leaf now reads **“No comparable pre-event estimate.”** Its screenshot fits the original 440px context row. It no longer suggests a pending fetch can supply the missing historical analyst evidence. All reported numbers, charts, margins, guidance and invalidation questions remain.
+
+### Design source and current product are distinct
+
+The pinned D07 [EXPERIENCE.md](https://github.com/mastermindx-market-intelligence/Macro/blob/da8df94d647f06b34e5a7a743f147980e627e854/research/design_candidates/production_design_20261102/d07/EXPERIENCE.md), blob **`2999b5aaa4133ca914e72dd1ba8ee459227efb02`**, explicitly supports the retained R3 comparison:
+
+- NVDA Q2 FY2026, historical report date 27 August 2025.
+- Reported revenue **46.743B USD**.
+- Prior management-guidance midpoint **45.000B USD**, range **44.10–45.90B**, issued 28 May 2025 for that quarter.
+- `((46.743 − 45.000) / 45.000) × 100 = 3.873333…%`, displayed **+3.9% above prior guidance**.
+- The later **54B** next-quarter outlook and current Forecast estimates are different objects and cannot fill this comparison.
+
+The arithmetic was independently recalculated from those retained inputs; this is not a new market calculation or API observation. The D07 README at the same source pin (blob `5f300097e708bd163fae657d0cbfe7eadc88d5bb`) keeps the composition provisional and its source/release boundaries open.
+
+Current protected Terminal source at **`d7a83d3348a4fcb762d93221f19c4e94cbe4505e`** has a materially narrower implementation:
+
+| Source | Blob | Relevant boundary |
+|---|---|---|
+| `terminal/components/fin/CompanyIntelligenceV2Current.tsx` | `594cff2b78961e481c9afa941ac9fc83d4f5c45b` | Existing Company event/lens/evidence owner; resultsComparisons starts empty. |
+| `terminal/app/api/investigations/baseline/route.ts` | `1f49c8ab6dbba4fbe9d53ccc4a493dee402aa709` | Exact retained-event read and reauthorization. |
+| `terminal/lib/companyRetainedContext.ts` | `b4581b1d38d4a6fd112b61f954fb2bf5490fc2a1` | Retained identity tuple and failed-read boundary. |
+| `terminal/lib/earningsExpectationBoundary.ts` | `7305d05bcee2d8456d09799718fdb674e2898df1` | Source-backed reported/guidance evidence; consensus and reaction not admitted. |
+| `terminal/lib/eventWorkspace.ts` | `df0e120bd753c971c117c8edd992c5fd733bfedd` | Workspace facts/guidance and comparison normalization. |
+| `terminal/lib/eventWorkspacePresent.ts` | `dd040ffe7d7407d67a5c1349f51fdb36319feae7` | Presentation/horizon/date limitations. |
+| `terminal/components/fin/EarningsRepricingEvidence.tsx` | `519d5f3aac4746d8312efa81081f9a3c67a7f990` | Available evidence versus static unavailable lanes. |
+
+Principal directly read the expectation boundary and retained-context owner; the source reviewer inspected the full owner chain above. No current API response or successful historical R3 event receipt was observed.
+
+The expectation boundary always returns consensus **NOT_ADMITTED**, evidence null and historicalConsensusAdmitted false. A false consensus_unlicensed producer flag is not admission. Reported evidence requires a nonempty byte-replayed item; guidance additionally requires a signed percentage value/range. That is not a qualified USD actual/prior-guidance comparator. Current normalizeDelta rejects an asserted comparable basis and beat/miss/verdict fields. The new dollar comparison is therefore a **D07 historical design proposal**, not existing API behavior.
+
+### Proposed reading journey
+
+The new native artboard reuses the existing R3 shell and contains body **`225E-0`**:
+
+| Section | Content |
+|---|---|
+| `225F-0` | Proposal framing and retained-case boundary. |
+| **`225J-0`** | Three 390px EN panes: selected prior-guidance comparison, benchmark chooser, unavailable-analyst explanation. |
+| **`227N-0`** | The same three states in Chinese, preserving company, fiscal quarter, date, revenue, reported basis and USD-billion units. |
+| **`229R-0`** | Existing-owner integration, current code limitations, exact arithmetic and required consumer proof. |
+| `22AB-0` | Exact design and code source pins; no implementation/release claim. |
+
+The ready pane labels **Above prior guidance**, shows **+3.9% relative to management's midpoint**, and keeps reported 46.743B, prior 45.000B, guide range and both publication dates visible. It does not call this a consensus surprise.
+
+The chooser leaves **prior management guidance selected**. The analyst option is unavailable and nonselectable, with a separate **Why unavailable? / 为何不可用？** action. That action explains availability without substituting current estimates or changing the selected benchmark. The explanation keeps the reported result accessible and explicitly identifies the unchanged prior guidance. Return and source/basis actions remain separate.
+
+The unavailable card must not be implemented as a disabled interactive parent containing the Why button. Keep the card nonselectable and its explanation action independently keyboard reachable. Newly drawn actionable controls use a 44px minimum area; the inherited global shell was not redesigned and is not covered by an all-controls claim.
+
+### Exact context and return qualification
+
+The existing retained browser tuple is **ci_event + ci_generation + ci_company + ci_fingerprint**, mapped to event_id + generation_id + company_id + fingerprint in the baseline owner. Retained rights are reauthorized; a failed retained read does not fall back to current/latest. No event ID, generation or fingerprint was invented from the historical fixture's date.
+
+The current Company owner has no benchmark state or URL field. Extend that incumbent selection owner for this proposed local control; do not introduce a second event/router/admission owner.
+
+The source critique identified one real tightening, applied to **`229Y-0`**: return may restore the selected benchmark/opener only while the captured tuple **and** selected metric, fiscal target and basis still match. Changed context or later user input retires the stale chooser/explanation, rebinds through the existing owner and focuses the current Expectations heading. The old guidance must not enter a replacement event. With unchanged context but an absent opener, use the heading fallback.
+
+The required production comparison still needs issuer/listing, fiscal target/ending, metric, units/currency, accounting basis and qualifying source-vintage evidence from actual producers. The current guidance horizon is free text and its presentation may omit the year; neither it nor a formatted percentage establishes that join. Display event dates can fall back through source availability, observation and generation time; they do not prove a pre-report estimate vintage.
+
+A direct request for an unqualified benchmark must show its own unavailable result. It cannot silently rename guidance as consensus. No watch, thesis, event or admission state changes merely by reading availability.
+
+### Verification and concurrent work
+
+Fresh JSX showed **75 original Brief text leaves, exactly one planned change at `1BKL-0`, and zero missing leaves**. Original Expectations `1CD3-0` and product entry `1BCX-0` remained byte-identical. The new proposal has **133 text leaves**, including its inherited shell, with the one subsequent return-contract refinement read back exactly.
+
+The F03 Terminal directory `1NDQ-0` changed concurrently outside this mission: its multiline Options A status gained **“A11: Tape filter draft · source-default fixture.”** Its simple text leaves remained unchanged, but whole-JSX equality is therefore false. That observed other-writer addition was preserved; this mission made no edit or scoped finish to that directory.
+
+Screenshots verified the existing Brief status row, all six 390px EN/ZH panes, the implementation contract and the final changed-context return paragraph. No clipped values or labels were found. The new 1440px board is alone on its separate page; inactive-page fit-content height is null and section screenshots establish the reviewed layouts.
+
+Every mutation returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed only on **`1BEK-0 / 21ZR-0`**. No API, product code, source admission, source event, current Forecast, save, trade, PR control or release changed. The known blank mobile successor, D07 readme, accepted directory structure, held Returns work and other writers were not reopened.
+
+**Required consumer proof:** ready → chooser → explanation → qualified return; unchanged and changed-event tuples; metric/period/basis changes; later intent; removed opener; keyboard and touch; actual future dollar-comparator receipts; unavailable/restricted evidence; a direct unavailable-benchmark request; independent source access without fallback or admission changes.
+
+**Next safe phase:** repair the newly evidenced Sector discovery gap through the existing F03 source pipeline. The oversized F03 Paper original is explicitly READ ONLY / NO MODIFY due to its observed data-loss warning; no mutation is planned there. Existing F03 source permits bounded source corrections, but its generated D05 assignment must be regenerated from qualified observations/curation rather than patched by hand. Exact source/build and carrier checks are in progress; all recorded Draft/HOLD and physical-migration restrictions remain.
