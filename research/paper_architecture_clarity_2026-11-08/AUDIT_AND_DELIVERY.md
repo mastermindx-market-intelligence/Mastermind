@@ -1,5 +1,11 @@
 # Paper architecture, features and clarity — 8 November 2026
 
+## Applied outcome
+
+Completed a cross-product architecture and clarity pass directly in Paper: **44 artboards changed, 16 files improved**, plus read-only review of preserved product journeys. The largest structural improvements are in Sector Intelligence, Expectation Surface and GMI; workspace entry corrections span OS, Hub, AI, Guide, Ontology, Prophet, Terminal, News and the shared design system.
+
+The changes make the current design easier to find, bring the answer and its evidence forward, name the next action precisely, and distinguish unavailable, historical, draft and completed states. The final verification and exact effect ledger appear below.
+
 ## Assignment and scope
 
 Chairman directs this session to audit and improve the existing Paper design estate: architecture, feature workflows and clarity. Operation correlation: paper-architecture-clarity-20261108-c4. This is design work, not a production implementation or release. No Slack messages or new runtime/watcher/queue are commissioned.
@@ -37,7 +43,7 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-Cross-product changes below are applied. OS, Sector, Policy, GMI and Terminal screenshots have been reviewed; Prophet responsive QA is the current verification frontier. Next: complete that bounded check, save final readback, release only owned working indicators, and publish the source evidence through the normal repository path. PLAN_NOT_ORG_LINKED until an existing Agent OS record is identified; this source evidence does not create a new organizational lifecycle.
+The bounded design pass is applied and visually verified. It changes 44 artboards across 11 files plus page/file navigation in five additional files: 16 files total. All session-owned effects are reconciled, and working indicators were released for the 44 explicitly owned artboards. Current source evidence is ready for a normal protected PR; it does not claim a master merge or application release. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -124,13 +130,13 @@ Reference index 1NDQ-0 gained a cloned, correctly styled D06 row 1XOB-0 with the
 
 Visual QA found the pre-existing fixed-height directory footer clipped its source line. Condensed the footer copy without changing styles or dropping the F03 source reference. Rechecked the full 1440×900 map: both footer lines now fit. D06 row and Company reference screenshots also reviewed.
 
-## Applied milestone — Prophet sample clarity and recovery
+## Verified milestone — Prophet sample clarity and recovery
 
 File: [Prophet build contract](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-D-0). The build-contract/readme page now opens the page list, followed by R7–R8 studies. All **13 pages** retained. The entry explicitly remains **DRAFT**.
 
 Across ten Today variants (SYI-0, T8V-0, THR-0, TQN-0, TZJ-0, U9F-0, UIX-0, USF-0, YMJ-0, V1X-0), moved each existing sample-data disclosure immediately below the task heading. The notice is no longer a distant footer. Stale-quote recovery now says **Recheck after quotes refresh** / **报价刷新后重新核查**, replacing an unproven automatic-return promise. No quote, score, ranking or sample value changed.
 
-All ten move and copy effects are observed. Responsive after-layout QA is pending at this save and will be appended below. Existing unresolved external operation on ZE5-0 is outside this session's effects and remains untouched.
+All ten move and copy effects are observed. Exact readbacks confirm each notice is the second child of its heading container and all ten recovery phrases match. Screenshots of desktop EN/ZH, 390px EN/ZH, 768px and 320px variants passed. At 320px the notice wraps to two lines in 288×36px without clipping; the complete English recovery phrase fits in its 172×18px text bounds. Existing unresolved external operation on ZE5-0 is outside this session's effects and remains untouched.
 
 ## Preserved strong patterns and bounded coverage
 
@@ -178,6 +184,134 @@ The operation prefix is `paper-clarity-20261108-c4-`. All entries below have obs
 | prophet-entry-order-01 | arrange_pages | APPLIED_RESPONSE_OBSERVED |
 | prophet-entry-label-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
 
-## Remaining proof at this save
+## Verified milestone — completing the named product inventory
 
-Complete Prophet responsive verification; append any actual repair and readback. Release only this session's owned working indicators. Source publication remains separate from Paper edit completion. No unresolved session-owned mutation, no live application release claim, and no human permission request are implied by this checkpoint.
+The final inventory with archived entries returned **37 resources: 34 files and three folders**. The earlier 36-resource observation is retained as an initial snapshot, not a count of products. Current product files were distinguished from dated studies, archives, copies, empty/scratch files and acceptance canaries. AERLOR is a separate hospitality site, outside this Mastermind design mission; no edits there.
+
+The additional product pass covered the following:
+
+| File / entry | Applied result |
+|---|---|
+| [Intelligence Hub](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0) | Renamed file; ordered current journeys; corrected index and unavailable AXON entry. |
+| [Expectation Surface](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) | Revision evidence first; security-finder entry; understandable coverage across five variants. |
+| [Mastermind AI](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0) | Current conversation, recovery and build pages precede older references. |
+| [Market Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-1-0) | Learning sequence restored; four entry variants describe explanation without a timing promise. |
+| [MarketOntology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) | Current task pages first; dated answer uses snapshot language. |
+| [Risk Radar / dashboard popups](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-5-0) | Existing directory first; historical program handoff separated. |
+| [Options watch study](https://app.paper.design/file/01M5FNCKAND6CBSJNYM5FZWR8Y/p-1-0) | Generic page renamed to the actual U08 mobile study. |
+
+### Intelligence Hub: recover discoverability and show the real missing destination
+
+The file named **Refined vase** actually contains the current Intelligence Hub R4 workspace. Renamed that exact file to **Intelligence Hub · R4 Workspace**. Its eight pages now run from the named design map to contracts, desktop, mobile, research/risk, and loading/filter/locale coverage. Source-only and held transfer pages follow a divider. All pages retained, active viewing context unchanged.
+
+Index 5E9-0 now directs readers **00 Product brief → 01 Build map**. Node 5ER-0 names the exact p-2-0 landing, and 5ET-0 distinguishes **4 CURRENT + ARCHIVE** from the separate archived build log. Full index screenshot reviewed.
+
+The primary US command 86-0 presents an AXON research item. The same workspace explicitly says its AXON detail 43 is an empty held shell, not a build route. Changed AP-0 from **Read evidence →** to **Evidence unavailable**, with a layer specification naming the unavailable held destination and no navigation. The hero-row screenshot fits. This improves the represented state; **it does not complete the missing evidence destination**. The held shell, source-only page and QA canaries were not opened for modification or copied into substitutes.
+
+The 390px China company evidence journey 1PU-0 was inspected and preserved. It distinguishes alternative-data interest from broader confirmation, research from entry readiness, missing facets from neutral/negative evidence, own-price returns from relative performance, and the forward Stocks Board check from return to the China command. The desktop's **Buy-Board** label and mobile's **Stocks Board** label remain a terminology question because their route equivalence was not established; no unsupported destination substitution was made.
+
+The initial rename response was EFFECT_UNKNOWN due to metadata readback timing. The operation was not replayed. An explicit original-file get_basic_info read returned the exact new file name; subsequent navigation reads confirmed it again. Reconciled: APPLIED_CONFIRMED_BY_ORIGINAL_CARRIER_READBACK.
+
+### Expectation Surface: headline → evidence → exploration → coverage/method
+
+Applied the hierarchy change across all five existing variants: dark EN desktop 6-0, light EN desktop WI-0, dark ZH desktop 1SD-0, dark EN mobile 2NZ-0, and light ZH mobile 392-0.
+
+The complete coverage census moves after the security explorer and immediately before Method and provenance. Revision breadth now follows the hero. Existing largest-mover, explorer, methodology and state-specimen sections remain. EN light's original lack of a specimen section was preserved.
+
+The hero gained **Find a security →** / **查找证券 →**, cloned from the existing action style and explicitly named for the same-board explorer destination. Mobile entries retain 44px height. These are design jump specifications, not demonstrated application click handlers.
+
+Coverage now says **Matched securities only** / **仅含已匹配证券**. Expanded desktop language preserves the exclusion of **724 unmatched vendor names** and **777 aliases without effective dates**. Internal COMPLETE_DEGRADED source status belongs under Method and provenance; the duplicate hero decision row is repurposed into that status row. The R1 and R5 decision IDs each remain exactly once in every desktop method section. Mobile's existing collapsed decision disclosure is preserved.
+
+Proof:
+- All five censuses retain **31 exact text lines each**, 155 unchanged lines in total.
+- Exact sibling readback on all five content parents confirms hero → breadth → movers → explorer → census → method, followed by the existing specimens where present.
+- Revision breadth now begins at **367px from the top of the EN desktop board** and **567px on EN mobile**. The initial audit observed approximately 741px and 1,088px respectively.
+- Full desktop screenshot, all five hero variants, and both mobile method areas were inspected. No new clipping or collisions.
+- Source snapshot and rendered clocks, nine comparable versus ten captured sessions, EPS/revenue distinction, missing/offline/no-match states, and descriptive/context-only boundaries remain unchanged.
+
+A mistyped file ID during the fresh read guard for the jump-layer naming call caused a pre-effect target-configuration failure. No edit was dispatched. Corrected the identifier, obtained the proper binding, then performed the original naming operation once. This was not an uncertain-effect replay.
+
+### AI, Guide and Ontology: follow the current task sequence
+
+**Mastermind AI:** all nine pages retained. The R10 conversation now precedes R10 Save/Resume/Recovery and Build/Implementation boundaries; older reference, retained shell, source-only and held pages follow a divider. The entry explicitly names R10. Current directory 1ZA-0 already prescribed this sequence, so no conflicting product architecture was invented.
+
+Read-only visual review of desktop entry 1MR-0 and partial-answer mobile 3F5-0 found a coherent question/composer, original-question retention, verified breadth, unavailable returns, targeted Retry source, and explicit uncertainty. Those states were preserved. Save/reopen, monitoring and permissions remain implementation obligations, not proof supplied by these designs.
+
+**Market Guide:** all six pages retained, now ordered entry → Score Reading → Contextual Help → Search/Aliases/Recovery → full Risk Radar guide → retained baseline. Four R14 entry variants replace “in seconds” with the explanation actually offered. English: “Ask what a score or signal means. Explore the explanation and detail.” Chinese: “询问分数或信号的含义，查看解释与细节。” Native-width header screenshots reviewed; a two-character Chinese wrap was corrected and rechecked. R14 still does not supersede the complete eight-variant baseline. The full mobile Risk Radar teaching page 3P4-0 was preserved, including index-versus-probability separation and unknown-versus-zero treatment.
+
+**MarketOntology:** all six pages retained. Current WTI task pages precede retained comparisons, implementation references and the explicit QA hold. Entry now says **00 · Start here · WTI journey + Scope**. R25 matched-answer 4T3-0 now begins **In this snapshot** and explains that unmet oil/breakeven conditions are not repaired by later rates/duration readings. Full R25 screenshot reviewed. R22 architecture, R23/R24 design references, R25 evidence/recovery and held portfolio scope retain their original status. Historical implementation/release annotations were not promoted to new deployment claims.
+
+### Risk Radar, dashboard popups and Options reference
+
+The existing Popups/Risk Radar directory AFT-0 was already a useful three-family map. Moved p-5-0 first, then current Risk Radar main/evidence and pullback studies, China popup studies and Events/News studies. The earlier program handoff follows a divider and is labeled historical. All six pages retained. Primary 1-0 and mobile 8R6-0 Risk Radar screens were inspected and preserved: partial data, freshness limitations, index versus odds, own-scale drivers and distinct positioning/sentiment remain explicit. Original held/refused Events/China caption effects remain untouched.
+
+The standalone Options R1 file was inventoried. The separate U08 watch-and-review mobile screen was visually reviewed: firing receipt, subsequent assessment revision, manual re-arm behavior and the distinction between a watch and an order are coherent. Its generic Page 1 now identifies the U08 mobile study. This neither promotes the dated study to current Terminal authority nor changes alert execution.
+
+## Final verification and release of editing indicators
+
+The root performed the changes and self-checks; bounded native reasoning helpers supplied read-only architecture judgments and the detailed Prophet viewport check. These are not formal GitHub approvals or production acceptance.
+
+| Area | Verification performed |
+|---|---|
+| OS | Today and Projects desktop/mobile; session action, review return, recovery and decision mobile screenshots; current page list and board count. |
+| Sector | Primary desktop screenshot, Chinese disclosures, map text integrity: 154 lines unchanged. |
+| Policy | All four corrected technical-record rows, with %K value and excluded state preserved. |
+| GMI | Full desktop and Chinese mobile evidence layouts; primary-source route verification. |
+| Prophet | All ten notice positions/recovery readbacks; desktop, 390px, 768px and 320px visual QA. |
+| Terminal | Full 1440×900 directory, D06 reference row and Company reference; footer fit repaired. |
+| Expectation | Five hero variants, full desktop, two mobile method panels, five sibling orders and 155-line census integrity. |
+| Hub, Guide, Ontology | Index/AXON row; EN desktop/mobile and ZH mobile headers; full R25 answer/recovery board. |
+| Other entry changes | Exact readback of existing pages, names and retained counts; no active-page switching. |
+
+Released working indicators through explicit artboard lists only: **44 boards across 11 files**. Page/file-only changes in the other five files required no global indicator clearing. No other designer's arbitrary indicators were cleared.
+
+## Exact effect ledger — final named-product pass
+
+| Operation | Tool | Original response |
+|---|---|---|
+| hub-file-name-01 | rename_resource | EFFECT_UNKNOWN |
+| hub-page-order-01 | arrange_pages | APPLIED_RESPONSE_OBSERVED |
+| hub-page-names-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
+| hub-index-route-01 | set_text_content | APPLIED_RESPONSE_OBSERVED |
+| popups-page-order-01 | arrange_pages | APPLIED_RESPONSE_OBSERVED |
+| popups-page-names-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
+| options-study-page-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
+| ai-page-order-01 | arrange_pages | APPLIED_RESPONSE_OBSERVED |
+| ai-entry-name-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
+| guide-page-order-01 | arrange_pages | APPLIED_RESPONSE_OBSERVED |
+| guide-entry-name-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
+| ontology-page-order-01 | arrange_pages | APPLIED_RESPONSE_OBSERVED |
+| ontology-entry-name-01 | update_pages | APPLIED_RESPONSE_OBSERVED |
+| ontology-historical-copy-01 | set_text_content | APPLIED_RESPONSE_OBSERVED |
+| hub-current-scope-01 | set_text_content | APPLIED_RESPONSE_OBSERVED |
+| hub-held-destination-01 | rename_nodes | APPLIED_RESPONSE_OBSERVED |
+| guide-explanation-copy-01 | set_text_content | APPLIED_RESPONSE_OBSERVED |
+| guide-zh-fit-01 | set_text_content | APPLIED_RESPONSE_OBSERVED |
+| expectation-evidence-priority-01 | move_nodes | APPLIED_RESPONSE_OBSERVED |
+| expectation-explorer-entries-01 | duplicate_nodes | APPLIED_RESPONSE_OBSERVED |
+| expectation-human-coverage-01 | set_text_content | APPLIED_RESPONSE_OBSERVED |
+| expectation-method-status-01 | move_nodes | APPLIED_RESPONSE_OBSERVED |
+| expectation-jump-destinations-01 | rename_nodes | APPLIED_RESPONSE_OBSERVED |
+
+Across the complete pass there were **66 design/content/navigation operations**: 64 observed applied responses plus two file-renaming responses reconciled by original-carrier readback. There are **no unresolved session-owned effects**. Eleven explicit finish-working operations returned applied/OK. These counts describe operations, not a product-completion percentage.
+
+## Primary source references
+
+- [Protected Mastermind source and governing procedures](https://github.com/mastermindx-market-intelligence/Mastermind/tree/5c3d3885234358aefb97ecdbc59be0864df14f8b)
+- [Pinned Macro design/source tree](https://github.com/mastermindx-market-intelligence/macro/tree/ba32f20ba306f9e75b7c400992138e736b904516)
+- [Policy stance calculation](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/engine/fed_stance.py) and [policy path calculation](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/engine/fed_path.py)
+- [GMI issuer link model](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/scripts/gmi_explorer/model.py), [page builder](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/scripts/build_gmi_explorer.py), and [Micron issuer evidence page](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/site/gmi-issuer-mu.html)
+
+## Remaining obligations and truthful boundaries
+
+1. **Hub AXON detail:** held empty destination remains incomplete. Its current entry now represents unavailability. Completing or replacing that held destination requires reconciliation through its actual source/effect owner, not a copied substitute.
+2. **GMI same-context return:** design specification now preserves query/theme; implementation evidence for the actual return path remains absent.
+3. **Interactive behavior:** same-context returns, new section jumps, save/permissions and recovery need their normal implementation and real user-path proof. Static Paper screenshots do not supply it.
+4. **Protected or held material:** oversized MASTERMIND PAGES, separate Sector canary, Prophet ZE5-0, transfer QA holds, original Events/China held effects and unrelated site/canary resources remain preserved.
+5. **Coverage:** this is a representative cross-product architecture and clarity audit, not a screenshot certification of every historical artboard, component or locale. Full design depth was retained where the sampled journey already worked.
+6. **Style tooling:** update_styles, create_artboard and token writes remain schema-held. No such API or equivalent replacement bypass was used.
+7. **Source release:** this report belongs to the operation's isolated GitHub branch. The active native merge-queue ruleset was readable, but classic branch-protection inspection returned **403 Resource not accessible by integration**. Required enforcement is therefore UNKNOWN, not waived and not a fabricated review requirement. The available auto-merge wrapper also lacks an expected-head parameter. No merge, auto-merge request, review impersonation or alternate-carrier replay was attempted. The source record can be published as a Ready PR; protected release remains separately gated.
+
+## Outcome
+
+**PROVEN_OUTCOME for this bounded Paper design pass.** The actual editable designs are improved, changed layouts are checked, source/data distinctions are preserved and the incomplete held/runtime journeys remain explicit. Source documentation is complete and recoverable on the same branch. No application code, financial computation, trading authority or production release was changed.
