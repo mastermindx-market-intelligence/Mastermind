@@ -200,16 +200,34 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     return rendered
 
 
-def expected_native_config(profile: RuntimeProfile, consumer=None) -> str:
+def expected_native_config(profile: RuntimeProfile, consumer=None, *, evaluation_inputs=None) -> str:
     """The exact native config bytes this profile must carry.
 
     Without a qualified consumer this is the reviewed disarmed BYOK config.
     With one it is the qualified config, which still carries no credential.
     """
-    if consumer is None:
+    if consumer is None and evaluation_inputs is None:
         return render_disarmed_native_byok(profile)
     from integrations.hermes_harness.native_executive_consumer import (
         publication_from_document,
     )
-    return render_qualified_native_byok(
-        profile, publication_from_document(consumer))
+    rendered = render_qualified_native_byok(profile, publication_from_document(consumer))
+    if evaluation_inputs is None:
+        return rendered
+    from pathlib import Path
+    if (type(evaluation_inputs) is not dict or set(evaluation_inputs) != {"schema", "artifact_root"}
+            or evaluation_inputs["schema"] != "mastermind.hermes_native_eval_inputs/v1"
+            or profile.role != "mmmeta"
+            or native_provider(profile.role, profile.native_provider_id).provider_id != "zai.glm-5.3"
+            or type(evaluation_inputs["artifact_root"]) is not str
+            or not Path(evaluation_inputs["artifact_root"]).is_absolute()
+            or consumer.get("schema") not in {"mastermind.hermes_native_executive_consumer/v3",
+                                               "mastermind.hermes_native_executive_consumer/v4"}):
+        raise RuntimeRefusal("NATIVE_EVAL_CONFIG_UNQUALIFIED")
+    native = _load_unique_yaml(rendered.encode("utf-8"))
+    # Native agent initialization owns this setting. The original unselected
+    # renderers remain byte-identical; trial effort stays per admission.
+    native["model"]["streaming"] = False
+    import yaml
+    return ("# Explicit native EVAL inputs select nonstreaming model requests.\n"
+            + yaml.safe_dump(native, sort_keys=False, allow_unicode=False))
