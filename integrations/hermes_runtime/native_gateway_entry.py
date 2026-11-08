@@ -526,7 +526,7 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
 def run(launch, argv: list[str]) -> int:
     """Enter native main only through the actual held release capability."""
     from .profile import load_profile
-    from .supervisor import expected_disabled_mcp, expected_disabled_mcp_with_application
+    from .supervisor import expected_disabled_mcp
 
     role = launch.row["role"]
     state = Path(launch.row["state_dir"])
