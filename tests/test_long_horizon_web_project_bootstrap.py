@@ -44,7 +44,7 @@ def test_substantial_assignment_must_start_next_phase_before_finalizing():
         "No Chairman reprompt",
         "authorized independent fallback",
         "18. Phase ladder: first exact input/action/proof, next safe phase",
-        "33. PRE-FINAL FALSIFIER:",
+        "PRE-FINAL FALSIFIER:",
         "MORE_WORK_EXISTS: START it before answering",
         "No phase/checkpoint/time-based exit",
     ):
@@ -63,7 +63,7 @@ def test_default_preserves_real_stops_and_existing_safety_fences():
         "Native review != GitHub APPROVED",
         "HARD_ROTATION",
         "CHECKPOINTED_CONTINUATION",
-        "DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING and return path",
+        "DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING plus return path",
         "No duplicate runners/queues",
         "HANDOFF_SOURCE_LINK_V1",
     ):

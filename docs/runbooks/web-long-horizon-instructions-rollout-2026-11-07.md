@@ -9,7 +9,7 @@ preserving newer valid Project-specific rules.
 
 ## Files to use
 
-1. **Project instruction (full, 7,924 characters and bytes; copy this alone):**
+1. **Project instruction (full, 7,996 characters and bytes, excluding the final LF; copy this alone):**
    `docs/evidence/2026-11-07-mission-continuation-project-instructions.txt`.
    This mirrors the exact `Approved Project instruction text` fence in the
    candidate `docs/sol_skills/BOOTSTRAP_KERNEL.md`; do not paste the surrounding
@@ -44,7 +44,7 @@ preserving newer valid Project-specific rules.
 5. If Mastermind work happens in chats outside Projects, optionally add the
    account-global overlay via **Settings > Personalization > Custom Instructions**.
    Project instructions override global Custom Instructions inside that Project.
-   Do not paste the 7,924-character Project block into the smaller global field.
+   Do not paste the 7,996-character Project block into the smaller global field.
 6. On each intended account/surface, start a fresh real, authorized mission
    canary with a ready phase and a distinct next phase. Observe whether it
    actually *starts* the second phase after checking and saving the first.
