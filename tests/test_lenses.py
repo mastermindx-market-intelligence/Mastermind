@@ -383,3 +383,45 @@ def test_news_row_carries_source_asof_and_flags_retained(monkeypatch):
     assert uni["value"]["evidence_grade"] == "vendored_snapshot"
     assert uni["value"]["source_asof"] is None
     assert uni["value"]["source_file"] == "site/intelligence/by_ticker.json"
+
+
+@pytest.mark.parametrize("retained,expected_status", [(True, "stale_retained"), (False, "context"),
+                                                       (None, "context"), ("true", "context"), (1, "context")])
+def test_news_row_unified_origin_stays_with_selected_rows(monkeypatch, retained, expected_status):
+    rec = {"n_recent": 4, "sentiment_lean": "neg", "n_pos": 0, "n_neg": 3}
+    origin = {"source_asof": "2026-10-29T21:00:00+00:00",
+              "source_asof_basis": "financial_news.fetched_at",
+              "retained_from_previous_build": retained, "retained_reason": "candidate_darker_than_existing"}
+    files = {
+        "site/intelligence/by_ticker.json": {"as_of": "2026-11-08", "news_freshness": origin,
+                                             "tickers": {"XYZ": {"news": rec}}},
+        "site/news/by_ticker.json": {"asof": "2026-11-08", "source_asof": "2026-11-08T06:00:00+00:00",
+                                      "retained_from_previous_build": False,
+                                      "tickers": {"XYZ": dict(rec, n_recent=99)}}}
+    monkeypatch.setattr(lenses, "_load", lambda rel: files.get(rel))
+    row = lenses._news_row("XYZ")
+    assert row["status"] == expected_status
+    assert row["direction"] == "bear"
+    assert row["value"]["n_recent"] == 4
+    assert row["value"]["source_asof"] == origin["source_asof"]
+    assert row["value"]["source_asof_basis"] == "financial_news.fetched_at"
+    assert row["value"]["retained_from_previous_build"] is (retained if isinstance(retained, bool) else None)
+    assert row["value"]["source_file"] == "site/intelligence/by_ticker.json"
+    assert ("candidate_darker_than_existing" in row["note"]) is (retained is True)
+
+    # An old unified snapshot keeps unknown provenance; newer standalone clocks cannot label its rows.
+    del files["site/intelligence/by_ticker.json"]["news_freshness"]
+    unknown = lenses._news_row("XYZ")
+    assert unknown["value"]["source_asof"] is None
+    assert unknown["value"]["retained_from_previous_build"] is None
+    assert unknown["value"]["n_recent"] == 4
+
+    # The existing standalone fallback selects BOTH its rows and its clocks.
+    files["site/intelligence/by_ticker.json"]["tickers"]["XYZ"]["news"] = None
+    fallback = lenses._news_row("XYZ")
+    assert fallback["status"] == "context"
+    assert fallback["value"]["source_asof"] == "2026-11-08T06:00:00+00:00"
+    assert fallback["value"]["retained_from_previous_build"] is False
+    assert fallback["value"]["n_recent"] == 99
+    assert fallback["value"]["source_file"] == "site/news/by_ticker.json"
+

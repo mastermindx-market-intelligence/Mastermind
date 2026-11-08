@@ -193,7 +193,7 @@ def _read_json(p: Path):
 # producer retained a previous build's feed), `retained_from_previous_build`, `generated_utc`.
 # An absent clock is null — never inferred from the file's mtime or from today's date.
 _FRESHNESS_BASIS = "vendored_macro_file"
-_FRESHNESS_KEYS = ("freshness", "alt_freshness")
+_FRESHNESS_KEYS = ("freshness", "alt_freshness", "news_freshness")
 
 
 def _ticker_record_checked(mapping, ticker):
@@ -282,6 +282,21 @@ def _freshness(doc, rel) -> dict:
             "generated_utc": _clock("generated_utc"),
             "basis": _FRESHNESS_BASIS,
             "source_file": rel}
+
+
+def _news_freshness(doc) -> dict:
+    """News-input provenance carried by the unified producer, not its build clock."""
+    doc = doc if isinstance(doc, dict) else {}
+
+    def text(key):
+        value = doc.get(key)
+        return value if isinstance(value, str) and value.strip() else None
+
+    retained = doc.get("retained_from_previous_build")
+    return {"source_asof": text("source_asof"),
+            "source_asof_basis": text("source_asof_basis"),
+            "retained_from_previous_build": retained if isinstance(retained, bool) else None,
+            "retained_reason": text("retained_reason")}
 
 
 def _pick(d, keys):
@@ -861,6 +876,7 @@ async def get_intelligence(args):
                 "ticker": t, **rec,
                 "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
                 "freshness": _freshness(unified_store, urel), "evidence_grade": "vendored_snapshot",
+                "news_freshness": _news_freshness(unified_store.get("news_freshness")),
             }
             if unified_failed:
                 payload["read_status"] = "partial"
