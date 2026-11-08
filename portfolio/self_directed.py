@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import os
+import re
 import stat
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
@@ -559,10 +560,45 @@ def _save_theses(theses: dict[str, dict]) -> None:
 # price + clock resolution (all lazy / optional)
 # ---------------------------------------------------------------------------
 
+# A US symbol is letters/digits plus '.' (BRK.B) and '-' (preferred/class shares). Anchoring the
+# WHOLE string to that allowlist and capping the length is what makes the ticker safe to interpolate
+# into a filename: no path separator, no '..' component, no NUL, no drive prefix, no whitespace.
+_TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
+
+_STOCKDATA_DIR = _ROOT / "vendor" / "macro" / "site" / "stockdata"
+
+
+def _safe_ticker(t: str) -> Optional[str]:
+    """Normalize an operator-supplied ticker to a filesystem-safe symbol, or None if unusable.
+
+    Closes CodeQL py/path-injection at the SOURCE (alerts #23/#24, sinks in ``_stockdata_price``):
+    every path built from a ticker goes through this allowlist first, so the tainted value can
+    never steer the path outside ``vendor/macro/site/stockdata``. Callers treat None as "no data"
+    and degrade exactly as they already do for a missing file.
+    """
+    if not isinstance(t, str):
+        return None
+    sym = t.strip().upper()
+    if not _TICKER_RE.match(sym):
+        return None
+    # '.' and '..' satisfy the character class (dots are legal in symbols) but are directory
+    # components, not symbols — never let one name a file.
+    if not sym.strip("."):
+        return None
+    return sym
+
+
 def _stockdata_price(ticker: str) -> Optional[float]:
     """Last mark from vendor/macro/site/stockdata/<T>.json — a plain file read, no import."""
+    sym = _safe_ticker(ticker)
+    if sym is None:
+        return None
     try:
-        p = _ROOT / "vendor" / "macro" / "site" / "stockdata" / f"{ticker.upper()}.json"
+        p = (_STOCKDATA_DIR / f"{sym}.json").resolve()
+        # Defence in depth on top of the allowlist: the resolved path must still sit directly in
+        # the stockdata dir. Unreachable while the allowlist holds, but cheap and explicit.
+        if p.parent != _STOCKDATA_DIR.resolve():
+            return None
         if p.exists():
             v = (json.loads(p.read_text()).get("tech") or {}).get("price")
             if v is not None and float(v) > 0:
