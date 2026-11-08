@@ -1,6 +1,6 @@
 {
   "schema": "PAPER_ACCENT_BEFORE_AFTER_MANIFEST_V1",
-  "changeCount": 2140,
+  "changeCount": 2218,
   "parts": [
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0001.json",
@@ -122,6 +122,22 @@
       "method": "EXACT_CONTENT_READBACK",
       "readbackLimitation": null,
       "changeCount": 149
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0018.json",
+      "sha": "d2d6c98977fd8fb9716e0b7204c4b6e91c9f9d4b",
+      "bytes": 699405,
+      "commit": "cae2f7bc6ce3c916197c5414872f9713f2952231",
+      "method": "EXACT_CONTENT_READBACK",
+      "changeCount": 66
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0019.json",
+      "sha": "29aa149ff91685032673d1493f79285ded77fa4b",
+      "bytes": 49579,
+      "commit": "c35d1be28cc51ca6144e3e9ab8d017b21bf9d402",
+      "method": "EXACT_CONTENT_READBACK",
+      "changeCount": 12
     }
   ],
   "previousFullSnapshot": {
@@ -133,5 +149,5 @@
     "fullContentReadback": false,
     "reason": "Two full blob fetches returned Transport closed; exact original target SHA matches locally computed Git blob digest. No write replay."
   },
-  "note": "Parts retain exact before/after JSX and operation receipts. Each file is bounded for full content readback."
+  "note": "Parts retain exact available before/after JSX and operation receipts. Recovered interrupted outcomes explicitly carry null full-before evidence and root-only current mappings; they are not certified as full historical subtree fidelity. Each new file is bounded for exact content readback."
 }
