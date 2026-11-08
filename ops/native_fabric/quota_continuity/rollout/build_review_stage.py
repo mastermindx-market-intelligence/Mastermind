@@ -786,6 +786,7 @@ def _before_provider_application_without_remote_placement(manifest):
 def before_provider_application(manifest):
     if type(manifest) is dict:
         manifest = before_glm_application_core(manifest)
+        manifest = before_provider_maintenance_guard(manifest)
     if type(manifest) is dict and manifest.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256:
         record, _, _ = provider_remote_placement_record()
         if len(manifest) != 116 or _manifest_digest(manifest) != record["application_after_manifest_sha256"]:
@@ -842,15 +843,172 @@ def _validate_go_source_transition_without_remote_placement(before, after):
         raise ValueError("provider APPLICATION source transition differs")
 
 
+PROVIDER_MAINTENANCE_GUARD_MEMBERS = {
+    "ext/experiential_bridge.py": {
+        "source": "rollout/provider_application/maintenance_guard/experiential_bridge.py",
+        "sha256": "288471efc8b10e1471102b34096d77d725ab935cc6574e4c943909f68cb346de",
+        "bytes": 35017,
+        "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+        "source_path": "ops/native_fabric/experiential_native_bridge/experiential_bridge.py",
+        "source_blob": "170e9730614e5c39b2cdc741e67f7b5a48a94c83"
+    },
+    "ext/experiential_host_context.py": {
+        "source": "rollout/provider_application/maintenance_guard/experiential_host_context.py",
+        "sha256": "ad157e490bdd949ca19c64897db0257434c3a0a0b45c69361dd57a3db223c276",
+        "bytes": 9527,
+        "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+        "source_path": "ops/native_fabric/experiential53/experiential_host_context.py",
+        "source_blob": "27bfc276a6314f6c6142ed12ec1be796e93a9594"
+    },
+    "ext/experiential_plan_policy.py": {
+        "source": "rollout/provider_application/maintenance_guard/experiential_plan_policy.py",
+        "sha256": "4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8",
+        "bytes": 11862,
+        "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+        "source_path": "control_plane/experiential_plan_policy.py",
+        "source_blob": "75ac83a25c7808479b02688baaedbe6ac1ce3afc"
+    },
+    "ext/experiential_transport.py": {
+        "source": "rollout/provider_application/maintenance_guard/experiential_transport.py",
+        "sha256": "499663819213645acb10e3948c29185abdbbad781660adcc47bca3c0c8786639",
+        "bytes": 58794,
+        "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+        "source_path": "ops/native_fabric/experiential53/experiential_transport.py",
+        "source_blob": "e64ce2a88535f7474668788a11d8b76aba225aef"
+    },
+    "ext/native_plan_worker.py": {
+        "source": "rollout/provider_application/maintenance_guard/native_plan_worker.py",
+        "sha256": "266c6dddb43e9abb669101504d6dc62a1936acd58628dd59927451deb8cc3f28",
+        "bytes": 26207,
+        "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+        "source_path": "ops/native_fabric/quota_continuity/candidate/native_plan_worker.py",
+        "source_blob": "1e39d143d28bc8c0513c7fa5998dad7c4390a6e9"
+    }
+}
+
+
+def provider_maintenance_guard_files(root=None):
+    """Authenticate the complete installed cohort from protected retained sources."""
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
+    profile = json.loads(_provider_source(
+        root.parent / "provider_plans/maintenance_guard/profile.json",
+        "2d5fc0601e711def977fc2b5a32dcc2942ac10b98acfa25a2c797964f94af606"))
+    _provider_source(root.parent / "provider_plans/router_admission.json",
+                     "84542fddbccc8cc59ad8ae6b85bb78ccc4c078e6c61a73f9c9f0af3711123e17")
+    _provider_source(root.parent / "provider_plans/maintenance_guard/provenance.json",
+                     "419bd6764301890e062c9265db8e307b06527253c80c43b91793c552618f17d2")
+    record, providers, _ = provider_remote_placement_record(root)
+    files = profile.get("files")
+    expected = dict(providers)
+    for name, source in PROVIDER_MAINTENANCE_GUARD_MEMBERS.items():
+        raw = _provider_source(root / source["source"], source["sha256"])
+        if len(raw) != source["bytes"]:
+            raise ValueError("provider maintenance source bytes differ")
+        expected[name] = source["sha256"]
+    transitions = {
+        "ext/lease_broker.py": (
+            "a841230c4030d178f309f311f199caad7767d3b45b44c41c021fdc14eacc3640",
+            "4072c76fd5d28729e4c62d44f9b700a2ac503ccb4acd1e572fc4a6c291fe23d3",
+            "maintenance_guard/lease_broker.py.patch",
+            "3d9999a21eec3645f935461d19fc8139c506e8f84997fa522f0d32344a37a84e"),
+        "ext/remote_sub_exec.py": (
+            "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+            "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
+            "maintenance_guard/remote_sub_exec.py.patch",
+            "32fca97c9865ace943b2bc76fcdda30e7d0f93d6fcfee9c7b31e02d2d7bb4809"),
+    }
+    expected_base = dict(expected)
+    expected_base["ext/pick.py"] = record["picker"]["preimage_sha256"]
+    for name, (before, after, path, digest) in transitions.items():
+        if (providers[name] != before or profile.get("patches", {}).get(name) != {
+                "before": before, "after": after, "patch": path, "patch_sha256": digest}):
+            raise ValueError("provider maintenance predecessor patch differs")
+        _provider_source(root.parent / "provider_plans" / path, digest)
+        expected[name] = after
+    if (profile.get("schema") != "mastermind.provider_plan_native_profile/v1"
+            or profile.get("source_map") != {}
+            or type(files) is not dict or len(files) != 116
+            or files != expected or profile.get("base_files") != expected_base
+            or set(profile.get("patches", {})) != set(transitions) | {"ext/pick.py"}
+            or _manifest_digest(files) != "3cf95195569cd80f0b978dd48160dda30baf68f48daab4d8d6d1b1f5c35e1ac1"):
+        raise ValueError("provider maintenance predecessor transition differs")
+    return dict(files)
+
+
+def before_provider_maintenance_guard(manifest):
+    """Invert only the complete incumbent-preserving APPLICATION source family."""
+    if type(manifest) is not dict:
+        raise ValueError("provider maintenance APPLICATION closure differs")
+    if not any(manifest.get(name) == row["sha256"]
+               for name, row in PROVIDER_MAINTENANCE_GUARD_MEMBERS.items()):
+        return manifest
+    provider_maintenance_guard_files()
+    if (_manifest_digest(manifest) !=
+            "4dccdb9401e27a38bba9153de5f82a23d1169aa204bac847887f6c9bc31a73be"):
+        raise ValueError("provider maintenance APPLICATION closure differs")
+    record, providers, _ = provider_remote_placement_record()
+    normalized = dict(manifest)
+    for name in PROVIDER_MAINTENANCE_GUARD_MEMBERS:
+        normalized[name] = providers[name]
+    if _manifest_digest(normalized) != record["application_after_manifest_sha256"]:
+        raise ValueError("provider maintenance APPLICATION parent differs")
+    return normalized
+
+
+def compose_provider_maintenance_guard_stage(root, output, manifest, files):
+    """Retain the installed provider family inside the existing APPLICATION stage."""
+    record, providers, _ = provider_remote_placement_record(root)
+    provider_maintenance_guard_files(root)
+    if (_manifest_digest(manifest) != record["application_after_manifest_sha256"]
+            or set(files) != set(manifest)):
+        raise ValueError("provider maintenance APPLICATION composition parent differs")
+    for name, source in PROVIDER_MAINTENANCE_GUARD_MEMBERS.items():
+        path = output / "native-code-stage" / name
+        previous = dict(files[name])
+        if (_provider_source(path, manifest[name]) is None
+                or previous["sha256"] != providers[name]):
+            raise ValueError("provider maintenance APPLICATION staged source differs")
+        raw = _provider_source(root / source["source"], source["sha256"])
+        path.write_bytes(raw)
+        manifest[name] = source["sha256"]
+        files[name] = dict(previous, source=source["source"], sha256=source["sha256"],
+                           bytes=len(raw), composition={
+                               "schema": "native-protected-source-retention.v1",
+                               "source_commit": source["source_commit"],
+                               "source_path": source["source_path"],
+                               "source_blob": source["source_blob"],
+                               "preimage_sha256": previous["sha256"],
+                               "inherited": previous,
+                           })
+    if (_manifest_digest(manifest) !=
+            "4dccdb9401e27a38bba9153de5f82a23d1169aa204bac847887f6c9bc31a73be"):
+        raise ValueError("provider maintenance APPLICATION composition differs")
+
+
 def validate_go_source_transition(before, after):
     if type(before) is dict and type(after) is dict and (
         before.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
         or after.get("ext/pick.py") == PROVIDER_REMOTE_PLACEMENT_PICKER_SHA256
     ):
         record, providers, _ = provider_remote_placement_record()
-        if before != providers or after.get("ext/pick.py") != record["picker"]["sha256"]:
-            raise ValueError("provider remote placement source transition differs")
-        normalized_before, normalized_after = dict(before), dict(after)
+        if after.get("ext/pick.py") != record["picker"]["sha256"]:
+            raise ValueError("provider remote placement transition differs")
+        if before == providers:
+            if any(after.get(name) == row["sha256"]
+                   for name, row in PROVIDER_MAINTENANCE_GUARD_MEMBERS.items()):
+                raise ValueError("provider maintenance cross-cohort transition differs")
+        elif before == provider_maintenance_guard_files():
+            if any(after.get(name) != row["sha256"]
+                   for name, row in PROVIDER_MAINTENANCE_GUARD_MEMBERS.items()):
+                raise ValueError("provider maintenance retained transition differs")
+            before_provider_maintenance_guard(
+                before_glm_application_core(_application_base(after)))
+        else:
+            raise ValueError("provider maintenance predecessor transition differs")
+        normalized_before, normalized_after = dict(providers), dict(after)
+        if before != providers:
+            for name in PROVIDER_MAINTENANCE_GUARD_MEMBERS:
+                normalized_after[name] = providers[name]
         normalized_before["ext/pick.py"] = record["picker"]["preimage_sha256"]
         normalized_after["ext/pick.py"] = record["picker"]["preimage_sha256"]
         return _validate_go_source_transition_without_remote_placement(
@@ -1898,9 +2056,13 @@ def main():
     parser.add_argument('--include-quota-reset-recovery', action='store_true',
                         help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
     parser.add_argument("--include-provider-plan-remote-placement", action="store_true", help="preserve the exact sequence-39 picker in the provider/APPLICATION source; requires provider plan and excludes the separately qualified H2 composition")
+    parser.add_argument("--include-provider-plan-maintenance-guard", action="store_true")
     parser.add_argument("--include-application-glm", action="store_true",
                         help="seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go")
     args = parser.parse_args()
+    if (args.include_provider_plan_maintenance_guard
+            and not (args.include_provider_plan_application and args.include_provider_plan_remote_placement)):
+        parser.error("--include-provider-plan-maintenance-guard requires provider APPLICATION and remote placement")
     if args.include_application_glm and not args.include_application_http:
         parser.error("--include-application-glm requires --include-application-http")
     if args.include_provider_plan_remote_placement and not args.include_provider_plan_application:
@@ -2010,6 +2172,8 @@ def main():
         compose_provider_application_stage(root, output, manifest, files)
     if args.include_provider_plan_remote_placement:
         compose_provider_remote_placement_stage(root, output, manifest, files)
+    if args.include_provider_plan_maintenance_guard:
+        compose_provider_maintenance_guard_stage(root, output, manifest, files)
     if args.include_quota_reset_recovery:
         compose_quota_reset_stage(root, output, manifest, files)
     normalize_application_carrier_base_manifest(

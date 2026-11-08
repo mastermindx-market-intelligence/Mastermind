@@ -580,7 +580,7 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
 
 
 
-def test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_path,monkeypatch):
+def test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_path,monkeypatch, *, current_core=True):
     """Cross-platform shape check, explicitly NOT Linux execution/Root proof."""
     account=SimpleNamespace(pw_uid=os.getuid(),pw_gid=os.getgid(),pw_name='fixture-user',pw_dir=str(tmp_path/'home'))
     # Darwin inherits the temporary parent's group even without a setgid bit.
@@ -624,11 +624,15 @@ def test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_pat
             "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", 211236,
             "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004", 217721),
     }
-    assert len(inventory['files']) == inventory['native_code_files'] == 107
-    for name,(preimage,old_size,candidate,new_size) in reviewed_core.items():
-        row=inventory['files'][name]
-        assert (row['sha256'],row['bytes']) == (preimage,old_size)
-        inventory['files'][name]=dict(row,sha256=candidate,bytes=new_size)
+    if current_core:
+        assert len(inventory['files']) == inventory['native_code_files'] == 107
+        for name,(preimage,old_size,candidate,new_size) in reviewed_core.items():
+            row=inventory['files'][name]
+            assert (row['sha256'],row['bytes']) == (preimage,old_size)
+            inventory['files'][name]=dict(row,sha256=candidate,bytes=new_size)
+    else:
+        # The prospective network-budget caller uses its own frozen source epoch.
+        assert len(inventory['files']) == inventory['native_code_files'] == 102
     for name,row in inventory['files'].items():
         source=(quota/row['source']).resolve()
         assert source.is_relative_to(ROOT/'ops/native_fabric')

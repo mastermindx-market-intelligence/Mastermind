@@ -5,6 +5,7 @@ owners in this module are disposable fixtures. No provider request is made.
 """
 from contextlib import redirect_stdout, redirect_stderr
 import copy
+import ast
 import importlib.util
 import io
 import json
@@ -24,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 sys.path.insert(0, str(NATIVE / "tests"))
 from test_go_native_stage import g, installer, loaded_entry, published, unseal
-from test_go_native_install import go_owner
+from test_go_native_install import go_owner, retained_go_owner
 from test_native_launcher_successor_transition import source_owners, owner
 from test_go_service_enrollment import (
     service_owner, prepare, unchanged_ingress,
@@ -32,6 +33,9 @@ from test_go_service_enrollment import (
 )
 from test_go_service_startup import environment, boot
 from test_hermes_primary_application_enrollment import select_role, isolated_native_service_imports
+from test_provider_application_transition import (
+    maintenance_guard_provider_stage, select_provider, owner_api,
+)
 
 PROFILES = ("hermes-attended", "hermes-secretary", "hermes-meta-ceo")
 MODELS = ("glm-5.3", "glm-5.3-flash")
@@ -391,3 +395,87 @@ def test_changed_projection_cannot_enter_the_original_installer(
         with pytest.raises(ValueError):
             installer._go_component(
                 output / "external-go-component", Path(component["stable_ext"]), manifest)
+
+
+@pytest.fixture(scope="module")
+def glm_maintenance_source_stage(glm_source_stage, tmp_path_factory):
+    root = tmp_path_factory.mktemp("glm-maintenance-source").resolve()
+    outputs = {}
+    for name, extra in (("prior", []), ("maintenance", ["--include-provider-plan-maintenance-guard"])):
+        output = root / name
+        with mock.patch.object(sys, "argv", [
+                "builder", "--output", str(output),
+                "--include-provider-plan-application", "--include-provider-plan-remote-placement",
+                "--include-go-application", "--include-application-http",
+                "--include-application-glm", *extra,
+        ]), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            glm_source_stage.builder.main()
+        outputs[name] = output
+    return SimpleNamespace(**outputs)
+
+
+def test_glm123_retains_native40_source_semantics_and_complete_dependencies(
+        glm_source_stage, glm_maintenance_source_stage, maintenance_guard_provider_stage):
+    builder = glm_source_stage.builder
+    output = glm_maintenance_source_stage.maintenance
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    prior = json.loads((glm_maintenance_source_stage.prior / "native-manifest.json").read_bytes())
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    assert len(manifest) == len(inventory["files"]) == 123 and set(manifest) == set(prior)
+    assert {name for name in manifest if manifest[name] != prior[name]} == set(builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS)
+    for name, digest in manifest.items():
+        raw = (output / "native-code-stage" / name).read_bytes()
+        assert g.digest(raw) == digest == inventory["files"][name]["sha256"]
+        assert len(raw) == inventory["files"][name]["bytes"]
+        if name in builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS:
+            assert digest == maintenance_guard_provider_stage.files[name]
+        else:
+            assert raw == (glm_maintenance_source_stage.prior / "native-code-stage" / name).read_bytes()
+    patch = (glm_source_stage.native.parent / "provider_plans/maintenance_guard/lease_broker.py.patch").read_text()
+    expected_class = ast.parse("class Broker:\n" + "".join(
+        line[1:] for line in patch.splitlines(True) if line.startswith("+") and not line.startswith("+++"))).body[0]
+    def guards(raw):
+        broker = next(n for n in ast.parse(raw).body if isinstance(n, ast.ClassDef) and n.name == "Broker")
+        return {n.name: ast.dump(n, include_attributes=False) for n in broker.body
+                if isinstance(n, ast.FunctionDef) and n.name in {
+                    "inspect_qualification_quiescence", "qualification_maintenance_guard"}}
+    expected = {n.name: ast.dump(n, include_attributes=False) for n in expected_class.body}
+    assert guards((output / "native-code-stage/ext/lease_broker.py").read_bytes()) == expected
+    assert guards((maintenance_guard_provider_stage.stage / "ext/lease_broker.py").read_bytes()) == expected
+    executor = ast.parse((output / "native-code-stage/ext/remote_sub_exec.py").read_bytes())
+    settings = next(n.value for n in executor.body if isinstance(n, ast.Assign)
+                    and any(isinstance(v, ast.Name) and v.id == "_SPARSE_GIT_SETTINGS" for v in n.targets))
+    assert ("advice.sparseIndexExpanded", "false") in ast.literal_eval(settings)
+    component = json.loads((output / "external-go-component/component.json").read_bytes())
+    assert installer._go_component(output / "external-go-component", Path(component["stable_ext"]), manifest)
+    assert {name: manifest["ext/" + name] for name in component["native_stage_dependencies"]} == component["native_stage_dependencies"]
+    before, after = dict(maintenance_guard_provider_stage.files), dict(manifest)
+    builder.validate_go_source_transition(before, after)
+    assert before == maintenance_guard_provider_stage.files and after == manifest
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+def test_native40_to_glm123_uses_original_transaction_and_single_selection(
+        owner_name, request, glm_source_stage, glm_maintenance_source_stage,
+        maintenance_guard_provider_stage):
+    case = request.getfixturevalue(owner_name)
+    selected = select_provider(case, maintenance_guard_provider_stage)
+    output = case.root / "maintenance-glm123-source"
+    shutil.copytree(glm_maintenance_source_stage.maintenance, output)
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    assert len(manifest) == 123
+    glm_source_stage.builder.stage_external_go_component(
+        glm_source_stage.native, output, str(case.ext), staged_manifest=manifest)
+    target = g.publish(output / "native-code-stage", case.ext, manifest)
+    api = owner_api(owner_name)
+    bundle = case.root / "maintenance-glm123-transition"
+    plan = api.prepare(case.successor, target.name, output / "external-go-component", bundle)
+    assert plan["expected_selection"] == selected and g.current(case.store) == selected
+    with mock.patch.object(g, "_select_locked", wraps=g._select_locked) as selection:
+        receipt = api.apply(bundle)
+        assert selection.call_count == 1
+    assert receipt["selection"] == g.current(case.store)
+    with mock.patch.object(g, "atomic_bytes", side_effect=AssertionError("completed recovery wrote")),             mock.patch.object(g, "_select_locked", side_effect=AssertionError("completed recovery selected")):
+        assert api.apply(bundle) == receipt
+        assert api.reconcile(bundle) == receipt
+    api.history(case)

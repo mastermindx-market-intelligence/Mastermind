@@ -608,3 +608,205 @@ def test_remote_placement_unqualified_flag_pairs_refuse_before_output(tmp_path, 
         with pytest.raises(SystemExit) as stopped:
             builder.main()
     assert stopped.value.code == 2 and not output.exists()
+
+
+# The selected maintenance family retains its sealed provider parent. It is not
+# the different five-member variant produced by the ordinary provider fixture.
+@pytest.fixture(scope="module")
+def maintenance_guard_provider_stage(tmp_path_factory):
+    from tests.provider_plan_fixed_parent import materialize_fixed_parent
+    from ops.native_fabric.provider_plans import compose
+    root = tmp_path_factory.mktemp("provider-maintenance-input").resolve()
+    base = materialize_fixed_parent(root / "base")
+    stage = root / "provider"
+    compose.compose(base, stage, profile_name="current116-maintenance-guard")
+    files = json.loads((compose.HERE / "maintenance_guard/profile.json").read_bytes())["files"]
+    assert {name: g.digest((stage / name).read_bytes()) for name in files} == files
+    assert files == builder.provider_maintenance_guard_files()
+    return SimpleNamespace(root=root, stage=stage, files=files)
+
+
+@pytest.fixture(scope="module")
+def maintenance_guard_builds(tmp_path_factory):
+    root = tmp_path_factory.mktemp("provider-maintenance-application").resolve()
+    outputs = {}
+    for name, flags in (
+        ("base", []), ("application", ["--include-go-application"]),
+        ("http", ["--include-go-application", "--include-application-http"]),
+    ):
+        output = root / name
+        with mock.patch.object(sys, "argv", [
+                "builder", "--output", str(output),
+                "--include-provider-plan-application",
+                "--include-provider-plan-remote-placement",
+                "--include-provider-plan-maintenance-guard", *flags,
+        ]), redirect_stdout(io.StringIO()):
+            builder.main()
+        outputs[name] = output
+    return SimpleNamespace(**outputs)
+
+
+@pytest.mark.parametrize("extension,count", [("base", 116), ("application", 118), ("http", 121)])
+def test_maintenance_composition_retains_only_the_five_protected_payloads(
+        extension, count, maintenance_guard_builds, remote_placement_builds):
+    output = getattr(maintenance_guard_builds, extension)
+    prior_output = getattr(remote_placement_builds, extension)
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    prior = json.loads((prior_output / "native-manifest.json").read_bytes())
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    assert len(manifest) == count and set(manifest) == set(prior)
+    assert {key for key in manifest if manifest[key] != prior[key]} == set(builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS)
+    for name, digest in manifest.items():
+        raw = (output / "native-code-stage" / name).read_bytes()
+        row = inventory["files"][name]
+        assert g.digest(raw) == row["sha256"] == digest and len(raw) == row["bytes"]
+        if name in builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS:
+            protected = builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS[name]
+            assert digest == protected["sha256"]
+            assert raw == (ROOT / protected["source"]).read_bytes()
+            assert row["composition"]["source_commit"] == "2541a68e9240ca3fb5c1fda7b68e1df8984c973b"
+            assert row["composition"]["source_blob"] == protected["source_blob"]
+            assert row["composition"]["preimage_sha256"] == prior[name]
+            assert row["composition"]["inherited"]["sha256"] == prior[name]
+        else:
+            assert raw == (prior_output / "native-code-stage" / name).read_bytes()
+    base = {key: value for key, value in manifest.items()
+            if key not in {g.GO_ENTRY, g.GO_HANDLER} | builder.HTTP_GENERATION_MEMBERS}
+    before = dict(base)
+    assert builder.before_provider_application(base) == builder.before_provider_application(
+        {key: value for key, value in prior.items()
+         if key not in {g.GO_ENTRY, g.GO_HANDLER} | builder.HTTP_GENERATION_MEMBERS})
+    assert base == before
+    if extension != "base":
+        component = json.loads((output / "external-go-component/component.json").read_bytes())
+        assert installer._go_component(output / "external-go-component", Path(component["stable_ext"]), manifest)
+        for name, digest in component["native_stage_dependencies"].items():
+            assert digest == manifest["ext/" + name]
+        predecessor = builder.provider_maintenance_guard_files()
+        saved = dict(predecessor), dict(manifest)
+        builder.validate_go_source_transition(predecessor, manifest)
+        assert (predecessor, manifest) == saved
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "http"])
+def test_maintenance_original_installer_commits_and_recovers(
+        owner_name, extension, request, maintenance_guard_provider_stage, maintenance_guard_builds):
+    test_combined_application_commits_and_recovers_original_transaction(
+        owner_name, extension, request, maintenance_guard_provider_stage, maintenance_guard_builds)
+
+
+@pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+def test_maintenance_current_cas_is_checked_before_any_write(
+        owner_name, request, maintenance_guard_provider_stage, maintenance_guard_builds):
+    case = request.getfixturevalue(owner_name)
+    api, plan, bundle = prepare_combined(case, owner_name, maintenance_guard_provider_stage,
+                                        maintenance_guard_builds.http)
+    selected = g.current(case.store)
+    later = g.select(case.store, selected["generation"], selected["generation"])
+    with mock.patch.object(g, "atomic_bytes", side_effect=AssertionError("stale CURRENT wrote")):
+        with pytest.raises(ValueError, match="compare-and-swap"):
+            api.apply(bundle)
+    assert g.current(case.store) == later
+    api.history(case)
+
+
+@pytest.mark.parametrize("direction", ["maintenance-to-legacy", "legacy-to-maintenance"])
+def test_maintenance_predecessor_and_target_families_cannot_cross(
+        direction, maintenance_guard_builds, remote_placement_builds):
+    _, legacy, _ = builder.provider_remote_placement_record()
+    maintenance = builder.provider_maintenance_guard_files()
+    source, output = ((maintenance, remote_placement_builds.http)
+                      if direction == "maintenance-to-legacy" else (legacy, maintenance_guard_builds.http))
+    target = json.loads((output / "native-manifest.json").read_bytes())
+    saved = dict(source), dict(target)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(source, target)
+    assert (source, target) == saved
+
+
+@pytest.mark.parametrize("fault", [
+    "broker-only", "executor-only", "provider-variant", "retained-member",
+    "missing-member", "extra-member", "picker", "unknown-broker",
+])
+def test_maintenance_partial_or_foreign_predecessor_cannot_normalize(fault, maintenance_guard_builds):
+    before = builder.provider_maintenance_guard_files()
+    _, legacy, _ = builder.provider_remote_placement_record()
+    if fault == "broker-only":
+        before["ext/remote_sub_exec.py"] = legacy["ext/remote_sub_exec.py"]
+    elif fault == "executor-only":
+        before["ext/lease_broker.py"] = legacy["ext/lease_broker.py"]
+    elif fault == "provider-variant":
+        before["ext/native_plan_worker.py"] = legacy["ext/native_plan_worker.py"]
+    elif fault == "retained-member":
+        before["ext/model_tier.py"] = "0" * 64
+    elif fault == "missing-member":
+        del before["ext/experiential_transport.py"]
+    elif fault == "extra-member":
+        before["ext/foreign.py"] = "0" * 64
+    elif fault == "picker":
+        before["ext/pick.py"] = "0" * 64
+    else:
+        before["ext/lease_broker.py"] = "0" * 64
+    after = json.loads((maintenance_guard_builds.http / "native-manifest.json").read_bytes())
+    saved = dict(before), dict(after)
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+    assert (before, after) == saved
+
+
+@pytest.mark.parametrize("member", tuple(builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS) + ("ext/model_tier.py",))
+def test_maintenance_partial_target_cannot_use_a_complete_predecessor(member, maintenance_guard_builds):
+    before = builder.provider_maintenance_guard_files()
+    after = json.loads((maintenance_guard_builds.http / "native-manifest.json").read_bytes())
+    after[member] = "0" * 64
+    with pytest.raises(ValueError):
+        builder.validate_go_source_transition(before, after)
+
+
+MAINTENANCE_SOURCE_INPUTS = [
+    "rollout/provider_application/remote-placement.json",
+    "rollout/provider_application/composition.json",
+    "../provider_plans/profile.json",
+    "../provider_plans/remote_placement/profile.json",
+    "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    "../provider_plans/maintenance_guard/profile.json",
+    "../provider_plans/maintenance_guard/provenance.json",
+    "../provider_plans/router_admission.json",
+    "../provider_plans/maintenance_guard/lease_broker.py.patch",
+    "../provider_plans/maintenance_guard/remote_sub_exec.py.patch",
+] + [row["source"] for row in builder.PROVIDER_MAINTENANCE_GUARD_MEMBERS.values()]
+
+
+@pytest.mark.parametrize("path", MAINTENANCE_SOURCE_INPUTS[5:])
+@pytest.mark.parametrize("fault", ["changed", "symlink"])
+def test_maintenance_retained_source_commitments_fail_closed(tmp_path, path, fault):
+    root = tmp_path / "native_fabric/quota_continuity"
+    for relative in MAINTENANCE_SOURCE_INPUTS:
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+    target = root / path
+    if fault == "changed":
+        target.write_bytes(target.read_bytes() + b"\n")
+    else:
+        retained = tmp_path / "foreign-source"
+        retained.write_bytes(target.read_bytes())
+        target.unlink()
+        target.symlink_to(retained)
+    with pytest.raises(ValueError):
+        builder.provider_maintenance_guard_files(root)
+
+
+@pytest.mark.parametrize("flags", [
+    ["--include-provider-plan-maintenance-guard"],
+    ["--include-provider-plan-application", "--include-provider-plan-maintenance-guard"],
+    ["--include-provider-plan-application", "--include-provider-plan-remote-placement",
+     "--include-provider-plan-maintenance-guard", "--include-quota-reset-recovery"],
+])
+def test_maintenance_unqualified_flags_refuse_before_output(tmp_path, flags):
+    output = tmp_path / "must-not-exist"
+    with mock.patch.object(sys, "argv", ["builder", "--output", str(output), *flags]):
+        with pytest.raises(SystemExit) as stopped:
+            builder.main()
+    assert stopped.value.code == 2 and not output.exists()
