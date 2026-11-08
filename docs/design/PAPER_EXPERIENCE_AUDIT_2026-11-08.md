@@ -12,12 +12,12 @@ The first wave is a completed, representative audit-and-improvement outcome at t
 
 - Governing protected Mastermind SHA: `5c3d3885234358aefb97ecdbc59be0864df14f8b` (rechecked unchanged before delivery).
 - Skillpack: `mastermind.sol_skillpack.v1`, version 1.0.1, bootstrap major 1.
-- Design-owner source pin: Macro `ba32f20ba306f9e75b7c400992138e736b904516`; `docs/DESIGN_DOCTRINE.md` and `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md`.
+- Initial-pass design-owner source pin: Macro `ba32f20ba306f9e75b7c400992138e736b904516`; `docs/DESIGN_DOCTRINE.md` and `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md`.
 - Existing OS product context: `WS:CHAIRMAN-CONTROL-ROOM`; the OS daily-flow specification remains its behavioral owner. This cross-product audit does not create a workstream, assign an Executive operation, or change Agent OS/Linear lifecycle status.
 - Source carrier: `sol/paper-experience-audit-20261108-c3` in Mastermind, authored through GitHub-native file operations with blob preconditions.
 - Paper carrier: Studio Direct C3, exact-file snapshots, stable operation IDs and target-scoped edits. Two native collaborators supplied architecture judgment only; the principal performed all edits and verification.
 
-## Task tree and acceptance
+## Initial audit pass: task tree and acceptance
 
 | ID | Objective | Result and proof | Editorial state |
 | --- | --- | --- | --- |
@@ -30,7 +30,7 @@ The first wave is a completed, representative audit-and-improvement outcome at t
 
 The completion ruler was actual editable improvements, clear before/after reasons, preserved analytical depth and context, visual verification, and durable evidence. No implementation or production proof was requested by this design commission.
 
-## Portfolio findings
+## Initial portfolio findings
 
 | Surface | Evidence and disposition |
 | --- | --- |
@@ -584,3 +584,19 @@ A read-only cross-product check of [Master Design System](https://app.paper.desi
 The native directory's candidate source was resolved and read at Macro `3b27c7b9c8382ac8f21161a37b833dd6cb4f4933`. `research/design_candidates/production_design_20261102/f02/INTERACTION_STATES.md` (blob `3d90cbd4e3b95513e54e46c36632b55dbd31192c`) retains earlier values only when source identity still matches the current context and uses the existing generation/race guard. `SOURCE_AND_DATA_CONTRACT.md` (blob `b5d0b68944683573b7af05a47c43242a4b1e0e43`) assigns user-owned data to the immutable account subject and gives actual consumer entitlement/data-retention rules precedence over the illustrative specimen policy. Root independently read these exact candidate excerpts.
 
 No new global retention, retry, navigation or write mechanism is warranted. No token, inactive component, G15 uncertainty or protected `9ZX-0` / `9ZS-0` / `9SE-0` / `9SM-0` was changed. This remains a candidate-source review, not foundation acceptance or production proof.
+
+
+## Sector: mobile rank semantics and percentage-point comparison
+
+On [R4 Explore and compare](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0), native mobile board `FO0-0` now describes its actual **rotation score × five-session rank change** fixture. Desktop `FB7-0` already used this distinction. Fifteen mobile copy corrections remove return-acceleration implications:
+
+- `FXQ-0` and `FYN-0` identify rotation score and rank movement; the score is not presented as relative return versus the S&P 500.
+- `FXY-0`, `G0W-0`, `FY3-0`, `FYU-0`, `FY9-0`, `G01-0`, `FYI-0`, `FZI-0` use lower/higher score and improving/falling rank.
+- `G1F-0` explicitly qualifies all 11 sectors' available rank history as this fixture.
+- `G1S-0`, `G27-0`, `G2Q-0`, `G2R-0` describe sign-only ranking movement, including the selected Energy and Technology groups.
+
+Both return-comparison headlines `FEN-0` / `FQK-0` now read **Energy leads Technology by 11.0 pp**. The underlying 21-session ETF returns remain +2.9% and −8.1%; their arithmetic difference is 11.0 percentage points. The separate 20-session equal-weight member comparison, populations, numeric scores/deltas/counts, selected Energy state, dates and Dossier actions remain unchanged.
+
+At Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`, `engine/sector_pulse.py` (blob `cf2e658f0baa73a884311ed0c7ae09f6c8e7da63`) computes historical rank minus current rank; positive means rank improved, and missing history returns no delta. `templates/si_workspace.js` (blob `2c7667c39b5a2a5171b5ef036ef45206fb0702fc`) counts the signs of `pulse_rank_delta_5d` and describes movement up/down the ranking. Root independently read both exact source excerpts and the current desktop/mobile JSX before editing.
+
+All 17 text changes read back exactly. Focused map, movement-strip and mobile-headline renders show readable wrapping; the complete long mobile board retains all sections and its footer. `sector-rank-clarity-finish-01` finished only the two comparison boards. Existing builder `BML-0`, qualified/unavailable model cells, historical priors, return contract `GPI-0`, and review-only clock canary `G4P-0` were preserved. This is native design correction; the fixture is not validated live market evidence.
