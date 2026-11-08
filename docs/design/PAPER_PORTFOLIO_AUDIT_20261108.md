@@ -33,12 +33,12 @@ Use a clear subject, main assessment and useful next step. Keep evidence limitat
 | Node | State | Work and acceptance |
 |---|---|---|
 | A1 | in_progress | Portfolio inventory, current/reference mapping and primary-journey audit. |
-| A2 | ready | Repair Policy Monitor's incomplete assessment/basis presentation across existing specimens. Preserve recorded values and stance. |
-| A3 | ready | Clarify Market Memory's selected revision, source-value availability and evidence destination. Do not invent source values or deltas. |
-| A4 | ready | Reconcile Options rotation's visible-count/filter contradiction and clarify method/destination labels. Preserve the plotted sample and missing/boundary states. |
-| A5 | ready | Add an explicit exit from News count details, retaining counts/definitions and a named return to headlines. |
-| A6 | ready | Improve file/page navigation where status and destination are verified; retain source/archive/candidate distinctions. |
-| A7 | ready | Same-carrier visual/readback verification, cumulative report and precise design-to-build acceptance notes. |
+| A2 | verified_current | Repair Policy Monitor's incomplete assessment/basis presentation across existing specimens. Preserve recorded values and stance. |
+| A3 | verified | Clarify Market Memory's selected revision, source-value availability and evidence destination. Do not invent source values or deltas. |
+| A4 | verified | Reconcile Options rotation's visible-count/filter contradiction and clarify method/destination labels. Preserve the plotted sample and missing/boundary states. |
+| A5 | verifying | Add an explicit exit from News count details, retaining counts/definitions and a named return to headlines. |
+| A6 | revalidated | Improve file/page navigation where status and destination are verified; retain source/archive/candidate distinctions. |
+| A7 | in_progress | Same-carrier visual/readback verification, cumulative report and precise design-to-build acceptance notes. |
 
 ## Initial verified inventory
 
@@ -79,4 +79,63 @@ Observed Paper write policy is TOOL_SCOPED_CONTRACT_V1. set_text_content, write_
 
 ## Next action
 
-Apply the bounded Policy Monitor copy/basis repair using a fresh exact-file guard, then read back and visually inspect the touched variants before advancing A3–A7.
+Finish exact readback of the changed Memory and News specimens, record interaction/data contracts beside the evidence, check the remaining representative entry points, then finish scoped Paper work and save the final audit return.
+
+
+## Verified improvement milestone
+
+### Market Memory — selected revision first
+
+Original file `01M6PXFEP1E1T59M2B3N673PMG`, page `p-1-0`. Replaced the coverage-led summary in all eight EN/ZH × desktop/mobile × light/dark specimens. The primary answer is now **1 value change**, followed by **January 1987 · 2 distinct source values**; **457 of 956 periods** remains secondary series coverage. No dates, numerical source observations, coverage values or deltas were invented or changed.
+
+The retained-history note now explicitly says that exact values are not shown. Source rows use **Open source record** / **查看来源记录**; the evidence card uses **Open source evidence** / **查看来源证据**. Wording is bounded to retained changes for the selected period.
+
+| Artboard | New summary frame | Original replaced frame |
+|---|---|---|
+| 1-0, light EN desktop | LT-0 | H-0 |
+| 2Q-0, dark EN desktop | LY-0 | 4M-0 |
+| 51-0, light ZH desktop | MD-0 | 6X-0 |
+| 7C-0, dark ZH desktop | MI-0 | 98-0 |
+| 9N-0, light EN mobile | M3-0 | BJ-0 |
+| C9-0, dark EN mobile | M8-0 | E5-0 |
+| EV-0, light ZH mobile | MN-0 | GR-0 |
+| HG-0, dark ZH mobile | MS-0 | JC-0 |
+
+All eight structural writes and the 32-label update returned `APPLIED_RESPONSE_OBSERVED`. Representative screenshots inspected: light EN desktop, dark EN desktop, light EN mobile and dark ZH mobile. These show readable wrapping and intact period selection, distinct clocks, source rows and return path. Exact all-variant readback remains in the final verification step.
+
+### Options rotation — count and destination
+
+File `01M5EPQ16VBT7SBW2NQVX2RJG4`, artboard `2-0`. Operation `paper-audit-20261108-options-counts-01` returned `APPLIED_RESPONSE_OBSERVED`.
+
+- `5H-0`, `83-0`: **Relative strength · 63 / 21 weeks**.
+- `86-0`: **11 in universe · 10 plotted**, replacing the contradictory claim that two were hidden.
+- `8C-0`: **Explore Technology holdings →**.
+
+The inspected screenshot shows nine placed sector marks, XLU on the boundary, and XLC unavailable/not drawn: ten plotted plus one unavailable equals the fixed eleven-member universe. The missing-Friday, missing-versus-zero and boundary explanations remain intact.
+
+### News — an explicit return from count details
+
+File `01M5EXPMQTSBFBAM8KKG83FTZH`. Eleven expanded-count headers were replaced with a compact title/record-day stack and a 44px-high **Back to headlines** / **返回新闻列表** action. Existing tally charts, observed-day counts, definitions and coverage-only limitation were retained through original-node cloning.
+
+Affected artboards: `1-0` desktop, `H3-0` tablet, `M3-0` mobile, `169-0` Chinese specimens and `1FM-0` light EN/ZH specimens. Replacement header roots: `2D2-0`, `2D9-0`, `2DG-0`, `2DN-0`, `2DU-0`, `2E1-0`, `2E8-0`, `2EF-0`, `2EM-0`, `2ET-0`, `2F0-0`.
+
+All eleven writes returned `APPLIED_RESPONSE_OBSERVED`. Inspected post-edit screenshots of the desktop rail, mobile strip, light EN details and dark ZH details show the label fitting without overlap. The frozen R3 ledger `27K-0` was inspected but not changed. This is an R2 state-component refinement, not R3 acceptance or a claim of working browser interaction.
+
+### Policy Monitor — concurrent revision preserved
+
+Operation `paper-audit-20261108-policy-basis-01` applied 24 text changes across the four main specimens. Subsequent screenshots and exact node reads showed independent same-target revisions: **Semiconductor pressure**, **Drawdown threshold met; technical confirmation is unknown**, and **Recorded label; a combined assessment cannot be verified here**. These current texts satisfy the key clarity finding and were preserved rather than overwritten. The final canvas therefore must not be attributed verbatim to this session's original wording.
+
+No numeric policy facts or recorded Hawkish label were changed by this session. Current screenshot verification supports the evidence-basis correction; it is not a new financial assessment.
+
+### Architecture and concurrent navigation improvements
+
+Fresh readback found changes made outside this session's own writes:
+
+- Sector now starts with `p-3-0`, **00 · D05 journey & contract · Provisional**, then `p-4-0`, **01 · R4 Explore & compare · Design**; its old default is labeled **Reference · Terminal breadth rotation card**.
+- Shared design system starts with `p-9-0`, **00 · Start here · Build contract**; source imports are separated after the core system pages.
+- Terminal's directory now sends Company readers to the D07 readme and Company R3 studies; it explicitly separates source-only, retained references and held Returns work.
+- Market Memory's page is now **01 · Revision evidence · Screens & states**.
+
+These are revalidated outcomes, not this session's edits. They improve current-study → contract → evidence navigation without declaring any candidate approved. No resource was archived, deleted, moved between files or promoted to accepted status.
+
+Existing programme context was read at `design/f03-paper-directory-20261102-c2`: `research/design_candidates/production_design_20261102/README.md` and `ORGANIZATION_RULES.md`. Their historical tool-schema gate is superseded for this session only by the observed qualified tool-scoped contract; unsupported folder/archive/resource actions remain unapplied. The programme's owner and directory identity remain unchanged.
