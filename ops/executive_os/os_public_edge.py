@@ -166,6 +166,15 @@ POST_ROUTES = PRE_DIRECT_NATIVE_POST_ROUTES + DIRECT_NATIVE_POST_ROUTES
 PRE_COMPANY_PRIORITIES_POST_ROUTES = POST_ROUTES
 POST_ROUTES += ("/os/executive/company-priorities",)
 
+# Two fixed metadata-only READs use the existing per-resource auth owners.
+# Preserve both exact predecessor profiles; partial mixes remain refused.
+PRE_AUTHORIZATION_IDENTITY_GET_ROUTES = GET_ROUTES
+AUTHORIZATION_IDENTITY_GET_ROUTES = (
+    "/workspace/native-authorization-identity/acquisition/current",
+    "/workspace/native-authorization-identity/content/current",
+)
+GET_ROUTES = PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + AUTHORIZATION_IDENTITY_GET_ROUTES
+
 # Preserve exactly the profiles admitted by the predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -203,7 +212,8 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
     (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
     (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
-    (GET_ROUTES, PRE_COMPANY_PRIORITIES_POST_ROUTES),
+    (PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, PRE_COMPANY_PRIORITIES_POST_ROUTES),
+    (PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

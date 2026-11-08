@@ -420,3 +420,28 @@ describe("Atelier Today", () => {
     expect(screen.queryByText(/worker assigned|queue healthy|3 projects/i)).toBeNull();
   });
 });
+
+describe("Today current catalogue owner",()=>{
+  it("uses the separate acquired collection, including a rootless project, without an Office or Mission claim",()=>{
+    const open=vi.fn(), mission=vi.fn();
+    render(<Today projection={projection({programs:programsRead([card])})} work={{kind:"PENDING"}} composer={null}
+      currentCatalogue={{value:{state:"AVAILABLE",programs:[{...card,workRef:"WS:ROOTLESS",title:"Rootless project",rootJobId:null,rootState:"UNKNOWN",rootCandidates:[]}],reason:"PARTIAL_PROJECT_COVERAGE"},current:()=>true}}
+      onOpenProject={open} onOpenMission={mission} onOpenInbox={vi.fn()} onOpenProjects={vi.fn()}/>);
+    expect(screen.queryByText("Alpha program")).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:"Open project Rootless project"}));
+    expect(open).toHaveBeenCalledWith("WS:ROOTLESS");expect(mission).not.toHaveBeenCalled();
+  });
+  it.each(["withdrawn","pending","unavailable","throws"])("does not fall back to Office cards for a %s catalogue",state=>{
+    render(<Today projection={projection({programs:programsRead([card])})} work={{kind:"PENDING"}} composer={null}
+      currentCatalogue={{value:{state:state==="pending"?"PENDING":state==="unavailable"?"UNAVAILABLE":"AVAILABLE",programs:[card],reason:"SOURCE_READ_PENDING"},current:()=>{if(state==="throws")throw Error("owner withdrawn");return state!=="withdrawn";}}}
+      onOpenProject={vi.fn()} onOpenInbox={vi.fn()} onOpenProjects={vi.fn()}/>);
+    expect(screen.queryByText("Alpha program")).toBeNull();expect(screen.queryByRole("button",{name:"Open project Alpha program"})).toBeNull();
+  });
+  it("rechecks owner currentness on the explicit gesture",()=>{
+    let current=true;const open=vi.fn();
+    render(<Today projection={projection()} work={{kind:"PENDING"}} composer={null}
+      currentCatalogue={{value:{state:"AVAILABLE",programs:[card],reason:"QUALIFIED_PROJECT_SOURCES"},current:()=>current}}
+      onOpenProject={open} onOpenInbox={vi.fn()} onOpenProjects={vi.fn()}/>);
+    current=false;fireEvent.click(screen.getByRole("button",{name:"Open project Alpha program"}));expect(open).not.toHaveBeenCalled();
+  });
+});
