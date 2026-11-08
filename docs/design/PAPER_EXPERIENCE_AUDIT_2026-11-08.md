@@ -12,7 +12,7 @@ This map points to the editable designs and current continuation sections. All c
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
-| Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; Study I `22CM-0` explains the historical result, earlier guidance, calculation and exact source return. |
+| Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I `22CM-0` explains the historical source/calculation; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
@@ -803,3 +803,63 @@ Root observed all47 newly composed nodes, reviewed the complete rendered320px bo
 Fresh inventory also exposed another writer's **PROPOSED · Historical benchmark chooser · EN/ZH**, root `21ZR-0` on `p-1C-0`, and build-reference root `20K2-0` on `p-1B-0`. A bounded read established that the six chooser/availability panes are disjoint from this source companion. Those concurrent boards are preserved and excluded from authored results.
 
 The stable operations `company-historical-source-duplicate-01`, `company-historical-source-compose-01`, `company-historical-source-name-01` and scoped `company-historical-source-finish-01` all returned **APPLIED_RESPONSE_OBSERVED** through the existing C3 carrier. The temporary duplicate was replaced only within the newly owned target. Native JSX does not retain the submitted `href` attributes, so the publisher links above are the builder mapping; the Paper actions are visual intent, not functioning navigation proof. Scroll, keyboard/touch, external-link handling, conditional focus and source-owner binding remain actual implementation proof obligations.
+
+
+## Company Financials: full-history selection and evidence at320px
+
+The next source-documented gap was the **All available periods** journey. New provisional Studies **J, K and L** now make that journey concrete on [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0), using the same labeled synthetic fixture as C/D/E.
+
+| Study | Native target / placement | Represented state |
+| --- | --- | --- |
+| J | `22GR-0`; x6706/y0,320px | Full history with **Revenue FY2025,120.0 USD million** selected. |
+| K | `22K0-0`; x7106/y0,320px | The same inventory after selecting **Revenue FY2024,100.0 USD million**, while history stays open. |
+| L | `22LN-0`; x7506/y0,320px | FY2024 selected evidence with its corresponding annual dates, synthetic source clocks and exact history return. |
+
+Each board has80px clearance from the previous companion. J/K preserve a compact table with chronological FY2024/FY2025 columns and representative Revenue/diluted-EPS rows. Revenue retains **USD millions** and EPS **USD per share**. Selection uses the individual Revenue cell's border and explicit **Selected** label. EPS cells remain read-only: FY2024 is **0.00 / Reported zero**; FY2025 is **— / Unavailable**. No EPS percentage change or missing-as-zero substitution is introduced.
+
+**2 available annual periods**, **Quarterly not supplied** and **All supplied periods are shown** qualify coverage to the synthetic FIXTURE. Both periods are January–December,12 months, with the common synthetic comparison basis. The compact **FY2025 vs FY2024:+20.0% revenue** line keeps its named period pair even when FY2024 is selected. It is not presented as a growth rate for FY2024. These task studies show two representative rows across the complete fixture period inventory, not a replacement for the source's full statement taxonomy.
+
+### Incumbent history owner and source inspection
+
+The immutable D07 task-study README/fixture remain at Macro `da8df94d647f06b34e5a7a743f147980e627e854`, blobs `9cdd40259c41d62692395854ea90da0aabb74546` / `b6e54cf182c898fe15d3074a266111f2c1a705b6`. Their explicit open requirement covers complete-history composition while preserving the source cadence, period inventory, accounting family, currency and selection validity. The fixture is exactly two annual periods; no issuer-wide archive, older-data fetch or made-up pagination population is implied.
+
+At Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`:
+
+| Source | Blob | Verified existing behavior |
+| --- | --- | --- |
+| `terminal/components/fin/StatementsPage.tsx` | `77cbdad052503a5158cae882ad77bd69614abaca` | Income columns use the normalized view. Charts cap annual/interim windows at20/16; the distinct Full history section passes all normalized periods to MiniTable with pageSize6. |
+| `terminal/components/fin/FinCharts.tsx` | `16e0208830f7361bffbd78ada9281140b6125454` | MiniTable preserves oldest-to-newest column order within a page, starts at the newest page or the focused period's page, and renders paging controls only when more than one page exists. Two periods produce one page. Its existing focus treatment is not an implemented click-to-open evidence handler. |
+| `StatementsSourceFocus` / `resolveStatementsFocus` in StatementsPage | Same renderer blob | Carries statement, basis, index hint, period end and row identity. The index is checked against the requested end date; after an index mismatch, a unique matching end date is required. This is not a license to carry a selection into another listing or changed source basis. |
+
+The new Revenue-selection and history/evidence presentation are **proposed interaction states** under the incumbent Statements owner. They do not introduce another route, archive service, period store or request owner.
+
+### Explicit selection and return behavior
+
+| Action | Required transition |
+| --- | --- |
+| Open from D's All available periods `1NOK-0` | Present J with existing FY2025 Revenue selection. C's counterpart is `1NKO-0`, with its own captured origin and FY2024 selection. |
+| Select FY2024 Revenue in J `22HH-0` | Deliberately update the selected metric-period/value through the existing owner and remain in history, as K. All associated evidence must follow that selection. |
+| Select FY2025 Revenue in K `22KT-0` | Return the selection to FY2025 without leaving history, as J. |
+| Open K's evidence action `22LI-0` | Open L for FY2024. Close `22M4-0` returns conditionally to that evidence opener; named Return `22LP-0` resolves K's selected Revenue cell `22KQ-0`. |
+| Open J's evidence action `22I9-0` | Reuse the existing FY2025 evidence content represented by E, retaining J as the actual origin. E's original board is unchanged. |
+| Close history `22GY-0` / `22K7-0` | Return conditionally to the captured inventory opener, retaining any deliberate new Revenue selection. Close does not silently choose or revert a period. |
+| Named history Return `22IB-0` / `22LK-0` | Resolve the selected Revenue cell in the underlying Statements view. Its value and evidence must agree; D's existing FY2025 cell is `1NO0-0`. |
+| Listing, source, cadence, period or invoker changes | Revalidate through the incumbent owner. Retire stale interaction and use a valid labeled fallback when the requested origin no longer exists. Do not restore focus to a disconnected node, substitute a different fiscal period, or transfer evidence to another listing. |
+
+L derives from a new duplicate of E, with only eight mapped text updates. It now shows Revenue FY2024 **100.0 USD m**, annual **1 Jan–31 Dec2024**, synthetic filing **15 Feb2025**, synthetic acquisition **16 Feb2025,09:00 UTC**, and unchanged fund-file build **3 Nov2026**. The source document and retained revision remain unavailable. No NVDA identity or historical-guidance data enters this synthetic Financials flow.
+
+### Native review map and verification
+
+An additive native builder section **`22MA-0`** now sits at the end of D07 readme **`1NFS-0`**, titled **8 Nov continuation · Provisional content companions**. It maps I–L, the two different return purposes, current source ownership and fit-content limitations. Readback verifies that all eleven prior readme children remain in their original order, followed by the one new section. It preserves the earlier dated source/foundation record rather than replacing it.
+
+Root inspected complete320px J/K/L renders. J/K are approximately900px fit-content studies, and L follows E's approximately671px content layout; scrolling, safe areas and any final fixed chrome remain later implementation proof. The two Revenue targets are64px high, Close is44px, and evidence/return actions are48px. Full JSX reads are15,349 characters each for J/K and6,399 for L. The selected cells, row-specific units, reported zero, unavailable EPS, period definitions, source clocks and named returns read back correctly. Fresh original D and E JSX is unchanged. Final p11 inventory contains13 boards, including the original readme/eight studies and four new companions I–L.
+
+The J/K duplicate/compose/name operations, L duplicate/eight-text/name operations, readme add/name operations and scoped `company-history-companions-finish-01` all returned **APPLIED_RESPONSE_OBSERVED** through C3. No rejected or held target was reused. Static render/readback establishes the represented states, not actual keyboard navigation, dialog behavior, click handlers, runtime source resolution or focus restoration.
+
+## Account/settings: inspected rejection preserved
+
+A bounded separate audit of [Terminal account/settings p10](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-10-0) found only desktop **`1MP2-0`** and mobile **`1MU2-0`**, both explicitly named **REJECTED · Entire-pane redesign**. Root independently confirmed this inventory. Neither was edited or copied into a replacement composition. Their labels do not identify the original rejection's detailed reason.
+
+For a future admitted settings target, root read `terminal/components/settings/SectionTerminal.tsx` at Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`, blob **`81e65723a217e66b6724781af37b331d3988918e`**. Controls apply locally immediately; per-group DeliveryNote represents account acknowledgement/guest/retry state. A checked option alone does not prove account persistence. The actual Home market is protected from toggling and tagged from `prefs.home`; the rejected fixture does not establish which market it is. The existing default-timeframe explanation is supported: it affects the next Terminal mount and leaves the open chart unchanged. These are source-backed constraints, with no new preference or settings owner.
+
+A fresh PR#2301 metadata read also exposed a concurrent source-triage body qualifying earlier head `e88e3c6c37840bd9fc1e2e094517742fd03fb262`. That other writer's exact-head qualification was preserved. Its CI/review evidence is not attributed to these subsequent Company additions; no PR-body replacement, new review, merge or release claim was made.
