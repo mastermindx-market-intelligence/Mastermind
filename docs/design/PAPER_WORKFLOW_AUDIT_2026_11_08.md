@@ -72,3 +72,25 @@ ProjectWorkspace currently renders Files/Details disclosures after the mounted c
 ### Cross-product audit findings accepted
 
 A read-only representative audit found eight obsolete decorative colored inset rails in Intelligence Hub, cryptic ranking/desk labels, News teasers exceeding the current R3 two-line contract, and old News references visually preceding the current composition. Sector's new Explore routes, source-basis distinctions and keyboard-focus outline are useful current work and must be preserved. Bounded repairs and exact receipts will follow here.
+
+## Applied milestone — market clarity and reference organization
+
+### Intelligence Hub · file 01M2VWK62FA5S4VVF6G7SBPE5J
+
+Eight decorative inset accent rails were removed using the supported clone-and-replace composition path. Exported JSX was compared before/after: after ignoring changed node IDs and the removed boxShadow, all eight subtrees were identical. This preserved values, ordering, source caveats and existing layout. Exact replacements: 13H-0 → 6ZT-0; 1K0-0 → 703-0; 58F-0 → 70G-0; 21P-0 → 70T-0; 2DZ-0 → 716-0; 2PU-0 → 6ZG-0; 3FY-0 → 71J-0; 4LK-0 → 71W-0.
+
+Current mobile lists 2OW-0 and 3F0-0 now have Company / Research index column labels (729-0 and 72D-0). The existing build board 6S-0 records the presentation amendment. All 30 records, the 17 price-covered + 13 missing-price grouping, valid zero values, listing identity, source date and filter/return rules remain. Neutral elevation effects and actual keyboard-focus treatment were not altered.
+
+Fresh reads showed desktop headers already improved to Opportunity / Edge index and Desk readings, so they were preserved. No ranking, score blending or trade authority was introduced.
+
+### News · file 01M5EXPMQTSBFBAM8KKG83FTZH
+
+Current R3 composition 27K-0 was moved with identity preserved to p-2-0, **00 · Current News · R3**, now first in the page list. The old p-1-0 is **01 · Behavior and build references**; four old fullscreen compositions are explicitly REF · R2. Existing access, recovery, responsive, localization and claim-comparison material remains intact.
+
+Five teasers now use the frozen R3 two-line 12.5/18.5 ellipsis treatment while retaining full source text. Replacement wrapper / text nodes: 29C → 2FU / 2FV; 29X → 2FX / 2FY; 2BF → 2G0 / 2G1; 2C5 → 2G3 / 2G4; 2CP → 2G6 / 2G7 (all IDs end in -0). Screenshot readback confirmed the visible two-line treatment and unclipped evidence ladders. Row-anatomy note 28K-0 now names the exact rule and no-motion requirement; 27Y-0 points to the retained references page.
+
+Primary source: Macro pin / research/product_intelligence_local_delivery/NEWS_RAIL_R3_SPEC_2026-10-22.md. R3 owns presentation; R2 retains behavior. Dark ships in the source law; light remains specimen-only. This audit does not release News.
+
+### Sector Intelligence · file 01M6FAXA774QT1VRDMAG7DFQ2W
+
+On FB7-0, FEO-0 now reads: “Energy’s price is holding up while its cycle has turned down.” The exact 21-session ETF and 20-session member-basket bases remain in their controls/charts/table, along with contradictions and model/prior distinctions. FEE-0 was already “Link to this view” on fresh read and was not rewritten. The recent GM1-0 audit notes, G4P-0 canary, market-map study layer and real focus outline were preserved. This is a copy-density improvement, not new market analysis.
