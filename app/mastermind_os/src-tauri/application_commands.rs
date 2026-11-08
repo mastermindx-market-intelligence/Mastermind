@@ -51,6 +51,7 @@ pub const APPLICATION_COMMANDS: &[&str] = &[
     "read_admitted_plan",
     "read_retained_activity",
     "read_resource_capacity",
+    "read_model_configuration",
     "read_host_observation",
     "read_fabric_catalog",
     "read_fabric_status",

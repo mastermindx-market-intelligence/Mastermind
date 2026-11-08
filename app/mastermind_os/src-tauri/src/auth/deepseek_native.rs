@@ -26,7 +26,7 @@ fn retire_window(app: &AppHandle, attached: &mut Option<u64>) -> bool {
 
 fn remote_navigation_allowed(url: &Url) -> bool {
     url.scheme() == "https" && url.host_str() == Some("chat.mastermind-x.com")
-        && url.port_or_known_default() == Some(443)
+        && url.port().is_none()
         && url.username().is_empty() && url.password().is_none()
 }
 
