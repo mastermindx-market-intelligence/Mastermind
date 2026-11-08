@@ -435,3 +435,57 @@ Sources at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`:
 - [Page contract](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_PAGE_CONTRACT_2026-10-21.md), blob `bfa98c7e0316fd9f46d8e74c6e724c6cc9fe4961`, defines the period-matched estimate fields without a currency/unit field and the percentage-change basis.
 
 All numeric values, chart geometry, periods, clocks, selected MU context, colored locale conventions and native board IDs were preserved. Root verified the 14 exact text readbacks and visibility, focused unit/selection screenshots, and both full mobile compositions. Existing interaction contract `3XP-0`, source map `3ZI-0`, synthetic-identity examples, shared-state/recovery additions and Study returns were not rewritten. `expectation-parity-finish-01` finished the five original compositions after the bounded copy corrections. This is design/source alignment, not evidence of a runtime change.
+
+## Continuation: AI pending read and explicit draft decision
+
+Two further native mobile states complete the proposed selected-chat recovery sequence on [AI · Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0):
+
+- `6D4-0` · **72 · Selected chat loading**. The exact selected target is loading while the current conversation and draft remain current. Return keeps them and invalidates the pending switch; a late read cannot open the target.
+- `6G6-0` · **73 · Keep draft or switch**. After the target qualifies, the current unsent draft is shown explicitly. Stay in current chat is the initial-focus action; Discard draft and switch names the loss and does not send the draft. Close keeps the current conversation and draft.
+
+Both are 390×844 native clones of the owned selected-read-failure composition, with one focused card replacement each. Existing answer/source values remain behind the inert history drawer. The owner contract `6BM-0` now references states 69–73; owned drawer layer names distinguish Chats from Saved cases. No original Saved cases board was changed.
+
+Root verified full final renders, focused drawer geometry and final JSX (23,568 / 24,471 characters). The first whole-board screenshot of a new clone transiently omitted unchanged header content; fresh scoped and whole-board reads resolved it without speculative mutations. Both complete final compositions show the status bar, current-chat identity, 44px actions and footer. All edits were observed applied, and `ai-read-switch-finish-01` finished the two new states and affected owned references. The same pinned chat-template gap, incumbent ownership and real-consumer proof requirements in the preceding AI section still apply.
+
+## Continuation: Ontology published-page comparison versus answer evidence
+
+On [MarketOntology · Start · WTI journey](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0), accepted desktop R23 `44L-0` and mobile R24 `4F5-0` used the broad phrase “source verification unavailable.” The source status actually describes an unavailable comparison with the canonical published transmission page. It is distinct from the existence of a captured owner reading and from the R25 answer's evidence matching.
+
+Eleven native text nodes were corrected:
+
+| Location | Native nodes | New meaning |
+| --- | --- | --- |
+| Hero explanations | `45R-0`, `4FZ-0` | Comparison with the published page is unavailable; existing path-condition conclusion preserved. |
+| Episode status label/value | `46Q-0`/`46R-0`, `4GV-0`/`4GW-0` | PUBLISHED PAGE · Not compared. |
+| Source-record footer | `4AQ-0`, `4KU-0` | Snapshot source record · not compared with the published page. |
+| Source-details badge | `4E9-0`, `4QK-0` | PAGE MATCH UNAVAILABLE. |
+| Mobile evidence subtitle | `4KH-0` | Existing 25 Sep 2026 reading date with published-page comparison unavailable. |
+
+The existing implementation-map paragraph `16D-0` on [board `13J-0`](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-6-0) retains all previous validation instructions and now states that the unavailable page comparison neither establishes nor fails the answer match. R25 still requires current permission plus the same chain, revision, evidence date, manifest and selected step.
+
+Sources at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`:
+
+- [Source composer](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/engine/ontology_explorer.py), blob `72b854ef302df0d004ef9f5b8a6b20d70f503b41`, `_source_block`: freshness `verification_unavailable`, `compared_against: None`, separate observation and generation clocks, and an explicit inability to observe the canonical served-page match.
+- [Current presentation](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/ontology.js), blob `9ef7d404abaa80bcf9b3e80fb2d77091fc4e825d`, `renderMeta`: Not verified against the published page.
+
+Root verified all eleven copy readbacks plus the exact appended contract, focused mobile hero/source header, full desktop/mobile boards and the host-validation card. Existing source readings, clocks, path tests, figures, return actions and acceptance status remain unchanged. R25 `4SA-0`/`4UY-0` match branches, implementation references `ACM-0`/`ACQ-0`, receipt additions `ADI-0`/`ACU-0`, R22 ruling and QA HOLD were preserved. `ontology-published-page-finish-01` finished only the twelve changed text nodes. No source-status engine, answer verifier or runtime claim was introduced.
+
+## Continuation: Risk Radar unavailable evidence without an unbound retry
+
+The Risk Radar pickup contract `19C-0` already states that source-detail retry is proposed and requires an existing permitted read owner for the opened snapshot. Without that owner, it requires Source details unavailable and a usable Back action. Five evidence compositions nevertheless showed an enabled-looking retry button.
+
+On [Risk Radar · Main + Evidence](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0), the five action groups were replaced with ordinary, noninteractive muted status text while retaining their 44px layout space:
+
+| Composition | Old action group | New status node |
+| --- | --- | --- |
+| Desktop Dark EN `8PS-0` | `8V9-0` | `AHR-0` |
+| Mobile Dark EN `8SH-0` | `8VB-0` | `AHT-0` |
+| Mobile Light EN `98K-0` | `98V-0` | `AHV-0` |
+| Mobile Light ZH `8ZF-0` | `8ZQ-0` | `AHX-0` |
+| Mobile Dark ZH `9AI-0` | `9AT-0` | `AHZ-0` |
+
+The English text is **Source details unavailable**; Chinese is **来源详情暂不可用**. Link-colored borders, arrows and button treatment were removed. Both Back and exact-context Return remain available. The seven retained driver readings, missing-input explanation, model/index distinction, source limitations and retained snapshot were preserved.
+
+Root independently read [templates/risk_radar_workspace.js](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/risk_radar_workspace.js), blob `10f21b5bcb9c2b13a5872b471677fe77ed3823c8`. It explicitly owns presentation without network requests or timers; the inspected dispatcher has view/horizon/Back/Escape behavior and no source-detail retry. This bounds the current specimen's promise; it does not assert that every other service in the wider system lacks a read capability.
+
+Root inspected all five full native renders and all five status JSX extractions, confirming correct locale/theme, no retry arrow, no link token and no action border. `risk-source-status-finish-01` finished the five new status nodes. The existing conditional retry contract remains intact. Events caption refusals, China description uncertainty and other held lanes were not touched. A future enabled retry still requires a demonstrated incumbent owner for the exact opened evidence; no fetch, polling, cache or request owner was added.
