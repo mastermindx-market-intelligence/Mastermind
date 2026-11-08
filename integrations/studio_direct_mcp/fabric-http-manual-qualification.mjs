@@ -39,7 +39,7 @@ test('authenticated Web MCP exact GLM and Experiential synthetic pins -> strict 
  const first=await connect();
  const spec=(await first.client.listTools()).tools.find(x=>x.name==='fabric_request')?.inputSchema;
  assert.ok(spec);
- assert.deepEqual(spec.properties.pool.enum,['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
+ assert.deepEqual(spec.properties.pool.enum,['grok','glm','minimax','bailian','cursor','ocfree','go','byteplus','experiential']);
  assert.equal(spec.properties.model.type,'string');
  for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
    assert.equal(spec.properties[consent].type,'boolean');
@@ -103,5 +103,40 @@ test('authenticated Web MCP exact GLM and Experiential synthetic pins -> strict 
  const expAccepted=await call(second.client,'fabric_accept',{...exp,by:'deterministic',
    expected_response_sha256:expResult.response_sha256,verification_summary:'artifact_digest_comparison'});
  assert.equal(expAccepted.accepted,true);
+
+ // Exercise the complete HTTP/schema -> native-argument -> result -> acceptance
+ // path for plan selectors, using only the isolated synthetic adapter.
+ for(const [suffix,pool,requested,resolved] of [
+  ['byteplus-ds','byteplus','deepseek-v4.1-flash','deepseek-v4.1-flash'],
+  ['byteplus-default','byteplus','auto','glm-5.3-flash'],
+  ['exp-included','experiential','free','deepseek-v4.1-flash'],
+  ['exp-paid','experiential','uncensored','deepseek-v4.1-flash-uncensored'],
+  ['exp-glm','experiential','glm-5.3-flash-uncensored','glm-5.3-flash-uncensored'],
+  ['exp-auto',undefined,undefined,undefined],
+ ]){
+  const plan={run_id:'http-plan-'+suffix,root_id:'http-plan-original'};
+  const consents={retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true};
+  const args={...plan,parent_id:plan.root_id,task_class:'mechanical',task_complexity:'C0_MECHANICAL',
+    work_packet:'PUBLIC SYNTHETIC plan selection; never contact a provider.',
+    ...(pool?{pool,model:requested}:{}),
+    ...(pool==='experiential'||!pool?consents:{}),...(!pool?{response_only:true}:{})};
+  const submitted=await call(second.client,'fabric_request',args);
+  assert.equal(submitted.delivery,'CONTROLLER_CREATED',JSON.stringify(submitted));
+  assert.equal(submitted.resolved_model,resolved);assert.equal(submitted.worker_start_proven,false);
+  const native=JSON.parse(await readFile(join(state,plan.run_id+'.route'),'utf8'));
+  assert.equal(native.pool,pool??null);assert.equal(native.model,resolved??null);
+  assert.equal(native.strict,Boolean(pool));assert.equal(native.quota_fallback,false);
+  assert.equal(native.root,plan.root_id);assert.equal(native.parent,plan.root_id);
+  if(!pool)assert.equal(native.response_only,true);
+  if(pool==='experiential'||!pool){
+   for(const key of ['experiential_retention_acknowledged','experiential_sensitive_data_opt_in',
+    'experiential_proprietary_code','experiential_code_exposure_opt_in'])assert.equal(native[key],true);
+  }
+  const retained=await call(second.client,'fabric_result',plan);
+  assert.equal(retained.adapter_response,'RETURN: VERIFIED\n\n');
+  const acceptedPlan=await call(second.client,'fabric_accept',{...plan,by:'deterministic',
+   expected_response_sha256:retained.response_sha256,verification_summary:'artifact_digest_comparison'});
+  assert.equal(acceptedPlan.accepted,true);
+ }
  assert.equal(gateway.stats().backend.spawns,1);
 });

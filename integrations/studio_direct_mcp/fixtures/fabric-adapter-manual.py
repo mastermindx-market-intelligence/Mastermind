@@ -35,6 +35,7 @@ parser.add_argument('--experiential-retention-acknowledged', action='store_true'
 parser.add_argument('--experiential-sensitive-data-opt-in', action='store_true')
 parser.add_argument('--experiential-proprietary-code', action='store_true')
 parser.add_argument('--experiential-code-exposure-opt-in', action='store_true')
+parser.add_argument('--experiential-response-only', action='store_true')
 parser.add_argument('--quota-fallback', action='store_true')
 parser.add_argument('--follow', action='store_true')
 args = parser.parse_args()
@@ -45,11 +46,20 @@ path = root / (rid + '.json')
 empty = dict(schema='mastermind.fabric_task_status.v1', run_id=rid,
              root_id=None, parent_run_id=None, state='NOT_FOUND',
              result_available=False, result_bytes=None, accepted=None, accepted_by=None)
+included = ['deepseek-v4.1-flash', 'deepseek-v4.1-flash-1017', 'gpt-6-luna',
+            'clef', 'clef-flash', 'jev-latest', 'gpt-6-luna-decisions']
+paid = ['deepseek-v4.1-flash-uncensored', 'glm-5.3-flash-uncensored']
+exp_models = ['glm-5.3-uncensored', *included, *paid]
+consent = all((args.experiential_retention_acknowledged, args.experiential_sensitive_data_opt_in,
+               args.experiential_proprietary_code, args.experiential_code_exposure_opt_in))
 if args.action == 'preview':
     if args.pool == 'glm' and args.requested_model in ('glm-5.3', 'auto'):
         model, mode = 'glm-5.3', 'glm'
-    elif args.pool == 'experiential' and args.requested_model == 'glm-5.3-uncensored':
-        model, mode = 'glm-5.3-uncensored', 'experiential'
+    elif args.pool == 'byteplus' and args.requested_model in (None, 'deepseek-v4.1-flash', 'glm-5.3-flash'):
+        model, mode = args.requested_model or 'glm-5.3-flash', 'byteplus'
+    elif args.pool == 'experiential' and args.requested_model in (*exp_models, 'free', 'uncensored'):
+        model = included[0] if args.requested_model == 'free' else paid[0] if args.requested_model == 'uncensored' else args.requested_model
+        mode = 'experiential'
     else:
         raise SystemExit(78)
     # Read-only preview, intentionally no per-run file or reservation.
@@ -61,14 +71,19 @@ if args.action == 'preview':
 elif args.action == 'request':
     # Independently require strict policy after the prior no-effect preview.
     # The Experiential branch is a provider-free fixture only.
-    if not args.strict_manual_pin or args.quota_fallback or path.exists():
+    auto_response = args.pool is None and args.requested_model is None and args.experiential_response_only and consent
+    if (not args.strict_manual_pin and not auto_response) or args.quota_fallback or path.exists():
         raise SystemExit(78)
     if args.pool == 'glm':
         if (args.requested_model != 'glm-5.3' or args.task_class != 'review'
             or args.max_turns != 12 or args.subject_pool != 'openai'):
             raise SystemExit(78)
-    elif args.pool == 'experiential':
-        if (args.requested_model != 'glm-5.3-uncensored'
+    elif args.pool == 'byteplus':
+        if (args.requested_model not in ('deepseek-v4.1-flash', 'glm-5.3-flash')
+            or args.task_class != 'mechanical' or args.max_turns not in (None, 8)):
+            raise SystemExit(78)
+    elif args.pool == 'experiential' or auto_response:
+        if ((not auto_response and args.requested_model not in exp_models)
             or args.task_class != 'mechanical' or args.max_turns is not None
             or args.subject_pool is not None
             or not args.experiential_retention_acknowledged
@@ -95,7 +110,8 @@ elif args.action == 'request':
              experiential_sensitive_data_opt_in=args.experiential_sensitive_data_opt_in,
              experiential_proprietary_code=args.experiential_proprietary_code,
              experiential_code_exposure_opt_in=args.experiential_code_exposure_opt_in,
-         ) if args.pool == 'experiential' else {}))))
+         ) if args.pool == 'experiential' or auto_response else {}),
+         **({'response_only': True} if args.experiential_response_only else {}))))
     print(json.dumps(status))
 elif args.action in ('status', 'wait'):
     print(path.read_text() if path.exists() else json.dumps(empty))
