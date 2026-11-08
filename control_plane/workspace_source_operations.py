@@ -80,6 +80,16 @@ def _reference(value):
 def _lookup_binding(value, identity, request_sha256):
     if value is None:
         return None
+    if identity["action"] == "correct_project_discovery":
+        from common.workspace_discovery_correction_contract import validate_lookup as validate_correction_lookup
+        try:
+            checked = validate_correction_lookup(value)
+            if (any(checked[k] != identity[k] for k in ("action", "request_id", "work_ref"))
+                    or checked["request_sha256"] != request_sha256):
+                raise ValueError()
+            return checked
+        except (ValueError, TypeError, KeyError):
+            raise SourceOperationConflict() from None
     keys = {"action", "request_id", "work_ref", "source_commit", "base_revision",
             "request_sha256", "expected_preference_revision"}
     if (identity["action"] not in {"add_project_file", "set_project_communication_preference"}
@@ -290,7 +300,7 @@ class SourceOperationEvents:
                 AND json_extract(payload_json,'$.identity.work_ref')=?
                 AND json_extract(payload_json,'$.kind')='SOURCE_OBSERVED'
                 AND ((json_extract(payload_json,'$.identity.action') IN
-                    ('add_project_file','set_project_communication_preference','publish_project_proposal','publish_project_plan_proposal')
+                    ('add_project_file','set_project_communication_preference','correct_project_discovery','publish_project_proposal','publish_project_plan_proposal')
                     AND json_extract(payload_json,'$.phase')='PUBLICATION')
                     OR (json_extract(payload_json,'$.identity.action')='ADOPT_PLAN'
                     AND json_extract(payload_json,'$.phase')='ADOPTION'))

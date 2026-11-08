@@ -704,7 +704,8 @@ def build_installed_coo_settings(raw, source, config_path, executive, *, expecte
         catalogue_provider=lambda principal, work_ref=None: catalogue_source.catalogue_for_principal(
             principal_frame(principal), work_ref=work_ref),
         agentos_context_provider=client.agentos_context,
-        agentos_current_context_provider=client.agentos_current_context)
+        agentos_current_context_provider=client.agentos_current_context,
+        agentos_discovery_context_provider=client.agentos_discovery_context)
     publication = build_installed_selected_child_target(raw)
     if publication is not None:
         # One frozen publication, read through the SHARED generation-bound

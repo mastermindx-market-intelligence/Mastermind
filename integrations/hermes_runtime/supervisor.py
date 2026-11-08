@@ -97,7 +97,9 @@ def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str =
     return argv
 
 
-def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, primary_application=None) -> dict[str, tuple[str, ...]] | None:
+def expected_disabled_mcp(
+    profile: RuntimeProfile, consumer=None, primary_application=None, *, evaluation_inputs=None,
+) -> dict[str, tuple[str, ...]] | None:
     """Require exact on-disk native config before trusting any CLI summary.
 
     A displayed MCP summary is not a connection or admission receipt.
@@ -106,9 +108,11 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, primary_applic
     reviewed Executive entry whose tool filter is empty. No unknown or
     enabled MCP/server plugin is allowed.
     """
+    if evaluation_inputs is not None and (primary_application is not None or profile.model_provider == "mastermind-fabric"):
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
     path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
     if not path.exists() and not path.is_symlink():
-        if (profile.state_dir / "install-manifest.json").exists():
+        if evaluation_inputs is not None or (profile.state_dir / "install-manifest.json").exists():
             raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
         # Uninstalled stub-runtime tests use a temporary profile without
         # a native config. Real installs must carry that config.
@@ -125,7 +129,8 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, primary_applic
         raw = path.read_bytes()
     except OSError:
         raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
-    if (profile.model_provider != "mastermind-fabric" and profile.native_provider_id is None
+    if (primary_application is None and evaluation_inputs is None
+            and profile.model_provider != "mastermind-fabric" and profile.native_provider_id is None
             and raw == render_hermes_config(profile).encode("utf-8")):
         return None
     # The built-in WP1 package remains independent for non-integrated
@@ -146,11 +151,12 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, primary_applic
     elif profile.model_provider == "mastermind-fabric":
         raise RuntimeRefusal("NATIVE_PRIMARY_APPLICATION_UNQUALIFIED")
     else:
-        allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
-    # An explicit persisted selection cannot downgrade to a legacy or
-    # model-less config. Only selector-free historical profiles retain
+        allowed_native = ({render_disarmed_native_byok(profile).encode("utf-8")}
+                          if evaluation_inputs is None else set())
+    # Explicit primary or evaluation context cannot downgrade to a legacy
+    # or model-less config. Only selector-free historical profiles retain
     # the earlier source-compatible config forms.
-    if primary_application is None and profile.native_provider_id is None:
+    if primary_application is None and evaluation_inputs is None and profile.native_provider_id is None:
         allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
     expected_mcp: dict[str, tuple[str, ...]] = {"mastermind_steward": tuple(ALLOWED_TOOLS)}
     if consumer is not None:
@@ -159,7 +165,8 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, primary_applic
         )
         publication = publication_from_document(consumer)
         if primary_application is None:
-            allowed_native.add(expected_native_config(profile, consumer).encode("utf-8"))
+            allowed_native.add(expected_native_config(
+                profile, consumer, evaluation_inputs=evaluation_inputs).encode("utf-8"))
         # The upstream census renders an empty include list as "(none)". The
         # Executive entry registers no model-facing tool at all, so the
         # summary must show exactly that.
@@ -528,7 +535,8 @@ class ServiceRuntime:
         expected_config = None
         if native.is_file():
             expected_config = expected_native_config(
-                self.profile, self._consumer_publication())
+                self.profile, self._consumer_publication(), evaluation_inputs=(
+                    self._native_launch.recipe.get("evaluation_inputs") if self._native_launch is not None else None))
         if expected_config is not None and native.read_bytes() == expected_config.encode("utf-8"):
             # load_secrets historically defaults dashboard Basic-Auth password
             # to the gateway token. The model child receives that password;
@@ -577,9 +585,13 @@ class ServiceRuntime:
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
         primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        evaluation_inputs = self._native_launch.recipe.get("evaluation_inputs") if self._native_launch is not None else None
         if primary is not None:
-            return expected_disabled_mcp(self.profile, self._consumer_publication(), primary)
-        return expected_disabled_mcp(self.profile, self._consumer_publication())
+            return expected_disabled_mcp(
+                self.profile, self._consumer_publication(), primary,
+                evaluation_inputs=evaluation_inputs)
+        return expected_disabled_mcp(
+            self.profile, self._consumer_publication(), evaluation_inputs=evaluation_inputs)
 
     def _check_registry(self) -> None:
         expected_disabled_mcp = self._expected_disabled_mcp()

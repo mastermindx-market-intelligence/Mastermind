@@ -2619,6 +2619,8 @@ def _service_from_config(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_knowledge_source_reader=packet_collector.project_knowledge_source_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_discovery_source_reader=packet_collector.project_discovery_source_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 canonical_project_read_bindings_factory=canonical_project_read_bindings_factory,
                 project_session_source_factory=managed_project_session_source,
                 project_archive_reader=packet_collector.project_archive_reader(

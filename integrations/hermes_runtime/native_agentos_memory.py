@@ -18,7 +18,8 @@ from ops.executive_os.native_gateway_sources import (
     DERIVATION_BASE, PRIVACY_DERIVATION_KIND, PRIVACY_DERIVATION_PATCH,
     PRIVACY_DERIVATION_POSTIMAGES, PRIVACY_LICENSE_SHA256,
     WORKSPACE_OAUTH_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_PATCH,
-    WORKSPACE_OAUTH_DERIVATION_POSTIMAGES)
+    WORKSPACE_OAUTH_DERIVATION_POSTIMAGES, EVAL_INPUTS_DERIVATION_KIND,
+    EVAL_INPUTS_DERIVATION_PATCH, EVAL_INPUTS_DERIVATION_POSTIMAGES)
 
 from integrations.hermes_harness.agentos_memory_provider import (
     AgentOsBinding, AgentOsHostPorts, AgentOsRefusal, create_provider)
@@ -31,6 +32,7 @@ from . import native_request_observation as observation
 
 READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v2"
 CURRENT_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v3"
+DISCOVERY_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v4"
 _CLAIM_ATTRIBUTE = "_mmx_agentos_memory_claim"
 _INSTANCE_ATTRIBUTE = "_mmx_agentos_memory_instance"
 _PACKAGE_MODULE = "integrations.hermes_harness.native_selected_child_plugin"
@@ -75,11 +77,17 @@ def _privacy_derivation(launch, vendor, *, publication=None):
     if publication is not None and type(publication) is not ExecutiveContextConsumerPublication:
         _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
     current = publication is not None and publication.workspace_principal is not None
+    evaluation = "evaluation_inputs" in launch.recipe
+    if evaluation and not current:
+        _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
     expected = {"kind": WORKSPACE_OAUTH_DERIVATION_KIND if current else PRIVACY_DERIVATION_KIND,
         "base_sha": DERIVATION_BASE,
         "patch_sha256": WORKSPACE_OAUTH_DERIVATION_PATCH if current else PRIVACY_DERIVATION_PATCH,
         "postimages": dict(WORKSPACE_OAUTH_DERIVATION_POSTIMAGES if current else PRIVACY_DERIVATION_POSTIMAGES),
         "license_sha256": PRIVACY_LICENSE_SHA256, "vendor_root": str(vendor)}
+    if evaluation:
+        expected.update(kind=EVAL_INPUTS_DERIVATION_KIND, patch_sha256=EVAL_INPUTS_DERIVATION_PATCH,
+                        postimages=dict(EVAL_INPUTS_DERIVATION_POSTIMAGES))
     if (not _plain_strings(selected)
             or set(selected) != {"kind", "base_sha", "patch_sha256", "source_root"}
             or any(selected[key] != expected[key] for key in ("kind", "base_sha", "patch_sha256"))
@@ -113,6 +121,7 @@ class _Claim:
         self.returned = None
         self.manager_return = None
         self.prompt = None
+        self.prompt_anchor = None  # Transient original current-user text, never retained output.
 
     def current(self, *, adopted=False):
         scope, factory = self.scope, self.factory
@@ -174,9 +183,14 @@ class _Instance:
 
     def prefetch(self, query, *, session_id=""):
         claim = self.claim
+        # A late worker may still hold this reusable provider after the next
+        # admission takes it over. It must not clear that new claim's anchor.
+        if observation._current.get() is not claim.scope:
+            return ""
+        claim.returned = claim.prompt = claim.prompt_anchor = None
+        claim.manager_return = None
         binding, epoch = self.provider._binding, self.provider._epoch
-        if (observation._current.get() is not claim.scope or binding is None
-                or not claim.current(adopted=True)):
+        if binding is None or not claim.current(adopted=True):
             return ""
         text = self.original_prefetch(query, session_id=session_id)
         if (not text or self.claim is not claim or observation._current.get() is not claim.scope
@@ -190,6 +204,7 @@ class _Instance:
             "receipt_sha256": snapshot["receipt_sha256"],
             "prefetch_context_sha256": snapshot["rendered_context_sha256"],
             "prefetch_context_bytes": snapshot["rendered_context_bytes"], "prompt": None}
+        claim.prompt = claim.prompt_anchor = None
         self.factory.last_delivery = dict(claim.returned)
         return text
 
@@ -211,6 +226,7 @@ class NativeAgentOsMemoryFactory:
         self.connection = self.rpc_current = None
         self.connection_current = None
         self.wrappers = []
+        self.evaluation_history_owner = None
         self.last_instance = self.last_delivery = None
         self.memory_manager_class = modules["agent.memory_manager"].MemoryManager
         self.collector_class = modules["plugins.memory"]._ProviderCollector
@@ -233,6 +249,76 @@ class NativeAgentOsMemoryFactory:
                 and all(getattr(owner, name, None) is wrapper for owner, name, wrapper in self.wrappers))
         except Exception:
             return False
+
+    def evaluation_history_current(self, claim, agent):
+        """Original LOCAL admission identity, not an agent platform hint."""
+        try:
+            from gateway.config import Platform
+            scope, turn = claim.scope, claim.turn
+            ctx, source = turn._ctx, scope.live.source
+            evaluation = scope.evaluation
+            return (self.evaluation_history_owner is not None
+                and self.observation.evaluation_owner is self.evaluation_history_owner
+                and evaluation is not None and evaluation.owner is self.evaluation_history_owner
+                and evaluation.scope is scope and self.current_claim() is claim
+                and claim.agent is agent and claim.current(adopted=True)
+                and turn._runner is scope.authority.runner
+                and turn._approval_owner == (scope.authority, scope.session_id, scope.generation)
+                and ctx.inbound_message_id == scope.admission_id
+                and ctx.source is source and source.platform is Platform.LOCAL
+                and source.chat_id == scope.session_id
+                and ctx.session_id == agent.session_id)
+        except Exception:
+            return False
+
+    def bind_evaluation_history(self, owner):
+        """Add one optional witness to this existing qualified turn owner."""
+        from .native_eval_inputs import NativeEvalInputOwner
+        if (type(owner) is not NativeEvalInputOwner or owner.binding is not self.observation
+                or owner.launch is not self.launch or self.evaluation_history_owner is not None
+                or not self.local_current()):
+            _refuse("NATIVE_EVAL_HISTORY_OWNER_UNAVAILABLE")
+        turn_context = self.modules["agent.turn_context"]
+        build = _function(turn_context, "build_turn_context")
+        hydrate = _function(turn_context, "_hydrate_from_history")
+
+        def hydrate_history(agent, conversation_history):
+            claim = evaluation = snapshot = None
+            frame = caller = None
+            try:
+                frame = inspect.currentframe()
+                caller = frame.f_back
+                if (caller.f_code is build.__code__ and caller.f_globals is vars(turn_context)
+                        and getattr(turn_context, "build_turn_context", None) is build
+                        and caller.f_locals.get("agent") is agent
+                        and caller.f_locals.get("conversation_history") is conversation_history):
+                    claim = self.current_claim()
+                    evaluation = claim.scope.evaluation
+                    if evaluation is not None and evaluation.owner is owner:
+                        with claim.scope.live.event_stream.lock, claim.scope.lock:
+                            snapshot = evaluation.history_snapshot(claim, agent, conversation_history,
+                                                                   caller.f_locals.get("messages"))
+            except Exception:
+                if evaluation is not None and evaluation.owner is owner:
+                    evaluation.fail("history_unavailable")
+            finally:
+                # Never retain caller frames, message lists or history text.
+                del caller, frame
+            # Preserve the original helper's return and exception behavior.
+            result = hydrate(agent, conversation_history)
+            if snapshot is not None:
+                try:
+                    evaluation.note_history(claim, agent, snapshot)
+                except Exception:
+                    evaluation.fail("history_unavailable")
+            return result
+
+        self.launch.check()
+        if not self.local_current():
+            _refuse("NATIVE_EVAL_HISTORY_OWNER_UNAVAILABLE")
+        self.evaluation_history_owner = owner
+        self.wrappers.append((turn_context, "_hydrate_from_history", hydrate_history))
+        turn_context._hydrate_from_history = hydrate_history
 
     def configure(self, *, session_id, instance_id, authority_epoch, server, session, loop,
                   currentness, connection_current):
@@ -371,6 +457,11 @@ class NativeAgentOsMemoryFactory:
     def note_prompt(self, claim, agent, messages, result, *, current_turn_user_idx, ext_prefetch_cache):
         """Observe the actual current user row, never a historical match."""
         returned = claim.returned
+        # A failed subsequent construction must not reuse an earlier turn's
+        # observation, even when the returned context bytes happen to match.
+        claim.prompt = claim.prompt_anchor = None
+        if returned is not None:
+            returned = claim.returned = {**returned, "prompt": None}
         if (returned is None or not claim.current(adopted=True) or claim.agent is not agent
                 or claim.manager_return != returned["prefetch_context_sha256"]
                 or type(ext_prefetch_cache) is not str or not ext_prefetch_cache
@@ -394,7 +485,8 @@ class NativeAgentOsMemoryFactory:
         content = api_messages[index].get("content")
         pieces = ([content] if type(content) is str else [item.get("text") for item in content
             if type(item) is dict and item.get("type") == "text"] if type(content) is list else [])
-        if not block or not any(type(piece) is str and block in piece for piece in pieces):
+        anchored = [piece for piece in pieces if type(piece) is str and block and block in piece]
+        if len(anchored) != 1:
             return
         # Bound digest work through the existing original-request observer.
         digest = observation._content_digest({"messages": api_messages})["content_sha256"]
@@ -404,6 +496,12 @@ class NativeAgentOsMemoryFactory:
         prompt = {"boundary": "build_api_messages", "turn_id": turn_id,
                   "context_block_sha256": _sha(block.encode("utf-8")), "api_messages_sha256": digest}
         claim.prompt = prompt
+        # Native request construction can sanitize metadata or strip images.
+        # Preserve the exact original text piece and its row, not a normalized
+        # copy or an unrestricted match in arbitrary historical messages.
+        claim.prompt_anchor = {"row_index": index, "row_count": len(api_messages),
+            "roles": tuple(row.get("role") for row in api_messages),
+            "text": anchored[0], "text_sha256": _sha(anchored[0].encode("utf-8"))}
         claim.returned = {**returned, "prompt": prompt}
         self.last_delivery = dict(claim.returned)
 
@@ -442,7 +540,7 @@ class NativeAgentOsMemoryFactory:
                     or instance.manager.get_provider("agentos") is not provider
                     or (readiness["state"] == "READY") != (snapshot is not None)))):
             _refuse("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
-        return {"schema": CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
+        result = {"schema": DISCOVERY_READBACK_SCHEMA if self.publication.discovery else CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
             "binding": {
             "implementation_sha": self.slot.owner, "publication_sha256": self.publication_sha256,
             "profile_id": str(self.role_home), "instance_id": self.instance_id,
@@ -450,6 +548,10 @@ class NativeAgentOsMemoryFactory:
             "enrollment_request_id": self.slot.publication.session.request_id,
             "principal_id": self.slot.publication.session.principal_id, "session_id": self.session_id},
             "context": context, "selected_child": None}
+        if self.publication.discovery:
+            from integrations.hermes_harness.native_discovery_tools import readback
+            result["discovery"] = readback(self.slot)
+        return result
 
 
 def register_memory_provider(ctx):
@@ -481,14 +583,37 @@ def validate_consumer_readback(value, *, publication, expected_binding):
             _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     if type(publication) is not ExecutiveContextConsumerPublication:
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
-    shape(value, ("schema", "binding", "context", "selected_child"))
+    shape(value, ("schema", "binding", "context", "selected_child", "discovery") if publication.discovery
+          else ("schema", "binding", "context", "selected_child"))
     shape(value["binding"], ("implementation_sha", "publication_sha256", "profile_id", "instance_id",
         "authority_epoch", "enrollment_request_id", "principal_id", "session_id"))
-    expected_schema = CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
+    expected_schema = DISCOVERY_READBACK_SCHEMA if publication.discovery else CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
     if (value["schema"] != expected_schema or value["binding"] != expected_binding
             or not observation._integer(value["binding"]["authority_epoch"])
             or value["binding"]["authority_epoch"] < 1):
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
+    if publication.discovery:
+        from integrations.hermes_harness.native_discovery_tools import schemas
+        from integrations.hermes_harness.native_executive_consumer import schema_digest
+        from common import coo_discovery_contract as discovery_wire
+        from common import workspace_discovery_correction_contract as correction
+        discovery = value["discovery"]
+        shape(discovery, ("catalogue", "registered", "tools", "uncertain_original", "reservation_unresolved"))
+        expected_tools = [{"name": name, "schema_sha256": schema_digest(schemas()[name])}
+                          for name in discovery_wire.TOOLS]
+        if (discovery["catalogue"] != discovery_wire.CATALOGUE or discovery["registered"] is not True
+                or discovery["tools"] != expected_tools or type(discovery["reservation_unresolved"]) is not bool):
+            _refuse("NATIVE_AGENTOS_READBACK_INVALID")
+        pending = discovery["uncertain_original"]
+        if pending is not None:
+            shape(pending, ("operation", "lookup"))
+            try:
+                selected = correction.validate_lookup(pending["lookup"])
+                if (type(pending["operation"]) is not str or pending["operation"] not in {"prepare", "submit", "reconcile"}
+                        or selected["work_ref"] != publication.work_ref):
+                    raise ValueError()
+            except (TypeError, ValueError):
+                _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     context = value["context"]
     shape(context, ("provider", "source_mode", "factory_registered", "provider_installed",
                     "readiness", "active_claim", "snapshot", "last_delivery"))
@@ -642,6 +767,8 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         claim = _Claim(factory, scope, turn)
         setattr(scope, _CLAIM_ATTRIBUTE, claim)
         try:
+            if scope.evaluation is not None:
+                args, kwargs = scope.evaluation.resolve_arguments(resolve, turn, args, kwargs)
             result = resolve(turn, *args, **kwargs)
             factory.bind_agent(claim, result[0])
             return result
@@ -652,11 +779,16 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
             claim.loading = False
 
     def wire_agent(turn, agent, *args, **kwargs):
+        scope = observation._current.get()
+        if scope is not None and scope.binding is request_observation and scope.evaluation is not None:
+            args, kwargs = scope.evaluation.wire_arguments(wire_callbacks, turn, agent, args, kwargs)
         result = wire_callbacks(turn, agent, *args, **kwargs)
         claim = factory.current_claim()
         if claim.turn is not turn or claim.agent is not agent or not claim.current(adopted=True):
             claim.failed = True
             _refuse("NATIVE_AGENTOS_ADOPTION_UNAVAILABLE")
+        if scope is not None and scope.evaluation is not None:
+            scope.evaluation.require_agent(agent)
         return result
 
     def prefetch_turn(agent, original_user_message, turn_author=None):
@@ -677,15 +809,26 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         claim = factory.current_claim()
         if claim.agent is not agent or not claim.current(adopted=True) or not claim.barrier_entered:
             _refuse("NATIVE_AGENTOS_CLAIM_UNAVAILABLE")
+        claim.prompt = claim.prompt_anchor = None
+        if claim.returned is not None:
+            claim.returned = {**claim.returned, "prompt": None}
         factory.require_snapshot(claim, agent)
         result = build_messages(agent, messages, **kwargs)
         factory.require_snapshot(claim, agent)
+        evaluation = claim.scope.evaluation
+        if evaluation is not None:
+            evaluation.require_messages(agent, result)
         try:
             factory.note_prompt(claim, agent, messages, result,
                 current_turn_user_idx=kwargs["current_turn_user_idx"],
                 ext_prefetch_cache=kwargs["ext_prefetch_cache"])
         except Exception:
             pass  # Observation failure cannot invent a native request failure.
+        if evaluation is not None:
+            try:
+                evaluation.note_messages(agent, result, claim.returned)
+            except Exception:
+                evaluation.fail("delivery_unavailable")
         return result
 
     wrappers = [(memory, "find_provider_dir", find_provider), (memory, "_load_package", held_package),

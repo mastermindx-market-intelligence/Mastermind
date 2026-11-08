@@ -29,8 +29,8 @@ REVIEWED_ANCHORS = {
     # and release-time permission checks; a change to any of them invalidates
     # all three status sites without changing the historical Company record.
     "_handle_ceo_ingress_connection": {'node_type': 'AsyncFunctionDef',
- 'source_sha256': '6a104ea9d843d54d80e85d68922dc018d42c7a76cdf8bdd6fb28f7ec0a7901bd',
- 'ast_sha256': 'baa31b823d34e36b4c1dbcc450a4966357d8e39cc72159e2b0e95008a163899e',
+ 'source_sha256': '4deb96d70ff9ed7386f48c5170aeb855db251090893c88e1da7e1395ff6de553',
+ 'ast_sha256': '6ddae8da5ef235a74e212fc72e56da950dfe4b24c6d1e1b9eab4fe730f89d3ca',
  'sites': ((('body',
              3,
              'body',
@@ -129,3 +129,7 @@ REVIEWED_ANCHORS = {
 # H6 joins current552 and H5 at exact source. The complete original Fabric
 # response subtree and Company listener AST are unchanged; only enclosing
 # source/method identity and mapped positions are requalified.
+# Discovery correction extends the original authenticated App-peer branch.
+# The Company method and all three Fabric error operands, including their
+# complete AST paths and token spans, remain unchanged. Only the exact whole
+# source and enclosing ingress-method digests change for this composition.

@@ -46,7 +46,7 @@ class InstalledCanonicalProjectData:
             self.identity.binding,self.identity._path,self.identity._expected,
             json.dumps(self.identity._selection,sort_keys=True,separators=(',',':')),
             collector.read_project_knowledge_catalogue,collector.read_project_knowledge_memory,
-            collector.read_project_knowledge_source,collector.read_project_plan,collector.canonical_project_data_scope,collector._collect_packet,
+            collector.read_project_knowledge_source,collector.read_project_discovery_source,collector.read_project_plan,collector.canonical_project_data_scope,collector._collect_packet,
             collector.read_current_agentos_context,
             collector.canonical_project_compilation_scope,
             collector._source_root,collector._macro_root,collector._code_root,collector._python,
@@ -193,7 +193,8 @@ class InstalledCanonicalProjectData:
         if view is None:return None
         readers={'project_knowledge_catalogue':self.collector.read_project_knowledge_catalogue,
                  'project_knowledge_memory':self.collector.read_project_knowledge_memory,
-                 'project_knowledge_source':self.collector.read_project_knowledge_source}
+                 'project_knowledge_source':self.collector.read_project_knowledge_source,
+                 'project_discovery_source':self.collector.read_project_discovery_source}
         # One pure installed READ capture, inside this view's original budget.
         # Nested collector/source checks retain live permissions while reusing
         # immutable C/N facts; full default/config/Event fences bracket capture.
