@@ -256,7 +256,7 @@ def _replace_atomic_jsonl(path: Path, rows: list[dict]) -> None:
                 pass
 
 
-def _append_jsonl(path: Path, row: dict) -> bool:
+def _append_jsonl_unlocked(path: Path, row: dict) -> bool:
     """Append one complete transition and report whether it reached the local ledger."""
     try:
         if path.name in _STRICT_ATOMIC_JSONL_NAMES:
@@ -2079,7 +2079,8 @@ def _context_request_lock():
                     pass
 
 
-def request_context(book: str, plane: str, reason: str, ticker: str | None = None) -> dict:
+def request_context(book: str, plane: str, reason: str, ticker: str | None = None,
+                    *, correlation: dict | None = None) -> dict:
     """Queue a bounded context-access request for later orchestrator review."""
     b = _clean_book(book)
     p = str(plane or "").strip().lower()
@@ -2089,6 +2090,8 @@ def request_context(book: str, plane: str, reason: str, ticker: str | None = Non
         return {"ok": False, "error": "plane must be a lowercase typed identifier"}
     if len(why) < 20:
         return {"ok": False, "error": "reason must explain the decision-relevant gap"}
+    if correlation is not None:
+        return _request_context_selected(b, p, why, tk, correlation)
     with _context_request_lock():
         existing = context_requests(limit=500)
         dedupe = (b, p, tk, why.lower())
@@ -2203,3 +2206,154 @@ def status() -> dict:
         "note": ("This is Mastermind Portfolio learning. The public user chatbot remains Mastermind AI "
                  "and has separate state and authority."),
     }
+
+
+@contextmanager
+def _context_receipt_lock():
+    from control_plane import locks
+    lock = locks.acquire("global:portfolio_context_requests", root=_ROOT)
+    if lock is None:
+        from brain import runlog
+        raise runlog.PortfolioRunError("fabric_context_ledger_busy")
+    with lock:
+        yield
+
+
+def _append_jsonl(path: Path, row: dict) -> bool:
+    if Path(path) != _DIR / "context_requests.jsonl":
+        return _append_jsonl_unlocked(path, row)
+    try:
+        from brain import runlog
+        with _context_receipt_lock():
+            # All context transitions share serialization and preserve partial originals.
+            runlog.strict_rows(path, absent=True)
+            return _append_jsonl_unlocked(path, row)
+    except Exception:
+        return False
+
+
+def _context_correlation(correlation: dict) -> dict:
+    from brain import runlog
+    if (type(correlation) is not dict or set(correlation) != {"run_id", "tool_id"}
+            or type(correlation["tool_id"]) is not str
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}", correlation["tool_id"])):
+        raise runlog.PortfolioRunError("fabric_context_identity_invalid")
+    runlog.portfolio_id(correlation["run_id"])
+    return dict(correlation)
+
+
+def _context_original_identity(book: str, correlation: dict, *, pending: bool = False) -> dict:
+    """Resolve the trusted book's saved effect, without opening another original."""
+    from brain import runlog, fabric_portfolio
+    book = runlog.portfolio_book(book)
+    with runlog.portfolio_lock():
+        original = (runlog.portfolio_pending_locked(book) if pending else
+                    runlog.portfolio_original_locked(correlation["run_id"], book=book))
+        effect = next((row for row in (original or {}).get("state", {}).get("tools", [])
+                       if row.get("id") == correlation["tool_id"]), None)
+        if (original is None or original["state"]["run_id"] != correlation["run_id"]
+                or effect is None or effect.get("state") not in {"pending", "complete"}
+                or effect.get("name") != fabric_portfolio.tool_name(book, "request_context_upgrade")):
+            raise runlog.PortfolioRunError("fabric_context_intent_missing")
+        args = effect["input"]
+        return {"book": book, "plane": str(args.get("plane") or "").strip().lower(),
+                "reason": " ".join(str(args.get("reason") or "").split())[:_MAX_REASON],
+                "ticker": str(args.get("ticker") or "").upper().strip()[:16] or None}
+
+
+def _context_receipt_from_rows(rows: list[dict], correlation: dict) -> dict | None:
+    from brain import runlog
+    matches = [row for row in rows if row.get("schema") == "portfolio.context_receipt.v1"
+               and row.get("run_id") == correlation["run_id"]
+               and row.get("tool_id") == correlation["tool_id"]]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise runlog.PortfolioRunError("fabric_context_receipt_duplicate")
+    receipt = matches[0]
+    if (set(receipt) != {"schema", "run_id", "tool_id", "request_id", "base_digest",
+                         "input_digest", "requested_input_digest", "deduped"}
+            or type(receipt["deduped"]) is not bool):
+        raise runlog.PortfolioRunError("fabric_context_receipt_invalid")
+    bases = [row for row in rows if row.get("schema") == "portfolio.context_request.v1"
+             and row.get("id") == receipt["request_id"]]
+    if len(bases) != 1 or runlog.digest(bases[0]) != receipt["base_digest"]:
+        raise runlog.PortfolioRunError("fabric_context_original_missing")
+    base = bases[0]
+    identity = {key: base.get(key) for key in ("book", "plane", "reason", "ticker")}
+    if runlog.digest(identity) != receipt["input_digest"]:
+        raise runlog.PortfolioRunError("fabric_context_receipt_invalid")
+    return {"ok": True, "deduped": receipt["deduped"], "request": base, "receipt": receipt}
+
+
+def reconcile_context_request(correlation: dict, *, book: str = "autonomous") -> dict:
+    """Read/re-sync one committed base+receipt; no append or semantic re-request."""
+    from brain import runlog
+    correlation = _context_correlation(correlation)
+    identity = _context_original_identity(book, correlation)
+    path = _DIR / "context_requests.jsonl"
+    with _context_receipt_lock():
+        before = runlog.strict_read(path)
+        result = _context_receipt_from_rows(runlog.strict_rows(path), correlation)
+        if result is None:
+            raise runlog.PortfolioRunError("fabric_context_effect_unsettled")
+        if (result["request"].get("book") != identity["book"]
+                or result["receipt"]["requested_input_digest"] != runlog.digest(identity)):
+            raise runlog.PortfolioRunError("fabric_context_input_conflict")
+        runlog.durable_existing(path, before)
+        return result
+
+
+def _request_context_selected(book: str, plane: str, reason: str, ticker: str | None,
+                              correlation: dict) -> dict:
+    from brain import runlog
+    correlation = _context_correlation(correlation)
+    book = runlog.portfolio_book(book)
+    identity = {"book": book, "plane": plane, "reason": reason, "ticker": ticker}
+    if _context_original_identity(book, correlation, pending=True) != identity:
+        raise runlog.PortfolioRunError("fabric_context_input_conflict")
+    path = _DIR / "context_requests.jsonl"
+    with _context_receipt_lock():
+        old = runlog.strict_read(path, absent=True)
+        rows = runlog.strict_rows(path, absent=True)
+        prior = _context_receipt_from_rows(rows, correlation)
+        if prior is not None:
+            if prior["receipt"]["requested_input_digest"] != runlog.digest(identity):
+                raise runlog.PortfolioRunError("fabric_context_input_conflict")
+            runlog.durable_existing(path, old)
+            return prior
+        # Immutable creation rows, not folded status projections, own semantic dedupe.
+        bases = [row for row in rows if row.get("schema") == "portfolio.context_request.v1"]
+        matches = [row for row in bases if
+                   (row.get("book"), row.get("plane"), row.get("ticker"),
+                    str(row.get("reason") or "").lower()) == (book, plane, ticker, reason.lower())]
+        base = matches[0] if matches else {
+            "schema": "portfolio.context_request.v1", "id": "ctx-" + uuid.uuid4().hex[:16],
+            "ts": _now(), **identity,
+            "status": "queued_for_orchestrator_review", "authority": "request_only"}
+        # Exact original casing is retained when semantic dedupe selects a prior request.
+        receipt = {"schema": "portfolio.context_receipt.v1", **correlation,
+                   "request_id": base["id"], "base_digest": runlog.digest(base),
+                   "input_digest": runlog.digest({key: base.get(key) for key in identity}),
+                   "requested_input_digest": runlog.digest(identity),
+                   "deduped": bool(matches)}
+        additions = ([base] if not matches else []) + [receipt]
+        runlog.sync_directory(path.parent)
+        flags = os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        if old is None:
+            flags |= os.O_CREAT | os.O_EXCL
+        fd = os.open(path, flags, 0o600)
+        try:
+            raw = b"".join(runlog.canonical(row) + b"\n" for row in additions)
+            if os.write(fd, raw) != len(raw):
+                raise runlog.PortfolioRunError("fabric_context_partial_append")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        runlog.sync_directory(path.parent)
+        if runlog.strict_read(path) != (old or b"") + raw:
+            raise runlog.PortfolioRunError("fabric_context_readback_failed")
+        result = _context_receipt_from_rows(runlog.strict_rows(path), correlation)
+        if result is None:
+            raise runlog.PortfolioRunError("fabric_context_receipt_missing")
+        return result

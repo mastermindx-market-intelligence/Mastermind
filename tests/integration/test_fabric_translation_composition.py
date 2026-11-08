@@ -23,33 +23,30 @@ from unittest.mock import patch
 
 from brain import translate
 
-# Forward fixture epoch: selected application admission composed over
-# native HTTP f7d72b740103bdf7a817ae0b00474f65cc2d828d. Exact candidate blobs follow.
-# Keep exact source validation; the prior 8af gate cannot describe the reviewed
-# A/B/codec and HTTP realm composition now exercised by this repository's CI.
+# Forward fixture epoch: original APPLICATION carrier b955c82.
+# These exact blobs qualify its selected/native/HTTP and scoped-model paths.
+# Historical input fixtures and the full source validation remain unchanged.
 PINS = {
     "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
-    "candidate/go_shim.py": "97deba9fc1f68458670b16a21cb410575a7466f8",
-    # Reviewed c5 current-quiescence/guard addition; incumbent97 definitions
-    # are unchanged. Keep this exact blob fence, including drift rejection below.
-    "candidate/lease_broker.py": "425dde8715612ab871f191c97a8142b80bffb13f",
-    "candidate/go_lease_gateway.py": "7eb74e2a9a18d3c6a1ad1f51ed198bd0e32bcdeb",
-    "candidate/go_lease_capability.py": "13e6b2d43cbb2933512e6e46d27a431e7813af88",
-    "candidate/application_http_transports.py": "b0b8404b45dd0a3e73a34430c2ef3a28b1edbf6d",
+    "candidate/go_shim.py": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
+    "candidate/lease_broker.py": "a4710c15842490f796b7482a63f993d1db6e937e",
+    "candidate/go_lease_gateway.py": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
+    "candidate/go_lease_capability.py": "38856700331b3fb3a7706a5745e23fb7b3d18cf0",
+    "candidate/application_http_transports.py": "c37181993a36da216c77778ebaeaae3ebe190a09",
     "candidate/provider_outcome.py": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
     "candidate/quota_circuit.py": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
     "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
     "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",
     "source/application_http_transports.py.preimage": "a116d8c671594552dd5c14f46f91981cd7c15f43",
-    # Historical metadata input selected by application_http_sources(); the
-    # current realm module is not a fallback for this exact retained evidence.
-    "source/codex_provider_realm.py.preimage": "eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37",
     "rollout/application_http_realm_projection.py": "684c54d5c9d8dbdd5bc046d123af31d20fc99dd1",
     "tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
-    "tests/test_application_turn_admission.py": "efe876eec40dc8885dbc0059915f2401146be969",
+    "tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
 }
+# Protected package/flat-import realm successor consumed through d62d93d.
+# Exact source pin; admission, credentials and realm call semantics are unchanged.
 REALM_PINS = {
+    "control_plane/codex_provider_realm.py": "b200d7c24f5de2d656cdfcfcec9714e1c679f78a",
     "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
     "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918",
 }

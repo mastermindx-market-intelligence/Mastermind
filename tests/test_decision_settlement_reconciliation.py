@@ -1398,7 +1398,13 @@ def test_direct_receipt_retry_is_exact_and_idempotent_after_projection_failure(
 def test_every_direct_brain_routes_ack_through_shared_receipt_finalizer(
     module_name, entrypoint
 ):
-    source = inspect.getsource(getattr(importlib.import_module(module_name), entrypoint))
+    module = importlib.import_module(module_name)
+    public = getattr(module, entrypoint)
+    implementation = getattr(module, "_" + entrypoint, public)
+    source = inspect.getsource(public)
+    if implementation is not public:
+        assert implementation.__name__ in source
+        source += "\n" + inspect.getsource(implementation)
 
     assert "finalize_direct_settlement_receipt" in source
     assert "acknowledge_settlement_receipt" not in source

@@ -1,0 +1,28 @@
+{
+  "cancelled": false,
+  "current_guard_receipt": "h1-final-guards.json",
+  "dispatch_count": 1,
+  "failed_case": "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+  "failed_job": 128455395754,
+  "failed_step": "Run repository test shard",
+  "findings": 68,
+  "findings_scope": "Retained output literals plus H4/shared-relay fixture identity receipts. No additional failing case in the completed job.",
+  "head": "d833bd07819086908c7e6b4695c5da3b389eb2aa",
+  "new_head_hosted_result_required": true,
+  "observed_at": "2026-11-07T16:47:05.764058+00:00",
+  "release_authorized": false,
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "rerun_requested": false,
+  "run": 42390001239,
+  "run_terminal_observed": false,
+  "schema": "mastermind.h6.hosted_ci_reconciliation.v1",
+  "shards": {
+    "0": "IN_PROGRESS",
+    "1": "SUCCESS",
+    "2": "SUCCESS",
+    "3": "SUCCESS",
+    "4": "FAILURE",
+    "5": "SUCCESS"
+  },
+  "source_correction": "Frozen full-file/token reviews; the unchanged complete committed-source guard and both new receipt drift controls passed at650598ae."
+}

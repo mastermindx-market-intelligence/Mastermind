@@ -1,0 +1,338 @@
+{
+  "components": {
+    "four_installer_validations": {
+      "rows": [
+        {
+          "cohort": "109",
+          "manifest_sha256": "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f",
+          "validated": true
+        },
+        {
+          "cohort": "112",
+          "manifest_sha256": "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af",
+          "validated": true
+        },
+        {
+          "cohort": "109-quota",
+          "manifest_sha256": "9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7",
+          "validated": true
+        },
+        {
+          "cohort": "112-quota",
+          "manifest_sha256": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d",
+          "validated": true
+        }
+      ],
+      "validation_only": true
+    },
+    "frontend": {
+      "build_returncode": 0,
+      "component_passed": 10,
+      "existing_lock_unchanged": true,
+      "typecheck_returncode": 0
+    },
+    "h4_preparation": {
+      "passed": 37
+    },
+    "model_configuration": {
+      "company_identity_passed": 86,
+      "passed": 273,
+      "signed_transport_cases_included": 18
+    },
+    "native_owner": {
+      "actual_imports": [
+        {
+          "committed_environment": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv",
+          "modules": 751,
+          "selected_origins": {
+            "agent": {
+              "path": "/Users/chriswong/.hermes/hermes-agent/agent/__init__.py",
+              "sha256": "21cdce89e9ffdb847634bf498b087410cd191a1e375db43928735846fb7ddc86"
+            },
+            "hermes_cli": {
+              "path": "/Users/chriswong/.hermes/hermes-agent/hermes_cli/__init__.py",
+              "sha256": "6a4ab05b8621ec1cd66a5abbe30fa32ed5bddddea95903036da01f0af1af94ce"
+            },
+            "hermes_state": {
+              "path": "/Users/chriswong/.hermes/hermes-agent/hermes_state.py",
+              "sha256": "dd50e9091ce6b9ebd76d157661bf82aa135d9c6bfe56ec57aed02b3cf901c4f2"
+            },
+            "run_agent": {
+              "path": "/Users/chriswong/.hermes/hermes-agent/run_agent.py",
+              "sha256": "8f8df32b0a027516c11ec58221d266048d0b76157599aa3934b4348add52a643"
+            },
+            "tools": {
+              "path": "/Users/chriswong/.hermes/hermes-agent/tools/__init__.py",
+              "sha256": "7bca460f476ac9ace706c8cfd07e98f8aae34d839862f0f68abafc3a8397cf35"
+            }
+          },
+          "sha256": "e1ec7e29d74215bbb4d6141fc6084de2c09402790c2ec4d8525114d12d1d372c"
+        }
+      ],
+      "hermes_after": {
+        "head": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+        "tracked_changes": [
+          " M agent/agent_init_fallback.py",
+          " M agent/chat_completion_helpers.py",
+          " M tests/tui_gateway/test_kanban_resume_guard.py",
+          " M tests/tui_gateway/test_protocol.py",
+          " M tests/tui_gateway/test_tui_gateway_server.py",
+          " M tui_gateway/methods_session.py"
+        ],
+        "tracked_content_sha256": "f626d8411c3a2f9adb23572d2f4a8db5defa32c60745cdd857f016abd9848dad",
+        "tracked_files": 22551
+      },
+      "hermes_before": {
+        "head": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+        "tracked_changes": [
+          " M agent/agent_init_fallback.py",
+          " M agent/chat_completion_helpers.py",
+          " M tests/tui_gateway/test_kanban_resume_guard.py",
+          " M tests/tui_gateway/test_protocol.py",
+          " M tests/tui_gateway/test_tui_gateway_server.py",
+          " M tui_gateway/methods_session.py"
+        ],
+        "tracked_content_sha256": "f626d8411c3a2f9adb23572d2f4a8db5defa32c60745cdd857f016abd9848dad",
+        "tracked_files": 22551
+      },
+      "hermes_observed_snapshot_stable": true,
+      "internal_guard_override": false,
+      "live_hermes_source_written_by_root": false,
+      "pm_repair_invoked": false,
+      "qualification": {
+        "log_sha256": "9ac5b069bc40a742e54abe5fcf3d80775b0e4f968f2e8135fe1ced9a8e1b2da1",
+        "returncode": 0,
+        "seconds": 43.228,
+        "unittest_counts": [
+          [
+            "25",
+            "26.046"
+          ]
+        ]
+      },
+      "runtime": [
+        {
+          "base_prefix": "/Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64",
+          "committed_environment": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv",
+          "executable": "/Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3",
+          "hermes_origins": {
+            "agent": "/Users/chriswong/.hermes/hermes-agent/agent/__init__.py",
+            "hermes_cli": "/Users/chriswong/.hermes/hermes-agent/hermes_cli/__init__.py",
+            "hermes_state": "/Users/chriswong/.hermes/hermes-agent/hermes_state.py",
+            "run_agent": "/Users/chriswong/.hermes/hermes-agent/run_agent.py",
+            "tools": "/Users/chriswong/.hermes/hermes-agent/tools/__init__.py"
+          },
+          "prefix": "/Users/chriswong/.hermes/tools/python-3.14.9+20261021-darwin-arm64",
+          "version": "3.14.9 (main, Oct 21 2026, 17:47:42) [Clang 23.1.3 ]"
+        }
+      ],
+      "scope": "WORKER qualification of the observed registered working-tree snapshot plus actual committed dependencies; not pristine ABI checkout, cessation of its writer, live enrollment or provider acceptance.",
+      "source_closure_sha256": "2a66e360ed689a1e219b8e81aa11ec9c64edcad2c86a986eae2eee00a87d7523",
+      "source_files": 714,
+      "source_root": "/private/tmp/fabric-followthrough-native-owner-v12"
+    },
+    "native_regression": {
+      "description": "All initial failures were in two historical fixture reconstruction helpers; their complete modules passed after exact fixture correction. Not a claim that the initial643-case command was green.",
+      "focused_corrective_passed": 233,
+      "focused_corrective_records": 233,
+      "initial_failed": 8,
+      "initial_passed": 635,
+      "initial_records": 643
+    },
+    "six_native_builds": {
+      "candidate_only": true,
+      "rows": [
+        {
+          "cohort": "107",
+          "native-manifest.json": {
+            "bytes": 10669,
+            "sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+          },
+          "native-source-inventory.json": {
+            "bytes": 35834,
+            "sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47"
+          },
+          "returncode": 0,
+          "seconds": 0.091,
+          "stderr": "",
+          "stdout": "{\"native_files\": 107, \"total_bytes\": 3240763, \"manifest_sha256\": \"59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a\", \"source_inventory_sha256\": \"d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47\"}\n"
+        },
+        {
+          "cohort": "109",
+          "native-manifest.json": {
+            "bytes": 10868,
+            "sha256": "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f"
+          },
+          "native-source-inventory.json": {
+            "bytes": 36359,
+            "sha256": "6e42565f0f32914c4ee3df58b8c097961f19730de4718f20bc49fbd720308d97"
+          },
+          "returncode": 0,
+          "seconds": 0.078,
+          "stderr": "",
+          "stdout": "{\"native_files\": 109, \"total_bytes\": 3483990, \"manifest_sha256\": \"a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f\", \"source_inventory_sha256\": \"6e42565f0f32914c4ee3df58b8c097961f19730de4718f20bc49fbd720308d97\"}\n"
+        },
+        {
+          "cohort": "112",
+          "native-manifest.json": {
+            "bytes": 11199,
+            "sha256": "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af"
+          },
+          "native-source-inventory.json": {
+            "bytes": 37275,
+            "sha256": "5faf9b583fe6398d6b6dff0b1033d498b13169d71413c51c846dcc2c8e0aaa66"
+          },
+          "returncode": 0,
+          "seconds": 0.099,
+          "stderr": "",
+          "stdout": "{\"native_files\": 112, \"total_bytes\": 3567165, \"manifest_sha256\": \"bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af\", \"source_inventory_sha256\": \"5faf9b583fe6398d6b6dff0b1033d498b13169d71413c51c846dcc2c8e0aaa66\"}\n"
+        },
+        {
+          "cohort": "107-quota",
+          "native-manifest.json": {
+            "bytes": 10669,
+            "sha256": "4fe3fee49a6260c96eaf454aa5af14268ce94bd0019b5d06f29d7b45e4979e6c"
+          },
+          "native-source-inventory.json": {
+            "bytes": 36888,
+            "sha256": "bbc37ef439df13ecabc1c9c0cbcca613f57f852a704a5a226072c7e811237dcc"
+          },
+          "returncode": 0,
+          "seconds": 0.078,
+          "stderr": "",
+          "stdout": "{\"native_files\": 107, \"total_bytes\": 3288381, \"manifest_sha256\": \"4fe3fee49a6260c96eaf454aa5af14268ce94bd0019b5d06f29d7b45e4979e6c\", \"source_inventory_sha256\": \"bbc37ef439df13ecabc1c9c0cbcca613f57f852a704a5a226072c7e811237dcc\"}\n"
+        },
+        {
+          "cohort": "109-quota",
+          "native-manifest.json": {
+            "bytes": 10868,
+            "sha256": "9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7"
+          },
+          "native-source-inventory.json": {
+            "bytes": 37413,
+            "sha256": "9dbb7d348b8711456eab74e7457d9a5ac7cf0010701d291c53350378825e585a"
+          },
+          "returncode": 0,
+          "seconds": 0.079,
+          "stderr": "",
+          "stdout": "{\"native_files\": 109, \"total_bytes\": 3531608, \"manifest_sha256\": \"9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7\", \"source_inventory_sha256\": \"9dbb7d348b8711456eab74e7457d9a5ac7cf0010701d291c53350378825e585a\"}\n"
+        },
+        {
+          "cohort": "112-quota",
+          "native-manifest.json": {
+            "bytes": 11199,
+            "sha256": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d"
+          },
+          "native-source-inventory.json": {
+            "bytes": 38329,
+            "sha256": "4f36c81c6a524cf7a60fd14402a4e31f97a5b797704f882f55214b3b444d6520"
+          },
+          "returncode": 0,
+          "seconds": 0.098,
+          "stderr": "",
+          "stdout": "{\"native_files\": 112, \"total_bytes\": 3614783, \"manifest_sha256\": \"01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d\", \"source_inventory_sha256\": \"4f36c81c6a524cf7a60fd14402a4e31f97a5b797704f882f55214b3b444d6520\"}\n"
+        }
+      ],
+      "source_builder_sha256": "2ec3f45fe0c984c63002a28c9111609cda68c811679c4e818cc5301f01c1c22d"
+    },
+    "worker_backend": {
+      "passed": 135
+    },
+    "worker_package": {
+      "passed": 68
+    }
+  },
+  "custody_source": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710139732",
+  "native_source": {
+    "builder_sha256": "2ec3f45fe0c984c63002a28c9111609cda68c811679c4e818cc5301f01c1c22d",
+    "native_entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+    "native_owner_closure_sha256": "2a66e360ed689a1e219b8e81aa11ec9c64edcad2c86a986eae2eee00a87d7523",
+    "registry_after_sha256": "b274de565b238f8809948ce3810c15b08c89d370ef37c56079a446ce6ef813f1",
+    "registry_before_sha256": "2c6d6eea7c50a60cf552840ff280093b52e149d1bf7d7af870b41dc41d9534ec",
+    "review_record_sha256": "c2e1385db494716d87901288887718b30df84bfb30f2566b0271def30da0dada",
+    "review_record_source": "5b76ba0d0a3d5cdbd93b514050d26946ba0cc890"
+  },
+  "packaging": {
+    "d8_requires_postcommit_head": true,
+    "explanation": "D8 reads git HEAD postimages, so the earlier detached0d result does not qualify the staged H6 merge; no new exception was added for that HEAD mismatch.",
+    "h1_sha256": "7555800c5a45d3642c147a0da1e03a80370bf3c741d828792ed0f41519497457",
+    "h1_test_source": "ce625f44bb200b04df9590e9b07df3eae55102f3",
+    "precommit_h1_and_identity_passed": true
+  },
+  "parents": [
+    "0d8174951141b1790e6121e13202e4036d1bdc20",
+    "e65e898d8a179f206c187c3bc662fb4ef5823981"
+  ],
+  "publication": {
+    "installed_live_hermes": false,
+    "live_enrollment": false,
+    "native_generation_published": false,
+    "native_generation_selected": false,
+    "paid_provider_acceptance": false,
+    "protected_merge": false,
+    "vps_activation": false
+  },
+  "reports": [
+    {
+      "bytes": 4184,
+      "file": "followthrough-six-cohort-builds-v12.json",
+      "sha256": "8c0fabea7302840d9cc7e68eb30ea2ff44c3abd097271404e462fded87682ec8"
+    },
+    {
+      "bytes": 670,
+      "file": "followthrough-four-installer-validations-v12.json",
+      "sha256": "4f2e093d9c849c104e52f933a3e51dcb20c42fd66a741ad6a3e2acba1543cb4a"
+    },
+    {
+      "bytes": 8829,
+      "file": "followthrough-native-composed-v12.json",
+      "sha256": "0c4b312f0444c4f554b40a07c5e7fa375aae402ce459e1dad0347ff9e852723c"
+    },
+    {
+      "bytes": 1675,
+      "file": "followthrough-fixture-repair-v12.json",
+      "sha256": "d8441ad58aa7869303c5b0cd60b30e60f9b4e98409064498d75af0be3961d2df"
+    },
+    {
+      "bytes": 4433,
+      "file": "followthrough-remaining-components-v12.json",
+      "sha256": "44f793828181b5b181502e41686f71652965ee26b585e90a27d86f0d5ac8d5e0"
+    },
+    {
+      "bytes": 391,
+      "file": "followthrough-company-identity-v12.json",
+      "sha256": "dc41ec08e47726f7714e32e04e62efcc169c5140e812fcbd75a4450bbdb24ad4"
+    },
+    {
+      "bytes": 4533,
+      "file": "followthrough-frontend-v12.json",
+      "sha256": "dcc00babf6720db4d88d9c03dd275d0914f4ad6a6fb9f7c72c3fd0505a4f32a7"
+    },
+    {
+      "bytes": 4098,
+      "file": "followthrough-native-owner-registered-observation-v13.json",
+      "sha256": "fbf2cacbf5b56d2e039beeaa65224ff0c766d2edf580f6a6400511a96d914d33"
+    },
+    {
+      "bytes": 863,
+      "file": "followthrough-h1-d8-final-v13.json",
+      "sha256": "706db2ceab5127eeeb749ab249eb7cadbe0e14a63440d3ed8164aca184a23a3a"
+    }
+  ],
+  "schema": "mastermind.fabric_application.root_followthrough_qualification.v1",
+  "scope": "Exact isolated composition of original0d817 and accepted H6e65; excludes later active H3 Phase C and is not the current2175 release head.",
+  "source_preservation": {
+    "all_equal_accepted_h6_bytes": true,
+    "inherited_whitespace_paths": [
+      "app/mastermind_os/src/resources/ModelConfigurationRead.test.tsx",
+      "app/mastermind_os/src/resources/ModelConfigurationRead.tsx",
+      "app/mastermind_os/src/resources/model-configuration.css",
+      "integrations/hermes_application_fabric/qualification/application_owner_support/a577-hermes-source-support.patch",
+      "ops/native_fabric/grok47/quota_billing/lease_broker.py.patch",
+      "ops/native_fabric/grok47/quota_billing/quota_circuit.py",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-frontend-build.log",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-frontend-component.log",
+      "review_evidence/fabric_application/h6-recovery-20261107-c2/h5-frontend-typecheck.log"
+    ]
+  }
+}

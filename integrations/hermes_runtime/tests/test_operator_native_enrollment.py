@@ -32,7 +32,7 @@ BOOT = "fixture-original-boot"
 
 @pytest.fixture
 def enrollment_command(tmp_path, monkeypatch):
-    def build(version=3, role="mmsecretary"):
+    def build(version=3, role="mmsecretary", *, primary_application=None):
         publication = publication_document() if version == 3 else None
         document = _installation(consumer=publication, role=role)
         row = next(item for item in document["roles"] if item["role"] == role)
@@ -51,10 +51,25 @@ def enrollment_command(tmp_path, monkeypatch):
             gateway_backend="native-session-authority",
             native_provider_id=("byteplus-modelark.glm-5.3-flash" if role == "mmsecretary" else "zai.glm-5.3"),
             tool_allowlist=frozenset({"clarify"}))
+        if primary_application is not None:
+            from integrations.hermes_application_fabric.publication import (
+                PROVIDER, expected_native_config as application_config,
+            )
+            primary = deepcopy(primary_application)
+            primary["enrollment_request_id"] = recipe["session_enrollment"]["request_id"]
+            primary["principal_id"] = f"uid:{row['uid']}"
+            recipe["primary_application"] = primary
+            recipe["schema"] = "mastermind.hermes_native_gateway_installation/v4"
+            profile = replace(profile, model_provider=PROVIDER,
+                              model_default=primary["model"], native_provider_id=None)
         profile_path = state_dir / "current/profile.yaml"
         native_config = home / "profiles" / role / "config.yaml"
         native_config.parent.mkdir(parents=True)
-        native_config.write_text(expected_native_config(profile, publication), encoding="utf-8")
+        config_text = (
+            application_config(profile, recipe["primary_application"], publication)
+            if primary_application is not None else expected_native_config(profile, publication)
+        )
+        native_config.write_text(config_text, encoding="utf-8")
         native_config.chmod(0o600)
         profile_path.write_text(dump_profile(profile), encoding="utf-8")
         hermes_bin = state_dir / "current/bin/hermes"
@@ -185,7 +200,7 @@ def test_actual_command_enrolls_original_once_and_reopens_existing(enrollment_co
     assert world.state.qualifications >= 7 and world.state.checks > 0
 
 
-@pytest.mark.parametrize("version", [1, 4])
+@pytest.mark.parametrize("version", [1, 5])
 def test_disarmed_or_unknown_recipe_refuses_before_native_import(enrollment_command, version):
     world = enrollment_command()
     world.launch.recipe["schema"] = f"mastermind.hermes_native_gateway_installation/v{version}"
@@ -278,3 +293,4 @@ def test_command_cannot_enroll_the_other_role(enrollment_command, role):
     with pytest.raises(RuntimeRefusal, match="NATIVE_ENROLLMENT_INSTALLATION_REQUIRED"):
         operation(world.path, world.binary, native_launch=world.launch)
     assert world.state.qualifications == world.state.inspections == world.state.creations == 0
+

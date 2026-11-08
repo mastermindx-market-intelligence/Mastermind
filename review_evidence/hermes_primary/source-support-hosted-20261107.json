@@ -1,0 +1,162 @@
+{
+  "schema": "mastermind.hermes_primary_source_support_hosted_proof.v1",
+  "source_head": "90fb4f44fa761d606509418ad47123446a4ea192",
+  "actual_merge": "2d9acf533d6ae3851b8a716c4149e4a6ad745b76",
+  "original_application_base": "552375cd288ebe3c417d10afa17f47114c6319db",
+  "workflow_run": 42386464763,
+  "native_job": 128444807247,
+  "native_job_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42386464763/job/128444807247",
+  "native_job_conclusion": "success",
+  "hosted_git_boundary_tests": {
+    "tests": 3,
+    "seconds": 0.164,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0
+  },
+  "proposal_unit_stdout": {
+    "passed": 383,
+    "seconds": 3.63
+  },
+  "proposal_native_seconds": 134.653,
+  "original_native_seconds": 133.916,
+  "proposal_native_receipt": {
+    "sources": {
+      "adapter_root": "2d9acf533d6ae3851b8a716c4149e4a6ad745b76",
+      "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+      "native_owner_root": "2d9acf533d6ae3851b8a716c4149e4a6ad745b76",
+      "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+    },
+    "source_support_proposal": {
+      "original_owner_commit": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+      "contract_sha256": "7952878b5662a83687982ad4d86bed72c774fc3362115572a9ff42424c4e7d66",
+      "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+      "postimages": {
+        "engine/provider_production_modes.py": "4df41a878c1368ad3d18da3d6b4eda9f3e4a6ea2afcdf38429a29518bf6464e8",
+        "tests/test_hermes_application_source_support.py": "e3253732804c5adb33b1b2360b1366f9425026897a47e4e843877538d28133bd",
+        "tests/test_hermes_attended_fabric_identity.py": "f344443fd3325ddac1a91d6f77b4add154b40e2c4f6aaa1cf99eb19d50922866",
+        "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+      },
+      "fixture_files": 2539,
+      "source_materialization": {
+        "method": "verified_local_committed_blobs",
+        "files": 2538,
+        "unique_blobs": 2534,
+        "bytes": 74768348,
+        "lazy_fetch_permitted": false,
+        "worktree_content_used": false
+      },
+      "original_source_unchanged": true,
+      "runtime_enrollment": false,
+      "unit_qualification": {
+        "tests": 383,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "junit_sha256": "6962ff3ea61a5f40e3331eaa53e07bfe929e3de0160822d2c384e82774c8512f",
+        "live_acceptance": false
+      }
+    },
+    "fixture_overrides_source_flags": false,
+    "tests_run": 21,
+    "network_counter_scope": "native_conversation_process_after_source_preparation",
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "blocked_external_connections": 0,
+    "provider_sdk_constructions": 0,
+    "real_application_handler": true,
+    "real_broker": true,
+    "provider_is_fixture": true,
+    "live_provider_acceptance": false,
+    "monetary_acceptance": false
+  },
+  "original_native_receipt": {
+    "sources": {
+      "adapter_root": "2d9acf533d6ae3851b8a716c4149e4a6ad745b76",
+      "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+      "native_owner_root": "2d9acf533d6ae3851b8a716c4149e4a6ad745b76",
+      "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+    },
+    "source_support_proposal": null,
+    "fixture_overrides_source_flags": true,
+    "tests_run": 21,
+    "network_counter_scope": "native_conversation_process_after_source_preparation",
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "blocked_external_connections": 0,
+    "provider_sdk_constructions": 0,
+    "real_application_handler": true,
+    "real_broker": true,
+    "provider_is_fixture": true,
+    "live_provider_acceptance": false,
+    "monetary_acceptance": false
+  },
+  "studio": {
+    "job": 128444807447,
+    "baseline": {
+      "tests": 1,
+      "seconds": 1.997
+    },
+    "observed": {
+      "tests": 1,
+      "seconds": 2.003
+    },
+    "full_discovery": {
+      "tests": 848,
+      "seconds": 168.503,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "production_effects": false
+  },
+  "paired": {
+    "job": 128444807450,
+    "unittest_groups": [
+      52,
+      8,
+      32,
+      23,
+      32,
+      42,
+      16,
+      14,
+      3
+    ],
+    "additional_pytest_tests": 42,
+    "additional_pytest_subtests": 16,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "overlap_not_unique_total": true
+  },
+  "host": {
+    "job": 128444807445,
+    "tests": 137,
+    "seconds": 22.55,
+    "conclusion": "success"
+  },
+  "gateway": {
+    "job": 128444807419,
+    "tests": 103,
+    "seconds": 13.946,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "job_conclusion": "failure",
+    "cause": "Existing exact100 gateway contract also discovered the new three Git-boundary cases.",
+    "correction": "Rename that unchanged check entry from test_source_materialization.py to verify_source_materialization.py and retain its explicit native-owner workflow invocation; original100 gateway count and tests stay unchanged.",
+    "unchanged_check_blob": "3d689b59edb5762571badadec1163e40cfbbd585"
+  },
+  "general_ci": {
+    "run": 42386464697,
+    "status_at_observation": "running; no aggregate success claimed"
+  },
+  "macro_source_support_adoption_proven": false,
+  "installed_primary": false,
+  "live_provider_acceptance": false,
+  "monetary_acceptance": false,
+  "mission_complete": false
+}

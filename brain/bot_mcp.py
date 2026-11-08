@@ -1956,12 +1956,37 @@ class InferenceToolError(ValueError):
     """Bounded protocol refusal before any registered handler executes."""
 
 
+# The Fabric inference view is DERIVED, lazy and read-only: the incumbent bot
+# roster plus the cognition owner's existing read objects under the cognition
+# owner's own namespace. It is a view of existing handlers, not a second
+# roster and not a new authority: the legacy bot server, _ALL and TOOL_NAMES
+# keep exactly their incumbent 25-tool authority, and no cognition object is
+# relabelled as mcp__bot__.
+def _inference_tool_view() -> dict:
+    """Return the derived fully-qualified-name -> existing handler object view.
+
+    The cognition import is deliberately lazy. brain.cognition_mcp imports
+    brain.autonomous_mcp, which imports brain.bot_mcp; a module-level import
+    here would close that cycle and break both owners. The first call happens
+    after this module has finished executing.
+    """
+    from brain import cognition_mcp
+
+    reads = cognition_mcp._READ_TOOLS
+    view = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    for tool in reads:
+        view[f"mcp__{cognition_mcp.SERVER_NAME}__{tool.name}"] = tool
+    if len(view) != len(_ALL) + len(reads):
+        raise InferenceToolError("fabric_tool_roster_invalid")
+    return view
+
+
 def inference_tool_catalog() -> list[dict]:
     """Describe exactly the incumbent registered roster, without SDK-only tools."""
     from jsonschema import Draft202012Validator
 
     catalog = []
-    for tool in _ALL:
+    for name, tool in _inference_tool_view().items():
         schema = copy.deepcopy(tool.input_schema)
         if schema == {}:
             schema = {"type": "object", "properties": {}}
@@ -1972,7 +1997,7 @@ def inference_tool_catalog() -> list[dict]:
         # smuggled through JSON Schema's permissive extra-property default.
         schema["additionalProperties"] = False
         Draft202012Validator.check_schema(schema)
-        catalog.append({"name": f"mcp__{SERVER_NAME}__{tool.name}",
+        catalog.append({"name": name,
                         "description": tool.description, "input_schema": schema})
     if len({row["name"] for row in catalog}) != len(catalog):
         raise InferenceToolError("fabric_tool_roster_invalid")
@@ -2024,7 +2049,7 @@ async def invoke_inference_tool(call: dict, *, provenance: dict) -> dict:
     if (set(provenance) != {"provider", "model", "turn_id"}
             or any(not isinstance(value, str) or not value for value in provenance.values())):
         raise InferenceToolError("fabric_tool_provenance_invalid")
-    tools = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    tools = _inference_tool_view()
     token = _INFERENCE_PROVENANCE.set({"source": "fabric_application", **provenance})
     try:
         return await tools[call["name"]].handler(copy.deepcopy(call["input"]))
