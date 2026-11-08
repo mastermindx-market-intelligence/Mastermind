@@ -118,7 +118,7 @@ class NativeHistoryReader:
         if (home.resolve(strict=True) != home or not stat.S_ISDIR(info.st_mode)
                 or identity != observed.provider_home_identity
                 or identity["uid"] != policy.worker_uid or identity["gid"] != policy.worker_gid
-                or identity["mode"] != 0o700):
+                or stat.S_IMODE(info.st_mode) != 0o700):
             raise NativeReadUnavailable()
         guard()
         binding = dict(schema="mastermind.dsh.native_read_binding.v1",
