@@ -184304,5 +184304,11 @@
         }
       }
     }
+  },
+  "beforeAfterEvidence": {
+    "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES.json",
+    "sha": "b39c4c02af3fefb55d272e71b569b61a332257b0",
+    "changeCount": 1267,
+    "partCount": 10
   }
 }
