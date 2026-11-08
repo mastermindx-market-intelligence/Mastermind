@@ -803,6 +803,35 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
 
+# Hermes primary APPLICATION codec: fixed input-byte and conversation-count
+# bounds, never OS accounts, principals, permissions or service selection.
+# Attended source self-review under the CEO-Web waiver. Full source hash and
+# complete typed tokens remain required; any drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
+    "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
+}
+
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {
+    "sha256": "78bde48fefedd95f7cec923d83dac6886424913887b683061877db4c2f0ed612",
+    "sites": ((335, 37, 40, "int", "409"),),
+}
+
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
+}
+
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.

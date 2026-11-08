@@ -22,8 +22,10 @@ from types import ModuleType
 
 from .errors import RuntimeRefusal
 
-SCHEMA = "mastermind.hermes_native_transport_observation/v2"
+SCHEMA = "mastermind.hermes_native_transport_observation/v3"
+PROVIDER_SCHEMA_V2 = "mastermind.hermes_native_transport_observation/v2"
 PREVIOUS_SCHEMA = "mastermind.hermes_native_transport_observation/v1"
+PROVIDER_SCHEMAS = frozenset({SCHEMA, PROVIDER_SCHEMA_V2})
 COVERAGE = "selected_nonstream_sync_httpx_only"
 EXECUTION_STAGE = "original_execute_admission_wrapper"
 HTTP_STAGE = "httpx_client_send_single_request"
@@ -236,6 +238,12 @@ class Contribution:
         self.scope, self.installation = scope, installation
         self.calls, self.dispatches, self.attempts = [], [], []
         self.errors, self.overflow = set(), False
+        credentials = installation.credential_installation
+        self.credential_scope = None
+        try:
+            self.credential_scope = credentials.scope(scope) if credentials is not None else None
+        except Exception:
+            self.errors.add("transport_observation_failed")
         self.execution = {"stage": EXECUTION_STAGE, "outcome": "unobserved",
                           "started_at_ms": None, "finished_at_ms": None, "duration_ms": None,
                           "process_start": {"status": "unavailable"},
@@ -279,7 +287,7 @@ class Contribution:
         record = {"state": "entered", "started_at_ms": wall, "finished_at_ms": None, "duration_ms": None}
         if kind == "attempt":
             record.update(dispatch_sequence=dispatch_sequence, request=_request_projection(request), response=None,
-                          runtime_provider=_runtime_provider(agent))
+                          runtime_provider=_runtime_provider(agent), auth_mechanism="unavailable")
             records, maximum = self.attempts, MAX_ATTEMPTS
         else:
             identifiers = identifiers or {}
@@ -301,7 +309,7 @@ class Contribution:
                     record["invalid_fields"] = list(caller.record["invalid_fields"])
                 record.update(call_sequence=caller.record["sequence"] if caller else None,
                               client_binding="pending", runtime_provider=_runtime_provider(agent),
-                              provider_client_check="pending")
+                              provider_client_check="pending", auth_client_check="pending")
                 records, maximum = self.dispatches, MAX_DISPATCHES
         with self.scope.live.event_stream.lock, self.scope.lock:
             if self.scope.closed or not self.scope.current() or not self.scope.adopted(agent):
@@ -372,6 +380,15 @@ class Contribution:
         except Exception:
             self.errors.add("clock_unavailable")
         self.execution.update(outcome=outcome, finished_at_ms=wall, duration_ms=duration)
+        if self.credential_scope is not None:
+            try:
+                self.credential_scope.close()
+            except Exception:
+                self.errors.add("transport_observation_failed")
+                try:
+                    self.credential_scope.discard()
+                except Exception:
+                    pass  # Never replace the original terminal outcome.
 
     def observe_execution_end(self):
         """Process I/O follows sealing, outside the original event/scope locks."""
@@ -406,6 +423,12 @@ class _Dispatch:
     def __init__(self, contribution, agent, span):
         self.contribution, self.agent, self.span = contribution, agent, span
         self.client = None
+        self.credential = None
+        try:
+            self.credential = (contribution.credential_scope.dispatch(agent)
+                               if contribution.credential_scope is not None else None)
+        except Exception:
+            contribution.error("transport_observation_failed")
         self.failed = False
         self.responses = []  # Bounded by the retained attempt budget; never persisted.
 
@@ -414,6 +437,16 @@ class Installation:
     def __init__(self, binding, *, reason=None, commit=None, current=None):
         self.binding, self.reason, self._commit = binding, reason, commit
         self._current = current
+        self.credential_installation = None
+
+    def bind_credentials(self, vendor, profile):
+        if self.credential_installation is not None or not self.registered_current():
+            return
+        from integrations.hermes_harness.native_model_credential import prepare_native_credential_observation
+        self.binding.launch.check()
+        selected = prepare_native_credential_observation(self.binding, vendor, profile)
+        self.credential_installation = selected
+        selected.commit()
 
     def registered_current(self):
         return self.reason is None and self._current is not None and self._current()
@@ -479,6 +512,21 @@ def prepare(binding, vendor):
         except Exception:
             contribution.error("transport_observation_failed")
             return None
+
+    def credential_failure(context):
+        # A failed optional callback cannot replace the original outcome or
+        # leave an earlier matched record eligible for publication.
+        try:
+            if context.credential is not None:
+                context.credential.discard()
+        except Exception:
+            pass
+        try:
+            context.contribution.error("transport_observation_failed")
+            note(context.contribution, "update", context.agent, context.span,
+                 auth_client_check="unavailable")
+        except Exception:
+            pass
 
     def current():
         return (calls.perform_api_call is observed_call
@@ -551,6 +599,13 @@ def prepare(binding, vendor):
                     context.client = transport_client
                     note(contribution, "check_provider_client", agent, span)
                     note(contribution, "update", agent, span, client_binding="qualified_sync_httpx")
+                    if context.credential is not None:
+                        try:
+                            context.credential.bind(client)
+                            note(contribution, "update", agent, span,
+                                 auth_client_check=context.credential.client_status())
+                        except Exception:
+                            credential_failure(context)
             return client
 
         token = _dispatch_context.set(context)
@@ -568,6 +623,17 @@ def prepare(binding, vendor):
                 except Exception:
                     contribution.error("response_metadata_unavailable")
             context.responses.clear()
+            if context.credential is not None:
+                try:
+                    note(contribution, "update", agent, span,
+                         auth_client_check=context.credential.client_status())
+                except Exception:
+                    credential_failure(context)
+                finally:
+                    try:
+                        context.credential.close()
+                    except Exception:
+                        credential_failure(context)
             note(contribution, "finish", agent, span, state)
 
     original_single = original_methods["_send_single_request"]
@@ -582,6 +648,12 @@ def prepare(binding, vendor):
             return original_single(client, request)
         attempt = note(contribution, "begin", "attempt", agent,
                        dispatch_sequence=dispatch_span.record["sequence"], request=request)
+        if context.credential is not None:
+            try:
+                mechanism = context.credential.mechanism(client, request)
+                note(contribution, "update", agent, attempt, auth_mechanism=mechanism)
+            except Exception:
+                credential_failure(context)
         try:
             response = original_single(client, request)
         except BaseException:
@@ -783,8 +855,9 @@ def validate_document(value):
     _shape(value, ("schema", "coverage", "http_stage", "installation", "complete_evaluation",
                    "provider_delivery_proven", "model_identity_verified", "execution", "calls",
                    "dispatches", "attempts", "errors", "overflow"))
-    _enum(value["schema"], {SCHEMA, PREVIOUS_SCHEMA})
-    provider_observed = value["schema"] == SCHEMA
+    _enum(value["schema"], {*PROVIDER_SCHEMAS, PREVIOUS_SCHEMA})
+    provider_observed = value["schema"] in PROVIDER_SCHEMAS
+    auth_observed = value["schema"] == SCHEMA
     for key, expected in (("coverage", COVERAGE), ("http_stage", HTTP_STAGE)):
         _enum(value[key], {expected})
     if any(value[key] is not False for key in ("complete_evaluation", "provider_delivery_proven", "model_identity_verified")):
@@ -836,7 +909,16 @@ def validate_document(value):
                 fields += ("runtime_provider",)
                 if kind == "dispatches":
                     fields += ("provider_client_check",)
+            if auth_observed and kind != "calls":
+                fields += ("auth_mechanism",) if kind == "attempts" else ("auth_client_check",)
             _shape(record, (*common, *fields))
+            if auth_observed and kind != "calls":
+                _enum(record["auth_mechanism"] if kind == "attempts" else record["auth_client_check"],
+                      {"API_KEY", "unavailable", "conflicting"} if kind == "attempts" else
+                      {"pending", "matched", "unavailable", "conflicting"})
+                if (kind == "dispatches" and record["auth_client_check"] == "matched"
+                        and record["client_binding"] != "qualified_sync_httpx"):
+                    raise ValueError("credential witness without original client")
             if provider_observed and kind != "calls":
                 _validate_scalar(record["runtime_provider"], "model")
             if type(record["sequence"]) is not int or record["sequence"] != sequence:

@@ -295,7 +295,8 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
             or not profile_path.is_absolute()
             or native_launch.recipe.get("schema") not in (
                 "mastermind.hermes_native_gateway_installation/v2",
-                "mastermind.hermes_native_gateway_installation/v3")):
+                "mastermind.hermes_native_gateway_installation/v3",
+                "mastermind.hermes_native_gateway_installation/v4")):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_INSTALLATION_REQUIRED")
     # These existing v2/v3 recipes require a closed enrollment descriptor.
     # Structural validation creates no enrollment and historical EVAL never
@@ -315,14 +316,12 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
         assert_root_service_cgroup(current.role)
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
-        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"),
+        primary = native_launch.recipe.get("primary_application")
+        enforce_role_tcp_ports(current, **({"native_launch": native_launch} if primary is not None else {}))
+        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"), primary,
                               evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
 
     qualify_profile()
-    # Landlock attaches once while this entry is still single-threaded and
-    # before asyncio creates a loop or executor. Children inherit it. Owner
-    # rechecks below retain the exact profile and must not reattach policy.
-    enforce_role_tcp_ports(profile)
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)
     prepare_vendor(Path(native_launch.recipe["vendor_root"]))
     from hermes_cli.gateway_runtime_discovery import query_identify
@@ -507,7 +506,8 @@ def _supervise(args: argparse.Namespace, *,
         from .role_isolation import assert_role_credential_isolation
         from .tcp_sandbox import enforce_role_tcp_ports
         assert_role_credential_isolation(profile)
-        enforce_role_tcp_ports(profile)
+        enforce_role_tcp_ports(profile, **({"native_launch": native_launch}
+            if profile.model_provider == "mastermind-fabric" else {}))
         from .role_status_publisher import publisher_from_process
         publisher = publisher_from_process(profile, custody_observer=custody_observer)
         if profile.gateway_backend == "native-session-authority":

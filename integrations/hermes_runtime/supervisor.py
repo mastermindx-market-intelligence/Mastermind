@@ -97,7 +97,8 @@ def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str =
     return argv
 
 
-def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, *, evaluation_inputs=None) -> dict[str, tuple[str, ...]] | None:
+def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, primary_application=None,
+                          *, evaluation_inputs=None) -> dict[str, tuple[str, ...]] | None:
     """Require exact on-disk native config before trusting any CLI summary.
 
     A displayed MCP summary is not a connection or admission receipt.
@@ -142,12 +143,19 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, *, evaluation_
         expected_native_config,
         render_disarmed_native_byok,
     )
-    allowed_native = ({render_disarmed_native_byok(profile).encode("utf-8")}
-                      if evaluation_inputs is None else set())
+    if primary_application is not None:
+        from integrations.hermes_application_fabric.publication import expected_native_config as application_config
+        allowed_native = {application_config(profile, primary_application, consumer).encode("utf-8")}
+    elif evaluation_inputs is not None:
+        allowed_native = set()
+    elif profile.model_provider == "mastermind-fabric":
+        raise RuntimeRefusal("NATIVE_PRIMARY_APPLICATION_UNQUALIFIED")
+    else:
+        allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
     # An explicit persisted selection cannot downgrade to a legacy or
     # model-less config. Only selector-free historical profiles retain
     # the earlier source-compatible config forms.
-    if evaluation_inputs is None and profile.native_provider_id is None:
+    if primary_application is None and evaluation_inputs is None and profile.native_provider_id is None:
         allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
     expected_mcp: dict[str, tuple[str, ...]] = {"mastermind_steward": tuple(ALLOWED_TOOLS)}
     if consumer is not None:
@@ -155,8 +163,9 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, *, evaluation_
             publication_from_document,
         )
         publication = publication_from_document(consumer)
-        allowed_native.add(expected_native_config(
-            profile, consumer, evaluation_inputs=evaluation_inputs).encode("utf-8"))
+        if primary_application is None:
+            allowed_native.add(expected_native_config(
+                profile, consumer, evaluation_inputs=evaluation_inputs).encode("utf-8"))
         # The upstream census renders an empty include list as "(none)". The
         # Executive entry registers no model-facing tool at all, so the
         # summary must show exactly that.
@@ -503,6 +512,25 @@ class ServiceRuntime:
         if self.profile.gateway_backend == "native-session-authority":
             from .native_gateway_entry import native_git_environment
             env.update(native_git_environment(Path(self._native_launch.recipe["vendor_root"])))
+        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        if primary is not None:
+            from integrations.hermes_application_fabric.publication import (
+                expected_native_config as application_config, primary_child_env)
+            from .secrets import child_secret_env_names
+            from .constants import DEFAULT_CHILD_SECRET_ENV
+            expected = application_config(self.profile, primary, self._consumer_publication()).encode("utf-8")
+            if not native.is_file() or native.read_bytes() != expected:
+                raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
+            if self.secrets.dashboard_password == self.secrets.token:
+                raise RuntimeRefusal("NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
+            for name in child_secret_env_names() - DEFAULT_CHILD_SECRET_ENV:
+                env.pop(name, None)
+            env.update(primary_child_env(self.profile, primary, self.secrets))
+            if self._consumer_publication() is not None:
+                from .egress import native_egress_child_env
+                env.update(native_egress_child_env(self.profile.role, self.secrets.values))
+            assert_no_supervisor_notification_env(env)
+            return env
         expected_config = None
         if native.is_file():
             expected_config = expected_native_config(
@@ -555,6 +583,9 @@ class ServiceRuntime:
         return recipe.get("executive_consumer")
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
+        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        if primary is not None:
+            return expected_disabled_mcp(self.profile, self._consumer_publication(), primary)
         return expected_disabled_mcp(self.profile, self._consumer_publication(), evaluation_inputs=(
             self._native_launch.recipe.get("evaluation_inputs") if self._native_launch is not None else None))
 

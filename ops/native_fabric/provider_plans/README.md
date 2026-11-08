@@ -2,9 +2,9 @@
 
 This successor connects the two enrolled plans to ordinary eligible AUTO
 requests as well as explicit native selections. It composes over selected M2
-generation `205b8321c22858b568fe37b7f11b861ee9aeed9c6615bd47847d986b14dfea08` (sequence 36),
-preserves the complete 116-file predecessor, and changes the existing picker,
-request adapter, local controller, slot and provider worker. The original
+generation `9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4` (sequence 37),
+preserves the complete 116-file predecessor, and corrects the existing
+Experiential policy, admission, transport and provider outcome. The original
 publisher owns selection.
 
 ## Request policy
@@ -13,16 +13,42 @@ publisher owns selection.
 | --- | --- | --- |
 | `byteplus`, default | `glm-5.3-flash` | Personal $50 coding plan |
 | `byteplus --model deepseek-v4.1-flash` | Exact DeepSeek model | Same subscription windows |
-| `experiential --model free` | First catalog-present free model, DeepSeek first | Exact `:free`; provider stops at allowance |
+| `experiential --model free` | First catalog-present free model, DeepSeek first | Max plain IDs; requires verified included-funding enforcement |
 | `experiential --model uncensored` | DeepSeek Flash Uncensored first | Existing prepaid wallet/plan allowance |
 | `experiential --model glm-5.3-flash-uncensored` | Exact GLM Flash Uncensored | Same paid allowance |
 
-All seven screenshot free models have native Fabric paths. DeepSeek V4.1 Flash,
+All seven screenshot included models have native Fabric protocol mappings. DeepSeek V4.1 Flash,
 DeepSeek V4.1 Flash 1017, GPT-6 Luna, Clef and Clef Flash use Chat Completions,
-all with `:free`. Explicit `jev-latest:free` uses System One and
-`gpt-6-luna-decisions:free` uses Decisions through the same bridge, account,
+with plain model IDs. Explicit `jev-latest` uses System One and
+`gpt-6-luna-decisions` uses Decisions through the same bridge, account,
 leases and result path. The default `free` selector chooses a chat model;
 typed decision models require an explicit model and JSON packet.
+
+### Max included funding gate
+
+The provider distinguishes paid-plan inclusion from promotional `:free` grants.
+Max included models use plain model IDs. The separate promotional selector is
+not enrolled by this plan and is never inferred from a base catalog entry.
+
+The public account metadata currently exposes organization, catalog and wallet
+observations, not active Max entitlement or the effective **Continue on credits**
+control. Accordingly the live metadata owner supplies no included-funding proof.
+Included admission fails with `PLAN_INCLUDED_FUNDING_UNVERIFIED`; AUTO excludes
+that candidate before dispatch. The gateway also refuses all included requests
+before RPM reservation or upstream send. There is no environment flag or caller
+override to declare this evidence verified.
+
+Enabling the included lane requires an authenticated provider-account readback
+that establishes this organization's active Max plan, all seven included models,
+its daily allowance, provider-enforced stopping with continuation disabled, and
+continued availability of separately requested paid Uncensored models. The
+existing admission predicate validates identity, exact types and freshness.
+No unsupported endpoint or invented request-level funding parameter is used.
+
+The two paid Flash Uncensored models remain independently selectable under the
+existing explicit paid mode and observed prepaid-wallet admission. They are not
+fallbacks from an included request. Unknown included capacity is never replaced
+with wallet capacity.
 
 A Jev packet contains `state` and a `questions` object, for example:
 
@@ -111,9 +137,11 @@ native-login fallback and inherited alternative authentication are excluded.
 Experiential uses the existing gateway, bound to `127.0.0.1:8311`. Its provider key
 stays in a private gateway environment file; workers receive only the separate
 local proxy token. The service entrypoint parses that file without shell eval.
-The gateway requires its policy digest and permits only the requested free IDs
-and the two Flash Uncensored IDs in plan mode. Unsafe nested retry/fallback
-controls are refused.
+The gateway requires its policy digest and permits only the two Flash Uncensored
+IDs while included funding is unverified. Unsafe nested retry/fallback controls
+are refused. HTTP 401 remains authentication failure; HTTP 403 is permission
+refusal. Closed provider error codes, status and validated request IDs survive
+in the original outcome without arbitrary error-message or response-body logging.
 
 ## Quotas
 
@@ -126,7 +154,8 @@ does not establish a separate subscription.
 
 Experiential's 7,000 free credits/day and $200/month are configured, Chairman-
 declared entitlements. They are never reported as observed remaining balances.
-The `:free` contract enforces zero wallet spill. Paid requests require an observed
+Included requests stay unavailable until provider no-spill enforcement is verified.
+Paid requests require an observed
 positive wallet balance and remain within the existing provider's prepaid
 funding boundary. No provisioning key, top-up, auto-recharge or second local
 billing ledger is required or created.

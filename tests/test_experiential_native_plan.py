@@ -46,6 +46,18 @@ def facts(port=8311, mode="free_and_uncensored", balance=37.0):
     }
     context = owner._observed_context(provider, read=replies.__getitem__, token="fixture-proxy-token-32-characters",
                                       base=f"http://127.0.0.1:{port}")
+    # Fixture-only positive account evidence exercises admission/transport.
+    # The real metadata owner returns None, covered separately below.
+    context["quota_readback"]["included_funding"] = {
+        "schema": "mastermind.experiential_included_funding/v1",
+        "source": "authenticated_provider_account",
+        "organization_sha256": digest, "plan_tier": "max",
+        "plan_active": True, "daily_credits": 7000,
+        "continue_on_credits": False, "provider_enforces_included_stop": True,
+        "paid_uncensored_remains_available": True,
+        "observed_at_unix": time.time(),
+        "included_models": list(FREE_CHAT_MODELS) + list(FREE_NATIVE_MODELS),
+    }
     return provider, replies, context
 
 
@@ -109,7 +121,7 @@ def test_account_owner_refuses_other_org_or_policy_before_admission():
 
 
 def native_packet(model):
-    if model == "jev-latest:free":
+    if model == "jev-latest":
         return {"state": "The list contains apple and pear.", "questions": {
             "present": {"type": "noul", "instructions": "The list contains apple."},
             "fruit": {"type": "choice", "instructions": "Which named fruit is present?",
@@ -126,7 +138,7 @@ def native_packet(model):
 
 
 def native_answer(model):
-    if model == "jev-latest:free":
+    if model == "jev-latest":
         return {"present": {"type": "noul", "noul": 0.99},
                 "fruit": {"type": "choice", "choice": "apple", "confidence": 0.98},
                 "count": {"type": "score", "score": 1, "confidence": 0.98}}
@@ -150,7 +162,7 @@ def local_gateway():
             if body["model"] in FREE_NATIVE_MODELS:
                 assert self.path == "/v1/" + FREE_NATIVE_MODELS[body["model"]]
                 answer = native_answer(body["model"])
-                payload = json.dumps({"model": body["model"].removesuffix(":free"),
+                payload = json.dumps({"model": body["model"],
                     "answers": answer, "usage": {"input_tokens": 12, "cost": 0}}).encode()
             else:
                 assert self.path == "/v1/chat/completions"
@@ -278,14 +290,17 @@ def test_selected_lease_account_and_local_custody_required_before_send(tmp_path,
     assert requests == []
 
 
-def test_base_catalog_ids_authorize_free_qualifiers_without_stripping_wire_model():
+def test_plain_catalog_ids_do_not_authorize_max_funding():
     provider, replies, _ = facts()
     replies["/v1/models"]["data"] = [
-        {"id": model.removesuffix(":free")} for model in FREE_CHAT_MODELS + PAID_UNCENSORED_MODELS]
+        {"id": model} for model in FREE_CHAT_MODELS + PAID_UNCENSORED_MODELS]
     context = owner._observed_context(provider, read=replies.__getitem__,
         token="fixture-proxy-token-32-characters", base="http://127.0.0.1:8311")
     assert context["quota_readback"]["available_models"] == sorted(FREE_CHAT_MODELS + PAID_UNCENSORED_MODELS)
-    assert admit(context, FREE_CHAT_MODELS[0])["plan_lane"] == "free"
+    assert context["quota_readback"]["included_funding"] is None
+    with pytest.raises(PlanRequestRefused, match="INCLUDED_FUNDING_UNVERIFIED"):
+        admit(context, FREE_CHAT_MODELS[0])
+    assert admit(context)["plan_lane"] == "paid_uncensored"
     frame = {"model": "deepseek-v4.1-flash", "choices": [
         {"message": {"content": "proof"}}], "usage": {}}
     assert transport._parse_completion(json.dumps(frame).encode(), "application/json",
@@ -362,7 +377,7 @@ def test_native_answer_validation_preserves_question_and_model_identity(model, f
     if fault == "answers":
         frame["answers"] = {}
     elif fault == "value":
-        first["noul" if model == "jev-latest:free" else "probability"] = 1.1
+        first["noul" if model == "jev-latest" else "probability"] = 1.1
     elif fault == "model":
         frame["model"] = "other-model"
     else:
@@ -372,7 +387,7 @@ def test_native_answer_validation_preserves_question_and_model_identity(model, f
 
 
 def test_native_latest_alias_preserves_documented_release_and_rejects_conflicting_identity():
-    model = "jev-latest:free"
+    model = "jev-latest"
     frame = json.dumps({"model": "jev-1.13.0", "answers": native_answer(model)}).encode()
     assert transport._parse_native_completion(frame, "application/json", model,
         native_packet(model))[1] == "jev-1.13.0"
@@ -385,7 +400,7 @@ def test_native_latest_alias_preserves_documented_release_and_rejects_conflictin
 
 def test_invalid_native_response_keeps_original_reconciliation_handle(tmp_path, monkeypatch, local_gateway):
     port, requests, _ = local_gateway
-    args, _ = run_bridge(tmp_path, monkeypatch, port, "jev-latest:free")
+    args, _ = run_bridge(tmp_path, monkeypatch, port, "jev-latest")
     def invalid(*_args, **_kwargs):
         raise transport.ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
     monkeypatch.setattr(transport, "_parse_native_completion", invalid)

@@ -139,11 +139,12 @@ def engine(native, monkeypatch):
     native.helpers, native.worker, native.conversation, native.middleware = helpers, worker, conversation, middleware
     native.process_calls, native.cleanups, native.factories = process_calls, [], []
 
-    def invoke(agent, payload, make_client, *, request_id="request-A", threaded=True):
+    def invoke(agent, payload, make_client, *, request_id="request-A", threaded=True,
+               native_client_lifecycle=False, turn_id="turn-A"):
         agent._disable_streaming = True
         agent._has_pending_redirect = lambda: False
         agent.thinking_callback = None
-        agent._current_turn_id, agent._current_api_request_id = "turn-A", request_id
+        agent._current_turn_id, agent._current_api_request_id = turn_id, request_id
         def call(payload):
             obj = worker._NonStreamRequest.__new__(worker._NonStreamRequest)
             obj.agent, obj.api_kwargs = agent, payload
@@ -154,14 +155,18 @@ def engine(native, monkeypatch):
                 native.factories.append(kwargs["reason"])
                 value = make_client()
                 return value
-            agent._create_request_openai_client = factory
+            if not native_client_lifecycle:
+                agent._create_request_openai_client = factory
             def register(client, **kw):
                 clients.append(client)
                 return client
             def close(reason):
                 native.cleanups.append(reason)
                 for client in clients:
-                    client.close()
+                    if native_client_lifecycle:
+                        agent._close_request_openai_client(client, reason=reason)
+                    else:
+                        client.close()
             obj.clients = SimpleNamespace(set_client=register, close_once=close)
             if threaded:
                 thread = threading.Thread(target=helpers._context_thread_target(obj._call))
@@ -176,7 +181,7 @@ def engine(native, monkeypatch):
         agent._interruptible_api_call = call
         args = dict(api_kwargs=payload, _original_api_kwargs=copy.deepcopy(payload), _llm_middleware_trace=[],
             _moa_prepared_request=None, _retry=SimpleNamespace(), thinking_spinner=None, retry_count=0,
-            api_call_count=1, api_request_id=request_id, effective_task_id="task-A", turn_id="turn-A", interrupted=False)
+            api_call_count=1, api_request_id=request_id, effective_task_id="task-A", turn_id=turn_id, interrupted=False)
         state = SimpleNamespace(**args, max_retries=1)
         assert conversation._run_api_retry_loop(agent, state) is None
         return state.response

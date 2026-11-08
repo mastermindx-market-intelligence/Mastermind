@@ -420,7 +420,7 @@ def history_lifecycle(lifecycle, monkeypatch):
 def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, before_request=None,
                   after_request=None, history=None, before_builder=None, native_context=False,
                   cached=None, before_history=None, after_history=None, source_platform=None,
-                  api_request_id="eval-request"):
+                  api_request_id="eval-request", route_factory=None):
     l, n = lifecycle, lifecycle.native
     selected = marker(t)
     ref, row, _ = n.claim(admission=admission, generation=generation)
@@ -433,7 +433,7 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
             platform=Platform.LOCAL if source_platform is None else source_platform,
             user_id="user", user_id_alt=None, user_name=None, chat_id=ref.session_id,
             chat_name=None, chat_type="private", thread_id=None)
-    route = provider_route()
+    route = provider_route() if route_factory is None else None
     out = {"marker": selected, "row": row}
     def execute():
         turn = l.turn_for(ref, row, cached=cached)
@@ -447,8 +447,9 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
             agent._current_turn_id = "turn-A"  # Same logical turn used by the original worker fixture.
             return agent
         turn._ctx.AIAgent = create
-        agent, reused = turn._resolve_turn_agent(route, "api", "original ephemeral", 3, None, {})
-        turn._wire_turn_agent_callbacks(agent, route, None, None, None, False)
+        selected_route = route if route_factory is None else route_factory(turn)
+        agent, reused = turn._resolve_turn_agent(selected_route, "api", "original ephemeral", 3, None, {})
+        turn._wire_turn_agent_callbacks(agent, selected_route, None, None, None, False)
         out.update(agent=agent, reused=reused, scope=observation._current.get(), turn=turn)
         if before_builder:
             before_builder(out)
@@ -1495,8 +1496,10 @@ def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, mon
     _, recipe, _ = selected_recipe()
     selected = replace(compose_profile("mmmeta", state_dir=tmp_path / "uncreated-state",
         secrets_file=tmp_path / "unread-secrets.env"),
-        model_provider="mastermind-fabric", native_provider_id=None,
+        model_provider="unaccepted-primary-fixture", native_provider_id=None,
         gateway_backend="native-session-authority")
+    # Keep this parser-negative fixture unqualified as new primary providers
+    # gain admission. The mixed-EVAL guard has its own explicit fixture above.
     path = tmp_path / "unsupported-profile.yaml"
     path.write_text(dump_profile(selected))
     monkeypatch.setattr(installer, "load_secrets",
@@ -1506,6 +1509,7 @@ def test_unaccepted_primary_profile_still_refuses_at_public_parser(tmp_path, mon
             systemd_user_dir=tmp_path / "uncreated-units", secrets_file=selected.secrets_file,
             hermes_bin=tmp_path / "unread-launcher", upstream_source=Path(recipe["vendor_root"]),
             native_installation=recipe)
+    assert "UNQUALIFIED_MODEL_ROUTE" in refused.value.code.split(",")
     assert refused.value.code != "NATIVE_EVAL_INPUTS_UNQUALIFIED"
     assert not selected.state_dir.exists()
 
