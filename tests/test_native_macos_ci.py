@@ -44,15 +44,16 @@ def test_existing_frontend_gate_is_preserved():
     assert all("continue-on-error" not in step for step in job["steps"])
 
 
-def test_frontend_build_uses_exact_app_only_production_source_closure():
+def test_frontend_build_uses_the_original_production_archive_owner():
     job = workflow()["jobs"]["frontend"]
     build = next(step for step in job["steps"]
-                 if step.get("name") == "Build exact app-only release archive")
+                 if step.get("name") == "Build exact production source archive")
     assert build["working-directory"] == "."
     command = build["run"]
     for required in (
         'release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"',
-        'git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"',
+        "from ops.executive_os.os_release_assets import _archive",
+        '_archive(Path(os.environ["GITHUB_WORKSPACE"]), os.environ["GITHUB_SHA"], Path(sys.argv[1]))',
         'cd "$release_root/app/mastermind_os"',
         "npm ci --ignore-scripts",
         "npm run build",
@@ -124,7 +125,9 @@ def test_workflow_and_test_changes_trigger_the_gate_without_write_permissions():
     assert set(config["on"]) == {"pull_request", "merge_group", "push", "workflow_dispatch"}
     for event in ("pull_request", "push"):
         assert set(config["on"][event]["paths"]) == {
-            "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH
+            "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH,
+            "integrations/deepseek_harness/company_plugin/src/protocol.ts",
+            "ops/executive_os/os_release_assets.py", "tests/test_os_release_assets.py",
         }
     assert config["on"]["push"]["branches"] == ["master"]
     assert config["on"]["merge_group"]["types"] == ["checks_requested"]

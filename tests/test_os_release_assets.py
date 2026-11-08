@@ -29,7 +29,9 @@ def source(tmp_path):
     (app / "package-lock.json").write_text('{"lockfileVersion":3}')
     (app / "source.txt").write_text("committed app bytes")
     root = Path(__file__).resolve().parents[1]
-    for name in helper().LAUNCH_INPUTS:
+    # One shared compiled input is separate from the stable receipt input map.
+    for name in (*helper().LAUNCH_INPUTS,
+                 "integrations/deepseek_harness/company_plugin/src/protocol.ts"):
         target = repo / name
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -370,6 +372,49 @@ def test_archive_uses_committed_bytes_and_ignores_checkout_generated_inputs(sour
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
                 build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"))
     assert mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=repo).digest
+
+
+def test_archive_uses_the_committed_company_contract_without_its_integration_tree(source, tmp_path):
+    mod = helper()
+    repo, _sha, _tree = source
+    protocol = Path("integrations/deepseek_harness/company_plugin/src/protocol.ts")
+    original = (repo / protocol).read_bytes()
+    sibling = protocol.with_name("not-an-os-input.ts")
+    (repo / sibling).write_text("committed sibling must stay outside the OS archive")
+    git(repo, "add", str(sibling))
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "-qm", "unrelated company input")
+    sha = git(repo, "rev-parse", "HEAD")
+    (repo / protocol).write_text("checkout bytes must not replace the committed contract")
+    (repo / protocol.with_name("checkout-only.ts")).write_text("uncommitted sibling")
+    out = tmp_path / "archive with spaces"
+    mod._archive(repo, sha, out)
+    assert (out / protocol).read_bytes() == original
+    assert not (out / sibling).exists()
+    assert not (out / protocol.with_name("checkout-only.ts")).exists()
+    assert (out / "app/mastermind_os/source.txt").read_text() == "committed app bytes"
+    assert {p.relative_to(out).as_posix() for p in (out / "integrations").rglob("*") if p.is_file()} == {
+        protocol.as_posix()
+    }
+
+
+@pytest.mark.parametrize("damage", ["missing", "symlink"])
+def test_archive_refuses_missing_or_linked_company_contract_before_extraction(source, tmp_path, damage):
+    mod = helper()
+    repo, _sha, _tree = source
+    protocol = repo / "integrations/deepseek_harness/company_plugin/src/protocol.ts"
+    protocol.unlink()
+    if damage == "symlink":
+        protocol.symlink_to("../../../../app/mastermind_os/source.txt")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "-qm", "invalid shared contract")
+    sha = git(repo, "rev-parse", "HEAD")
+    out = tmp_path / "refused archive"
+    out.mkdir()
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        mod._archive(repo, sha, out)
+    assert list(out.iterdir()) == []
 
 
 def test_changed_provenance_cannot_pass_the_prior_preflight_digest(bundle):

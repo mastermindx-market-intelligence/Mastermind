@@ -61,6 +61,10 @@ DIST = "app/mastermind_os/dist"
 RECEIPT = "build-receipt.json"
 INSTALLED_RECEIPT = "app/mastermind_os/web-build-receipt.json"
 RECIPE = ["npm ci --ignore-scripts", "npm run build"]
+# The OS imports this one existing company contract; its surrounding integration
+# is not a build input. Exact commit/tree and this recipe bind both archive paths.
+ARCHIVE_INPUTS = ("app/mastermind_os",
+                  "integrations/deepseek_harness/company_plugin/src/protocol.ts")
 CONTROL_TEMPLATE = "ops/executive_os/control.json.template"
 INPUTS = ("app/mastermind_os/package.json", "app/mastermind_os/package-lock.json",
           "app/mastermind_os/vite.config.ts", "app/mastermind_os/src/public-config.ts",
@@ -205,7 +209,7 @@ def _capture_dist(source, *, sealed):
 
 def _archive(repo, sha, destination):
     completed = subprocess.run(["/usr/bin/git", "--no-optional-locks", "-c", f"safe.directory={repo}",
-                                "-C", str(repo), "archive", sha, "app/mastermind_os"],
+                                "-C", str(repo), "archive", sha, *ARCHIVE_INPUTS],
                                capture_output=True, check=True, timeout=30)
     if len(completed.stdout) > 128 * 1024 * 1024:
         raise ValueError("app source archive exceeds budget")

@@ -1047,3 +1047,41 @@ The merged source passed 458 bridge/Runtime/current-context tests, 274 package/a
 The original native full package remains reusable: no package-bound source changed during master composition; only its build evidence and this frontier changed. The C32 canonical handoff is archived in `research/evidence/deepseek-native-handoff-c32-20261108.md`.
 
 Release facts: the current GitHub connector's branch-protection read returned explicit HTTP403 `Resource not accessible by integration`; that action is closed and effective enforcement is UNKNOWN, not a claim that approval is required or waived. No alternate reader/account replay or merge request was made. Exact-head hosted CI, protected-source acceptance, original root/Worker/realm/capability/account admission, public routing and signed-in packaged production proof remain separately required. Source publication and Ready status do not clear those production holds. Continue by reconciling the exact published head, running the committed-HEAD identity gate and consuming hosted CI, then using the original permitted release path when its enforcement is established.
+
+
+## C34 — repair the actual hosted CI failures, then complete native admission producers
+
+C33 hosted frontend tests passed all 7,010 cases across 412 files (12 skips).
+Its later production archive omitted the existing company protocol leaf, although
+a normal checkout built successfully. The original os_release_assets archive
+owner now includes exactly that leaf and CI calls the same owner. Existing
+receipt INPUTS and LAUNCH_INPUTS remain compatible; no protocol copy is created.
+The canonical development extras now pin agent-client-protocol 0.12.1, repairing
+the cold-install collection failure in Python shards 2 and 5.
+
+Qualification: 228 focused tests passed, all three previously blocked profile
+cases collect (not claimed as executed), and a fresh archive of exact C33 source
+built with npm ci and the original 12-file asset manifest. C33's committed-head
+CEO guard passed all 337 cases. Exact source/command/time/log/receipt identities
+are recorded in research/evidence/deepseek-native-ci-repair-20261108.json.
+
+Hosted macOS CI produced an unsigned app at integrated source
+009dbffef5a73062e7050cbeaea8b58e92b1d2b0, composing C33 with protected
+d8c89a44bf896a623467cb303a29e46dea19cf9a. This is packageability, not installation
+or provider acceptance. That newer protected change is path-disjoint and
+contains no governing-law change; no ancestry-only rewrite is needed.
+
+The original PR returned to Draft at 2026-11-08T05:16:34Z. Source inspection also
+found three concrete producer gaps, which remain implementation work in this
+same operation: the default canonical policy pair does not yet contain native
+admission; the root package attestation builder lacks its finite publication
+edge; and the incumbent Control update preserves but cannot introduce the first
+native selection. Complete these through their existing owners, preserving all
+original Worker, realm, quota, host, source, package and account checks.
+
+Ordinary PR-native reads confirmed the merge queue is enabled and no auto-merge
+or queue effect exists. The denied administrative protection read remains closed.
+The LIVE Control component update restarts Control and must not be applied under
+the mission's no-active-service-restart constraint. Source preparation proceeds.
+All accepted Hermes/C21 DO_NOT_REDO evidence and production holds remain in force.
+MORE_WORK_EXISTS; this is not a mission-complete handoff.

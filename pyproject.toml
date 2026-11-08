@@ -29,6 +29,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<10",
+    # Native ACP boundary tests exercise the exact SDK used by the sealed Worker.
+    # Keep it in development qualification; control Python remains SDK-free.
+    "agent-client-protocol==0.12.1",
     # The historical mcp>= floor is intentionally retired; the maintained v1
     # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.
