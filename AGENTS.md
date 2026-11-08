@@ -15,6 +15,10 @@ trading, or source-write authority and never promotes research into trade execut
 
 Apply [the Chairman's October 23 commercial-data-rights ruling](docs/COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. The commercial rights and approval gate is settled as `APPROVED_BY_CHAIRMAN_ATTESTATION`; no session may require repeated approval or contract/public-terms re-proof.
 
+## Reuse-first engineering
+
+For substantive systems, agent/autonomy infrastructure, charts, UI or tool implementation, apply [Reuse First](docs/REUSE_FIRST_ENGINEERING.md): inspect the incumbent and maintained open-source options before custom-building commodity machinery. Prefer small adapters/composition over duplicate systems; spend bespoke engineering on differentiated quant logic and scientifically validated behavior. Check actual fit, maintenance, existing security boundaries and consumer proof without adding a new approval gate. Keep the scan proportionate; this adds no mandatory research or approval ceremony.
+
 ## Human-first product work
 
 For any user-facing design, mockup, build or review, read the existing shared content

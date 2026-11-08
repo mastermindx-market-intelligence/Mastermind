@@ -1122,6 +1122,20 @@ C37 hosted OS, ACP and governed-MCP workflows passed. Hash-locked Linux environm
 No live materialization, original layout observation, service restart, provider call or installed DeepSeek acceptance is claimed. The explicit installed receipt/config-read, Fabric/VPS, admin-protection and foreign-GC denials stay closed. Final package build must join the actual original Worker coordinates and enrolled official-Node digest; do not invent them. Preserve accepted Hermes and C21 evidence. Continue C39 in this healthy session; MORE_WORK_EXISTS.
 
 
+## C40 — current protected master and original identity guards (2026-11-08)
+
+Prepared merge parents are ba0dd5be56d1b37bb96800144898b7069a294a18 and protected1981aea5122943ce59d7ebe9706ddf5a658b377d, under the same original operation, branch, managed M2 writer and governing pin. Protected reuse-first, sequence38 remote placement and original Hermes dialogue-parent changes compose without conflict. Of24 protected changed paths,23 remain byte-identical; the sole adjusted path is the historical remote-placement test fixture.
+
+The historical fixture now starts with sealed sequence37 and copies exactly five independently hash-qualified canonical members, verifies all116 historical hashes, then writes inert descriptors. It retains historical realm07367e and generation296e; the current default profile retains its genuine DeepSeek-aware realm4f08. Neither production profile nor the protected composer is retagged. The D7 classifier's full-file pin now follows only the retained-read import relocation; its original event-loop AST and ten tamper refusals remain unchanged.
+
+Qualification:157 passed and28 subtests passed, unchanged7218 source inputs, 2026-11-08T07:45:22.174499Z–07:45:47.391258Z. Receipt SHA2564fc46289880c9c3a7169716970f94bfd01923c34ebf92464b5900fe3bc07a176; log SHA2566b8ddc9c935eca80be1f46111004682cd73088b506b7f625a5723a6d44e2b938. Tests cover all12 D7 cases, remote placement/current AUTO routing, protected Hermes pre-inference parent/current-role checks, existing native reply writer, leadership and reuse-first laws. The preceding exact ba0 committed-source run passed337 with one now-repaired D7 identity failure; D8 and the actual Linux git-archive closure passed.
+
+Exact evidence: research/evidence/deepseek-native-master-composition-c40-20261108.json. C39 hosted OS42459553241, ACP42459553327 and governed-MCP42459553222 succeeded; CI42459553245, RWE42459553278 and CodeQL42459549642 were still in progress at the bounded snapshot. No completed failure was present and no rerun was issued.
+
+No installed-source or signed-in DeepSeek acceptance is claimed. Root-custodied artifacts/attestation, actual original Worker and account/realm/quota/host admission, live routing, required exact-head CI/source acceptance and packaged create/history/send/recovery/logout/reconnect/uncertain-send/Stop/same-Session resume/tool settlement remain production holds. Installed-config/receipt, paid-Fabric/VPS, protection-administration403 and foreign-GC denials remain closed; active-service restart remains forbidden. Accepted Hermes and C21 work remain DO_NOT_REDO.
+
+Continue after publication with exact merge readback and bounded consumer/source-readiness work through the next permitted source/release milestone. MORE_WORK_EXISTS.
+
 ## C39 — sealed native contracts, public conversation routing and CI repair (2026-11-08)
 
 Source parent df0a78e01039c66741a613e8b29412258bcba662; same original operation, branch and managed writer. The procedure pin is refreshed to protected1981aea5122943ce59d7ebe9706ddf5a658b377d: INDEX1.0.1/major1 and changed reuse-first laws read at that SHA; the complete24-file delta retains all other applicable companions. Protected source036e8 is still composed; the three1981 commits are the next source composition.

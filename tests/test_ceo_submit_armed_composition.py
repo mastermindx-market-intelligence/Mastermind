@@ -1618,11 +1618,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # no additional event loop or execution call is admitted.
     # The optional sealed observation owner composes with those protected reads;
     # only this final full-file fingerprint changes, never the wrapper AST.
+    # The retained-read resolver import now names its original Session Bridge
+    # owner; its class and the installed event-loop AST are unchanged.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '8aa8ba94aaf97f6e67e64c9a2201db742d67e7a854b49285c7d8b744b960a4dc'):
+            '4bd72faae71a79bc6279c8cb36ed0d0e431a812cab140e8842576e23d16197b6'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
