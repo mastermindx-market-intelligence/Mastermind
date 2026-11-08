@@ -104,8 +104,8 @@ lease = register_native_tool(
 `HermesGitHubApp(HostGitHubSession(...))`. Its `HostGitHubSession` fields are
 source-bound: exact original `profile_id`, `role`, `session_id`,
 `operation_id`, repository, new `hermes/<operation>` branch, accepted
-`master`/ `main` base SHA, numeric installation, allowed path prefixes,
-allowed issue numbers and currentness guard. Nonexistent
+`master`/ `main` base SHA, numeric installation, **authenticated expected App bot login** (`app_bot_login`, e.g. `mastermind-hermes-author[bot]`), allowed path prefixes,
+allowed issue numbers and currentness guard. The expected login must come from the actually enrolled App's verified GitHub identity, never from a model argument. PR and comment readbacks verify that exact GitHub actor; copied audit markers from other users cannot count as a bot action. Nonexistent
 `existing_native_owner` names in this example are an explicit **integration
 point** to the original installed owner, not a claim of a new production API.
 
