@@ -2,7 +2,7 @@
 ## Research findings, architecture decisions, and implementation masterplan
 
 **Research date:** 6 November 2026  
-**Status:** Implementation in progress; current source and release frontier is recorded in §53. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
+**Status:** Implementation in progress; current source and release frontier is recorded in §56. Multiple source slices are protected/merged, but full runtime deployment, installed journeys and product acceptance are not yet proven. MISSION_COMPLETE=false.  
 **Commission:** Make the existing Hermes harness a continuously useful, learning teammate integrated with Executive OS, Agent OS, Subagent Fabric, Mastermind OS, the VPS, repositories, and host fleet.
 
 ## 1. Recommended direction
@@ -2420,3 +2420,39 @@ The exact-context fence must still reject adjacent unlisted tests and treat unre
 The separate §54 authentication source remains uncommitted in its isolated validation checkout. Initial synthetic qualification exposed and corrected a recursive admission-lock acquisition in the observer; the exact stalled test session was terminated and reconciled before another run. The next run observed the original direct credential, SDK client and request mechanism, while the EVAL publisher correctly withheld a configured READ_ONLY class from an API_KEY witness. The positive fixture must select the matching public class before input freezing; the mismatched class must remain a negative case. These are development findings, not accepted tests or live authentication proof.
 
 Original installed C26 denial, paid Fabric refusal, socket-test denials, active primary APPLICATION owner and genuine security/release holds remain unchanged. **MISSION_COMPLETE=false; MORE_WORK_EXISTS.**
+
+## 56. Authentication source published; archive correction qualified — 2026-11-08
+
+**MISSION_COMPLETE=false; MORE_WORK_EXISTS.** The original installed carrier, release holds and denial boundaries remain controlling. This checkpoint records source delivery, not installed acceptance.
+
+### EVAL dependency / original release effect
+
+PR2234's archive correction is commit **c43807ba8a816ab81547a5de3d2ae2c917419aa8**, tree3c158a5494d2f7d90c3ab4f5f52bb45cb36e0ae0, on its original branch. Its exact two-file delta enforces the two permitted OMH vendor files and extends the original real archive/import/negative-omission proof. Production archive scope is unchanged. Two archive cases passed (XML SHA256 d9c6c9686d5196b4da33f66fd82a6061091c15c8e52dab6cfafba1834a512fd6); the finite contextual scope cases passed independently. Do not present the earlier diagnostic failure as a passing cohort.
+
+Native readback PID36127 confirmed the original auto-merge request, enabled **2026-11-07T22:28:47Z**, remained active at c438, OPEN/Ready, queue entry null, with no merged commit. No re-arm, cancellation or direct merge occurred. At the retained CI milestone, main CI42425902793 was in progress; harness42425902781, proxy42425902757, qualification42425902748 and OAuth42425902782 succeeded. Runtime42425902801 was cancelled: Python3.13 job128563995076 passed; Python3.12 job128563995217 was cancelled with only “The operation was canceled.” Its cause is not established and it is not a passing workflow. Fresh PR-specific reconciliation is assigned as principal judgment; no admin protection-read retry.
+
+### Auth source / evidence
+
+[PR2257](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2257) is the sole auth source carrier, operation **hermes-native-auth-observation-20261107-c3**, branch **sol/hermes-native-auth-observation-20261107-c3**. Draft publication/readback confirmed head **e1a2ef899c119e64fbff2e6c962b8153a2d46a80**, parent c438, exact tree **996b49896f7653616f9c6f81f2c066e60574cd31**. The 16 auth postimages were frozen and GitHub's tree equals C3's staged tree. Branch compare-and-swap and readback succeeded. PR2257 initially contains its still-pending EVAL ancestry; accepted parent composition and required CI remain prerequisites to its own release.
+
+The incumbent credential owner observes its already-performed direct secret read, actual LOCAL resolver aliases, adopted original route, current client construction/cache return and every actual HTTP attempt. It retains no secret/header/secret-derived digest or extra credential read. Unsupported, missing or changed joins remain unavailable/conflicting. Transport v3 publishes a closed broad API_KEY mechanism only after the matching frozen class and complete original joins; historical v1/v2 decoding and v2 provider projection remain closed. API_KEY does not establish account, entitlement, remote acceptance, delivery or installed use. Optional observer failure preserves original native results/exceptions.
+
+Source qualification uses pinned licensed source bodies, synthetic credentials, the SDK and in-process MockTransport. It does not invoke a live provider or replace the installed runtime carrier.
+
+- 28 auth journeys passed: XML SHA256 **940431548c1433854fa7dde203153a199969c9061b01b9d08e97082343cac420**.
+- 90 incumbent credential/transport/isolated-entry regressions passed: **3d2bccc0e39cc92bcf5a74a79c8dc479b3003c4124acd4ddc6798d2594a882e1**.
+- 15 finite-context scope cases passed: **89e8576b60aa7b992bf2bd292471c76e7599b92d6937826709c81ea51684a50a**.
+- Complete actual three-send retry and unchanged real shared-budget pressure cases both passed: **8205b0ce9643d250030b48aff7d97a663c458f5851b73ef8de745b190f052fb8**. Original compact fixture identities were selected consistently before observation; no retained evidence rewrite or budget change.
+- Ten historical/provider cases passed in an earlier11-case cohort; its one retry-fixture budget failure was subsequently corrected and independently requalified above. Cohorts overlap and must not be summed.
+- Actual D8 added-identity scanner reported no findings. The committed-head **test_d8_template_topology_and_protected_defaults** passed at e1a2 (PID56115 exit0; XML **342e32f2dca1f30e2f7c7716e471da5ab836f3281bf8a9fbecd8807e0f7d890c**).
+- Staged/committed diff checks and byte-equality readback passed.
+
+A development recursive-lock deadlock and callback cleanup hazards were corrected before these final journeys. The exact stalled session was terminated and reconciled; quiet later progress was not treated as a hang. The shared16KiB budget, original uncertainty and current native EVAL invalidity/effect/cleanup rules remain unchanged.
+
+### Next connected product wave
+
+Created and read back **sol/hermes-native-project-knowledge-20261108-c3** at accepted protected **1890f60881707da8939167e5736aa02af1d7f125**; clean source-only worktree **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/knowledge-current-source-validation**. This is not a runtime admission. No v5 postimage exists at this checkpoint. The next explicit finite principal amendment will authorize the connected current project-note/preference consumer before edits.
+
+Principal judgment confirms a separate v5 extension can reuse the same ConsumerSlot, paired OAuth, original MCP caller, Workspace reads, source-operation prepare/read/submit/reconcile, Events and Git publisher. No parallel memory, auth, uncertainty, retry or publication plane is needed. PR2175 filename overlap is ordinary semantic composition, not a transfer of its primary APPLICATION source or writer custody. Its original branch/effects/holds remain preserved.
+
+Original runtimeC26 denial, paid Fabric refusal, two AF_UNIX test denials, local exec disconnection, active primary APPLICATION writer, held398/409 and fleet predecessor/writer predicates are unchanged. C3 remains source validation only. Reuse the compatible protected-law pin66780; the inspected protected move to1890 has no governing-law or auth/EVAL overlap.
