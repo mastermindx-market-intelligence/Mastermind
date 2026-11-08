@@ -1,0 +1,15 @@
+--- a/ext/artifact_delivery.py
++++ b/ext/artifact_delivery.py
+@@ -929,6 +929,12 @@
+         import native_host_review_delivery
+         code = native_host_review_delivery.code_for_request(request, expected_hash=observer_source_hash)
+         response_limit = native_host_review_delivery.MAX_RESPONSE
++    elif type(request) is dict and request.get("schema") == "mastermind.original_support_policy_status.v1":
++        # Separate prelaunch owner join; do not widen any old observation scope.
++        import support_policy_status
++        code = support_policy_status.code_for_request(request,
++            expected_hash=observer_source_hash, expected_sources=current_sources_sha256)
++        response_limit = 16384
+     elif type(request) is dict and request.get("schema") == "mastermind.fabric_run_observation_request.v1":
+         import run_observation_delivery
+         code = run_observation_delivery.code_for_request(request, expected_hash=observer_source_hash)

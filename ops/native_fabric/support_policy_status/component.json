@@ -1,0 +1,27 @@
+{
+  "schema": "mastermind.support_policy_status_component.v1",
+  "source_base": "8731fca29dd36d1083d424f14a956d9819acb205",
+  "native_current_baseline": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+  "baseline_purpose": "component/API qualification only; never a whole-cohort replacement for prospective Memory118",
+  "patches": {
+    "ext/fabric_task.py": {
+      "before": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28",
+      "after": "3728219c9a38484b6bfa60406be8a711178c943f01781aac657bb0852802897d",
+      "patch": "patches/fabric_task.py.forward.patch",
+      "patch_sha256": "2da5b12a7c52f251d2ebc1c637bf8639103815a738ddae4fee970680ba46497a"
+    },
+    "ext/artifact_delivery.py": {
+      "before": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
+      "after": "ba8bdca361827efae32c7a46c3398561d187ebe8a5bd64537685183a95dde3bd",
+      "patch": "patches/artifact_delivery.py.forward.patch",
+      "patch_sha256": "74b96abf06cd32d33c83f922a39f7fd0b36b3553796a7608a6f24d1ee5022c40"
+    }
+  },
+  "new_module": {
+    "path": "ext/support_policy_status.py",
+    "source": "ops/native_fabric/support_policy_status/reader.py",
+    "sha256": "8c2d728e5ca8ba2b606147656d5bb18bfb7a84e2a95f7f8828eb4be8b3d63ab6"
+  },
+  "runtime_effects": false,
+  "final_cohort": "Root combines actual Memory118/helper postimages before selection. No old116 native-manifest/publisher/selector is emitted by this component."
+}
