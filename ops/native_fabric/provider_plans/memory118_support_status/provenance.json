@@ -1,6 +1,6 @@
 {
   "accepted_memory_count": 118,
-  "actual_conflict_resolution": "Memory main has added privacy dispatch after parse_args: insert exact reviewed new parser/command nodes; retain all original Memory main statements and guards. Delivery transport patch applies exactly.",
+  "actual_conflict_resolution": "Memory main has existing all-original privacy dispatch after parse_args: exact reviewed new parser inserted, new command runs ONLY AFTER unchanged all-original guard. No privacy exception. Delivery transport patch applies exactly.",
   "actual_runtime_observation": "Root native40 d19f5c6a independent of these source fixtures",
   "base_count": 116,
   "base_selection": {

@@ -134,3 +134,31 @@ def test_actual_memory_generic_channel_privacy_still_refuses(joined,tmp_path,mon
         with pytest.raises(ValueError,match='participant_view_required'):
             (module.inspect_run if channel=='inspect' else module.read_result)('inert-private-run')
     assert not (here/'broker').exists()
+
+
+@pytest.mark.parametrize('suffix',['.request.packet','.operator-packet'])
+def test_new_support_command_preserves_private_refusal_before_reader(runtime,monkeypatch,suffix):
+    r=runtime
+    import fabric_memory_view
+    packet=fabric_memory_view.PACKET_PREFIX+b'"inert":true}'
+    (r.state/(r.run+suffix)).write_bytes(packet)
+    # Keep the metadata join genuinely usable so a misplaced command would
+    # classify over inert transport, rather than merely fail for absent inputs.
+    p=r.state/(r.run+'.request.json');request=json.loads(p.read_text())
+    request['packet_sha256']=hashlib.sha256(packet).hexdigest();p.write_text(json.dumps(request))
+    p=r.state/(r.run+'.request-launch.json');launch=json.loads(p.read_text())
+    launch['packet_sha256']=request['packet_sha256']
+    launch['request_sha256']=sha(r.state/(r.run+'.request.json'));p.write_text(json.dumps(launch))
+    calls=[];metadata_reads=[];original=r.delivery.local_file
+    def record(path,*args,**kwargs):
+        if Path(path).name in {r.run+x for x in ('.request.json','.request-launch.json','.support.json')}:
+            metadata_reads.append(Path(path).name)
+        return original(path,*args,**kwargs)
+    def inert_transport(alias,request,**kwargs):
+        calls.append(alias);return json.dumps(r.status.observe(request)).encode()
+    monkeypatch.setattr(r.delivery,'local_file',record)
+    monkeypatch.setattr(r.delivery,'transport',inert_transport)
+    result=r.task.main(['support-policy-status',r.run,'--root',r.original_root,'--parent',r.parent])
+    assert result==75,('private original crossed new read boundary',result,calls)
+    assert calls==[] and metadata_reads==[]
+    assert not (r.state/(r.run+'.support-policy-status.intent.json')).exists()

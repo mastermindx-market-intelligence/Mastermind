@@ -35,10 +35,22 @@
      p_mac_return = sub.add_parser("recover-mac-policy")
      p_mac_return.add_argument("run_id")
      p_mac_return.add_argument("--root", required=True)
-@@ -1998,6 +2012,40 @@
+@@ -1998,6 +2012,41 @@
      p_completed.add_argument("--apply", action="store_true")
  
      args = parser.parse_args(argv)
++
++
++    # Public CLI adapters may not expose or reconcile a prospective participant
++    # original through status/log/artifact/continuation/acceptance shortcuts.
++    from fabric_memory_view import require_generic_channel
++    original = getattr(args, 'run_id', None)
++    if original is not None:
++        try:
++            require_generic_channel(HERE, original)
++        except ValueError:
++            print('participant_view_required', file=sys.stderr)
++            return 75
 +    if args.cmd == "support-policy-status":
 +        try:
 +            import hashlib
@@ -62,17 +74,6 @@
 +        _json(response)
 +        return 0 if response.get("state") == "OBSERVED" else 78
 +
-+
-+    # Public CLI adapters may not expose or reconcile a prospective participant
-+    # original through status/log/artifact/continuation/acceptance shortcuts.
-+    from fabric_memory_view import require_generic_channel
-+    original = getattr(args, 'run_id', None)
-+    if original is not None:
-+        try:
-+            require_generic_channel(HERE, original)
-+        except ValueError:
-+            print('participant_view_required', file=sys.stderr)
-+            return 75
      if args.cmd == "provider-diagnostics":
          import original_delivery_collector as collector
          try:
