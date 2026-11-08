@@ -1583,6 +1583,30 @@ def test_fresh_status_uid_sweep_proves_idle_absence(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_fresh_status_after_shutdown_without_native_history_reader(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, _adapter, sweeper, peer, _spec = _fixture(tmp_path)
+        assert broker._native_history_binding[0] is None
+        await broker.shutdown()
+        response = await broker.execute(
+            _request(
+                "status",
+                {"fresh_uid_sweep": True},
+                suffix="fresh-status-after-shutdown",
+            ),
+            peer=peer,
+        )
+
+        result = response["result"]
+        assert result["active_run_id"] is None
+        assert result["status_sweep_busy"] is False
+        assert result["status_sweep"]["passed"] is True
+        assert result["status_sweep"]["reason"] == "status_absence"
+        assert sweeper.calls == ["broker_shutdown", "status_absence"]
+
+    asyncio.run(scenario())
+
+
 def _missing_owner_fixture():
     from types import SimpleNamespace
     from copy import deepcopy

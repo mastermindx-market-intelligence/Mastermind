@@ -4424,7 +4424,8 @@ class ExecutiveWorkerBroker:
         """Cancel an active run, then prove the dedicated UID is quiescent."""
 
         async with self._state_lock:
-            self._native_history_shutdown = True
+            if self._native_history_binding[0] is not None:
+                self._native_history_shutdown = True
             if self._native_history_unknown:
                 raise BrokerStateError("original native history resource remains unresolved")
             if self.policy.require_assignment_seal:
