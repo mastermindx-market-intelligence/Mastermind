@@ -6,7 +6,10 @@ real grant, private study data or completed Memory attempt is exercised.
 """
 import hashlib
 import json
-from tests.test_fabric_participant_owner import case, participant, canonical, memory, port
+from tests import test_fabric_participant_owner as owner_fixture
+from tests.test_fabric_participant_owner import (
+    _native_owner_modules, case, participant, canonical, memory,
+)
 
 
 def test_two_declared_principals_can_share_one_execution_identity_without_becoming_independent(case):
@@ -34,7 +37,9 @@ def test_two_declared_principals_can_share_one_execution_identity_without_becomi
     observed = []
     for descriptor in reads:
         if descriptor['participant_role'] in ('reviewer_1', 'reviewer_2') and descriptor['evidence_role'] == 'principal_ref':
-            body = port.validate_payload(descriptor,
+            # The actual owner is created by the imported scoped fixture, not at
+            # collection. Keep its real import lifetime and restoration law.
+            body = owner_fixture.port.validate_payload(descriptor,
                 value['metadata_payloads'][descriptor['reference']['object_id']], reads)
             observed.append(body)
     assert len(observed) == 2
