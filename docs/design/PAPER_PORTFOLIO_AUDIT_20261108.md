@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption, Market Memory exact-record comparison with actual source-record proof, and Prophet D03 selected comparison, subject identity and security-watchlist outcomes. OS created-project opening recovery and two exact directory reference corrections are also completed. The next foreground slice is invalid project setup link recovery through the existing journey owner. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption, Market Memory exact-record comparison with actual source-record proof, and Prophet D03 selected comparison, subject identity and security-watchlist outcomes. OS created-project opening recovery and two exact directory reference corrections are also completed. Invalid project setup link recovery through the existing journey owner is now completed as well. The next foreground slice is a bounded News reading/return flow audit against its actual existing implementation. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -408,8 +408,28 @@ Principal inspected desktop, EN/ZH mobile and contract screenshots. A bounded re
 
 **Remaining consumer proof:** zero/one/ambiguous catalogue results, pending/repeated gestures, read failure then exact success, auth/host/selection invalidation and late responses, Back/reopen identity, keyboard/screen-reader behavior, and absence of duplicate creation or launch effects.
 
-### Next active slice: invalid project setup link
+### Invalid project setup link — source plan (now implemented)
 
 The same source exposes a separate invalid-link entry. Open project setup invokes `openProjectJourney` and the existing journey owner: known safe selection resumes its original identity; an eligible retained same-actor goal can be restored; cold invalid entry has no recovered selection and opens blank setup. Host/auth/currentness still bind. This is presentation/URL navigation, not project creation or launch.
 
 Add concise EN/ZH proposed entry recovery using this distinction. Do not claim that the original project was restored, deleted, failed or expired. Back hides the local pane but does not repair an invalid URL; explicit setup opening uses the existing URL adapter. This adjacent work remains disjoint from live Today/New project writers.
+
+### Invalid setup link — implemented and verified
+
+Three additional proposals on the same OS p-E page:
+
+- `YSR-0`: desktop EN, existing Projects-selected shell.
+- `YVT-0`: 390px EN.
+- `YWR-0`: 390px ZH.
+
+The cards say **Project setup link unavailable**, direct the user to the original setup link for a previous request, and offer **Open project setup** / **Back to projects**. They contain no created-project badge, invented project title, original-request-restored claim or deleted/expired/failed explanation. Exact text checks confirmed that no confirmed-creation copy or unconditional retained-request promise leaked from their source specimens.
+
+App.openProjectJourney first calls the existing journey owner, then clears catalogue selection/tab and selects Projects. A cold invalid URL initializes with no selection, goal or retained context; explicit opening therefore presents blank setup. Known selection or eligible retained same-actor context uses the existing recovery path. Invalidated host/auth/generation suppresses navigation. This is presentation and safe URL mutation; no creation, planning or work launch is invoked.
+
+The source distinction is visible in the appended existing-owner contract `YYM-0` on `YEL-0`: cold entry, existing session context, and return/URL. Back and Close hide the invalid state locally but do not repair its URL, so reload can show the error again. Explicit Open commits the safe setup URL before adopting state. Do not promise durable draft restoration across a cold reload or restore passively held cross-actor content.
+
+The original recovery contract now includes a compact proposal index `YZ2-0` for all six recovery screens. Current start-here board PBO and its newer W1/W2 target-design groups were read and preserved; no existing live goal-first journey was overwritten.
+
+Principal inspected EN/ZH mobile, desktop and the appended contract screenshots; all controls and copy fit in the observed layouts. Text readback confirms required owner constraints and the unchanged protected source pin. Desktop invalid-link board lies below its corresponding created-project desktop with an 80px gap; mobile proposals have separate horizontal positions. Scoped finish completed for all three new boards and the appended contract board. All effects were **APPLIED_RESPONSE_OBSERVED**; no runtime setup navigation was performed.
+
+**Next foreground:** inspect News count-detail and publisher-reading transitions against the actual existing TickerNewsPanel / NewsCatchup owners. Preserve frozen R3 `27K-0` and accepted R2 return-header repairs. Do not invent an internal article route, review effect, reader service or persistence merely to illustrate the return flow.
