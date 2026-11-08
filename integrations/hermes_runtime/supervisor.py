@@ -166,88 +166,6 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, *, evaluation_
     return expected_mcp
 
 
-
-def expected_disabled_mcp_with_application(profile: RuntimeProfile, consumer=None, primary_application=None,
-                                              *, evaluation_inputs=None) -> dict[str, tuple[str, ...]] | None:
-    """Require exact on-disk native config before trusting any CLI summary.
-
-    A displayed MCP summary is not a connection or admission receipt.
-    The only accepted additional config is the reviewed, *disabled*
-    Steward source, plus - for a qualified optional consumer - the exact
-    reviewed Executive entry whose tool filter is empty. No unknown or
-    enabled MCP/server plugin is allowed.
-    """
-
-    if primary_application is None:
-        return expected_disabled_mcp(profile, consumer, evaluation_inputs=evaluation_inputs)
-    if evaluation_inputs is not None and profile.model_provider == "mastermind-fabric":
-        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
-    path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
-    if not path.exists() and not path.is_symlink():
-        if evaluation_inputs is not None or (profile.state_dir / "install-manifest.json").exists():
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
-        # Uninstalled stub-runtime tests use a temporary profile without
-        # a native config. Real installs must carry that config.
-        return None
-    if path.is_symlink():
-        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_SYMLINK")
-    try:
-        info = path.stat()
-        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
-                or info.st_uid != os.geteuid() or info.st_nlink != 1):
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNSAFE")
-        if info.st_size > 64 * 1024:
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_TOO_LARGE")
-        raw = path.read_bytes()
-    except OSError:
-        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
-    if (evaluation_inputs is None and profile.native_provider_id is None
-            and raw == render_hermes_config(profile).encode("utf-8")):
-        return None
-    # The built-in WP1 package remains independent for non-integrated
-    # installs; this optional consumer is loaded only for the specific
-    # reviewed disabled native config.
-    from integrations.hermes_harness.native_mcp import render_disarmed_native_config
-    from integrations.hermes_steward.client import ALLOWED_TOOLS
-
-    if profile.extension_allowlist:
-        raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
-    from integrations.hermes_harness.native_byok import (
-        expected_native_config,
-        render_disarmed_native_byok,
-    )
-    if primary_application is not None:
-        from integrations.hermes_application_fabric.publication import expected_native_config as application_config
-        allowed_native = {application_config(profile, primary_application, consumer).encode("utf-8")}
-    elif evaluation_inputs is not None:
-        allowed_native = set()
-    elif profile.model_provider == "mastermind-fabric":
-        raise RuntimeRefusal("NATIVE_PRIMARY_APPLICATION_UNQUALIFIED")
-    else:
-        allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
-    # An explicit persisted selection cannot downgrade to a legacy or
-    # model-less config. Only selector-free historical profiles retain
-    # the earlier source-compatible config forms.
-    if primary_application is None and evaluation_inputs is None and profile.native_provider_id is None:
-        allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
-    expected_mcp: dict[str, tuple[str, ...]] = {"mastermind_steward": tuple(ALLOWED_TOOLS)}
-    if consumer is not None:
-        from integrations.hermes_harness.native_executive_consumer import (
-            publication_from_document,
-        )
-        publication = publication_from_document(consumer)
-        if primary_application is None:
-            allowed_native.add(expected_native_config(
-                profile, consumer, evaluation_inputs=evaluation_inputs).encode("utf-8"))
-        # The upstream census renders an empty include list as "(none)". The
-        # Executive entry registers no model-facing tool at all, so the
-        # summary must show exactly that.
-        expected_mcp[publication.mcp.server] = ("(none)",)
-    if raw not in allowed_native:
-        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
-    return expected_mcp
-
-
 class ServiceRuntime:
     def __init__(
         self,
@@ -578,7 +496,7 @@ class ServiceRuntime:
                 self._native_home = current_home
             elif self._native_home != current_home:
                 raise RuntimeRefusal("NATIVE_PROFILE_HOME_CHANGED")
-        self._expected_disabled_mcp()
+        self._expected_disabled_mcp_native()
         native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
         from integrations.hermes_harness.native_byok import expected_native_config
         env = self._env()
@@ -656,14 +574,11 @@ class ServiceRuntime:
         return recipe.get("executive_consumer")
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
-        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
-        if primary is not None:
-            return expected_disabled_mcp_with_application(self.profile, self._consumer_publication(), primary_application=primary)
         return expected_disabled_mcp(self.profile, self._consumer_publication(), evaluation_inputs=(
             self._native_launch.recipe.get("evaluation_inputs") if self._native_launch is not None else None))
 
     def _check_registry(self) -> None:
-        expected_disabled_mcp = self._expected_disabled_mcp()
+        expected_disabled_mcp = self._expected_disabled_mcp_native()
         try:
             proc = subprocess.run(
                 (self._native_launch.argv(self.profile, self.hermes_bin, tools=True)
@@ -839,8 +754,95 @@ def _terminate(proc: subprocess.Popen[bytes]) -> None:
         proc.kill()
         proc.wait(timeout=1)
 
+    def _expected_disabled_mcp_native(self) -> dict[str, tuple[str, ...]] | None:
+        primary = self._native_launch.recipe.get("primary_application") if self._native_launch is not None else None
+        if primary is not None:
+            return expected_disabled_mcp_with_application(self.profile, self._consumer_publication(), primary_application=primary)
+        return self._expected_disabled_mcp()
+
 
 def _reap(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is None:
         return
     proc.wait(timeout=1)
+
+
+def expected_disabled_mcp_with_application(profile: RuntimeProfile, consumer=None, primary_application=None,
+                                              *, evaluation_inputs=None) -> dict[str, tuple[str, ...]] | None:
+    """Require exact on-disk native config before trusting any CLI summary.
+
+    A displayed MCP summary is not a connection or admission receipt.
+    The only accepted additional config is the reviewed, *disabled*
+    Steward source, plus - for a qualified optional consumer - the exact
+    reviewed Executive entry whose tool filter is empty. No unknown or
+    enabled MCP/server plugin is allowed.
+    """
+
+    if primary_application is None:
+        return expected_disabled_mcp(profile, consumer, evaluation_inputs=evaluation_inputs)
+    if evaluation_inputs is not None and profile.model_provider == "mastermind-fabric":
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
+    path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
+    if not path.exists() and not path.is_symlink():
+        if evaluation_inputs is not None or (profile.state_dir / "install-manifest.json").exists():
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
+        # Uninstalled stub-runtime tests use a temporary profile without
+        # a native config. Real installs must carry that config.
+        return None
+    if path.is_symlink():
+        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_SYMLINK")
+    try:
+        info = path.stat()
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_nlink != 1):
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNSAFE")
+        if info.st_size > 64 * 1024:
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_TOO_LARGE")
+        raw = path.read_bytes()
+    except OSError:
+        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
+    if (evaluation_inputs is None and profile.native_provider_id is None
+            and raw == render_hermes_config(profile).encode("utf-8")):
+        return None
+    # The built-in WP1 package remains independent for non-integrated
+    # installs; this optional consumer is loaded only for the specific
+    # reviewed disabled native config.
+    from integrations.hermes_harness.native_mcp import render_disarmed_native_config
+    from integrations.hermes_steward.client import ALLOWED_TOOLS
+
+    if profile.extension_allowlist:
+        raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
+    from integrations.hermes_harness.native_byok import (
+        expected_native_config,
+        render_disarmed_native_byok,
+    )
+    if primary_application is not None:
+        from integrations.hermes_application_fabric.publication import expected_native_config as application_config
+        allowed_native = {application_config(profile, primary_application, consumer).encode("utf-8")}
+    elif evaluation_inputs is not None:
+        allowed_native = set()
+    elif profile.model_provider == "mastermind-fabric":
+        raise RuntimeRefusal("NATIVE_PRIMARY_APPLICATION_UNQUALIFIED")
+    else:
+        allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
+    # An explicit persisted selection cannot downgrade to a legacy or
+    # model-less config. Only selector-free historical profiles retain
+    # the earlier source-compatible config forms.
+    if primary_application is None and evaluation_inputs is None and profile.native_provider_id is None:
+        allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
+    expected_mcp: dict[str, tuple[str, ...]] = {"mastermind_steward": tuple(ALLOWED_TOOLS)}
+    if consumer is not None:
+        from integrations.hermes_harness.native_executive_consumer import (
+            publication_from_document,
+        )
+        publication = publication_from_document(consumer)
+        if primary_application is None:
+            allowed_native.add(expected_native_config(
+                profile, consumer, evaluation_inputs=evaluation_inputs).encode("utf-8"))
+        # The upstream census renders an empty include list as "(none)". The
+        # Executive entry registers no model-facing tool at all, so the
+        # summary must show exactly that.
+        expected_mcp[publication.mcp.server] = ("(none)",)
+    if raw not in allowed_native:
+        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
+    return expected_mcp
