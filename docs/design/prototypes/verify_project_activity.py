@@ -133,7 +133,9 @@ async def verify():
         assert await page.get_by_role("button", name="Resend", exact=True).count() == 0
         await page.click("#state-action")
         assert "example-operation-17" in await page.locator("#activity-panel").inner_text()
+        await apply("result")
         await page.locator("#activity-panel [data-close]").click()
+        assert await page.evaluate("document.activeElement.id") == "project-title"
         checks.append("Unknown effects retain the original operation and cannot preview a stale follow-up or offer resend.")
 
         await apply("partial")
