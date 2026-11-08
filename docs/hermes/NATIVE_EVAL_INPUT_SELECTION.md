@@ -1111,3 +1111,44 @@ Baseline JUnit SHA-256: `a71820d2436dbe75511bbd6ada5127276a395383f4fb18b6edf56d7
 Qualified JUnit SHA-256: `abe6230c7a943181db27892efb00b00d5d3b67295b179e1782451e654af57e13`.
 
 This proves the finite registration and its regression cases. It does not claim that the current stacked PR already has a release-eligible whole delta; that depends on the actual protected prerequisites and resulting residual source.
+
+
+## Managed-worker retirement: bounded source contribution — 2026-11-08
+
+Under the Chairman's instruction to finish and harden the existing Hermes/Fabric
+integration, the assigned principal authorizes a finite repair to the incumbent
+native managed-worker lifetime. This is the same
+`hermes-eval-producer-compose-20261107-sol-001` contribution and original PR;
+it introduces no second worker owner, queue, retry service or runtime grant.
+
+At the pinned upstream `1c0cd667746d3395fe9e1b6c74f8f85952486f18`,
+`gateway/session_managed_worker.py` removes a worker from the authority map
+before bounded teardown. Its `closed` flag stops I/O but can precede actual
+process and thread completion. Existing work counting excludes that flag and
+the profile join does not account for a retained managed worker. These facts
+cannot serve as physical retirement or cleanup evidence.
+
+The repair belongs in those original managed-worker, runtime-work and admission
+owners, carried by the existing cumulative native EVAL source qualification.
+Retain unresolved resources under the same owner, keep queued successors behind
+the original admission gate, and reuse the incumbent drain and shutdown paths.
+A finished response, terminal ledger row or I/O-stop flag must not erase an
+unretired worker. Original result settlement and `unknown` effect meanings stay
+intact. Physical handle/thread retirement does not prove descendant cleanup,
+whole-admission `NO_EFFECT`, complete EVAL coverage or installed acceptance.
+
+The following three exact new paths are authorized as EVAL-owned contributions:
+
+- `integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_managed_worker.py.source`
+- `integrations/hermes_runtime/tests/fixtures/native_eval_inputs/gateway__session_runtime_workers.py.source`
+- `integrations/hermes_runtime/tests/test_native_worker_retirement.py`
+
+The donor fixtures must retain their exact upstream bytes, source pin, hashes
+and existing MIT license provenance. The existing qualification manifest,
+patch, qualifier, README, provenance and native input tests remain their named
+owners. `ops/executive_os/native_gateway_sources.py` remains a contextual source
+binding only. This finite amendment permits registration of the three paths;
+it changes no forbidden prefix, core import/environment rule, effective-delta
+calculation, dependency subtraction, parent ordering or shared ownership rule.
+The gate must still reject adjacent unlisted paths. It does not authorize access
+to any previously denied source or resolve the outstanding integration conflict.
