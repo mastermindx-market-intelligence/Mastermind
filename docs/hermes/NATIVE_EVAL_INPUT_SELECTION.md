@@ -1088,3 +1088,17 @@ PR2255 remains draft and unarmed until its required accepted inputs make the
 actual residual EVAL delta finite and free of forbidden-prefix changes. Any
 newly protected Project Knowledge v5 gateway registration must be preserved
 alongside this auth binding during that accepted-source composition.
+
+## Assigned-principal APPLICATION observation scope amendment — 2026-11-08
+
+The Chairman has directed completion and integration of the Hermes/Fabric architecture and hardening work. Under that continuing commission, the assigned integration principal authorizes these exact additional EVAL-owned paths for the existing `hermes-eval-producer-compose-20261107-sol-001` operation and the same Draft PR2255:
+
+- `docs/hermes/APPLICATION_OBSERVATION_V4.md`
+- `integrations/hermes_runtime/native_application_observation.py`
+- `integrations/hermes_runtime/tests/test_native_application_observation.py`
+
+These are the bounded original APPLICATION return-observation contribution, its qualification cases, and its contract document, published in `5c114cf8d691bb7cad9f3c92c19e688132bf1cda` and extended by the qualified observed-serving-label projection in `bccae891c4ba6b97c65ea9c210fc145c092a9a74`. They extend the existing native observation owner and EVAL publisher; they create no new transport, runner, store, admission, credential, queue, retry, account or deployment operation.
+
+Record this amendment in a commit before adding these exact paths to the finite EVAL-owned `ALLOWED_PATHS`. The gate change must cite that immutable amendment and prove that each path independently reaches both real fences, while nearby unlisted paths and mixed forbidden changes remain refused. These are owned paths, not shared-connection exemptions. No path prefix, import prohibition, forbidden surface, effective-delta computation, dependency subtraction, release ordering or existing ownership rule is expanded.
+
+The same Draft carrier may prepare its bounded source composition now. The original EVAL, APPLICATION and auth release carriers retain their independent effects; their outstanding work must not be imported into the APPLICATION release. Final residual retargeting and release still require their actual protected inputs, a whole effective delta within the finite EVAL closure, required checks, and the original delivery path. This source amendment grants no runtime admission, installed acceptance, complete producer validity, learning promotion or uptime claim.
