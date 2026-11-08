@@ -1,0 +1,354 @@
+{
+  "root": "/private/tmp/h6-installer-verified-env-20261107-_82zoqkq",
+  "argv": [
+    "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+    "tests/test_executive_launchd_config.py::test_control_config_template_tracks_strict_service_schema",
+    "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[0]",
+    "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[1]",
+    "tests/test_executive_python_runtime_provisioner.py::test_installer_projects_exact_validated_python_runtime_provenance",
+    "tests/test_executive_release_publication.py::test_archive_padding_is_fully_consumed_before_publication",
+    "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-directory]",
+    "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-file]",
+    "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-symlink]",
+    "tests/test_executive_release_publication.py::test_postpublication_interruption_leaves_verified_release",
+    "tests/test_executive_release_publication.py::test_seal_survives_relocation_and_existing_release_is_only_verified",
+    "tests/test_executive_release_stage_only.py::test_changed_existing_assets_or_seal_never_repaired",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[archive]",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[chown]",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[os_release_assets.py:import]",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[race]",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:create]",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:verify]",
+    "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[rename]",
+    "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-dir]",
+    "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-symlink]",
+    "tests/test_executive_release_stage_only.py::test_ordinary_path_reuses_shared_stage",
+    "tests/test_executive_release_stage_only.py::test_packed_source_still_fails_archive_and_retains_stage",
+    "tests/test_executive_release_stage_only.py::test_preflight_refuses_before_staging[updates5]",
+    "tests/test_executive_release_stage_only.py::test_real_stage_seal_and_existing_destination_are_read_only",
+    "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[acl]",
+    "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[mode]",
+    "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[symlink]",
+    "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[absent]",
+    "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[sealed_identical]",
+    "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[valid]",
+    "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+    "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+    "--basetemp",
+    "/private/tmp/h6-installer-verified-env-20261107-_82zoqkq/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-installer-verified-env-20261107-_82zoqkq/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 70.976,
+  "testcases": 42,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_d7_exact_event_loop_only_and_foreign_scope_refused",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_control_config_template_tracks_strict_service_schema",
+      "classname": "tests.test_executive_launchd_config",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_derives_arm_and_refuses_source_override[0]",
+      "classname": "tests.test_executive_privileged_control_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_derives_arm_and_refuses_source_override[1]",
+      "classname": "tests.test_executive_privileged_control_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_projects_exact_validated_python_runtime_provenance",
+      "classname": "tests.test_executive_python_runtime_provisioner",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_archive_padding_is_fully_consumed_before_publication",
+      "classname": "tests.test_executive_release_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_competing_destination_is_preserved_without_nested_stage[race-directory]",
+      "classname": "tests.test_executive_release_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_competing_destination_is_preserved_without_nested_stage[race-file]",
+      "classname": "tests.test_executive_release_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_competing_destination_is_preserved_without_nested_stage[race-symlink]",
+      "classname": "tests.test_executive_release_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_postpublication_interruption_leaves_verified_release",
+      "classname": "tests.test_executive_release_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_seal_survives_relocation_and_existing_release_is_only_verified",
+      "classname": "tests.test_executive_release_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_existing_assets_or_seal_never_repaired",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[archive]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[chown]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[os_release_assets.py:import]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[race]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[release_manifest.py:create]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[release_manifest.py:verify]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failure_retains_stage_without_other_effects[rename]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_occupied_destination_never_adopted_or_overwritten[stage-dir]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_occupied_destination_never_adopted_or_overwritten[stage-symlink]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_ordinary_path_reuses_shared_stage",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_packed_source_still_fails_archive_and_retains_stage",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_preflight_refuses_before_staging[updates5]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_real_stage_seal_and_existing_destination_are_read_only",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_source_and_ancestry_guards[acl]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_source_and_ancestry_guards[mode]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_source_and_ancestry_guards[symlink]",
+      "classname": "tests.test_executive_release_stage_only",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_optional_preflight_refuses_before_service_stop[absent]",
+      "classname": "tests.test_os_release_assets",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_optional_preflight_refuses_before_service_stop[sealed_identical]",
+      "classname": "tests.test_os_release_assets",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_optional_preflight_refuses_before_service_stop[valid]",
+      "classname": "tests.test_os_release_assets",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[asyncio.run(_serve_from_config-subprocess.run(_serve_from_config]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[asyncio.run(_serve_from_config-run(_serve_from_config]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[asyncio.run(_serve_from_config-foreign.run(_serve_from_config]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[asyncio.run(_serve_from_config-asyncio.run(_other_coroutine]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[_serve_from_config(config_path, _installed_control=True)-_serve_from_config(other_path, _installed_control=True)]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[_installed_control=True)-_installed_control=False)]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[_installed_control=True))-_installed_control=True), debug=True)]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[def serve_installed_control(-def moved_control(]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[import asyncio-import foreign as asyncio]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_d7_reviewed_event_loop_never_adopts_modified_source[-\\nimport subprocess\\nsubprocess.run([])\\n]",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "45e00f2cc162072e381af0198bc09a54daa73544fa9cd47b4ed25760a061c4aa",
+    "result.xml": "0ebadfdc355c9955bd05d7da543a41bc462bb1aa626c77cfaf8e4c1bc79bdf8f"
+  }
+}

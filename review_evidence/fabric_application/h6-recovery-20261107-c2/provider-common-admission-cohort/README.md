@@ -1,5 +1,12 @@
 # H6 provider-preserving common admission source proposal
 
+## Current-family adoption
+
+The original APPLICATION family has advanced beyond this proposal's exact parent.
+Read [the current-family adoption contract](CURRENT_FAMILY_ADOPTION_20261107.md)
+and its exact source comparison before deriving or applying a successor.
+The previously qualified proposal and its 12 source postimages remain unchanged.
+
 ## Status and exact applicability
 
 This is an isolated source proposal, not selected or installed production source.
@@ -16,7 +23,10 @@ and common-fence changes; do not stack the earlier H3/common patches again.
 common-admission-cohort-proposal.patch SHA256:
 64142500cd2651083c538c2cfc6e399edf2a739dde2c0c66c865204a8e39b68b
 
-The patch is 81259 bytes for the three existing rollout owners; nine new\ncohort files are in source_overlay with exact source_overlay_inventory.json hashes.\nAll 12 resulting source files match the qualified source. Forward check, actual application\nto a fresh exact source export, postimage verification and reverse check passed.
+The patch is 81259 bytes for the three existing rollout owners; nine new
+cohort files are in source_overlay with exact source_overlay_inventory.json hashes.
+All 12 resulting source files match the qualified source. Forward check, actual application
+to a fresh exact source export, postimage verification and reverse check passed.
 See patch-application-proof.json.
 
 ## Closed source relation
@@ -100,7 +110,10 @@ Final enrollment JUnit SHA256:
 ## Reproduction through existing owners
 
 Materialize an owned disposable repository-shaped source at the exact base,
-then apply the proposal patch after checking its three existing preimages. Copy\nthe nine exact source_overlay files to their recorded repository-relative paths\nonly when those destinations are absent; verify their recorded hashes.\nRetain the source checkout as source beneath a private H6 cohort directory.
+then apply the proposal patch after checking its three existing preimages. Copy
+the nine exact source_overlay files to their recorded repository-relative paths
+only when those destinations are absent; verify their recorded hashes.
+Retain the source checkout as source beneath a private H6 cohort directory.
 The normal builder flags continue to emit the existing artifacts unchanged.
 
 The new source is emitted only with:
@@ -132,11 +145,12 @@ window/capacity and billable-meter qualification, applicable legacy transition,
 remote APPLICATION closure, protected delivery and real consumer acceptance.
 Unknown billable usage still refuses under the strict H3 contract.
 
-The current receiver context is completed d0c5431/#2232 and 024bc08/#2225, which
-report the same 0a native source and a3d/Macro25ba consumer source. H4 owns 88a68's
-NativeSecretaryClient/SessionAuthority acceptance command and its active latency
-successor. Do not create an H6 acceptance runner or replay the old combined
-latency overlay. Original #2175 remains the release/C3/J carrier.
+The original proposal was qualified against completed d0c5431/#2232 and
+024bc08/#2225-era source. Current receiver source has advanced; the adoption
+contract above records its exact changed parents and active composition. H4
+retains the existing NativeSecretaryClient/SessionAuthority acceptance command.
+Do not create an H6 acceptance runner or replay an old combined latency overlay.
+Original #2175 remains the release/C3/J carrier.
 
 This proposal and its test receipts are a completed H6 source contribution.
 They do not establish release, selection, installation, live account enrollment,
@@ -145,4 +159,8 @@ product acceptance.
 
 ## Protected-source packaging correction
 
-The first committed-head guard on1390 rejected nested-patch hunk line numbers895/896.\nThe source is now delivered as ordinary existing-owner diffs plus directly visible\noverlay members. The same guard and review registry remain unchanged. All12\nqualified source postimages, manifests and executed source/enrollment evidence\nare unchanged. The failed receipt and exact packaging change are retained.\n
+The first committed-head guard on1390 rejected nested-patch hunk line numbers895/896.
+The source is now delivered as ordinary existing-owner diffs plus directly visible
+overlay members. The same guard and review registry remain unchanged. All12
+qualified source postimages, manifests and executed source/enrollment evidence
+are unchanged. The failed receipt and exact packaging change are retained.

@@ -1,0 +1,195 @@
+{
+  "schema": "mastermind.h6.installer_fixture_recovery.v1",
+  "source_parent": "e1e94813bb16dd5f77140a456ac2c69e71fe0447",
+  "governing_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+  "observed_master": "9e390e74f6a95c0e6bef6ec3a3a601c5e97ccfcb",
+  "governing_16_path_delta": [],
+  "completed_donor": {
+    "commit": "d9d1afd23332f58a1cf5649fc37d51c1138ea512",
+    "receipt_path": "review_evidence/hermes_primary/attended-installer-ci-fixtures-20261107.json",
+    "receipt_sha256": "5df5d1da3cd7dcd3d17c9220af2d07e39a96a13f0a8ce3a675d8a28e22c1478f",
+    "return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6712903230",
+    "inherited_qualification": {
+      "focused": 25,
+      "publication_and_stage": 45,
+      "attribution": "donor execution, not rerun or relabelled H6"
+    }
+  },
+  "hosted_failure": {
+    "run_id": 42413921926,
+    "head": "e1e94813bb16dd5f77140a456ac2c69e71fe0447",
+    "status": "completed",
+    "conclusion": "failure",
+    "run_attempt": 1,
+    "distinct_case_count": 31,
+    "distinct_cases": [
+      "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+      "tests/test_executive_launchd_config.py::test_control_config_template_tracks_strict_service_schema",
+      "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[0]",
+      "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[1]",
+      "tests/test_executive_python_runtime_provisioner.py::test_installer_projects_exact_validated_python_runtime_provenance",
+      "tests/test_executive_release_publication.py::test_archive_padding_is_fully_consumed_before_publication",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-directory]",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-file]",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-symlink]",
+      "tests/test_executive_release_publication.py::test_postpublication_interruption_leaves_verified_release",
+      "tests/test_executive_release_publication.py::test_seal_survives_relocation_and_existing_release_is_only_verified",
+      "tests/test_executive_release_stage_only.py::test_changed_existing_assets_or_seal_never_repaired",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[archive]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[chown]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[os_release_assets.py:import]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[race]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:create]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:verify]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[rename]",
+      "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-dir]",
+      "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-symlink]",
+      "tests/test_executive_release_stage_only.py::test_ordinary_path_reuses_shared_stage",
+      "tests/test_executive_release_stage_only.py::test_packed_source_still_fails_archive_and_retains_stage",
+      "tests/test_executive_release_stage_only.py::test_preflight_refuses_before_staging[updates5]",
+      "tests/test_executive_release_stage_only.py::test_real_stage_seal_and_existing_destination_are_read_only",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[acl]",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[mode]",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[symlink]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[absent]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[sealed_identical]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[valid]"
+    ],
+    "job_log_sha256": {
+      "128527797483": "5526a7a3749589f09cc3a56343ada97dd553cf256f0db779e5b8f2606142de78",
+      "128527797528": "e0534e0704739f8d01ea8cf72fe74d645df8ecb1093b88fe23980cedef2cd91a",
+      "128527797536": "c7d8aff6367a39215104b816253ade1533bdb2189a1f4553464f533369ce9ab7",
+      "128527797540": "35a7ec4ec68b33397e7e701d6a28575e8166714a089deb58c7d387388d4ea95f",
+      "128527797669": "f460d6ed017ef1ae2a7b0b2dacd40167fd159d591f6fdd8602ad16e898498932"
+    }
+  },
+  "source_dependencies": {
+    "installer_sha256": "6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2",
+    "installer_exact_donor": true,
+    "executive_service_sha256": "6a104ea9d843d54d80e85d68922dc018d42c7a76cdf8bdd6fb28f7ec0a7901bd",
+    "executive_service_exact_donor": true,
+    "phase1c_sha256": "bf4fdf9b2bff42d9c04304ee4dbedb35eb6089d66f7954c91646e9ba6755c549",
+    "phase1c_kept_unchanged": true,
+    "event_loop_normalized_ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+    "event_loop_exact_donor": true
+  },
+  "files": {
+    "tests/test_executive_launchd_config.py": {
+      "preimage_sha256": "013e23f4eec21ec9aac359c7bdf432bf5c09e2fa8c8f88b5be965a7282950971",
+      "postimage_sha256": "b6ffbdd94bc9cce1b65f90ea40fed7ee3db19dc34167cedbf189518b33a2dd3d",
+      "exact_donor": true
+    },
+    "tests/test_executive_privileged_control_composition.py": {
+      "preimage_sha256": "26ae54510cc2a05542f5098e9905395bf93058a616071c78f408b50ae7ae7e16",
+      "postimage_sha256": "25b17d1f9262c0b64cefcab3367152369a8b3cdcea6bb41a3aa6c4940a249176",
+      "exact_donor": true
+    },
+    "tests/test_executive_python_runtime_provisioner.py": {
+      "preimage_sha256": "6258ab2155066f41b90f6e7222ff5d6ea2ee86502cd79b6e4145f128357d4379",
+      "postimage_sha256": "fb065a98dbf9d1593cb9dfd07ca2ec485d56549d328d4e485571166704416519",
+      "exact_donor": true
+    },
+    "tests/test_executive_release_publication.py": {
+      "preimage_sha256": "be9bc1644c925920a8a1f3cd4f67be1148bceb4b0b376c22b46c3e2545933036",
+      "postimage_sha256": "2ef6d489aa63c29e2f6fc6971fa15a17670fe5e42648e48a78b264244bf375c5",
+      "exact_donor": true
+    },
+    "tests/test_executive_release_stage_only.py": {
+      "preimage_sha256": "d8bf7cbb78d525f940c65f52985037f1414f8a61f6084e0f8ab6aa22094f308b",
+      "postimage_sha256": "3e612f2808fcacee6bf7f1788296fac96afe9435201c67a1fd70a611a23281c9",
+      "exact_donor": true
+    },
+    "tests/test_os_release_assets.py": {
+      "preimage_sha256": "ac92024071f4201fefdaac5facc449375c1b4eab27448302bfc314b1873ad0f8",
+      "postimage_sha256": "531098ff59a6ca35fdea5b7e104fbffe891c5f1972917dc14f87766fbea9e5f5",
+      "exact_donor": true
+    },
+    "tests/test_ceo_submit_armed_composition.py": {
+      "preimage_sha256": "38165eff77d3bdf1ccc2cd1fc0c19566ac4de2185613c7cc917326f7667d3a52",
+      "postimage_sha256": "2182de36b214138bd15bdb354a39c55e47c140b9f8149471ccac697f55718022",
+      "exact_donor": false,
+      "adaptation": "H6 exact whole-script pin; original event-loop AST and every refusal unchanged",
+      "whole_script_sha256": "bf4fdf9b2bff42d9c04304ee4dbedb35eb6089d66f7954c91646e9ba6755c549",
+      "normalized_anchor_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819"
+    }
+  },
+  "preserved": {
+    "production_source": true,
+    "native_0a_source": true,
+    "macro_25ba_projection": true,
+    "common_admission_proposal_12_postimages": true,
+    "review_registry": true,
+    "donor_unjoined_web_observation_source_not_claimed": true,
+    "original_2175_writer": true,
+    "original_J_C3_effects": true
+  },
+  "qualification": {
+    "current_h6_focused": {
+      "root": "/private/tmp/h6-installer-verified-env-20261107-_82zoqkq",
+      "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+      "rc": 0,
+      "seconds": 70.976,
+      "testcases": 42,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "45e00f2cc162072e381af0198bc09a54daa73544fa9cd47b4ed25760a061c4aa",
+        "result.xml": "0ebadfdc355c9955bd05d7da543a41bc462bb1aa626c77cfaf8e4c1bc79bdf8f"
+      },
+      "coverage": "31 exact hosted failures plus existing D7 diff check and 10 mutation refusals",
+      "runtime_preflight": {
+        "runtime": {
+          "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+          "packages": {
+            "pytest": "9.1.1",
+            "numpy": "2.5.2",
+            "jsonschema": "4.26.0",
+            "PyYAML": "6.0.3",
+            "referencing": "0.37.0",
+            "rpds-py": "2026.9.1"
+          }
+        },
+        "fixed_dependency_roots": [
+          "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/lib/python3.14/site-packages",
+          "/private/tmp/h6-h1-exact-fixture-p8ns5zzf/hermes/.venv/lib/python3.14/site-packages"
+        ],
+        "collection_rc": 0,
+        "collection_tail": "tests/test_ceo_submit_armed_composition.py: 12\ntests/test_executive_launchd_config.py: 1\ntests/test_executive_privileged_control_composition.py: 2\ntests/test_executive_python_runtime_provisioner.py: 1\ntests/test_executive_release_publication.py: 6\ntests/test_executive_release_stage_only.py: 17\ntests/test_os_release_assets.py: 3\n\n"
+      }
+    },
+    "current_h6_committed_D8": "pending",
+    "current_h6_hosted": "pending publication",
+    "prior_collection_only_outcomes": [
+      {
+        "root": "/private/tmp/h6-installer-fixture-recovery-20261107-q03dv8x7",
+        "rc": 4,
+        "test_cases_executed": 0,
+        "collection_error": "CI scratch environment lacked jsonschema",
+        "files": {
+          "result.log": "2e82335e7b2b0f53db491100e11aefbb0ec6f62cc12cd37df8a30d06ab149478",
+          "result.xml": "9e22b566ea03a713e4754e9c17069a470dff67f9e7758dcbfeb14fc55389d07c"
+        },
+        "source_unchanged": true
+      },
+      {
+        "root": "/private/tmp/h6-installer-fixture-complete-20261107-w64inx6s",
+        "rc": 4,
+        "test_cases_executed": 0,
+        "collection_error": "Hermes scratch environment lacked numpy",
+        "files": {
+          "result.log": "b4083335b60775513d7d62a4c0383ba8e2accacabf2470fa2283941b55df91c4"
+        },
+        "source_unchanged": true
+      }
+    ],
+    "dependency_resolution": "Existing private CPython3.14 dependency roots, CI packages first and Hermes-only missing packages second; exact collection preflight passed; no dependency installation or live environment change."
+  },
+  "runtime_effects": {
+    "installation": false,
+    "enrollment": false,
+    "provider": false,
+    "selection": false,
+    "live_acceptance": false
+  }
+}

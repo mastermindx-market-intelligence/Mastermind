@@ -1,0 +1,262 @@
+{
+  "refs": {
+    "h6": "e1e94813bb16dd5f77140a456ac2c69e71fe0447",
+    "original": "a25b04708fcb295f37b577733f592bd4d7d2e6ef",
+    "qualified_h4": "6f124537d5b6675f5509c6e4c7a7a75508f5cf8a",
+    "funding": "212d10b79e5c3ff83b92ffcad37eb18585555354"
+  },
+  "files": {
+    "ops/native_fabric/quota_continuity/candidate/support_bundle.py": {
+      "h6": {
+        "sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+        "bytes": 39302,
+        "git_blob_sha1": "23dbd2812e333c7b96313d089a37131cc2638d01"
+      },
+      "original": {
+        "sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+        "bytes": 39302,
+        "git_blob_sha1": "23dbd2812e333c7b96313d089a37131cc2638d01"
+      },
+      "qualified_h4": {
+        "sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+        "bytes": 39302,
+        "git_blob_sha1": "23dbd2812e333c7b96313d089a37131cc2638d01"
+      },
+      "funding": {
+        "sha256": "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b",
+        "bytes": 19070,
+        "git_blob_sha1": "e5e6153d86ce6d5e1ce3220ee435a41dc35deefa"
+      }
+    },
+    "ops/native_fabric/quota_continuity/candidate/lease_broker.py": {
+      "h6": {
+        "sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+        "bytes": 201422,
+        "git_blob_sha1": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0"
+      },
+      "original": {
+        "sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+        "bytes": 211236,
+        "git_blob_sha1": "a4710c15842490f796b7482a63f993d1db6e937e"
+      },
+      "qualified_h4": {
+        "sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+        "bytes": 211236,
+        "git_blob_sha1": "a4710c15842490f796b7482a63f993d1db6e937e"
+      },
+      "funding": {
+        "sha256": "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a",
+        "bytes": 152653,
+        "git_blob_sha1": "425dde8715612ab871f191c97a8142b80bffb13f"
+      }
+    },
+    "ops/native_fabric/quota_continuity/candidate/pick.py": {
+      "h6": {
+        "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+        "bytes": 169718,
+        "git_blob_sha1": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5"
+      },
+      "original": {
+        "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+        "bytes": 169718,
+        "git_blob_sha1": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5"
+      },
+      "qualified_h4": {
+        "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+        "bytes": 169718,
+        "git_blob_sha1": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5"
+      },
+      "funding": {
+        "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+        "bytes": 169718,
+        "git_blob_sha1": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5"
+      }
+    },
+    "ops/native_fabric/quota_continuity/rollout/native_generation.py": {
+      "h6": {
+        "sha256": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+        "bytes": 20430,
+        "git_blob_sha1": "06bbec04453ee0d08721666a21d0a51c6a178d80"
+      },
+      "original": {
+        "sha256": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+        "bytes": 20430,
+        "git_blob_sha1": "06bbec04453ee0d08721666a21d0a51c6a178d80"
+      },
+      "qualified_h4": {
+        "sha256": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+        "bytes": 20430,
+        "git_blob_sha1": "06bbec04453ee0d08721666a21d0a51c6a178d80"
+      },
+      "funding": {
+        "sha256": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+        "bytes": 20430,
+        "git_blob_sha1": "06bbec04453ee0d08721666a21d0a51c6a178d80"
+      }
+    },
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": {
+      "h6": {
+        "sha256": "7611de59d939df241bae3ee5987c11c7428dad856ad6842cef505d1affc62cc5",
+        "bytes": 191656,
+        "git_blob_sha1": "2de79611ce82e14b6a255bd1a4956fb5abbf7502"
+      },
+      "original": {
+        "sha256": "7611de59d939df241bae3ee5987c11c7428dad856ad6842cef505d1affc62cc5",
+        "bytes": 191656,
+        "git_blob_sha1": "2de79611ce82e14b6a255bd1a4956fb5abbf7502"
+      },
+      "qualified_h4": {
+        "sha256": "7611de59d939df241bae3ee5987c11c7428dad856ad6842cef505d1affc62cc5",
+        "bytes": 191656,
+        "git_blob_sha1": "2de79611ce82e14b6a255bd1a4956fb5abbf7502"
+      },
+      "funding": {
+        "sha256": "ce8a98c23ef9de6e416c6c1989522c5ca04e11f1a226bce5f6f50f8e9563e94a",
+        "bytes": 113053,
+        "git_blob_sha1": "ee308cad46c5c77c03d06660f9d6f2222fd09ec4"
+      }
+    },
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": {
+      "h6": {
+        "sha256": "51f3264ddd873d2966b6fc991c45b1cd69961a1b03a88bc370dee1d9d79b61dc",
+        "bytes": 79003,
+        "git_blob_sha1": "e5776548a1b75a128f4bbb4f29b478f1bed52280"
+      },
+      "original": {
+        "sha256": "a9d9690803cbee92304f4b8a5153a87316a008c5dce07b12ec5464f187601ea0",
+        "bytes": 95213,
+        "git_blob_sha1": "cad8a71b824b9fb50638e8f0f24adb1472822d4e"
+      },
+      "qualified_h4": {
+        "sha256": "a9d9690803cbee92304f4b8a5153a87316a008c5dce07b12ec5464f187601ea0",
+        "bytes": 95213,
+        "git_blob_sha1": "cad8a71b824b9fb50638e8f0f24adb1472822d4e"
+      },
+      "funding": {
+        "sha256": "f621e98e63c5ca5a702f9217cd9d6feaf535c6c0d41f5f0d393b90b53a3d5841",
+        "bytes": 47160,
+        "git_blob_sha1": "c9385b31ddb9f7a4908943b02a6e3086b26525b9"
+      }
+    },
+    "integrations/hermes_application_fabric/host.py": {
+      "h6": {
+        "sha256": "554e44d573a00aeccc7a1827b5a85b7e398ec56c45ce4ed937783503dbd1e1e8",
+        "bytes": 18905,
+        "git_blob_sha1": "c38567a3d451e4db4e63652dd104ba1a51f4b50b"
+      },
+      "original": {
+        "sha256": "554e44d573a00aeccc7a1827b5a85b7e398ec56c45ce4ed937783503dbd1e1e8",
+        "bytes": 18905,
+        "git_blob_sha1": "c38567a3d451e4db4e63652dd104ba1a51f4b50b"
+      },
+      "qualified_h4": {
+        "sha256": "554e44d573a00aeccc7a1827b5a85b7e398ec56c45ce4ed937783503dbd1e1e8",
+        "bytes": 18905,
+        "git_blob_sha1": "c38567a3d451e4db4e63652dd104ba1a51f4b50b"
+      },
+      "funding": {
+        "state": "ABSENT_AT_PROTECTED_SOURCE",
+        "application_owner_not_in_protected_base": true
+      }
+    },
+    "integrations/hermes_application_fabric/source_context.py": {
+      "h6": {
+        "sha256": "887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597",
+        "bytes": 29870,
+        "git_blob_sha1": "9be1019625e28b1752a8919eda5fef5039e3bb00"
+      },
+      "original": {
+        "sha256": "887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597",
+        "bytes": 29870,
+        "git_blob_sha1": "9be1019625e28b1752a8919eda5fef5039e3bb00"
+      },
+      "qualified_h4": {
+        "sha256": "887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597",
+        "bytes": 29870,
+        "git_blob_sha1": "9be1019625e28b1752a8919eda5fef5039e3bb00"
+      },
+      "funding": {
+        "state": "ABSENT_AT_PROTECTED_SOURCE",
+        "application_owner_not_in_protected_base": true
+      }
+    }
+  },
+  "schema": "mastermind.h6.current_family_adoption_contract.v1",
+  "kind": "read_only_exact_source_comparison_not_successor_qualification",
+  "original_carrier": {
+    "pr": 2175,
+    "head": "a25b04708fcb295f37b577733f592bd4d7d2e6ef",
+    "branch": "sol/web-fabric-app-final-compose-20261107-sol",
+    "merged": false
+  },
+  "paired_macro": {
+    "pr": 10740,
+    "head": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "merged": false
+  },
+  "eval_prerequisite": {
+    "pr": 2271,
+    "head": "7a32ac9364ac0ec182353cfb643fdff21ec7a448",
+    "merged": true,
+    "merged_at": "2026-11-08T03:57:30Z"
+  },
+  "current_components": {
+    "provider-minimum-native-manifest.json": {
+      "path": "review_evidence/hermes_h4/root-source-join-20261108/provider-minimum-native-manifest.json",
+      "sha256": "98e8e868c9528ad07f86a74e930fcda15108bbae5ad054ee0577f3dd3d1610b6",
+      "members": 116,
+      "relevant_emitted_members": {
+        "ext/lease_broker.py": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
+        "ext/pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+        "ext/support_bundle.py": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+        "ext/native_runtime_bindings.py": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce"
+      }
+    },
+    "full-native-manifest.json": {
+      "path": "review_evidence/hermes_h4/root-source-join-20261108/full-native-manifest.json",
+      "sha256": "2ff09d1770f826adaa21202cdaef6cee78008b3a66f12e1a8de59e4227788ffb",
+      "members": 121,
+      "relevant_emitted_members": {
+        "ext/lease_broker.py": "831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173",
+        "ext/pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc",
+        "ext/support_bundle.py": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+        "ext/native_runtime_bindings.py": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
+        "ext/native_go_entry.py": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc"
+      }
+    }
+  },
+  "proposal_applicability": {
+    "qualified_base": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895",
+    "qualified_provider_h2_parent_manifest": "b49e1350b83afd4f2c439e7b13b2b7079a4db88dd7d9d6b0cf9801c423f29547",
+    "direct_apply_to_current_family": false,
+    "reason": "builder preimage and effective provider family changed; active original/H4 funding source composition must supply one completed current family"
+  },
+  "funding": {
+    "accepted_source": "212d10b79e5c3ff83b92ffcad37eb18585555354",
+    "predicate": "control_plane.experiential_plan_policy.require_included_funding",
+    "actual_provider_account_readback": false,
+    "unknown_remaining_credits": true,
+    "default_included_dispatch_refused": true,
+    "positive_proof_fixture_only": true
+  },
+  "task_purpose": {
+    "native_host_changed": false,
+    "source_context_changed": false,
+    "per_admission_authenticated_projection_join": "not supplied by inspected source",
+    "existing_owner_contract_required": true
+  },
+  "effects": {
+    "runtime": false,
+    "provider": false,
+    "enrollment": false,
+    "selection": false,
+    "original_carrier_ref": false,
+    "common_proposal_rebased": false
+  },
+  "sources": [
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6716795966",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6706556886",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6708081894",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/blob/212d10b79e5c3ff83b92ffcad37eb18585555354/docs/reports/experiential-max-funding-contract-20261108.md"
+  ]
+}
