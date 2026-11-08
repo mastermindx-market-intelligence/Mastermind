@@ -22,9 +22,104 @@ Operations `paper-migrated-breadth-mobile-basis-20261108-c4` and `paper-migrated
 
 Operation `paper-migrated-bonds-mobile-meaning-20261108-c4` and explicit board release `paper-migrated-bonds-mobile-finish-20261108-c4` returned APPLIED_RESPONSE_OBSERVED. The separate R1 file remains historical; this change does not relabel it as current.
 
+## Verified portfolio navigation and mobile decisions
+
+[Bot Paper Portfolio V3](https://app.paper.design/file/01M6Y3AT0XJBWTM3AVCMBJQ8TE/p-1-0) remains an editable design reference, with illustrative account and receipt data. Six artboards were affected: existing Start Here `1-0`, existing atlas `1EI-0`, and four new native phone specimens. Existing desktop decisions and original mobile holdings remain intact.
+
+### Migrated map and actual source scope
+
+All twelve Start Here references were read against current native artboard identities and corrected: U→2C, X→77, 10→CI, 13→IC, 16→NS, 19→SG, 1E→WM, 1H→11E, 1K→14D, 1N→17U, 1Q→1CP, 1T→1EI (every ID has suffix `-0`). Footer `2B-0` points to the current file/page. The old monolithic file/page remains historical origin, not an editable build destination.
+
+Fresh [#673 metadata](https://github.com/mastermindx-market-intelligence/Mastermind/pull/673) at head `67aa483a3a5ac445b01a3dc2849889afa19ce057` is Open/Draft/HOLD and covers the US-only S0 read-only decision snapshot inspector. It does not own the whole V3 redesign or arbitrary settlement receipt lookup. Text `26-0` and `2B-0` now state that bounded scope; manual Opus handoff and actual runtime/release proof requirements remain.
+
+### Four native phone specimens
+
+| Board | View | Retained meaning |
+| --- | --- | --- |
+| `1KJ-0` | 13 · Decisions & Orders · 390 × 1486 | All seven existing desktop history rows; current 9 Oct queued target is separate; 5 Oct selected row `1Q5-0` opens its own receipt. All statuses, times, target values and outcomes come from desktop `IC-0`. |
+| `1QU-0` | 14 · Selected settlement receipt · 390 × 825 | US Autonomous, 5 Oct 06:11 ET, Maintain the held book. Settlement 6 Oct 09:31 ET; orders 0; fills/fees 0 / $0.00. Completed no-trade outcome and holdings unchanged remain explicit. 44px Back to decisions retains the originating selection. |
+| `1V6-0` | 15 · Selected receipt unavailable · 390 × 688 | Retains the same book/date/decision heading and Back. Unavailable evidence does not render zero orders/fills or a no-trade receipt, and does not replace the selected decision with the newest one. |
+| `1XM-0` | 16 · Decision history unavailable · 390 × 834 | Retains selected Portfolio tab, filter/search and separately labeled retained 9 Oct target. Read failure has no zero count and no false-empty history message. |
+
+The four boards reuse the existing 390px account/navigation shell. Current-book marks remain explicitly labeled as marks. New content uses the existing tokens and original fixtures. All four whole-phone screenshots were inspected. The first list screenshot revealed black default text in newly appended components; exact heading/title/filter nodes were corrected to the dark text token, then the complete list was captured again. Tabs were also reflowed into single wrapped labels. The final screenshots show all seven rows, readable contrast, complete bottoms, and the selected receipt identity.
+
+### Current source binding, not runtime acceptance
+
+Source pin: `Mastermind@1d0579c0540f5281e52faf069dd7dba2f480c7c6`.
+
+- [app/web.py](https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/app/web.py), blob `1d61d2f54de9215fe703e539ba5e91a9cead3eb6`, owns the existing `/api/decisions?portfolio=autonomous` presentation. [bot/autonomous.py](https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/bot/autonomous.py), blob `f3c771d3554a924d80b3ee4630e685c56aeb1c47`, reads the registry-owned decisions journal. Reuse these owners; no new history store.
+- [app/decision_availability.py](https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/app/decision_availability.py), blob `529de3a392cb9f05914caad98184adbdf43805f6`, passes `selection["last_valid"]` into receipt inspection. The public route does not expose arbitrary historical selection. Root independently read this current source.
+- [app/settlement_price_read.py](https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/app/settlement_price_read.py), blob `88cebdb9dc000d50d32f57f029f414876adef4d5`, binds one exact persisted decision to its receipt, transaction/hash/fill vector and accepted origin. Its existence does not establish the new mobile route. Durable ledger verification and execution qualification remain separate.
+- Source list/read rendering does not yet implement all proposed failed-history versus empty, historical selection, filter/search/scroll/focus return distinctions. These are new design requirements through the existing owners. A date label is not a decision identity. No actual endpoint, browser or trade was exercised in this design pass.
+
+Builder block `21F-0` on Start Here names all four current board IDs and requires book + decision identity, preserved search/filter/expansion/scroll/focus, exact return, no latest substitution, and verified receipt-bound empty fills before no-trade. A newer decision cannot replace an open historical selection; book/access changes require revalidation. Missing receipt, failed history and successful empty history remain different states.
+
+### Unknown self-directed submission
+
+Atlas card `1H1-0` keeps illustrative request `SD-1009-001` and the original uncertainty. The former active-looking Check request status action is replaced by status verification unavailable and disabled Resubmission held (`1KE-0`). The connection-loss text preserves context; footer says an absent order row does not prove submission failure.
+
+Root independently read [portfolio/self_directed.py](https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/portfolio/self_directed.py), blob `11c46facb5c883d45ce21531665b56a4c5b9da74`: `place_order` has no client request-reference argument; `history()` calls `settle_pending()`; `book(read_only=True)` separately skips settlement. No exact request-reference recovery is proven. The historical #768 candidate browser guard remains Draft/HOLD, not current implementation. A history read cannot be relabeled as a side-effect-free request lookup. This refinement neither sends an order nor introduces a new request registry.
+
+The initial stacked unavailable message clipped its footer in the fixed 432×340 card; the recovery row was reflowed horizontally with a 44px held control, and a new screenshot verified the complete footer and padding. Existing fixture identity and uncertainty are retained.
+
+### Proof and release
+
+All **42 portfolio operations**, including explicit final release of the six affected artboards, returned APPLIED_RESPONSE_OBSERVED. Operation IDs are listed below. Source-map, atlas-card, all four phone and updated full Start Here screenshots were inspected. Final map height is 1296 at y−3200; next board starts y−1800, leaving104px. New phone boards retain at least80px native placement clearance. No overlapping original board was moved.
+
+- `paper-portfolio-migrated-map-scope-20261108-c4`
+- `paper-portfolio-unknown-submission-copy-20261108-c4`
+- `paper-portfolio-unknown-submission-unavailable-20261108-c4`
+- `paper-portfolio-unknown-submission-fit-20261108-c4`
+- `paper-portfolio-mobile-decisions-copy-20261108-c4`
+- `paper-portfolio-mobile-decisions-header-20261108-c4`
+- `paper-portfolio-mobile-decisions-tabs-20261108-c4`
+- `paper-portfolio-mobile-decisions-tabs-flow-20261108-c4`
+- `paper-portfolio-mobile-current-target-20261108-c4`
+- `paper-portfolio-mobile-current-target-context-20261108-c4`
+- `paper-portfolio-mobile-history-header-20261108-c4`
+- `paper-portfolio-mobile-history-controls-20261108-c4`
+- `paper-portfolio-mobile-history-row-0-20261108-c4`
+- `paper-portfolio-mobile-history-row-1-20261108-c4`
+- `paper-portfolio-mobile-history-row-2-20261108-c4`
+- `paper-portfolio-mobile-history-row-3-20261108-c4`
+- `paper-portfolio-mobile-history-row-4-20261108-c4`
+- `paper-portfolio-mobile-history-row-5-20261108-c4`
+- `paper-portfolio-mobile-history-row-6-20261108-c4`
+- `paper-portfolio-mobile-decisions-name-20261108-c4`
+- `paper-portfolio-mobile-decisions-contrast-20261108-c4`
+- `paper-portfolio-mobile-selected-receipt-copy-20261108-c4`
+- `paper-portfolio-mobile-receipt-return-20261108-c4`
+- `paper-portfolio-mobile-receipt-title-20261108-c4`
+- `paper-portfolio-mobile-receipt-explanation-20261108-c4`
+- `paper-portfolio-mobile-receipt-facts-header-20261108-c4`
+- `paper-portfolio-mobile-receipt-settlement-20261108-c4`
+- `paper-portfolio-mobile-receipt-orders-20261108-c4`
+- `paper-portfolio-mobile-receipt-fills-20261108-c4`
+- `paper-portfolio-mobile-receipt-completed-20261108-c4`
+- `paper-portfolio-mobile-receipt-name-20261108-c4`
+- `paper-portfolio-mobile-receipt-unavailable-copy-20261108-c4`
+- `paper-portfolio-mobile-receipt-unavailable-body-20261108-c4`
+- `paper-portfolio-mobile-receipt-unavailable-identity-20261108-c4`
+- `paper-portfolio-mobile-receipt-unavailable-message-20261108-c4`
+- `paper-portfolio-mobile-history-unavailable-copy-20261108-c4`
+- `paper-portfolio-mobile-history-unavailable-context-20261108-c4`
+- `paper-portfolio-mobile-history-unavailable-message-20261108-c4`
+- `paper-portfolio-mobile-history-retained-label-20261108-c4`
+- `paper-portfolio-mobile-failure-names-20261108-c4`
+- `paper-portfolio-mobile-builder-binding-20261108-c4`
+- `paper-portfolio-mobile-phase-finish-20261108-c4`
+
+## Breadth work in progress and reconciled interruption
+
+Native copies of `XZ-0` were created as `17W-0` (constituents) and `1HC-0` (receipts); both duplicate responses were APPLIED_RESPONSE_OBSERVED. Original selected-session header became `1QS-0` and body `1QZ-0`. The headline now states the exact normalized-level comparison: A/D108.7 minus index106.2 =2.5 normalized points, rather than implying predictive or temporal leadership.
+
+The first headline attempt `paper-breadth-summary-headline-20261108-c4` was refused DOCUMENT_CHANGED. An exact original-body read showed the requested headline absent; no call was replayed. The reconciled, newly qualified headline operation applied. Counts operation returned APPLIED_RESPONSE_OBSERVED; the later execution cell's return path disappeared. Original-target readback then found the requested extremes row `2BS-0` and drivers header `2C3-0` present. They were not replayed.
+
+That readback also showed additional changes beyond this session's observed calls: completed driver/coverage/action rows,44px tabs, and advancing headers/bodies on the two copies. Those changes are not claimed as this session's operation receipts. The known live overlap is protected; no blind completion or overwrite of those nodes is authorized by this record. Continue independent portfolio/Bonds work, then inspect exact current Breadth targets and reconcile custody before any further mutation. The original-copy/source-hold boundaries remain intact.
+
 ## Active continuation
 
-Continue the Breadth inspector readability and session/return journey, then bind the current Bonds production-read recovery and Bot Portfolio mobile decision/receipt journey to their existing owners. Forex R26 source and current designs are being compared. This record does not claim those pending phases are applied.
+Portfolio mobile journey and source-map/unknown-submission corrections are now verified. Continue the current Bonds production-read recovery, reconcile the live Breadth overlap, and compare Forex R26 source/current design. These remaining phases are not claimed complete.
 
 ## Acceptance boundary
 
