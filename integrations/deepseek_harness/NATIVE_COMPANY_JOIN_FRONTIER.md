@@ -1027,3 +1027,7 @@ claims no installation, service start/restart, public-route acceptance, provider
 call or new physical canary. The paid Fabric/VPS and denied installed-path lanes
 are not retried. The prior installed Executive reader observation remains
 backend_unavailable; no later acceptance is inferred from these source tests.
+
+## C33 package preflight repair (2026-11-08 UTC)
+
+The original full stage stopped before creating its release/state. Its owner-package validator rejected the two package metadata leaves already accepted by the original host preparer. Both now share the same closed path rule; changed outputs and patch/source digests remain pinned. All 45 package qualification tests pass, including the actual complete manifest and seven out-of-scope path refusals. [Exact evidence](../../research/evidence/deepseek-native-package-preflight-20261108.json). Continue the same candidate target; this was a terminal preflight failure with no release effect, not uncertain delivery.

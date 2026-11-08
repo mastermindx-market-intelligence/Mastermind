@@ -1,0 +1,78 @@
+{
+  "diagnosis": "Complete-package verifier rejected the two package.json leaves already permitted by the host preparer.",
+  "effect_reconciliation": "Original stage failed before release/state creation. No unknown effect and no replacement owner.",
+  "installed": false,
+  "next_action": "Continue stage against the same original target after this qualified source repair.",
+  "operation_id": "deepseek-mastermind-chat-20261106-c2",
+  "original_target": {
+    "release": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/.cache/attended-native-c32-20261108-pro1",
+    "release_exists": false,
+    "state": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/.cache/attended-native-c32-state-20261108-pro1",
+    "state_exists": false
+  },
+  "provider_calls": 0,
+  "recorded_at": "2026-11-08T04:28:09.745442+00:00",
+  "repair": "Preparation and packaging share the existing closed source-path rule; output patch scope and manifest digests remain unchanged.",
+  "runs": {
+    "original_stage": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "integrations/deepseek_harness/package_attended.py",
+        "--donor",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022",
+        "--pnpm",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/.pnpm/pnpm@11.28.5/node_modules/pnpm/bin/pnpm.cjs",
+        "--release",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/.cache/attended-native-c32-20261108-pro1",
+        "--state",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/.cache/attended-native-c32-state-20261108-pro1",
+        "--public-url",
+        "https://chat.mastermind-x.com/",
+        "--port",
+        "4180",
+        "--relay-port",
+        "4181"
+      ],
+      "base_sha": "71d99ff8f65f67753bd93ddbcb8796b08b28cb54",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 1,
+      "finished_at": "2026-11-08T04:23:38.336474+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "9873dfefe138dff27847bef3dc5b98285ceaa99ec67df666ae4b01dd8c133b8f",
+      "receipt_sha256": "cd641c4c9a18e592f1117011df0ccd41f863ac3bf5dee5ef86ee98a1b0c82e43",
+      "source_inputs": 7010,
+      "started_at": "2026-11-08T04:23:37.603246+00:00"
+    },
+    "qualification": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_worker_package.py",
+        "tests/test_dsh_native_acp_package.py",
+        "tests/test_dsh_native_session_package.py"
+      ],
+      "base_sha": "71d99ff8f65f67753bd93ddbcb8796b08b28cb54",
+      "changed_inputs": [],
+      "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2",
+      "exit_code": 0,
+      "finished_at": "2026-11-08T04:26:33.192842+00:00",
+      "inputs_unchanged": true,
+      "log_sha256": "b2c6720453f06d35157bf6fc9703ffce184bf1d11bc189b38e5a9b17338d728b",
+      "receipt_sha256": "084f2f21fe4b00fff7834cb07b3da0d78fe888cb4a4b4601567653d2bfc59845",
+      "source_inputs": 7010,
+      "started_at": "2026-11-08T04:26:21.817003+00:00"
+    }
+  },
+  "schema": "mastermind.dsh_native_package_preflight_qualification.v1",
+  "source_base_sha": "71d99ff8f65f67753bd93ddbcb8796b08b28cb54",
+  "source_sha256": {
+    "integrations/deepseek_harness/runtime_compat/native_access_package.py": "458efef3e25b430bba0844d1f5ac5754584017c3d221f1936fe31f1c1ebb97b9",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "97866f1b593e30c2e8900eb12afcfd7b33b1cff1b6f6378ee27e98ac74fe00b5",
+    "tests/test_dsh_native_owner_package.py": "3b79527b620e5ad44ea2e00d87299b688d70b9513a83a7168d4c7fa5ae236c98"
+  },
+  "tests_passed": 45
+}

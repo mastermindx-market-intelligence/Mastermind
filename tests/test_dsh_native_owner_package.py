@@ -233,3 +233,20 @@ def test_earlier_owner_package_retains_its_original_composition(source, tmp_path
     if version == "v2":
         assert (release / "app/packages/client/file-upload/src/index.ts").read_bytes() == b"export const native = 'donor';\n"
     assert (release / "app/packages/client/ui-deliverables/src/present-open.ts").read_bytes() == b"export const native = 'donor';\n"
+
+
+def test_actual_complete_host_manifest_uses_the_same_closed_packaging_scope():
+    expected, actual = package.qualify_inputs()
+    assert actual == package.host.manifest()
+    assert {"packages/llm/llm/package.json", "packages/boot/app-boot/package.json"} <= set(actual["source_sha256"])
+    assert set(actual["output_sha256"]) == package.host.CHANGED
+    assert expected["host_patch_sha256"] == actual["patch_sha256"]
+
+
+@pytest.mark.parametrize("name", [
+    "package.json", "packages/core/agent/package.json", "packages/boot/app-boot/foreign.json",
+    "packages/llm/llm/package.json/../foreign.json", "/packages/llm/llm/package.json",
+    "vendor/loader/package.json", "vendor/loader/src/foreign.py",
+])
+def test_shared_host_source_path_scope_remains_closed(name):
+    assert not package.host.source_path_allowed(name)

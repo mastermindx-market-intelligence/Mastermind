@@ -2,7 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import subprocess
 from . import prepare_native_access as access
@@ -38,10 +38,7 @@ def _host_record(raw: bytes, patch: bytes, expected: dict, session: dict | None)
         raise ValueError("native owner package host composition refused")
     for mapping in ("source_sha256", "output_sha256"):
         for name, value_digest in value[mapping].items():
-            path = PurePosixPath(name)
-            if (path.is_absolute() or ".." in path.parts
-                    or not any(name.startswith(package + "/src/") for package in host.PACKAGES)
-                    or path.suffix not in (".ts", ".tsx")
+            if (not host.source_path_allowed(name)
                     or type(value_digest) is not str or not re.fullmatch("[0-9a-f]{64}", value_digest)):
                 raise ValueError("native owner package host source path refused")
     headers = patch.decode().splitlines()

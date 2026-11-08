@@ -31,6 +31,14 @@ CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[1] + "/src/index.ts
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
+def source_path_allowed(name: str) -> bool:
+    """One closed path scope for preparation and complete-package qualification."""
+    path = PurePosixPath(name)
+    return (not path.is_absolute() and ".." not in path.parts
+            and ((any(name.startswith(package + "/src/") for package in PACKAGES)
+                  and path.suffix in (".ts", ".tsx"))
+                 or name in ("packages/llm/llm/package.json", "packages/boot/app-boot/package.json")))
+
 def manifest() -> dict:
     value = json.loads((ROOT / "native-host-source.json").read_bytes())
     patch = (ROOT / "native-host-admission.patch").read_bytes()
@@ -44,11 +52,7 @@ def manifest() -> dict:
             or hashlib.sha256(patch).hexdigest() != value.get("patch_sha256")):
         raise ValueError("native host source manifest refused")
     for name, digest in {**value["source_sha256"], **value["output_sha256"]}.items():
-        path = PurePosixPath(name)
-        if (path.is_absolute() or ".." in path.parts
-                or not ((any(name.startswith(package + "/src/") for package in PACKAGES)
-                         and path.suffix in (".ts", ".tsx"))
-                        or name in ("packages/llm/llm/package.json", "packages/boot/app-boot/package.json"))
+        if (not source_path_allowed(name)
                 or type(digest) is not str or len(digest) != 64
                 or any(c not in "0123456789abcdef" for c in digest)):
             raise ValueError("native host source path or digest refused")
