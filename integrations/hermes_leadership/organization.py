@@ -21,6 +21,7 @@ MAX_BYTES = 8192
 _REPORTS_TO = {
     "meta_ceo": "chairman",
     "autonomy_ceo": "meta_ceo",
+    "mastermind_ceo": "meta_ceo",
     "secretary": "meta_ceo",
     "delivery": "secretary",
     "engineering": "meta_ceo",

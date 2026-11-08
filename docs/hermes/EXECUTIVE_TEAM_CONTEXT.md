@@ -6,7 +6,7 @@ Parent: Mastermind #2159, design comment6699721779; execution comment6700014545.
 
 ## What the consumer does
 
-`integrations.hermes_leadership` adds a role-specific briefing to the existing authenticated Mission v3 reader. Meta-CEO, the CEO of AI-Native Autonomy, Secretary, Delivery, Engineering, Reliability/Capacity/FinOps, Product, Intelligence, Assurance and the external Grok adviser have explicit objectives, wake conditions, evidence requirements and limits. These charters use the existing responsibility syntax. They are guidance, not identities, tool grants or model selections.
+`integrations.hermes_leadership` adds a role-specific briefing to the existing authenticated Mission v3 reader. Meta-CEO, the two CEO-tier seats (Autonomy-CEO, Mastermind-CEO), Secretary, Delivery, Engineering, Reliability/Capacity/FinOps, Product, Intelligence, Assurance and the external Grok adviser have explicit objectives, wake conditions, evidence requirements and limits. These charters use the existing responsibility syntax. They are guidance, not identities, tool grants or model selections.
 
 The installed host retains one logical Secretary and can resolve several separately authorized native session contexts. A native call cannot supply a different role, project, provider, account, endpoint or credential. No conversation transcript or company-state cache is created.
 
@@ -112,7 +112,7 @@ The original `mmx_leadership_brief` now includes a bounded
 read and the same native host-bound session/role guard; it does not register a
 second tool or call another backend.
 
-- The ten existing charter keys form one explicit *advisory reporting tree*
+- The eleven existing charter keys form one explicit *advisory reporting tree*
   rooted in the human Chairman. Chief of Staff, Engineering, Reliability and
   other lead/reporting relationships are editorial guidance, not proof that
   any particular native role is enrolled, present, delegated or authorized.
