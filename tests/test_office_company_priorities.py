@@ -271,8 +271,10 @@ def test_company_route_is_one_forward_addition_and_caddy_has_exact_fixed_profile
     from tests.test_source_operation_public_edge import CURRENT_MANIFEST
 
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + (PATH,)
+    # Company priorities preceded the later model-configuration READ. Retain
+    # that complete predecessor pair instead of mixing two route generations.
     assert (
-        edge.GET_ROUTES,
+        edge.PRE_MODEL_CONFIGURATION_GET_ROUTES,
         edge.PRE_COMPANY_PRIORITIES_POST_ROUTES,
     ) in edge.TRANSITION_ROUTE_PROFILES
     text = edge.render(CURRENT_MANIFEST, 49200)
