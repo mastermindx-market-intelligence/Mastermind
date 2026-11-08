@@ -290,6 +290,10 @@ _CONFIG_REQUIRED = frozenset(
 )
 _CONFIG_OPTIONAL = frozenset(
     {
+        "memory_native_issuer",
+        "memory_evaluation",
+        "protected_memory_execution",
+        "memory_original_result_access",
         "content_observer",
         "content_observer_profile_path",
         "company_consultation",
@@ -1038,6 +1042,28 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    try:
+        if 'memory_native_issuer' in keys:
+            from control_plane.executive_memory_issuer import validate_transport_document
+            config['memory_native_issuer']=validate_transport_document(config['memory_native_issuer'])
+        if 'memory_evaluation' in keys:
+            from control_plane.protected_memory_evaluation_source import configured
+            config['memory_evaluation']=configured(config)
+            transport=config.get('memory_native_issuer')
+            if type(transport) is not dict or transport.get('protocol')!='memory.e0.native_issuer.v3':
+                raise ValueError('evaluation requires its existing explicit protected transport')
+        if 'protected_memory_execution' in keys:
+            from control_plane.protected_memory_profile import validate_profile_document
+            config['protected_memory_execution']=validate_profile_document(config['protected_memory_execution'])
+        if 'memory_original_result_access' in keys:
+            from control_plane.protected_memory_result_access import validate_access_document
+            config['memory_original_result_access']=validate_access_document(config['memory_original_result_access'])
+            transport=config.get('memory_native_issuer')
+            if (type(transport) is not dict or transport.get('protocol')!='memory.e0.native_issuer.v3'
+                    or transport.get('service_key_fingerprint')!=config['memory_original_result_access']['ssh_key_fingerprint']):
+                raise ValueError('completed Memory service access requires its explicit v3 transport')
+    except (ValueError,TypeError,KeyError):
+        raise ServiceError('protected Memory configuration refused') from None
     hermes_configuration = config.get("hermes_attended_configuration_sha256")
     if "hermes_attended_configuration_sha256" in config and (
             type(hermes_configuration) is not str

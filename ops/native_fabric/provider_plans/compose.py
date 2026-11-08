@@ -27,6 +27,8 @@ def compose(base, output, *, profile_name="provider-plans"):
         profile_root = HERE
     elif profile_name == "current116-maintenance-guard":
         profile_root = HERE / "maintenance_guard"
+    elif profile_name == "current116-protected-memory":
+        profile_root = HERE / "memory118"
     elif profile_name == "current116-remote-placement":
         profile_root = HERE / "remote_placement"
     else:
@@ -75,7 +77,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--profile", choices=("provider-plans", "current116-maintenance-guard", "current116-remote-placement"),
+    parser.add_argument("--profile", choices=("provider-plans", "current116-maintenance-guard", "current116-remote-placement", "current116-protected-memory"),
                         default="provider-plans")
     args = parser.parse_args()
     print(json.dumps(compose(args.base, args.output, profile_name=args.profile), sort_keys=True))
