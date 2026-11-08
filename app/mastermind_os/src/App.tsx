@@ -1,3 +1,4 @@
+import {NativeAuthorizationContinuationControl} from "./NativeAuthorizationContinuationControl";
 import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
@@ -6059,6 +6060,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 </p>
               ) : null}
               {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
+              {native && <NativeAuthorizationContinuationControl host={window.MastermindMissionHost} state={authState} revision={authRevision} locale={locale}/>}
             </div>
           ) : null}
         </div>

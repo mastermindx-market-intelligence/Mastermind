@@ -33,7 +33,7 @@ it.each(['en','zh-CN'] as const)('explains the observed incomplete authorization
  expect(e.client.getState()).toEqual({status:'error',reason:'AUTH_TRANSACTION_EXPIRED',acquisition:true,content:false});
  expect(e.container.querySelector('.shell')).toBeTruthy();expect(e.container.querySelector('.auth-entry')).toBeNull();
  expect((screen.getByRole('button',{name:locale==='en'?'New conversation':'新建对话'}) as HTMLButtonElement).disabled).toBe(true);
- expect(e.invoke.mock.calls.every(([name])=>['auth_status','executive_auth_status','read_programs','read_work'].includes(name)),e.invoke.mock.calls.map(([name])=>name).join(',')).toBe(true);
+ expect(e.invoke.mock.calls.every(([name])=>['auth_status','executive_auth_status','read_programs','read_work','read_authorization_continuation'].includes(name)),e.invoke.mock.calls.map(([name])=>name).join(',')).toBe(true);
 });
 it('labels the same incomplete grant as pending only while the existing owner is signing in',async()=>{
  const e=await mount({status:'signing_in',reason:null,acquisition:true,content:false});
