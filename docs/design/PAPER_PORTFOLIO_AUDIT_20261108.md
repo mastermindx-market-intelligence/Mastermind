@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption; Market Memory exact-record comparison with actual source-record proof; Prophet D03 selected comparison, subject identity and security-watchlist outcomes; OS created-project opening and invalid-link recovery with exact directory corrections; News source reading and return with EN/ZH states; and International scanner-to-dossier context preservation with five new proposal boards. The next foreground is a bounded Policy Monitor journey audit, preserving the already accepted concurrent incomplete-basis corrections. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. The next foreground is a bounded GMI evidence/return audit that preserves its accepted primary hierarchy. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -574,3 +574,83 @@ Every mutation returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed o
 **Required consumer proof:** non-default horizon/basis and ordered pins through ordinary open/Back; actual intended observation and rights/clock state through the existing builders; requested-market presence; unavailable/ambiguous contexts; return-stack bound; render/URL rollback; source replacement; direct/new-tab/browser-history behavior; focus/announcement fallback; locale/direction ink and mobile interaction geometry.
 
 **Next safe phase:** bounded Policy Monitor journey audit, retaining the already accepted current incomplete-basis wording and protecting live writers. Seek a concrete source-supported evidence-reading or recovery gap before making any new design change.
+
+
+## Continuing phase — Policy source notes and date meaning
+
+**State:** design changes completed, visually inspected, read back and scoped-finished. File `01M6Q4WK0EMPV1G2KDGGRQBC1B` (Macro · Policy Monitor · Production Design). The four existing main specimens retain their accepted incomplete-basis, stance, activity and numeric-rate content.
+
+### Consequential gap and source evidence
+
+The visible action said “Review source dates (2)” / “查看来源日期（2）”. The existing template actually renders `pmv.evidence.notes`, which can include absent inputs and qualification limitations as well as dated narrative notes. The count is the length of that array; it is not a count of dated source records. “Sources” is a separate disclosure.
+
+This slice used candidate PR [Macro #10493](https://github.com/mastermindx-market-intelligence/Macro/pull/10493) at exact head `c742039f32d3ae73b557b8b2b5f6ff4df36b23c2`. It was OPEN/ready with merge-on-green and merge-blocked labels when observed; this is candidate source evidence, not merged/released behavior. No PR, code, label or release control was changed.
+
+| Candidate source | Blob | Relevant responsibility |
+|---|---|---|
+| `lib/policy_monitor_view.py` | `8e00a6fc97687c94160a5858233ce1b5b964f8f6` | Note construction, qualified dates and source rows. |
+| `templates/_policy_monitor_dialog.html.j2` | `3b79568eb00e007d49ea4cde66a83c588d51ecc3` | Native details/summary, bilingual array rendering and separate Sources disclosure. |
+| `tests/probe_policy_monitor_browser.py` | `622eda1ce7a98e7145d23192f8bec6f48c60ec3c` | Existing consumer-probe coverage, inspected but not rerun. |
+| `tests/test_policy_monitor_view.py` | `01308cefaa7219bd08a9181cbf5e059c6f6b17b6` | Existing view-model test expectations, inspected but not rerun. |
+
+The large dashboard controller file could not be read through the available bounded file paths: the file fetch returned empty content and the raw fetch returned a size/format limitation. No full-controller inspection is claimed. Existing MH behavior ownership is preserved; this slice adds no controller or Escape handler.
+
+### Actual original-fixture projection
+
+The main Paper reference is **30 October 2026**. Candidate-head policy data had moved to November; it was not substituted into this historical design. The original inputs were fetched at `2a411cd1ab9877950ead72d81c4a1a9d609ca887`:
+
+- `site/policy_lever.json`, blob `ea17ed7732061d5b161c00f51bec0ae5d9e3f891`.
+- `data/regime/latest.json`, blob `1a300e214702fffc46b01e73d1c2657d5cca108b`; only its relevant date, fed_path and fed_stance values were projected.
+
+An unchanged, pure local view-model projection of those relevant inputs exited successfully and returned `snapshot.date = 2026-10-30`, known true, mixed freshness, and **exactly two notes**: the Iran/oil and China/tariffs narratives, each reviewed **2026-07-18**. The source formatter also returned the supplied relative-age suffix “106 days old”. That supplied suffix is not recalculated from today's date or inferred from the retained snapshot.
+
+The same result returned four source rows and no valid source URL:
+
+| Input | Observed source/date | Interpretation retained |
+|---|---|---|
+| Semiconductor drawdown | SMH/SOXX, 2026-10-30 | Market observation date. |
+| Market-implied rate path | ZQ, 2026-10-30, monthly effective-rate basis/vendor close | Preserve its own rate basis. |
+| Fed projection | fred:FEDTARMD, publication date unavailable | A missing publication date remains missing. |
+| Fed-versus-market comparison rule | sep_vs_market_year_end.v1, recorded 2026-10-30 | Rule presence/date does not supply the missing projection publication date or qualify a numerical spread. |
+
+Oil's raw observed setup was known but unqualified; that is distinct from a globally absent setup. No extra note was invented from the visual condition card. This was local source projection only: no market request, live rate calculation, product browser execution or production proof.
+
+### Implemented Paper changes
+
+Four exact existing leaves were corrected:
+
+| Main artboard | Leaf | New action |
+|---|---|---|
+| `1-0` dark desktop EN | `11-0` | › Source notes (2) |
+| `59-0` light desktop EN | `8U-0` | › Source notes (2) |
+| `AQ-0` light mobile EN | `EB-0` | › Source notes (2) |
+| `GE-0` dark mobile ZH | `K0-0` | › 来源说明（2） |
+
+A new proposal artboard **`RG-0`**, “PROPOSED · Source notes · EN/ZH · 30 Oct fixture”, sits on existing build page `p-2-0`. It reuses the native MH shell and replaces only cloned sections:
+
+- `UY-0`: reference snapshot and proposal framing.
+- `V3-0`: 390px light EN expanded notes, 390px dark ZH expanded notes, and keyboard-collapsed EN state with visible summary focus.
+- `WH-0`: separate four-row Sources explanation, including the unavailable projection date and rule-versus-observation distinction.
+- `WZ-0`: exact boundary between the supplied relative age and the proposed absolute review-date presentation.
+- `X1-0`: note count, native disclosure and existing-dialog ownership.
+- `XE-0`: minimum builder change, exact input provenance and required consumer proof.
+
+The note summary has a minimum 44px hit area. The two narrative names, order and validated dates remain explicit in both languages. Explanatory copy keeps commentary review dates separate from market observations and other input dates/bases. No fake source link was added: the original fixture supplied none.
+
+### Minimum implementation contract
+
+The proposed source-code delta is limited to omitting the relative-age suffix from the EN/ZH stale-narrative note strings in the existing view-model builder. Preserve subject, validated copy_as_of, all other note types, ordering and existing freshness/qualification calculations. Do not parse rendered English in the browser. **This formatter change is designed, not implemented in product code.**
+
+Continue deriving the note count from the complete existing array; do not filter it to date notes. An empty array keeps the existing omission of the disclosure and does not certify that all inputs are fresh. Invalid/missing narrative dates do not become invented dates.
+
+Use native details/summary. Keyboard activation of the focused summary toggles it while retaining that summary focus; this is not a universal claim about pointer activation, programmatic changes or remounts. Escape and dialog Close remain with the existing Policy dialog owner and mx5CloseDlg. Opening or closing notes performs no refresh, review mark, source mutation, async load or submission.
+
+### Verification, preservation and next proof
+
+Fresh JSX readback found **306 original text leaves across the four main specimens, exactly four planned label changes and zero missing leaves**. The pre-existing `MH-0` behavior board remained byte-identical. The proposal contains 64 text leaves. Screenshots verified the three language/state panes, separate Sources section, behavior contract and builder-proof section; text wraps and focus treatment are visible. The new board is at x4780, width1440, separated by 80px from the existing MH board ending at x4700. Its inactive-page fit-content height is reported as null; screenshots establish the inspected section layouts.
+
+Every mutation returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed on `1-0 / 59-0 / AQ-0 / GE-0 / RG-0`. Existing incomplete-basis corrections, MH numeric-rate contract, unknown-effect/release holds and other writers remain with their existing owners.
+
+Required consumer proof when the formatter is implemented: the exact two-note fixture and original subjects/dates; only the relative-age suffix removed; unchanged non-narrative notes/order; empty-list omission; malformed and missing dates; unknown versus zero; four source rows/no invented URL; native keyboard collapse and actual dialog focus behavior; EN/ZH wrapping at 390px. Existing probes were inspected, not rerun, and no production behavior is claimed.
+
+**Next safe phase:** a read-only GMI evidence/return audit is running. Preserve the accepted primary hierarchy (subject, dated evidence, narrow claim, limitation, next destination); implement only a new consequential, source-supported interaction or identity gap.
