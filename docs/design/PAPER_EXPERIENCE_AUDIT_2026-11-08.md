@@ -12,7 +12,7 @@ This map points to the editable designs and current continuation sections. All c
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
-| Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I `22CM-0` explains the historical source/calculation; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
+| Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I/M `22CM-0` / `22SU-0` explain the historical source/calculation in EN dark and ZH light; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
@@ -863,3 +863,41 @@ A bounded separate audit of [Terminal account/settings p10](https://app.paper.de
 For a future admitted settings target, root read `terminal/components/settings/SectionTerminal.tsx` at Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`, blob **`81e65723a217e66b6724781af37b331d3988918e`**. Controls apply locally immediately; per-group DeliveryNote represents account acknowledgement/guest/retry state. A checked option alone does not prove account persistence. The actual Home market is protected from toggling and tagged from `prefs.home`; the rejected fixture does not establish which market it is. The existing default-timeframe explanation is supported: it affects the next Terminal mount and leaves the open chart unchanged. These are source-backed constraints, with no new preference or settings owner.
 
 A fresh PR#2301 metadata read also exposed a concurrent source-triage body qualifying earlier head `e88e3c6c37840bd9fc1e2e094517742fd03fb262`. That other writer's exact-head qualification was preserved. Its CI/review evidence is not attributed to these subsequent Company additions; no PR-body replacement, new review, merge or release claim was made.
+
+
+## Company historical sources: Chinese light-theme companion and consistent units
+
+**Provisional Study M**, native **`22SU-0`**, now extends the same historical source/calculation content to the existing Chinese workflow. It is a320px light-theme fit-content study at x7906/y0 on [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0),80px after L. Its typography and fiscal-period terminology follow original Chinese Study G. G's full JSX remains unchanged.
+
+M preserves **营收 · 2026财年第二季度**, **此前管理层指引**, **中值** and **分析师共识数据暂缺**. The actual46.743 USD bn, normalized prior45.000 midpoint, published45.0±2%, derived44.10–45.90 range,3.8733…% calculation and displayed+3.9% are identical to I. The Q1 release is explicitly described as containing this Q2 guidance; the later Q3 outlook remains a separate section. All three established dates remain distinct: the quarter ended27 July2025, prior guidance was published28 May2025, and the actual/new outlook were published27 August2025.
+
+The conversion now explicitly names both units: **原文：46,743百万美元。换算后：46.743十亿美元（USD）。** During the locale review, the English I conversion line **`22D5-0`** was similarly clarified to **46,743 USD million =46.743 USD bn**. This is a presentation clarification; the reported amount and source precision did not change.
+
+M's public-release actions **`22TD-0`** / **`22TO-0`** map to the same NVIDIA Q2/Q1 publisher URLs recorded above. The unavailable-copy note says the public announcements are English and the view supplies no retained copy or acquisition time. Publication dates are not relabeled as retrieval/observation receipts. Close **`22T0-0`** and named Return **`22U3-0`** retain the actual Chinese origin, such as G's **`1NRL-0`** or F's **`1NPU-0`**, together with the selected listing, fiscal quarter, reported USD basis and prior-guidance comparator. Another language specimen is not a fallback destination.
+
+Root inspected the complete M render and updated I render, and read back13,336 /13,313 characters of JSX. Formula, values, unit conversion, Chinese fiscal labels, source dates, missing retained copy and same-period return all match. Close remains44px and the source/return actions48px. Both compositions require scrolling in a final phone viewport; no full-shell, runtime interaction or source-replay acceptance is claimed. M was duplicated/rewritten only within a new owned target. All M, I-clarification and scoped finish receipts are **APPLIED_RESPONSE_OBSERVED**.
+
+Native readme section **`22MA-0`** now maps I/M together and identifies the Chinese origin and English publisher pages. Its existing J/K/L history requirements remain intact.
+
+## Company navigation architecture: reuse the existing complete family chooser
+
+A bounded re-audit resolved an apparent composition gap: a complete Company-family chooser already exists. Root inspected the full390×844 render of **`5ML-0`**, sheet **`5Q1-0`**, on [Company · Navigation + Interaction](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1). Overview, Intelligence, Financials, Earnings, Market, Ownership and Lab are visible, with Intelligence selected. Desktop **`MO-0`**, hierarchy **`76W-0`** and family/state reference **`79J-0`** supply retained patterns. D07 H is a distinct local Financials chooser.
+
+Root read the incumbent source at Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`:
+
+- `terminal/components/fin/finPageFamilies.ts`, blob **`2b0b398a8656d7a6a62fcd832b8ff867530c9791`**.
+- `terminal/components/fin/ResearchWorkspaceNav.tsx`, blob **`49049cac5652efd5d515d5a8a31ed4d732094d39`**.
+
+| Family | Existing page keys; first is the current default |
+| --- | --- |
+| Overview | `overview` |
+| Intelligence | `intelligence` |
+| Financials | `statements`, `statistics`, `revenue`, `dividends`, `compare` |
+| Earnings | `earnings`, `forecast`, `transcripts` |
+| Market | `technicals`, `seasonals` |
+| Ownership | `ownership`, `insider` |
+| Lab | `lab` |
+
+Current family selection dispatches its default page through `onPage`; local view selection dispatches its page key. The design must not promise restoration of a family's last-used local view without an existing owner-backed implementation. Close/scrim/Escape handling belongs to ResearchWorkspaceNav and its family trigger. The older native family descriptions include broader proposed views, so their existence is not treated as evidence that all are current routes.
+
+A new native reference row **`22U6-0`** in the owned D07 continuation map identifies the existing chooser and the local/global distinction. No competing family chooser, route grammar or navigation owner was added. Full integration and any shared-shell qualification remain separate from this source-backed reuse decision.
