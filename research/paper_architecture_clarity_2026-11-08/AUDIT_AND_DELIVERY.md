@@ -2,7 +2,7 @@
 
 ## Applied outcome
 
-The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory and Guide. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
+The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide and Mastermind AI. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
 
 | Current design entry | Verified continuation improvement |
 |---|---|
@@ -11,6 +11,7 @@ The first verified pass changed **44 artboards across 16 files**. The continuing
 | [F02 build contract](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0) | Evidence jumps preserve route/filters and place focus correctly; settled filter status is announced without moving focus. |
 | [GMI Foundations](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) | Current candidate source is bound correctly, with precise return-focus and snapshot-proof boundaries. |
 | [Expectation Build states](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-2-0) | EN/ZH desktop/mobile numeric disclosures, distinct clocks, null values, failed selection and empty-series studies. |
+| [Mastermind AI workbench](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0) | Interrupted-response desktop/mobile studies preserve partial prose and draft without restarting an uncertain request. |
 | [Market Guide handoff](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0) | Direct entry opens explicitly scoped US research; contextual Back requires a real origin, with a separate unavailable-link state. |
 | [Market Memory comparison](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) | Selected source-version unavailability preserves both record references and the exact comparison return. |
 | [Options D08C companion](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0) | Explicit assessment target, new-firing notice, General assessment, receipt/revision recovery and 320px study. |
@@ -54,9 +55,9 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The Chairman explicitly requested autonomous continuation beyond the initial pass. Eight material continuation lanes are verified above; the selected active unit is Mastermind AI interrupted-response clarity. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Nine material continuation lanes are verified above. Bounded next reviews examine Terminal replay recovery and News source-correction/return behavior; an existing complete contract is preserved rather than duplicated. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
 
-Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Guide handoff are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
+Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the AI interrupted-response companion are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -588,3 +589,59 @@ Existing search, alias, related-lesson return, unknown-link and no-JavaScript de
 Root inspected the two corrected board cards, the complete new companion including its 390px Chinese specimen, and the full fit-content R21 artboard. The longer Open labels fit their original footers; all new text and 44px actions render legibly without clipping. All own mutations returned observed success and R21 was explicitly released. Runtime owner-URL, caller-focus and browser-history behavior remains a required proof, not a claim from static Paper.
 
 Next: implement the AI incomplete-response specimen using the current request owner, preserve the original request’s uncertain outcome, and avoid a default retry action.
+
+
+## Continuation delivery 8 — AI incomplete response without request replay
+
+### Current-source finding and existing owners
+
+Root read the current [standalone stream consumer](https://github.com/mastermindx-market-intelligence/macro/blob/069f4a102de251433544d2423ef5df5f1e576454/templates/chat.html) at observed Macro main `069f4a102de251433544d2423ef5df5f1e576454`, blob `93c56416344e6a5099308d6397bc6256d0d4d952`. EOF and reader rejection reach `finishStream()`; when `doneReceived` is false, it suppresses visuals, removes progress and enables the composer without labeling retained prose incomplete. This is a source observation, not a deployed-browser reproduction.
+
+The current candidate [C3 build contract](https://github.com/mastermindx-market-intelligence/macro/blob/44af2f06661b75142a244e4fcad1f88eb80e080b/research/design_candidates/paper_audit_20261108/BUILD_PLAN.md), blob `c8c7c6c14f1d92abce9147c7e34a9afc6b7d27c6`, preserves existing request identity when transmission outcome is uncertain. It does not authorize an automatic second research run. The historical AI architecture and contemporary context-receipt candidates already own lifecycle/evidence requirements. No competing lifecycle, retry mechanism or source implementation was created.
+
+An early advisory suggestion of **Review and retry** was rejected after this current-source check. The implemented design action is **Return to draft**, which has no request effect.
+
+### Editable Paper changes
+
+File `01M3P1QEHS5XXQY85BJT6QR2E1`:
+
+| Location | New node | Purpose |
+|---|---|---|
+| [R10 workbench](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-1-0) | `5WL-0` | Incomplete response · Desktop · Proposed, 1440×900 |
+| Same workbench | `5YW-0` | Incomplete response · Mobile · Proposed, 390×844 |
+| [R10 Build + Implementation Boundaries](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-9-0), existing `5VN-0` | `62G-0` | Response/request distinction, source binding and focused acceptance |
+| Same builder addition | `62X-0` | Before-any-text variant at 390px |
+
+The new workbench boards are deep clones of existing `3CZ-0` / `3F5-0`, with their cloned answer components replaced by the incomplete-response state. The original research-in-progress and source-specific partial-answer boards remain unchanged. Existing shell, question, composer and assets were reused; new artboard creation/style/token APIs were not invoked.
+
+Both new boards show:
+
+- **Mastermind · Incomplete response**
+- **The response ended before completion.**
+- **Text shown may be incomplete. Your follow-up draft is kept.**
+- A short retained piece of the existing fixture prose: **Participation improved.**
+- **Evidence details unavailable.**
+- **Research status unconfirmed**
+- **Return to draft**
+
+The original follow-up **Could this be a short-term rebound?** stays visible in the composer. Cloned chart/citation/performance/Stop controls were removed from the new answer component so they cannot imply qualified completion. No market value, source clock, new evidence or live result was added. The before-text specimen says **No response text was received** rather than presenting an empty successful answer.
+
+### Behavioral boundary and proof
+
+The response’s completion state and the underlying request’s effect state remain separate. Stream interruption does not establish cancellation, success or no effects. In the illustrated unconfirmed case, the original request reference and admission guard remain with the incumbent owner; the Send affordance remains unavailable and Return to draft only focuses the current owner-matched composer.
+
+The builder contract requires:
+
+1. Retain permitted partial prose and the draft; suppress unqualified visuals and bind Sources to the actual response receipt. Absence uses the existing evidence-unavailable rule.
+2. Preserve original uncertain-operation custody. No automatic retry, new operation ID or presumed cancellation. Any later confirmed outcome comes from the existing request owner; interruption is not permanently hard-coded as unknown.
+3. Preserve focus when announcing the asynchronous status. Return to draft is an explicit local focus action, not a reopened research sheet or model request.
+4. Reject late events from older answers/conversations. Account/access changes clear restricted content and retire callbacks without erasing original operation custody.
+5. Prove interruption before text, after text, reader rejection, intentional Stop, source-specific failure, absent receipt, conversation switch and owner change. Only an eligible subsequent attempt uses the existing review / Start research boundary.
+
+The existing Save-with-monitoring-off hold, architecture/source candidates, QA HOLD page and D06 chart-to-Brain work remain unchanged.
+
+### Verification
+
+Root inspected both complete new workbench artboards at native dimensions, the before-text specimen and the entire current builder board. Both desktop and mobile retain the exact draft; mobile wraps it legibly inside the original composer. All status text and controls are contained, with no clipped footer or invented successful visual. The builder addition is legible and leaves previous source/evidence/Save guidance intact. All own mutations returned observed success. `5WL-0`, `5YW-0` and `5VN-0` were explicitly released.
+
+Paper acceptance is complete for this visual increment. Runtime stream labeling, request reconciliation and evidence qualification remain implementation/consumer-proof work with their existing owners.
