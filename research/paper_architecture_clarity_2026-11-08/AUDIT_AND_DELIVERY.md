@@ -29,7 +29,7 @@ Completion for this cross-product design pass: inventory current product files, 
 - Mastermind Product Design System file 01M312VSDSZFVT45674GDVJVZN is readable.
 - MASTERMIND PAGES file 01M2WGNCX9475G79JRKJTCM08P explicitly warns further changes risk data loss. READ-ONLY for this pass. Use established product files, no mutation to the oversized file.
 - Current Design Director evidence under docs/hermes/design-director/EVIDENCE.md records one separate Sector review-copy canary G4P-0; preserve it and original DSJ-0.
-- No Paper modifying effect has been dispatched. No uncertain effects.
+- See verified milestones below for completed Paper edits. No unresolved uncertain effects.
 
 ## Execution ownership
 
@@ -37,7 +37,7 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-Inventory and source recovery in progress. Next: read actual workflow screens, record prioritized exact-node defects, then apply the first coherent correction and verify it. PLAN_NOT_ORG_LINKED until an existing Agent OS record is identified; this source evidence does not create a new organizational lifecycle.
+Canonical entry points and Today/Projects corrections are applied and verified. Next: consume bounded domain and OS workflow findings, apply grounded high-value fixes and retain exact visual proof. PLAN_NOT_ORG_LINKED until an existing Agent OS record is identified; this source evidence does not create a new organizational lifecycle.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -50,3 +50,18 @@ Effect receipts: [{"operation_id":"paper-clarity-20261108-c4-os-today-01","tool"
 Verification: exact page-list readback plus Today desktop/mobile and directory screenshots. Design-only visual proof; no application navigation or production claim. No unknown effects.
 
 Next: apply shared-system entry-point correction and consume bounded architecture findings for market products and OS return/recovery screens.
+
+
+## Verified milestone — Projects, system entry and News revision architecture
+
+Projects M4J-0/N28-0: 12 text changes align desktop and mobile cards with Today. Each card now identifies its next destination (Open project, Review sharing, Read brief) and distinguishes In progress, Review needed and Brief ready. The mobile board contained a visible legacy title and scope label above the current content, duplicating the title and pushing Archived projects offscreen. Reparented legacy N5N-0 and TAJ-0 into the existing hidden reference group N5V-0 using compatible move_nodes; all node IDs preserved and no style API used. Native-width after screenshots confirm one main heading, all three cards, Archived projects and bottom safe area visible at 390×844. Desktop screenshot also verified.
+
+Product Design System: existing Build contract/readme page p-9-0 is now first and named 00 · Start here · Build contract. All nine pages retained; pending source imports separated at end. It remains Candidate 2, not an approval or production implementation.
+
+News: renamed the existing file to News Intelligence · R3 Ledger + R2 States. Page p-1-0 now says 01 · R3 presentation + R2 behavior references. Artboard 27K-0 is R3 · Start here · News ledger + R2 behavior. Its guide explicitly distinguishes the current R3 ledger presentation from retained R2 wording, evidence grouping, catch-up, NEXT CHECK, access/recovery/responsive states. Light remains specimen only, consistent with the frozen R3 source. Screenshot of guide 27W-0 confirms legibility and no clipping. No financial values, populations or evidence semantics changed.
+
+The first rename_resource response returned EFFECT_UNKNOWN because immediate metadata still showed the previous name. The original operation was NOT replayed. Original-carrier list_resources and explicit get_basic_info independently confirmed the new name for the same file ID. Reconciliation: APPLIED_CONFIRMED_BY_ORIGINAL_CARRIER_READBACK; no unresolved uncertain effect.
+
+Effect receipts: [{"operation_id":"paper-clarity-20261108-c4-ds-entry-order-01","tool":"arrange_pages","state":"APPLIED_RESPONSE_OBSERVED"},{"operation_id":"paper-clarity-20261108-c4-ds-entry-name-01","tool":"update_pages","state":"APPLIED_RESPONSE_OBSERVED"},{"operation_id":"paper-clarity-20261108-c4-news-file-label-01","tool":"rename_resource","state":"EFFECT_UNKNOWN"},{"operation_id":"paper-clarity-20261108-c4-news-page-label-01","tool":"update_pages","state":"APPLIED_RESPONSE_OBSERVED"},{"operation_id":"paper-clarity-20261108-c4-news-guide-01","tool":"set_text_content","state":"APPLIED_RESPONSE_OBSERVED"},{"operation_id":"paper-clarity-20261108-c4-news-board-label-01","tool":"rename_nodes","state":"APPLIED_RESPONSE_OBSERVED"},{"operation_id":"paper-clarity-20261108-c4-os-projects-copy-01","tool":"set_text_content","state":"APPLIED_RESPONSE_OBSERVED"},{"operation_id":"paper-clarity-20261108-c4-os-projects-mobile-structure-01","tool":"move_nodes","state":"APPLIED_RESPONSE_OBSERVED"}]
+
+All changes are editable Paper designs. Screenshot proof validates design layout, not functioning application navigation or deployment.
