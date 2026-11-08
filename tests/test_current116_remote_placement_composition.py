@@ -10,7 +10,7 @@ import shutil
 import pytest
 
 from ops.native_fabric.provider_plans import compose
-from provider_plan_fixed_parent import materialize_fixed_parent
+from provider_plan_fixed_parent import materialize_fixed_parent, materialize_fixed_sequence38
 from test_provider_plan_remote_mode_boundary import router
 
 PROFILE = "current116-remote-placement"
@@ -20,43 +20,7 @@ PROFILE = "current116-remote-placement"
 def current_source(tmp_path_factory):
     root = tmp_path_factory.mktemp("public-sequence38")
     previous = materialize_fixed_parent(root / "sequence37")
-    current = root / "sequence38"
-    profile = json.loads((compose.HERE / "remote_placement/profile.json").read_text())
-    # This profile consumes historical sequence 38, not the moving default
-    # composer output. Keep the sealed predecessor's original provider realm.
-    historical_sources = {
-        "ext/experiential_bridge.py":
-            "ops/native_fabric/experiential_native_bridge/experiential_bridge.py",
-        "ext/experiential_host_context.py":
-            "ops/native_fabric/experiential53/experiential_host_context.py",
-        "ext/experiential_plan_policy.py":
-            "control_plane/experiential_plan_policy.py",
-        "ext/experiential_transport.py":
-            "ops/native_fabric/experiential53/experiential_transport.py",
-        "ext/native_plan_worker.py":
-            "ops/native_fabric/quota_continuity/candidate/native_plan_worker.py",
-    }
-    previous_files = json.loads((previous / "FILES.json").read_text())
-    assert {
-        name for name, expected in profile["base_files"].items()
-        if previous_files[name] != expected
-    } == set(historical_sources)
-    shutil.copytree(previous, current)
-    repository = Path(__file__).resolve().parents[1]
-    for name, source in historical_sources.items():
-        payload = (repository / source).read_bytes()
-        assert hashlib.sha256(payload).hexdigest() == profile["base_files"][name]
-        (current / name).write_bytes(payload)
-    files = {
-        name: hashlib.sha256((current / name).read_bytes()).hexdigest()
-        for name in profile["base_files"]
-    }
-    assert files == profile["base_files"] and len(files) == 116
-    (current / "FILES.json").write_text(json.dumps(files))
-    # Inert descriptor over independently hash-qualified public source bytes.
-    (current / "RELEASE.json").write_text(json.dumps({
-        "digest": profile["base_selection"]["generation"], "files": files}))
-    return current
+    return materialize_fixed_sequence38(root / "sequence38", previous)
 
 
 @pytest.fixture

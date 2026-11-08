@@ -411,6 +411,10 @@ def before_host_pull_integrity(manifest):
 # An explicit forward composition of the selected provider plan and the exact
 # current APPLICATION107 source. The historical provider composer stays frozen.
 PROVIDER_APPLICATION_RECORD_SHA256 = "7bbe9fbffd0087d7ae5c191a50e8c6f6ce28fae43554a97e4efc0c23bba26584"
+# Retain the exact historical inputs authenticated by that unchanged record.
+# The current provider profile/realm may advance without retagging this cohort.
+PROVIDER_APPLICATION_PROFILE_SOURCE = "source/provider-application-profile.json.preimage"
+PROVIDER_APPLICATION_REALM_SOURCE = "source/provider-application-codex_provider_realm.py.preimage"
 PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
     "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
     "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",
@@ -442,7 +446,7 @@ def provider_application_record(root=None):
     raw = _provider_source(root / "rollout/provider_application/composition.json",
                            PROVIDER_APPLICATION_RECORD_SHA256)
     record = json.loads(raw)
-    profile = json.loads(_provider_source(root / record["provider_profile_source"],
+    profile = json.loads(_provider_source(root / PROVIDER_APPLICATION_PROFILE_SOURCE,
                                          record["provider_profile_sha256"]))
     if (record["schema"] != "native-provider-application-composition.v1"
             or set(record["additions"]) != PROVIDER_APPLICATION_MEMBERS
@@ -609,6 +613,7 @@ def compose_provider_application_stage(root, output, manifest, files):
     for key, expected in manifest.items():
         _provider_source(stage / key, expected)
     updates = {}
+    addition_sources = {}
     # Apply only reviewed patch bytes to copied preimages outside any Git index.
     with tempfile.TemporaryDirectory(prefix="native-provider-application-") as temporary:
         scratch = Path(temporary)
@@ -628,10 +633,13 @@ def compose_provider_application_stage(root, output, manifest, files):
         for key, row in record["additions"].items():
             if key in manifest or (stage / key).exists() or (stage / key).is_symlink():
                 raise ValueError("provider APPLICATION addition already exists")
-            raw = _provider_source(root / row["source"], row["sha256"])
+            source = (PROVIDER_APPLICATION_REALM_SOURCE
+                      if key == "ext/codex_provider_realm.py" else row["source"])
+            raw = _provider_source(root / source, row["sha256"])
             if len(raw) != row["bytes"]:
                 raise ValueError("provider APPLICATION addition size differs")
             updates[key] = raw
+            addition_sources[key] = source
     composed = dict(manifest, **{key: sha(raw) for key, raw in updates.items()})
     before_provider_application(composed)
     for key, raw in updates.items():
@@ -644,7 +652,9 @@ def compose_provider_application_stage(root, output, manifest, files):
                 sha256=sha(raw), bytes=len(raw))
         else:
             row = record["additions"][key]
-            files[key] = dict(row, installed_preimage_sha256=None)
+            # The accepted record keeps its original source location; a new
+            # inventory identifies the actual retained input read for this build.
+            files[key] = dict(row, source=addition_sources[key], installed_preimage_sha256=None)
     manifest.update(composed)
 
 

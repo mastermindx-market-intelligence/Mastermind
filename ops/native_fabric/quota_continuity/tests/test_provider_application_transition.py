@@ -24,16 +24,18 @@ from test_go_native_install import (source_owners, owner, go_owner, retained_go_
 
 @pytest.fixture(scope="module")
 def provider_stage(tmp_path_factory):
-    # Use the existing authenticated predecessor and unchanged seq36->37
-    # composer. The resulting RELEASE metadata is not a live selection receipt.
+    # Use the authenticated historical predecessor and existing sequence-38
+    # fixture owner. The moving default composer is a different source cohort.
     repository = ROOT.parents[2]
-    sys.path.insert(0, str(repository))
+    sys.path.insert(0, str(repository / "tests"))
     try:
-        from ops.native_fabric.provider_plans import compose
+        from provider_plan_fixed_parent import materialize_fixed_sequence38
     finally:
         sys.path.pop(0)
     fixture = json.loads((repository / "tests/fixtures/provider-plan-auto-predecessor.json").read_bytes())
-    profile = json.loads((compose.HERE / "profile.json").read_bytes())
+    record, _ = builder.provider_application_record(ROOT)
+    profile = json.loads(builder._provider_source(
+        ROOT / builder.PROVIDER_APPLICATION_PROFILE_SOURCE, record["provider_profile_sha256"]))
     assert fixture["files"] == profile["base_files"]
     root = tmp_path_factory.mktemp("provider-preserved-input").resolve()
     base = root / "base"
@@ -46,13 +48,7 @@ def provider_stage(tmp_path_factory):
         path.write_bytes(raw)
     (base / "RELEASE.json").write_text(json.dumps({
         "digest": profile["base_selection"]["generation"], "files": profile["base_files"]}))
-    stage = root / "provider"
-    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
-    git_env = {"GIT_CONFIG_COUNT": str(count + 2),
-        f"GIT_CONFIG_KEY_{count}": "gc.auto", f"GIT_CONFIG_VALUE_{count}": "0",
-        f"GIT_CONFIG_KEY_{count + 1}": "maintenance.auto", f"GIT_CONFIG_VALUE_{count + 1}": "false"}
-    with mock.patch.dict(os.environ, git_env):
-        compose.compose(base, stage)
+    stage = materialize_fixed_sequence38(root / "provider", base)
     assert {relative: g.digest((stage / relative).read_bytes())
             for relative in profile["files"]} == profile["files"]
     return SimpleNamespace(root=root, stage=stage, files=profile["files"])
@@ -552,7 +548,7 @@ def test_remote_placement_original_map_is_checked_before_inverse(remote_placemen
 @pytest.mark.parametrize("path", [
     "rollout/provider_application/remote-placement.json",
     "rollout/provider_application/composition.json",
-    "../provider_plans/profile.json",
+    builder.PROVIDER_APPLICATION_PROFILE_SOURCE,
     "../provider_plans/remote_placement/profile.json",
     "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
 ])
@@ -562,7 +558,7 @@ def test_remote_placement_source_commitments_refuse_drift(tmp_path, path, fault)
     paths = [
         "rollout/provider_application/remote-placement.json",
         "rollout/provider_application/composition.json",
-        "../provider_plans/profile.json",
+        builder.PROVIDER_APPLICATION_PROFILE_SOURCE,
         "../provider_plans/remote_placement/profile.json",
         "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
     ]
@@ -570,6 +566,8 @@ def test_remote_placement_source_commitments_refuse_drift(tmp_path, path, fault)
         destination = root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes((ROOT / relative).read_bytes())
+    # Prove the complete retained baseline before exercising the chosen fault.
+    builder.provider_remote_placement_record(root)
     target = root / path
     if fault == "changed":
         target.write_bytes(target.read_bytes() + b"\n")
@@ -593,3 +591,57 @@ def test_remote_placement_unqualified_flag_pairs_refuse_before_output(tmp_path, 
         with pytest.raises(SystemExit) as stopped:
             builder.main()
     assert stopped.value.code == 2 and not output.exists()
+
+
+@pytest.mark.parametrize("fault", ["changed", "symlink", "missing"])
+def test_frozen_provider_realm_refuses_drift_before_stage_write(tmp_path, builds, fault):
+    root = tmp_path / "repository/ops/native_fabric/quota_continuity"
+    record, _ = builder.provider_application_record(ROOT)
+    paths = {
+        "rollout/provider_application/composition.json",
+        builder.PROVIDER_APPLICATION_PROFILE_SOURCE,
+        builder.PROVIDER_APPLICATION_REALM_SOURCE,
+        *(row["source"] for row in record["replacements"].values()),
+        *(row["source"] for key, row in record["additions"].items()
+          if key != "ext/codex_provider_realm.py"),
+    }
+    for relative in paths:
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / relative).read_bytes())
+
+    def stage(name):
+        output = tmp_path / name
+        output.mkdir()
+        shutil.copytree(builds.default / "native-code-stage", output / "native-code-stage")
+        manifest = json.loads((builds.default / "native-manifest.json").read_bytes())
+        files = json.loads((builds.default / "native-source-inventory.json").read_bytes())["files"]
+        return output, manifest, files
+
+    baseline, complete, inventory = stage("valid")
+    builder.compose_provider_application_stage(root, baseline, complete, inventory)
+    assert len(complete) == 116
+    assert inventory["ext/codex_provider_realm.py"]["source"] == builder.PROVIDER_APPLICATION_REALM_SOURCE
+    assert (
+        g.digest((baseline / "native-code-stage/ext/codex_provider_realm.py").read_bytes())
+        == record["additions"]["ext/codex_provider_realm.py"]["sha256"]
+    )
+
+    target = root / builder.PROVIDER_APPLICATION_REALM_SOURCE
+    if fault == "changed":
+        target.write_bytes(target.read_bytes() + b"\n")
+    elif fault == "symlink":
+        retained = tmp_path / "retained-realm"
+        target.rename(retained)
+        target.symlink_to(retained)
+    else:
+        target.unlink()
+    output, manifest, files = stage("refused")
+    original_manifest = dict(manifest)
+    original_inventory = json.loads(json.dumps(files))
+    with pytest.raises(ValueError, match="provider APPLICATION source"):
+        builder.compose_provider_application_stage(root, output, manifest, files)
+    assert manifest == original_manifest and files == original_inventory
+    assert {name: g.digest((output / "native-code-stage" / name).read_bytes())
+            for name in original_manifest} == original_manifest
+    assert not (output / "native-code-stage/ext/codex_provider_realm.py").exists()
