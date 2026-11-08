@@ -478,7 +478,15 @@ def test_exact_reviewed_source_tokens_do_not_admit_byte_drift():
     from tests.executive_fabric_release_identity_review import REVIEWED_FILES
     paths=[name for name in REVIEWED_FILES if name.startswith('ops/native_fabric/provider_plans/memory118/native_owner/')]
     paths.append('ops/native_fabric/support_policy_status/reader.py')
-    assert len(paths)==4
+    # The composed cohort includes the accepted Memory task/broker pins.
+    assert set(paths)=={
+        'ops/native_fabric/provider_plans/memory118/native_owner/artifact_delivery.py',
+        'ops/native_fabric/provider_plans/memory118/native_owner/fabric_task.py',
+        'ops/native_fabric/provider_plans/memory118/native_owner/lease_broker.py',
+        'ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py',
+        'ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py',
+        'ops/native_fabric/support_policy_status/reader.py',
+    }
     for name in paths:
         source=(ROOT/name).read_text()
         assert mask_reviewed_identity_literals(name,source)!=source
