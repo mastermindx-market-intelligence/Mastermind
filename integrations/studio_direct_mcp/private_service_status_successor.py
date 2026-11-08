@@ -445,18 +445,30 @@ def _static_state(svc, account, roots, plan, raw):
         svc._fabric_release_bytes(roots["base"] / MODULE),
         svc._fabric_release_bytes(roots["manifest"]),
     )
+    publisher_composed = False
     if state == (raw["module.before"], raw["manifest.before"]):
         phase = "OLD"
     elif state == (raw["module.after"], raw["manifest.before"]):
         phase = "MODULE_ONLY"
     elif state == (raw["module.after"], raw["manifest.after"]):
         phase = "COMMITTED"
+    elif (state[0] == raw["module.after"] and
+          svc._pin_owner_module().publisher_postimage(
+              svc, account, roots, plan, raw, state[1])):
+        # A *completed, separately retained* native-pin publisher successor is
+        # the only admissible change after this fleet-status transaction.
+        # Its own plan, target pair, full runtime identity and terminal result
+        # are revalidated on every startup; partial upgrades still fail shut.
+        phase = "COMMITTED"
+        publisher_composed = True
     else:
         fail("FOREIGN_STATE")
     before = manifest_from(raw["manifest.before"])
     for name, h in before["files"].items():
-        if name != MODULE and digest(svc._fabric_release_bytes(
-                roots["base"] / name)) != h:
+        if name == MODULE or (name in ("git-publish.mjs", "workspace-access.mjs")
+                             and publisher_composed):
+            continue
+        if digest(svc._fabric_release_bytes(roots["base"] / name)) != h:
             fail("OTHER_MODULE_CHANGED")
     if (digest(svc._fabric_release_bytes(roots["plist"])) != before["plistHash"]
             or svc._stable_regular_file_hash(

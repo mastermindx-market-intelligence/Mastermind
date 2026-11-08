@@ -11,6 +11,7 @@ import re
 
 from common.workspace_source_operation_contract import validate_lookup, validate_advance
 from common.executive_workspace_contract import PRINCIPAL_KEYS, RESOURCE, SCOPE
+from common import workspace_discovery_correction_contract as correction
 
 FRAME_SCHEMA = "mastermind.workspace_source_operation_frame.v1"
 MAX_REQUEST_BYTES = 98304
@@ -19,8 +20,9 @@ MAX_RESPONSE_BYTES = 32768
 _PREFIXES = {"publish_project_proposal": "mmos-project-create-",
              "publish_project_plan_proposal": "mmos-project-plan-proposal-", "ADOPT_PLAN": "mmos-project-adopt-",
              "ACCEPT_DIRECTION": "mmos-direction-accept-", "add_project_file": "mmos-project-file-add-",
-             "set_project_communication_preference": "mmos-project-preference-set-"}
-_KNOWLEDGE = {"add_project_file", "set_project_communication_preference"}
+             "set_project_communication_preference": "mmos-project-preference-set-",
+             correction.ACTION: correction.REQUEST_PREFIX}
+_KNOWLEDGE = {"add_project_file", "set_project_communication_preference", correction.ACTION}
 _MAX_INT = 2**53 - 1
 
 
@@ -58,6 +60,8 @@ def _identity(value):
 
 
 def validate_knowledge_lookup(value):
+    if type(value) is dict and value.get("action") == correction.ACTION:
+        return correction.validate_lookup(value)
     _keys(value, {"action", "request_id", "work_ref", "source_commit", "base_revision",
                   "request_sha256", "expected_preference_revision"})
     if _identity(value) not in _KNOWLEDGE: _fail()
@@ -108,6 +112,13 @@ def operation_request_limit(operation, value):
         return MAX_CONTROL_REQUEST_BYTES
 
 
+def operation_response_limit(operation):
+    if operation == "read_original":
+        from common.workspace_discovery_original_contract import MAX_RESPONSE_BYTES as original_limit
+        return original_limit
+    return MAX_RESPONSE_BYTES
+
+
 def validate_operation_request(operation, request):
     value = _tree(request)
     if operation == "options":
@@ -118,11 +129,15 @@ def validate_operation_request(operation, request):
         body = value["request"]
         if type(body) is not dict or set(body) & {"principal", "verified_expires_at", "operation"}: _fail()
         action = _identity({"action": value["action"], "request_id": body.get("request_id")})
+        if action == correction.ACTION:
+            correction.validate_request(body)
         if action == "publish_project_proposal":
             if "work_ref" in body: _fail()
         else:
             validate_lookup({"schema": "mastermind.workspace_source_operation_lookup.v1", "action": action,
                              "request_id": body["request_id"], "work_ref": body.get("work_ref")})
+    elif operation == "read_original":
+        correction.validate_lookup(value)
     elif operation in {"read", "reconcile"}:
         if type(value) is not dict: _fail()
         if value.get("action") in _KNOWLEDGE: validate_knowledge_lookup(value)

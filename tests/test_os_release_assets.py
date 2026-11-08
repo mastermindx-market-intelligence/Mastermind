@@ -48,7 +48,11 @@ NOTICE_BYTES = {
 }
 
 
-def built_dist(app, *, noir_notices=False):
+PRIVATE_ENTRY = "assets/private-entry-a.jpg"
+PRIVATE_ENTRY_BYTES = b"\xff\xd8fixture private entry\xff\xd9"
+
+
+def built_dist(app, *, noir_notices=False, private_entry=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text('<script src="/os/assets/index-a.js"></script><link href="/os/assets/index-a.css">')
@@ -64,6 +68,8 @@ def built_dist(app, *, noir_notices=False):
             "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
             **NOTICE_BYTES,
         }
+        if private_entry:
+            extra[PRIVATE_ENTRY] = PRIVATE_ENTRY_BYTES
         for name, data in extra.items():
             path = dist / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +86,8 @@ def bundle(tmp_path, source, monkeypatch, request):
     monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(mod, "_require_root", lambda: None)
     monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(
-        app, noir_notices=getattr(request, "param", False)))
+        app, noir_notices=bool(getattr(request, "param", False)),
+        private_entry=getattr(request, "param", False) == "private_entry"))
     repo, sha, tree = source
     out = tmp_path / "bundle"
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
@@ -199,6 +206,7 @@ def rewrite_receipt(out, mod, mutate):
     return receipt
 
 
+@pytest.mark.parametrize("bundle", [False, "private_entry"], indirect=True)
 def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundle, tmp_path):
     mod, out, sha, tree = bundle
     receipt = json.loads((out / "build-receipt.json").read_bytes())
@@ -217,6 +225,9 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     assert (stage / "app/mastermind_os/dist/assets/index-a.js").read_text() == "committed app bytes"
     assert (stage / "app/mastermind_os/dist/assets/index-a.js").stat().st_mode & 0o777 == 0o444
     assert (stage / "app/mastermind_os/dist/assets").stat().st_mode & 0o777 == 0o755
+    for name, raw in checked.files.items():
+        assert (stage / mod.DIST / name).read_bytes() == raw
+        assert (stage / mod.DIST / name).stat().st_mode & 0o777 == 0o444
     (stage / ".executive-release-manifest.json").write_text("existing immutable seal")
     before = {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
     mod.compare_existing(checked, stage)
@@ -225,16 +236,23 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
-def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path):
+@pytest.mark.parametrize("bundle,expected_count", [(True, 11), ("private_entry", 12)], indirect=["bundle"])
+def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path, expected_count):
     mod, out, sha, tree = bundle
     manifest = json.loads((out / mod.DIST / "asset-manifest.json").read_bytes())
     rows = {item["path"]: item for item in manifest["files"]}
-    assert len(rows) == 11
+    assert len(rows) == expected_count
+    if expected_count == 12:
+        assert rows[PRIVATE_ENTRY] == {"path": PRIVATE_ENTRY, "byte_count": len(PRIVATE_ENTRY_BYTES),
+                                      "sha256": hashlib.sha256(PRIVATE_ENTRY_BYTES).hexdigest(),
+                                      "mime": "image/jpeg"}
     checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
     stage = tmp_path / "notice-stage"
     stage.mkdir()
     mod.import_assets(checked, stage)
+    if expected_count == 12:
+        assert checked.files[PRIVATE_ENTRY] == PRIVATE_ENTRY_BYTES
+        assert (stage / mod.DIST / PRIVATE_ENTRY).read_bytes() == PRIVATE_ENTRY_BYTES
     for name, data in NOTICE_BYTES.items():
         assert rows[name] == {"path": name, "byte_count": len(data),
                               "sha256": hashlib.sha256(data).hexdigest(),
@@ -244,7 +262,7 @@ def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, 
     mod.compare_existing(checked, stage)
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
+@pytest.mark.parametrize("bundle", [True, "private_entry"], indirect=True)
 def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
     pytest.importorskip("mcp", reason="real HTTP loading belongs to the optional MCP network test environment")
     _, out, _, _ = bundle
@@ -268,10 +286,16 @@ def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
         assert messages[0]["status"] == 200
         assert dict(messages[0]["headers"])[b"content-type"] == b"text/plain; charset=utf-8"
         assert messages[-1]["body"] == data
+    if (out / "app/mastermind_os/dist" / PRIVATE_ENTRY).exists():
+        messages = asyncio.run(request("/os/" + PRIVATE_ENTRY))
+        assert messages[0]["status"] == 200
+        assert dict(messages[0]["headers"])[b"content-type"] == b"image/jpeg"
+        assert dict(messages[0]["headers"])[b"x-content-type-options"] == b"nosniff"
+        assert messages[-1]["body"] == PRIVATE_ENTRY_BYTES
     assert asyncio.run(request("/os/third-party/unknown.txt"))[0]["status"] == 404
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
+@pytest.mark.parametrize("bundle", [True, "private_entry"], indirect=True)
 @pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "extra_directory"])
 def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage):
     mod, out, _, _ = bundle
@@ -289,6 +313,7 @@ def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage
         mod._capture_dist(out, sealed=False)
 
 
+@pytest.mark.parametrize("bundle", [False, "private_entry"], indirect=True)
 @pytest.mark.parametrize("damage", ["wrong_sha", "wrong_tree", "asset_changed", "manifest_changed", "missing_manifest", "extra", "symlink", "hardlink", "fifo", "traversal"])
 def test_bad_artifact_refused_without_destination_effect(bundle, tmp_path, damage):
     import os

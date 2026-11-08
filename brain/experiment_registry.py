@@ -17,7 +17,8 @@ Design invariants (charter P3/P8):
   - ``matured()`` is the ONLY function the agenda calls — it returns items that are
     ready for a human or Opus session to judge, in priority order (earliest
     comeback_date first, then by id).
-  - P2: any failure in load/save degrades to an empty list, never raises.
+  - P2: default reads and mutation entrypoints retain their fail-soft behavior.
+    Strict read consumers can opt into error propagation without running a mutation.
   - MW2 addition: ``evaluate(item, asof)`` returns a tri-state verdict
     (not_old_enough / blocked_missing_evidence / ready_for_review) driven by a
     registry of PER-EXPERIMENT mechanical evaluator functions keyed by id.  LLMs may
@@ -866,9 +867,36 @@ def update_evaluator_tracking(experiment_id: str, state: str, asof: date | None 
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def load() -> list[dict]:
-    """Return all experiments (with safe defaults filled in)."""
-    return [_defaults(dict(e)) for e in _load()]
+def load(*, strict: bool = False) -> list[dict]:
+    """Return experiments with defaults; strict reads expose unavailable evidence.
+
+    Strict mode reads the existing registry once without acquiring a mutation
+    lock, recording a mutation preimage, or promoting experiment status.
+    """
+    if strict:
+        import stat
+
+        try:
+            raw = _REGISTRY_PATH.read_bytes()
+        except FileNotFoundError:
+            probe = _REGISTRY_PATH
+            while True:
+                try:
+                    mode = probe.lstat().st_mode
+                except FileNotFoundError:
+                    parent = probe.parent
+                    if parent == probe:
+                        raise
+                    probe = parent
+                    continue
+                if probe == _REGISTRY_PATH or not stat.S_ISDIR(mode):
+                    raise
+                raw = None
+                break
+        experiments = [] if raw is None else _decode_registry_bytes(raw, strict=True)
+    else:
+        experiments = _load()
+    return [_defaults(dict(e)) for e in experiments]
 
 
 def get(experiment_id: str) -> dict | None:
@@ -1000,7 +1028,9 @@ def matured(as_of: date | None = None) -> list[dict]:
     return sorted(results, key=_sort_key)
 
 
-def open_with_tristate(as_of: date | None = None) -> list[dict]:
+def open_with_tristate(
+    as_of: date | None = None, *, experiments: list[dict] | None = None,
+) -> list[dict]:
     """Return all OPEN (non-terminal) experiments with their tri-state evaluation attached.
 
     Each item in the returned list is the experiment dict enriched with an ``evaluation``
@@ -1011,11 +1041,12 @@ def open_with_tristate(as_of: date | None = None) -> list[dict]:
       4. not_old_enough last (sorted by expected_ready_date ASC within this tier)
 
     This is the source of truth for the agenda's experiment section and the web pane.
-    Never raises (P2).
+    Default callers retain fail-soft reads (P2). A supplied snapshot avoids a
+    second registry read and propagates projection failures to its owner.
     """
     as_of = as_of or date.today()
     try:
-        all_exps = load()
+        all_exps = load() if experiments is None else experiments
         results = []
         for exp in all_exps:
             if exp.get("status") in ("judged", "cancelled"):
@@ -1044,25 +1075,51 @@ def open_with_tristate(as_of: date | None = None) -> list[dict]:
         results.sort(key=_sort_key)
         return results
     except Exception:  # noqa: BLE001
+        if experiments is not None:
+            raise
         return []
 
 
-def summary() -> dict:
+def summary(*, experiments: list[dict] | None = None) -> dict:
     """A compact summary suitable for the agenda and the /api/experiments endpoint.
 
     Returns {total, open, matured, judged, cancelled, matured_items: [...],
-             open_tristate: [...], as_of: str}.  Never raises.
+             open_tristate: [...], as_of: str}.
+    Default callers retain the existing fail-soft maturity-update behavior.
+    A supplied snapshot is projected without a registry reread or mutation;
+    due open items remain open, and projection failures propagate.
     """
     try:
-        all_exps = load()
+        all_exps = load() if experiments is None else experiments
         by_status: dict[str, int] = {}
         for e in all_exps:
             s = e.get("status", "open")
             by_status[s] = by_status.get(s, 0) + 1
-        mat = matured()
-        tristate = open_with_tristate()
+        if experiments is None:
+            mat = matured()
+            tristate = open_with_tristate()
+            as_of = date.today()
+        else:
+            as_of = date.today()
+            mat = []
+            for exp in all_exps:
+                ready = exp.get("status") == "matured"
+                comeback = exp.get("comeback_date")
+                if exp.get("status") == "open" and comeback:
+                    try:
+                        ready = as_of >= date.fromisoformat(str(comeback)[:10])
+                    except (TypeError, ValueError):
+                        ready = False
+                if ready:
+                    mat.append(dict(exp))
+            mat.sort(key=lambda exp: (
+                0 if exp.get("comeback_date") else 1,
+                str(exp.get("comeback_date"))[:10] if exp.get("comeback_date") else "",
+                exp.get("id") or "",
+            ))
+            tristate = open_with_tristate(as_of, experiments=all_exps)
         return {
-            "as_of": date.today().isoformat(),
+            "as_of": as_of.isoformat(),
             "total": len(all_exps),
             "open": by_status.get("open", 0),
             "matured": by_status.get("matured", 0),
@@ -1072,6 +1129,8 @@ def summary() -> dict:
             "open_tristate": tristate,
         }
     except Exception:  # noqa: BLE001
+        if experiments is not None:
+            raise
         return {"as_of": date.today().isoformat(), "total": 0, "open": 0,
                 "matured": 0, "judged": 0, "cancelled": 0, "matured_items": [],
                 "open_tristate": []}

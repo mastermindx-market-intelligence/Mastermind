@@ -25,6 +25,9 @@ CURRENT_RESULT_SCHEMA = "mastermind.coo_agentos_current_context_result.v1"
 CURRENT_CATALOGUE = "coo.agentos_current_context.v1"
 CURRENT_ACTION = "read_current_agentos_context"
 CURRENT_TOOL = "executive_agentos_current_context"
+DISCOVERY_FRAME_SCHEMA = "mastermind.ceo_ingress.coo_discovery_context.v1"
+DISCOVERY_RESULT_SCHEMA = "mastermind.coo_discovery_context_result.v1"
+DISCOVERY_CATALOGUE = "coo.discovery_correction.v1"
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 224 * 1024
 MAX_BUNDLE_BYTES = 128 * 1024
@@ -123,9 +126,14 @@ def validate_current_frame(frame):
     return _validate_frame(frame, current=True)
 
 
-def _validate_frame(frame, *, current):
+def validate_discovery_frame(frame):
+    return _validate_frame(frame, current=True, discovery=True)
+
+
+def _validate_frame(frame, *, current, discovery=False):
     _shape(frame, _CURRENT_FRAME_KEYS if current else _FRAME_KEYS)
-    if type(frame["schema"]) is not str or frame["schema"] != (CURRENT_FRAME_SCHEMA if current else FRAME_SCHEMA):
+    schema = DISCOVERY_FRAME_SCHEMA if discovery else CURRENT_FRAME_SCHEMA if current else FRAME_SCHEMA
+    if type(frame["schema"]) is not str or frame["schema"] != schema:
         _refuse()
     selected = context(frame["principal_context"])
     _digest(frame["capability_profile_digest"])
@@ -152,15 +160,24 @@ def validate_current_result(value, *, expected_context, capability_profile_diges
         capability_profile_digest=capability_profile_digest, expected_workspace_principal=expected_workspace_principal)
 
 
-def _validate_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal):
+def validate_discovery_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal):
+    workspace_principal(expected_workspace_principal)
+    return _validate_result(value, expected_context=expected_context,
+        capability_profile_digest=capability_profile_digest, expected_workspace_principal=expected_workspace_principal,
+        discovery=True)
+
+
+def _validate_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal, discovery=False):
     from control_plane.agentos_context_bundle import validate_context_read, validate_current_context_read, TOKEN_BUDGET
     from ops.fabric_launch.agentos import validate_bundle
     current = expected_workspace_principal is not None
     _shape(value, _CURRENT_RESULT_KEYS if current else _RESULT_KEYS)
     expected = context(expected_context)
     observed = context(value["principal_context"])
-    if (type(value["schema"]) is not str or value["schema"] != (CURRENT_RESULT_SCHEMA if current else RESULT_SCHEMA)
-            or type(value["catalogue"]) is not str or value["catalogue"] != (CURRENT_CATALOGUE if current else CATALOGUE)
+    schema = DISCOVERY_RESULT_SCHEMA if discovery else CURRENT_RESULT_SCHEMA if current else RESULT_SCHEMA
+    catalogue = DISCOVERY_CATALOGUE if discovery else CURRENT_CATALOGUE if current else CATALOGUE
+    if (type(value["schema"]) is not str or value["schema"] != schema
+            or type(value["catalogue"]) is not str or value["catalogue"] != catalogue
             or observed != expected or _digest(value["capability_profile_digest"]) != _digest(capability_profile_digest)
             or type(value["bundle_encoding"]) is not str or value["bundle_encoding"] != "base64"):
         _refuse()
@@ -202,13 +219,15 @@ def result(raw, receipt, *, principal_context, capability_profile_digest):
     return decode(encode(value))  # Detach the already bounded owner result.
 
 
-def current_result(raw, receipt, *, principal_context, capability_profile_digest, workspace_principal):
+def current_result(raw, receipt, *, principal_context, capability_profile_digest, workspace_principal, discovery=False):
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_BUNDLE_BYTES:
         _refuse()
-    value = {"schema": CURRENT_RESULT_SCHEMA, "catalogue": CURRENT_CATALOGUE,
+    value = {"schema": DISCOVERY_RESULT_SCHEMA if discovery else CURRENT_RESULT_SCHEMA,
+        "catalogue": DISCOVERY_CATALOGUE if discovery else CURRENT_CATALOGUE,
         "principal_context": dict(principal_context), "capability_profile_digest": capability_profile_digest,
         "workspace_principal": dict(workspace_principal), "bundle_encoding": "base64",
         "bundle_base64": base64.b64encode(raw).decode("ascii"), "receipt": receipt}
-    validate_current_result(value, expected_context=principal_context,
+    validator = validate_discovery_result if discovery else validate_current_result
+    validator(value, expected_context=principal_context,
         capability_profile_digest=capability_profile_digest, expected_workspace_principal=workspace_principal)
     return decode(encode(value))

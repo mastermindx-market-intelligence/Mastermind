@@ -136,6 +136,19 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
 # acquisition. Each exception binds one entire reviewed source line in one file.
 # A fetch/clone/raw-content call added even in the same file is still rejected.
 _INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
+    # Exact published compiler provenance, asserted as local archive metadata.
+    # Neither line performs a request; other acquisition text stays guarded.
+    'tests/fixtures/discovery-correction-source.json': frozenset((
+        '"pull_request": "https://github.com/mastermindx-market-intelligence/macro/pull/10831",',
+    )),
+    'tests/discovery_correction_test_support.py': frozenset((
+        "assert fixture['pull_request']=='https://github.com/mastermindx-market-intelligence/macro/pull/10831'",
+    )),
+    # Actual temporary-Git correction owner fixture; this is an inert PR URL
+    # returned by the declared fixture API, never a remote acquisition command.
+    'app/mastermind_os/src/fixtures/discovery-correction-owner.json': frozenset((
+        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
+    )),
     'app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json': frozenset((
         '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",',
     )),

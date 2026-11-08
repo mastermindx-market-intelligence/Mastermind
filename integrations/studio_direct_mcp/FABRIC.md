@@ -25,7 +25,7 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 Omitting `pool` and `model` retains the existing economical `AUTO` route, including the
 incumbent eligible pre-task capacity continuation. For a **new** run only, the Web
 `fabric_request` may set a closed `pool` from `grok`, `glm`, `minimax`, `bailian`,
-`cursor`, `ocfree`, or `go`; `model` requires `pool` and selects an exact *already
+`cursor`, `ocfree`, `go`, `byteplus`, or `experiential`; `model` requires `pool` and selects an exact *already
 qualified* model within that pool. `model: "auto"` means only the provider is pinned.
 This is a strict constraint, not a suggestion, and it does not expose a host or account.
 
@@ -57,39 +57,71 @@ stdout. Unsupported native help or a malformed/mismatched preview still yields
 `retry_allowed=false`; any future genuinely separate review needs a new,
 properly admitted run after the actual policy/capacity issue is resolved.
 
-Optional `max_turns` is limited by native
-policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
-read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
-independence filter.
+Optional `max_turns` follows native wrapper compatibility: GLM and MiniMax use
+their existing limits; BytePlus permits at most 64. Other manual pools refuse it.
+`subject_pool` remains the separate author independence filter.
 
-`pool: "experiential"` is an additional strictly manual pin for the Experiential Labs
-uncensored route and accepts exactly `model: "glm-5.3-uncensored"` — no omitted model, no
-`auto`, and no other slug (including `glm-5.3-flash-uncensored` or any case variant);
-every deviation is refused before reservation or dispatch. The current native
-source contract admits only the plugin's `mechanical` and `fix_build` labor
-classes; `review`, `audit`, and `census` are refused before any native call.
-**That provider retains prompts and responses.** Every experiential request must carry all
-three explicit acknowledgments: `retention_opt_in: true`, `sensitive_data_opt_in: true`,
-and `code_exposure_opt_in: true`. This conservative code consent is required even for
-public-looking packets because a worker may later access repository source.
-The fields are refused for other pools; they are never sent to the provider.
-For experiential, the incumbent native `request --help` must advertise the four
-exact independent gates `--experiential-retention-acknowledged`,
-`--experiential-sensitive-data-opt-in`, `--experiential-proprietary-code`,
-`--experiential-code-exposure-opt-in` before any native status/preview/launch.
-The facade passes all four to the **native worker authority** (not HTTP inference);
-older native adapters fail closed as `MANUAL_ROUTE_UNAVAILABLE`.
-This is a mechanism for carrying explicit caller acknowledgments, not proof that
-a ChatGPT identity authenticated the consent or that any provider is qualified. `max_turns` is refused for this pool until the native adapter proves compatibility.
-The same native `preview`, `--strict-manual-pin` recheck, exact run/pool/model witnesses and
-no-fallback rules apply, with the experiential slug compared exactly; if the native adapter
-has no qualified Experiential route the request fails closed with `MANUAL_ROUTE_UNAVAILABLE`
-before any worker dispatch. Source presence alone activates nothing in connected ChatGPT.
-Existing model quality, budget, entitlement, host and policy
-gates always win; a model string is never proof that a model is served or permitted.
+### ModelArk and Experiential plan selectors
+
+The facade carries these closed selectors to the existing native owner. It does
+not read provider credentials, select an account, infer an entitlement, or own a
+budget counter.
+
+| Pool | Request model | Native behavior |
+| --- | --- | --- |
+| `byteplus` | `deepseek-v4.1-flash`, `glm-5.3-flash` | Exact Coding Plan model |
+| `byteplus` | omitted or `auto` | Native default; preview result becomes an exact request pin |
+| `experiential` | omitted or `free` | Native included-plan preference, subject to verified funding |
+| `experiential` | `uncensored` | Explicit paid Flash lane; native preference is DeepSeek, then GLM at new selection only |
+| `experiential` | Seven plain included IDs or the two Flash Uncensored IDs | Exact enrolled model, protocol and funding admission |
+| `experiential` | `glm-5.3-uncensored` | Historical explicit route, only if native policy admits it |
+
+The seven included IDs are `deepseek-v4.1-flash`,
+`deepseek-v4.1-flash-1017`, `gpt-6-luna`, `clef`, `clef-flash`,
+`jev-latest`, and `gpt-6-luna-decisions`. The two paid IDs are
+`deepseek-v4.1-flash-uncensored` and `glm-5.3-flash-uncensored`.
+Promotional `:free` IDs are not Max-plan selectors. The facade never converts
+included selection into paid selection. A selector's preview must resolve within
+its requested lane, and the exact model is forwarded to native strict request;
+neither another model nor another pool can be silently substituted.
+
+Both plan pools accept only the facade's bounded `mechanical` and `fix_build`
+classes. All Experiential manual requests require explicit
+`retention_opt_in: true`, `sensitive_data_opt_in: true`, and
+`code_exposure_opt_in: true`, even for public-looking packets. Experiential
+retains prompts and responses. The facade forwards the existing four native
+consent flags, including conservative proprietary-code treatment. Native help
+must advertise every flag before status, preview or launch, and native admission
+independently rechecks consent, funding and account identity.
+
+For unpinned `C0_MECHANICAL` / `C1_ROUTINE_BOUNDED` `mechanical` or
+`fix_build` work, `provider_plan_auto: true` selects one native AUTO attempt.
+It bypasses the incumbent pre-task continuation wrapper because that wrapper's
+deadline/preflight contract excludes these local plan consumers. Native may still
+choose another admitted incumbent pool; the field grants no provider, account,
+consent or paid-lane authority. It is not forwarded as a new native argument.
+Manual pools are incompatible with it. Other AUTO requests preserve the existing
+continuation behavior. Responses identify the single-attempt limit explicitly.
+
+For the same bounded unpinned AUTO classes, all three consents may be supplied together with
+`response_only: true`. This explicitly declares a task completed entirely from its submitted packet,
+with no worker tool actions or artifact requirements; it is never inferred from packet
+text. This form also selects one native attempt. The facade forwards `--experiential-response-only` and all four consent
+flags without adding a pool or model pin. Native AUTO may consider included
+chat models only. Paid Uncensored and native System One/Decisions protocols stay
+explicit selections. Without these fields, existing AUTO behavior is unchanged.
+Consent fields are refused on other explicit pools, and incomplete or nonboolean
+consents refuse before native access.
+
+Native funding gates remain controlling. Catalog presence is not Max funding
+proof, and a merged facade cannot make an unverified included lane eligible.
+No request, failed attempt or effect-unknown run is replayed by this change.
 
 `fabric_capabilities.manual_routing.available` is true only when the installed native
-adapter advertises both `preview` and `--strict-manual-pin`. A source-merged Web
+adapter advertises both `preview` and `--strict-manual-pin`. The capability
+also reports the facade's closed pool list and consent requirements, with
+`tool_snapshot_verified: false`: it cannot attest ChatGPT's exposed schema.
+A source-merged Web
 facade or passing tests alone do not activate the feature in connected ChatGPT.
 Reconcile the pinned native generation, immutable service release, tool snapshot and
 actual originating parent; verify one new pinned-model START, useful result, parent

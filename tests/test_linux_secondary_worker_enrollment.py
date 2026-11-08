@@ -152,7 +152,12 @@ def test_release_archive_scope_excludes_vendor_and_unneeded_surfaces() -> None:
         "scripts/executive_os_linux_worker.py",
         "scripts/executive_os_remote_worker_gateway.py",
     )
-    assert all("vendor" not in item for item in m.RELEASE_PATHS)
+    # The native EVAL import closure contains this exact licensed pure helper.
+    # Neither the upstream Hermes vendor tree nor a vendor-directory wildcard is allowed.
+    assert {item for item in m.RELEASE_PATHS if "vendor" in Path(item).parts} == {
+        "integrations/hermes_omh/vendor/__init__.py",
+        "integrations/hermes_omh/vendor/dag_core.py",
+    }
     assert "integrations" not in m.RELEASE_PATHS
     assert "integrations/business_mcp_auth" not in m.RELEASE_PATHS
     assert "integrations/mastermind_secretary_mcp" not in m.RELEASE_PATHS
@@ -175,6 +180,7 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
         archive.extractall(repo, filter="data")
     decoys = (
         "vendor/hermes/secret.txt", "integrations/unrelated/secret.txt",
+        "integrations/hermes_omh/vendor/unreviewed.py",
         "integrations/business_mcp_auth/server.py", "integrations/business_mcp_auth/jwks.py",
         "integrations/mastermind_secretary_mcp/adapter.py",
         "unrelated/private.txt", "scripts/ohf/private-probe.py",
@@ -207,6 +213,9 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
         "integrations/hermes_harness/native_executive_consumer.py",
         "integrations/hermes_harness/native_tool_registration.py",
         "integrations/hermes_runtime/native_gateway_entry.py",
+        *(f"integrations/hermes_omh/{name}.py" for name in
+          ("__init__", "effort_config", "hae_zai_extension", "adapter",
+           "vendor/__init__", "vendor/dag_core")),
         *(f"integrations/hermes_runtime/profiles/{role}.yaml" for role in ("mmmeta", "mmsecretary")),
         *(f"integrations/hermes_qualification/profiles/{role}/{name}"
           for role in ("mmmeta", "mmsecretary") for name in ("config.yaml", "SOUL.md")),
@@ -232,6 +241,8 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
         "integrations.hermes_harness.native_executive_consumer",
         "integrations.hermes_harness.native_tool_registration",
         "integrations.hermes_runtime.native_gateway_entry",
+        # Import the selected helpers and their real eager adapter/DAG closure.
+        "integrations.hermes_omh.effort_config", "integrations.hermes_omh.hae_zai_extension",
         # The selected-child reply decoder imports this canonical envelope owner.
         "integrations.hermes_delegate.executive",
     ]
@@ -281,8 +292,10 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
 
     # A checkout or the explicit third-party dependency path cannot supply a
     # missing first-party consumer member in a fresh isolated interpreter.
-    for leaf in ("policy", "executive"):
-        member = extracted / "integrations/hermes_delegate" / f"{leaf}.py"
+    for module_name in ("integrations.hermes_delegate.policy",
+                        "integrations.hermes_delegate.executive",
+                        "integrations.hermes_omh.vendor.dag_core"):
+        member = extracted.joinpath(*module_name.split(".")).with_suffix(".py")
         retained = member.read_bytes()
         member.unlink()
         try:
@@ -293,8 +306,11 @@ def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path:
             )
             assert refused.returncode != 0
             assert "ISOLATED_RUNTIME_BYOK_IMPORTS_OK" not in refused.stdout
-            assert "ModuleNotFoundError" in refused.stderr
-            assert f"integrations.hermes_delegate.{leaf}" in refused.stderr
+            if module_name == "integrations.hermes_omh.vendor.dag_core":
+                assert "ImportError: cannot import name \'dag_core\' from \'integrations.hermes_omh.vendor\'" in refused.stderr
+            else:
+                assert "ModuleNotFoundError" in refused.stderr
+                assert module_name in refused.stderr
         finally:
             member.write_bytes(retained)
 
