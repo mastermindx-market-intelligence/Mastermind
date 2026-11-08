@@ -763,6 +763,12 @@ ALLOWED_PATHS = frozenset(
         # docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md, finite contribution scope.
         # These exact evidence/doc/test paths are EVAL-owned, not shared-owner
         # exemptions; inherited dependency/control/config deltas remain fenced.
+        # APPLICATION observation amendment, same original operation:
+        # git:mastermindx-market-intelligence/Mastermind@14c920f43cee40017cbd952d58561e40e5ca1809
+        # docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md, exact owned contribution.
+        "docs/hermes/APPLICATION_OBSERVATION_V4.md",
+        "integrations/hermes_runtime/native_application_observation.py",
+        "integrations/hermes_runtime/tests/test_native_application_observation.py",
         "docs/hermes/MEMORY_LEARNING_QUALIFICATION.md",
         "tests/test_agent_eval_hermes_memory_grounding.py",
         "review_evidence/hermes_eval/current-primary-context-trial-composition-20261107.json",
@@ -1558,6 +1564,9 @@ def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, mon
 
 
 @pytest.mark.parametrize("owned", [
+    "docs/hermes/APPLICATION_OBSERVATION_V4.md",
+    "integrations/hermes_runtime/native_application_observation.py",
+    "integrations/hermes_runtime/tests/test_native_application_observation.py",
     "docs/hermes/MEMORY_LEARNING_QUALIFICATION.md",
     "tests/test_agent_eval_hermes_memory_grounding.py",
     "review_evidence/hermes_eval/current-primary-context-trial-composition-20261107.json",
@@ -1579,6 +1588,9 @@ def test_native_eval_contribution_evidence_reaches_both_real_fences(tmp_path, mo
 
 
 @pytest.mark.parametrize("foreign", [
+    "docs/hermes/APPLICATION_OBSERVATION_UNLISTED.md",
+    "integrations/hermes_runtime/native_application_observation_unlisted.py",
+    "integrations/hermes_runtime/tests/test_native_application_observation_unlisted.py",
     "integrations/hermes_runtime/unlisted_native_owner.py",
     "tests/test_hermes_primary_application_unlisted.py",
     "tests/test_linux_secondary_worker_unlisted.py",

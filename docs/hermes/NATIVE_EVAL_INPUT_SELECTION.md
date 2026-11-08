@@ -1102,3 +1102,12 @@ These are the bounded original APPLICATION return-observation contribution, its 
 Record this amendment in a commit before adding these exact paths to the finite EVAL-owned `ALLOWED_PATHS`. The gate change must cite that immutable amendment and prove that each path independently reaches both real fences, while nearby unlisted paths and mixed forbidden changes remain refused. These are owned paths, not shared-connection exemptions. No path prefix, import prohibition, forbidden surface, effective-delta computation, dependency subtraction, release ordering or existing ownership rule is expanded.
 
 The same Draft carrier may prepare its bounded source composition now. The original EVAL, APPLICATION and auth release carriers retain their independent effects; their outstanding work must not be imported into the APPLICATION release. Final residual retargeting and release still require their actual protected inputs, a whole effective delta within the finite EVAL closure, required checks, and the original delivery path. This source amendment grants no runtime admission, installed acceptance, complete producer validity, learning promotion or uptime claim.
+
+### Finite ownership-gate qualification
+
+The gate cites amendment commit `14c920f43cee40017cbd952d58561e40e5ca1809` and adds only the three exact owned paths above. Before that correction, all three new standalone-path fixtures failed at program-surface applicability. After the correction, the four selected parametrized real-repository fence groups passed: **32 cases, zero failures, errors or skips**. They cover owned contributions, shared-only non-applicability, both real whole-delta fences, neighboring unlisted paths and forbidden foreign changes. The independent forbidden-prefix and effective-delta rules are unchanged.
+
+Baseline JUnit SHA-256: `a71820d2436dbe75511bbd6ada5127276a395383f4fb18b6edf56d7ef83059a9`.
+Qualified JUnit SHA-256: `abe6230c7a943181db27892efb00b00d5d3b67295b179e1782451e654af57e13`.
+
+This proves the finite registration and its regression cases. It does not claim that the current stacked PR already has a release-eligible whole delta; that depends on the actual protected prerequisites and resulting residual source.
