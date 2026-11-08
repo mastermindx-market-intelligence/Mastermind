@@ -204,6 +204,19 @@ Before writing, inspect current Project identity, editor permission, active conc
 
 After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START; completed phase or pending CI/review -> save and execute the next independent safe milestone, not a status-only close. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
 
+### Optional account-global continuation instruction (outside Projects)
+
+For Mastermind work conducted outside the Mastermind Project, the account owner may
+also paste the short `docs/evidence/2026-11-07-global-continuation-custom-instructions.txt`
+into ChatGPT Personalization > Custom Instructions, subject to the actual UI limit and
+the user's existing settings. This is a **supplement**, not a replacement for the
+full Project kernel or existing personal instructions. Project instructions apply
+only within their own Project and override global custom instructions; therefore
+install/verify the complete Project kernel for every distinct relevant Project.
+Neither file applies to a chat merely because a GitHub PR has changed. Do not
+claim account-wide installation without each intended account's saved-text readback
+and an appropriate fresh-session action canary.
+
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and
