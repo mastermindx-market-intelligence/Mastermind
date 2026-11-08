@@ -203,9 +203,15 @@ class OriginalRepairRead(unittest.TestCase):
         self.assertEqual(set(old),set(new))
         for name in old.keys()-{'transport_plan','public_reason'}:
             self.assertEqual(old[name],new[name],name)
-        for path in ['ops/fleet_storage_cleanup/preview_install.py', 'ops/fleet_storage_cleanup/fleet_remote_sweep.py']:
-            self.assertEqual(subprocess.check_output(['git','show','c4d54b52f55cb2c536bb18824120c66ede383295:'+path],cwd=root),
-                             (root/path).read_bytes())
+        path = 'ops/fleet_storage_cleanup/preview_install.py'
+        self.assertEqual(subprocess.check_output(['git','show','c4d54b52f55cb2c536bb18824120c66ede383295:'+path],cwd=root), (root/path).read_bytes())
+        path = 'ops/fleet_storage_cleanup/fleet_remote_sweep.py'
+        old = ast.parse(subprocess.check_output(['git','show','c4d54b52f55cb2c536bb18824120c66ede383295:'+path],cwd=root))
+        new = ast.parse((root/path).read_bytes())
+        # Exactly ONE opt-in fixed-read function; the ENTIRE predecessor module
+        # (generic run/SSH/main and every old function/import) remains AST exact.
+        new.body = [n for n in new.body if not isinstance(n,ast.FunctionDef) or n.name != 'read_original_orch_result']
+        self.assertEqual(ast.dump(old,include_attributes=False),ast.dump(new,include_attributes=False))
 
     def test_closed_source_pinned_transport_and_dispatch_only_original_reader(self):
         registry, config = self.fixture.public()

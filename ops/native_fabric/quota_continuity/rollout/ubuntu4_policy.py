@@ -544,12 +544,12 @@ def public_refusal(exc):
 def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
                    expected_module_sha, expected_storage_sha, payload=None,
                    expected_before=None, operation_id=None, original_settled=False,
-                   expected_policy_sha=None, expected_reader_sha=None):
-    """One fixed enrolled transport plan; no network or automatic source trust."""
+                   expected_policy_sha=None, expected_reader_sha=None, expected_driver_sha=None):
+    """Fixed enrolled plan; no network or automatic source trust."""
     binding = storage.enrolled_binding('ubuntu4', registry_bytes, ssh_config_bytes)
     if binding['binding'] != {'account': ACCOUNT, 'hostnames': [HOSTNAME]}:
         raise storage.InstallHeld('fixed_host_account')
-    if kind not in {'inspect', 'install', 'inspect-custody', 'repair-orch-group-write', 'read-orch-repair'}:
+    if kind not in {'inspect', 'install', 'inspect-custody', 'repair-orch-group-write', 'read-orch-repair', 'read-orch-repair-framed'}:
         raise storage.InstallHeld('operation_kind')
     if not _hex(expected_module_sha) or not _hex(expected_storage_sha):
         raise storage.InstallHeld('installer_source_pin')
@@ -564,7 +564,7 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
         if raw is None or _sha(raw) != wanted:
             raise storage.InstallHeld('installer_source_pin')
         sources.append((base64.b64encode(raw).decode(), wanted))
-    if kind == 'read-orch-repair':
+    if kind in {'read-orch-repair', 'read-orch-repair-framed'}:
         if not _hex(expected_reader_sha):
             raise storage.InstallHeld('installer_source_pin')
         file = Path(__file__).with_name('orch_repair_read.py')
@@ -579,13 +579,13 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
     elif expected_reader_sha is not None:
         raise storage.InstallHeld('installer_source_pin')
     request = {'kind': kind}
-    if kind in {'repair-orch-group-write', 'read-orch-repair'}:
+    if kind in {'repair-orch-group-write', 'read-orch-repair', 'read-orch-repair-framed'}:
         if (payload is not None or expected_before is not None or expected_policy_sha is not None
                 or original_settled is not False or type(operation_id) is not str
                 or not 1 <= len(operation_id) <= 128
                 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-' for c in operation_id)):
             raise storage.InstallHeld('orch_repair_identity')
-        if kind == 'read-orch-repair' and operation_id != ORCH_REPAIR_ORIGINAL_OPERATION:
+        if kind in {'read-orch-repair', 'read-orch-repair-framed'} and operation_id != ORCH_REPAIR_ORIGINAL_OPERATION:
             raise storage.InstallHeld('orch_repair_identity')
         request['operation_id'] = operation_id
     if kind == 'install':
@@ -597,6 +597,11 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
         request.update(payload=base64.b64encode(payload).decode(),
                        expected_before=expected_before, expected_after=expected_policy_sha,
                        operation_id=operation_id, original_settled=True)
+    if kind == 'read-orch-repair-framed':
+        from ops.native_fabric.quota_continuity.rollout.orch_repair_read import framed_plan
+        return framed_plan(driver, binding, sources, expected_driver_sha)
+    if expected_driver_sha is not None:
+        raise storage.InstallHeld('installer_source_pin')
     code = ('import base64,hashlib,json,types\n'
             'sources=' + repr(sources) + '\n'
             'n={"__name__":"fixed_storage_dependency","__file__":"preview_install.py"}\n'

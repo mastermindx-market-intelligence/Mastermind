@@ -198,3 +198,193 @@ def read_orch_repair(*, operation_id, home=None, uid=None, platform=None,
             os.close(fd)
 
 
+# Prospective opt-in framing. This is observation data, never an action grant.
+FRAME_LIMIT = 4096
+FRAME_SCHEMA = 'mastermind.orch_original_read_frame.v1'
+CONTEXT_SCHEMA = 'mastermind.orch_original_read_context.v1'
+FIXED_SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20',
+             '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4']
+
+
+def _canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+
+
+def framed_plan(driver, binding, sources, expected_driver_sha):
+    """Literal same-owner plan; no caller command/path, authority or dispatch."""
+    import base64
+    import shlex
+    file = Path(storage.__file__).with_name('fleet_remote_sweep.py')
+    fd = storage._directory(file.parent, os.getuid())
+    try:
+        raw = storage._read(fd, file.name, os.getuid())
+    finally:
+        os.close(fd)
+    if (type(expected_driver_sha) is not str or len(expected_driver_sha) != 64
+            or raw is None or _sha(raw) != expected_driver_sha or driver.SSH != FIXED_SSH):
+        raise storage.InstallHeld('installer_source_pin')
+    context = dict(schema=CONTEXT_SCHEMA, root=ORCH_REPAIR_ROOT,
+                   operation_id=ORCH_REPAIR_ORIGINAL_OPERATION,
+                   target_sha256=_sha(_canonical(binding)),
+                   sources=dict(storage=sources[0][1], module=sources[1][1],
+                                reader=sources[2][1], driver=expected_driver_sha))
+    code = ('import base64,hashlib,json,types\nsources=' + repr(sources) + '\n'
+            'n={"__name__":"fixed_storage_dependency","__file__":"preview_install.py"}\n'
+            'p={"__name__":"fixed_policy_enrollment","__file__":"ubuntu4_policy.py"}\n'
+            'q={"__name__":"fixed_orch_repair_read"}\n'
+            'for index,namespace in enumerate((n,p,q)):\n'
+            ' raw=base64.b64decode(sources[index][0])\n'
+            ' if hashlib.sha256(raw).hexdigest()!=sources[index][1]:raise SystemExit(78)\n'
+            ' if index:namespace["storage"]=types.SimpleNamespace(**n)\n'
+            ' if index==2:namespace.update(_scope=p["_scope"],_entries=p["_entries"],_public_refusal=p["public_refusal"])\n'
+            ' exec(compile(raw,("preview_install.py","ubuntu4_policy.py","orch_repair_read.py")[index],"exec"),namespace)\n'
+            'q["stream_original_read"](json.loads(' + repr(_canonical(context).decode()) + '))\n')
+    argv = list(FIXED_SSH)
+    argv[argv.index('ConnectTimeout=20')] = 'ConnectTimeout=10'
+    return dict(kind='read-orch-repair-framed', target=binding, context=context,
+                argv=argv + [binding['alias'], shlex.join(['python3', '-c', code])],
+                timeout=20, connect_timeout=10, dispatch_authorized=False)
+
+
+def _valid_context(value):
+    keys = {'schema', 'root', 'operation_id', 'target_sha256', 'sources'}
+    return (type(value) is dict and set(value) == keys
+            and value['schema'] == CONTEXT_SCHEMA and value['root'] == ORCH_REPAIR_ROOT
+            and value['operation_id'] == ORCH_REPAIR_ORIGINAL_OPERATION
+            and type(value['sources']) is dict
+            and set(value['sources']) == {'storage', 'module', 'reader', 'driver'}
+            and all(type(s) is str and len(s) == 64 and all(c in '0123456789abcdef' for c in s)
+                    for s in [value['target_sha256'], *value['sources'].values()]))
+
+
+def stream_original_read(context):
+    """Frames follow exact fixed-account scope check; no raw exception output."""
+    if not _valid_context(context):
+        raise storage.InstallHeld('orch_repair_identity')
+    def emit(kind, result=None):
+        frame = dict(schema=FRAME_SCHEMA, context=context, kind=kind, result=result)
+        raw = _canonical(frame) + b'\n'
+        if len(raw) > FRAME_LIMIT // 2:
+            raise storage.InstallHeld('orch_repair_record_unqualified')
+        print(raw.decode(), end='', flush=True)
+    if '_public_refusal' in globals():
+        refusal = _public_refusal
+    else:
+        from ops.native_fabric.quota_continuity.rollout.ubuntu4_policy import public_refusal as refusal
+    try:
+        _scope(None, None, None, None, None)
+    except (OSError, ValueError) as exc:
+        emit('SCOPE_REFUSED', dict(state='HELD_OR_UNKNOWN', replay=False,
+             retry_authorized=False, lifecycle_authority=False, **refusal(exc)))
+        return
+    emit('READ_ENTERED')
+    try:
+        value = read_orch_repair(operation_id=ORCH_REPAIR_ORIGINAL_OPERATION)
+    except (OSError, ValueError) as exc:
+        value = dict(state='HELD_OR_UNKNOWN', replay=False, retry_authorized=False,
+                     lifecycle_authority=False, **refusal(exc))
+    emit('RESULT', value)
+
+
+PUBLIC_READ_REASONS = frozenset({
+    'HOST_ACCOUNT_MISMATCH', 'ACCOUNT_HOME_MISMATCH', 'OWNER_OR_MODE_UNQUALIFIED',
+    'DIRECTORY_UNQUALIFIED', 'FILE_UNQUALIFIED', 'FILE_CHANGED', 'ADMISSION_LOCK_UNQUALIFIED',
+    'ADMISSION_LOCK_BUSY', 'ADMISSION_LOCK_CHANGED', 'DIRECTORY_CHANGED',
+    'ACTIVE_OR_UNKNOWN_MARKER', 'ACTIVE_HISTORY_UNKNOWN', 'ORCH_REPAIR_IDENTITY',
+    'ORCH_REPAIR_PREIMAGE_UNQUALIFIED', 'ORCH_REPAIR_ACL_UNQUALIFIED',
+    'ORCH_REPAIR_RECORD_UNQUALIFIED', 'ORCH_REPAIR_RECORD_CHANGED',
+    'REQUIRED_PATH_ABSENT', 'SYMLINK_REFUSED', 'OS_ACCESS_REFUSED', 'TARGET_ALREADY_EXISTS',
+    'OWNER_BUSY', 'OS_ERROR_UNCLASSIFIED', 'UNCLASSIFIED',
+})
+
+
+def _qualified_result(value):
+    """Only core closed read fields survive; arbitrary error text never escapes."""
+    if type(value) is not dict:
+        return None
+    if value.get('state') == 'HELD_OR_UNKNOWN':
+        if (set(value) != {'state', 'replay', 'retry_authorized', 'lifecycle_authority', 'reason'}
+                or type(value.get('reason')) is not str or value['reason'] not in PUBLIC_READ_REASONS
+                or value.get('replay') is not False or value.get('retry_authorized') is not False
+                or value.get('lifecycle_authority') is not False):
+            return None
+        # Preserve no source exception text or attacker-chosen error strings.
+        return dict(state='HELD_OR_UNKNOWN', reason=value['reason'], replay=False,
+                    retry_authorized=False, lifecycle_authority=False)
+    keys = {'schema', 'root', 'operation_id', 'state', 'reason', 'current_postimage_qualified',
+            'current_reason', 'replay', 'retry_authorized', 'lifecycle_authority'}
+    verified = value.get('state') == 'VERIFIED'
+    if (set(value) != keys | ({'intent_sha256', 'verified_sha256'} if verified else set())
+            or value.get('schema') != 'mastermind.ubuntu4_orch_repair_read.v1'
+            or value.get('root') != ORCH_REPAIR_ROOT
+            or value.get('operation_id') != ORCH_REPAIR_ORIGINAL_OPERATION
+            or any(value.get(k) is not False for k in ['replay','retry_authorized','lifecycle_authority'])
+            or type(value.get('current_postimage_qualified')) is not bool):
+        return None
+    if verified:
+        if (value['reason'] != 'ORIGINAL_RECEIPTS_VERIFIED'
+                or value['current_reason'] not in {'RECORDED_POSTIMAGE_CURRENT','RECORDED_POSTIMAGE_CHANGED','CURRENT_ACL_UNQUALIFIED'}
+                or value['current_postimage_qualified'] != (value['current_reason']=='RECORDED_POSTIMAGE_CURRENT')
+                or any(type(value[k]) is not str or len(value[k]) != 64
+                       or any(c not in '0123456789abcdef' for c in value[k])
+                       for k in ['intent_sha256','verified_sha256'])):
+            return None
+    elif (value['state'] != 'UNKNOWN' or value['reason'] not in {'ORIGINAL_RECORDS_ABSENT','ORIGINAL_INTENT_ONLY'}
+          or value['current_postimage_qualified'] is not False
+          or value['current_reason'] not in {'ORIGINAL_COMPLETION_UNKNOWN','CURRENT_ACL_UNQUALIFIED'}):
+        return None
+    return value
+
+
+def transport_observation(raw, context, *, returncode, timed_out=False, overflow=False,
+                          local_unavailable=False):
+    """Bounded canonical frames only. No raw stdout/stderr or retry authority."""
+    result = dict(schema='mastermind.orch_original_read_transport.v1', root=ORCH_REPAIR_ROOT,
+                  operation_id=ORCH_REPAIR_ORIGINAL_OPERATION, context_sha256=_sha(_canonical(context)),
+                  phase='UNOBSERVED', transport_state='TIMED_OUT' if timed_out else 'PROCESS_RETURNED',
+                  exit_code=returncode, result=None, retry_authorized=False,
+                  replay=False, lifecycle_authority=False, stderr_retained=False)
+    if local_unavailable:
+        result['transport_state'] = 'LOCAL_PROCESS_UNAVAILABLE'
+        return result
+    if type(raw) is not bytes or not _valid_context(context) or overflow or len(raw) > FRAME_LIMIT:
+        result['transport_state'] = 'OUTPUT_UNQUALIFIED'
+        return result
+    try:
+        frames = []
+        def pairs(items):
+            value = {}
+            for key, item in items:
+                if key in value: raise ValueError('duplicate')
+                value[key] = item
+            return value
+        lines = raw.splitlines(keepends=True)
+        for line in lines:
+            if not line.endswith(b'\n'):
+                if timed_out and len(frames) < 2: break
+                raise ValueError('incomplete')
+            value = json.loads(line, object_pairs_hook=pairs)
+            if (type(value) is not dict or set(value) != {'schema','context','kind','result'}
+                    or value['schema'] != FRAME_SCHEMA or value['context'] != context
+                    or _canonical(value)+b'\n' != line):
+                raise ValueError('frame')
+            frames.append(value)
+        if len(frames) > 2: raise ValueError('count')
+        if frames:
+            first = frames[0]
+            if first['kind'] == 'SCOPE_REFUSED' and len(frames) == 1:
+                if (_qualified_result(first['result']) is None
+                        or first['result']['state'] != 'HELD_OR_UNKNOWN'): raise ValueError('refusal')
+                result.update(phase='SCOPE_REFUSED', result=_qualified_result(first['result']))
+            elif first['kind'] == 'READ_ENTERED' and first['result'] is None:
+                result['phase'] = 'READ_ENTERED'
+                if len(frames) == 2:
+                    value = _qualified_result(frames[1]['result'])
+                    if frames[1]['kind'] != 'RESULT' or value is None: raise ValueError('result')
+                    result.update(phase='RESULT_RETAINED', result=value)
+            else: raise ValueError('order')
+        if not timed_out and (returncode != 0 or result['phase'] not in {'RESULT_RETAINED','SCOPE_REFUSED'}):
+            result['transport_state'] = 'RETURN_WITHOUT_QUALIFIED_RESULT'
+    except (ValueError, UnicodeError, RecursionError, TypeError):
+        result.update(phase='UNQUALIFIED', result=None, transport_state='OUTPUT_UNQUALIFIED')
+    return result
