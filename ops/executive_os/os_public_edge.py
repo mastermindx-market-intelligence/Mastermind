@@ -166,6 +166,18 @@ POST_ROUTES = PRE_DIRECT_NATIVE_POST_ROUTES + DIRECT_NATIVE_POST_ROUTES
 PRE_COMPANY_PRIORITIES_POST_ROUTES = POST_ROUTES
 POST_ROUTES += ("/os/executive/company-priorities",)
 
+# Native v2 has a separate fixed POST branch and its existing 512KiB request
+# bound. It does not widen legacy, source-operation or public MCP matchers.
+# Authentication and every effect remain with the original conversation owner.
+NATIVE_CONVERSATION_POST_ROUTES = tuple(
+    "/os/executive/conversation/v2/" + operation
+    for operation in ("preview", "create", "status", "read", "recover",
+        "consume", "consume/status", "turn/preview", "turn", "turn/status",
+        "turn/read", "turn/recover", "resume/preview", "resume",
+        "resume/status", "stop", "stop/status")
+)
+NATIVE_MAX_BODY = 524288
+
 # Preserve exactly the profiles admitted by the predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -269,12 +281,14 @@ def render(manifest: object, relay_port: int) -> str:
     # each appear exactly once, in full, so a template that still carries only
     # the CEO-only pair, or that widens either list, cannot be rendered.
     if (template.count("__ASSET_PATHS__") != 1
-            or template.count("__RELAY_PORT__") != 5
+            or template.count("__RELAY_PORT__") != 6
             or template.count("path " + " ".join(GET_ROUTES) + " __ASSET_PATHS__\n") != 1
             or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1
             or template.count("path " + " ".join(SOURCE_POST_ROUTES) + "\n") != 1
             or template.count("path " + " ".join(COMPLETE_MCP_METADATA_ROUTES) + "\n") != 1
             or template.count("path " + " ".join(COMPLETE_MCP_ROUTES) + "\n") != 1
+            or template.count("path " + " ".join(NATIVE_CONVERSATION_POST_ROUTES) + "\n") != 1
+            or template.count("max_size 524288") != 1
             or template.count("max_size 98304") != 1
             or template.count("max_size 64KB") != 2):
         raise ValueError("OS edge template differs")
@@ -305,7 +319,9 @@ def stage(*, manifest: object, relay_port: int, output: Path) -> dict:
         "relay_port": relay_port,
         "routes": {"get": sorted(set(GET_ROUTES) | set(asset_routes(manifest))),
                    "post": list(POST_ROUTES),
-                   "source_post": list(SOURCE_POST_ROUTES)},
+                   "source_post": list(SOURCE_POST_ROUTES),
+                   "native_post": list(NATIVE_CONVERSATION_POST_ROUTES)},
+        "native_max_body": NATIVE_MAX_BODY,
         "mcp": {"get": list(COMPLETE_MCP_METADATA_ROUTES),
                 "post": list(COMPLETE_MCP_ROUTES)},
         "installed": False,

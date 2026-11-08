@@ -32,9 +32,9 @@ short_socket_root=auth.short_socket_root
 # Accepted closed conversation kinds and canonical DATA readers extend the
 # imported modules; the original Launch/recovery behavior remains qualified below.
 EXTRA_PINS={
- # Accepted AT24 ec343 observer retains original receipt provenance only;
- # begin/recover/receipt validation and all original-effect guards are unchanged.
- 'orchestration/operation-controller.ts':'a85991493f7b0073772401a547f10c871f22791d2255f4512581d13b59b59b9a',
+ # Current composed controller adds native Stop and explicit reconciliation;
+ # default Launch still uses one original submit and its original-key GET.
+ 'orchestration/operation-controller.ts':'d41d237babeb0a3a1646702f7f2998ad8bb35afd4c88c77dd5b3591f73405087',
  'mission.ts':'07e7ed5815788ee839aa2becdbd806443923f2249172de7997cae3770deb1c44',
  'workspace-contract.ts':'dece354a0c3744af41cf36e435cd8edee1f2247a0f7b07cef1974cc47d2990d5',
  'project-discovery.ts':'a4d539f729a9918585499c4c23fc169ed13439f102bf6554d5a2bcc284788742',

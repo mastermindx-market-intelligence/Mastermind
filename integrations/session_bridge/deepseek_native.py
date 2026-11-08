@@ -21,13 +21,19 @@ from control_plane.workstream_admission_contract import canonical_work_ref
 from integrations.deepseek_harness.native_read_port import (
     OwnedNativeReadPort, NativeReadUnavailable, canonical,
 )
-from integrations.deepseek_harness.runtime_compat.prepare_native_session import PIN
 
-ASSOCIATION_SCHEMA = "mastermind.dsh.native_read_association.v1"
-RESULT_SCHEMA = "mastermind.session_bridge.native_history.v1"
-_SHA = re.compile(r"[0-9a-f]{64}")
-_ROOT = re.compile(r"JOB-[0-9]{1,9}")
-_MAX_SAFE = 2**53 - 1
+from control_plane.native_conversation_read_contract import (
+    ASSOCIATION_SCHEMA,
+    RESULT_SCHEMA,
+    PIN,
+    _SHA,
+    _ROOT,
+    _MAX_SAFE,
+    _text,
+    principal_namespace,
+    validate_native_read_arguments,
+    DeepSeekNativeAssociation,
+)
 
 
 def _guard(callback: Callable[[], None]) -> None:
@@ -38,93 +44,12 @@ def _guard(callback: Callable[[], None]) -> None:
         raise BridgeError("ingress_unavailable", "installed native read guard is invalid")
 
 
-def _text(value, maximum):
-    return (type(value) is str and 0 < len(value) <= maximum
-            and not any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in value))
-
-
-def principal_namespace(principal: NeutralPrincipalProjection) -> str:
-    return principal_scope_from_identity(
-        issuer_digest=principal.issuer_digest, subject_digest=principal.subject_digest,
-        client_ref=principal.client_ref, resource=principal.resource)
-
-
-def validate_native_read_arguments(value: Any) -> dict[str, Any]:
-    """Closed selection/cursor syntax only; never a native-session association."""
-    if type(value) is not dict or set(value) != {"selection", "read"}:
-        raise BridgeError("invalid_input", "native history requires an exact selection and read")
-    selected, request = value["selection"], value["read"]
-    if (type(selected) is not dict or set(selected) != {"work_ref", "root_job_id"}
-            or type(selected["root_job_id"]) is not str or _ROOT.fullmatch(selected["root_job_id"]) is None):
-        raise BridgeError("invalid_input", "native history selection is invalid")
-    try:
-        work = canonical_work_ref(selected["work_ref"])
-        if work != selected["work_ref"]:
-            raise ValueError()
-    except (TypeError, ValueError):
-        raise BridgeError("invalid_input", "native history selection is invalid") from None
-    if type(request) is not dict:
-        raise BridgeError("invalid_input", "native history read is invalid")
-    if request == {"kind": "snapshot"}:
-        normalized = {"kind": "snapshot"}
-    elif set(request) == {"kind", "through_seq", "before_seq", "max_messages"} and request["kind"] == "page":
-        through, before, count = request["through_seq"], request["before_seq"], request["max_messages"]
-        if (type(through) is not int or not -1 <= through <= _MAX_SAFE
-                or (before is not None and (type(before) is not int or not 0 <= before <= min(_MAX_SAFE, through + 1)))
-                or type(count) is not int or not 1 <= count <= 8):
-            raise BridgeError("invalid_input", "native history cursor is invalid")
-        normalized = {"kind": "page", "through_seq": through, "before_seq": before, "max_messages": count}
-    elif set(request) == {"kind", "native_ref", "offset_bytes", "expected_sha256"} and request["kind"] == "result":
-        from control_plane.native_conversation_result import NativeConversationResultRef
-        try:
-            reference = NativeConversationResultRef.from_wire(request["native_ref"])
-        except (ValueError, TypeError):
-            raise BridgeError("invalid_input", "native history result reference is invalid") from None
-        offset, digest = request["offset_bytes"], request["expected_sha256"]
-        if (type(offset) is not int or not 0 <= offset < 4*1024*1024
-                or digest is not None and (type(digest) is not str or _SHA.fullmatch(digest) is None)
-                or offset > 0 and digest is None):
-            raise BridgeError("invalid_input", "native history result cursor is invalid")
-        normalized = dict(kind="result", native_ref=reference.to_wire(), offset_bytes=offset, expected_sha256=digest)
-    else:
-        raise BridgeError("invalid_input", "native history read is invalid")
-    return {"selection": {"work_ref": work, "root_job_id": selected["root_job_id"]}, "read": normalized}
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class DeepSeekNativeAssociation:
-    """One explicit installed selection, never discovered from local sessions."""
-
-    work_ref: str
-    root_job_id: str
-    native_session_id: str
-    owner_principal_scope: str
-    composition_sha256: str
-    native_package_sha256: str
-    donor_sha: str = PIN
-
-    def __post_init__(self):
-        validate_native_read_arguments({"selection": {
-            "work_ref": self.work_ref, "root_job_id": self.root_job_id}, "read": {"kind": "snapshot"}})
-        if (not _text(self.native_session_id, 256) or self.donor_sha != PIN
-                or any(type(value) is not str or _SHA.fullmatch(value) is None
-                       for value in (self.owner_principal_scope, self.composition_sha256, self.native_package_sha256))):
-            raise TypeError("qualified installed native association required")
-
-    def document(self) -> dict[str, Any]:
-        return {"schema": ASSOCIATION_SCHEMA, **dataclasses.asdict(self)}
-
-    @property
-    def digest(self) -> str:
-        return hashlib.sha256(canonical(self.document())).hexdigest()
-
-
 class DeepSeekNativeReadSource:
     """One already-connected capability supplied by the original live launcher."""
 
     def __init__(self, association: DeepSeekNativeAssociation, port: OwnedNativeReadPort,
                  *, require_current: Callable[[], None]):
-        from control_plane.native_conversation_read import RetainedNativeReadPort
+        from integrations.session_bridge.retained_native_read import RetainedNativeReadPort
         if (type(association) is not DeepSeekNativeAssociation or type(port) not in (OwnedNativeReadPort, RetainedNativeReadPort)
                 or not callable(require_current) or inspect.iscoroutinefunction(require_current)
                 or inspect.iscoroutinefunction(getattr(require_current, "__call__", None))

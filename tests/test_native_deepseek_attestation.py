@@ -68,7 +68,7 @@ def deepseek_installation(tmp_path, monkeypatch):
             source_sha="a"*40, source_tree="b"*40, build_sha256="c"*64,
             package_manifest_sha256=sha(manifest), entrypoint_sha256=sha(entry), native_worker=worker,
             node={"path":str(binary),"sha256":sha(binary)})
-        return att.build_native_deepseek_attestation(**args)
+        return att.build_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     document = build()
     receipt = root / "attestation.json"
     def publish(value=None):
@@ -205,7 +205,7 @@ def test_package_budget_precedes_protected_inventory(deepseek_installation,monke
     monkeypatch.setattr(package,"qualify_native_worker_package",
                         lambda **kw:pytest.fail("unbounded qualification before custody"))
     with pytest.raises(att.NativeAttestationError,match="entry bound"):
-        att.build_native_deepseek_attestation(binary_path=i.binary,release=i.release,
+        att.build_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, binary_path=i.binary,release=i.release,
                                              source_repo=i.root,source_sha="a"*40)
 
 
@@ -213,7 +213,7 @@ def test_protected_node_mismatch_refuses_before_version_probe(deepseek_installat
     i=deepseek_installation;i.qualified["node"]={"path":str(i.binary),"sha256":"f"*64}
     monkeypatch.setattr(att.subprocess,"run",lambda *a,**kw:pytest.fail("foreign Node executed"))
     with pytest.raises(att.NativeAttestationError,match="Node differs from protected"):
-        att.build_native_deepseek_attestation(binary_path=i.binary,release=i.release,
+        att.build_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, binary_path=i.binary,release=i.release,
                                              source_repo=i.root,source_sha="a"*40)
 
 
@@ -222,5 +222,5 @@ def test_source_changed_during_root_observation_refuses(deepseek_installation,mo
     from ops.executive_os import install_source_policy
     monkeypatch.setattr(install_source_policy,"validate_acceptance_source",lambda **kw:"f"*40)
     with pytest.raises(att.NativeAttestationError,match="protected source changed"):
-        att.build_native_deepseek_attestation(binary_path=i.binary,release=i.release,
+        att.build_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, binary_path=i.binary,release=i.release,
                                              source_repo=i.root,source_sha="a"*40)

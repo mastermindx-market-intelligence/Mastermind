@@ -6,6 +6,7 @@ import stat
 import pytest
 
 from control_plane import native_provider_attestation as att
+from integrations.deepseek_harness import package_attended as package
 from ops.executive_os import capacity_host_artifacts
 from test_native_deepseek_attestation import deepseek_installation
 
@@ -25,7 +26,7 @@ def test_root_publisher_feeds_original_reader_without_worker_or_provider_start(d
     i = deepseek_installation
     args = fresh(i)
     before = list(i.calls)
-    result = att.publish_native_deepseek_attestation(**args)
+    result = att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     assert result["state"] == "PUBLISHED" and result["effect_state"] == "APPLIED"
     assert result["worker_observation"] == "NOT_OBSERVED"
     assert result["service_activated"] is False and result["provider_calls"] == 0
@@ -60,7 +61,7 @@ def test_prior_target_or_stage_refuses_before_build_without_overwrite(deepseek_i
     monkeypatch.setattr(att, "build_native_deepseek_attestation",
         lambda **kw: pytest.fail("existing publication was rebuilt"))
     with pytest.raises(att.NativeAttestationError, match="reconciliation"):
-        att.publish_native_deepseek_attestation(**args)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     assert i.payload.read_bytes() == before
     if existing == "stage":
         assert stage.read_bytes() == b"original pending bytes"
@@ -78,7 +79,7 @@ def test_partial_private_write_stays_pending_and_is_not_replayed(deepseek_instal
         raise OSError("inert disk error")
     monkeypatch.setattr(att.os, "write", fail_after_prefix)
     with pytest.raises(att.NativeAttestationPublicationPending):
-        att.publish_native_deepseek_attestation(**args)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     assert not i.receipt.exists()
     _, stage = att._deepseek_publication_names(i.receipt, i.release)
     assert stage.stat().st_size == 19
@@ -87,7 +88,7 @@ def test_partial_private_write_stays_pending_and_is_not_replayed(deepseek_instal
     assert observed["stage_sha256"] == hashlib.sha256(stage.read_bytes()).hexdigest()
     before = stage.read_bytes(), stage.stat().st_ino
     with pytest.raises(att.NativeAttestationError, match="reconciliation"):
-        att.publish_native_deepseek_attestation(**args)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     assert (stage.read_bytes(), stage.stat().st_ino) == before
 
 
@@ -102,7 +103,7 @@ def test_lost_rename_return_reconciles_original_inode_without_republication(deep
         raise OSError("lost return after original rename")
     monkeypatch.setattr(capacity_host_artifacts, "_rename_exclusive", lost)
     with pytest.raises(att.NativeAttestationPublicationUnknown):
-        att.publish_native_deepseek_attestation(**args)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     before = i.receipt.read_bytes(), i.receipt.stat().st_ino, list(i.calls)
     observed = att.reconcile_native_deepseek_attestation(**args)
     assert observed["state"] == "PRESENT_QUALIFIED"
@@ -119,7 +120,7 @@ def test_late_collision_never_overwrites_either_original_carrier(deepseek_instal
         rename(*argv)
     monkeypatch.setattr(capacity_host_artifacts, "_rename_exclusive", collide)
     with pytest.raises(att.NativeAttestationPublicationUnknown):
-        att.publish_native_deepseek_attestation(**args)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args)
     _, stage = att._deepseek_publication_names(i.receipt, i.release)
     assert i.receipt.read_bytes() == b"foreign canonical occupant" and stage.exists()
     assert att.reconcile_native_deepseek_attestation(**args)["state"] == "COLLISION"
@@ -147,7 +148,7 @@ def test_currentness_changes_after_staging_refuse_before_canonical_effect(deepse
             return original(*argv, **kw)
         monkeypatch.setattr(att, "load_native_deepseek_attestation", drift)
     with pytest.raises(att.NativeAttestationPublicationPending):
-        att.publish_native_deepseek_attestation(**args, current=current)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args, current=current)
     assert stage.exists() and not i.receipt.exists()
 
 
@@ -261,7 +262,7 @@ def test_final_callback_cannot_replace_exact_receipt_before_success(deepseek_ins
             changed.append(path.stat().st_ino)
     error = att.NativeAttestationPublicationPending if when == "private" else att.NativeAttestationPublicationUnknown
     with pytest.raises(error) as caught:
-        att.publish_native_deepseek_attestation(**args, current=current)
+        att.publish_native_deepseek_attestation(qualify_package=package.qualify_native_worker_package, **args, current=current)
     assert changed
     assert caught.value.evidence["receipt_path"] == str(i.receipt)
     assert len(caught.value.evidence["receipt_sha256"]) == 64

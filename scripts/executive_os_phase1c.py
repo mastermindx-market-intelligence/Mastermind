@@ -2932,7 +2932,7 @@ def _service_from_config(
                         deepseek_session = DeepSeekNativeSession(
                             deepseek_native_read_source, read_guard=require_deepseek_read)
                     else:
-                        from control_plane.native_conversation_read import RetainedNativeReadResolver
+                        from integrations.session_bridge.retained_native_read import RetainedNativeReadResolver
                         deepseek_session = RetainedNativeReadResolver(service, runtime,
                             native_conversation_composition, require_current=require_deepseek_read)
 

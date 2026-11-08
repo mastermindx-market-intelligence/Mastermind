@@ -167,7 +167,7 @@ class RemoteOperatorHarnessAdapter:
 
 
     async def _native_read_request(self, operation, payload, *, before_read):
-        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable, canonical
+        from control_plane.native_conversation_read_contract import NativeReadUnavailable, canonical
         if self.result_contract != DSH_NATIVE_RESULT_CONTRACT or not callable(before_read):
             raise NativeReadUnavailable()
         client, frozen = self.client, canonical(payload)
@@ -194,13 +194,13 @@ class RemoteOperatorHarnessAdapter:
         return value["native_read"]
 
     async def read_native_binding(self, *, epoch, generation, before_read):
-        from integrations.deepseek_harness.native_read_port import validate_native_read_binding
+        from control_plane.native_conversation_read_contract import validate_native_read_binding
         value = await self._native_read_request("ohf-native-read-binding",
             {"epoch": to_wire(epoch), "generation": to_wire(generation)}, before_read=before_read)
         return validate_native_read_binding(value)
 
     async def read_native_content(self, *, epoch, generation, association, request, before_read):
-        from integrations.deepseek_harness.native_read_port import validate_native_read_response
+        from control_plane.native_conversation_read_contract import validate_native_read_response
         value = await self._native_read_request("ohf-native-read",
             {"epoch": to_wire(epoch), "generation": to_wire(generation),
              "association": association, "request": request}, before_read=before_read)

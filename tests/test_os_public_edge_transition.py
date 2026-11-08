@@ -73,6 +73,28 @@ def source_branch(port=49152, group=None):
     return value
 
 
+NATIVE_PATHS = tuple("/os/executive/conversation/v2/" + operation
+    for operation in ("preview", "create", "status", "read", "recover",
+        "consume", "consume/status", "turn/preview", "turn", "turn/status",
+        "turn/read", "turn/recover", "resume/preview", "resume",
+        "resume/status", "stop", "stop/status"))
+
+
+def native_branch(port=49152, group=None):
+    # Independent expected branch: do not use the production constructor.
+    handler = proxy(port)
+    handler.pop("transport")
+    value = {"match": [{"method": ["POST"], "path": list(NATIVE_PATHS)}],
+             "handle": [{"handler": "request_body", "max_size": 524288}, handler]}
+    if group is not None:
+        value["group"] = group
+    return value
+
+
+def expect_native_upgrade(branches):
+    branches.insert(len(branches) - 1, native_branch(group=branches[1].get("group")))
+
+
 def expect_source_upgrade(branches):
     branches.insert(2, source_branch(group=branches[1].get("group")))
 
@@ -180,8 +202,9 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
             expect_source_upgrade(inner_of(expected))
         if with_mcp:
             expect_complete_mcp(inner_of(expected))
+        expect_native_upgrade(inner_of(expected))
         assert value == expected
-        assert len(inner_of(value)) == (6 if with_mcp else 4)
+        assert len(inner_of(value)) == (7 if with_mcp else 5)
         if with_mcp:
             # The public-MCP branches keep every handler and gain exactly the
             # one COO path in their two fixed path lists.
@@ -195,7 +218,7 @@ def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fi
                     list(COMPLETE_MCP_METADATA_ROUTES)
                     if seen["match"][0]["method"] == ["GET"] else list(COMPLETE_MCP_ROUTES))
         else:
-            assert inner_of(value)[3:] == inner_of(before)[3 if fixed == GET_ROUTES else 2:]
+            assert inner_of(value)[4:] == inner_of(before)[3 if fixed == GET_ROUTES else 2:]
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
     assert planned["bindings"]["observed_fullconfig_sha256"] == module._sha256(before)
 
@@ -311,6 +334,7 @@ def test_retained_legacy_get_wrappers_upgrade_without_masking_the_profile():
         target[0]["match"][0]["path"] = expected_get
         target[1]["match"][0]["path"] = list(POST_ROUTES)
         expect_source_upgrade(target)
+        expect_native_upgrade(target)
         assert value == expected
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
 
@@ -348,6 +372,7 @@ def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
         get_paths_of(expected)[:] = expected_get
         post_paths_of(expected)[:] = list(POST_ROUTES)
         expect_source_upgrade(inner_of(expected))
+        expect_native_upgrade(inner_of(expected))
         assert value == expected
 
 
@@ -430,7 +455,8 @@ def test_exact_incumbent_edge_gains_only_qualified_control_room_routes():
     assert receipt["get_routes"]["fixed"] == list(GET_ROUTES)
     assert receipt["post_routes"] == list(POST_ROUTES)
     for config in (prepared, finished):
-        get, post, source, terminal = inner_of(config)
+        get, post, source, native, terminal = inner_of(config)
+        assert native == native_branch()
         assert source == source_branch()
         paths = get["match"][0]["path"]
         assert set(GET_ROUTES) <= set(paths)
@@ -576,6 +602,7 @@ def test_only_get_paths_and_dedicated_source_branch_differ(maker):
     changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
                     relay_port=49152)
     stripped = copy.deepcopy(changed)
+    assert inner_of(stripped).pop(-2) == native_branch()
     assert inner_of(stripped).pop(2) == source_branch()
     stripped["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
@@ -585,7 +612,7 @@ def test_only_get_paths_and_dedicated_source_branch_differ(maker):
     expected_post = copy.deepcopy(inner_of(live)[1])
     expected_post["match"][0]["path"] = list(POST_ROUTES)
     assert inner_of(changed)[1] == expected_post
-    assert inner_of(changed)[3] == inner_of(live)[2]
+    assert inner_of(changed)[4] == inner_of(live)[2]
     assert changed["apps"]["tls"] == live["apps"]["tls"]
     assert changed["admin"] == live["admin"]
     assert site_of(changed, index=1) == site_of(live, index=1)
@@ -950,8 +977,9 @@ def mcp_fullconfig(old=OLD, port=49152):
 def test_mcp_shape_changes_only_get_paths_and_dedicated_source_branch(maker):
     live = mcp_fullconfig()
     changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
-    assert len(inner_of(changed)) == 6
+    assert len(inner_of(changed)) == 7
     stripped = copy.deepcopy(changed)
+    assert inner_of(stripped).pop(-2) == native_branch()
     assert inner_of(stripped).pop(2) == source_branch()
     inner_of(stripped)[0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
@@ -1091,7 +1119,8 @@ def test_retained_caddy_adapter_topology_with_mcp_is_accepted():
         assert result["match"][0]["method"] == seen["match"][0]["method"], index
         assert result["match"][0]["path"] == (
             list(COMPLETE_MCP_METADATA_ROUTES) if index == 0 else list(COMPLETE_MCP_ROUTES))
-    assert final_wrapper[5] == wrapper[4]
+    assert final_wrapper[5] == native_branch(group="group4")
+    assert final_wrapper[6] == wrapper[4]
     assert final_wrapper[0]["match"][0]["path"] == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
 
 
@@ -1368,3 +1397,123 @@ def test_plan_records_the_public_mcp_route_matrix():
             prepare_config(fullconfig=(observed_public_edge(False) if value is ceo_only else
                                        (live if value is already else fullconfig())),
                            current_manifest=OLD, candidate_manifest=NEW, relay_port=49152))
+
+
+def native_current_config(with_mcp=False):
+    live = mcp_fullconfig() if with_mcp else fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    if with_mcp:
+        expect_complete_mcp(inner_of(live))
+    expect_native_upgrade(inner_of(live))
+    return live
+
+
+def assert_native_refused(live):
+    for make in (
+        lambda: plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+            current_manifest=OLD, candidate_manifest=NEW, relay_port=49152),
+        lambda: prepare_config(fullconfig=live, current_manifest=OLD,
+            candidate_manifest=NEW, relay_port=49152),
+        lambda: final_config(fullconfig=live, current_manifest=OLD,
+            candidate_manifest=NEW, relay_port=49152),
+    ):
+        with pytest.raises(ValueError):
+            make()
+
+
+@pytest.mark.parametrize("with_mcp", [False, True])
+@pytest.mark.parametrize("fault", [
+    "missing", "extra", "duplicate", "reordered", "wildcard", "slash", "query",
+    "wrong_method", "extra_matcher", "extra_handler", "handler_order",
+    "duplicate_branch", "misplaced", "merged_get", "merged_post",
+])
+def test_native_branch_rejects_any_changed_closed_topology(with_mcp, fault):
+    live = native_current_config(with_mcp)
+    branches = inner_of(live)
+    native = branches[-2]
+    paths = native["match"][0]["path"]
+    if fault == "missing":
+        paths.pop()
+    elif fault == "extra":
+        paths.append("/os/executive/conversation/v2/arbitrary")
+    elif fault == "duplicate":
+        paths.append(paths[0])
+    elif fault == "reordered":
+        paths.reverse()
+    elif fault in {"wildcard", "slash", "query"}:
+        paths[0] += {"wildcard": "*", "slash": "/", "query": "?x=1"}[fault]
+    elif fault == "wrong_method":
+        native["match"][0]["method"] = ["GET"]
+    elif fault == "extra_matcher":
+        native["match"][0]["query"] = {"x": ["1"]}
+    elif fault == "extra_handler":
+        native["handle"].append(proxy())
+    elif fault == "handler_order":
+        native["handle"].reverse()
+    elif fault == "duplicate_branch":
+        branches.insert(-1, copy.deepcopy(native))
+    elif fault == "misplaced":
+        branches.insert(2, branches.pop(-2))
+    else:
+        target = 0 if fault == "merged_get" else 1
+        branches[target]["match"][0]["path"].append(paths[0])
+    assert_native_refused(live)
+
+
+@pytest.mark.parametrize("with_mcp", [False, True])
+@pytest.mark.parametrize("cap", [64000, 98304, 524287, 524289, 524288.0, True])
+def test_native_branch_requires_exact_integer_request_limit(with_mcp, cap):
+    live = native_current_config(with_mcp)
+    inner_of(live)[-2]["handle"][0]["max_size"] = cap
+    assert_native_refused(live)
+
+
+@pytest.mark.parametrize("with_mcp", [False, True])
+@pytest.mark.parametrize("mutation", sorted(PROXY_MUTATIONS))
+def test_native_branch_requires_the_whole_public_host_proxy(with_mcp, mutation):
+    live = native_current_config(with_mcp)
+    PROXY_MUTATIONS[mutation](inner_of(live)[-2]["handle"][-1])
+    assert_native_refused(live)
+
+
+@pytest.mark.parametrize("fault", ["historical", "missing_source", "missing_current_get", "ceo_only"])
+def test_native_branch_cannot_authorize_a_partial_or_historical_profile(fault):
+    live = native_current_config(fault == "ceo_only")
+    if fault == "historical":
+        get_paths_of(live)[:] = sorted(set(SOURCE_CONTEXT_GET_ROUTES) | set(asset_routes(OLD)))
+        post_paths_of(live)[:] = list(PRE_INSTRUCTION_ADMISSION_POST_ROUTES)
+    elif fault == "missing_source":
+        inner_of(live).pop(2)
+    elif fault == "missing_current_get":
+        get_paths_of(live).remove("/workspace/byok/roles/current")
+    else:
+        inner_of(live)[3]["match"][0]["path"] = list(MCP_METADATA_ROUTES)
+        inner_of(live)[4]["match"][0]["path"] = list(MCP_ROUTES)
+    assert_native_refused(live)
+
+
+@pytest.mark.parametrize("with_mcp", [False, True])
+def test_native_current_branch_preserves_wrappers_group_and_proxy_without_duplication(with_mcp):
+    live = native_current_config(with_mcp)
+    native = inner_of(live)[-2]
+    native["group"] = "retained-native-group"
+    native["handle"][-1]["transport"] = {"protocol": "http"}
+    native["handle"] = [{"handler": "subroute", "routes": [{"handle": native["handle"]}]}]
+    before = copy.deepcopy(live)
+    planned, prepared, final = transition_values(live)
+    assert live == before
+    assert planned["observed_native_branch"] is True
+    assert planned["native_post_routes"] == list(NATIVE_PATHS)
+    assert planned["native_max_body"] == 524288
+    for changed in (prepared, final):
+        branches = inner_of(changed)
+        assert len(branches) == (7 if with_mcp else 5)
+        assert branches[-2] == inner_of(before)[-2]
+        assert sum(b.get("match") == [{"method": ["POST"], "path": list(NATIVE_PATHS)}]
+                   for b in branches) == 1
+        assert branches[1]["handle"][0]["max_size"] == 64000
+        assert branches[2]["handle"][0]["max_size"] == 98304
+        if with_mcp:
+            assert branches[4]["handle"][0]["max_size"] == 64000

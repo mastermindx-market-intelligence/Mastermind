@@ -10,7 +10,12 @@ from tests import test_os_public_edge_transition as fixtures
 
 
 def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
-    assert set(edge.FRESH_CONVERSATION_POST_ROUTES) == set(fresh.ROUTES) == set(_OS_FRESH_CONVERSATION_ROUTES)
+    assert set(edge.FRESH_CONVERSATION_POST_ROUTES) == set(fresh.ROUTES)
+    assert edge.NATIVE_CONVERSATION_POST_ROUTES == tuple(fresh.NATIVE_ROUTES)
+    assert set(_OS_FRESH_CONVERSATION_ROUTES) == set(fresh.ROUTES) | set(fresh.NATIVE_ROUTES)
+    assert edge.NATIVE_MAX_BODY == fresh.NATIVE_MAX_REQUEST_BYTES == 524288
+    assert set(edge.NATIVE_CONVERSATION_POST_ROUTES).isdisjoint(
+        edge.POST_ROUTES + edge.SOURCE_POST_ROUTES + edge.COMPLETE_MCP_ROUTES)
     assert set(edge.PROJECT_CONVERSATION_READ_POST_ROUTES) | {
         '/os/executive/session/project-executions', '/os/executive/session/project-execution-read',
     } == set(ROUTES) | {'/os/executive/session/history-context'}
@@ -27,6 +32,8 @@ def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
     assert 'path ' + ' '.join(edge.POST_ROUTES) + '\n' in text
     assert 'path ' + ' '.join(edge.GET_ROUTES) + ' ' in text
     assert text.count('max_size 64KB') == 2 and text.count('max_size 98304') == 1
+    assert text.count('max_size 524288') == 1
+    assert 'path ' + ' '.join(edge.NATIVE_CONVERSATION_POST_ROUTES) + '\n' in text
     assert '/os/executive/session/send' not in edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES
     assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + ('/os/executive/session/send',)
     assert all('*' not in route for route in edge.GET_ROUTES + edge.POST_ROUTES)

@@ -266,7 +266,7 @@ class NativeOperatorHostSelection:
         from control_plane.native_conversation_binding import NativeConversationRegistration
         from control_plane.operator_harness_wire import workspace_identity, OperatorHarnessWireError
         from control_plane.remote_attempt_transport import RemoteOperatorHostBinding, RemoteAttemptTransportError
-        from integrations.deepseek_harness.operator_adapter import NativeOperatorAdapter, DSH_NATIVE_HARNESS_KIND
+        from control_plane.native_conversation_result import native_operator_capabilities, DSH_NATIVE_HARNESS_KIND
         fields = {'schema', 'registration', 'harness_binary_digest', 'harness_version',
                   'expected_config_digest', 'workspace'}
         registration_fields = {field.name for field in dataclasses.fields(NativeConversationRegistration)}
@@ -301,7 +301,7 @@ class NativeOperatorHostSelection:
                 harness_binary_digest=value['harness_binary_digest'],
                 harness_version=value['harness_version'],
                 expected_config_digest=value['expected_config_digest'], workspace=workspace,
-                capabilities=NativeOperatorAdapter.describe_capabilities())
+                capabilities=native_operator_capabilities())
         except (TypeError, ValueError, OperatorHarnessWireError, RemoteAttemptTransportError) as exc:
             raise FabricCompositionError('Native operator expected host facts are invalid') from exc
         return cls(registration, binding, observation.transport)

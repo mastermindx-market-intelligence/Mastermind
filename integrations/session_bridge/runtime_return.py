@@ -173,7 +173,7 @@ class RuntimeSessionReturn:
             raise TypeError("installed native Secretary owner required")
         self.hermes = hermes
         from .deepseek_native import DeepSeekNativeSession
-        from control_plane.native_conversation_read import RetainedNativeReadResolver
+        from integrations.session_bridge.retained_native_read import RetainedNativeReadResolver
         if deepseek is not None and type(deepseek) not in (DeepSeekNativeSession, RetainedNativeReadResolver):
             raise TypeError("installed native DeepSeek reader required")
         self.deepseek = deepseek
@@ -330,7 +330,7 @@ class RuntimeSessionReturn:
         if native is None:
             raise BridgeError("backend_unavailable", "installed native history is unavailable")
         source = native
-        from control_plane.native_conversation_read import RetainedNativeReadResolver
+        from integrations.session_bridge.retained_native_read import RetainedNativeReadResolver
         if type(source) is RetainedNativeReadResolver:
             from control_plane.fresh_conversation_admission import read_creation_restriction, NATIVE_SCHEMA
             from common.fresh_conversation_contract import canonical_digest

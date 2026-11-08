@@ -297,7 +297,7 @@ def native_objective(value):
 
 
 def _native_id(value):
-    from integrations.deepseek_harness.native_protocol import native_id
+    from control_plane.native_conversation_protocol import native_id
     return native_id(value)
 
 

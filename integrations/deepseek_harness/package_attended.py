@@ -704,7 +704,8 @@ def native_attestation_publication(*, worker_config, worker_config_sha256,
     else:
         if expected_receipt_sha256 is not None:
             raise ValueError("An expected existing receipt is reconciliation input only")
-        result = attestation.publish_native_deepseek_attestation(**arguments)
+        result = attestation.publish_native_deepseek_attestation(
+            **arguments, qualify_package=qualify_native_worker_package)
     try:
         current()
     except Exception as exc:

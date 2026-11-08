@@ -115,7 +115,8 @@ def inputs(tmp_path, monkeypatch, request):
                                                        and not s.st_mode & 0o022, "unsafe fixture custody"))
     repo = tmp_path / "source"
     repo.mkdir()
-    for name in assets.INPUTS:
+    for name in (*assets.INPUTS,
+                 "integrations/deepseek_harness/company_plugin/src/protocol.ts"):
         target = repo / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((assets.ROOT / name).read_bytes())
@@ -256,7 +257,8 @@ def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(s
     assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
     assert route[2]["handle"][0]["max_size"] == 98304
     assert route[2]["handle"][1] == _proxy(HOST)
-    assert len(route) == 4 and route[3] == ABORT_BRANCH
+    assert len(route) == 5 and route[4] == ABORT_BRANCH
+    assert route[3] == native_expected_branch()
     assert ready(staged)["state"] == "CUTOVER_READY"
     relay.selected = "new"
     assert publish(staged, "finalize")["state"] == "FINAL"
@@ -266,7 +268,8 @@ def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(s
     assert "/os/assets/index-old.js" not in route[0]["match"][0]["path"]
     assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
     assert route[2]["handle"][0]["max_size"] == 98304
-    assert len(route) == 4 and route[3] == ABORT_BRANCH
+    assert len(route) == 5 and route[4] == ABORT_BRANCH
+    assert route[3] == native_expected_branch()
 
 
 @pytest.mark.parametrize("inputs", [(False, False, "pre-native")], indirect=True)
@@ -347,7 +350,8 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
         # Body bounds, proxy/header identity and terminal refusal remain exact.
         assert current[1]["handle"] == original[1]["handle"]
         assert current[1]["handle"][0] == {"handler": "request_body", "max_size": 64000}
-        assert current[2:] == original[2:]
+        assert current[2:-2] + current[-1:] == original[2:]
+        assert current[-2] == native_expected_branch()
         assert current[2]["handle"][0] == {"handler": "request_body", "max_size": 98304}
         assert current[4]["handle"][0] == {"handler": "request_body", "max_size": 64000}
         assert current[-1] == {"handle": [{"handler": "static_response", "abort": True}]}
@@ -901,3 +905,154 @@ def test_staged_prepare_without_the_coo_route_pair_is_refused(staged):
     with pytest.raises(ValueError, match="transition bindings differ"):
         publish(staged, stage_digest=m.digest(descriptor_raw))
     assert ("POST", "config") not in relay.events
+
+
+def native_expected_branch():
+    from tests.test_os_public_edge_transition import native_branch
+    return native_branch()
+
+
+def native_inner(config):
+    return config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+
+
+def test_native_v2_routes_survive_original_two_phase_publication(staged):
+    i, result, relay = staged
+    expected = native_expected_branch()
+    original = copy.deepcopy(relay.current)
+    assert all(branch.get("match") != expected["match"] for branch in native_inner(original))
+    for phase, state in (("prepare", "PREPARED"), ("finalize", "FINAL")):
+        if phase == "finalize":
+            assert ready(staged)["state"] == "CUTOVER_READY"
+            relay.selected = "new"
+        assert publish(staged, phase)["state"] == state
+        branches = native_inner(relay.current)
+        assert branches[-2] == expected
+        assert sum(branch.get("match") == expected["match"] for branch in branches) == 1
+        assert branches[1]["handle"][0]["max_size"] == 64000
+        assert branches[2]["handle"][0]["max_size"] == 98304
+        assert branches[4]["handle"][0]["max_size"] == 64000
+        assert branches[-1] == ABORT_BRANCH
+    assert relay.events.count(("POST", "config")) == 2
+
+
+@pytest.mark.parametrize("capture", ["prepare.json", "final.json"])
+@pytest.mark.parametrize("fault", ["remove", "cap", "host", "float_cap"])
+def test_rehashed_native_only_capture_cannot_override_the_recomputed_transition(staged, capture, fault):
+    i, result, relay = staged
+    stage_path = i["out"]
+    before_live = copy.deepcopy(relay.current)
+    with m.private(stage_path) as stage:
+        original = json.loads(stage.read(capture))
+        forged = copy.deepcopy(original)
+        branches = native_inner(forged)
+        assert branches[-2] == native_expected_branch()
+        if fault == "remove":
+            branches.pop(-2)
+        elif fault in {"cap", "float_cap"}:
+            branches[-2]["handle"][0]["max_size"] = 64000 if fault == "cap" else 524288.0
+        else:
+            branches[-2]["handle"][-1]["headers"]["request"]["set"]["Host"] = ["127.0.0.1"]
+        raw = m.canonical(forged)
+        assert raw != m.canonical(original)
+        descriptor = json.loads(stage.read(m.DESCRIPTOR))
+        descriptor["files"][capture] = {"sha256": m.digest(raw), "bytes": len(raw)}
+        if fault != "float_cap":
+            # Repair the attacker's internal plan too: only independent
+            # reconstruction from the original source/capture can reject it.
+            key = "prepare_fullconfig_sha256" if capture == "prepare.json" else "final_fullconfig_sha256"
+            descriptor["plan"]["bindings"][key] = m.digest(raw)
+            if fault == "remove":
+                descriptor["plan"]["native_post_routes"] = []
+            elif fault == "cap":
+                descriptor["plan"]["native_max_body"] = 64000
+        # For float_cap preserve the genuine plan: dict equality alone would
+        # otherwise accept 524288.0 as equal to the required integer.
+        descriptor_raw = m.canonical(descriptor)
+    (stage_path / capture).write_bytes(raw)
+    (stage_path / m.DESCRIPTOR).write_bytes(descriptor_raw)
+    with pytest.raises(ValueError, match="transition bindings differ"):
+        publish(staged, stage_digest=m.digest(descriptor_raw))
+    assert relay.events == []
+    assert relay.current == before_live
+    assert relay.selected == "old"
+    assert not (stage_path / m.OPERATION).exists()
+
+
+@pytest.mark.parametrize("fault", ["paths", "float_cap"])
+def test_rehashed_native_plan_summary_is_reconstructed_before_any_effect(staged, fault):
+    i, result, relay = staged
+    path = i["out"] / m.DESCRIPTOR
+    descriptor = json.loads(path.read_bytes())
+    if fault == "paths":
+        descriptor["plan"]["native_post_routes"].pop()
+    else:
+        descriptor["plan"]["native_max_body"] = 524288.0
+    raw = m.canonical(descriptor)
+    path.write_bytes(raw)
+    with pytest.raises(ValueError, match="transition bindings differ"):
+        publish(staged, stage_digest=m.digest(raw))
+    assert relay.events == []
+    assert not (i["out"] / m.OPERATION).exists()
+
+
+@pytest.mark.parametrize("phase", ["prepare", "finalize"])
+def test_numeric_readback_drift_retains_original_intent_without_success_or_replay(staged, monkeypatch, phase):
+    i, result, relay = staged
+    if phase == "finalize":
+        assert publish(staged)["state"] == "PREPARED"
+        assert ready(staged)["state"] == "CUTOVER_READY"
+        relay.selected = "new"
+    posts_before = relay.events.count(("POST", "config"))
+    original_http = relay.http
+    def changed_readback(port, method, path, **kwargs):
+        result = original_http(port, method, path, **kwargs)
+        if port == 2019 and method == "POST":
+            native_inner(relay.current)[-2]["handle"][0]["max_size"] = 524288.0
+        return result
+    monkeypatch.setattr(m, "_http", changed_readback)
+    with pytest.raises(ValueError, match="publication readback differs"):
+        publish(staged, phase)
+    journal = i["out"] / m.OPERATION
+    assert (journal / (phase + "-intent.json")).exists()
+    reconciliation = json.loads((journal / (phase + "-reconciliation.json")).read_bytes())
+    assert reconciliation["state"] == "RECONCILIATION_REQUIRED"
+    assert reconciliation["phase"] == phase
+    assert not (journal / (phase + "-receipt.json")).exists()
+    assert relay.events.count(("POST", "config")) == posts_before + 1
+    with pytest.raises(ValueError):
+        publish(staged, phase)
+    assert relay.events.count(("POST", "config")) == posts_before + 1
+
+
+def test_cutover_refuses_numerically_equal_native_configuration_drift(staged):
+    i, result, relay = staged
+    assert publish(staged)["state"] == "PREPARED"
+    native_inner(relay.current)[-2]["handle"][0]["max_size"] = 524288.0
+    with pytest.raises(ValueError, match="configuration no longer current"):
+        ready(staged)
+    assert relay.events.count(("POST", "config")) == 1
+    assert {p.name for p in (i["out"] / m.OPERATION).iterdir()} == {
+        "prepare-intent.json", "prepare-receipt.json"}
+
+
+@pytest.mark.parametrize("when", ["before", "during"])
+def test_final_publication_rechecks_exact_native_config_before_the_original_post(staged, monkeypatch, when):
+    i, result, relay = staged
+    assert publish(staged)["state"] == "PREPARED"
+    relay.selected = "new"
+    def drift():
+        native_inner(relay.current)[-2]["handle"][0]["max_size"] = 524288.0
+    if when == "before":
+        drift()
+    else:
+        original_validate = m._validate
+        def validate_and_drift(*args):
+            original_validate(*args)
+            drift()
+        monkeypatch.setattr(m, "_validate", validate_and_drift)
+    with pytest.raises(ValueError, match="(full configuration drift|configuration or ETag changed)"):
+        publish(staged, "finalize")
+    assert relay.events.count(("POST", "config")) == 1
+    assert {p.name for p in (i["out"] / m.OPERATION).iterdir()} == {
+        "prepare-intent.json", "prepare-receipt.json"}

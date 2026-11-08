@@ -128,7 +128,7 @@ async def _bounded_receive_body(
                 raise _InvalidBody("body chunk is not bytes")
             total += len(chunk)
             if total > max_bytes:
-                raise _InvalidBody("body exceeds transport byte limit")
+                raise _InvalidBody(f"body exceeds {max_bytes} bytes")
             body.extend(chunk)
             if not event.get("more_body", False):
                 return bytes(body)

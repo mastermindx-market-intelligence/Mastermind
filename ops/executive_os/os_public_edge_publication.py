@@ -302,8 +302,13 @@ def _load_stage(stage, expected_digest):
     live, prepared, final = (decode(contents[name + ".json"]) for name in ("live", "prepare", "final"))
     kwargs = dict(fullconfig=live, current_manifest=manifests["old"],
                   candidate_manifest=manifests["new"], relay_port=d["relay_port"])
-    require(d["plan"] == planner.plan(old_source=d["old"]["source"], new_source=d["new"]["source"], **kwargs)
-            and prepared == planner.prepare_config(**kwargs) and final == planner.final_config(**kwargs),
+    # Canonical equality preserves numeric types. Python dict equality would
+    # accept a floating-point body cap as equal to the required integer after
+    # a forged stage repaired its outer file digests.
+    require(canonical(d["plan"]) == canonical(planner.plan(
+                old_source=d["old"]["source"], new_source=d["new"]["source"], **kwargs))
+            and canonical(prepared) == canonical(planner.prepare_config(**kwargs))
+            and canonical(final) == canonical(planner.final_config(**kwargs)),
             "transition bindings differ")
     return d, manifests, live, prepared, final
 
@@ -413,7 +418,7 @@ def verify_cutover(*, stage_path, stage_digest, new_sha, new_digest):
             predecessor = _success(stage, operation, d, stage_digest, "prepare", live, prepared, None)
             intent = decode(operation.read("prepare-intent.json"))
             _listener(d["relay_port"], intent["listener_pid"])
-            require(_config()[0] == prepared, "prepared configuration no longer current")
+            require(canonical(_config()[0]) == canonical(prepared), "prepared configuration no longer current")
             return {"schema": SCHEMA, "state": "CUTOVER_READY", "stage_digest": stage_digest,
                     "prepare_receipt_digest": predecessor, "new_source": new_sha,
                     "new_bundle_digest": new_digest, "installed": False}
@@ -435,12 +440,14 @@ def publish(*, stage_path, stage_digest, listener_pid, phase):
                 predecessor = _success(stage, operation, d, stage_digest, "prepare", live, prepared, None)
             base, candidate, manifest = prepared, final, manifests["new"]
         current, etag = _config()
-        require(current == base, "live full configuration drift")
+        require(canonical(current) == canonical(base), "live full configuration drift")
         _listener(d["relay_port"], listener_pid)
         _validate(stage, phase, candidate)
         _served(manifest, d["relay_port"])
         _listener(d["relay_port"], listener_pid)
-        require(_config() == (base, etag), "configuration or ETag changed during qualification")
+        observed_config, observed_etag = _config()
+        require(canonical(observed_config) == canonical(base) and observed_etag == etag,
+                "configuration or ETag changed during qualification")
         require(_load_stage(stage, stage_digest)[0] == d, "stage changed during qualification")
         if phase == "prepare":
             _new_directory(stage.path / OPERATION)
@@ -472,7 +479,7 @@ def _commit_publication(stage, operation, *, schema, phase, binding, etag, candi
                              headers={"Content-Type": "application/json", "If-Match": etag})
         require(status == 200, "publication status refused; reconciliation required")
         after, _ = _config()
-        require(after == candidate, "publication readback differs; reconciliation required")
+        require(canonical(after) == canonical(candidate), "publication readback differs; reconciliation required")
         requalify()
         receipt = {**binding, "state": state, "intent_digest": digest(canonical(intent)),
                    "http_status": status}
@@ -600,7 +607,7 @@ def _load_dsh_stage(stage, expected_digest):
     record, _ = _dsh_artifact(stage, d["artifact_digest"])
     require(record["source"] == d["source"], "native stage source differs")
     live, candidate = decode(contents["live.json"]), decode(contents["candidate.json"])
-    require(candidate == dsh_planner.candidate_config(live), "native candidate differs")
+    require(canonical(candidate) == canonical(dsh_planner.candidate_config(live)), "native candidate differs")
     return d, record, live, candidate
 
 
@@ -653,12 +660,14 @@ def publish_dsh(*, stage_path, stage_digest, listener_pid):
         d, record, base, candidate = _load_dsh_stage(stage, stage_digest)
         require(OPERATION not in stage.names(), "original operation already exists; no replay")
         current, etag = _config()
-        require(current == base and etag == d["observed_etag"], "native full configuration drift")
+        require(canonical(current) == canonical(base) and etag == d["observed_etag"], "native full configuration drift")
         _listener(4181, listener_pid)
         _validate_file(stage, "candidate.json", candidate)
         _served_dsh(record)
         _listener(4181, listener_pid)
-        require(_config() == (base, etag), "configuration or ETag changed during qualification")
+        observed_config, observed_etag = _config()
+        require(canonical(observed_config) == canonical(base) and observed_etag == etag,
+                "configuration or ETag changed during qualification")
         require(_load_dsh_stage(stage, stage_digest)[0] == d, "native stage changed during qualification")
         _new_directory(stage.path / OPERATION)
         with private(stage.path / OPERATION) as operation:

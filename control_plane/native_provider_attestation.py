@@ -483,17 +483,18 @@ def _deepseek_manifest(release):
 
 
 def build_native_deepseek_attestation(*, binary_path: Path, release: Path,
-                                      source_repo: Path, source_sha: str) -> dict:
+                                      source_repo: Path, source_sha: str, qualify_package) -> dict:
     """Root qualification only; no service/account/session creation or publication."""
     if os.geteuid() != _ROOT_UID:
         _fail("native attestation producer requires root")
-    from integrations.deepseek_harness.package_attended import qualify_native_worker_package
+    if not callable(qualify_package):
+        _fail("native package qualifier must come from the trusted installation composition")
     binary_path, release = _deepseek_path(str(binary_path)), _deepseek_path(str(release))
     # Bound and establish root custody before the existing package qualifier
     # enumerates/hashes its manifest. Its publication inventories predate these
     # worker-side package budgets and cannot be the first admission check.
     initial = _deepseek_tree(release)
-    qualified = qualify_native_worker_package(
+    qualified = qualify_package(
         release=release, source_repo=source_repo, source_sha=source_sha)
     binary = _file_observation(binary_path, content=True)
     runtime = binary["identity"]
@@ -771,7 +772,7 @@ def _deepseek_receipt_entry(parent_fd, name):
 
 def publish_native_deepseek_attestation(*, receipt_path: Path, binary_path: Path,
         release: Path, source_repo: Path, source_sha: str, expected_owner_gid: int,
-        allowed_versions: frozenset[str], current=None) -> dict:
+        allowed_versions: frozenset[str], qualify_package, current=None) -> dict:
     """Publish one root-qualified receipt for the existing Worker, without activation.
 
     The package owner supplies its original pinned Worker-config predicate.
@@ -799,7 +800,8 @@ def publish_native_deepseek_attestation(*, receipt_path: Path, binary_path: Path
                 _fail("original native receipt or private stage requires reconciliation")
             config_current()
             document = build_native_deepseek_attestation(binary_path=binary_path,
-                release=release, source_repo=source_repo, source_sha=source_sha)
+                release=release, source_repo=source_repo, source_sha=source_sha,
+                qualify_package=qualify_package)
             _deepseek_shape(document)
             if document["node"]["version"] not in allowed_versions:
                 _fail("native Node version differs from original Worker configuration")

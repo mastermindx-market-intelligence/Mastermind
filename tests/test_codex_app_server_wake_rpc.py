@@ -79,7 +79,7 @@ EPOCH = SessionEpochRef(
 GENERATION = ProcessGenerationRef(
     process_generation_id="generation-123",
     session_epoch_id="epoch-123",
-    generation_number=7,
+    generation_number=1,
     worker_id="worker-123",
 )
 BINDING = RuntimeBinding(
@@ -95,6 +95,50 @@ PROCESS = ProcessIdentityObservation(
     process_start_identity="Mon Aug 30 01:00:00 2026",
     boot_id="boot-123",
 )
+
+
+# Typed synthetic evidence for this already-owned unit-test run. These fixture
+# identities are not observations of a production process or account.
+_OWNED_PROFILE = RequestedExecutionProfile(
+    worker_id=GENERATION.worker_id, provider="openai-codex",
+    requested_model="gpt-5.6-sol", harness_kind="codex-app-server",
+    harness_binary_digest="a" * 64, harness_version="0.147.0",
+    workspace=WorkspaceIdentity("/tmp/mastermind-w3a-owned-workspace", "b" * 40, 1, 2, 501, 20),
+    sandbox_policy="read-only", approval_policy="never", network_policy="disabled",
+    capabilities=CapabilityManifest(), native_helper_policy=NativeHelperPolicy.DISABLED,
+    authority_policy_hash="c" * 64,
+)
+_OWNED_ATTESTATION = ObservedHarnessAttestation(
+    served_model=_OWNED_PROFILE.requested_model,
+    harness_version=_OWNED_PROFILE.harness_version,
+    harness_binary_digest=_OWNED_PROFILE.harness_binary_digest,
+    capabilities=(), effective_skills=(), effective_mcp=(), effective_plugins_or_apps=(),
+    sandbox_state=_OWNED_PROFILE.sandbox_policy, approval_state=_OWNED_PROFILE.approval_policy,
+    network_state=_OWNED_PROFILE.network_policy, effective_config_digest="d" * 64,
+    auth=AuthRealmFact(worker_id=GENERATION.worker_id, provider=_OWNED_PROFILE.provider),
+    workspace=_OWNED_PROFILE.workspace,
+    supports_subagent_capability_ceiling=ObservedTriState.FALSE,
+)
+
+
+def _owned_materialization_receipt():
+    """Build one typed receipt for the explicit synthetic fixture above."""
+    process = to_wire(PROCESS)
+    return build_operator_materialization_receipt(
+        operation_command_id=f"ohf-op:start:{ATTEMPT_ID}", operation_kind="start_session",
+        attempt_id=ATTEMPT_ID, worker_id=GENERATION.worker_id,
+        session_epoch_id=EPOCH.session_epoch_id,
+        process_generation_id=GENERATION.process_generation_id,
+        generation_number=GENERATION.generation_number,
+        requested_profile_digest=requested_profile_digest(to_wire(_OWNED_PROFILE)),
+        provider_session_id=NATIVE_HANDLE, process_identity=process,
+        observed_attestation=to_wire(_OWNED_ATTESTATION),
+        process_credentials={"process_identity": process, "os_principal_name": "fixture-worker",
+                             "os_principal_uid": 501},
+        provider_home_identity={"path": "/var/empty/worker-123", "device": 1, "inode": 2,
+                                "uid": 501, "gid": 20, "mode": 0o700},
+        created_at="2026-09-03T00:00:00+00:00",
+    )
 
 
 @dataclass
@@ -208,8 +252,8 @@ def _owned_adapter(
     # default so guarded ordinary turns exercise the production send seam.
     adapter.skill_canary_binding = None
     adapter.process_identity_observer = lambda _pid: observed_process
-    requested = SimpleNamespace(approval_policy="never", capabilities=SimpleNamespace(required=()))
-    attestation = SimpleNamespace(effective_config_digest="d" * 64, capabilities=(), effective_mcp=())
+    requested = _OWNED_PROFILE
+    attestation = _OWNED_ATTESTATION
     adapter._active_workers = {
         adapter.worker_id: GENERATION.process_generation_id,
     }
@@ -1666,10 +1710,12 @@ def _real_broker_with_owned_adapter(
     broker._state_lock = asyncio.Lock()
     broker._operator_run = broker_module._BrokerOperatorRun(
         adapter=adapter,
-        requested=SimpleNamespace(approval_policy="never"),
+        requested=_OWNED_PROFILE,
         epoch=EPOCH,
         generation=GENERATION,
         provider_session_id=NATIVE_HANDLE,
+        materialization_operation=OperationId(f"ohf-op:start:{ATTEMPT_ID}"),
+        materialization_receipt=_owned_materialization_receipt(),
         busy=busy,
     )
     return broker
@@ -2201,3 +2247,15 @@ def test_foreign_company_read_withheld_without_changing_delivery_or_ack(override
     assert result.target_ack_projection == TrustedWorkerWakeAckProjection(
         **dataclasses.asdict(_worker_projection()))
     assert len(fake.calls) == 1
+
+
+def test_real_broker_unmaterialized_run_refuses_before_provider_io():
+    client = FakeOwnedAppServerClient()
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+    state = broker._operator_run
+    state.materialization_receipt = None
+    with pytest.raises(BrokerPreSubmitError, match="materialization remains unobserved"):
+        asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+    assert client.calls == []
+    assert state.busy is False
+    assert state.native_read_task is None

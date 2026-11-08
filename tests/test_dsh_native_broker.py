@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from integrations.deepseek_harness.operator_adapter import NativeOperatorAdapter
 
 from control_plane.executive_worker_broker import (
     BrokerPolicy, BrokerStateError, ExecutiveWorkerBroker, PeerCredentials,
@@ -48,6 +49,7 @@ async def configured(tmp_path, monkeypatch):
     f.broker = ExecutiveWorkerBroker(None, policy, f.sweeper,
         adapter_id=None, operator_binary_attestation=f.adapter.binding.binary,
         operator_adapter_factory=factory, operator_harness_armed=True,
+        native_read_adapter_type=NativeOperatorAdapter,
         autonomy_guard=authority, autonomy_canary_factory=lambda payload: dict(payload))
     f.peer = PeerCredentials(policy.control_uid, policy.worker_gid, os.getpid())
     def require(operation, epoch, generation, method, session):
@@ -405,5 +407,60 @@ def test_late_original_read_cannot_borrow_a_later_broker_busy_slot(tmp_path,monk
         finally: state.busy=False
         assert f.adapter.native.open_calls == 1 and f.adapter.native.prompt_calls == 0
         monkeypatch.setattr(f.adapter,"_call",original_call)
+        await close(f)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("drift", ["absent", "wrong-class", "subclass", "factory", "connection", "session"])
+def test_native_read_requires_the_original_exact_factory_class_binding(tmp_path, monkeypatch, drift):
+    async def run():
+        f = await configured(tmp_path, monkeypatch)
+        payload, _ = await ready_read(f)
+        state = f.broker._operator_run
+        original_binding = f.broker._native_read_binding
+        original_factory = f.broker.operator_adapter_factory
+        original_native = state.native_connection
+        original_session = state.provider_session_id
+        class DerivedAdapter(NativeOperatorAdapter):
+            pass
+        try:
+            if drift == "absent": f.broker._native_read_binding = None
+            elif drift == "wrong-class": f.broker._native_read_binding = (object, original_factory)
+            elif drift == "subclass": f.adapter.__class__ = DerivedAdapter
+            elif drift == "factory": f.broker.operator_adapter_factory = lambda *args: f.adapter
+            elif drift == "connection": state.native_connection = object()
+            else: state.provider_session_id = "other-native-session"
+            with pytest.raises(BrokerStateError):
+                await request(f, "ohf-native-read", payload)
+            assert not f.read_entered.is_set() and not state.busy and state.native_read_task is None
+            assert original_native.open_calls == 1 and original_native.prompt_calls == 0
+            assert len(f.factories) == 1 and f.sweeper.calls == []
+        finally:
+            f.adapter.__class__ = NativeOperatorAdapter
+            f.broker._native_read_binding = original_binding
+            f.broker.operator_adapter_factory = original_factory
+            state.native_connection = original_native
+            state.provider_session_id = original_session
+            await close(f)
+    asyncio.run(run())
+
+
+def test_inflight_native_read_cannot_adopt_equal_replacement_class_binding(tmp_path, monkeypatch):
+    async def run():
+        f = await configured(tmp_path, monkeypatch)
+        payload, _ = await ready_read(f)
+        original_binding = f.broker._native_read_binding
+        reading = asyncio.create_task(request(f, "ohf-native-read", payload))
+        await asyncio.wait_for(f.read_entered.wait(), 2)
+        state = f.broker._operator_run
+        original_task = state.native_read_task
+        f.broker._native_read_binding = tuple(list(original_binding))
+        assert f.broker._native_read_binding == original_binding
+        assert f.broker._native_read_binding is not original_binding
+        f.read_release.set()
+        assert await reading == {"native_read": None}
+        assert original_task.done() and not state.busy and state.native_read_task is None
+        assert f.adapter.native.open_calls == 1 and f.adapter.native.prompt_calls == 0
+        f.broker._native_read_binding = original_binding
         await close(f)
     asyncio.run(run())

@@ -191,8 +191,8 @@ async def read_native_content(owner, principal, reference, root, material, origi
     """Resolve one original seal through the installed finite native READ."""
     from common.session_bridge_private_contract import (
         PRIVATE_SCHEMA, PRIVATE_RESULT_SCHEMA, SessionBridgeIngressOwner)
-    from integrations.session_bridge.deepseek_native import RESULT_SCHEMA
-    from integrations.deepseek_harness.native_read_port import _result_data
+    from control_plane.native_conversation_read_contract import RESULT_SCHEMA
+    from control_plane.native_conversation_read_contract import _result_data
     from control_plane.native_continuation import _digest as bridge_digest
     from control_plane.fresh_conversation_reference import _original, _bounded
     factory = owner._app.session_bridge_provider_factory

@@ -1435,6 +1435,7 @@ class ExecutiveWorkerBroker:
         validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
+        native_read_adapter_type: type | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
@@ -1530,6 +1531,12 @@ class ExecutiveWorkerBroker:
             raise WorkerBrokerError("assignment sealing needs the original flat broker")
         self.peer_resolver = peer_resolver
         self.operator_adapter_factory = operator_adapter_factory
+        if native_read_adapter_type is not None and (
+                not self._operator_only or type(native_read_adapter_type) is not type):
+            raise WorkerBrokerError("native read requires the trusted operator-only class binding")
+        self._native_read_binding = (
+            (native_read_adapter_type, operator_adapter_factory)
+            if native_read_adapter_type is not None else None)
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
@@ -2650,8 +2657,7 @@ class ExecutiveWorkerBroker:
 
     async def _ohf_native_read(self, payload: dict[str, Any], *, content: bool) -> dict[str, Any]:
         """One finite observation on the original READY run; never constructs an adapter."""
-        from integrations.deepseek_harness.operator_adapter import NativeOperatorAdapter
-        from integrations.deepseek_harness.native_read_port import NativeReadUnavailable
+        from control_plane.native_conversation_read_contract import NativeReadUnavailable
         expected = {"epoch", "generation"} | ({"association", "request"} if content else set())
         if set(payload) != expected:
             raise BrokerProtocolError("native read payload fields are invalid")
@@ -2664,7 +2670,9 @@ class ExecutiveWorkerBroker:
         state = await self._operator_state(generation, join_native_read=False)
         try:
             adapter, native = state.adapter, state.native_connection
-            if (type(adapter) is not NativeOperatorAdapter or native is None
+            binding = self._native_read_binding
+            if (binding is None or type(adapter) is not binding[0]
+                    or self.operator_adapter_factory is not binding[1] or native is None
                     or adapter.native is not native or epoch != state.epoch
                     or state.pending_begin is not None or state.collecting_turn is not None
                     or state.native_read_task is not None or state.terminal_error is not None
@@ -2674,6 +2682,9 @@ class ExecutiveWorkerBroker:
             def current():
                 self._require_current_autonomy()
                 if (self._operator_run is not state or state.adapter is not adapter
+                        or self._native_read_binding is not binding
+                        or self.operator_adapter_factory is not binding[1]
+                        or type(adapter) is not binding[0]
                         or state.native_read_task is not task
                         or state.native_connection is not native or adapter.native is not native
                         or state.epoch != epoch or state.generation != generation or not state.busy

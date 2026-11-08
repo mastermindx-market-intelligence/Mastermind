@@ -27,7 +27,7 @@ from control_plane.executive_orchestration_principal import (
 )
 from control_plane.native_conversation_result import (
     DSH_NATIVE_HARNESS_KIND, DSH_NATIVE_RESULT_CONTRACT, NativeConversationResultObservation,
-    NativeConversationBeginObservation,
+    NativeConversationBeginObservation, native_operator_capabilities,
 )
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION, AdapterFailureClass, CandidateResult,
@@ -177,12 +177,7 @@ class NativeOperatorAdapter:
 
     @classmethod
     def describe_capabilities(cls):
-        return HarnessAdapterCapabilities(
-            cls.interface_version,
-            ("describe_capabilities", "validate_requested_profile", "start_session", "begin_turn",
-             "read_events", "interrupt_turn", "collect_candidate_result", "graceful_stop", "cancel", "reconcile"),
-            ("resume_session",), True, False, False, False, False, False, False, True,
-        )
+        return native_operator_capabilities(interface_version=cls.interface_version)
 
     def validate_requested_profile(self, requested):
         reasons = []

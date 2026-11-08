@@ -99,6 +99,27 @@ mcp.mastermind-x.com {
         header_up X-Forwarded-For 127.0.0.1
       }
     }
+    @nativepost {
+      method POST
+      path /os/executive/conversation/v2/preview /os/executive/conversation/v2/create /os/executive/conversation/v2/status /os/executive/conversation/v2/read /os/executive/conversation/v2/recover /os/executive/conversation/v2/consume /os/executive/conversation/v2/consume/status /os/executive/conversation/v2/turn/preview /os/executive/conversation/v2/turn /os/executive/conversation/v2/turn/status /os/executive/conversation/v2/turn/read /os/executive/conversation/v2/turn/recover /os/executive/conversation/v2/resume/preview /os/executive/conversation/v2/resume /os/executive/conversation/v2/resume/status /os/executive/conversation/v2/stop /os/executive/conversation/v2/stop/status
+    }
+    handle @nativepost {
+      request_body {
+        max_size 524288
+      }
+      reverse_proxy 127.0.0.1:__RELAY_PORT__ {
+        header_up -Forwarded
+        header_up -X-Forwarded-Host
+        header_up -X-Forwarded-Port
+        header_up -X-Real-IP
+        header_up -CF-Connecting-IP
+        header_up -EO-Connecting-IP
+        header_up -EO-Client-IP
+        header_up Host mcp.mastermind-x.com
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For 127.0.0.1
+      }
+    }
     abort
   }
 }

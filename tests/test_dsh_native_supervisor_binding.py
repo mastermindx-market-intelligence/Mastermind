@@ -112,8 +112,14 @@ def test_native_constructor_cannot_use_legacy_factory_or_role_adapter(tmp_path, 
                                         expected_native_result=ref)
 
 
-def test_disabled_native_storage_cannot_enter_fresh_claim_join(tmp_path):
+def test_disabled_native_storage_cannot_enter_fresh_claim_join(tmp_path, monkeypatch):
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+    from test_dsh_native_runtime_binding import CANDIDATE
+
     runtime, root, job = _stored(tmp_path)
+    disabled = ExecutionCapabilityRegistry.load(CANDIDATE)
+    assert disabled.profiles["operator.dsh.native-conversation.v1"].enabled is False
+    monkeypatch.setattr(ExecutionCapabilityRegistry, "load", classmethod(lambda cls: disabled))
     with pytest.raises(rt.StateConflict, match="capability policy"):
         runtime.jobs.assert_frontier_planner_execution(job.job_id)
     assert runtime.attempts.list_attempts() == []

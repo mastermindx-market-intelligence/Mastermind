@@ -9,7 +9,7 @@ import pytest
 
 from common.session_bridge_private_contract import BridgeError
 from control_plane.native_conversation_binding import NativeConversationHostComposition
-from control_plane.native_conversation_read import RetainedNativeReadResolver
+from integrations.session_bridge.retained_native_read import RetainedNativeReadResolver
 from integrations.deepseek_harness.native_read_port import RESPONSE_SCHEMA
 from integrations.session_bridge.runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
 from integrations.session_bridge.runtime_return import RuntimeSessionReturn

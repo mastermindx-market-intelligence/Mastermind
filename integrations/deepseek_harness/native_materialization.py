@@ -244,7 +244,7 @@ def _copy_package(candidate, stage, uid, raw, manifest, root_identity, target_fd
                             or att.has_macos_acl(child_path, expected_identity=info, descriptor=source_child)):
                         raise ValueError("native package member changed while opening")
                     if directory:
-                        os.mkdir(name, 0o700, dir_fd=target_fd)
+                        os.mkdir(name, mode=0o700, dir_fd=target_fd)
                         child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=target_fd)
                         try:
                             walk(source_child, child, child_path, rel, depth+1)
@@ -490,7 +490,7 @@ def native_materialization(*, worker_config, worker_config_sha256, source_repo, 
                         os.close(fd)
                     row["prepared"] = _node(stage, digest)
                 else:
-                    os.mkdir(stage.name, 0o700, dir_fd=parent_fd)
+                    os.mkdir(stage.name, mode=0o700, dir_fd=parent_fd)
                     prepared = True
                     created = os.stat(stage.name, dir_fd=parent_fd, follow_symlinks=False)
                     stage_fd = os.open(stage.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,

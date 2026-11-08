@@ -13,8 +13,9 @@ from typing import Any, Protocol, runtime_checkable
 from control_plane.executive_orchestration_result import RESULT_SCHEMA
 from control_plane.operator_harness_contract import (
     OperationId, ProcessGenerationRef, RequestedExecutionProfile, TurnRef, TurnStartObservation,
+    HarnessAdapterCapabilities, OPERATOR_HARNESS_INTERFACE_VERSION,
 )
-from integrations.deepseek_harness.native_protocol import (
+from control_plane.native_conversation_protocol import (
     NativeClaim, NativeProtocolError, NativeResult, NativeTerminal, native_id,
 )
 
@@ -22,6 +23,16 @@ NATIVE_CONVERSATION_RESULT_SCHEMA = "mastermind.dsh_native_conversation_result/v
 ROLE_RESULT_CONTRACT = RESULT_SCHEMA
 DSH_NATIVE_RESULT_CONTRACT = "mastermind.dsh_native_conversation/v1"
 DSH_NATIVE_HARNESS_KIND = "dsh-native-web-acp"
+
+
+def native_operator_capabilities(*, interface_version=OPERATOR_HARNESS_INTERFACE_VERSION):
+    """Static original adapter facts; never a process or admission factory."""
+    return HarnessAdapterCapabilities(
+        interface_version,
+        ("describe_capabilities", "validate_requested_profile", "start_session", "begin_turn",
+         "read_events", "interrupt_turn", "collect_candidate_result", "graceful_stop", "cancel", "reconcile"),
+        ("resume_session",), True, False, False, False, False, False, False, True,
+    )
 
 
 def result_contract_for_profile(requested: RequestedExecutionProfile) -> str:

@@ -182,3 +182,40 @@ def test_chat_retains_unrelated_certificate_authority():
     config["apps"]["tls"]["automation"]["policies"][0]["issuers"] = [{"module": "internal"}]
     candidate = planner.candidate_config(config)
     assert candidate["apps"]["tls"] == config["apps"]["tls"]
+
+
+def test_native_ingress_rejects_rehashed_candidate_with_changed_json_type(inputs, monkeypatch):
+    relay, request = _stage(inputs, monkeypatch)
+    stage_path = Path(request["stage_path"])
+    candidate = json.loads((stage_path / "candidate.json").read_bytes())
+    candidate["apps"]["http"]["servers"]["production"]["routes"][-1]["terminal"] = 1
+    raw = m.canonical(candidate)
+    descriptor = json.loads((stage_path / m.DESCRIPTOR).read_bytes())
+    descriptor["files"]["candidate.json"] = {"sha256": m.digest(raw), "bytes": len(raw)}
+    descriptor_raw = m.canonical(descriptor)
+    (stage_path / "candidate.json").write_bytes(raw)
+    (stage_path / m.DESCRIPTOR).write_bytes(descriptor_raw)
+    with pytest.raises(ValueError, match="native candidate differs"):
+        m.publish_dsh(**{**request, "stage_digest": m.digest(descriptor_raw)})
+    assert relay.posts == 0
+    assert not (stage_path / m.OPERATION).exists()
+
+
+def test_native_ingress_numeric_readback_cannot_publish_a_false_success(inputs, monkeypatch):
+    relay, request = _stage(inputs, monkeypatch)
+    original_http = relay.http
+    def changed_readback(port, method, path, **kwargs):
+        result = original_http(port, method, path, **kwargs)
+        if method == "POST":
+            relay.config["apps"]["http"]["servers"]["production"]["routes"][-1]["terminal"] = 1
+        return result
+    monkeypatch.setattr(m, "_http", changed_readback)
+    with pytest.raises(ValueError, match="publication readback differs"):
+        m.publish_dsh(**request)
+    journal = Path(request["stage_path"]) / m.OPERATION
+    assert (journal / "dsh-intent.json").exists()
+    assert (journal / "dsh-reconciliation.json").exists()
+    assert not (journal / "dsh-receipt.json").exists()
+    with pytest.raises(ValueError, match="no replay"):
+        m.publish_dsh(**request)
+    assert relay.posts == 1

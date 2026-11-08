@@ -927,6 +927,7 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
                             ambient_classifier=DarwinDistnotedClassifier()),
         adapter_id=None, operator_binary_attestation=installed.binary,
         operator_adapter_factory=operator_adapter_factory, operator_harness_armed=True,
+        native_read_adapter_type=NativeOperatorAdapter,
         autonomy_guard=autonomy_guard,
         autonomy_canary_factory=_build_autonomy_canary_factory(config),
     )

@@ -9,7 +9,7 @@ import inspect
 from typing import Callable
 
 from common.session_bridge_private_contract import BridgeError
-from integrations.deepseek_harness.native_read_port import (
+from control_plane.native_conversation_read_contract import (
     NativeReadUnavailable, canonical, native_read_frame, validate_native_read_binding,
     validate_native_read_response,
 )

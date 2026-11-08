@@ -49,7 +49,7 @@ def test_verified_native_reply_can_terminalize_while_callback_remains_pending(tm
         job = runtime.jobs.create_job("Original callback scheduling fixture")
         lease = runtime.attempts.claim_job(job.job_id, worker_id="worker-01", quota_class="default")
         assert lease is not None
-        retained = SimpleNamespace(lease=lease, job=job)
+        retained = SimpleNamespace(lease=lease, job=job, native_result=None)
         # Route the real, unmarked legacy creation record through the current
         # immutable JOB_CREATED guard; a Runtime-like object cannot prove it.
         from control_plane.fresh_conversation_admission import read_creation_restriction
