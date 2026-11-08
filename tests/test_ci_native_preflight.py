@@ -151,7 +151,7 @@ def check_layout(job):
     upload = next(s for s in steps if s.get('name') == 'Upload fixed test diagnostics')
     assert steps.index(prepare) < steps.index(native) < steps.index(repository) < steps.index(upload)
     assert upload['if'] == 'always()' and upload['timeout-minutes'] == 2
-    assert job['timeout-minutes'] == 60 and repository['timeout-minutes'] == 45
+    assert job['timeout-minutes'] == 75 and repository['timeout-minutes'] == 45
     assert upload['with']['path'].splitlines() == [
         '${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json',
         '${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json',
