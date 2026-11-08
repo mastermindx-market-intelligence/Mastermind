@@ -1731,6 +1731,14 @@
         },
         "change": "Remove the crisp decorative edge component; preserve the existing broad depth, image, fill, text and visibility."
       }
+    },
+    {
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-5ie-0-reference-wrapper-bounds-v1",
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "nodeId": "5K6-0",
+      "currentNode": "6LM-0",
+      "expectedZIndex": "110",
+      "reason": "Nested stacking value omitted by HTML replacement; content and root bounds are preserved; needs qualified native property restoration."
     }
   ],
   "zIndexPreflight": [
@@ -1892,5 +1900,3432 @@
         "No host, credential, selector or alternative-carrier action."
       ]
     }
+  },
+  "nestedZIndexRecovery": {
+    "terminalNF": {
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-ne-0-accent-refinement-1631-v1",
+      "currentRoot": "24VA-0",
+      "nodes": 24,
+      "allNodesTextStylesOrderVerified": true,
+      "onlyRootShadowChanged": true,
+      "cleanupVerified": true,
+      "utility": "27YT-0",
+      "nativeCopyOperation": "paper-accent-estate-20261108-c4-t05rm-nf-native-zindex-restore-v1",
+      "nativeOrderOperation": "paper-accent-estate-20261108-c4-t05rm-nf-native-zindex-order-v1"
+    },
+    "pendingAI": [
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-5ie-0-reference-wrapper-bounds-v1",
+        "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+        "nodeId": "5K6-0",
+        "currentNode": "6LM-0",
+        "expectedZIndex": "110",
+        "beforeSubtree": [
+          {
+            "id": "5K6-0",
+            "tag": "div",
+            "styles": {
+              "boxSizing": "border-box",
+              "height": "40px",
+              "justifySelf": "end",
+              "minWidth": "0px",
+              "overflow": "visible",
+              "position": "relative",
+              "width": "128px",
+              "zIndex": "110"
+            },
+            "sides": [],
+            "thin": false,
+            "shadow": false,
+            "gradient": false,
+            "offset": 38950,
+            "parentId": "5IG-0",
+            "end": 40638,
+            "text": "NVDA"
+          },
+          {
+            "id": "5K7-0",
+            "tag": "div",
+            "styles": {
+              "alignItems": "center",
+              "backgroundColor": "#11151D",
+              "borderColor": "#343D4C",
+              "borderRadius": "12px",
+              "borderStyle": "solid",
+              "borderWidth": "1px",
+              "boxShadow": "#FFFFFF1F 0px 1px 0px inset, #1F273A17 0px 5px 15px",
+              "boxSizing": "border-box",
+              "display": "flex",
+              "gap": "7px",
+              "height": "40px",
+              "justifyContent": "center",
+              "overflow": "clip",
+              "paddingInline": "10px",
+              "position": "absolute",
+              "width": "128px"
+            },
+            "sides": [],
+            "thin": false,
+            "shadow": true,
+            "gradient": false,
+            "offset": 39142,
+            "parentId": "5K6-0",
+            "end": 40621,
+            "text": "NVDA"
+          },
+          {
+            "id": "5K8-0",
+            "tag": "svg",
+            "styles": {
+              "width": "15px",
+              "height": "15px",
+              "flexShrink": "0",
+              "display": "inline-block",
+              "overflow": "clip"
+            },
+            "sides": [],
+            "thin": false,
+            "shadow": false,
+            "gradient": false,
+            "offset": 39563,
+            "parentId": "5K7-0",
+            "end": 40134,
+            "text": ""
+          },
+          {
+            "id": "5KB-0",
+            "tag": "div",
+            "styles": {
+              "boxSizing": "border-box",
+              "flexGrow": "1",
+              "height": "12px",
+              "minWidth": "0px",
+              "overflow": "clip",
+              "width": "84px"
+            },
+            "sides": [],
+            "thin": false,
+            "shadow": false,
+            "gradient": false,
+            "offset": 40149,
+            "parentId": "5K7-0",
+            "end": 40602,
+            "text": "NVDA"
+          },
+          {
+            "id": "5KC-0",
+            "tag": "div",
+            "styles": {
+              "boxSizing": "border-box",
+              "color": "#CBD3DF",
+              "fontFamily": "system-ui, sans-serif",
+              "fontSize": "11px",
+              "fontWeight": 700,
+              "letterSpacing": "0.275px",
+              "lineHeight": "11px",
+              "overflowWrap": "anywhere",
+              "width": "max-content"
+            },
+            "sides": [],
+            "thin": false,
+            "shadow": false,
+            "gradient": false,
+            "offset": 40299,
+            "parentId": "5KB-0",
+            "end": 40581,
+            "text": "NVDA"
+          }
+        ],
+        "sourceSignature": "<div id=\"NODE\" style={{ boxSizing: 'border-box', height: '40px', justifySelf: 'end', minWidth: '0px', overflow: 'visible', position: 'relative', width: '128px', zIndex: '110' }}> <div id=\"NODE\" style={{ alignItems: 'center', backgroundColor: '#11151D', borderColor: '#343D4C', borderRadius: '12px', borderStyle: 'solid', borderWidth: '1px', boxShadow: '#FFFFFF1F 0px 1px 0px inset, #1F273A17 0px 5px 15px', boxSizing: 'border-box', display: 'flex', gap: '7px', height: '40px', justifyContent: 'center', overflow: 'clip', paddingInline: '10px', position: 'absolute', width: '128px' }}> <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\" width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\" id=\"NODE\" style={{ width: '15px', height: '15px', flexShrink: '0', display: 'inline-block', overflow: 'clip' }}> <circle cx=\"8.7\" cy=\"8.7\" r=\"5.6\" fill=\"#000000\" style={{ boxSizing: 'border-box', transform: 'none', transformOrigin: '0px 0px', overflow: 'visible' }} /> <path d=\"m12.9 12.9 4 4\" fill=\"#000000\" style={{ boxSizing: 'border-box', transform: 'none', transformOrigin: '0px 0px', overflow: 'visible' }} /> </svg> <div id=\"NODE\" style={{ boxSizing: 'border-box', flexGrow: '1', height: '12px', minWidth: '0px', overflow: 'clip', width: '84px' }}> <div id=\"NODE\" style={{ boxSizing: 'border-box', color: '#CBD3DF', fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '0.275px', lineHeight: '11px', overflowWrap: 'anywhere', width: 'max-content' }}> NVDA </div> </div> </div> </div>",
+        "liveExactDonorFound": false
+      }
+    ]
+  },
+  "styleNormalizationReview": {
+    "status": "UNCLASSIFIED_RAW_DIFFERENCES_REQUIRE_SEMANTIC_REVIEW",
+    "stats": {
+      "checked": 1595,
+      "childStyleDifferences": 468,
+      "childStructureDifferences": 0,
+      "rootUnplannedDifferences": 3095
+    },
+    "childDifferences": [
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-5ie-0-reference-wrapper-bounds-v1",
+        "node": "5K6-0",
+        "index": 57,
+        "key": "zIndex",
+        "before": "110"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-8k5ag-2na-0-top-cap-v1",
+        "node": "2NE-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-8k5ag-2na-0-top-cap-v1",
+        "node": "2NH-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-8k5ag-2uo-0-top-cap-v1",
+        "node": "2UT-0",
+        "index": 5,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-8k5ag-2uo-0-top-cap-v1",
+        "node": "2UY-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-8k5ag-2uo-0-top-cap-v1",
+        "node": "2V3-0",
+        "index": 15,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2j3-0-accent-refinement-671-v1",
+        "node": "2JD-0",
+        "index": 25,
+        "key": "flexBasis",
+        "before": "0%"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2j3-0-accent-refinement-671-v1",
+        "node": "2JD-0",
+        "index": 25,
+        "key": "flexGrow",
+        "before": "1"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2j3-0-accent-refinement-671-v1",
+        "node": "2JA-0",
+        "index": 28,
+        "key": "flexBasis",
+        "before": "0%"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2j3-0-accent-refinement-671-v1",
+        "node": "2JA-0",
+        "index": 28,
+        "key": "flexGrow",
+        "before": "1"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2k9-0-accent-refinement-671-v1",
+        "node": "2L0-0",
+        "index": 12,
+        "key": "flexBasis",
+        "before": "0%"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2k9-0-accent-refinement-671-v1",
+        "node": "2L0-0",
+        "index": 12,
+        "key": "flexGrow",
+        "before": "1"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2k9-0-accent-refinement-671-v1",
+        "node": "2KW-0",
+        "index": 16,
+        "key": "flexBasis",
+        "before": "0%"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-qr2e1-2k9-0-accent-refinement-671-v1",
+        "node": "2KW-0",
+        "index": 16,
+        "key": "flexGrow",
+        "before": "1"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-fo-0-accent-refinement-1151-v1",
+        "node": "FS-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "8-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "9-0",
+        "index": 3,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "G-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "H-0",
+        "index": 11,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "19-0",
+        "index": 22,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "1E-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "1G-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "1J-0",
+        "index": 32,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "1S-0",
+        "index": 39,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "21-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6-0-accent-refinement-1151-v1",
+        "node": "24-0",
+        "index": 48,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "6L-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "6U-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "73-0",
+        "index": 19,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "7C-0",
+        "index": 28,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "7L-0",
+        "index": 37,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "7U-0",
+        "index": 46,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-6k-0-accent-refinement-1151-v1",
+        "node": "83-0",
+        "index": 55,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-8c-0-accent-refinement-1151-v1",
+        "node": "8D-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-8c-0-accent-refinement-1151-v1",
+        "node": "8E-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-8c-0-accent-refinement-1151-v1",
+        "node": "8G-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-8c-0-accent-refinement-1151-v1",
+        "node": "8O-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-az-0-accent-refinement-1151-v1",
+        "node": "B9-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-az-0-accent-refinement-1151-v1",
+        "node": "BG-0",
+        "index": 15,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-az-0-accent-refinement-1151-v1",
+        "node": "BI-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-az-0-accent-refinement-1151-v1",
+        "node": "BJ-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-br-0-accent-refinement-1151-v1",
+        "node": "BU-0",
+        "index": 3,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-br-0-accent-refinement-1151-v1",
+        "node": "BV-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "CQ-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "CS-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "CT-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "D1-0",
+        "index": 15,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "D4-0",
+        "index": 18,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "D6-0",
+        "index": 20,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "D8-0",
+        "index": 22,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DA-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DB-0",
+        "index": 25,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DC-0",
+        "index": 26,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DE-0",
+        "index": 28,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DF-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DP-0",
+        "index": 39,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-cm-0-accent-refinement-1151-v1",
+        "node": "DR-0",
+        "index": 41,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-dz-0-accent-refinement-1151-v1",
+        "node": "EG-0",
+        "index": 15,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-dz-0-accent-refinement-1151-v1",
+        "node": "EH-0",
+        "index": 16,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-dz-0-accent-refinement-1151-v1",
+        "node": "EK-0",
+        "index": 19,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-ep-0-accent-refinement-1151-v1",
+        "node": "ET-0",
+        "index": 4,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-ep-0-accent-refinement-1151-v1",
+        "node": "EV-0",
+        "index": 6,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-ep-0-accent-refinement-1151-v1",
+        "node": "EX-0",
+        "index": 8,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-ep-0-accent-refinement-1151-v1",
+        "node": "EZ-0",
+        "index": 10,
+        "key": "minHeight",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-ep-0-accent-refinement-1151-v1",
+        "node": "F4-0",
+        "index": 15,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-f8-0-accent-refinement-1151-v1",
+        "node": "FI-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-f8-0-accent-refinement-1151-v1",
+        "node": "FJ-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-f8-0-accent-refinement-1151-v1",
+        "node": "G1-0",
+        "index": 26,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "GK-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "H7-0",
+        "index": 32,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "HE-0",
+        "index": 37,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "HI-0",
+        "index": 41,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "HJ-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "HP-0",
+        "index": 48,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "HW-0",
+        "index": 53,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "I0-0",
+        "index": 57,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "I1-0",
+        "index": 58,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "I7-0",
+        "index": 64,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "IE-0",
+        "index": 69,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "II-0",
+        "index": 73,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-vjvzn-gb-0-accent-refinement-1151-v1",
+        "node": "IJ-0",
+        "index": 74,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-9yc-1-accent-refinement-1391-v1",
+        "node": "9YD-1",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-9yc-1-accent-refinement-1391-v1",
+        "node": "9YJ-1",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-9yc-1-accent-refinement-1391-v1",
+        "node": "9YK-1",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-9yc-1-accent-refinement-1391-v1",
+        "node": "A24-1",
+        "index": 11,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-ajp-1-accent-refinement-1391-v1",
+        "node": "AJQ-1",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-ajp-1-accent-refinement-1391-v1",
+        "node": "AJW-1",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-ajp-1-accent-refinement-1391-v1",
+        "node": "AK2-1",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-ajp-1-accent-refinement-1391-v1",
+        "node": "AK6-1",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-ajp-1-accent-refinement-1391-v1",
+        "node": "AKD-1",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-akg-1-accent-refinement-1391-v1",
+        "node": "AKH-1",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-akg-1-accent-refinement-1391-v1",
+        "node": "AKN-1",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-akg-1-accent-refinement-1391-v1",
+        "node": "AKT-1",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-akg-1-accent-refinement-1391-v1",
+        "node": "AKX-1",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-akg-1-accent-refinement-1391-v1",
+        "node": "AL4-1",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-al7-1-accent-refinement-1391-v1",
+        "node": "AL8-1",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-al7-1-accent-refinement-1391-v1",
+        "node": "ALE-1",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-al7-1-accent-refinement-1391-v1",
+        "node": "ALI-1",
+        "index": 11,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-al7-1-accent-refinement-1391-v1",
+        "node": "ALM-1",
+        "index": 15,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-al7-1-accent-refinement-1391-v1",
+        "node": "ALT-1",
+        "index": 22,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2D-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2E-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2I-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2J-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2K-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2L-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2M-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2O-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2P-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2Q-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2S-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2T-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2U-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3L-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G39-0",
+        "index": 22,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3A-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3B-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3E-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3H-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3K-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2W-0",
+        "index": 34,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G2X-0",
+        "index": 35,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G30-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G33-0",
+        "index": 41,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G36-0",
+        "index": 44,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g2c-0-accent-refinement-1511-v1",
+        "node": "G3N-0",
+        "index": 47,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "FZX-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "FZY-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G02-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G03-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G04-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G05-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G06-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G08-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G09-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0A-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0C-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0D-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0E-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0G-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0H-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0K-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0N-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0Q-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0T-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0U-0",
+        "index": 34,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0V-0",
+        "index": 35,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0W-0",
+        "index": 36,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-fzw-0-accent-refinement-1511-v1",
+        "node": "G0Y-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G12-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G13-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G17-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G18-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G19-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1A-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1B-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1D-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1E-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1F-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1H-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1I-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1J-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1L-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1M-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G8U-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1P-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1S-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1V-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1Y-0",
+        "index": 36,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G1Z-0",
+        "index": 37,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G20-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G23-0",
+        "index": 41,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G26-0",
+        "index": 44,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G27-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g11-0-accent-refinement-1511-v1",
+        "node": "G29-0",
+        "index": 47,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G3R-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G3S-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G3W-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G3X-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G3Y-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G3Z-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G40-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G42-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G43-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G44-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G46-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G47-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G48-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4A-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4B-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4E-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4H-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4K-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4N-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4O-0",
+        "index": 34,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4P-0",
+        "index": 35,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4S-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4V-0",
+        "index": 41,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4W-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g3q-0-accent-refinement-1511-v1",
+        "node": "G4Y-0",
+        "index": 44,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G52-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G53-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G57-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G58-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G59-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5A-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5B-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5D-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5E-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5F-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5H-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5I-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5J-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5L-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5M-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5N-0",
+        "index": 22,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5O-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5P-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "I6Y-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5S-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5T-0",
+        "index": 31,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5U-0",
+        "index": 32,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5V-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5W-0",
+        "index": 34,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G5X-0",
+        "index": 35,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G60-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G63-0",
+        "index": 41,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G66-0",
+        "index": 44,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G67-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G69-0",
+        "index": 47,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-g51-0-accent-refinement-1511-v1",
+        "node": "G6A-0",
+        "index": 48,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERV-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ESB-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ESG-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ESI-0",
+        "index": 5,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ESH-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ESF-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ES4-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ES3-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERW-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ES2-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ES1-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERZ-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERY-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQ6-0",
+        "index": 25,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERG-0",
+        "index": 26,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERJ-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERI-0",
+        "index": 28,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERH-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQF-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERU-0",
+        "index": 32,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERT-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERS-0",
+        "index": 34,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERK-0",
+        "index": 35,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERO-0",
+        "index": 36,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERR-0",
+        "index": 37,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERQ-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERP-0",
+        "index": 39,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERL-0",
+        "index": 40,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQO-0",
+        "index": 43,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERD-0",
+        "index": 44,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERF-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERE-0",
+        "index": 46,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQS-0",
+        "index": 47,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERC-0",
+        "index": 49,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERB-0",
+        "index": 50,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ERA-0",
+        "index": 51,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER8-0",
+        "index": 53,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER7-0",
+        "index": 54,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER6-0",
+        "index": 55,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER4-0",
+        "index": 57,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER3-0",
+        "index": 58,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER2-0",
+        "index": 59,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "ER0-0",
+        "index": 61,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQZ-0",
+        "index": 62,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQY-0",
+        "index": 63,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQW-0",
+        "index": 65,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQV-0",
+        "index": 66,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQU-0",
+        "index": 67,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQP-0",
+        "index": 68,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQR-0",
+        "index": 69,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQQ-0",
+        "index": 70,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQ7-0",
+        "index": 71,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQH-0",
+        "index": 72,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQL-0",
+        "index": 73,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQN-0",
+        "index": 74,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQM-0",
+        "index": 75,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQI-0",
+        "index": 76,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQK-0",
+        "index": 77,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQJ-0",
+        "index": 78,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQ8-0",
+        "index": 79,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eq5-0-accent-refinement-1511-v1",
+        "node": "EQA-0",
+        "index": 80,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPN-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPU-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPX-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPW-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPR-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPO-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EOW-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPE-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPM-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPL-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPK-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPI-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EPG-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EP8-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EP3-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EP0-0",
+        "index": 39,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EOX-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-eos-0-accent-refinement-1511-v1",
+        "node": "EOT-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOF-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOM-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOP-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOO-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOJ-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOG-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "ENO-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EO6-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOE-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOD-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOC-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EOA-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EO8-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "EO0-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "ENV-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "ENS-0",
+        "index": 39,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "ENP-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-enk-0-accent-refinement-1511-v1",
+        "node": "ENL-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EMV-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "ENG-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "END-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "ENF-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "ENE-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN4-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "ENC-0",
+        "index": 11,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "ENB-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "ENA-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN9-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN7-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN6-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN3-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EMW-0",
+        "index": 19,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN2-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EN1-0",
+        "index": 22,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EMZ-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EMY-0",
+        "index": 25,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-emr-0-accent-refinement-1511-v1",
+        "node": "EMS-0",
+        "index": 26,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRS-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRT-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRV-0",
+        "index": 4,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRW-0",
+        "index": 5,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRX-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRY-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DS1-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DS8-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DS9-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSB-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSC-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSE-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSF-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSG-0",
+        "index": 25,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSS-0",
+        "index": 26,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DST-0",
+        "index": 27,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSU-0",
+        "index": 28,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSV-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTY-0",
+        "index": 30,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTZ-0",
+        "index": 31,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DU1-0",
+        "index": 33,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSH-0",
+        "index": 38,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSI-0",
+        "index": 39,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSJ-0",
+        "index": 40,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSK-0",
+        "index": 41,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSL-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSM-0",
+        "index": 43,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSN-0",
+        "index": 44,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSO-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSP-0",
+        "index": 46,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSX-0",
+        "index": 49,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSY-0",
+        "index": 50,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DSZ-0",
+        "index": 51,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT0-0",
+        "index": 52,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT1-0",
+        "index": 53,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT3-0",
+        "index": 55,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT4-0",
+        "index": 56,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT5-0",
+        "index": 57,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT7-0",
+        "index": 59,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT8-0",
+        "index": 60,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DT9-0",
+        "index": 61,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTB-0",
+        "index": 63,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTC-0",
+        "index": 64,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTD-0",
+        "index": 65,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTF-0",
+        "index": 67,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTG-0",
+        "index": 68,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTH-0",
+        "index": 69,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTJ-0",
+        "index": 71,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTK-0",
+        "index": 72,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTL-0",
+        "index": 73,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTM-0",
+        "index": 74,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTN-0",
+        "index": 75,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTO-0",
+        "index": 76,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRO-0",
+        "index": 77,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DRP-0",
+        "index": 78,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTQ-0",
+        "index": 79,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTR-0",
+        "index": 80,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTS-0",
+        "index": 81,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTT-0",
+        "index": 82,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTU-0",
+        "index": 83,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTV-0",
+        "index": 84,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTW-0",
+        "index": 85,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-drr-0-accent-refinement-1511-v1",
+        "node": "DTX-0",
+        "index": 86,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUI-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUJ-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUN-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUO-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUP-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUS-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUW-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUX-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DUZ-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DV0-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DV1-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DV3-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DV4-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DV6-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DVC-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DVH-0",
+        "index": 39,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DVK-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dug-0-accent-refinement-1511-v1",
+        "node": "DVN-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWM-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWT-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWW-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWV-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWQ-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWN-0",
+        "index": 10,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DVV-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWD-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWL-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWK-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWJ-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWH-0",
+        "index": 20,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DWF-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DW7-0",
+        "index": 23,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DW2-0",
+        "index": 29,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DVZ-0",
+        "index": 39,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DVW-0",
+        "index": 42,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dvr-0-accent-refinement-1511-v1",
+        "node": "DVS-0",
+        "index": 45,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DX3-0",
+        "index": 1,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DX4-0",
+        "index": 2,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DX8-0",
+        "index": 6,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DX9-0",
+        "index": 7,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXA-0",
+        "index": 8,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXB-0",
+        "index": 9,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXD-0",
+        "index": 11,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXE-0",
+        "index": 12,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXF-0",
+        "index": 13,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXG-0",
+        "index": 14,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXI-0",
+        "index": 16,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXJ-0",
+        "index": 17,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXK-0",
+        "index": 18,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXL-0",
+        "index": 19,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXN-0",
+        "index": 21,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXO-0",
+        "index": 22,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXQ-0",
+        "index": 24,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXR-0",
+        "index": 25,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-2mdjm-dx2-0-accent-refinement-1511-v1",
+        "node": "DXS-0",
+        "index": 26,
+        "key": "minWidth",
+        "before": "0px"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-t05rm-ne-0-accent-refinement-1631-v1",
+        "node": "NF-0",
+        "index": 1,
+        "key": "zIndex",
+        "before": "3"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-t05rm-t0-0-accent-refinement-1631-v1",
+        "node": "T5-0",
+        "index": 5,
+        "key": "flexBasis",
+        "before": "0%"
+      },
+      {
+        "operationId": "paper-accent-estate-20261108-c4-t05rm-t0-0-accent-refinement-1631-v1",
+        "node": "T5-0",
+        "index": 5,
+        "key": "flexGrow",
+        "before": "1"
+      }
+    ]
   }
 }
