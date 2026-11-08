@@ -420,7 +420,7 @@ def history_lifecycle(lifecycle, monkeypatch):
 def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, before_request=None,
                   after_request=None, history=None, before_builder=None, native_context=False,
                   cached=None, before_history=None, after_history=None, source_platform=None,
-                  api_request_id="eval-request"):
+                  api_request_id="eval-request", route_factory=None):
     l, n = lifecycle, lifecycle.native
     selected = marker(t)
     ref, row, _ = n.claim(admission=admission, generation=generation)
@@ -433,7 +433,7 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
             platform=Platform.LOCAL if source_platform is None else source_platform,
             user_id="user", user_id_alt=None, user_name=None, chat_id=ref.session_id,
             chat_name=None, chat_type="private", thread_id=None)
-    route = provider_route()
+    route = provider_route() if route_factory is None else None
     out = {"marker": selected, "row": row}
     def execute():
         turn = l.turn_for(ref, row, cached=cached)
@@ -447,8 +447,9 @@ def execute_trial(lifecycle, t, *, admission="eval-admission", generation=3, bef
             agent._current_turn_id = "turn-A"  # Same logical turn used by the original worker fixture.
             return agent
         turn._ctx.AIAgent = create
-        agent, reused = turn._resolve_turn_agent(route, "api", "original ephemeral", 3, None, {})
-        turn._wire_turn_agent_callbacks(agent, route, None, None, None, False)
+        selected_route = route if route_factory is None else route_factory(turn)
+        agent, reused = turn._resolve_turn_agent(selected_route, "api", "original ephemeral", 3, None, {})
+        turn._wire_turn_agent_callbacks(agent, selected_route, None, None, None, False)
         out.update(agent=agent, reused=reused, scope=observation._current.get(), turn=turn)
         if before_builder:
             before_builder(out)

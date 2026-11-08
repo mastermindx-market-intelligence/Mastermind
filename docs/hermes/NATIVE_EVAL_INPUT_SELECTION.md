@@ -324,7 +324,7 @@ match to the frozen public label. A differing label stays unavailable/conflictin
 Exactly one correlated physical session can yield the fingerprint of
 `[original_profile_id, native_agent_session_id]`; multiple IDs stay conflicting.
 
-Transport observation v2 also retains a digest and UTF-8 byte length of the
+Transport observation v2 introduced, and current v3 preserves, a digest and UTF-8 byte length of the
 actual adopted agent's runtime provider selector at each dispatch and each HTTP
 attempt. The `provider_client_check` field records selector equality at the
 qualified original client-factory return; it does not attest the factory's
@@ -345,7 +345,7 @@ conflicting. Current transport producer and reader must be released together.
 Provider request coverage remains partial. Response-reported labels do not prove
 the serving model. Explicit wire sampling digests remain in the trace and are not
 relabeled as complete effective sampling. Network-origin hashes are not EVAL
-destination-string digests. Unobserved auth, effective environment,
+destination-string digests. Authentication beyond the bounded mechanism below, effective environment,
 process/workspace freshness, capability/source/network coverage, effects and cleanup stay missing or
 unknown. This publisher therefore creates invalid v3 evidence of attempts,
 never a valid Harness2 trial or learning promotion.
@@ -957,3 +957,134 @@ its existing carrier or remain outside the residual EVAL delta. A retarget
 alone, a conceptual dependency or altered parent interpretation is insufficient.
 No new release carrier, second composer, queue override, runtime grant or
 installation is authorized or claimed by this source ordering decision.
+
+
+## Original authentication-mechanism observation
+
+Transport observation **v3** adds only a closed `auth_client_check` status on each
+dispatch and `auth_mechanism` on each HTTP attempt. The existing credential owner
+supplies this optional contribution for the selected mmmeta/Z.ai EVAL route.
+It makes no additional credential read, constructs no client, and owns no
+credential store, refresh process or authentication policy.
+
+The qualified original LOCAL `route_runtime` path resolves the exact rendered
+named-provider entry. Both native resolver aliases are observed, including the
+direct custom-module import used by this path. The witness requires the current
+original admission, the actual frozen configuration, an absent explicit key,
+and the original direct environment selection consumed by that resolver.
+An inline key that takes precedence, a nonempty scoped override, a pool or an
+unobserved callable cannot be inferred from the presence of a key environment
+name. An empty single-profile overlay may qualify when the pinned secret owner
+actually falls through to its original direct read. A second resolution cannot
+replace the original turn's witness.
+
+Private equality joins that resolution to the route passed to the original
+agent resolver and to the route actually adopted after original callback wiring.
+The same memory claim, LOCAL source, admission, runner, generation and adopted
+agent remain required. Legitimate native dictionary copies do not need object
+identity; the relevant selected route fields and private credential must match.
+Cached agents need a fresh observation in the current admission.
+
+The observer then follows the pinned request-client checkout. It checks the
+actual copied kwargs before and after checkout, a newly returned client when
+one is created, or the actual cached client returned by the current checkout.
+The original request factory, concrete SDK client and qualified HTTPX client
+must join. At **every retained original HTTP-send boundary**, the current SDK
+key and exactly one Authorization value must privately match the observed key.
+A later restored key cannot erase an earlier conflict. Primary/shared client
+construction outside that dispatch supplies no witness and retains its original
+factory behavior.
+
+Private key, route, client and capture references are discarded at the original
+scope/dispatch boundary. Retained records contain no credential or header value,
+credential digest or length, environment name, client pointer, account identity,
+permission or exact realm identifier. Reference release is not a claim of
+immutable-string zeroization. An optional observer or cleanup failure preserves
+the original native return/exception and makes its evidence unavailable.
+Hook installation rechecks the captured native owners before mutation and
+retains an intervening binding.
+
+Only after the existing complete request/content/delivery joins may the EVAL
+publisher fill `execution.auth_realm_class="API_KEY"`: the frozen configuration
+must select that public class, every dispatch must match, and every retained
+attempt must carry API_KEY. This is a broad authentication mechanism. It cannot
+attest READ_ONLY, account entitlement, exact realm/generation, remote acceptance
+or delivery. A differently selected class stays conflicting. Missing evidence,
+changed ownership, unfinished spans, errors and metadata loss remain unavailable.
+
+Historical transport v1 and v2 stay closed and retain their original fields;
+neither acquires an authentication witness from today's process. In particular,
+v2 preserves its original provider projection. The shared **16 KiB** budget,
+original private result and publisher/store carriers are unchanged. Current
+native evidence still lacks complete effect, cleanup and other producer facts;
+this addition does not create a valid trial or learning promotion.
+
+Qualification executes pinned Hermes resolver, secret-selection, client-cache
+and creation bodies with synthetic credentials, the actual SDK and an in-process
+HTTPX transport. Source fixtures retain exact upstream commit/blob/hash
+provenance and the existing MIT notice. A declared SDK-retry fixture exercises
+per-attempt change/restore behavior; it does not change the native setting of
+zero SDK retries. The complete three-attempt provider fixture uses compact
+original admission, physical-session, turn and request identities consistently
+at their real boundaries. The distinct pressure fixture keeps ordinary
+identities and actual reservation loss; no retained record is rewritten. These are source tests, not installed credential or provider
+acceptance.
+
+
+## Auth contribution composed with the residual EVAL source — 2026-11-08
+
+The completed original PR2257 contribution
+`e1a2ef899c119e64fbff2e6c962b8153a2d46a80` (tree
+`996b49896f7653616f9c6f81f2c066e60574cd31`, parent
+`c43807ba8a816ab81547a5de3d2ae2c917419aa8`) is now composed into the
+PR2255 source whose prior head was
+`130444741b7c21501d01c63157678047666da3cc`.
+The exact sixteen-path contribution was taken from pinned source archives and
+each incoming blob identity was checked. Eleven paths were new or matched the
+incoming base exactly; three merged without conflict. The two manually
+reconciled paths were this document and the existing finite-scope test.
+
+The resulting source preserves the APPLICATION primary-launch and consumer
+registration paths, the original retained-Trial ownership boundary, Harness2
+recovery references, native history and grounding v2. This document retains the
+prior release-order decision. The original EVAL-owned `ALLOWED_PATHS` set is
+unchanged. The shared native integration set adds exactly the eight authorized
+auth paths; existing APPLICATION/enrollment positive cases and all neighbor
+refusals remain. The gate algorithms, effective-delta calculation, forbidden
+prefixes and D7 identity script are unchanged. None of the sixteen auth paths
+has a corresponding D8 source-identity row to update.
+
+Two separate source cohorts passed against stable postimages:
+
+- **475 behavior cases, zero failures, errors or skips**, using CPython3.14.7.
+  The six complete modules cover native credential observations, transport
+  observation, EVAL publication, EVAL inputs, Agent OS memory and gateway entry.
+  This checks the actual composed request/client/HTTP joins together with the
+  incumbent recovery, history, private-result and gateway contracts.
+- **26 scope cases, zero failures, errors or skips**, using CPython3.12.13.
+  The four selected parametrized gates exercise the real owned/shared
+  contribution fences, foreign-path refusals and source evidence.
+
+Behavior log SHA-256:
+`1db5ea623a4bd521ab3df31a263ea842911c0f941bd2188ac74c35facb0d8216`;
+JUnit SHA-256:
+`e39526d659a052baa281fc287a61129fee89df4a9cc444145d27021377a49fa9`.
+Scope log SHA-256:
+`64576d99c4cef913eb9b9bd4e5a096807fe2289f77eb08a67c7de2e43fc6349d`;
+JUnit SHA-256:
+`4962f7a33ee945e4eccde86c55b2eb9f516b13bc825dc26aab92870a408237a1`.
+
+The pinned Hermes fixture source remains
+`1c0cd667746d3395fe9e1b6c74f8f85952486f18` with the existing MIT notice.
+No fixture or test receipt attests a live credential, account entitlement,
+remote acceptance, valid current native trial, learning promotion or runtime
+installation.
+
+This source intake does not replace original PR2257's release carrier or its
+accepted-base update. Original PR2234 and the timeout-only PR2260 must first be
+reconciled against their actual protected outcomes for that update. Original
+PR2175 remains independently responsible for APPLICATION/native integration.
+PR2255 remains draft and unarmed until its required accepted inputs make the
+actual residual EVAL delta finite and free of forbidden-prefix changes. Any
+newly protected Project Knowledge v5 gateway registration must be preserved
+alongside this auth binding during that accepted-source composition.

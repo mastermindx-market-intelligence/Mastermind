@@ -792,6 +792,18 @@ ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/", "corpus/agent_eval_pro_
 # change must not become an EVAL wave just because it touches a shared owner.
 # No imports, forbidden prefixes, dependency paths, or workflow exceptions.
 NATIVE_EVAL_INTEGRATION_PATHS = frozenset({
+    # Principal amendment: hermes-native-auth-observation-20261107-c3.
+    # Canonical plan §54 at 2e796df3a464f22928240ed56595c423d69918a8.
+    # Existing credential owner and exact test-only source qualifications;
+    # no core environment/import/forbidden-path or execution grant change.
+    "integrations/hermes_harness/native_model_credential.py",
+    "integrations/hermes_harness/tests/test_native_model_credentials.py",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__secret_scope.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__client_lifecycle.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__agent_runtime_helpers.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/gateway__session_worker_construct.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/provenance.json",
+    "integrations/hermes_runtime/tests/test_native_transport_observation.py",
     "integrations/hermes_runtime/native_request_observation.py",
     "integrations/hermes_runtime/native_transport_observation.py",
     "integrations/hermes_runtime/native_session_control.py",
@@ -1515,7 +1527,10 @@ def test_native_eval_owned_delta_reaches_real_fences_with_shared_connections(tmp
     files = [(owned, "fixture\n"), ("integrations/hermes_runtime/supervisor.py", "fixture\n"),
              ("tests/test_hermes_primary_application_host.py", "fixture\n"),
              ("tests/test_linux_secondary_worker_enrollment.py", "fixture\n"),
-             ("ops/hermes_egress/squid.conf", "fixture\n")]
+             ("ops/hermes_egress/squid.conf", "fixture\n"),
+             *[(path, "fixture\n") for path in NATIVE_EVAL_INTEGRATION_PATHS
+               if path.startswith("integrations/hermes_harness/")
+               or path == "integrations/hermes_runtime/tests/test_native_transport_observation.py"]]
     repo = _standalone_prefix_delta_repo(tmp_path, "native_eval_owned", files)
     _bind_root_to_private_fixture(monkeypatch, repo)
     assert _fence_not_applicable_reason(compute_pr_diff_paths(repo)) is None
@@ -1528,7 +1543,9 @@ def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, mon
              ("tests/test_hermes_primary_application_host.py", "fixture\n"),
              ("tests/test_linux_secondary_worker_enrollment.py", "fixture\n"),
              ("ops/hermes_egress/squid.conf", "fixture\n"),
-             ("integrations/hermes_runtime/unrelated_hermes_owner.py", "fixture\n")]
+             ("integrations/hermes_runtime/unrelated_hermes_owner.py", "fixture\n"),
+             ("integrations/hermes_harness/native_model_credential.py", "fixture\n"),
+             ("integrations/hermes_harness/tests/test_native_model_credentials.py", "fixture\n")]
     repo = _standalone_prefix_delta_repo(tmp_path, "shared_native_only", files)
     _bind_root_to_private_fixture(monkeypatch, repo)
     changed = compute_pr_diff_paths(repo)
@@ -1568,6 +1585,9 @@ def test_native_eval_contribution_evidence_reaches_both_real_fences(tmp_path, mo
     "review_evidence/hermes_eval/unlisted.json",
     "tests/test_agent_eval_hermes_memory_grounding_unlisted.py",
     "docs/hermes/MEMORY_LEARNING_UNLISTED.md",
+    "integrations/hermes_harness/unlisted_credential_owner.py",
+    "integrations/hermes_harness/tests/test_unlisted_credentials.py",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/unlisted.source",
     "integrations/hermes_qualification/native_eval_inputs/extra.py",
     "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/unlisted.source",
     "control_plane/bypass.py", "config/agent_eval.yaml", ".github/workflows/agent-eval.yml", "requirements/new.in",

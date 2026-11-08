@@ -390,6 +390,11 @@ def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
     original_turn = lifecycle.turn_for
     def turn_for(*args, **kwargs):
         turn = original_turn(*args, **kwargs)
+        if mode == "retry_restore":
+            # A compact, original physical-session identity keeps this complete
+            # three-attempt fixture within the shared v3 metadata budget. The
+            # separate pressure case retains ordinary identities and real loss.
+            turn._ctx.session_id = "p"
         original_agent = turn._ctx.AIAgent
         def build(**options):
             agent = original_agent(**options)
@@ -398,7 +403,16 @@ def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
         turn._ctx.AIAgent = build
         return turn
     monkeypatch.setattr(lifecycle, "turn_for", turn_for)
-    bodies = []
+    bodies, budget = [], []
+    if mode == "retry_restore":
+        original_begin = transport.Contribution.begin
+        def measured_begin(contribution, kind, *args, **kwargs):
+            before = contribution.scope.metadata_bytes
+            result = original_begin(contribution, kind, *args, **kwargs)
+            budget.append((kind, before, contribution.scope.metadata_bytes,
+                           result is not None))
+            return result
+        monkeypatch.setattr(transport.Contribution, "begin", measured_begin)
     def handler(request):
         bodies.append(json.loads(request.content))
         if mode == "raised_attempt":
@@ -427,16 +441,23 @@ def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
                 http_client=httpx.Client(transport=httpx.MockTransport(handler), event_hooks=hooks))
         if mode == "raised_attempt":
             with pytest.raises(openai.APIConnectionError):
-                engine.invoke(out["agent"], out["kwargs"], make_client, request_id=request_id)
+                engine.invoke(out["agent"], out["kwargs"], make_client, request_id=request_id,
+                turn_id="t" if mode == "retry_restore" else "turn-A")
         else:
-            engine.invoke(out["agent"], out["kwargs"], make_client, request_id=request_id)
+            engine.invoke(out["agent"], out["kwargs"], make_client, request_id=request_id,
+                turn_id="t" if mode == "retry_restore" else "turn-A")
     from gateway.config import Platform
     prior = [] if mode == "history_empty" else [{"role": "user", "content": "Original prior conversation."}]
-    out = execute_trial(lifecycle, t, after_request=downstream, native_context=native_history,
+    def original_turn_identity(out):
+        if mode == "retry_restore":
+            out["agent"]._current_turn_id = "t"
+    out = execute_trial(lifecycle, t, admission="a" if mode == "retry_restore" else "eval-admission",
+        before_builder=original_turn_identity,
+        after_request=downstream, native_context=native_history,
         history=prior if native_history else None,
         source_platform=Platform.API_SERVER if mode == "history_api" else None,
         api_request_id=request_id)
-    receipt = {"admission_id": "eval-admission", "ref": {"profile_id": t.owner.profile_id, "session_id": t.session},
+    receipt = {"admission_id": out["row"]["admission_id"], "ref": {"profile_id": t.owner.profile_id, "session_id": t.session},
         "sequence": 1, "status": "terminal", "outcome": "failed" if mode == "raised_attempt" else "completed",
         "authority_epoch": 2, "execution_generation": 3}
     # The native lifecycle fixture's role is mmsecretary. It exercises the same
@@ -447,7 +468,8 @@ def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
     def build(value=None):
         return publication._build_run(out["marker"], receipt, projected if value is None else value,
             finalizer_ref=t.owner.producer["runner_code_ref"], now="2026-11-08T00:00:00Z", missing_reason="NOT_OBSERVED")
-    return SimpleNamespace(projected=projected, build=build, marker=out["marker"], bodies=bodies)
+    return SimpleNamespace(projected=projected, build=build, marker=out["marker"], bodies=bodies,
+        budget=budget, physical_id=out["agent"].session_id)
 
 
 def test_actual_sdk_and_pinned_worker_observations_feed_conservative_native_receipt(wire_projection):
@@ -516,8 +538,10 @@ def historical_transport(value):
     for record in value["dispatches"]:
         record.pop("runtime_provider")
         record.pop("provider_client_check")
+        record.pop("auth_client_check")
     for record in value["attempts"]:
         record.pop("runtime_provider")
+        record.pop("auth_mechanism")
     return value
 
 
@@ -530,6 +554,63 @@ def test_transport_v1_remains_closed_and_survives_the_original_retained_reader(e
     assert read()["request_observation"]["transport"] == legacy
     legacy["dispatches"][0]["runtime_provider"] = doc["transport"]["dispatches"][0]["runtime_provider"]
     assert read()["request_observation_error"] == "INVALID_RETAINED_OBSERVATION"
+
+
+
+def historical_transport_v2(value):
+    value = copy.deepcopy(value)
+    value["schema"] = transport.PROVIDER_SCHEMA_V2
+    for record in value["dispatches"]:
+        record.pop("auth_client_check")
+    for record in value["attempts"]:
+        record.pop("auth_mechanism")
+    return value
+
+
+def test_transport_v2_retained_reader_stays_closed_without_auth_fields(engine, monkeypatch):
+    doc, carrier = run_call(engine, lambda: sdk(lambda request: httpx.Response(200, json=success())))
+    saved, read = retained_read(engine, carrier, monkeypatch)
+    legacy = historical_transport_v2(doc["transport"])
+    assert transport.validate_document(legacy) == legacy
+    saved[observation.RESULT_KEY]["transport"] = legacy
+    assert read()["request_observation"]["transport"] == legacy
+    legacy["attempts"][0]["auth_mechanism"] = "API_KEY"
+    assert read()["request_observation_error"] == "INVALID_RETAINED_OBSERVATION"
+
+
+def test_transport_v2_keeps_its_original_provider_projection_without_invented_auth(wire_projection):
+    w = wire_projection
+    value = copy.deepcopy(w.projected)
+    legacy = value["request_observation"]["transport"] = historical_transport_v2(
+        value["request_observation"]["transport"])
+    assert transport.validate_document(legacy) == legacy
+    run = w.build(value)
+    assert run["execution"]["provider"] == "custom"
+    assert run["execution"]["model_requested"] == "glm-5.3"
+    assert run["execution"]["auth_realm_class"] is None
+    assert run["validity"]["status"] != "VALID"
+
+
+@pytest.mark.parametrize("change", ["missing_client", "missing_attempt", "private_field", "mechanism", "false_client"])
+def test_auth_projection_is_closed_in_the_authenticated_retained_reader(engine, monkeypatch, change):
+    _, carrier = run_call(engine, lambda: sdk(lambda request: httpx.Response(200, json=success())))
+    saved, read = retained_read(engine, carrier, monkeypatch)
+    value = saved[observation.RESULT_KEY]["transport"]
+    dispatch, attempt = value["dispatches"][0], value["attempts"][0]
+    if change == "missing_client":
+        dispatch.pop("auth_client_check")
+    elif change == "missing_attempt":
+        attempt.pop("auth_mechanism")
+    elif change == "private_field":
+        attempt["credential"] = "synthetic-private-value"
+    elif change == "mechanism":
+        attempt["auth_mechanism"] = "Bearer synthetic-private-value"
+    else:
+        dispatch.update(auth_client_check="matched", client_binding="unsupported")
+    observed = read()
+    assert observed["request_observation_error"] == "INVALID_RETAINED_OBSERVATION"
+    assert observed["answer"] == "[redacted]"
+    assert "synthetic-private-value" not in json.dumps(observed)
 
 
 @pytest.mark.parametrize("change", ["missing", "raw_label", "false_match", "attempt_shape", "schema"])
@@ -559,7 +640,12 @@ def test_actual_provider_changes_cannot_be_hidden_by_restored_agent_labels(wire_
     run = w.build()
     assert run["execution"]["provider"] is None
     unavailable = {item["path"]: item["reason"] for item in run["observation_availability"]["unavailable"]}
-    assert unavailable["execution.provider"] == "OBSERVATION_CONFLICT"
+    assert unavailable["execution.provider"] == "OBSERVATION_CONFLICT", json.dumps({
+        "metadata_overflow": w.projected["request_observation"]["metadata_overflow"],
+        "transport_overflow": w.projected["request_observation"]["transport"]["overflow"],
+        "retained_attempts": len(w.projected["request_observation"]["transport"]["attempts"]),
+        "actual_attempts": len(w.bodies), "budget": w.budget, "physical_id": w.physical_id,
+    })
     assert run["execution"]["model_requested"] == "glm-5.3"
     assert "PRIVATE_OTHER_PROVIDER" not in json.dumps(w.projected)
     if len(w.bodies) == 3:

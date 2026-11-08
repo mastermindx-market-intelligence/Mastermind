@@ -122,6 +122,7 @@ class _Claim:
         self.manager_return = None
         self.prompt = None
         self.prompt_anchor = None  # Transient original current-user text, never retained output.
+        self.credential_route_token = None  # Opaque within this original claim only.
 
     def current(self, *, adopted=False):
         scope, factory = self.scope, self.factory
@@ -766,9 +767,17 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
             _refuse("NATIVE_AGENTOS_CLAIM_UNAVAILABLE")
         claim = _Claim(factory, scope, turn)
         setattr(scope, _CLAIM_ATTRIBUTE, claim)
+        credential = scope.transport.credential_scope
+        route_token = None
         try:
             if scope.evaluation is not None:
                 args, kwargs = scope.evaluation.resolve_arguments(resolve, turn, args, kwargs)
+            if credential is not None:
+                try:
+                    route_token = credential.capture_route(resolve, turn, args, kwargs)
+                    claim.credential_route_token = route_token
+                except Exception:
+                    credential.discard()
             result = resolve(turn, *args, **kwargs)
             factory.bind_agent(claim, result[0])
             return result
@@ -789,6 +798,14 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
             _refuse("NATIVE_AGENTOS_ADOPTION_UNAVAILABLE")
         if scope is not None and scope.evaluation is not None:
             scope.evaluation.require_agent(agent)
+        credential = scope.transport.credential_scope if scope is not None else None
+        if credential is not None:
+            try:
+                credential.adopt_route(claim, claim.credential_route_token, wire_callbacks, args, kwargs)
+            except Exception:
+                credential.discard()
+            finally:
+                claim.credential_route_token = None
         return result
 
     def prefetch_turn(agent, original_user_message, turn_author=None):
