@@ -116,3 +116,13 @@ image file, not that a model saw it, that Paper is current, or that the design w
 
 For installation, current live evidence, exact canary results and remaining gates,
 read `docs/hermes/design-director/README.md` in the canonical Mastermind source.
+
+## Portable support files
+
+The native URL installer fetches only explicitly referenced files. Retain these
+paths even when the matching reference is not loaded into model context:
+`references/design-dna.md`, `references/briefing.md`, `references/critique.md`,
+`references/handoff.md`, `references/routing.md`, `references/corpus.json`,
+`scripts/director.py`, `templates/README.md`, `templates/assignment.json`,
+`assets/references/osShot.jpg`, `assets/references/osMobileShot.jpg`,
+`assets/references/sectorShot.jpg`, `assets/references/policyShot.jpg`.

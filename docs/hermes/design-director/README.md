@@ -49,7 +49,7 @@ claim still needs real review. Recommendation never means automatic acceptance.
 After protected source release, use the actual accepted commit:
 
 ```bash
-hermes --profile design-lead skills install 'https://github.com/mastermindx-market-intelligence/Mastermind/tree/ACCEPTED_COMMIT/skills/mastermind-design-director' --yes
+hermes --profile design-lead skills install 'https://raw.githubusercontent.com/mastermindx-market-intelligence/Mastermind/ACCEPTED_COMMIT/skills/mastermind-design-director/SKILL.md' --yes
 ```
 
 Do not use `--force`, which bypasses the native scan. The existing installer
@@ -58,3 +58,9 @@ invoke the native skill loader in that profile and run `validate-corpus` with th
 existing qualified Python. Recognition is not proof of an agent consuming the skill.
 Do not force-reload a live conversation; use the next normal authorized session.
 Existing role, memory, models and credentials are preserved by this package.
+
+The installed native URL source accepts a direct `.md` URL, not a GitHub tree URL.
+The main skill explicitly lists every support file so the installer carries the
+script, templates, reference manifest and binary screenshots from the same commit.
+This behavior was inspected in the installed `UrlSource` implementation; do not
+substitute an unpinned registry identifier or hand-copy around a scan failure.

@@ -85,3 +85,31 @@ on real output; it is not a successful full responsive/production design journey
 
 The package can be source-complete while the overall commission remains incomplete.
 A PR, green CI, native skill recognition or one Paper edit is not production readiness.
+
+## Native preflight and bounded specialist attempt
+
+The existing Hermes CLI successfully inspected the exact source skill via a direct
+raw `SKILL.md` URL. A GitHub tree URL returned not found; the operator command was
+corrected before release. Installed `UrlSource` fetches only explicit support paths,
+so SKILL.md now lists the full portable closure, including all four JPEGs. The host's
+system Python has Pillow; the managed Hermes base interpreter does not import Pillow
+by itself. Use the observed existing qualified Python for helper commands.
+
+One new Fabric audit was submitted through the existing typed carrier:
+`hermes-design-director-20261108-c1-01-visual-audit-01`, controller PID 12117. Delivery
+was CONTROLLER_CREATED, then the original status reported REQUEST_REFUSED_BEFORE_LAUNCH,
+EXECUTION_NOT_ELIGIBLE and no accepted worker result. Retained owner evidence records
+`prelaunch_FabricTaskError` / UNCLASSIFIED_PRELAUNCH_REFUSAL. The routing subprocess
+completed with rc 0 and normal cleanup, but the controller returned 75. No worker START,
+image consumption, model identity or quality score is claimed. Root correlation was
+not established as an accepted execution binding; result retrieval returned ROOT_UNVERIFIED.
+No replay, provider switch or account change was attempted. The original request
+remains the recovery anchor; diagnosis is not a new grant.
+
+Protected master advanced independently to
+`036e8d26cb2b158856f1250b2dfc9cca9700f28a` with the existing `mmx_browser` native plugin
+source. Its docs and registration code were inspected: versioned connection, actual
+session/profile binding, site grants, fresh snapshots and original effect semantics.
+That source explicitly still requires installed-profile acceptance. No browser plugin
+was enabled, no site permission was granted, and no ChatGPT automation was inferred.
+The new source is path-disjoint from this package and does not alter its governing pin.
