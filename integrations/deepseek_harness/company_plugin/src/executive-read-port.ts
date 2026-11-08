@@ -7,7 +7,8 @@ import {Duplex} from "node:stream";
 import type {Context} from "@deepseek-ai/cordis";
 import {createScope} from "@deepseek-ai/dsh-scope";
 import type {SessionId} from "@deepseek-ai/dsh-session";
-import {createCompanySessionReadBridge, type CompanySessionReader} from "./company-peer";
+import {createCompanySessionReadBridge, type CompanySessionReader, type CompanyReadPeerFactory} from "./company-peer";
+export {openClosedNativeHistory} from "./closed-native-history";
 import {DONOR_SHA} from "./protocol";
 import {isNativeResultRead, readNativeResultContent, type NativeResultRead} from "./native-result-content";
 
@@ -44,7 +45,7 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, item:
   plain(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 const hash = (value: unknown): string => createHash("sha256").update(canonical(value)).digest("hex");
 const safe = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-function syncGuard(guard: () => void): void {
+export function syncGuard(guard: () => void): void {
   const result: unknown = guard();
   if (result !== undefined) {
     if (result && typeof (result as PromiseLike<unknown>).then === "function")
@@ -187,7 +188,8 @@ export async function executeExecutiveNativeRead(
 
 /** One port in its existing Cordis fiber. No listener, retry, queue or native
  * session lifecycle is introduced. Concurrent/pipelined requests are refused. */
-export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: InstalledNativeReadSource): {
+export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: InstalledNativeReadSource,
+  createPeer?: CompanyReadPeerFactory): {
   dispose(): Promise<void>;
 } {
   association(source.association);
@@ -289,7 +291,7 @@ export function attachExecutiveReadPort(ctx: Context, port: Duplex, source: Inst
   }, "mastermind: inherited native read port");
   try {
     current();
-    bridge = createCompanySessionReadBridge(scope.ctx);
+    bridge = createCompanySessionReadBridge(scope.ctx, createPeer);
     sourceSignal.addEventListener("abort", onRetired, {once: true});
     port.on("data", onData);
     current();

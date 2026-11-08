@@ -6,7 +6,7 @@
  */
 import {createRequire} from "node:module";
 import {createHash} from "node:crypto";
-import {createReadStream,realpathSync} from "node:fs";
+import {createReadStream,realpathSync,lstatSync} from "node:fs";
 import {readFile,realpath,lstat} from "node:fs/promises";
 import {dirname,join,resolve,sep} from "node:path";
 import {fileURLToPath,pathToFileURL} from "node:url";
@@ -595,10 +595,9 @@ export function createNativeReadAdmission({bindings,generation,bridge,executeRea
   };
 }
 
-export async function main(){
+async function qualifiedNativeEntry(){
   const entry=fileURLToPath(import.meta.url),release=dirname(entry),app=join(release,"app");
-  if(process.argv.length!==2||await realpath(entry)!==entry||await realpath(release)!==release)throw refused();
-  const rawPolicy=process.env.MMX_NATIVE_EXECUTION_POLICY,policy=parseExecutionPolicy(rawPolicy);
+  if(await realpath(entry)!==entry||await realpath(release)!==release)throw refused();
   const fd=process.env.MMX_NATIVE_COMPANY_FD;
   if(!/^(?:[3-9]|[1-9][0-9]+)$/.test(fd??"")||Number(fd)>2147483647)throw refused();
   const config=JSON.parse(await readFile(join(release,"app.json"),"utf8"));
@@ -620,6 +619,13 @@ export async function main(){
     if(!path.startsWith(app+sep))throw new Error("Native module is outside its qualified package");
     found=await import(pathToFileURL(path).href);imported.set(name,found);return found;
   };
+  return {entry,entryHash,binaryHash,release,app,fd,config,workspace,importNative};
+}
+
+export async function main(){
+  if(process.argv.length!==2)throw refused();
+  const policy=parseExecutionPolicy(process.env.MMX_NATIVE_EXECUTION_POLICY);
+  const {entry,entryHash,binaryHash,config,release,app,fd,workspace,importNative}=await qualifiedNativeEntry();
   const [{runProfile},{createLaunchEnvironmentSnapshot},{symbols},{isAgentLoopRequest}]=await Promise.all([
     importNative("@deepseek-ai/dsh/profile-boot"),importNative("@deepseek-ai/dsh-launch-environment"),
     importNative("@deepseek-ai/cordis"),importNative("@deepseek-ai/dsh-llm"),
@@ -712,6 +718,52 @@ export async function main(){
     socket.destroy();throw error;
   }
 }
+
+/** Finite READ of the original persisted Session; never enters profile boot. */
+export async function readHistoryMain(){
+  if(process.argv.length!==3||process.argv[2]!=="--read-history")throw refused();
+  const {release,fd,config}=await qualifiedNativeEntry();
+  const raw=process.env.MMX_NATIVE_HISTORY_ASSOCIATION;
+  if(typeof raw!=="string"||Buffer.byteLength(raw)>8192)throw refused();
+  const association=JSON.parse(raw);
+  if(!plain(association)||canonical(association)!==raw||
+    association.native_package_sha256!==await hashFile(join(release,"package-manifest.json"))||
+    association.donor_sha!==DONOR)throw refused();
+  freeze(association);
+  const portPath=join(release,"company_plugin/lib/executive-read-port.js");
+  if(await realpath(portPath)!==portPath||
+    config.company_host_exports?.["./executive-read-port"]?.file!=="executive-read-port.js"||
+    await hashFile(portPath)!==config.company_host_exports["./executive-read-port"].sha256)throw refused();
+  const home=process.env.DSH_HOME,initial=lstatSync(home);
+  const homeIdentity=[initial.dev,initial.ino,initial.uid,initial.gid,initial.mode];
+  if(!initial.isDirectory()||initial.isSymbolicLink()||(initial.mode&0o777)!==0o700||
+    initial.uid!==process.getuid()||initial.gid!==process.getgid())throw refused();
+  const lifetime=new AbortController(),socket=new Socket({fd:Number(fd),readable:true,writable:true});
+  const close=()=>{lifetime.abort();socket.destroy();};
+  const ended=new Promise(resolve=>socket.once("close",resolve));
+  socket.once("end",close);socket.once("error",close);
+  process.once("SIGTERM",close);process.once("SIGINT",close);
+  const current=()=>{
+    lifetime.signal.throwIfAborted();
+    const now=lstatSync(home);
+    if(realpathSync(home)!==home||!now.isDirectory()||now.isSymbolicLink()||
+      canonical([now.dev,now.ino,now.uid,now.gid,now.mode])!==canonical(homeIdentity))throw refused();
+  };
+  let owner;
+  try{
+    current();
+    const {openClosedNativeHistory}=await import(pathToFileURL(portPath).href);
+    owner=await openClosedNativeHistory(home,socket,Object.freeze({
+      association,signal:lifetime.signal,requireCurrent:current,
+    }));
+    await ended;
+  }finally{
+    close();
+    try{await owner?.dispose();}
+    finally{process.off("SIGTERM",close);process.off("SIGINT",close);}
+  }
+}
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
-  await main().catch(()=>{process.stderr.write("Native Worker admission failed\n");process.exitCode=1;});
+  const run=process.argv[2]==="--read-history"?readHistoryMain:main;
+  await run().catch(()=>{process.stderr.write("Native Worker admission failed\n");process.exitCode=1;});
 }

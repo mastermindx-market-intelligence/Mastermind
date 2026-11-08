@@ -462,7 +462,23 @@ class FabricBindingSource:
         def current():
             if self.native_conversation_selection() is not selection:
                 raise FabricCompositionError('Native operator selection was replaced')
-        return NativeConversationHostComposition(selection.registration, current, self.expected_sha256)
+        def read_client(*, job_id, attempt_id, worker_id, session_epoch_id, process_generation_id):
+            # A nonowning transport to the existing installed Worker. Runtime
+            # supplies historical identity; no active claim or adapter is made.
+            from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+            current()
+            if worker_id != selection.registration.worker_id:
+                raise FabricCompositionError('Native READ Worker differs from installed selection')
+            client = RemoteWorkerBrokerClient(selection.binding.transport,
+                dict(host_ref=selection.registration.host_ref, job_id=job_id,
+                     attempt_id=attempt_id, worker_id=worker_id, operation_id=attempt_id),
+                allowed_operations=frozenset({"ohf-native-read-binding", "ohf-native-read"}),
+                bound_payload_identity=dict(session_epoch_id=session_epoch_id,
+                                            process_generation_id=process_generation_id))
+            current()
+            return client
+        return NativeConversationHostComposition(
+            selection.registration, current, self.expected_sha256, read_client)
 
     def remote_operator_binding(self, host_ref: str, worker_id: str):
         selection = self.native_conversation_selection()

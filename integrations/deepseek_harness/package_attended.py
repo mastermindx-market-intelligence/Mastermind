@@ -98,39 +98,70 @@ def company_host_exports(root, build, *, required=False):
     return exports
 
 
+# Fixed dependencies of the cold reader, all resolved to the original native
+# modules in this same package. No bundled service/error identity is substituted.
+_CLOSED_COMPANY_DEPENDENCIES = {
+    "cordis": "vendor/cordis",
+    "dsh-session": "packages/core/session",
+    "dsh-session-persistence-jsonl": "packages/session/session-persistence-jsonl",
+    "dsh-session-query-sqlite": "packages/session-query/session-query-sqlite",
+    "dsh-typert-registry": "packages/typert/registry",
+    "dsh-api-remote-access": "packages/api/remote-access",
+    "dsh-api-gateway": "packages/api/gateway",
+    "dsh-client-connection": "packages/client/connection",
+    "dsh-typert-protocol": "packages/typert/protocol",
+    "dsh-deque": "packages/util/deque",
+    "dsh-session-query": "packages/session-query/session-query",
+    "dsh-llm": "packages/llm/llm",
+}
+
+
+def _company_dependencies(release):
+    selected = {"dsh-scope": "packages/core/scope"}
+    manifest = release / "company_plugin/lib/build-manifest.json"
+    if manifest.is_file():
+        build = json.loads(manifest.read_bytes())
+        if "src/closed-native-history.ts" in build.get("source_sha256", {}):
+            selected.update(_CLOSED_COMPANY_DEPENDENCIES)
+    return selected
+
+
 def verify_company_scope(release):
-    """Resolve the host leaf to the original packaged native scope module."""
-    target = release / "app/packages/core/scope"
-    link = release / "company_plugin/node_modules/@deepseek-ai/dsh-scope"
-    if (target.resolve(strict=True) != target or not link.is_symlink()
-            or os.readlink(link) != "../../../app/packages/core/scope"
-            or link.resolve(strict=True) != target):
-        raise ValueError("Company host native scope link differs")
-    package = target / "package.json"
-    entry = target / "lib/index.js"
-    if (package.resolve(strict=True) != package or entry.resolve(strict=True) != entry
-            or not entry.is_file()
-            or json.loads(package.read_text()).get("name") != "@deepseek-ai/dsh-scope"):
-        raise ValueError("Company host native scope package differs")
+    """Resolve private host leaves to the original packaged native modules."""
+    for name, relative in _company_dependencies(release).items():
+        target = release / "app" / relative
+        link = release / "company_plugin/node_modules/@deepseek-ai" / name
+        if (target.resolve(strict=True) != target or not link.is_symlink()
+                or os.readlink(link) != "../../../app/" + relative
+                or link.resolve(strict=True) != target):
+            raise ValueError("Company host native " + ("scope" if name == "dsh-scope" else "dependency") + " link differs")
+        package, entry = target / "package.json", target / "lib/index.js"
+        if (package.resolve(strict=True) != package or entry.resolve(strict=True) != entry
+                or not entry.is_file()
+                or json.loads(package.read_text()).get("name") != "@deepseek-ai/" + name):
+            raise ValueError("Company host native dependency package differs")
 
 
 def package_company_scope(release):
-    """Reuse the existing native dependency; never bundle another Cordis owner."""
-    target = release / "app/packages/core/scope"
-    if (target.resolve(strict=True) != target
-            or not (target / "lib/index.js").is_file()
-            or json.loads((target / "package.json").read_text()).get("name") != "@deepseek-ai/dsh-scope"):
-        raise ValueError("Original native scope package required")
+    """Reuse existing native dependencies within the same owned package."""
     company = release / "company_plugin"
     if release.resolve(strict=True) != release or company.resolve(strict=True) != company:
         raise ValueError("Company dependency directory redirected")
+    dependencies = _company_dependencies(release)
+    for name, relative in dependencies.items():
+        target = release / "app" / relative
+        if (target.resolve(strict=True) != target
+                or not (target / "lib/index.js").is_file()
+                or json.loads((target / "package.json").read_text()).get("name") != "@deepseek-ai/" + name):
+            raise ValueError("Original native dependency package required")
     parent = company / "node_modules/@deepseek-ai"
     # The release is a newly owned staging tree. Never replace an existing link.
     for ancestor in (parent.parent, parent):
         if ancestor.exists() and (ancestor.is_symlink() or ancestor.resolve(strict=True) != ancestor):
             raise ValueError("Company dependency directory redirected")
         ancestor.mkdir(exist_ok=True)
-    (parent / "dsh-scope").symlink_to("../../../app/packages/core/scope", target_is_directory=True)
+    for name, relative in dependencies.items():
+        (parent / name).symlink_to("../../../app/" + relative, target_is_directory=True)
     verify_company_scope(release)
 
 

@@ -760,6 +760,7 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
     from integrations.acp_worker.turn import AcpProfile
     from integrations.deepseek_harness.operator_adapter import (
         NativeLaunchBinding, NativeOperatorAdapter, observe_native_workspace)
+    from integrations.deepseek_harness.native_history import NativeHistoryReader
     try:
         registry = ExecutionCapabilityRegistry.load()
     except CapabilityPolicyError:
@@ -928,6 +929,7 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
         adapter_id=None, operator_binary_attestation=installed.binary,
         operator_adapter_factory=operator_adapter_factory, operator_harness_armed=True,
         native_read_adapter_type=NativeOperatorAdapter,
+        native_history_reader=NativeHistoryReader(policy=policy, installed=installed, require_source=require_source),
         autonomy_guard=autonomy_guard,
         autonomy_canary_factory=_build_autonomy_canary_factory(config),
     )

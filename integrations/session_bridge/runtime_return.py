@@ -354,7 +354,7 @@ class RuntimeSessionReturn:
             def root_guard():
                 if ownership() != original_owner:
                     raise BridgeError("binding_unavailable", "original native root changed")
-            native = await source.select(principal, args["selection"], root_guard=root_guard)
+            native = await source.select(principal, args["selection"], root_guard=root_guard, read=args["read"])
             root_guard()
         binding = native.selected_binding()
         selection = {"work_ref": binding.work_ref, "root_job_id": binding.root_job_id}

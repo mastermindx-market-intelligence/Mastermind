@@ -44,6 +44,7 @@ class NativeConversationHostComposition:
     registration: NativeConversationRegistration
     current: Callable[[], None]
     composition_sha256: str | None = None
+    native_read_client_factory: Callable | None = None
 
     def __post_init__(self):
         if (type(self.registration) is not NativeConversationRegistration
@@ -52,6 +53,8 @@ class NativeConversationHostComposition:
             raise ValueError("native host composition requires a synchronous installed source")
 
     def require_current(self) -> None:
+        if self.native_read_client_factory is not None and not callable(self.native_read_client_factory):
+            raise ValueError("native READ source is unavailable")
         value = self.current()
         if value is not None:
             if inspect.iscoroutine(value):

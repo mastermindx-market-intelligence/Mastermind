@@ -107,6 +107,10 @@ class NativeReadUnavailable(Exception):
     """Fixed private failure, with no host path or arbitrary backend text."""
 
 
+class NativeReadPhysicalUnknown(NativeReadUnavailable):
+    """The original finite read child has not proved physical settlement."""
+
+
 def canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True,
                       separators=(",", ":"), allow_nan=False).encode("utf-8", errors="strict")
@@ -262,6 +266,19 @@ def native_read_frame(*, association_sha256: str, principal_scope: str,
         "association_sha256": association_sha256,
         "principal": {"principal_scope": principal_scope, "issued_at": issued_at, "expires_at": expires_at},
         "read": dict(request)}, association_sha256)
+
+
+def validate_native_history_binding(value):
+    """Actual Worker receipt plus the current reader; never execution authority."""
+    if (type(value) is not dict or set(value) != {
+            "schema", "binding", "materialization_receipt_sha256"}
+            or value["schema"] != "mastermind.dsh.native_history_binding.v1"
+            or type(value["materialization_receipt_sha256"]) is not str
+            or _SHA.fullmatch(value["materialization_receipt_sha256"]) is None):
+        raise NativeReadUnavailable()
+    return {"schema": value["schema"],
+            "binding": validate_native_read_binding(value["binding"]),
+            "materialization_receipt_sha256": value["materialization_receipt_sha256"]}
 
 
 def validate_native_read_binding(value: Any) -> dict[str, str]:

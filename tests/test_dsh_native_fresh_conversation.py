@@ -487,6 +487,20 @@ def test_native_stop_resume_send_and_terminal_stop_keep_one_session_and_two_gene
             assert len(runtime.attempts.list_attempts()) == 1
             with runtime.store.read() as connection:
                 assert connection.execute("SELECT COUNT(*) FROM process_generations").fetchone()[0] == 2
+            from tests.test_dsh_native_retained_read import historical_view
+            history = historical_view(service, runtime, adapters[0], tmp_path)
+            history_before = runtime.events.list_events()
+            for original_reference in (initial, refs[-1]):
+                recovered_body = await history.returns.deepseek_history(principal, dict(selection=dict(work_ref=request["work_ref"],
+                    root_job_id=original_dispatch.retained.job.root_job_id),
+                    read=dict(kind="result", native_ref=original_reference.to_wire(),
+                              offset_bytes=0, expected_sha256=None)))
+                assert recovered_body["native"]["state"] == "NO_ANSWER"
+                assert recovered_body["native_session_id"] == original_session.observation.provider_session_id
+            assert runtime.events.list_events() == history_before
+            assert history.writes == ["ohf-native-read-binding", "ohf-native-read"] * 2
+            assert history.payloads[0]["generation"]["process_generation_id"] == original_session.generation.process_generation_id
+            assert history.payloads[2]["generation"]["process_generation_id"] == second.generation.process_generation_id
             refused = await frame(owner, principal, {**selected, "resume_key": "no-g3",
                 "expected_result_digest": refs[-1].seal_digest}, "resume_preview")
             assert not refused["ok"] and adapters[0].resume_calls == 1

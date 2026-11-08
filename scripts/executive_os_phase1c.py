@@ -3470,7 +3470,8 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
             original_native_composition.require_current()
         native_composition = NativeConversationHostComposition(
             original_native_composition.registration, require_native_composition_current,
-            original_native_composition.composition_sha256)
+            original_native_composition.composition_sha256,
+            original_native_composition.native_read_client_factory)
     service = _service_from_config(
         raw,
         native_conversation_composition=native_composition,

@@ -19,11 +19,12 @@ const aliases=Object.entries(parsed.config.compilerOptions.paths)
 const shared=await import(pathToFileURL(resolve(donor,"vitest.shared.ts")).href);
 export default defineConfig({
   resolve:{alias:[
+    {find:"mmx-pinned-native-history",replacement:resolve(donor,"packages/api/session-controller/src/history.ts")},
     {find:"mmx-native-test-remote",replacement:resolve(donor,"packages/api/session-controller/tests/test-remote.ts")},
     {find:"mmx-native-browser-credentials",replacement:resolve(donor,"packages/api/gateway/tests/browser-credentials.ts")},
     ...aliases,
   ]},
   plugins:[shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:["native.host.test.ts","native.executive.test.ts","native.executive.fixture.test.ts"],maxWorkers:1,fileParallelism:false,
+  test:{environment:"node",include:["native.host.test.ts","native.executive.test.ts","native.executive.fixture.test.ts","native.closed-history.test.ts"],maxWorkers:1,fileParallelism:false,
     testTimeout:15000,hookTimeout:15000,execArgv:shared.vitestExecArgv},
 });

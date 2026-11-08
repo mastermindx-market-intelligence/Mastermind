@@ -378,3 +378,30 @@ def test_native_cannot_replace_primary_before_any_broker_or_socket(tmp_path, mon
     with pytest.raises(cli.ServiceError, match="cannot replace"):
         cli._service_from_config({"worker_id": "native-fixture", "coo_operator_harness_armed": True},
             native_conversation_composition=selected, remote_operator_binding_source=forbidden)
+
+def test_native_history_factory_reuses_installed_read_transport_without_admission(tmp_path, root_stats, monkeypatch):
+    import asyncio
+    source = source_for(tmp_path, native_document(tmp_path))
+    native = source.native_conversation_selection()
+    selected = source.native_conversation_composition()
+    writes = []
+    async def forbidden(*args, **kwargs):
+        writes.append((args, kwargs))
+        raise AssertionError("constructing native READ made a network call")
+    monkeypatch.setattr(asyncio, "open_connection", forbidden)
+    identity = dict(job_id="JOB-001", attempt_id="attempt-original",
+        worker_id=native.registration.worker_id, session_epoch_id="epoch-original",
+        process_generation_id="generation-original")
+    client = selected.native_read_client_factory(**identity)
+    assert client.binding is native.binding.transport
+    assert client.allowed_operations == frozenset({"ohf-native-read-binding", "ohf-native-read"})
+    assert client.identity == dict(host_ref=native.registration.host_ref, job_id="JOB-001",
+        attempt_id="attempt-original", worker_id=native.registration.worker_id, operation_id="attempt-original")
+    assert client.bound_payload_identity == dict(session_epoch_id="epoch-original", process_generation_id="generation-original")
+    assert writes == []
+    with pytest.raises(composition.FabricCompositionError):
+        selected.native_read_client_factory(**{**identity, "worker_id":"foreign"})
+    source.path.write_bytes(source.path.read_bytes()+b" ")
+    with pytest.raises((composition.FabricCompositionError, RuntimeError, ValueError)):
+        selected.native_read_client_factory(**identity)
+    assert writes == []

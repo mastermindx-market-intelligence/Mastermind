@@ -10,6 +10,7 @@ import type {} from "@deepseek-ai/dsh-api-gateway";
 import type {RemoteAccessBinding, RemoteAccessRole} from "@deepseek-ai/dsh-api-remote-access";
 import type {SessionId} from "@deepseek-ai/dsh-session";
 import type {PeerScope} from "@deepseek-ai/dsh-typert-protocol";
+import type {PeerOptions} from "@deepseek-ai/dsh-client-connection";
 import type {SessionPage, SessionPageRequest, SessionProjectionsValue} from "@deepseek-ai/dsh-api-session-controller";
 
 export interface CompanySessionReadBinding {
@@ -71,7 +72,10 @@ function pageRequest(request: CompanyHistoryPageRequest, sessionId: SessionId): 
 
 /** One policy registration in the existing host fiber; no session registry,
  * authentication service, listener, operation store or new transcript owner. */
-export function createCompanySessionReadBridge(ctx: Context): {
+export type CompanyReadPeerFactory = (owner: Context, options: PeerOptions) => PeerScope;
+
+export function createCompanySessionReadBridge(ctx: Context,
+  createPeer: CompanyReadPeerFactory = (owner, options) => owner.connection.createPeer(options)): {
   open(binding: CompanySessionReadBinding): CompanySessionReader;
 } {
   let active = true;
@@ -126,7 +130,7 @@ export function createCompanySessionReadBridge(ctx: Context): {
         }
       }
       current();
-      peer = ctx.connection.createPeer({principal, interactions: "none"});
+      peer = createPeer(ctx, {principal, interactions: "none"});
       const exactPeer = peer;
       readers.set(principal, () => {
         try {

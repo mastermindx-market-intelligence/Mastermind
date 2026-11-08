@@ -20,6 +20,7 @@ if (execFileSync("git",["-C",donor,"status","--porcelain"],{encoding:"utf8"}).tr
   throw new Error("The donor checkout must be clean.");
 const requireDonor=createRequire(join(donor,"package.json"));
 const {build}=await import(pathToFileURL(requireDonor.resolve("tsdown")).href);
+const ts=requireDonor("typescript");
 const outDir=join(packageDir,"lib");
 await mkdir(outDir,{recursive:true});
 await build({
@@ -37,12 +38,25 @@ await build({
   cwd:packageDir,config:false,entry:{"company-peer":"src/company-peer.ts","executive-read-port":"src/executive-read-port.ts"},outDir,
   format:"esm",platform:"node",target:"es2024",dts:false,clean:false,sourcemap:false,
   // Reuse the original native Cordis scope implementation at runtime.
-  external:["@deepseek-ai/dsh-scope"],
+  external:[/^@deepseek-ai\//],
+  alias:{"mmx-pinned-native-history":join(donor,"packages/api/session-controller/src/history.ts")},
+  // The donor uses TypeScript's standard-decorator transform. Rolldown's
+  // syntax lowering alone preserves @Remote, which Node cannot execute.
+  plugins:[{name:"mastermind-company-standard-decorators",transform:{order:"pre",handler(code,id){
+    if(id.split("?",1)[0]!==join(packageDir,"src/closed-native-history.ts"))return;
+    const result=ts.transpileModule(code,{fileName:id,compilerOptions:{
+      target:ts.ScriptTarget.ES2024,module:ts.ModuleKind.ESNext,sourceMap:false,
+    }});
+    return {code:result.outputText,map:null};
+  }}}],
   outExtensions:()=>({js:".js"}),
 });
+// Do not publish a build record for host JavaScript the selected Node cannot parse.
+for(const name of ["company-peer.js","executive-read-port.js"])
+  execFileSync(process.execPath,["--check",join(outDir,name)],{stdio:"pipe"});
 const host=await readFile(join(outDir,"company-peer.js"));
 const port=await readFile(join(outDir,"executive-read-port.js"));
-const sources=["protocol.ts","index.ts","company-peer.ts","executive-read-port.ts","native-result-content.ts","client/connection.ts","client/index.ts","client/styles.ts"];
+const sources=["protocol.ts","index.ts","company-peer.ts","executive-read-port.ts","native-result-content.ts","closed-native-history.ts","client/connection.ts","client/index.ts","client/styles.ts"];
 const sourceDigests={};
 for(const path of sources)sourceDigests["src/"+path]=sha(await readFile(join(packageDir,"src",path)));
 const manifest={

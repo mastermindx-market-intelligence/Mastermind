@@ -49,8 +49,8 @@ class DeepSeekNativeReadSource:
 
     def __init__(self, association: DeepSeekNativeAssociation, port: OwnedNativeReadPort,
                  *, require_current: Callable[[], None]):
-        from integrations.session_bridge.retained_native_read import RetainedNativeReadPort
-        if (type(association) is not DeepSeekNativeAssociation or type(port) not in (OwnedNativeReadPort, RetainedNativeReadPort)
+        from integrations.session_bridge.retained_native_read import RetainedNativeReadPort, HistoricalNativeReadPort
+        if (type(association) is not DeepSeekNativeAssociation or type(port) not in (OwnedNativeReadPort, RetainedNativeReadPort, HistoricalNativeReadPort)
                 or not callable(require_current) or inspect.iscoroutinefunction(require_current)
                 or inspect.iscoroutinefunction(getattr(require_current, "__call__", None))
                 or port.association_sha256 != association.digest):

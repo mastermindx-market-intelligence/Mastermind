@@ -125,3 +125,136 @@ def test_retirement_between_binding_and_content_is_refused_at_original_transport
             h.dispatch.native_phase = "READY"
             await cleanup(h.service)
     asyncio.run(run())
+
+
+def historical_view(service, runtime, adapter, tmp_path):
+    """The original Runtime and owner, with only Worker transport bytes inert."""
+    from control_plane.operator_harness_wire import to_wire
+    calls, writes, payloads, hooks = [], [], [], {}
+    fault = {}
+    binding = service._fixture_native_binding
+    async def invoke(operation, payload, *, timeout_seconds, before_write):
+        assert timeout_seconds == 6.0
+        calls.append(operation)
+        hook = hooks.get(operation)
+        if hook is not None:
+            result = hook()
+            if asyncio.iscoroutine(result): await result
+        before_write(operation, payload)
+        writes.append(operation); payloads.append(payload)
+        if operation == "ohf-native-read-binding":
+            value = dict(schema="mastermind.dsh.native_history_binding.v1",
+                binding=dict(schema="mastermind.dsh.native_read_binding.v1",
+                    native_session_id=adapter.provider_session_id, native_package_sha256="3"*64,
+                    donor_sha="687f282e8625c6b8d11ff58211a90524be2e4317"),
+                materialization_receipt_sha256="4"*64)
+            if fault.get("session"): value["binding"]["native_session_id"] = "foreign"
+            if fault.get("digest"): value["materialization_receipt_sha256"] = "invalid"
+            if fault.get("extra"): value["extra"] = True
+            return {"native_read":value}
+        frame = payload["request"]; selected = frame["read"]
+        assert selected["kind"] == "result"
+        return {"native_read":dict(schema=RESPONSE_SCHEMA, request_id=frame["request_id"],
+            association_sha256=frame["association_sha256"], status="READ",
+            data=dict(kind="result", state="NO_ANSWER", claim=selected["claim"], terminal=selected["terminal"],
+                turn_start_seq=selected["claim"]["throughSeq"], turn_end_seq=selected["terminal"]["throughSeq"],
+                user_message_seq=None, assistant_message_seqs=[], content=None))}
+    client = SimpleNamespace(request=invoke)
+    def factory(**identity):
+        attempt = runtime.attempts.get_attempt(identity["attempt_id"])
+        assert attempt.worker_id == identity["worker_id"] and attempt.job_id == identity["job_id"]
+        epoch, generation = runtime.operator_harness.generation_refs(identity["process_generation_id"])
+        assert epoch.session_epoch_id == identity["session_epoch_id"]
+        return client
+    host = NativeConversationHostComposition(binding.selection, binding.current,
+        composition_sha256="a"*64, native_read_client_factory=factory)
+    resolver = RetainedNativeReadResolver(service, runtime, host, require_current=binding.current)
+    fabric = RuntimeFabricTargetProjector(runtime)
+    returns = RuntimeSessionReturn(runtime, fabric=fabric, codex=RuntimeCodexTargetProjector(fabric),
+        socket_path=tmp_path/"unused-history.sock", deepseek=resolver)
+    return SimpleNamespace(returns=returns, calls=calls, writes=writes, payloads=payloads,
+                           hooks=hooks, fault=fault, host=host, client=client)
+
+
+async def closed_composition(tmp_path, monkeypatch):
+    h = await composition(tmp_path, monkeypatch)
+    reference = h.dispatch.retained.native_result
+    await h.service.operator_supervisor.idle_retained_native_job(h.dispatch.retained)
+    h.service.operator_supervisor.native_idle_projection(h.dispatch.retained, expected_result=reference)
+    h.dispatch.native_phase = "IDLE"
+    view = historical_view(h.service, h.runtime, h.adapter, tmp_path)
+    for name in vars(view): setattr(h, name, getattr(view, name))
+    h.args["read"] = dict(kind="result", native_ref=reference.to_wire(),
+        offset_bytes=0, expected_sha256=None)
+    h.reference = reference
+    return h
+
+
+def test_closed_original_result_joins_historical_receipt_without_new_events_or_session(tmp_path, monkeypatch):
+    async def run():
+        h = await closed_composition(tmp_path, monkeypatch)
+        try:
+            before = h.runtime.events.list_events()
+            result = await h.returns.deepseek_history(h.principal, h.args)
+            assert result["native"]["state"] == "NO_ANSWER"
+            assert result["native_session_id"] == h.adapter.provider_session_id
+            assert h.calls == h.writes == ["ohf-native-read-binding", "ohf-native-read"]
+            binding, content = h.payloads
+            assert "materialization_receipt_sha256" not in binding["history"]
+            assert content["history"] == {**binding["history"], "materialization_receipt_sha256":"4"*64}
+            assert content["epoch"] == binding["epoch"] and content["generation"] == binding["generation"]
+            assert h.runtime.events.list_events() == before
+            assert h.adapter.start_calls == h.adapter.calls == 1 and h.adapter.resume_calls == 0
+            assert len(h.runtime.attempts.list_attempts()) == 1
+        finally: await cleanup(h.service)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("slot", ["active_turn", "pending_turn", "_fresh_turn_source",
+                                  "_fresh_control_source", "_fresh_interrupt_source"])
+def test_idle_history_refuses_reserved_original_operation_before_transport(tmp_path, monkeypatch, slot):
+    async def run():
+        h = await closed_composition(tmp_path, monkeypatch)
+        previous = getattr(h.dispatch, slot, None)
+        try:
+            setattr(h.dispatch, slot, object())
+            with pytest.raises(BridgeError): await h.returns.deepseek_history(h.principal, h.args)
+            assert h.calls == h.writes == []
+        finally:
+            setattr(h.dispatch, slot, previous)
+            await cleanup(h.service)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["session", "digest", "extra"])
+def test_closed_history_pins_actual_binding_before_any_content_request(tmp_path, monkeypatch, fault):
+    async def run():
+        h = await closed_composition(tmp_path, monkeypatch)
+        try:
+            h.fault[fault] = True
+            with pytest.raises(BridgeError): await h.returns.deepseek_history(h.principal, h.args)
+            assert h.calls == h.writes == ["ohf-native-read-binding"]
+        finally: await cleanup(h.service)
+    asyncio.run(run())
+
+
+def test_idle_resume_reservation_during_binding_prevents_content_write(tmp_path, monkeypatch):
+    async def run():
+        h = await closed_composition(tmp_path, monkeypatch)
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def hold():
+            entered.set()
+            await release.wait()
+        h.hooks["ohf-native-read-binding"] = hold
+        pending = asyncio.create_task(h.returns.deepseek_history(h.principal, h.args))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            h.dispatch._fresh_control_source = object()
+            release.set()
+            with pytest.raises(BridgeError): await pending
+            assert h.calls == ["ohf-native-read-binding"] and h.writes == []
+        finally:
+            release.set(); h.dispatch._fresh_control_source = None
+            await asyncio.gather(pending, return_exceptions=True)
+            await cleanup(h.service)
+    asyncio.run(run())

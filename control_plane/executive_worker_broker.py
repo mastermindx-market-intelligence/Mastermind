@@ -1436,6 +1436,7 @@ class ExecutiveWorkerBroker:
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         native_read_adapter_type: type | None = None,
+        native_history_reader: Any | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
@@ -1537,6 +1538,13 @@ class ExecutiveWorkerBroker:
         self._native_read_binding = (
             (native_read_adapter_type, operator_adapter_factory)
             if native_read_adapter_type is not None else None)
+        if native_history_reader is not None and (
+                self._native_read_binding is None or not callable(native_history_reader)):
+            raise WorkerBrokerError("native history requires the original installed native reader")
+        self._native_history_binding = (native_history_reader, self._native_read_binding)
+        self._native_history_task = None
+        self._native_history_shutdown = False
+        self._native_history_unknown = False
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
@@ -1799,6 +1807,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
             ):
                 raise BrokerStateError("capacity observation requires an idle broker")
             observed = observer()
@@ -1823,6 +1833,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
             ):
                 raise BrokerStateError("the worker broker already has active work")
             self._validation_busy = True
@@ -2052,6 +2064,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                or self._native_history_unknown
+                or self._native_history_shutdown
             ):
                 raise BrokerStateError("the worker broker already has active work")
             self._starting = True
@@ -2658,6 +2672,8 @@ class ExecutiveWorkerBroker:
     async def _ohf_native_read(self, payload: dict[str, Any], *, content: bool) -> dict[str, Any]:
         """One finite observation on the original READY run; never constructs an adapter."""
         from control_plane.native_conversation_read_contract import NativeReadUnavailable
+        if "history" in payload:
+            return await self._ohf_native_history_read(payload, content=content)
         expected = {"epoch", "generation"} | ({"association", "request"} if content else set())
         if set(payload) != expected:
             raise BrokerProtocolError("native read payload fields are invalid")
@@ -2704,6 +2720,59 @@ class ExecutiveWorkerBroker:
             raise
         # A disconnected reader cannot release busy over original thread/SDK work.
         return await asyncio.shield(task)
+
+    async def _ohf_native_history_read(self, payload, *, content):
+        """Finite cold observation; the shielded broker task owns lock and cleanup."""
+        from control_plane.native_conversation_read_contract import canonical
+        expected = {"epoch", "generation", "history"} | ({"association", "request"} if content else set())
+        if set(payload) != expected:
+            raise BrokerProtocolError("native history payload fields are invalid")
+        binding = self._native_history_binding
+        reader = binding[0]
+        if reader is None or self._native_history_task is not None:
+            raise BrokerStateError("original native history reader is unavailable")
+        frozen = canonical(payload)
+        task = asyncio.create_task(self._native_history_transaction(
+            payload, content, frozen, binding), name="operator-native-history-read")
+        self._native_history_task = task
+        task.add_done_callback(self._observe_operator_task)
+        return await asyncio.shield(task)
+
+    async def _native_history_transaction(self, payload, content, frozen, binding):
+        from control_plane.native_conversation_read_contract import (
+            NativeReadUnavailable, NativeReadPhysicalUnknown, canonical)
+        task = asyncio.current_task()
+        try:
+            async with self._state_lock:
+                def current():
+                    self._require_current_autonomy()
+                    if (self._native_history_task is not task or self._native_history_binding is not binding
+                            or self._native_read_binding is not binding[1]
+                            or self.operator_adapter_factory is not binding[1][1]
+                            or self._native_history_shutdown or self._native_history_unknown
+                            or self._quarantined_reason is not None or self._active_run_id is not None
+                            or self._operator_run is not None or self._starting
+                            or self._validation_busy or self._status_sweep_busy
+                            or canonical(payload) != frozen):
+                        raise NativeReadUnavailable()
+                try:
+                    current()
+                    value = await binding[0](payload, content=content, current=current)
+                    current()
+                    return {"native_read": value}
+                except NativeReadPhysicalUnknown:
+                    self._native_history_unknown = True
+                    self._quarantined_reason = "original native history child requires physical reconciliation"
+                    return {"native_read": None}
+                except Exception:
+                    return {"native_read": None}
+                except BaseException:
+                    self._native_history_unknown = True
+                    self._quarantined_reason = "original native history task was interrupted"
+                    raise
+        finally:
+            if self._native_history_task is task:
+                self._native_history_task = None
 
     async def _native_read_transaction(self, state, epoch, generation, payload, content, current):
         try:
@@ -3762,6 +3831,8 @@ class ExecutiveWorkerBroker:
                 or self._starting
                 or self._validation_busy
                 or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
             ):
                 raise BrokerStateError(
                     "OHF absence proof requires an idle worker broker"
@@ -3910,6 +3981,8 @@ class ExecutiveWorkerBroker:
                     or self._starting
                     or self._validation_busy
                     or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
                 ):
                     raise BrokerStateError(
                         "a fresh status UID sweep requires an idle worker broker"
@@ -4317,6 +4390,8 @@ class ExecutiveWorkerBroker:
                     or self._starting
                     or self._validation_busy
                     or self._status_sweep_busy
+                    or self._native_history_unknown
+                    or self._native_history_shutdown
                 ):
                     raise BrokerStateError(
                         "validation is serialized after worker collection"
@@ -4349,6 +4424,9 @@ class ExecutiveWorkerBroker:
         """Cancel an active run, then prove the dedicated UID is quiescent."""
 
         async with self._state_lock:
+            self._native_history_shutdown = True
+            if self._native_history_unknown:
+                raise BrokerStateError("original native history resource remains unresolved")
             if self.policy.require_assignment_seal:
                 self._quarantined_reason = "broker shutdown"
             active_run_id = self._active_run_id
