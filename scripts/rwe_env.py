@@ -485,7 +485,7 @@ def checkout_command_for(ref: str | None, repo: str = VENDOR_REPO) -> str:
         "git clone --no-checkout https://github.com/{repo}.git vendor/macro_src\n"
         "cd vendor/macro_src\n"
         "git sparse-checkout init --cone\n"
-        "git sparse-checkout set engine lib\n"
+        "git sparse-checkout set engine lib scripts\n"
         "git checkout {ref}\n"
         "cd -"
     ).format(repo=repo, ref=ref_display)

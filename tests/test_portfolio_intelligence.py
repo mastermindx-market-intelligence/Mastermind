@@ -84,7 +84,7 @@ def test_prophet_board_separates_discovery_and_management(monkeypatch, macro_roo
     assert result["context_only"] is True
 
 
-def test_sector_rotation_is_ranked_projected_and_bounded(macro_root):
+def test_sector_rotation_is_ranked_projected_and_bounded(monkeypatch):
     def row(ticker, rank, score, kind="sector"):
         return {
             "id": ticker.lower(), "ticker": ticker, "name": ticker, "kind": kind,
@@ -96,12 +96,14 @@ def test_sector_rotation_is_ranked_projected_and_bounded(macro_root):
                            "en": f"{ticker} leads"}],
         }
 
-    _write(macro_root, "site/sectordata/sector_central.json", {
+    central = {
         "as_of": _day(),
         "market": {"risk_on": True, "headline_en": "rotation broadening"},
         "sectors": [row("XLB", 2, 70), row("XLK", 1, 80)],
         "baskets": [row("IGV", 1, 75, "basket"), row("ITA", 2, 72, "basket")],
-    })
+    }
+    monkeypatch.setattr(pi, "_read_sector_central", lambda: (
+        central, {"status": "fresh", "as_of": _day(), "stale": False}))
 
     result = pi.sector_rotation(limit=1)
 
@@ -196,9 +198,9 @@ def test_market_packet_is_compact_start_of_session_overview(monkeypatch, macro_r
         "asof": _day(), "quad": "Q1", "quad_name": "Goldilocks",
         "sector_rs": [{"ticker": "XLK", "rank": 1}],
     })
-    _write(macro_root, "site/sectordata/sector_central.json", {
-        "as_of": _day(), "market": {"risk_on": True}, "sectors": [], "baskets": [],
-    })
+    monkeypatch.setattr(pi, "_read_sector_central", lambda: (
+        {"as_of": _day(), "market": {"risk_on": True}, "sectors": [], "baskets": []},
+        {"status": "fresh", "as_of": _day(), "stale": False}))
     _write(macro_root, "site/prophet/index.json", {"asof": _day()})
     monkeypatch.setattr(prophet_feed, "index", lambda: {
         "asof": _day(), "authority_tier": "display", "gate_go": False,

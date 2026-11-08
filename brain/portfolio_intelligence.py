@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -1057,18 +1058,132 @@ def _psl_consistent(dossier: dict, measured: dict) -> bool:
     return True
 
 
+_PSL_NATIVE_MEMBER = "sectordata/sector_central.json"
+_PSL_NATIVE_REASONS = frozenset((
+    "native_generation_not_configured", "native_generation_configuration_invalid",
+    "native_generation_reader_unavailable", "native_generation_not_selected",
+    "native_generation_unavailable", "native_generation_contract_invalid",
+    "native_generation_too_large",
+))
+_PSL_RECEIPT_LIMITS = {
+    "schema": 32, "source": 32, "generation_id": 128, "source_session": 10,
+    "published_at": 32, "qualification": 8, "input_version": 128,
+    "baseline_session": 10, "content_sha256": 64,
+}
+
+
+def _read_sector_central() -> tuple[dict | None, dict]:
+    """Read one existing selected snapshot; never initialize, select or fall back.
+
+    Deployment supplies the same private root used by Macro. Its incumbent
+    facade owns pointer/manifest/member verification; its projection owns source
+    semantics and the public receipt. Existing Portfolio parsers still consume
+    the original captured Central, whose legacy fields exceed preview core.
+    """
+    health = {
+        "artifact": _PSL_NATIVE_MEMBER, "source_mode": "selected_generation",
+        "available": False, "status": "missing", "as_of": None, "stale": None,
+        "authority": "context", "execution_authority": False,
+    }
+
+    def unavailable(reason: str, status: str = "missing") -> tuple[None, dict]:
+        return None, {**health, "status": status, "source_reason": reason}
+
+    configured = os.environ.get("MACRO_SECTOR_GENERATIONS_ROOT")
+    if configured is None:
+        return unavailable("native_generation_not_configured")
+    if (not configured or configured != configured.strip()
+            or len(configured) > 4096 or "\x00" in configured):
+        return unavailable("native_generation_configuration_invalid", "malformed")
+    root = Path(configured)
+    if not root.is_absolute() or root == Path("/") or ".." in root.parts:
+        return unavailable("native_generation_configuration_invalid", "malformed")
+    # Do not resolve symlinks away: the native facade must inspect the original
+    # deployment root and ancestors. No caller path or generation selector exists.
+    try:
+        from lib.sector_generation_contract import (
+            SECTOR_GENERATION_DOMAIN, SECTOR_GENERATION_MEMBERS,
+            SectorGenerationContractError, _decode_member, project_sector_bundle,
+        )
+        from lib.sector_generation_wire import SectorGenerationTooLarge, encode_sector_generation
+        from engine.sector_native_view import SectorViewUnavailable
+        from scripts.vps_live_orchestrator import (
+            SelectedGenerationAbsent, SelectedGenerationUnavailable, read_selected_generation,
+        )
+    except ImportError:
+        return unavailable("native_generation_reader_unavailable")
+    try:
+        snapshot = read_selected_generation(
+            generations_root=root, domain=SECTOR_GENERATION_DOMAIN,
+            members=SECTOR_GENERATION_MEMBERS,
+        )
+    except SelectedGenerationAbsent:
+        return unavailable("native_generation_not_selected")
+    except (SelectedGenerationUnavailable, OSError):
+        return unavailable("native_generation_unavailable")
+    try:
+        # Observe after the one capture; never consult the selected pointer again.
+        now = datetime.now(UTC)
+        projection = project_sector_bundle(
+            member_bytes=snapshot.members,
+            input_identity=snapshot.manifest.get("input_identity"),
+            generation_id=snapshot.generation_id, published_at=snapshot.published_at,
+            now=now, audience="preview", preview_rows=3,
+        )
+        receipt = projection["receipt"]
+        encode_sector_generation(
+            audience="preview", source_session=receipt["source_session"],
+            published_at=receipt["published_at"], qualification=receipt["qualification"],
+            projection=projection,
+        )
+        central = _decode_member(snapshot.members[_PSL_NATIVE_MEMBER])
+    except SectorGenerationTooLarge:
+        return unavailable("native_generation_too_large", "malformed")
+    except (SectorGenerationContractError, SectorViewUnavailable, ValueError, TypeError,
+            KeyError, OverflowError, RecursionError):
+        return unavailable("native_generation_contract_invalid", "malformed")
+    qualification = receipt["qualification"]
+    return central, {
+        **health, "available": True,
+        "status": {"accepted": "fresh", "stale": "stale"}.get(qualification, "unknown"),
+        "as_of": receipt["source_session"],
+        "stale": {"accepted": False, "stale": True}.get(qualification),
+        # This is the owner's authorized-representation hash, not a hash of a
+        # Portfolio packet, raw Central, or a second snapshot.
+        "native_receipt": dict(receipt),
+    }
+
+
 def _psl_health(health: Any) -> dict:
     """Bound the existing artifact-health disclosure without upgrading native clocks."""
     health = health if isinstance(health, dict) else {}
     status = health.get("status")
     stamp = health.get("as_of")
-    return {
+    result = {
         "status": status if status in ("missing", "malformed", "undated", "stale", "fresh") else "unknown",
         "as_of": stamp if isinstance(stamp, str) and 0 < len(stamp) <= 64
         and not any(ord(char) < 32 for char in stamp) else None,
         "stale": health.get("stale") if isinstance(health.get("stale"), bool) else None,
         "execution_authority": False,
     }
+    if health.get("source_mode") == "selected_generation":
+        result.update(source_mode="selected_generation", source_member=_PSL_NATIVE_MEMBER)
+        reason = health.get("source_reason")
+        if isinstance(reason, str) and reason in _PSL_NATIVE_REASONS:
+            result["source_reason"] = reason
+        receipt = health.get("native_receipt")
+        # Bound an additive disclosure, not a second source-admission scheme.
+        # Only the existing native owner above constructs the source receipt.
+        if (isinstance(receipt, dict) and set(receipt) == set(_PSL_RECEIPT_LIMITS)
+                and receipt.get("schema") == "sector_native_view.receipt.v1"
+                and receipt.get("source") == "macro.sector"
+                and receipt.get("qualification") in ("accepted", "stale", "degraded")
+                and all((key == "baseline_session" and value is None)
+                        or (isinstance(value, str) and 0 < len(value) <= _PSL_RECEIPT_LIMITS[key]
+                            and not any(ord(char) < 32 for char in value))
+                        for key, value in receipt.items())):
+            result["native_receipt"] = dict(receipt)
+    return result
 
 
 def _psl_unavailable(reason: str, health: Any = None) -> dict:
@@ -1786,17 +1901,17 @@ def sector_rotation(limit: int = 6, *, projection: str = "legacy",
             return _psl_window_unavailable("sector_selection_required")
         if not isinstance(sector, str) or sector not in _PSL_GROUP_IDS:
             return _psl_window_unavailable("invalid_sector_selection")
-        data, health = _read_vendor(_PSL_ARTIFACT)
+        data, health = _read_sector_central()
         return _sector_window_projection(data, health, sector)
     if sector is not _PSL_SECTOR_UNSET:
         return _psl_window_unavailable("incompatible_selector_combination")
     if projection not in ("legacy", "sector_dossiers"):
         return _psl_unavailable("unsupported_projection")
     if projection == "sector_dossiers":
-        data, health = _read_vendor(_PSL_ARTIFACT)
+        data, health = _read_sector_central()
         return _sector_dossier_projection(data, health)
     cap = min(_clamp_limit(limit, 6), 6)
-    data, health = _read_vendor("site/sectordata/sector_central.json")
+    data, health = _read_sector_central()
     if not isinstance(data, dict):
         data = {}
 
@@ -1811,7 +1926,7 @@ def sector_rotation(limit: int = 6, *, projection: str = "legacy",
         return [_rotation_row(row) for row in usable[:cap]]
 
     market = data.get("market") if isinstance(data.get("market"), dict) else {}
-    return {
+    packet = {
         "schema": "mastermind.portfolio_intelligence.sector_rotation/v1",
         "as_of": data.get("as_of"),
         "context_only": True,
@@ -1824,6 +1939,17 @@ def sector_rotation(limit: int = 6, *, projection: str = "legacy",
         "sectors": ranked(data.get("sectors")),
         "baskets": ranked(data.get("baskets")),
     }
+    if health.get("source_mode") == "selected_generation":
+        # The new native receipt must fit with the original legacy fields. Never
+        # let the generic serializer silently truncate this newly admitted path.
+        payload = json.dumps(packet, default=str, ensure_ascii=False)
+        if len(payload) > _PSL_MAX_BYTES or len(payload.encode("utf-8")) > _PSL_MAX_BYTES:
+            packet.update(as_of=None, sectors=[], baskets=[],
+                          market={key: None for key in packet["market"]},
+                          health={**_psl_health(health), "available": False,
+                                  "status": "unknown", "source_reason":
+                                  "native_legacy_transport_budget_exceeded"})
+    return packet
 
 
 def _project_mtf(value: Any) -> dict:

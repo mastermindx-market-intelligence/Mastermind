@@ -503,7 +503,7 @@ def test_read_pinned_ref_reads_from_real_repo_layout(tmp_path):
 def test_checkout_command_for_includes_ref_and_sparse_paths():
     command = rwe.checkout_command_for("deadbeef")
     assert "git checkout deadbeef" in command
-    assert "git sparse-checkout set engine lib" in command
+    assert "git sparse-checkout set engine lib scripts" in command
     assert "mastermindx-market-intelligence/macro" in command
 
 

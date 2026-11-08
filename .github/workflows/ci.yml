@@ -103,18 +103,19 @@ jobs:
           python-version: "3.12"
           cache: pip
       # Source-proximate web tests import app.deps through the real application.
-      # Supply the same immutable engine/lib source as the full-shard job;
+      # Supply the same immutable native-owner source as the full-shard job;
       # no runtime data, new credential policy or alternate dependency owner.
       - name: Checkout pinned Macro engine for source-proximate tests
         if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          ref: 91add9613ad29dcfb82ff75036dd6519cfc6c06f
           path: vendor/macro_src
           sparse-checkout: |
             engine
             lib
+            scripts
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - name: Install focused Python test dependencies
@@ -188,7 +189,9 @@ jobs:
 
       # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
       # A clean hosted runner lacks the local sibling checkout; pin exactly
-      # the importable Macro engine revision, not VPS-owned runtime data.
+      # the importable Macro revision, including native publisher/freshness owners.
+      # CI-only PSL dependency qualification: Macro PR 10780 at the exact ref below;
+      # this does not install runtime data or promote that upstream candidate to production.
       # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
       # and can currently read Macro only because Macro is public. When the
       # upstream repository becomes private, the owner must first install a
@@ -201,11 +204,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          ref: 91add9613ad29dcfb82ff75036dd6519cfc6c06f
           path: vendor/macro_src
           sparse-checkout: |
             engine
             lib
+            scripts
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
