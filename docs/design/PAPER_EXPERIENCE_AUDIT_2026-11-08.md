@@ -10,14 +10,14 @@ This map points to the editable designs and current continuation sections. All c
 | Review area | Native destination and visible improvement |
 | --- | --- |
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
-| Options Plan and Compare | [D08C comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0): C02 retains explicit illustrative units and now opens a scenario choice. C11–C15 add a neutral chooser, exact Higher/Lower change reviews, updated local draft with cleared payoff, and changed-draft refusal; native build mapping is on p15. |
+| Options Plan and Compare | [D08C comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0): C02 retains explicit illustrative units and now opens a scenario choice. C11–C15 add a neutral chooser, exact Higher/Lower change reviews, updated local draft with cleared payoff, and changed-draft refusal. C16–C18 provide the390px Dark EN choice → exact review → current-plan sequence; native build mapping is on p15. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
 | Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I/M `22CM-0` / `22SU-0` explain the historical source/calculation in EN dark and ZH light; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
 | Company navigation | [Existing family chooser](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1): 5ML keeps its complete family structure, with explicit44px Close/Lab target containers `22UE-0` / `22UH-0` around the original visuals. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
-| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): failed/pending/filter states now identify the Research index. [Research-list detail returns](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-5-0) add EN/ZH filing companions `7QG-0` / `7SY-0` with their actual list origin. |
+| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): failed/pending/filter states now identify the Research index. [Research-list detail returns](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-5-0) add EN/ZH filing companions `7QG-0` / `7SY-0` with their actual list origin. Current details and the new companions now distinguish numeric Edge index / 剩余边际指数 from the categorical stage. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
 | Analytical provenance | [Expectation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) qualifies missing units/selected examples; [Ontology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) distinguishes page comparison from answer evidence. |
 | Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
@@ -1184,3 +1184,70 @@ Root read complete before/after JSX for all ten details. Masking **only each sin
 The supplement **7VG-0**, inside content-driven wrapper **7XY-0**, now contains **7Y1-0** with the exact field/localization mapping. Owned introduction **7VJ-0** was clarified to distinguish retained command-origin layouts/returns from this numeric-label correction. The new note renders fully and the complete wrapper JSX was read back.
 
 The ten-label edit, owned-note updates and scoped **hub-edge-label-finish-01** returned **APPLIED_RESPONSE_OBSERVED** with no per-node errors. This closes the inspected p4 and newly added p5 label inconsistency only. It does not promote candidate_unqualified designs, change a source model or establish implemented UI behavior; held/source-only lanes remain untouched.
+
+
+## Options comparison: phone choice, exact review and updated-plan return
+
+The comparison continuation now has a complete **390px Dark EN** representation that starts and ends in the actual phone plan. Root added three editable companions on [Terminal p13](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0). Existing C04 and C09 remain unchanged.
+
+| State | Native root and placement | What it establishes |
+| --- | --- | --- |
+| **C16 · Choose entry scenario** | **243N-0**, x8902,y924;390px wide, minimum844px | All three entry alternatives are readable in one column, with equal card geometry and an explicit keep-baseline path. |
+| **C17 · Review higher entry** | **2478-0**, x10620,y0;390px full-scroll | Read-only exact per-leg changes, retained research and explicit local adoption/cancellation. |
+| **C18 · Higher-entry plan / Payoff cleared** | **24AK-0**, x4144,y924;390px full-scroll | The current phone plan after successful local adoption, with updated entry, original evidence and no obsolete numerical payoff. |
+
+C16 uses the existing C09 phone status shell and56px header geometry,16px gutters and358px useful width. Its three **120px minimum** cards are each one action: Baseline **2448-0**, Higher **244E-0**, Lower **244J-0**. They show5.20/5.40/5.00 for the600 Call while the610 Call remains2.00 USD/unit. The shared20 November2026 expiry, one-spread context and explicitly assumed100 shares per contract remain visible. The entire chooser, including48px Cancel **244P-0**, fits the844px specimen. Close **2440-0** is44×44.
+
+### Exact review and full retained research
+
+C17 is read-only. The long leg is **Buy1 · SPY ·20 Nov2026 ·600 Call**, entry **5.20 →5.40 USD/unit**; the short leg is **Sell1 · SPY ·20 Nov2026 ·610 Call**, entry **2.00 USD/unit ·unchanged**. Nothing is applied merely by selecting Higher or viewing the review.
+
+Expanded research disclosure **247Y-0** has a44px target and exposes the complete three existing fields:
+
+- Research question: **Does the evidence support upside through20 November?**
+- Invalidation: **Reassess if the supporting flow and structure evidence weakens.**
+- Research horizon: **Reassess by10 Nov2026.**
+
+The horizon is retained authored text, not a new date-only schema field, reminder or watch condition. It stays distinct from the20 November contract expiry. Merely opening/closing this disclosure changes no draft value. Any actual research edit invalidates the review under the same live-generation guard as a leg edit.
+
+The footer uses the existing exact phone geometry: **110px Cancel248D-0 +12px gap +236px Use in plan draft248F-0**, both48px high. Close **247L-0** remains44×44. C17 is explicitly named as a full-scroll canvas representation: its complete footer and research can be reviewed without pretending that all content fits inside the initial844px viewport.
+
+### Successful adoption clears the previous payoff
+
+C18 preserves the original phone status, Research plan header, SPY identity/navigation, exact-leg structure, **03 Nov15:58ET** evidence row and session/account-availability text. Native clones retain the SVG status icons.
+
+Only the long-entry text in the exact-leg group changes: **24BF-0 =5.40 USD/unit**; short entry **24BI-0 =2.00 USD/unit**. The new acknowledgement **24B7-0** identifies the adopted Higher entry. The old payoff group is wholly absent: no old curve, $320/$680 extrema,603.20 breakeven,3.20 debit or Values table remains as a current result.
+
+The replacement payoff panel **24BJ-0** states **Not calculated for these assumptions** and exposes a separate **Calculate expiry payoff24BN-0** action through the incumbent qualification path. It retains the requirement for verified contract terms and the unavailability of P/L after costs. Native evidence **24BQ-0** /Open **24BS-0** still carries the original timestamp; adopting an authored entry does not refresh its source.
+
+Complete retained research **24BT-0**, with44px disclosure **24BU-0**, remains visible in the full-scroll specimen. Its content and structure are exactly equal to the C17 research group after generated-ID normalization.
+
+### Actual phone origin, fresh re-entry and stale-review refusal
+
+The new native contract **24EJ-0** is appended inside the existing **23LJ-0** comparison continuation on [p15](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0). All earlier content remains intact.
+
+- Initial phone launch is **C04 Compare1PTY-0 →C16**. It does not borrow the desktop Choose trigger1RLS-0.
+- Cancel, Close and Escape apply nothing and restore the actual surviving phone Compare trigger and its scroll context. On first launch this is1PTY-0; after re-entry from C18 it is **24C7-0**. If that origin is no longer valid, use the current Plan heading through the same owner; never restore captured inputs over newer edits.
+- Use shows C18 **only after successful, revalidated local adoption**, then focuses or announces its updated-draft status. A stale or invalid attempt follows C15's refusal semantics in the same full-screen container. It must not navigate to success or clear a valid newer result.
+- **Compare again24C7-0** captures the current5.40/2.00 draft afresh. It must not display C16's older5.20 example as Current plan. Alternatives are recomputed/revalidated through the incumbent comparison path. **Edit24BC-0** similarly opens the existing editor with current values.
+- One full-screen surface replaces chooser/review. It does not stack overlays or send Dark EN users to the separate Light ZH C10 fixture. Lower-entry and changed-draft semantic variants reuse C13/C15 content and guards in this phone container; redundant cosmetic phone copies were not required to establish another behavior.
+
+The exact owner/editor/retained-selection/source/edit-generation guard remains binding for every edit, including invalid raw strings and `onEdit(null)`. An account/context change unmounts the former owner's review and data. Baseline means the captured current draft only while still valid; it is not a command to reset a newer draft.
+
+### Sources, proof and implementation boundary
+
+The source pins remain Macro **291f21aa8e9d757466412549a8d6537d889ab4d8** D08C INTERACTIONS/PRODUCT_AND_RETENTION/DATA_AND_BUILD and Terminal **f0af84bbd6c28c2f6477bd8ffc031903979023bd** draft/editor/payoff/host. Relevant source blobs include DATA_AND_BUILD **ce29e9f79ad292be4dd6c5677d9e6f5bd6a40024**, optionsPlanDraft.ts **1b02689501cd26226b61e7a5d3fa8f5868552f7b** and OptionsPlanPayoffPanel.tsx **fb46e15b98e8221beb402f5558651a943b3f981f**. The existing horizon remains a single-line authored string of up to160 code points.
+
+Current payoff-panel `onApply` calls Calculate and can POST; it is still **not** the proposed local-only adoption callback. These native controls do not authorize relabelling that callback, invent another state/persistence owner, or extend the draft schema. Same-owner local adoption needs its separately admitted continuation. No account Save, watch, quote refresh or automatic calculation follows from these designs.
+
+Verification is concrete:
+
+- All three final phone renders and the appended native build note were visually inspected. A first chooser render omitted its newly cloned status graphics; a subsequent exact-root read showed the preserved time/icons, without another edit.
+- Original **C04 remains byte-identical at15,570 JSX characters** and **C09 at17,240**.
+- Removing only the new24EJ contract reproduces the full prior23LJ content modulo whitespace; subsequent edits were confined to the five newly owned contract paragraphs for spacing/clarity.
+- Normalized C18 status/header/context/evidence/session subtrees are exactly equal to their original C04 sources. Masking only the long-entry div makes its full exact-leg subtree identical as well.
+- New full JSX sizes are C16 **10,708**, C17 **11,675**, C18 **16,023** characters. C18 has the correct5.40/2.00 values and no obsolete payoff values/curve.
+- Computed styles confirm390px roots, content-driven full-scroll height,44px Close/disclosure targets,120px choice cards and48px footer/calculation controls. Inventory grew **15→18**; each new board has its own free column or sits80px below its original, with no overlap.
+- All scoped edits and **options-phone-finish-01** returned **APPLIED_RESPONSE_OBSERVED** without per-node errors.
+
+This establishes editable phone-state and build-contract proof. Real focus restoration, scrolling/ARIA behavior, race handling, local callbacks and qualified calculation still require consumer implementation/proof. F01/D08C candidate qualifications, Plan#804 and D08D holds remain unchanged.
