@@ -324,7 +324,7 @@ match to the frozen public label. A differing label stays unavailable/conflictin
 Exactly one correlated physical session can yield the fingerprint of
 `[original_profile_id, native_agent_session_id]`; multiple IDs stay conflicting.
 
-Transport observation v2 also retains a digest and UTF-8 byte length of the
+Transport observation v2 introduced, and current v3 preserves, a digest and UTF-8 byte length of the
 actual adopted agent's runtime provider selector at each dispatch and each HTTP
 attempt. The `provider_client_check` field records selector equality at the
 qualified original client-factory return; it does not attest the factory's
@@ -345,7 +345,7 @@ conflicting. Current transport producer and reader must be released together.
 Provider request coverage remains partial. Response-reported labels do not prove
 the serving model. Explicit wire sampling digests remain in the trace and are not
 relabeled as complete effective sampling. Network-origin hashes are not EVAL
-destination-string digests. Unobserved auth, effective environment,
+destination-string digests. Authentication beyond the bounded mechanism below, effective environment,
 process/workspace freshness, capability/source/network coverage, effects and cleanup stay missing or
 unknown. This publisher therefore creates invalid v3 evidence of attempts,
 never a valid Harness2 trial or learning promotion.
@@ -580,3 +580,75 @@ values and every original request/content join under the unchanged16KiB budget.
 A separate valid longer-identifier fixture exercises actual reservation failure
 and requires incomplete/invalid evidence. Production limits, reservation rules,
 provider conflict semantics and publisher validity checks remain unchanged.
+
+
+## Original authentication-mechanism observation
+
+Transport observation **v3** adds only a closed `auth_client_check` status on each
+dispatch and `auth_mechanism` on each HTTP attempt. The existing credential owner
+supplies this optional contribution for the selected mmmeta/Z.ai EVAL route.
+It makes no additional credential read, constructs no client, and owns no
+credential store, refresh process or authentication policy.
+
+The qualified original LOCAL `route_runtime` path resolves the exact rendered
+named-provider entry. Both native resolver aliases are observed, including the
+direct custom-module import used by this path. The witness requires the current
+original admission, the actual frozen configuration, an absent explicit key,
+and the original direct environment selection consumed by that resolver.
+An inline key that takes precedence, a nonempty scoped override, a pool or an
+unobserved callable cannot be inferred from the presence of a key environment
+name. An empty single-profile overlay may qualify when the pinned secret owner
+actually falls through to its original direct read. A second resolution cannot
+replace the original turn's witness.
+
+Private equality joins that resolution to the route passed to the original
+agent resolver and to the route actually adopted after original callback wiring.
+The same memory claim, LOCAL source, admission, runner, generation and adopted
+agent remain required. Legitimate native dictionary copies do not need object
+identity; the relevant selected route fields and private credential must match.
+Cached agents need a fresh observation in the current admission.
+
+The observer then follows the pinned request-client checkout. It checks the
+actual copied kwargs before and after checkout, a newly returned client when
+one is created, or the actual cached client returned by the current checkout.
+The original request factory, concrete SDK client and qualified HTTPX client
+must join. At **every retained original HTTP-send boundary**, the current SDK
+key and exactly one Authorization value must privately match the observed key.
+A later restored key cannot erase an earlier conflict. Primary/shared client
+construction outside that dispatch supplies no witness and retains its original
+factory behavior.
+
+Private key, route, client and capture references are discarded at the original
+scope/dispatch boundary. Retained records contain no credential or header value,
+credential digest or length, environment name, client pointer, account identity,
+permission or exact realm identifier. Reference release is not a claim of
+immutable-string zeroization. An optional observer or cleanup failure preserves
+the original native return/exception and makes its evidence unavailable.
+Hook installation rechecks the captured native owners before mutation and
+retains an intervening binding.
+
+Only after the existing complete request/content/delivery joins may the EVAL
+publisher fill `execution.auth_realm_class="API_KEY"`: the frozen configuration
+must select that public class, every dispatch must match, and every retained
+attempt must carry API_KEY. This is a broad authentication mechanism. It cannot
+attest READ_ONLY, account entitlement, exact realm/generation, remote acceptance
+or delivery. A differently selected class stays conflicting. Missing evidence,
+changed ownership, unfinished spans, errors and metadata loss remain unavailable.
+
+Historical transport v1 and v2 stay closed and retain their original fields;
+neither acquires an authentication witness from today's process. In particular,
+v2 preserves its original provider projection. The shared **16 KiB** budget,
+original private result and publisher/store carriers are unchanged. Current
+native evidence still lacks complete effect, cleanup and other producer facts;
+this addition does not create a valid trial or learning promotion.
+
+Qualification executes pinned Hermes resolver, secret-selection, client-cache
+and creation bodies with synthetic credentials, the actual SDK and an in-process
+HTTPX transport. Source fixtures retain exact upstream commit/blob/hash
+provenance and the existing MIT notice. A declared SDK-retry fixture exercises
+per-attempt change/restore behavior; it does not change the native setting of
+zero SDK retries. The complete three-attempt provider fixture uses compact
+original admission, physical-session, turn and request identities consistently
+at their real boundaries. The distinct pressure fixture keeps ordinary
+identities and actual reservation loss; no retained record is rewritten. These are source tests, not installed credential or provider
+acceptance.

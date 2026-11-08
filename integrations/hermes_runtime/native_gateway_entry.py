@@ -586,6 +586,7 @@ def run(launch, argv: list[str]) -> int:
         if "evaluation_inputs" in launch.recipe:
             from .native_eval_inputs import NativeEvalInputOwner
             request_observation.evaluation_owner = NativeEvalInputOwner(launch, profile, request_observation)
+            request_observation.transport_installation.bind_credentials(vendor, profile)
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,
