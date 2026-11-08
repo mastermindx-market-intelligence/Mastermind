@@ -130,7 +130,7 @@ def test_task_first_direct_execution_is_visible_in_project_and_native_briefs():
     assert "9A. TASK FIRST: operational fix -> authorized host/service direct + live proof" in block
     assert "no PR absent source change" in block
     assert "21. Direct principal implementation/test/repair needs no failed Fabric attempt." in block
-    assert "without a failed Fabric attempt" in block
+    assert "Delegate independent leaves if faster end-to-end" in block
     assert "No extra review/handoff ceremony" in block
     assert "No denied-effect/EFFECT_UNKNOWN carrier swap" in block
     assert "Operational repair: use actually authorized host/service tools" in native
