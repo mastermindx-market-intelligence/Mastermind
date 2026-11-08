@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -204,6 +205,24 @@ def rewrite_receipt(out, mod, mutate):
     path.write_bytes(mod._canonical(receipt))
     path.chmod(0o444)
     return receipt
+
+
+def test_root_artifact_qualifies_under_restrictive_installer_umask(bundle, source, tmp_path):
+    # Production install.sh uses umask 077. The prepared root-owned package
+    # must still be mode 0755 and pass the exact incumbent artifact qualifier.
+    mod, _assets, sha, tree = bundle
+    output = tmp_path / "restricted-umask-root"
+    prior = os.umask(0o077)
+    try:
+        mod.prepare(source_repo=source[0], expected_sha=sha,
+                    web_client_id="test-public-client-id",
+                    output=output, build_user="test",
+                    node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"))
+    finally:
+        os.umask(prior)
+    assert output.stat().st_mode & 0o777 == 0o755
+    assert mod.qualify(output, expected_sha=sha, tree_sha=tree,
+                       source_repo=source[0]).digest
 
 
 @pytest.mark.parametrize("bundle", [False, "private_entry"], indirect=True)

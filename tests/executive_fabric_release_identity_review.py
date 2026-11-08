@@ -785,8 +785,8 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
 REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
+    'sha256': '73d00ddf64d29d17e0a677a87ee43cd4febfc9310f8127e9a6533e42ea6a28e3',
+    'sites': ((1675, 26, 31, 'int', '0o700'),),
 }
 
 
