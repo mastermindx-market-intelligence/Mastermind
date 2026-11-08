@@ -1,0 +1,676 @@
+{
+  "schema": "PAPER_STYLE_TOOL_REPAIR_PROGRESS_V1",
+  "pr": 2326,
+  "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2326",
+  "head": "89596672caa46600ace18fbb52d3a3a92e919522",
+  "sourceBase": "53c490917cf4289a66d3f2727778ee4b38bb1ed9",
+  "sourceReadbackVerified": true,
+  "change": "One exact descriptor profile for constraint-free string/number union, preserving all other schema/annotation/guard checks.",
+  "validation": {
+    "localUnittestPass": 36,
+    "diffCheck": "PASS",
+    "headHostedChecks": {
+      "success": 9,
+      "skipped": 1
+    },
+    "nativeInstalledProof": "NOT_INSTALLED"
+  },
+  "nativeRelease": {
+    "intent": {
+      "operation": "native_protected_auto_merge_request",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 2326,
+      "head": "89596672caa46600ace18fbb52d3a3a92e919522",
+      "actor": "mastermindxryan",
+      "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+      "command": "/opt/homebrew/bin/gh pr merge 2326 --repo mastermindx-market-intelligence/Mastermind --auto --squash --match-head-commit 89596672caa46600ace18fbb52d3a3a92e919522",
+      "sourceComplete": true,
+      "localTests": 36,
+      "hostedHeadChecks": "9SUCCESS_1SKIPPED",
+      "queueRuleset": 22852988,
+      "reviewClaim": "NO_INDEPENDENT_APPROVAL_CLAIMED",
+      "state": "QUEUED_AWAITING_INTEGRATED_CHECKS",
+      "queueEntryId": "MQE_lQDOTotz3c8AAAABNtdUUM4ABAiKzgPR2CA",
+      "queuePositionAtRead": 3
+    },
+    "response": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Process started with PID 89778 (shell: /bin/zsh)\nInitial output:\n! The merge strategy for master is set by the merge queue\n"
+        },
+        {
+          "type": "text",
+          "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+        }
+      ],
+      "structuredContent": null,
+      "isError": false
+    },
+    "completion": {
+      "content": [
+        {
+          "type": "text",
+          "text": "[Reading 2 new lines (total: 2 lines)]\n\n! The merge strategy for master is set by the merge queue\n\n✅ Process completed with exit code 0 (runtime: 1.77s)"
+        },
+        {
+          "type": "text",
+          "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+        }
+      ],
+      "structuredContent": null,
+      "isError": false
+    },
+    "readback": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Process started with PID 94805 (shell: /bin/zsh)\nInitial output:\n{\"data\":{\"repository\":{\"pullRequest\":{\"number\":2326,\"state\":\"OPEN\",\"isDraft\":false,\"headRefOid\":\"89596672caa46600ace18fbb52d3a3a92e919522\",\"baseRefName\":\"master\",\"merged\":false,\"mergedAt\":null,\"mergeCommit\":null,\"autoMergeRequest\":null,\"mergeQueueEntry\":{\"id\":\"MQE_lQDOTotz3c8AAAABNtdUUM4ABAiKzgPR2CA\",\"state\":\"AWAITING_CHECKS\",\"position\":3}}}}}"
+        },
+        {
+          "type": "text",
+          "text": "\n[executed on device: m2studio (3f5ce987-e3eb-40a3-af9f-4b0ae54919cc)]"
+        }
+      ],
+      "structuredContent": null,
+      "isError": false
+    },
+    "ruleset": {
+      "id": 22852988,
+      "name": "Mastermind Default Branch Merge Queue",
+      "target": "branch",
+      "source_type": "Repository",
+      "source": "mastermindx-market-intelligence/Mastermind",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "~DEFAULT_BRANCH"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "merge_queue",
+          "parameters": {
+            "merge_method": "SQUASH",
+            "max_entries_to_build": 8,
+            "min_entries_to_merge": 1,
+            "max_entries_to_merge": 4,
+            "min_entries_to_merge_wait_minutes": 0,
+            "grouping_strategy": "ALLGREEN",
+            "check_response_timeout_minutes": 180
+          }
+        },
+        {
+          "type": "code_scanning",
+          "parameters": {
+            "code_scanning_tools": [
+              {
+                "tool": "CodeQL",
+                "security_alerts_threshold": "all",
+                "alerts_threshold": "all"
+              }
+            ]
+          }
+        }
+      ],
+      "node_id": "RRS_lACqUmVwb3NpdG9yec5Oi3PdzgFctXw",
+      "created_at": "2026-09-10T20:20:57.133-05:00",
+      "updated_at": "2026-11-08T08:23:34.316-06:00",
+      "bypass_actors": [],
+      "current_user_can_bypass": "never",
+      "_links": {
+        "self": {
+          "href": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/rulesets/22852988"
+        },
+        "html": {
+          "href": "https://github.com/mastermindx-market-intelligence/Mastermind/rules/22852988"
+        }
+      }
+    }
+  },
+  "runtimeDiagnosis": {
+    "primaryDirectIncumbent": {
+      "schema": "mastermind.paper_primary_direct_incumbent_readonly.v1",
+      "sourcePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+      "scope": "Read-only process, launchd and exact observed filesystem metadata on the two already connected Macs; no Paper operations, runtime writes, install/stage/restart/selector actions, credential reads or environment output.",
+      "status": "LIVE_DIRECT_PROCESSES_IDENTIFIED_BUT_CONFIGURED_BUNDLES_AND_SDK_ABSENT",
+      "conclusion": "Six live direct Paper seats run on M2 and match existing on-disk LaunchAgent labels/arguments. Their configured bundle base and SDK interpreter paths are currently absent. Consequently no current INSTALLATION/BINDING receipt, source digest or complete source-to-process qualification can be established at those configured paths. No matching direct service was observed on M1. Which M2 seat is the root's current primary app remains unproven without the current app's exact existing binding/diagnostic.",
+      "hosts": {
+        "m2": {
+          "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+          "uid": 501,
+          "services": [
+            {
+              "seat": "ryan",
+              "label": "com.mastermind.paper-direct.business.ryan",
+              "state": "active",
+              "launchPid": 93634,
+              "tunnelPid": 94078,
+              "servePid": 94095,
+              "processInterpreter": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+              "configuredInterpreter": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "bundleRoot": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/ryan/paper-v20-merged-e3ee36e-20261102",
+              "sourcePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/ryan/paper-v20-merged-e3ee36e-20261102/runtime/direct_service.py",
+              "profilePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/ryan/paper-v20-merged-e3ee36e-20261102/connection/profile.yaml",
+              "tunnelExecutable": "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.ryan.plist",
+              "plistSha256": "dd7b8cbfeaabcd99d26b8b26f518b710d5463afef2b736f4635524d3aca8f867",
+              "plistMetadata": {
+                "bytes": 1729,
+                "isSymlink": false,
+                "mode": "0o600",
+                "path": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.ryan.plist",
+                "uid": 501
+              },
+              "safeIdentityArgumentsAgree": true,
+              "installationReceipt": "NOT_FOUND_AT_PROCESS_CONFIGURED_BUNDLE",
+              "sourceDigest": "UNVERIFIED",
+              "bindingReceipt": "UNREADABLE_BECAUSE_CONFIGURED_BUNDLE_ROOT_ABSENT",
+              "chatgptCurrentAppMapping": "UNPROVEN"
+            },
+            {
+              "seat": "c3",
+              "label": "com.mastermind.paper-direct.business.c3",
+              "state": "active",
+              "launchPid": 48834,
+              "tunnelPid": 49092,
+              "servePid": 49115,
+              "processInterpreter": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+              "configuredInterpreter": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "bundleRoot": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c3/paper-v20-merged-e3ee36e-20261102",
+              "sourcePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c3/paper-v20-merged-e3ee36e-20261102/runtime/direct_service.py",
+              "profilePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c3/paper-v20-merged-e3ee36e-20261102/connection/profile.yaml",
+              "tunnelExecutable": "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c3.plist",
+              "plistSha256": "c98781d1f6f0882da43339858d080813be15ea1421250576b3f4a0e4da2916e4",
+              "plistMetadata": {
+                "bytes": 1717,
+                "isSymlink": false,
+                "mode": "0o600",
+                "path": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c3.plist",
+                "uid": 501
+              },
+              "safeIdentityArgumentsAgree": true,
+              "installationReceipt": "NOT_FOUND_AT_PROCESS_CONFIGURED_BUNDLE",
+              "sourceDigest": "UNVERIFIED",
+              "bindingReceipt": "UNREADABLE_BECAUSE_CONFIGURED_BUNDLE_ROOT_ABSENT",
+              "chatgptCurrentAppMapping": "UNPROVEN"
+            },
+            {
+              "seat": "c4",
+              "label": "com.mastermind.paper-direct.business.c4",
+              "state": "active",
+              "launchPid": 13309,
+              "tunnelPid": 13390,
+              "servePid": 13394,
+              "processInterpreter": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+              "configuredInterpreter": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "bundleRoot": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102",
+              "sourcePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102/runtime/direct_service.py",
+              "profilePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102/connection/profile.yaml",
+              "tunnelExecutable": "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c4.plist",
+              "plistSha256": "8c985894abff4ce55098b1084e2f6646b633ac3b6e0cb0539c90c4049a15122a",
+              "plistMetadata": {
+                "bytes": 1717,
+                "isSymlink": false,
+                "mode": "0o600",
+                "path": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c4.plist",
+                "uid": 501
+              },
+              "safeIdentityArgumentsAgree": true,
+              "installationReceipt": "NOT_FOUND_AT_PROCESS_CONFIGURED_BUNDLE",
+              "sourceDigest": "UNVERIFIED",
+              "bindingReceipt": "UNREADABLE_BECAUSE_CONFIGURED_BUNDLE_ROOT_ABSENT",
+              "chatgptCurrentAppMapping": "UNPROVEN"
+            },
+            {
+              "seat": "c1",
+              "label": "com.mastermind.paper-direct.business.c1",
+              "state": "active",
+              "launchPid": 10657,
+              "tunnelPid": 10970,
+              "servePid": 10986,
+              "processInterpreter": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+              "configuredInterpreter": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "bundleRoot": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c1/paper-v20-merged-e3ee36e-20261102",
+              "sourcePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c1/paper-v20-merged-e3ee36e-20261102/runtime/direct_service.py",
+              "profilePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c1/paper-v20-merged-e3ee36e-20261102/connection/profile.yaml",
+              "tunnelExecutable": "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c1.plist",
+              "plistSha256": "976c2d71be62e31bdcd1fe964a2ba576d94ddefb1d36182db9843e0ab2deb136",
+              "plistMetadata": {
+                "bytes": 1717,
+                "isSymlink": false,
+                "mode": "0o600",
+                "path": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c1.plist",
+                "uid": 501
+              },
+              "safeIdentityArgumentsAgree": true,
+              "installationReceipt": "NOT_FOUND_AT_PROCESS_CONFIGURED_BUNDLE",
+              "sourceDigest": "UNVERIFIED",
+              "bindingReceipt": "UNREADABLE_BECAUSE_CONFIGURED_BUNDLE_ROOT_ABSENT",
+              "chatgptCurrentAppMapping": "UNPROVEN"
+            },
+            {
+              "seat": "chris-admin",
+              "label": "com.mastermind.paper-direct.business.chris-admin",
+              "state": "active",
+              "launchPid": 40937,
+              "tunnelPid": 40988,
+              "servePid": 41018,
+              "processInterpreter": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+              "configuredInterpreter": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "bundleRoot": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/chris-admin/paper-v20-merged-e3ee36e-20261102",
+              "sourcePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/chris-admin/paper-v20-merged-e3ee36e-20261102/runtime/direct_service.py",
+              "profilePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/chris-admin/paper-v20-merged-e3ee36e-20261102/connection/profile.yaml",
+              "tunnelExecutable": "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.chris-admin.plist",
+              "plistSha256": "a774423a7ce4948921865d81883fab082ddd5b3e98fcc29a7bcd77ff9cfaadc3",
+              "plistMetadata": {
+                "bytes": 1771,
+                "isSymlink": false,
+                "mode": "0o644",
+                "path": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.chris-admin.plist",
+                "uid": 501
+              },
+              "safeIdentityArgumentsAgree": true,
+              "installationReceipt": "NOT_FOUND_AT_PROCESS_CONFIGURED_BUNDLE",
+              "sourceDigest": "UNVERIFIED",
+              "bindingReceipt": "UNREADABLE_BECAUSE_CONFIGURED_BUNDLE_ROOT_ABSENT",
+              "chatgptCurrentAppMapping": "UNPROVEN"
+            },
+            {
+              "seat": "c2",
+              "label": "com.mastermind.paper-direct.business.c2",
+              "state": "active",
+              "launchPid": 41623,
+              "tunnelPid": 41679,
+              "servePid": 41685,
+              "processInterpreter": "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+              "configuredInterpreter": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "bundleRoot": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c2/paper-v21-merged-9f65957e-20261103",
+              "sourcePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c2/paper-v21-merged-9f65957e-20261103/runtime/direct_service.py",
+              "profilePath": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c2/paper-v21-merged-9f65957e-20261103/connection/profile.yaml",
+              "tunnelExecutable": "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
+              "plistPath": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c2.plist",
+              "plistSha256": "223e87fbc2c81e5236763f168be04af4aca7d5623e59c694b2afad7832d5abfa",
+              "plistMetadata": {
+                "bytes": 1722,
+                "isSymlink": false,
+                "mode": "0o600",
+                "path": "/Users/chriswong/Library/LaunchAgents/com.mastermind.paper-direct.business.c2.plist",
+                "uid": 501
+              },
+              "safeIdentityArgumentsAgree": true,
+              "installationReceipt": "NOT_FOUND_AT_PROCESS_CONFIGURED_BUNDLE",
+              "sourceDigest": "UNVERIFIED",
+              "bindingReceipt": "UNREADABLE_BECAUSE_CONFIGURED_BUNDLE_ROOT_ABSENT",
+              "chatgptCurrentAppMapping": "UNPROVEN"
+            }
+          ],
+          "filesystemObservations": [
+            {
+              "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats",
+              "result": "Native list_directory: NOT_FOUND"
+            },
+            {
+              "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102",
+              "result": "Native list_directory: NOT_FOUND"
+            },
+            {
+              "path": "/Users/chriswong/.local/share/mastermind-paper",
+              "result": "Native depth=1 listing shows runtime only"
+            },
+            {
+              "path": "/Users/chriswong/.local/share/mastermind-paper/direct-business-sdk-20260926/bin/python",
+              "result": "Native get_file_info: ENOENT"
+            }
+          ],
+          "installationReadAttempts": [
+            {
+              "errorCode": null,
+              "errorType": "FileNotFoundError",
+              "root": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c1/paper-v20-merged-e3ee36e-20261102"
+            },
+            {
+              "errorCode": null,
+              "errorType": "FileNotFoundError",
+              "root": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c4/paper-v20-merged-e3ee36e-20261102"
+            },
+            {
+              "errorCode": null,
+              "errorType": "FileNotFoundError",
+              "root": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/chris-admin/paper-v20-merged-e3ee36e-20261102"
+            },
+            {
+              "errorCode": null,
+              "errorType": "FileNotFoundError",
+              "root": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c2/paper-v21-merged-9f65957e-20261103"
+            },
+            {
+              "errorCode": null,
+              "errorType": "FileNotFoundError",
+              "root": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/c3/paper-v20-merged-e3ee36e-20261102"
+            },
+            {
+              "errorCode": null,
+              "errorType": "FileNotFoundError",
+              "root": "/Users/chriswong/.local/share/mastermind-paper/direct-business-seats/ryan/paper-v20-merged-e3ee36e-20261102"
+            }
+          ],
+          "interpretation": "These are observed active-process/configured-path discrepancies. Cause of missing directories and bytes originally loaded are unproven. A root directory name containing v20/v21 or a source prefix is provenance text, not verified bridge identity."
+        },
+        "m1": {
+          "deviceId": "37db60bd-f84d-4521-ae9e-47c575d9ba86",
+          "uid": 501,
+          "psReturnCode": 0,
+          "launchctlReturnCode": 0,
+          "matchingDirectServices": 0,
+          "matchingTransports": 0,
+          "matchingLaunchdLabels": 0,
+          "scopeLimit": "Current all-process metadata and current GUI user launchd domain only; no claim about other hosts or inactive archived installations."
+        }
+      },
+      "custody": {
+        "rootRetainsSolePaperWriter": true,
+        "legacyStudioNotSubstituted": true,
+        "historical1409Denial": "Preserved unreplayed; original exact tuple still unavailable, no asserted disjointness.",
+        "permissionDenialObserved": false,
+        "unknownPaperEffectCreated": false,
+        "doNotInfer": [
+          "Do not identify the primary app as C4 solely from branch naming or presence of a C4 daemon.",
+          "Do not treat active launchd state as current source/bundle integrity.",
+          "Do not call filesystem absence an account permission denial.",
+          "Do not stop/restart these live services to test the missing-path hypothesis.",
+          "Do not rebuild or relabel an old bundle from its path basename."
+        ]
+      },
+      "exactNextEvidence": [
+        "Use an already available current app execution_binding/service_ref, transport_diagnostic or exact existing app/tunnel owner record to map the carrier to one of these incumbent seats. No new Paper call was made by this child.",
+        "Recover the chosen consumer's exact original INSTALLATION/BINDING receipt and backing immutable bytes through known canonical artifact/source locators, or document their proven absence; avoid a broad filesystem scan.",
+        "Only after that mapping and preimage recovery can the root prepare a concrete same-seat release/cutover through the existing owner. Current findings do not create a generic Chairman gate.",
+        "Source-profile fix and ordinary disjoint Paper edits remain independent of this runtime discrepancy."
+      ],
+      "helperProcesses": [
+        {
+          "name": "m2_locator",
+          "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+          "pid": 42284,
+          "completion": "Process completed with exit code 0 (runtime: 0.63s)"
+        },
+        {
+          "name": "m1_locator",
+          "deviceId": "37db60bd-f84d-4521-ae9e-47c575d9ba86",
+          "pid": 55448,
+          "completion": "Process completed with exit code 0 (runtime: 0.16s)"
+        },
+        {
+          "name": "m2_installations",
+          "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+          "pid": 45317,
+          "completion": "Process completed with exit code 0 (runtime: 0.06s)"
+        },
+        {
+          "name": "m2_launchd",
+          "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+          "pid": 48726,
+          "completion": "Process completed with exit code 0 (runtime: 0.09s)"
+        },
+        {
+          "name": "m2_c4_identity",
+          "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+          "pid": 50156,
+          "completion": "Process completed with exit code 0 (runtime: 0.08s)"
+        },
+        {
+          "name": "m2_loaded_identity",
+          "deviceId": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+          "pid": 51203,
+          "completion": "Process completed with exit code 0 (runtime: 0.12s)"
+        }
+      ],
+      "nativeEffects": {
+        "runtimeWrites": 0,
+        "PaperCalls": 0,
+        "serviceChanges": 0,
+        "credentialReads": 0,
+        "allDiagnosticProcessesCompleted": true
+      },
+      "limitations": [
+        "No INSTALLATION.json source/SDK hash was verified for these direct bundles.",
+        "No BINDING.json or tunnel ID was recovered.",
+        "No proof that any daemon belongs to the root's current ChatGPT app was established.",
+        "No claim of healthy restart or reconnect is made."
+      ],
+      "sourceRefs": [
+        "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/direct_service.py#L189-L244",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/direct_service.py#L327-L422",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DIRECT_CHATGPT.md#L175-L190"
+      ]
+    },
+    "successorRoute": {
+      "schema": "mastermind.paper_update_styles_successor_route_advisory.v1",
+      "sourcePin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+      "scope": "Read-only source/cached-evidence reasoning. No host processes, staging, selectors, lifecycle actions, Paper calls, source mutations or held-tool attempts performed.",
+      "conclusion": {
+        "sourceRepair": "AUTHORIZED_ROUTINE_SOURCE_WORK",
+        "currentLegacyV20ToNewProfileAction": "NOT_IMPLEMENTED_IN_PINNED_INSTALLER",
+        "currentPrimaryDirectAppConsumer": "EXACT_INSTALLED_SEAT_AND_BUNDLE_NOT_ESTABLISHED",
+        "chairmanReservedControl": "NOT_ESTABLISHED_BY_RECOVERED_SOURCE",
+        "decision": "Prepare the narrow source/profile fix and owning tests now. Preserve original denial/effect identities. A later exact same-seat release may be an ordinary qualified release under current mission authority, but current installation eligibility is not proved and version/admitted-seat membership alone is insufficient.",
+        "noBlanketGate": "The isolated #1409 staging refusal is action-local. Its incomplete recovered tuple is not a blanket prohibition on future source work or all installations.",
+        "noImpliedRelease": "A new generation label, a protected source merge, and an already admitted seat do not alone authorize replay, activation or a held native update_styles invocation."
+      },
+      "historicDenial": {
+        "knownAction": "Isolated v12 staging; pre-execution denial",
+        "knownPreservation": "Unreplayed; adding v22 source did not authorize another staging attempt under a new name/carrier.",
+        "exactTuple": {
+          "tool": null,
+          "caller": null,
+          "path": null,
+          "payloadOrArgv": null,
+          "denialReason": null
+        },
+        "exactTupleStatus": "NOT_RECOVERED_BY_BOUNDED_PRIMARY_SOURCE_READS",
+        "sources": [
+          "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1409#issuecomment-6664056923",
+          "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1409#issuecomment-6664428069",
+          "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DIRECT_CHATGPT.md#L386-L414"
+        ],
+        "interpretation": "Do not represent the unknown tuple as a universal installation denial. Equally do not assert that a particular proposed staging is disjoint solely because it has a different generation name. Resolve overlap at the concrete effect boundary using the original refusal when recoverable and the accepted existing installer/consumer identity; keep source preparation independent."
+      },
+      "observedInstallationEvidence": {
+        "artifact": "paper_installed_runtime_readonly_diagnosis.json",
+        "sha256": "33908148c7ad7b63c28f4a3500e6330dd84c6d104a7fa0e6c6ac51845923c078",
+        "m2": {
+          "account": "chatgpt4",
+          "generation": "v20",
+          "manifestSha256": "993ba97789d4c463f9854f5feff1ef3e4f55d08177249eca887d7c2864bb30d9",
+          "configSha256": "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df",
+          "guardedStatus": "CONNECTED",
+          "updateStyles": "edit_held_schema"
+        },
+        "m1": {
+          "account": "chrisadmin",
+          "generation": "v20",
+          "manifestSha256": "601b838e8e6810a3c20c9b0d41a4b02e444673a3c4e46ac025a89aedbe443b56",
+          "configSha256": "374f20e46a332037371ab27e0e822e3385be9b41cb1223b915afdebabfb79206",
+          "guardedStatus": "UPSTREAM_HTTP_ERROR; retry_allowed=false; not retried"
+        },
+        "runtimeBridgeSha256": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+        "limitations": [
+          "Selected config/runtime identity verified, but complete current gateway module/dependency/plist seal and loaded-service identity were not verified.",
+          "Legacy M1/M2 receipt identities do not establish which exact bundle/seat backs the root's primary direct Paper app.",
+          "No prior v20 admission is a v20-to-new-generation admission."
+        ]
+      },
+      "minimumSourceRepair": {
+        "profile": "Add a second exact reviewed update_styles descriptor for the observed primitive type union. Preserve current getter-first and tool-scoped admission, other held tools, strict annotations, exact input validation and no-replay semantics.",
+        "prohibitedShortcuts": [
+          "Do not globally weaken schema comparison.",
+          "Do not use the test-only custom catalog pin as runtime admission.",
+          "Do not overwrite historical generation source/digests.",
+          "Do not select or invoke a currently held writer."
+        ],
+        "files": [
+          {
+            "path": "integrations/paper_desktop/bridge.py",
+            "role": "Exact additional reviewed profile; pinned blob fa74470154925e15abf33cb21747ed846ef30584."
+          },
+          {
+            "path": "tests/test_paper_tool_scoped_compatibility.py",
+            "role": "Owning positive/negative profile, annotation, unexpected argument and drift tests; pinned blob 05cf0617c96ec0739c8683bde914d46787daa1c3."
+          },
+          {
+            "path": "integrations/paper_desktop/runtime_stage.py",
+            "role": "For the immutable legacy runtime route, add an unused generation with exact final source digest. Preserve all v2-v22 entries."
+          },
+          {
+            "path": "tests/test_paper_runtime_stage.py",
+            "role": "Exact new generation/digest and no-overwrite/receipt verification; pinned blob c804f7571b7ae56dd1863706a033d8cc8305ce96."
+          },
+          {
+            "path": "docs/PAPER_DIRECT_CHATGPT.md",
+            "role": "Record source readiness separately from exact installation and native acceptance."
+          },
+          {
+            "path": "docs/PAPER_DESIGN_INTEGRATION.md",
+            "role": "Document only the chosen existing consumer/installer route and genuine boundaries."
+          }
+        ],
+        "additionalOnlyIfLegacyConsumerChosen": [
+          {
+            "path": "integrations/studio_direct_mcp/private_service.py",
+            "role": "Add exact observed v20 successor admission and target-runtime verifier in the existing paper-runtime-upgrade owner; reuse _apply_paper_selection and original lifecycle owner."
+          },
+          {
+            "path": "integrations/studio_direct_mcp/private_service_test.py",
+            "role": "Owning tests for exact predecessor/target, full seal, same non-Paper config/plist, stale CAS, loaded service, concurrent drift, rollback and EFFECT_UNKNOWN."
+          }
+        ],
+        "retainUnchangedUnlessConcreteNeed": [
+          {
+            "path": "integrations/studio_direct_mcp/paper_v20_fleet_cohorts.py",
+            "reason": "Frozen historical v10/v12-to-v20 cohort; its byte hash is part of admission. No need to repurpose it into an arbitrary successor registry."
+          },
+          {
+            "path": "integrations/paper_desktop/direct_service.py",
+            "reason": "Existing generic immutable direct bundle machinery already copies reviewed source; profile change alone does not require a new bundle owner."
+          }
+        ]
+      },
+      "routes": {
+        "primaryDirectApp": {
+          "owner": "integrations/paper_desktop/direct_service.py plus actual existing same-seat host service owner",
+          "existingActions": [
+            "stage",
+            "verify",
+            "probe",
+            "bind",
+            "doctor",
+            "run",
+            "launch",
+            "serve"
+          ],
+          "stagePredicates": [
+            "Reviewed immutable exact source revision; destination must not exist.",
+            "Exact same-seat identity/grants; private no-symlink paths and immutable source/binary hashes.",
+            "Selected Python/tunnel binary and pinned SDK verified; receipt remains STAGED_NOT_ENROLLED."
+          ],
+          "preflight": "verify then probe gives LOCAL_STDIO_PROVEN with paper_called=false and production_acceptance=false. bind retains existing exact tunnel/key reference and refuses BINDING_EXISTS; doctor verifies network readiness, not app acceptance.",
+          "activationBoundary": "No generic incumbent-service replace/cutover command is exposed by direct_service. Use only the actual existing same-seat service owner and actual host grants after its qualified release sequence is established; do not overwrite an incumbent plist or launch a duplicate/manual tunnel client.",
+          "neededCurrentEvidence": [
+            "Exact current direct-app INSTALLATION/BINDING/source-to-process/seat identity.",
+            "Actual existing same-label service owner and qualified replacement operation.",
+            "No in-flight or unresolved effect at the concrete service cutover.",
+            "Whether existing action snapshot actually needs refresh; no new app/tunnel or new credential enrollment by assumption."
+          ],
+          "chairmanBoundary": "Not automatically reserved. Current routine recovery law can cover a qualified same-seat ordinary release; an actually missing admin credential, service permission, human-only refresh/consent, explicit denial or outside-scope decision remains its own concrete boundary."
+        },
+        "legacyStudio": {
+          "owner": "integrations/studio_direct_mcp/private_service.py::cmd_paper_runtime_upgrade",
+          "currentAdmissions": [
+            "Exact C2/C4 original v10 predecessors to v12.",
+            "Exact C2 Personal sealed v12 predecessor to v20.",
+            "Exact M1 chrisadmin frozen v5 predecessor to v20.",
+            "Eight frozen M2 v10/v12 cohorts and named accepted predecessor variants to v20."
+          ],
+          "currentLimitation": "Observed M1/M2 current v20 manifests match none of those predecessor transitions. No arbitrary target-generation flag or v20-to-new-profile admission exists.",
+          "minimumSuccessor": "Within the existing owner, pin the selected current v20 account/manifest/config/plist/non-Paper profile and complete sealed installation, the new immutable target digest/receipt and exactly planned successor manifest. Preserve source pointer, gateway modules, dependency seal, capabilities, label and account.",
+          "preflightAndActivation": [
+            "Stage/verify the new immutable runtime using runtime_stage only after a concrete lawful staging action is established.",
+            "Run existing owner successor with exact manifest CAS and --preflight-only; require NOT_APPLIED and full predicate checks.",
+            "Through the same accepted lifecycle owner, stop only that exact quiescent seat from an authorized control context that survives its stop.",
+            "Apply exact selection under original account mutex: full seal and runtime recheck, loaded-service refusal, config first, manifest last.",
+            "Read back exact committed identities, start same seat through owner, then perform same-carrier native qualification."
+          ],
+          "failureRules": [
+            "Installed control closure failure cannot be bypassed by presenting that same damaged installed origin as source fallback.",
+            "A genuine accepted-release source helper is supported by the documented operator sequence; actual host/source custody grants still bind.",
+            "Postcommit or rollback uncertainty is EFFECT_UNKNOWN on original operation; no replay, failover or restart until reconciled."
+          ]
+        }
+      },
+      "nativeAcceptance": {
+        "status": "NOT_PERFORMED",
+        "required": [
+          "New bridge/source identity tied to actual same-seat running consumer.",
+          "Catalog reports the new exact update_styles contract qualified; unrelated incompatibilities remain scoped.",
+          "One authorized bounded exact-target operation with prepared file/snapshot/operation identity.",
+          "Same-carrier effect/readback plus ignoredStyles, zIndex, subtree styles/text/topology and screenshot as material to root's clone failure.",
+          "Reconnect/read proof and preserved operation receipt; no claim based only on stage, tests, tools/list or app refresh."
+        ]
+      },
+      "sourceRefs": [
+        {
+          "path": "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md",
+          "blob": "d4d0401ad31dc56bbae8528f7427c84cd4ba7137",
+          "lines": "29-38;150;264-281;294-310",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"
+        },
+        {
+          "path": "integrations/studio_direct_mcp/private_service.py",
+          "blob": "112282553880aa04ae2c0ae646a30d4d308380ce",
+          "lines": "974-1060;1591-1606;1682-1755;5216-5741;6564-6574",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/studio_direct_mcp/private_service.py"
+        },
+        {
+          "path": "integrations/studio_direct_mcp/paper_v20_fleet_cohorts.py",
+          "blob": "584f7efe48adfb1d5f084dbb1ccd40ee30593bab",
+          "lines": "1-17;155-227",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/studio_direct_mcp/paper_v20_fleet_cohorts.py"
+        },
+        {
+          "path": "integrations/paper_desktop/direct_service.py",
+          "blob": "0f883967b80d4112d7bb2342084fae9b20b7e656",
+          "lines": "226-244;327-422;460-532;547-625;628-721",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/direct_service.py"
+        },
+        {
+          "path": "integrations/paper_desktop/runtime_stage.py",
+          "blob": "4e41f4f1ca19025fa9203d84723c8858a9b3a3bf",
+          "lines": "30-104;258-389",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/integrations/paper_desktop/runtime_stage.py"
+        },
+        {
+          "path": "docs/PAPER_DIRECT_CHATGPT.md",
+          "blob": "1a75b7558aff3f1f86f3b944d179fcffe752fa3d",
+          "lines": "132-190;352-369;386-414",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DIRECT_CHATGPT.md"
+        },
+        {
+          "path": "docs/PAPER_DESIGN_INTEGRATION.md",
+          "blob": "89f16b9db8ac51c9979e1fe3bdd0e6f4b2b055c3",
+          "lines": "1-44;388-440;831-835",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5c3d3885234358aefb97ecdbc59be0864df14f8b/docs/PAPER_DESIGN_INTEGRATION.md"
+        }
+      ],
+      "recommendedNextAction": "Root prepares exact descriptor/profile source patch and affected tests through protected GitHub workflow now. Choose and bind one actual existing consumer before preparing its narrowly admitted successor. Do not run old v20 transitions against current v20 manifests; do not infer Chairman gate from incomplete installer implementation or historical role labels."
+    }
+  },
+  "runtimeDisposition": "Do not stop/restart live primary direct processes: configured bundle/SDK paths are absent and current app is not uniquely mapped to a seat. No update_styles call, runtime installation, selector change or Paper carrier change has occurred."
+}
