@@ -1197,6 +1197,65 @@ def cmd_native_pool_pin_forward(args):
 
 
 @contextmanager
+def _native_selected_publication_lock_for_publisher(account):
+    """Hold the existing selected native-generation lock throughout a publisher CAS.
+
+    Retained bootstrap evidence may have been pruned. The incumbent read-only
+    status verifier already authenticates those selected bytes; use its exact
+    store to acquire the SAME existing publication lock, then verify again.
+    Never create a second lock, install a generation or change a pool pointer.
+    """
+    if account != "chatgpt2-personal":
+        raise SystemExit("NATIVE_POOL_PIN_ACCOUNT_REFUSED")
+    from types import SimpleNamespace
+    pin = _pin_owner_module()
+    roots = _build_runtime_roots(account)
+    plan = pin.decode(_fabric_release_bytes(
+        roots["state"] / "native-pool-pin" / "plan.json"))
+    args = SimpleNamespace(
+        account=account, operation="status",
+        successor_bundle=plan["successor_bundle"],
+        successor_plan_sha256=plan["successor_digest"],
+        retained_proof_purpose="")
+    with _pin_native_context(args) as before:
+        if before["phase"] != "SELECTED":
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+    import importlib.util
+    if _INSTALLED_CONTROL_CONTEXT is not None:
+        native = _installed_control_module(
+            "_studio_pin_pub_generation",
+            "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+    else:
+        path = (Path(__file__).resolve().parents[2] /
+                "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+        spec = importlib.util.spec_from_file_location("_studio_pin_pub_generation", path)
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+    with native.publication_lock(Path(before["store"])):
+        with _pin_native_context(args) as after:
+            if after != before:
+                raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_CHANGED")
+        yield
+
+
+def cmd_native_pool_pin_publisher(args):
+    """Use only the existing selected-pin owner for a sealed C2 publisher update."""
+    pin = _pin_owner_module()
+    try:
+        value = pin.run_publisher(sys.modules[__name__], args)
+    except SystemExit as error:
+        if type(error.code) is str and error.code in {
+            "NATIVE_POOL_PIN_" + code for code in pin.REFUSAL_CODES
+        }:
+            raise
+        raise SystemExit("NATIVE_POOL_PIN_PUBLISHER_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_PIN_PUBLISHER_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
+@contextmanager
 def _pin_native_context(args):
     """Use the existing successor verifier and publication lock, never a hash-only claim."""
     import importlib.util
@@ -6471,6 +6530,14 @@ def build_parser() -> argparse.ArgumentParser:
                          help="exact owner preview plan SHA256; required for apply, status and reconcile")
     forward.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
     forward.set_defaults(func=cmd_native_pool_pin_forward)
+    publisher = sub.add_parser("native-pool-pin-publisher")
+    publisher.add_argument("--account", choices=("chatgpt2-personal",), required=True)
+    publisher.add_argument("--operation",
+                           choices=("preview", "apply", "status", "reconcile"), required=True)
+    publisher.add_argument("--source", help="exact reviewed publisher source; preview/apply")
+    publisher.add_argument("--expected-manifest-sha256", required=True)
+    publisher.add_argument("--expected-plan-sha256")
+    publisher.set_defaults(func=cmd_native_pool_pin_publisher)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
     enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)

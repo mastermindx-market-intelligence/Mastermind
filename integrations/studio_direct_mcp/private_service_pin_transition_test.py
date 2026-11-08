@@ -693,7 +693,7 @@ class ForwardPinTransitionTests(unittest.TestCase):
         self.loaded = False
         self.launch_error = False
         self.calls = []
-        self.account = "chatgpt1"
+        self.account = getattr(self, "fixture_account", "chatgpt1")
         self.label = "com.mastermind.studio-direct-private." + self.account
 
         def run(argv, **kwargs):

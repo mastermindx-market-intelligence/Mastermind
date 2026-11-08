@@ -1795,7 +1795,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-forward", "native-pool-pin-enrollment", "fleet-status-module-upgrade", "seal-runtime", "start", "status", "stop", "_original-collection-helper", "original-predecessor-readback"},
+            {'stage', 'upgrade', 'paper-runtime-upgrade', 'fabric-backend-release', 'native-pool-pin', 'native-pool-pin-forward', 'native-pool-pin-enrollment', 'fleet-status-module-upgrade', 'seal-runtime', 'start', 'status', 'stop', '_original-collection-helper', 'original-predecessor-readback', 'native-pool-pin-publisher'},
         )
 
     def test_forward_pin_cli_exposes_only_its_closed_inputs(self):
@@ -1887,6 +1887,24 @@ class TestCLI(unittest.TestCase):
             parser.parse_args(["--help"])
         except SystemExit as e:
             self.assertEqual(e.code, 0)
+
+    def test_native_pin_publisher_cli_is_one_closed_existing_personal_seat(self):
+        parser = svc.build_parser()
+        opts = parser.parse_args([
+            "native-pool-pin-publisher", "--account", "chatgpt2-personal",
+            "--operation", "preview", "--expected-manifest-sha256", "a" * 64,
+        ])
+        self.assertIs(opts.func, svc.cmd_native_pool_pin_publisher)
+        for forbidden in ("admin-business", "chatgpt1", "chatgpt2-business",
+                          "chatgpt3", "chatgpt4", "fabric-read", "other"):
+            with self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "native-pool-pin-publisher", "--account", forbidden,
+                    "--operation", "preview", "--expected-manifest-sha256", "a" * 64,
+                ])
+        for forbidden in ("credential", "force", "skip_integrity", "remote",
+                          "branch", "start", "stop"):
+            self.assertFalse(hasattr(opts, forbidden))
 
 
 # -------------------------------------------------------------------

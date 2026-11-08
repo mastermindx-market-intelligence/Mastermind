@@ -572,3 +572,72 @@ class ForwardC4PublisherTests(unittest.TestCase):
                 self.invoke()
         self.assertFalse(self.tx.exists())
         self.assertEqual(before, {name: self.roots[name].read_bytes() for name in before})
+
+class ForwardPersonalPublisherTests(ForwardStatusSuccessorTests):
+    fixture_account = fx.svc._pin_owner_module().PUBLISHER_ACCOUNT
+    start = ForwardC4PublisherTests.start
+
+    def setUp(self):
+        super().setUp()
+        from contextlib import nullcontext
+        svc = fx.svc
+        pin = svc._pin_owner_module()
+        self.assertEqual(self.account, pin.PUBLISHER_ACCOUNT)
+        source = self.home / "personal-publisher-source"
+        source.mkdir(mode=0o700)
+        before, after = {}, {}
+        self.publisher_modules = {}
+        for name in pin.PUBLISHER_FILES:
+            original = (self.roots["base"] / name).read_bytes()
+            successor = original + b"\n// Personal publisher composition fixture\n"
+            (source / name).write_bytes(successor)
+            (source / name).chmod(0o600)
+            before[name] = pin.digest(original)
+            after[name] = pin.digest(successor)
+            self.publisher_modules[name] = successor
+        self.patch(pin, "PUBLISHER_PREDECESSOR", before)
+        self.patch(pin, "PUBLISHER_SUCCESSOR", after)
+        self.patch(svc, "_native_selected_publication_lock_for_publisher",
+                   lambda *args, **kwargs: nullcontext())
+        args = SimpleNamespace(
+            account=self.account, operation="preview", source=str(source),
+            expected_manifest_sha256=pin.digest(self.roots["manifest"].read_bytes()),
+            expected_plan_sha256=None,
+        )
+        preview = pin.run_publisher(svc, args)
+        args.operation = "apply"
+        args.expected_plan_sha256 = preview["planSha256"]
+        applied = pin.run_publisher(svc, args)
+        self.assertEqual(applied["phase"], "COMMITTED")
+        self.assertEqual(applied["effect"], "APPLIED")
+        self.assertTrue(self.status.require_start(svc, self.account, self.roots))
+        self.binding = binding_for_existing(self.roots, self.new_pool)
+        self.publisher_dir = self.roots["state"] / pin.PUBLISHER_TRANSACTION
+        self.assertTrue((self.publisher_dir / "result.json").is_file())
+        self.retained = {
+            path: path.read_bytes()
+            for path in self.roots["state"].rglob("*") if path.is_file()
+        }
+        self.assertGreater(len(self.retained), 3)
+
+    def test_personal_publisher_forward_start_preserves_all_prior_histories(self):
+        self.selected()
+        self.assertTrue(self.start()["started"])
+        for path, original in self.retained.items():
+            self.assertEqual(path.read_bytes(), original)
+        for name, expected in self.publisher_modules.items():
+            self.assertEqual((self.roots["base"] / name).read_bytes(), expected)
+
+    def test_missing_personal_publisher_completion_refuses_forward_start(self):
+        self.selected()
+        (self.publisher_dir / "result.json").unlink()
+        with self.assertRaises(SystemExit):
+            self.start()
+
+    def test_changed_personal_publisher_module_refuses_forward_start(self):
+        self.selected()
+        name = next(iter(self.publisher_modules))
+        target = self.roots["base"] / name
+        target.write_bytes(target.read_bytes() + b"\nforeign publisher postimage\n")
+        with self.assertRaises(SystemExit):
+            self.start()
