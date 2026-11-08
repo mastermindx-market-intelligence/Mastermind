@@ -81,14 +81,19 @@ class HostGitHubSession:
         if (not isinstance(self.profile_id, str) or not self.profile_id
                 or not isinstance(self.session_id, str)
                 or not 0 < len(self.session_id) <= 128
-                or _ROLE.fullmatch(self.role or "") is None
-                or _OPERATION.fullmatch(self.operation_id or "") is None
-                or _REPO.fullmatch(self.repository or "") is None
-                or _BRANCH.fullmatch(self.branch or "") is None
+                or type(self.role) is not str
+                or _ROLE.fullmatch(self.role) is None
+                or type(self.operation_id) is not str
+                or _OPERATION.fullmatch(self.operation_id) is None
+                or type(self.repository) is not str
+                or _REPO.fullmatch(self.repository) is None
+                or type(self.branch) is not str
+                or _BRANCH.fullmatch(self.branch) is None
                 or ".." in self.branch or "//" in self.branch
                 or self.branch.endswith(("/", ".lock"))
                 or self.base_branch not in ("main", "master")
-                or _SHA.fullmatch(self.base_sha or "") is None
+                or type(self.base_sha) is not str
+                or _SHA.fullmatch(self.base_sha) is None
                 or type(self.installation_id) is not int or self.installation_id <= 0):
             raise GitHubBotRefused("GITHUB_HOST_BINDING_INVALID")
         if (not isinstance(self.token_source, GitHubAppInstallationTokens)
@@ -100,7 +105,8 @@ class HostGitHubSession:
                 or not _current(self.currentness_guard)
                 or not isinstance(self.allowed_path_prefixes, tuple)
                 or not self.allowed_path_prefixes
-                or any(not _clean_path(prefix.rstrip("/"))
+                or any(type(prefix) is not str
+                       or not _clean_path(prefix.rstrip("/"))
                        for prefix in self.allowed_path_prefixes)
                 or not isinstance(self.allowed_issue_numbers, frozenset)
                 or any(type(number) is not int or number < 1
@@ -115,7 +121,7 @@ class HostGitHubSession:
 
     def path_is_allowed(self, path: str) -> bool:
         return _clean_path(path) and any(
-            path == prefix or path.startswith(prefix)
+            path == prefix or (prefix.endswith("/") and path.startswith(prefix))
             for prefix in self.allowed_path_prefixes
         )
 
@@ -194,7 +200,8 @@ class HermesGitHubApp:
         if result is None:
             return None
         if (not isinstance(result, dict) or not isinstance(result.get("object"), dict)
-                or _SHA.fullmatch(result["object"].get("sha", "")) is None):
+                or type(result["object"].get("sha")) is not str
+                or _SHA.fullmatch(result["object"]["sha"]) is None):
             raise GitHubBotUnavailable("GITHUB_REF_UNVERIFIED")
         return result["object"]["sha"]
 
@@ -227,7 +234,8 @@ class HermesGitHubApp:
 
     def commit_file(self, *, expected_head: str, path: str,
                     content: str, message: str) -> dict:
-        if (_SHA.fullmatch(expected_head or "") is None
+        if (type(expected_head) is not str
+                or _SHA.fullmatch(expected_head) is None
                 or not self.binding.path_is_allowed(path)
                 or type(content) is not str or len(content.encode("utf-8")) > 131072
                 or type(message) is not str or not 1 <= len(message) <= 180
@@ -250,7 +258,9 @@ class HermesGitHubApp:
                     or _SHA.fullmatch(tree.get("sha", "")) is None):
                 raise GitHubBotEffectUnknown("GITHUB_TREE_UNVERIFIED")
             commit = self._read_or_write("POST", "/git/commits", payload={
-                "message": message + "\n\n" + self.binding.audit_marker,
+                "message": (message + "\n\n" + self.binding.audit_marker
+                            + "\nHermes-Role: " + self.binding.role
+                            + "\nHermes-Operation: " + self.binding.operation_id),
                 "tree": tree["sha"], "parents": [expected_head],
             })
             if (not isinstance(commit, dict)
@@ -277,7 +287,8 @@ class HermesGitHubApp:
         return result
 
     def create_pr(self, *, expected_head: str, title: str, body: str) -> dict:
-        if (_SHA.fullmatch(expected_head or "") is None
+        if (type(expected_head) is not str
+                or _SHA.fullmatch(expected_head) is None
                 or type(title) is not str or not 4 <= len(title) <= 140
                 or type(body) is not str or len(body) > 16000):
             raise GitHubBotRefused("GITHUB_PR_INPUT_REFUSED")
@@ -376,7 +387,7 @@ class HermesGitHubApp:
             "comment_find": {"action", "issue_number", "request_id"},
             "comment_create": {"action", "issue_number", "request_id", "body"},
         }
-        if action not in allowed or set(arguments) != allowed[action]:
+        if type(action) is not str or action not in allowed or set(arguments) != allowed[action]:
             raise GitHubBotRefused("GITHUB_ACTION_ARGUMENTS_REFUSED")
         if action == "status":
             return self.status()
