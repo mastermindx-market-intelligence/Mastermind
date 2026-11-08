@@ -255,6 +255,21 @@ impl Inner {
                     && current.generation == anchor.generation
             })
     }
+    pub(super) fn continuation_exchange_guard(&mut self, pending: &Pending) -> Result<()> {
+        let Some(witness) = pending.continuation.as_ref() else {
+            return Ok(());
+        };
+        if pending.resource != Resource::Content
+            || pending.generation != self.generation
+            || pending.expires <= Instant::now()
+            || !self.probe_current(&witness.anchor)
+            || millis(SystemTime::now()).is_none_or(|now| now >= witness.account.expires_at_ms)
+        {
+            self.fail_continuation(pending.generation, "AUTHENTICATION_CHANGED");
+            return Err("AUTHENTICATION_CHANGED".into());
+        }
+        Ok(())
+    }
     fn fail_continuation(&mut self, generation: u64, reason: &'static str) {
         if self.generation == generation
             && self
@@ -573,6 +588,139 @@ mod tests {
         assert_eq!(pending.generation, generation);
         let witness = pending.continuation.as_ref().unwrap().clone();
         (inner, pending, witness, old)
+    }
+    fn callback_before_exchange_fixture() -> (Inner, String, String) {
+        let (mut inner, old) = timeout();
+        let anchor = inner.begin_continuation_check().unwrap();
+        let proof = account(
+            Resource::Acquisition,
+            anchor.acquisition_wall,
+            &"a".repeat(64),
+        );
+        inner.open_content_continuation(&anchor, proof).unwrap();
+        let state = inner.pending.as_ref().unwrap().state.clone();
+        (
+            inner,
+            format!("{CALLBACK}?state={state}&code=synthetic-new-code"),
+            old,
+        )
+    }
+    fn callback_before_exchange_refuses(change: &str) {
+        if crate::native_refresh::enabled() {
+            let (inner, _) = timeout();
+            assert_eq!(inner.continuation_status().state, "INELIGIBLE");
+            return;
+        }
+        let (mut inner, callback, _) = callback_before_exchange_fixture();
+        match change {
+            "expiry" => inner.acquisition.as_mut().unwrap().expires = Instant::now(),
+            "token" => inner.acquisition = Some(token("replacement-acquisition")),
+            "proof" => {
+                inner
+                    .pending
+                    .as_mut()
+                    .unwrap()
+                    .continuation
+                    .as_mut()
+                    .unwrap()
+                    .account
+                    .expires_at_ms = 1
+            }
+            _ => unreachable!(),
+        }
+        let retained = inner.acquisition.as_ref().unwrap().value.clone();
+        // This is the actual callback's gate: only consume's success permits
+        // construction of the oauth/token request. No HTTP/provider is invoked.
+        let mut exchange_progressions = 0;
+        let result = inner.consume(&callback).map(|_| exchange_progressions += 1);
+        assert!(result.is_err(), "{change} reached exchange progression");
+        assert_eq!(exchange_progressions, 0);
+        assert!(!inner.exchanging && inner.pending.is_none() && inner.content.is_none());
+        assert_eq!(inner.acquisition.as_ref().unwrap().value, retained);
+        assert_eq!(inner.continuation_status().state, "INELIGIBLE");
+    }
+    #[test]
+    fn callback_before_exchange_refuses_expired_acquisition() {
+        callback_before_exchange_refuses("expiry");
+    }
+    #[test]
+    fn callback_before_exchange_refuses_replaced_acquisition_without_generation_change() {
+        callback_before_exchange_refuses("token");
+    }
+    #[test]
+    fn callback_before_exchange_refuses_expired_account_proof() {
+        callback_before_exchange_refuses("proof");
+    }
+    #[test]
+    fn callback_before_exchange_retains_valid_callback_and_known_denial() {
+        if crate::native_refresh::enabled() {
+            let (inner, _) = timeout();
+            assert_eq!(inner.continuation_status().state, "INELIGIBLE");
+            return;
+        }
+        let (mut inner, callback, _) = callback_before_exchange_fixture();
+        assert!(inner.consume(&callback).is_ok());
+        assert!(inner.exchanging && inner.status().acquisition);
+        for late_original in [false, true] {
+            let (mut inner, callback, old) = callback_before_exchange_fixture();
+            inner.acquisition.as_mut().unwrap().expires = Instant::now();
+            let denial = if late_original {
+                format!("{CALLBACK}?state={old}&error=access_denied")
+            } else {
+                callback.replace("code=synthetic-new-code", "error=access_denied")
+            };
+            assert_eq!(
+                inner.consume(&denial).err().as_deref(),
+                Some("AUTHORIZATION_REFUSED")
+            );
+            assert!(!inner.exchanging && inner.pending.is_none() && inner.content.is_none());
+            assert!(inner.acquisition.is_some());
+            assert_eq!(inner.reason, Some("AUTHORIZATION_REFUSED"));
+        }
+    }
+    #[test]
+    fn prepost_recheck_refuses_expiry_replacement_proof_and_late_denial_after_consume() {
+        if crate::native_refresh::enabled() {
+            let (inner, _) = timeout();
+            assert_eq!(inner.continuation_status().state, "INELIGIBLE");
+            return;
+        }
+        for change in [
+            "monotonic_expiry",
+            "wall_expiry",
+            "token",
+            "client",
+            "proof",
+            "denial",
+            "logout",
+        ] {
+            let (mut inner, pending, mut witness, old) = pending();
+            match change {
+                "monotonic_expiry" => inner.acquisition.as_mut().unwrap().expires = Instant::now(),
+                "wall_expiry" => {
+                    inner.acquisition.as_mut().unwrap().wall_expires = SystemTime::now()
+                }
+                "token" => inner.acquisition = Some(token("replacement-acquisition")),
+                "client" => inner.client_id = Some("replacement-client".into()),
+                "proof" => witness.account.expires_at_ms = 1,
+                "denial" => {
+                    assert!(inner.observe_timed_out_refusal(&old));
+                }
+                _ => inner.invalidate(),
+            }
+            let mut original = pending;
+            original.continuation = Some(witness);
+            let mut exchange_progressions = 0;
+            let result = inner
+                .continuation_exchange_guard(&original)
+                .map(|_| exchange_progressions += 1);
+            assert!(result.is_err(), "{change} reached exchange progression");
+            assert_eq!(exchange_progressions, 0);
+            assert!(!inner.exchanging && inner.content.is_none());
+            if change == "denial" {
+                assert_eq!(inner.reason, Some("AUTHORIZATION_REFUSED"));
+            }
+        }
     }
     #[test]
     fn actual_pending_timeout_is_required_and_projection_is_closed() {

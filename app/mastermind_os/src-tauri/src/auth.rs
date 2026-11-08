@@ -331,6 +331,7 @@ impl Inner {
             return Err("AUTHORIZATION_REFUSED".into());
         }
         self.exchanging = true;
+        self.continuation_exchange_guard(&pending)?;
         if pending.resource == Resource::Executive { self.executive_reason = ExecutiveReason::Exchanging; }
         Ok((
             pending,
@@ -688,6 +689,14 @@ pub async fn callback(app: AppHandle, raw: String) {
         }
     };
     let (pending, code, client) = transaction;
+    // A continuation cannot exchange a fresh code against an expired or
+    // replaced retained Acquisition grant. Rejoin again immediately before
+    // constructing the request, after consume's own continuation fence.
+    if pending.continuation.is_some() && state.lock()
+        .and_then(|mut inner| inner.continuation_exchange_guard(&pending)).is_err() {
+        emit(&app);
+        return;
+    }
     let response = state
         .http
         .post(format!("{ISSUER}oauth/token"))
