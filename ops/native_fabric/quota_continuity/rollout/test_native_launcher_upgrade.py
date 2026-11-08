@@ -119,60 +119,14 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify the current107 build before restoring any historical bytes."""
+    """Qualify all current107 bytes before restoring historical fixtures."""
+    import test_native_current_source as current_source
     native = Path(builder.__file__).parent.parent
-    manifest_raw = (output / 'native-manifest.json').read_bytes()
-    inventory_raw = (output / 'native-source-inventory.json').read_bytes()
-    baseline_raw = (native / 'rollout/native-manifest.json').read_bytes()
-    baseline_inventory_raw = (native / 'rollout/native-source-inventory.json').read_bytes()
-    manifest = json.loads(manifest_raw)
-    inventory = json.loads(inventory_raw)
-    # The immutable baseline remains the historical source. Current builds
-    # apply this reviewed three-file successor before any fixture rollback.
-    reviewed_core = {
-        "go_lease_capability.py": (
-            "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
-            "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
-        "go_lease_gateway.py": (
-            "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
-            "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
-        "lease_broker.py": (
-            "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
-            "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
-    }
-    expected_manifest = json.loads(baseline_raw)
-    expected_inventory = json.loads(baseline_inventory_raw)
-    for filename, (preimage, candidate) in reviewed_core.items():
-        member = "ext/" + filename
-        data = (native / "candidate" / filename).read_bytes()
-        row = expected_inventory["files"][member]
-        if (expected_manifest[member] != preimage
-                or row["sha256"] != preimage or g.digest(data) != candidate):
-            raise AssertionError("reviewed core successor differs: " + member)
-        expected_manifest[member] = candidate
-        row.update(bytes=len(data), sha256=candidate, composition={
-            "schema": "mastermind.glm-native-core-source.v1",
-            "preimage_sha256": preimage, "candidate_sha256": candidate})
-    expected_manifest_raw = (json.dumps(expected_manifest, sort_keys=True, indent=2) + "\n").encode()
-    expected_inventory_raw = (json.dumps(expected_inventory, sort_keys=True, indent=2) + "\n").encode()
-    if (manifest_raw != expected_manifest_raw or inventory_raw != expected_inventory_raw
-            or len(manifest) != 107
-            or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
-            or set(inventory['files']) != set(manifest)
-            or inventory['native_code_files'] != len(manifest)):
-        raise AssertionError('current application source closure differs')
-    for name, wanted in manifest.items():
-        data = (output / 'native-code-stage' / name).read_bytes()
-        row = inventory['files'][name]
-        source = (native / row['source']).read_bytes()
-        if (g.digest(data) != wanted or row['sha256'] != wanted
-                or row['bytes'] != len(data) or source != data):
-            raise AssertionError('current captured source differs: ' + name)
-        if name in APPLICATION_PREIMAGES:
-            candidate = 'candidate/' + name.split('/')[1]
-            if row['source'] != candidate or (native / candidate).read_bytes() != data:
-                raise AssertionError('current application candidate differs: ' + name)
-    return manifest
+    if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
+        raise AssertionError("current application source binding differs")
+    return current_source.verify_current_stage(
+        output, native,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
 
 
 def restore_application_preimages(stage, manifest):

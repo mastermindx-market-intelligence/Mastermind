@@ -100,6 +100,8 @@ REVIEWED_GENERATIONS = {
     "v22": {
         "bridge.py": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
     },
+    # Protected #2326 primitive style-value union; v22 remains immutable.
+    "v23": {"bridge.py": "7467d4534099657d3fd244641185e57675d5ec6ec2faeddad9d1cca2f5d18523"},
 }
 
 

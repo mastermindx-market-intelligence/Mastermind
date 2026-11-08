@@ -19,6 +19,7 @@ import sys
 
 import pytest
 import test_fabric_clean_linked_donor_20261017 as donor_contract
+import test_fabric_grok47_qwen_release_composition_20261022 as current_source_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
@@ -220,10 +221,10 @@ def native_stage(tmp_path_factory):
     assert result.returncode == 0, result.stderr
     expected = (NATIVE / "rollout/native-manifest.json").read_bytes()
     assert _sha(expected) == NATIVE_MANIFEST_SHA
-    assert (output / "native-manifest.json").read_bytes() == expected
-    assert (output / "native-source-inventory.json").read_bytes() == (
-        NATIVE / "rollout/native-source-inventory.json").read_bytes()
-    manifest = json.loads(expected)
+    builder = current_source_contract.read_builder()
+    manifest = current_source_contract.read_current_source_fixture().verify_current_stage(
+        output, NATIVE,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
     assert len(manifest) == EXPECTED_NATIVE_FILES
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
