@@ -19,6 +19,9 @@ from typing import Any
 from control_plane.browser_resource_contract import (
     ALLOWED_BROWSER_TOOLS,
     READ_ONLY_BROWSER_TOOLS,
+    APP_CONTROL_TOOLS,
+    APP_CONTROL_READ_TOOLS,
+    browser_tools_for_digest,
 )
 from control_plane.codex_worker import ProcessIdentityError, ProcessInspector
 from integrations.workbench_action_mcp.action_artifacts import (
@@ -323,7 +326,7 @@ class BrowserActionPort:
         tool: str,
         arguments: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        if tool not in READ_ONLY_BROWSER_TOOLS:
+        if tool not in READ_ONLY_BROWSER_TOOLS | APP_CONTROL_READ_TOOLS or tool not in self._codec.allowed_tools:
             raise BrowserPortRefused("MUTATING_TOOL_REQUIRES_ACTION_REF")
         try:
             canonical = canonical_browser_arguments(arguments)
@@ -335,6 +338,8 @@ class BrowserActionPort:
         browser, _binding, socket_path = self._resource(
             caller, browser_ref, require_fresh=False
         )
+        if tool not in browser_tools_for_digest(browser.tool_schema_digest):
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         request_id = secrets.token_hex(16)
         try:
             response = self._relay(
@@ -376,13 +381,15 @@ class BrowserActionPort:
                                     {"grant_ref": grant_ref}, credential=True)
 
     def _prepare_action(self, caller, browser_ref, tool, arguments, *, credential: bool) -> str:
-        if (not credential and tool not in ALLOWED_BROWSER_TOOLS) or (credential and tool != CREDENTIAL_TOOL):
+        if (not credential and tool not in self._codec.allowed_tools) or (credential and tool != CREDENTIAL_TOOL):
             raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
-        if tool in READ_ONLY_BROWSER_TOOLS:
+        if tool in READ_ONLY_BROWSER_TOOLS | APP_CONTROL_READ_TOOLS:
             raise BrowserPortRefused("READ_ONLY_TOOL_NEEDS_NO_ACTION_REF")
         if type(browser_ref) is not str:
             raise BrowserPortRefused("BROWSER_REF_INVALID")
         browser, binding, _socket_path = self._resource(caller, browser_ref)
+        if not credential and tool not in browser_tools_for_digest(browser.tool_schema_digest):
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         credential_use = self._credential_use(caller, browser, arguments.get("grant_ref")) if credential else None
         if credential_use is not None:
             arguments = {"grant_ref": arguments["grant_ref"],
@@ -475,11 +482,12 @@ class BrowserActionPort:
             binding = self._binding(caller, browser)
             socket_path = self._relay_root / f"{browser.start_action_id}.sock"
         try:
-            prepared = self._codec.decode_action(
-                action_ref, now_ms=self._now(), require_fresh=require_live
-            )
+            prepared = (self._codec.decode_action(action_ref, now_ms=self._now()) if require_live
+                        else self._codec.decode_recovery_action(action_ref, now_ms=self._now()))
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_ACTION_INVALID") from error
+        if prepared.schema != CREDENTIAL_ACTION_SCHEMA and prepared.tool_name not in browser_tools_for_digest(browser.tool_schema_digest):
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         if (
             prepared.browser_ref_sha256
             != hashlib.sha256(browser_ref.encode("utf-8")).hexdigest()
@@ -723,6 +731,15 @@ class BrowserActionPort:
             effect_state = (
                 "APPLIED" if result.get("isError") is False else "EFFECT_UNKNOWN"
             )
+            if prepared.tool_name in APP_CONTROL_TOOLS:
+                # Classify only the UI dispatch, never downstream completion.
+                # A missing result remains unknown; reconciliation never repeats it.
+                app_result = result.get("structuredContent")
+                app_status = app_result.get("status") if (type(app_result) is dict
+                    and app_result.get("schema") == "mastermind.os.app-control.v1"
+                    and type(app_result.get("code")) is str and 0 < len(app_result["code"]) <= 160
+                    and result.get("isError") is (app_result.get("status") in {"REFUSED", "EFFECT_UNKNOWN"})) else None
+                effect_state = {"DISPATCHED": "APPLIED", "NO_CHANGE": "NOT_APPLIED", "REFUSED": "NOT_APPLIED"}.get(app_status, "EFFECT_UNKNOWN")
             result_record = finalize_action(
                 self._store,
                 identity,
@@ -741,7 +758,7 @@ class BrowserActionPort:
                 "observed_sha256": observed_sha256,
                 "reconciled": False,
             }
-            if effect_state == "APPLIED":
+            if effect_state == "APPLIED" or prepared.tool_name in APP_CONTROL_TOOLS:
                 response_receipt["result"] = result
             return response_receipt
 
