@@ -72,3 +72,16 @@ the current protected base contains 78 files. The on-disk tree and the unchanged
 base commit's Git blobs have identical digests, establishing that this mismatch
 predates this change. The current 116-file composer and local pipeline tests
 passed. The historical release seal was not changed.
+
+## Concurrent fixed-parent source qualifications
+
+The remote-placement and maintenance-guard qualifications bind sequence 37.
+Their tests now reconstruct that exact parent from the existing verified
+predecessor fixture and an exact frozen copy of its protected profile. They
+do not infer their parent from the latest default composer output. Original
+parent/profile, patch, postimage and unchanged-payload assertions remain intact.
+The sidecar source profiles and publication authority are unchanged.
+
+After integrating the concurrent protected changes, all 197 focused tests passed,
+including the fixed-parent router, maintenance-guard and sparse Git qualifications.
+Their original hash and behavioral assertions remain enforced.
