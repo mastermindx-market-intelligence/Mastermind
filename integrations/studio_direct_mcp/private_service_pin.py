@@ -1338,10 +1338,12 @@ PUBLISHER_PREDECESSOR = {
     "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
     "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
 }
+
 PUBLISHER_SUCCESSOR = {
     "git-publish.mjs": "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
+
 PUBLISHER_JOURNAL_FILES = frozenset({
     "plan.json", "intent.json", "manifest.before", "manifest.after",
     "git-publish.mjs.before", "git-publish.mjs.after",

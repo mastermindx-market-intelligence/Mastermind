@@ -102,22 +102,6 @@ def native_module_namespace(manifest, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
-def before_source_successors(manifest):
-    return builder.before_qualification_quiescence(
-        builder.before_host_pull_integrity(builder.before_sparse_index_advice(manifest)))
-
-
-def before_admission_integrity(manifest):
-    # Historical-generation cases retain their exact parent, while the current
-    # build and the new successor tests below inspect the actual repaired bytes.
-    previous = before_source_successors(manifest)
-    if any(previous.get(name) == digest
-           for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
-        assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
-        previous.update(builder.ADMISSION_INTEGRITY_PREIMAGES)
-        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256
-    return previous
-
 
 @contextmanager
 def loaded_entry(published, *, clean_yaml=False):
@@ -364,7 +348,7 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     # request-refusal carrier used to reconstruct historical predecessors.
     assert actual_default["ext/fabric_task.py"] == builder.ADMISSION_INTEGRITY_DIGESTS["ext/fabric_task.py"]
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
-        expected = (builder.ADMISSION_INTEGRITY_DIGESTS["ext/fabric_task.py"] if name == "fabric_task.py"
+        expected = (builder.GO_REQUEST_REFUSAL_TASK_DIGEST if name == "fabric_task.py"
                     else builder.GO_UBUNTU4_DIGESTS[name])
         assert default["ext/" + name] == expected
         historical["ext/" + name] = original
