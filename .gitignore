@@ -104,3 +104,7 @@ research/evidence/ohf_p0/**
 
 # Pinned Rakazo qualification installs its exact contract deps locally.
 integrations/rakazo_qualification/node_modules/
+
+# Outputs of this operation's attended native package qualification.
+/.cache/attended-native-c41-20261108-pro1/
+/.cache/attended-native-state-c41-20261108-pro1/

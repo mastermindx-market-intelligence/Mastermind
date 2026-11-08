@@ -1,10 +1,10 @@
 {
   "schema": "mastermind.dsh_attended_build.v1",
   "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
-  "package_manifest_sha256": "5972644fee8dafabe332e17a98a1cd59cb0f06a859018eccb549091ddddb7cef",
-  "app_config_sha256": "a0c1df93bbb510b653ca758942e727b1c67384d0e716ac0f4b7bc48bf365492e",
+  "package_manifest_sha256": "387f5ba0e3e9d41fb5d228861456044945db16ae09332b6788bb0f2b20a438e9",
+  "app_config_sha256": "dcda64e50012369f59bef338afb9418ee18e11db709d11704f7d1ac73aa4e7b9",
   "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
-  "native_client_build_sha256": "80209a8e056ff00a364600854ed1def6cceadd4542e40672a9cc8144de9693d7",
+  "native_client_build_sha256": "d3448c18d970361c3ef76d95929917c2bb5886aa3cb44a242567199988662a0d",
   "index_sha256": "0c37affd964c8819b210e02b5da8c600c2cfa03ee999fc3977a8809b2e8c74a0",
   "company_host_exports": {
     "./company-peer": {
@@ -33,14 +33,14 @@
     "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
     "receipt_sha256": "8931fd1764e7887b76c9ea1c0d07cd9ce6379dc069c75516d066ed509cfefeef"
   },
-  "evidence_commit": "e2c9451ef5bf428bbbbbfa06aa420c8033f8ad7b",
-  "custody": "Source-linked staged native attended build and Worker entry; snapshot evidence only, with no installation or production acceptance claimed.",
+  "evidence_commit": "4f4984822a5aea458a10827abca6bf387814ce00",
+  "custody": "Source-linked C41 complete staged attended package and original Worker entry, with seven build gates and full check-only closure qualification; no native final-layout materialization, installation or production acceptance claimed.",
   "installed": false,
   "provider_calls": 0,
   "native_worker": {
     "schema": "mastermind.dsh_native_worker_entry/v1",
     "entry": "native_worker.mjs",
-    "sha256": "087883b459b87f6742ace82a19df7e2dfe71d0453fe781c513a55d4b7a400c6d",
+    "sha256": "e47e35060596ee9fe4e7bc4715dfaff32be22d22a4cbd394db72daabe8ea5469",
     "agent_name": "deepseek-harness-acp",
     "agent_version": "0.0.1",
     "model_provider": "deepseek-account"

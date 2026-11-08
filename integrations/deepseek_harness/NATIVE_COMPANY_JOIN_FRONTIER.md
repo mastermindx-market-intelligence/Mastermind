@@ -1,5 +1,31 @@
 # DeepSeek native company join: exact acceptance frontier
 
+## C42 — complete C41 package qualified on the original carrier
+
+The ordinary candidate now contains the published C41 native entry and the complete original donor application. The first stage attempt failed before native compilation because the accepted standalone Node executable lacked the builder's conventional adjacent headers. Its terminal receipt, original log and three patch receipts were retained. All 7,220 pre-existing source inputs were unchanged; the raw input-snapshot mismatch consisted only of 10,300 newly generated paths under this exact candidate.
+
+The retained official Node 26.5.0 darwin-arm64 archive was rehashed as `ee920559aaa2391569cff4d737e3b83963430e3a14dedd91bfe0ff53171b5af9`. Its regular executable and complete regular header subtree were extracted to one private conventional prefix, preserving Node SHA256 `cbee2298aee5cc476bf8d5441e7348b627254a39d869743a5b04489028c729d4`. The recorded failed candidate alone was removed; the same producer and original C41 release/state paths were then used with the repaired Node prefix. Two exact anchored ignore entries cover those generated paths; no shared Git metadata or previous C33 candidate changed.
+
+All **7 build gates passed**, producing **325 client artifacts** and a **116,152-entry package closure**. Original `launch_attended.mjs --check-only` passed over that full closure; both runs retained **7,221 unchanged source inputs**. The updated build binding and original export/layout/Worker/publication consumers passed **43 focused tests**, with unchanged inputs.
+
+| Evidence | SHA256 |
+| --- | --- |
+| Repaired complete build receipt | `da18d53d5d88a671fdd481cea608745253896033d621c10f0264939eadb7937a` |
+| Repaired complete build log | `0ccad3edc69577bd2d84c49dda0adb8069d413b90667b78ef0cf7a554af9650b` |
+| Full check-only receipt | `2d65e9f6eb25ee04b24cf19083cf0e7fd2ceeec96a46785e10d70d4b4cc59749` |
+| Full check-only log | `d4d45acea7e0567827083945abd9dfafeb56ef87aa68a0f1ed60c60734b2980f` |
+| 43-case build-binding receipt | `f7a603edce23295cead4de5c1b414d5c2e0021feb24692d61c047d3e58cf9f53` |
+| 43-case build-binding log | `986dbc9a5d6b6525242d1315dd44f9f5e97162596004680091f1927df955e4ea` |
+| Complete package manifest | `387f5ba0e3e9d41fb5d228861456044945db16ae09332b6788bb0f2b20a438e9` |
+| App configuration | `dcda64e50012369f59bef338afb9418ee18e11db709d11704f7d1ac73aa4e7b9` |
+| Source build record | `8509245e0fb079b9c98d71b1c3553ebcd210515a9af171eb3d918e0af0d781e8` |
+
+The native entry is `e47e35060596ee9fe4e7bc4715dfaff32be22d22a4cbd394db72daabe8ea5469`; company bundles, patch receipts and native index retain their original identities. Complete machine-readable input, artifact and effect evidence is in `research/evidence/deepseek-native-complete-build-c42-20261108.json`.
+
+The typed publisher's first status read returned its generic failed-inspection envelope. Source diagnosis established that it is not a permission-specific error; a one-megabyte untracked-path buffer is a hypothesis, not a proven cause. After the scoped output repair, one same-tool/same-operation reconciliation succeeded with local/remote C41 heads equal and publication APPLIED. No alternate publisher or mutation replay was used.
+
+This is an ordinary unselected attended build, not final native Worker materialization. No application, service, listener, Session or provider was started. The check-only process is terminal. Production holds remain: accepted source/required exact-head CI, original final Worker coordinates and custody/attestation, actual account/realm/capability/quota/host admission, routing and the real packaged journey. The retained-history review also identifies an original lifecycle boundary to resolve before claiming the full source journey: G1 IDLE has explicit same-Session Resume without a prompt, while final G2 closure has no current retained reader. Preserve the closed denials, no-restart constraint, Hermes and C21 acceptance. Continue the existing source/consumer path; **MORE_WORK_EXISTS**.
+
 This record continues PR #2177 on the original source carrier. The complete donor
 application and original company presentation plugin remain the implementation.
 Donor pin: `687f282e8625c6b8d11ff58211a90524be2e4317`.
