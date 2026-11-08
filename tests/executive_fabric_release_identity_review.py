@@ -1092,13 +1092,13 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
 # APPLICATION recipe limits. Source/path/token identity remains exact. The
 # Broker/task postimages are the full current-native preserving transplants.
 # No identity scanner, runtime grant, timeout or budget rule changes.
-REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': '7ebcfae71e2eec1311b774ea2c501d9fb9acf5425d8653503cdbeab5a7ef3055',
-                                                      'sites': [(63,
+REVIEWED_FILES.update({'control_plane/protected_memory_economic_owner.py': {'sha256': '431a4a36f12ebaff25ee681aaf45635a0a6820b7b117bae18aa6b52393e19221',
+                                                      'sites': [(74,
                                                                  33,
                                                                  36,
                                                                  'int',
                                                                  '501'),
-                                                                (143,
+                                                                (154,
                                                                  25,
                                                                  28,
                                                                  'int',

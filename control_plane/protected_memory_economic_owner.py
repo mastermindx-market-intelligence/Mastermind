@@ -33,17 +33,28 @@ def qualify_helper_source():
     manifest = _json(_root_source(root / '.executive-release-manifest.json'))
     if manifest.get('commit_sha') != root.name: fail()
     entries = {r['path']: r for r in manifest['entries']}
-    names = ['scripts/protected_memory_economic_helper.py']
+    profile_name='ops/native_fabric/provider_plans/memory118/profile.json'
+    names = ['scripts/protected_memory_economic_helper.py',profile_name]
     names += ['ops/native_fabric/provider_plans/memory118/native_owner/' + n for n in (
         'fabric_operator_contract.py', 'fabric_operator_owner.py', 'fabric_memory_view.py',
         'protected_memory_economic.py', 'lease_broker.py', 'artifact_delivery.py',
         'fabric_task.py', 'provider_outcome.py', 'run_observation_delivery.py')]
     names += ['ops/native_fabric/quota_continuity/candidate/' + n for n in ('pool_ledger.py','pick.py')]
     names += ['ops/native_fabric/quota_continuity/source/'+n for n in ('model_tier.py','fabric_policy_snapshot.py')]
+    retained={}
     for name in names:
         raw = _root_source(root / name); entry = entries.get(name)
         if (type(entry) is not dict or entry.get('sha256') != hashlib.sha256(raw).hexdigest()
                 or entry.get('size') != len(raw)): fail()
+        retained[name]=raw
+    # Source correspondence only: a coherent source manifest cannot pair a
+    # smaller historical helper with the current preserving native profile.
+    # Use the SAME checked bytes; no second path read or selection/grant claim.
+    profile=_json(retained[profile_name])
+    if type(profile) is not dict or type(profile.get('files')) is not dict:fail()
+    for name in ('lease_broker.py','fabric_task.py'):
+        source_name='ops/native_fabric/provider_plans/memory118/native_owner/'+name
+        if profile['files'].get('ext/'+name)!=hashlib.sha256(retained[source_name]).hexdigest():fail()
     _root_source(Path(sys.executable).resolve(strict=True))
 
 
