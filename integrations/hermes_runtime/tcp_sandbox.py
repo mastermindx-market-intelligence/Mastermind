@@ -43,14 +43,25 @@ class _PortRule(ctypes.Structure):
                 ("port", ctypes.c_uint64)]
 
 
-def role_tcp_ports(profile: RuntimeProfile) -> tuple[frozenset[int], frozenset[int]]:
+def role_tcp_ports(profile: RuntimeProfile, *, primary_application=None) -> tuple[frozenset[int], frozenset[int]]:
     if type(profile) is not RuntimeProfile or profile.role not in ROLE_PROXY_PORT:
         raise RuntimeRefusal("ROLE_TCP_PROFILE_UNQUALIFIED")
     ports = (profile.gateway_port, profile.backend_port, ROLE_PROXY_PORT[profile.role])
     if (any(type(port) is not int or not 1024 <= port <= 65535 for port in ports)
             or len(set(ports)) != 3):
         raise RuntimeRefusal("ROLE_TCP_FIXED_PORTS_REQUIRED")
-    return frozenset(ports[:2]), frozenset(ports)
+    connect = frozenset(ports)
+    if primary_application is not None:
+        from integrations.hermes_application_fabric.publication import APPLICATION_PORT, publication_from_document
+        publication = publication_from_document(primary_application)
+        if (publication.role != profile.role or profile.model_provider != "mastermind-fabric"
+                or profile.model_default != publication.model
+                or profile.gateway_backend != "native-session-authority" or APPLICATION_PORT in ports):
+            raise RuntimeRefusal("ROLE_TCP_APPLICATION_UNQUALIFIED")
+        connect |= {APPLICATION_PORT}
+    elif profile.model_provider == "mastermind-fabric":
+        raise RuntimeRefusal("ROLE_TCP_APPLICATION_UNQUALIFIED")
+    return frozenset(ports[:2]), connect
 
 
 def _libc():
@@ -105,7 +116,9 @@ def apply_tcp_port_policy(bind_ports: frozenset[int], connect_ports: frozenset[i
     """
     if (type(bind_ports) is not frozenset or type(connect_ports) is not frozenset
             or not bind_ports or not connect_ports
-            or len(bind_ports | connect_ports) > 3
+            or len(bind_ports | connect_ports) > 4
+            or len(bind_ports | connect_ports) == 4
+               and (50142 not in connect_ports or 50142 in bind_ports)
             or any(type(p) is not int or not 1024 <= p <= 65535
                    for p in bind_ports | connect_ports)):
         raise RuntimeRefusal("ROLE_TCP_PORT_POLICY_INVALID")
@@ -137,5 +150,14 @@ def apply_tcp_port_policy(bind_ports: frozenset[int], connect_ports: frozenset[i
         os.close(fd)
 
 
-def enforce_role_tcp_ports(profile: RuntimeProfile) -> None:
-    apply_tcp_port_policy(*role_tcp_ports(profile))
+def enforce_role_tcp_ports(profile: RuntimeProfile, *, native_launch=None) -> None:
+    primary = None
+    if profile.model_provider == "mastermind-fabric":
+        if native_launch is None:
+            raise RuntimeRefusal("ROLE_TCP_APPLICATION_UNQUALIFIED")
+        # Qualify the existing launch capability before expanding the inherited
+        # connect-only port set. The systemd one-role IP allowlist is unchanged.
+        native_launch.qualify(profile, profile.state_dir / "current/bin/hermes")
+        primary = native_launch.recipe.get("primary_application")
+    apply_tcp_port_policy(*role_tcp_ports(profile, primary_application=primary))
+

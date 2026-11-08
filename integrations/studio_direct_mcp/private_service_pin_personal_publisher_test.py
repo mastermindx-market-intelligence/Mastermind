@@ -107,7 +107,7 @@ class PersonalPublisherSuccessorTests(unittest.TestCase):
         )
         self.patch(svc, "_fleet_status_successor_owner_module", lambda: self.fake_owner)
         self.patch(svc, "_pin_owner_module", lambda: pin)
-        self.patch(status_owner, "_original_pin", lambda *a: "0" * 64)
+        self.patch(status_owner, "_original_pin", lambda *a, forward_original=False: '0' * 64)
         self.status_dir = self.roots["state"] / self.fake_owner.TRANSACTION
         self.status_dir.mkdir(mode=0o700)
         self.write(self.status_dir / "result.json", svc._fabric_release_json({
@@ -263,7 +263,7 @@ class PersonalPublisherSuccessorTests(unittest.TestCase):
         # The real fleet-status retained reader is separately tested; this
         # fixture supplies its already authenticated predecessor transaction.
         self.patch(status_owner, "_retained",
-                   lambda *a: (self.status_plan, self.status_raw, self.status_digest))
+                   lambda *a, forward_original=False: (self.status_plan, self.status_raw, self.status_digest))
         self.assertTrue(status_owner.require_start(svc, self.account, self.roots))
         result = self.roots["state"] / pin.PUBLISHER_TRANSACTION / "result.json"
         result.unlink()

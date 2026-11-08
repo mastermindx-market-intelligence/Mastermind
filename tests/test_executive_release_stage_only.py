@@ -128,6 +128,8 @@ print(owner+":"+oct(stat.S_IMODE(os.lstat(p).st_mode))[2:])
            "SOURCE_REPO": str(repo), "EXPECTED_SHA": sha, "TREE_SHA": tree,
            "SCRIPT_DIR": str(ROOT / "ops/executive_os"), "PYTHON_BINARY": str(runner),
            "OS_WEB_ASSETS": str(out), "OS_WEB_ASSETS_DIGEST": digest, "CONTROL_AEAD_BUNDLE": "",
+           "HERMES_ATTENDED_SOURCE": "", "HERMES_ATTENDED_CONFIGURATION": "",
+           "HERMES_ATTENDED_CONFIGURATION_SHA256": "",
            "STAGE_RELEASE_ONLY": "1", "ALLOW_FROZEN_ACCEPTED_ANCESTOR": "0",
            "ARM_PRIVILEGED_BROKER": "0", "CONTROL_CONFIG_SOURCE": "", "PROTECTED_MASTER_SHA": "",
            "CALLS": str(tmp_path / "calls"), "FAIL": ""}

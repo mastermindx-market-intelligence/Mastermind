@@ -80,9 +80,9 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
   'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
   'uses': 'actions/checkout@v4',
   'with': {'repository': 'mastermindx-market-intelligence/macro',
-           'ref': '256c757b3c4f0ec759571c29a30a71387d0a18f8',
+           'ref': '268a89e3828d848848c77dfe69191c3fa7319361',
            'path': 'vendor/macro_src',
-           'sparse-checkout': 'engine\nlib\n',
+           'sparse-checkout': 'engine\nlib\nconfig\n',
            'persist-credentials': False,
            'token': '${{ secrets.MACRO_CI_READ_TOKEN || github.token }}'}},
  {'name': 'Install focused Python test dependencies',
@@ -278,13 +278,14 @@ def validate_parallel_workflow(text: str) -> None:
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
 
     # Guard each hosted job's total wall-clock budget, not just pytest time.
-    # The merge queue gives all required checks 100 minutes. Shard zero uses
-    # additional Paper/Fabric qualifications and previously hit 45m at cleanup.
+    # Preserve the existing <=100-minute shard+fan-in source contract (the
+    # current server queue is180m). Real prerequisites took ~23m before the
+    # unchanged45m repository step; reserve bounded upload/cleanup headroom.
     shard_timeout = shards.get("timeout-minutes")
     gate_timeout = gate.get("timeout-minutes")
     if (
         type(shard_timeout) is not int
-        or not 45 <= shard_timeout <= 60
+        or not 45 <= shard_timeout <= 75
         or type(gate_timeout) is not int
         or not 1 <= gate_timeout <= 8
         or gate_timeout > shard_timeout

@@ -110,11 +110,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          ref: 268a89e3828d848848c77dfe69191c3fa7319361
           path: vendor/macro_src
           sparse-checkout: |
             engine
             lib
+            config
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - name: Install focused Python test dependencies
@@ -154,10 +155,11 @@ jobs:
       contents: read
       actions: read
     runs-on: ubuntu-latest
-    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
-    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
-    # 60 minutes stays inside the merge queue's 100-minute check response limit.
-    timeout-minutes: 60
+    # Keep every prerequisite and the full 45-minute repository allowance.
+    # Actual setup took ~23m; a successful test/upload then crossed job60 in
+    # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
+    # This budget correction does not diagnose a post-test process-exit stall.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -201,11 +203,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          ref: 268a89e3828d848848c77dfe69191c3fa7319361
           path: vendor/macro_src
           sparse-checkout: |
             engine
             lib
+            config
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
@@ -340,6 +343,8 @@ jobs:
           for pattern in (
               "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
               "test_application_http_admission.py", "test_application_http_realm_projection.py",
+              "test_application_auto_request.py", "test_application_cross_pool_auto.py",
+              "test_application_registered_pool_selection.py", "test_application_registered_pool_composition.py",
               "test_bailian_application_handler_composition.py",
               "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
               "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
@@ -357,6 +362,9 @@ jobs:
             ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
             ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
@@ -400,14 +408,69 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: f0375acf4ba076718e7cb420ed28ab61fb0a4f26
+          ref: f38c5b9ea25ea598094a309f0edf48e2722408be
           path: .ci-production-macro
           sparse-checkout: |
             engine
             lib
             config
+            tests
+            scripts
+            research/earnings_intelligence/e3/gold
+            ops/launchd
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Verify exact scoped Fabric model and Metabolism composition
+        if: matrix.index == 0
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'requests>=2.31'
+          exact_composition_proof="$(mktemp -d "$RUNNER_TEMP/fabric-exact-composition.XXXXXX")"
+          trap 'rm -rf "$exact_composition_proof"' EXIT
+          (
+            cd "$GITHUB_WORKSPACE/.ci-production-macro"
+            PYTHONPATH="$PWD" MM_FABRIC_GATEWAY_SOURCE_ROOT="$GITHUB_WORKSPACE" \
+              python -m pytest -q --noconftest -c /dev/null \
+              --junitxml="$exact_composition_proof/exact-proof.xml" \
+              tests/test_fabric_exact_scoped_model_composition.py \
+              tests/test_company_intelligence_event_compiler_e3a.py
+          )
+          python - "$exact_composition_proof/exact-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("FABRIC_EXACT_COMPOSITION_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
+          (
+            cd "$GITHUB_WORKSPACE/.ci-production-macro"
+            PYTHONPATH="$PWD" MM_FABRIC_GATEWAY_SOURCE_ROOT="$GITHUB_WORKSPACE" \
+              python -m pytest -q --noconftest -c /dev/null --rootdir="$PWD" \
+              --junitxml="$exact_composition_proof/metabolism-proof.xml" \
+              tests/test_metabolism_audit.py \
+              tests/test_metabolism_fabric_composition.py
+          )
+          python - "$exact_composition_proof/metabolism-proof.xml" <<'PROOF'
+          import collections, json, sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = list(root.iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests.test_metabolism_audit": 185,
+                      "tests.test_metabolism_fabric_composition": 106}
+          counts = collections.Counter()
+          for case in root.iter("testcase"):
+              name = case.get("classname", "")
+              module = next((key for key in expected if name == key or name.startswith(key + ".")), None)
+              assert module is not None, ("unrecognized module", name)
+              counts[module] += 1
+          assert dict(counts) == expected, (dict(counts), expected)
+          assert totals["tests"] == sum(expected.values()), totals
+          assert all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("FABRIC_METABOLISM_COMPOSITION_PROOF " + json.dumps({"totals": totals, "modules": counts}, sort_keys=True))
+          PROOF
+
       - name: Verify actual Brain Fabric and production inference composition
         if: matrix.index == 0
         env:
@@ -417,15 +480,23 @@ jobs:
         run: |
           set -euo pipefail
           brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
+          brain_composition_root="$(cd "$brain_composition_root" && pwd -P)"
           trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
-          git archive HEAD brain bot common app control_plane portfolio \
+          git -c gc.auto=0 archive HEAD brain bot bridge common app config control_plane data_layer portfolio \
             scripts/translate_all.py \
             tests/integration/test_production_inference_composition.py \
             tests/integration/test_fabric_inference_composition.py \
             tests/integration/test_fabric_translation_composition.py \
             tests/integration/test_fabric_chat_inference_composition.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
             tests/integration/test_fabric_chat_buffered_delivery.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
+            tests/test_advisor_cognition_plane.py \
             tests/integration/test_fabric_text_native_application.py \
+            tests/integration/test_fabric_text_cross_pool_auto.py \
+            tests/integration/test_technician_fabric_composition.py \
+            tests/integration/test_fabric_portfolio_composition.py \
+            tests/integration/test_fabric_regional_portfolio_composition.py \
             tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/quota_continuity \
             ops/native_fabric/experiential_proxy/gateway.py |
@@ -446,6 +517,41 @@ jobs:
             -p test_fabric_text_native_application.py -v
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_translation_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m pytest -q --noconftest -c /dev/null \
+            --rootdir="$brain_composition_root" --junitxml="$brain_composition_root/cognition-auto-proof.xml" \
+            tests/test_advisor_cognition_plane.py \
+            tests/integration/test_fabric_chat_cross_pool_auto.py \
+            tests/integration/test_fabric_text_cross_pool_auto.py
+          python - "$brain_composition_root/cognition-auto-proof.xml" <<'PROOF'
+          import collections, json, sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = list(root.iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests.test_advisor_cognition_plane": 12,
+                      "tests.integration.test_fabric_chat_cross_pool_auto": 16,
+                      "tests.integration.test_fabric_text_cross_pool_auto": 14}
+          counts = collections.Counter()
+          for case in root.iter("testcase"):
+              name = case.get("classname", "")
+              module = next((key for key in expected if name == key or name.startswith(key + ".")), None)
+              assert module is not None, ("unrecognized module", name)
+              counts[module] += 1
+          assert dict(counts) == expected, (dict(counts), expected)
+          # JUnit counts may additionally include unittest subtests. The closed
+          # testcase/module inventory above proves every required base case ran.
+          assert totals["tests"] >= sum(expected.values()), totals
+          assert all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("FABRIC_COGNITION_AUTO_PROOF " + json.dumps({"totals": totals, "modules": counts, "reported_subtests": totals["tests"] - sum(counts.values())}, sort_keys=True))
+          PROOF
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_portfolio_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_regional_portfolio_composition.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_chat_cross_pool_auto.py -v
+          PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
+            -p test_fabric_text_cross_pool_auto.py -v
           python -m pip install --disable-pip-version-check playwright==1.62.0
           python -m playwright install --with-deps chromium
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
@@ -469,11 +575,10 @@ jobs:
 
       - name: Run repository test shard
         if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
-        # Give best-effort upload an opportunity inside the 60-minute job.
-        # The prior 38-minute step timed out; its snapshot retained the final
-        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
-        # for setup/cleanup opportunity, not a guaranteed future bound.
-        # Slow setup or runner loss can still prevent artifact delivery.
+        # Preserve the independent 45-minute test limit. Job75 accommodates
+        # observed ~23m prerequisite work plus upload/cleanup; slow setup or
+        # runner loss can still prevent artifact delivery. No exit is inferred
+        # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
         run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 

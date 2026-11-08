@@ -693,6 +693,7 @@ class _FixedResponsesDriver:
         max_output_tokens = self._max_output_tokens(logical)
         if max_output_tokens is not None:
             body["max_output_tokens"] = max_output_tokens
+        body.update(self._output_controls(logical))
         wire = _canonical(body)
         if len(wire) > MAX_WIRE_BYTES:
             raise TransportRefused("request_too_large")
@@ -709,6 +710,12 @@ class _FixedResponsesDriver:
             wire_body_digest=_sha256(wire),
             max_output_tokens=max_output_tokens,
         )
+
+    def _output_controls(self, logical: Mapping[str, Any]) -> Dict[str, Any]:
+        return {}
+
+    def _logical_fields(self, parsed: Mapping[str, Any]):
+        return _LOGICAL_FIELDS
 
     def _logical_payload(self, value: Any) -> Dict[str, Any]:
         if isinstance(value, (bytes, bytearray)):
@@ -731,8 +738,9 @@ class _FixedResponsesDriver:
         _reject_nonfinite(parsed)
         if len(_canonical(parsed)) > MAX_LOGICAL_BYTES:
             raise TransportRefused("request_too_large")
+        allowed_fields = self._logical_fields(parsed)
         for field in parsed:
-            if field in _LOGICAL_FIELDS:
+            if field in allowed_fields:
                 continue
             if field in _OUTPUT_CONTROL_FIELDS:
                 raise TransportRefused("unsupported_output_control", str(field))
@@ -1102,6 +1110,34 @@ class BailianResponsesDriver(_FixedResponsesDriver):
     pool = "bailian"
     allowed_models = frozenset({"qwen3.8-max", "qwen3.8-flash"})
     default_model = "qwen3.8-flash"
+
+    def _logical_fields(self, parsed: Mapping[str, Any]):
+        if not ({"temperature", "reasoning_effort"} & set(parsed)):
+            return _LOGICAL_FIELDS
+        # This is a closed, model-specific plaintext Responses form. The
+        # shared grammar and MiniMax compiler never inherit these controls.
+        fields = {"model", "messages", "max_tokens", "stream", "temperature", "reasoning_effort"}
+        temperature = parsed.get("temperature")
+        messages = parsed.get("messages")
+        if (set(parsed) != fields or parsed.get("model") != "qwen3.8-flash"
+                or type(temperature) not in (int, float) or temperature != 0
+                or parsed.get("reasoning_effort") != "none" or parsed.get("stream") is not False
+                or type(messages) is not list or len(messages) not in (1, 2)):
+            raise TransportRefused("qwen_plaintext_control_invalid")
+        roles = ["user"] if len(messages) == 1 else ["system", "user"]
+        if any(type(message) is not dict or set(message) != {"role", "content"}
+               or message["role"] != role or type(message["content"]) is not str
+               or not message["content"]
+               for message, role in zip(messages, roles)):
+            raise TransportRefused("qwen_plaintext_control_invalid")
+        return fields
+
+    def _output_controls(self, logical: Mapping[str, Any]) -> Dict[str, Any]:
+        if "reasoning_effort" not in logical:
+            return {}
+        # _logical_fields has validated the complete pair. Keep both controls
+        # in the logical digest and in the exact dispatched wire bytes.
+        return {"temperature": logical["temperature"], "reasoning": {"effort": "none"}}
 
 
 __all__ = [
