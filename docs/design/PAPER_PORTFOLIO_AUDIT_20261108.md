@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption; Market Memory exact-record comparison with actual source-record proof; Prophet D03 selected comparison, subject identity and security-watchlist outcomes; OS created-project opening and invalid-link recovery with exact directory corrections; and the News source-reading and return proposal with EN/ZH states. The next foreground is a bounded International Markets workflow audit beyond the already accepted R14 date-label corrections. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and explicit adoption; Market Memory exact-record comparison with actual source-record proof; Prophet D03 selected comparison, subject identity and security-watchlist outcomes; OS created-project opening and invalid-link recovery with exact directory corrections; News source reading and return with EN/ZH states; and International scanner-to-dossier context preservation with five new proposal boards. The next foreground is a bounded Policy Monitor journey audit, preserving the already accepted concurrent incomplete-basis corrections. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -492,3 +492,85 @@ All logical edits returned **APPLIED_RESPONSE_OBSERVED**. Scoped `finish_working
 **Required consumer proof:** actual new-tab publisher URL and same-mounted-tab return; unchanged and stream-updated feeds; changed detail identity; removed story; missing URL; source/review-filter changes; owner/access invalidation; reload/remount without restoration promises; Back and descendant Escape focus; correct ARIA expansion/control state and fallback announcement; EN/ZH mobile wrapping and touch geometry. Opening/returning/closing must cause no review write and no duplicate refresh service.
 
 **Next safe phase:** inspect International Markets' current journey for a substantive, source-supported comparison or drill-in gap. Preserve all eight accepted R14 date-mode corrections and any live concurrent targets. Continue within the existing product/state owners.
+
+
+### International scanner → dossier → return — completed Paper slice
+
+File **`01M3P1TW5Y3XWQC37ADDS8K5AG`**, new page **`p-L-0` — Proposed · Scanner to dossier**. [Open the proposed journey](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-L-0).
+
+A bounded Paper audit found a missing continuity contract between the selected scanner row and its dossier. Frozen scanner `G9J-0` illustrates Brazil at **−6.9% USD / 21 Oct**; frozen dossier `LLI-0` illustrates **+3.4% USD / 20 Oct**, under similar snapshot headings. These may be independent examples and are not evidence of a production data error. No frozen number or date was reconciled by this slice. The new proposal uses one clearly labeled R14 specimen throughout its open/read/return sequence.
+
+Source inspection also found an actual implementation discontinuity at the pinned source: the scanner Dossier anchor contains `data-gs-open="dossier"` but lacks `data-gs-select-market`. The enhanced `gsMarketEvent()` only intercepts the latter. The Dossier anchor therefore follows its ordinary `?view=dossier&market=...` URL and carries no horizon, basis or pins. Query parsing supplies configured defaults and a new empty return stack. The proposed context-preserving interaction is explicitly **not implemented at this pin**.
+
+#### Implemented Paper targets
+
+| Artboard | Content |
+|---|---|
+| `OR0-0` | 1440px desktop journey, three failure cases, existing-owner transition contract, data meaning and consumer proof |
+| `PD6-0` | 390px English dossier with explicit originating scanner and Back to scan |
+| `PRG-0` | 390px Chinese dossier with matching basis/horizon, localized copy and Chinese direction-ink convention |
+| `QQO-0` | 390px English unavailable destination / source changed / direct-entry states |
+| `QSJ-0` | 390px Chinese equivalents of all three recovery states |
+
+The desktop body `QKU-0` contains:
+
+- `QKY-0`: **Open selected Brazil → read dossier → Back to scan**, preserving the illustrated USD-unhedged / 1D / price-return / 21 Oct context and returning focus to the explicit Open Brazil dossier control.
+- `QNA-0`: **Stay in scan**, **Open current scanner**, and **Open scanner** are separate outcomes.
+- `QNY-0`: transition composition and the exact limits of the existing return owner.
+- `QOD-0`: timing/basis/source meaning and percentage-versus-contribution semantics.
+- `QOQ-0`: implementation delta and concrete consumer proof.
+
+The matching-context example is labeled proposed/specimen throughout. No observation hash, rights tier, original source body or missing clock was manufactured. Full source-clock panels and other scanner rows are explicitly outside the focused excerpts.
+
+#### Same-pin source evidence
+
+All following source reads used the existing Macro product pin **`ba32f20ba306f9e75b7c400992138e736b904516`**. This remains a product-content pin, not a claim that Macro main is protected.
+
+| Source | Blob | Finding |
+|---|---|---|
+| [intl_workspace_state.js](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/templates/intl_workspace_state.js) | `8bbfcfd664667e0cd7febc41af0fe8cfacca1ae9` | Existing context, bounded return stack, query defaults, basis/horizon changes and source invalidation |
+| [intl_workspace.js](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/templates/intl_workspace.js) | `62155676721a29a2bc65047e736b23fbba7e2f2a` | Market-link handler, exact panel resolution, default-market fallback, focus restoration and replaceSource |
+| [_gs_scanner_macros.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/templates/intl_workspace/_gs_scanner_macros.html.j2) | `9e70464c075bff9fa1d03f1712a52f897c585882` | Separate market and Dossier anchors; same helper in mobile cards; source-owned percentage-point contributions |
+| [_gs_macros.html.j2](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/templates/intl_workspace/_gs_macros.html.j2) | `9644628ce0065309ae1f93246c72096aa785a74d` | Four-clock display; read-only Price mode; basis/horizon; no selectable latest/aligned timing mode |
+| [intl_surveillance_mount.py](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/lib/intl_surveillance_mount.py) | `9fbb80dfa8665fcc7e55b6c7f802f8bb3eb76272` | Existing seven views receive the same supplied observation set, copied per builder; independent not_built/error states |
+| [intl_gs_scanner_view.py](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/lib/intl_gs_scanner_view.py) | `c667b3c071a7c467b8e9b7c8a5c24deaba0e18f6` | Qualified observation projection and honest abstentions; no production specimen path |
+| [intl_gs_dossier_view.py](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/lib/intl_gs_dossier_view.py) | `e95b2cf0f3df0041c77bca7e1f59e0c80ac88d8b` | Same per-context observation authority and selected-market dossier; no invented values or specimen path |
+| [intl_global_observation.py](https://github.com/mastermindx-market-intelligence/macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/engine/intl_global_observation.py) | `cdbe0a4f769e39641e6426414d93eb5b777be341` | Multiplicative USD identity, observation identity, four clocks, qualification and decomposition fields |
+
+Scanner and dossier templates were also read (blobs `f60422f1c8ac2c2e2ae95eef84d05a12d9d7cdf9` and `48ac01ee03d16f7525f975d73b4cf5f767d6aa0d`); dossier macros blob `67fabfdd185fa08bfd9e9e742a4e2714a69c2d18`. Frozen R14 spec and its freeze decision were read at the same pin, blobs `eb8f6c0590951824310d7b9356cae34a7904f066` and `9b01ee11e169c699b4e5ed5884ae155e00096fad`. Their reference/design status and existing production-owner boundaries remain intact.
+
+#### Handoff contract
+
+**Ordinary enhanced open.** Reuse the existing reducer/controller. Validate the exact dossier panel and the requested market child under the current binding; compose selection of the requested market in the scanner context, capture its admitted origin anchor in the existing return stack, then open the dossier. Commit the composed result once. A validation, stack-capacity, rendering or URL failure must leave the original state/URL intact, rather than partially updating selection, stack and view. This is a required implementation change, not a claim that simply adding one attribute already supplies the behavior.
+
+**Return.** Existing `CONTEXT_FIELDS` are view, selected_market, ordered compare_markets, horizon, currency_basis, return_basis, source_reference, expanded and library_group. Each return entry separately stores anchor_id. The stack supports up to eight entries; ordered comparison selection is bounded to four. Back pops that context and emits restore_focus. A configured, still-visible origin anchor receives focus; otherwise the workspace heading does. The new proposed implementation must announce the fallback.
+
+**Limits.** Exact scroll offsets, arbitrary scanner filters, search and sort are not captured. Baseline is not in return context and follows the existing tuple invalidation. The inspector has separate conditional scroll behavior; that does not establish scanner/dossier scroll restoration. No second navigation, history, comparison or evidence store was added.
+
+**Changed source.** Existing source replacement checks expected current source, closes source-bound inspector context, rebinds through the current owner, and clears baseline and return history. The design therefore says **Open current scanner**, not Back to scan, once the earlier return context is gone. It does not revive old values or an older generation.
+
+**Direct/new-tab entry.** Keep real anchors and browser-native modified-click/no-JS behavior. The proposed fallback should serialize the existing supported query fields. A new document still uses its own current binding and has no captured return stack; it may offer **Open scanner**, with no original-context recovery claim. Browser history reparsing likewise does not preserve the in-memory stack. A missing current scanner destination must show its unavailable reason and disable the entry.
+
+**Failed destination.** Missing/ambiguous panel, stale generation or absent requested market must not be shown as successful navigation to the default or first market. Keep the original scan on a failed ordinary handoff. The source's existing default-market painting is specifically not proof of successful requested-market recovery.
+
+#### Data meaning and proof distinction
+
+The source has **no latest-available/aligned-period field, action, query parameter or implemented mode transition**. `gs_snapshot()` renders read-only Mode=Price and existing basis/horizon; its latest-qualified-clock note is not an aligned-comparison capability. This new proposal adds no timing selector and preserves the prior R14 specimen-label corrections without recasting them as shipped functionality.
+
+A publication generation is necessary for the v2 binding, but it is **not an observation receipt or evidence identity**. A bounded source reviewer flagged that distinction, and `QOC-0 / QOT-0` now explicitly require proof through the existing surveillance builder that the intended qualified observation, available evidence references, clocks and qualification reach both scanner and dossier. Matching generation, human date labels or displayed values alone do not pass.
+
+The reused **−6.9%, −4.2%, −2.8%** values are rounded specimen figures. They are not newly computed market evidence. The existing return identity is multiplicative, and raw FX % is not an additive percentage-point contribution. Production uses the supplied `additive_fx_contribution_pp` and `interaction_pp`; navigation cannot upgrade absent, restricted, stale or unqualified data.
+
+#### Verification and preserved work
+
+Principal inspected the three-stage desktop journey, English/Chinese mobile dossier, all English/Chinese recovery states, owner contract and final proof contract. New primary controls declare 44px minimum height; observed EN/ZH labels wrap without clipping. This is static geometry evidence, not a runtime accessibility certificate.
+
+Final readback spans **206 text leaves** across the five new boards. All eight local-index/currency clarity replacements and all four review corrections match exactly. Neither recovery board contains the old numerical specimen values. The selected-source copy and restored-focus outline are visible in the journey.
+
+Four original source specimens — `G9J-0`, `LLI-0`, `IRV-0`, `JLR-0` — have **byte-for-byte identical JSX before and after**. No edit targeted frozen R14, accepted scanner date-mode changes, current `OK5-0 / OMO-0` proposals, Saved Research interaction/help pages, or another writer's board. The five new artboards have distinct non-overlapping horizontal ranges on their separate page. Paper reports fit-content heights as null for this inactive page; screenshots, not that null metadata, establish the inspected layouts.
+
+Every mutation returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed on `OR0-0 / PD6-0 / PRG-0 / QQO-0 / QSJ-0`. No application navigation, market data request, save, trade or source-code implementation was performed.
+
+**Required consumer proof:** non-default horizon/basis and ordered pins through ordinary open/Back; actual intended observation and rights/clock state through the existing builders; requested-market presence; unavailable/ambiguous contexts; return-stack bound; render/URL rollback; source replacement; direct/new-tab/browser-history behavior; focus/announcement fallback; locale/direction ink and mobile interaction geometry.
+
+**Next safe phase:** bounded Policy Monitor journey audit, retaining the already accepted current incomplete-basis wording and protecting live writers. Seek a concrete source-supported evidence-reading or recovery gap before making any new design change.
