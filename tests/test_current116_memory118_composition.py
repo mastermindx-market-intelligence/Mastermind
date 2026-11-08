@@ -30,24 +30,38 @@ def dump(node):
 
 
 @pytest.fixture(scope="module")
-def joined(current_source, tmp_path_factory):
+def memory_parent(current_source,tmp_path_factory):
+    # Explicit UNSELECTED public postimage descriptor; never an installed receipt.
+    parent=tmp_path_factory.mktemp("memory-expected40")/'source'
+    compose.compose(current_source,parent,profile_name="current116-maintenance-guard")
+    profile=json.loads((compose.HERE/'memory118/profile.json').read_text())
+    assert json.loads((parent/'FILES.json').read_text())==profile['base_files']
+    assert profile['expected_predecessor']['state']=='UNSELECTED_SOURCE_DESCRIPTOR_ONLY'
+    assert profile['expected_predecessor']['actual_selection_observed'] is False
+    (parent/'RELEASE.json').write_text(json.dumps({'digest':profile['base_selection']['generation'],
+        'files':profile['base_files'],'fixture_premise':'UNSELECTED public expected predecessor only'}))
+    return parent
+
+
+@pytest.fixture(scope="module")
+def joined(memory_parent, tmp_path_factory):
     output = tmp_path_factory.mktemp("memory118-parent") / "source"
-    result = compose.compose(current_source, output, profile_name=PROFILE)
+    result = compose.compose(memory_parent, output, profile_name=PROFILE)
     assert result["files"] == 118
     assert result["publication_performed"] is result["selection_performed"] is False
     return output
 
 
-def test_exact116_to118_retains_every_incumbent_member(current_source, joined):
+def test_exact116_to118_retains_every_incumbent_member(memory_parent, joined):
     profile = json.loads((compose.HERE / "memory118/profile.json").read_text())
     base, final = profile["base_files"], profile["files"]
     assert len(base) == 116 and len(final) == 118
     assert set(final) - set(base) == ADDITIONS and set(base) <= set(final)
-    assert {name for name in base if base[name] != final[name]} == EXACT_REPLACEMENTS | {"ext/remote_sub_exec.py"}
-    assert base == json.loads((current_source / "FILES.json").read_text())
+    assert {name for name in base if base[name] != final[name]} == EXACT_REPLACEMENTS
+    assert base == json.loads((memory_parent / "FILES.json").read_text())
     for name, expected in final.items():
         assert sha((joined / name).read_bytes()) == expected
-    assert set(profile["patches"]) == {"ext/fabric_task.py", "ext/lease_broker.py", "ext/remote_sub_exec.py"}
+    assert set(profile["patches"]) == {"ext/fabric_task.py", "ext/lease_broker.py"}
     assert set(profile["source_map"]) == (EXACT_REPLACEMENTS | ADDITIONS) - set(profile["patches"])
     assert not (joined / "CURRENT.json").exists() and not (joined / "ext/broker").exists()
 
@@ -186,8 +200,8 @@ def test_joined_existing_store_refuses_unqualified_custody(joined, tmp_path, mon
 
 
 @pytest.mark.parametrize("defect", ["foreign_generation", "missing_member", "injected_member", "wrong_preimage"])
-def test118_exact_source_preconditions_fail_closed(current_source, tmp_path, defect):
-    base = tmp_path / "base"; shutil.copytree(current_source, base)
+def test118_exact_source_preconditions_fail_closed(memory_parent, tmp_path, defect):
+    base = tmp_path / "base"; shutil.copytree(memory_parent, base)
     descriptor = base / "RELEASE.json"; value = json.loads(descriptor.read_text())
     if defect == "foreign_generation": value["digest"] = "0" * 64
     elif defect == "missing_member": value["files"].pop("ext/native_plan_worker.py")
@@ -199,7 +213,7 @@ def test118_exact_source_preconditions_fail_closed(current_source, tmp_path, def
     assert not output.exists()
 
 
-def test_changed_profile_helper_source_refuses_before_any_output(current_source, tmp_path, monkeypatch):
+def test_changed_profile_helper_source_refuses_before_any_output(memory_parent, tmp_path, monkeypatch):
     profile = json.loads((compose.HERE / "memory118/profile.json").read_text())
     repo = tmp_path / "public-source"
     for source in profile["source_map"].values():
@@ -210,7 +224,7 @@ def test_changed_profile_helper_source_refuses_before_any_output(current_source,
     monkeypatch.setattr(compose, "REPO", repo)
     output = tmp_path / "output"
     with pytest.raises(ValueError, match="canonical dependency changed"):
-        compose.compose(current_source, output, profile_name=PROFILE)
+        compose.compose(memory_parent, output, profile_name=PROFILE)
     assert not output.exists()
 
 
@@ -230,8 +244,21 @@ def test_fixed_control_owner_uses_the_same_full_broker_and_task_as_profile(joine
     for name in ('lease_broker.py','fabric_task.py'):
         assert (namespace/name).read_bytes()==(joined/'ext'/name).read_bytes()
     profile=json.loads((compose.HERE/'memory118/profile.json').read_text())
-    assert profile['base_selection']['sequence']==39
-    assert profile['base_selection']['generation']=='774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea'
+    assert profile['base_selection']['sequence']==40
+    assert profile['base_selection']['generation']=='ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879'
     for name in ('experiential_bridge.py','experiential_host_context.py','experiential_plan_policy.py',
                  'experiential_transport.py','native_plan_worker.py','pick.py'):
         assert profile['files']['ext/'+name]==profile['base_files']['ext/'+name]
+
+
+@pytest.mark.parametrize('relabel',[False,True])
+def test_stale39_cannot_become_the_expected40_source(current_source,tmp_path,relabel):
+    base=tmp_path/'stale39';shutil.copytree(current_source,base)
+    if relabel:
+        value=json.loads((base/'RELEASE.json').read_text())
+        value['digest']='ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879'
+        (base/'RELEASE.json').write_text(json.dumps(value))
+    output=tmp_path/'must-not-exist'
+    with pytest.raises(ValueError,match='selected native base changed'):
+        compose.compose(base,output,profile_name=PROFILE)
+    assert not output.exists()

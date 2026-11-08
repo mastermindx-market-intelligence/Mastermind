@@ -9,10 +9,10 @@
   "base_count": 116,
   "base_public_source_commit": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
   "base_selection": {
-    "generation": "774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea",
-    "previous": "296e522f5f236d764aa4ad1b9fa677d7eea32e6bdfe2fc97c0755c06a857908f",
+    "generation": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+    "previous": "774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea",
     "schema": "native-code-selection.v1",
-    "sequence": 39
+    "sequence": 40
   },
   "broker_guard_parent_sha256": "4072c76fd5d28729e4c62d44f9b700a2ac503ccb4acd1e572fc4a6c291fe23d3",
   "broker_memory_changed_functions": [
@@ -74,15 +74,11 @@
     },
     "ext/lease_broker.py": {
       "after": "7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd",
-      "before": "a841230c4030d178f309f311f199caad7767d3b45b44c41c021fdc14eacc3640"
+      "before": "4072c76fd5d28729e4c62d44f9b700a2ac503ccb4acd1e572fc4a6c291fe23d3"
     },
     "ext/provider_outcome.py": {
       "after": "eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b",
       "before": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e"
-    },
-    "ext/remote_sub_exec.py": {
-      "after": "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
-      "before": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
     },
     "ext/run_observation_delivery.py": {
       "after": "5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f",
@@ -98,6 +94,13 @@
   },
   "current_executor_review": "9e3beebe488266978fd7efe4935d54dc8920fe18c7b3b676326e0640ad151eb1",
   "current_executor_root_acceptance": "8567bea9e1d2e494c19358adb872e935a3846f72dbf2b75745aa808bc0569b0f",
+  "expected_predecessor": {
+    "actual_publication_observed": false,
+    "actual_selection_observed": false,
+    "required_action_time_binding": "Root actual qualified publication and selection40 before any use as installed predecessor",
+    "source_manifest_sha256": "e06c1fb1091ba52b133ea7869db895a6c41cc13113a86bc17c6a52cbea21154d",
+    "state": "UNSELECTED_SOURCE_DESCRIPTOR_ONLY"
+  },
   "fixed_helper_full_broker_sha256": "7a713554c24b2fe47186db1332a023d952bdbeb8a83e972976c19dc5bc9769bd",
   "fixed_helper_full_task_sha256": "c0f12526bb13cbef6be6b766232e31dc520fffc38e1353923ae97e8ff5c521d1",
   "incumbent_lease_reader_unchanged": true,
@@ -117,6 +120,8 @@
     "sequence": 37
   },
   "source_descriptor_is_runtime_authority": false,
+  "source_parent116_manifest_sha256": "e06c1fb1091ba52b133ea7869db895a6c41cc13113a86bc17c6a52cbea21154d",
+  "source_predecessor_name": "prospective ef304 guarded116; not an observed CURRENT40",
   "target_count": 118,
   "task_privacy_seams": [
     "inspect_run wrapper",
