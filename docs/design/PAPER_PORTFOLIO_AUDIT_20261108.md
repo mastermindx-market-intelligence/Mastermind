@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. The next foreground is the existing F03 source-directory pipeline, where the Sector pointer still lands on an older reference instead of the current provisional journey and return proposal. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. The next foreground is a bounded read-only audit of current Discover/Heatmaps source-population and timing transitions. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -886,3 +886,66 @@ Every mutation returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed o
 **Required consumer proof:** ready → chooser → explanation → qualified return; unchanged and changed-event tuples; metric/period/basis changes; later intent; removed opener; keyboard and touch; actual future dollar-comparator receipts; unavailable/restricted evidence; a direct unavailable-benchmark request; independent source access without fallback or admission changes.
 
 **Next safe phase:** repair the newly evidenced Sector discovery gap through the existing F03 source pipeline. The oversized F03 Paper original is explicitly READ ONLY / NO MODIFY due to its observed data-loss warning; no mutation is planned there. Existing F03 source permits bounded source corrections, but its generated D05 assignment must be regenerated from qualified observations/curation rather than patched by hand. Exact source/build and carrier checks are in progress; all recorded Draft/HOLD and physical-migration restrictions remain.
+
+
+## Continuing phase — F03 current Sector discovery and exact-board search
+
+### Corrected discovery through the incumbent source owner
+
+The existing F03 generator, rather than a manually patched generated assignment, now exposes three distinct Sector destinations:
+
+| Role | Exact current locator |
+| --- | --- |
+| Provisional D05 Readme | `01M6FAXA774QT1VRDMAG7DFQ2W / p-3-0 / BML-0` |
+| Bounded comparison-return proposal | `01M6FAXA774QT1VRDMAG7DFQ2W / p-6-0 / GPL-0` |
+| Retained original reference | `01M6FAXA774QT1VRDMAG7DFQ2W / p-1-0` |
+
+Fresh exact-page metadata reads confirmed p3's twelve boards and p6's single **PROPOSED · Comparison return · EN/ZH** board. The wrapper's active p1 summary was not substituted for the requested page response. The p1 census row remains the original dated observation, including its old title/count; current discovery is supplied through the separate return-observation overlay.
+
+The source branch is the existing **`design/f03-paper-directory-20261102-c2`** in Macro, under **`research/design_candidates/production_design_20261102/f03/`**. The original source head was `97856926b1a5ccd85780c67c5db45e6581bf5b3c`. Governing Mastermind law remains `5c3d3885234358aefb97ecdbc59be0864df14f8b`; this correction does not adopt older law pins found in retained historical receipts.
+
+The real [D05 observation](https://github.com/mastermindx-market-intelligence/macro/blob/235d60d912589e630988b67eee6ba63be37c5712/research/design_candidates/production_design_20261102/f03/evidence/d05-sector-reference-observation-20261108.md) and [native metadata responses](https://github.com/mastermindx-market-intelligence/macro/blob/235d60d912589e630988b67eee6ba63be37c5712/research/design_candidates/production_design_20261102/f03/evidence/d05-sector-reference-readback-20261108.json) were committed and byte-read back before curation linked them. The note cites this canonical audit at its Sector-completion commit `c966b03919c3bc161d23445a007ab75def0e4024`. The Macro note's actual blob is `3672f23a0d2bb4609469c3ec4ca88af56a17bf7d`; the metadata-response blob is `f1e9d7dcb64b534a7193b3655a1bef14e53086a9`.
+
+### Two completed source phases
+
+1. **Page/role correction** — commit [`4981fe2dab3912666769c0ef275249f73894b6b9`](https://github.com/mastermindx-market-intelligence/macro/commit/4981fe2dab3912666769c0ef275249f73894b6b9), following the authored-observation commit `235d60d912589e630988b67eee6ba63be37c5712`. Both curation mirrors add `assignment_returns.D05`; the incumbent `--refresh-returns` generator updates D05 Markdown, assignment/provenance JSON and directory HTML. The other generated assignment files and index remain byte-equal. The actual diff affected fourteen paths, all read back with exact expected blobs and contents.
+2. **Exact proposed-board discovery** — commit [`f905484186904fd98227a5353a1024dec7f4e9f6`](https://github.com/mastermindx-market-intelligence/macro/commit/f905484186904fd98227a5353a1024dec7f4e9f6). The existing observation now optionally carries `candidate_board_id`; D05 supplies the parent-bound GPL-0. The source builder, existing page-keyed JavaScript join, search, assignment labels and detail rendering use that field. Fourteen paths changed from the prior head; all fourteen committed files matched exact blob and body readbacks. The branch head itself read back at this commit.
+
+The [current generated D05 entry](https://github.com/mastermindx-market-intelligence/macro/blob/f905484186904fd98227a5353a1024dec7f4e9f6/research/design_candidates/production_design_20261102/f03/assignments/D05.md), [behavior contract](https://github.com/mastermindx-market-intelligence/macro/blob/f905484186904fd98227a5353a1024dec7f4e9f6/research/design_candidates/production_design_20261102/f03/evidence/candidate-board-discovery-20261108.md) and [verification receipt](https://github.com/mastermindx-market-intelligence/macro/blob/f905484186904fd98227a5353a1024dec7f4e9f6/research/design_candidates/production_design_20261102/f03/evidence/candidate-board-discovery-verification-20261108.json) are the concrete source deliverables.
+
+### User-visible behavior and strict limits
+
+A builder can search **GPL-0** or **`01M6FAXA774QT1VRDMAG7DFQ2W/p-6-0/GPL-0`** in Assignments or Paper references. Assignment cards explain the matched **Observed candidate board**, and HTML detail plus generated Markdown show the full candidate identity. BML remains the p3 Readme board. The p1 reference is retained separately.
+
+The link opens the containing Paper page; EN/ZH copy explicitly says to select the displayed ID there. There is no invented Paper board URL, automatic board selection, `board=GPL-0` hash, or directory focus target absent from the rendered inventory. Query, owner and originating view remain in the assignment/detail/Back path. Full returned Readme tuples also become searchable in the reference view through the same claim text.
+
+Missing and explicit-null optional locators preserve legacy behavior. Non-null locators require the existing board-ID grammar and their own exact candidate URL/file/page. The builder rejects malformed rows before applying any return; the JavaScript projection suppresses invalid candidate claims while preserving independent Readme and retained evidence. Terminal newlines, paths/fragments, markup, backticks and non-string values are rejected. Exact canonical URL equality avoids an end-of-line regex normalization discrepancy. Equal short IDs in separate file/page identities stay distinct; repeated same claims deduplicate while distinct roles survive.
+
+The locator uses the existing immutable observation and retains its timestamp and source head. It is not a new Paper observation, source registry, lifecycle, ownership record or approval. D05 stays an explicitly **unqualified bounded proposal**, with draft RIG state, null receipt and null newly qualified shell/system versions. The source note is a discovery observation, not a substituted full D05 implementation contract.
+
+### Verification and preserved evidence
+
+The first exact-source baseline passed **101 return/identity + 62 directory source-logic + 26 structural-evidence checks**. The page-pointer phase passed **109/63/26**. The final candidate-board feature passed **129/69/26**. These are actual local executions; the old full input suite was not rerun and no hosted CI result is inferred.
+
+The checks include wrong-file/page tuples, repeated short-ID ambiguity, absent/null compatibility, invalid metadata and URLs, atomic rejection, EN/ZH rendering strings, query/owner/Back context and absence of invented board-focus/URL targets. Source diff inspection showed only **D05's `candidate_board_id`** changed within assignment data in the second phase. The source whitespace inspection emitted no diagnostics.
+
+Preserved exactly:
+
+- Nine frozen artifact hashes, all 36 non-evidence assignment digests, 348 canonical route identities and nine noncanonical deltas.
+- The original 301-page and 2,450-artboard census, all 301 NOT_DISPATCHED physical-action rows, original native ledger and unrelated structural-observation captures.
+- The prior eight returned observations and source/ownership/approval fields; no return was withdrawn or relabeled approved.
+- The intentionally historical root `artifact-manifest.json`, blob `3248109137a2a55360c73dc09fe3e3d662d59743`.
+
+The current manifest is **`paper/retention/artifact-manifest.json`**, explicitly selected by F03 continuity. Its 279 preexisting entries matched their source-tree Git blobs. The first phase adds three evidence files (282 entries); the second adds a behavior contract and verification receipt (284 entries). Only affected actual-byte digests were updated. The root manifest's older hashes were recognized as historical and were **not repaired or overwritten**.
+
+The retained compressed structural evidence was retrieved through the GitHub reader's supported base64 mode and verified at **481,924 bytes**, Git blob `2a53aaeb70e7dcaddec405851a41f960c3685385`, SHA-256 `ef6acf0ff80886afa28f762ee3caf34825b4a6f69b4b228a0e5bec2bb2a43728`. It was not fabricated or omitted to make validation pass.
+
+### Browser proof and ownership boundaries
+
+The selected Chrome extension could not reach the owned temporary workspace loopback preview: **`net::ERR_CONNECTION_REFUSED`**. A bounded read-only device inventory showed multiple online hosts without a verified binding to the selected browser. No host was guessed or used for remote execution. The temporary server exited 130 after its owned session was interrupted, and the agent-created error tab was closed.
+
+Accordingly, **real-browser rendering, responsive layout, keyboard/focus and accessibility remain unverified**. Source checks are not substituted for those proofs. No alternate browser/control mechanism, preview-hosting deployment, credential access or security change was attempted. This is a preview-transport boundary, not a security denial or an uncertain source mutation.
+
+The F03 original `01M2WGNCX9475G79JRKJTCM08P` remains **READ ONLY / NO MODIFY** due to the recorded data-loss warning. This continuation performed **zero F03 Paper writes, clones, moves, archives or physical organization actions**. The existing recorded Draft/HOLD and stacked `unsupported_base_ref` CI restrictions remain. Live #10631 metadata was not established; no current PR state was invented and no duplicate PR was created. No Ready/un-draft/enqueue/relabel/merge, runtime admission, production change, release or deployment was performed.
+
+**Next safe phase:** continue the bounded read-only Discover/Heatmaps audit. Current D04 discovery points to Terminal `p-8-1 / N71-1` and overview `LMF-1`; the readme already covers many cohort/return/save concerns, so those are not automatically reopened. Investigate a consequential current source/population/time transition before proposing any new design change. Preserve warned originals, live writers and all accepted work.
