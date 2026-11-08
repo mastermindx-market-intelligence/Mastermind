@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from control_plane.child_execution_contracts import ExecutionBinding
 from ops.executive_os import provider_orchestrator_guard as guard
 from ops.executive_os import provider_orchestrator_policy as policy
 from ops.executive_os.provider_orchestrator_policy import (
@@ -677,7 +679,7 @@ def _payload(
     }
 
 
-def _emitted(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+def _emitted(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
     raw = capsys.readouterr().out.strip()
     assert raw
     return json.loads(raw)["hookSpecificOutput"]
@@ -1149,3 +1151,378 @@ def test_existing_enabled_cap4_is_never_silently_downgraded(tmp_path: Path) -> N
     assert not (home / ".agents").exists()
     assert not (home / ".claude" / "hooks").exists()
     assert not (home / ".claude" / "skills").exists()
+
+
+# --- WO-11: engine-independent ExecutionBinding launch guard -------------------
+#
+# The four required refusal cases (missing binding, stale fence, provider
+# substitution, unaccounted descendant) plus the scoped-arming and
+# server-derived-projection invariants. Bindings are built with the REAL
+# WO-02 contract and mirror the WO-14 issuer's claim_payload shape, proving
+# the stdlib-only deployment guard validates what the broker actually issues.
+
+_SHARED_LAUNCH = (
+    'POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 '
+    'POOL_TASK_CLASS=code pool run glm "bounded task" /tmp glm-5.3'
+)
+
+
+@pytest.fixture()
+def shared_placement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
+    monkeypatch.setenv("MASTERMIND_SHARED_PLACEMENT", "1")
+    for name in (
+        "POOL_EXECUTION_BINDING",
+        "MASTERMIND_PLACEMENT_RECEIPT",
+        "POOL_ORCHESTRATOR_ID",
+        "POOL_PARENT_RUN_ID",
+        "POOL_TASK_CLASS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    return cwd
+
+
+def _binding(**over) -> dict[str, object]:
+    row: dict[str, object] = {
+        "root_run_ref": "hermes-root-1",
+        "immediate_parent_run_ref": "hermes-run-7",
+        "logical_child_key": "child-1",
+        "request_digest": "a" * 64,
+        "effective_complexity": "C1_ROUTINE_BOUNDED",
+        "original_root_orchestrator_ref": "root-orch-1",
+        "task_kind": "code",
+        "job_ref": "job-1",
+        "attempt_ref": "attempt-1",
+        "provider_ref": "codex",
+        "pool_ref": "glm",
+        "host_id": "ubuntu0",
+        "worker_id": "worker-a",
+        "assignment_generation": 1,
+        "fence_counter": 2,
+    }
+    row.update(over)
+    return ExecutionBinding.from_dict(row).to_dict()
+
+
+def _receipt(binding: dict[str, object], **over) -> dict[str, object]:
+    row: dict[str, object] = {
+        "schema": guard.PLACEMENT_RECEIPT_SCHEMA,
+        "execution_binding": binding,
+        "fence_counter": binding["fence_counter"],
+        "attempt_ref": binding["attempt_ref"],
+        "lease_state": "HELD",
+        "lease_expires_at_ms": 4_102_444_800_000,
+    }
+    row.update(over)
+    return row
+
+
+def _install(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    binding: dict[str, object],
+    *,
+    receipt: dict[str, object] | None = None,
+    env_binding: dict[str, object] | str | None = None,
+) -> None:
+    path = tmp_path / "placement-receipt.json"
+    path.write_text(
+        json.dumps(receipt if receipt is not None else _receipt(binding)),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MASTERMIND_PLACEMENT_RECEIPT", str(path))
+    if env_binding is None:
+        env_binding = binding
+    monkeypatch.setenv(
+        "POOL_EXECUTION_BINDING",
+        env_binding if isinstance(env_binding, str) else json.dumps(env_binding),
+    )
+
+
+def _guard_launch(cwd: Path, command: str = _SHARED_LAUNCH) -> None:
+    guard.guard_bash(_payload(cwd, command), {"command": command})
+
+
+# --- required refusal 1: missing binding ---------------------------------------
+
+
+def test_shared_placement_paid_launch_without_binding_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding(), env_binding="")
+    monkeypatch.delenv("POOL_EXECUTION_BINDING", raising=False)
+
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "no" in output["permissionDecisionReason"]
+    assert "broker-issued ExecutionBinding.v1" in output["permissionDecisionReason"]
+
+    # Owner truth unavailable is equally refusing: never launch while
+    # placement truth is uncertain (advisory-only fallback law).
+    monkeypatch.delenv("MASTERMIND_PLACEMENT_RECEIPT", raising=False)
+    monkeypatch.setenv("POOL_EXECUTION_BINDING", json.dumps(_binding()))
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "placement receipt" in output["permissionDecisionReason"]
+    assert "Never launch a paid child" in output["permissionDecisionReason"]
+
+
+def test_shared_placement_native_delegation_without_binding_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The binding gate runs BEFORE the native-child routing fences, so a
+    # delegation (Agent/Task) is refused on the binding, not the model.
+    with pytest.raises(SystemExit):
+        guard.guard_native_child({"model": "opus", "prompt": "help"})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "broker-issued ExecutionBinding.v1" in output["permissionDecisionReason"]
+
+
+def test_shared_placement_malformed_binding_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binding = _binding()
+    _install(monkeypatch, tmp_path, binding, env_binding="{not json")
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "not valid JSON" in _emitted(capsys)["permissionDecisionReason"]
+
+    wrong_schema = dict(binding, schema="ExecutionBinding.v2")
+    _install(monkeypatch, tmp_path, binding, env_binding=wrong_schema)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "schema must be ExecutionBinding.v1" in _emitted(capsys)[
+        "permissionDecisionReason"
+    ]
+
+    bad_digest = dict(binding, request_digest="z" * 8)
+    _install(monkeypatch, tmp_path, binding, env_binding=bad_digest)
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "request_digest" in _emitted(capsys)["permissionDecisionReason"]
+
+
+# --- required refusal 2: stale fence -------------------------------------------
+
+
+def test_shared_placement_paid_launch_with_stale_fence_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The owner's lease moved to fence 3; the session still holds fence 2.
+    current = _binding(fence_counter=3)
+    stale = _binding(fence_counter=2)
+    _install(
+        monkeypatch, tmp_path, stale,
+        receipt=_receipt(current, fence_counter=3),
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "stale fence" in output["permissionDecisionReason"]
+    assert "fence 3" in output["permissionDecisionReason"]
+
+    # A released lease refuses even with matching fences.
+    _install(
+        monkeypatch, tmp_path, current,
+        receipt=_receipt(current, lease_state="RELEASED"),
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "stale fence" in _emitted(capsys)["permissionDecisionReason"]
+
+    # An expired lease refuses even while marked HELD.
+    _install(
+        monkeypatch, tmp_path, current,
+        receipt=_receipt(current, lease_expires_at_ms=1),
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    reason = _emitted(capsys)["permissionDecisionReason"]
+    assert "stale fence" in reason and "lease expired" in reason
+
+
+# --- required refusal 3: provider substitution ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code pool run grok bounded /tmp grok-4.6",
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code python3 /opt/mastermind/ext/slot.py grok -- "
+        "grok -p bounded --output-format plain",
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code /opt/mastermind/ext/remote_sub.sh ubuntu2 grok "
+        "/tmp/packet.txt /home/ubuntu2/lanes/repo grok-4.6",
+    ],
+    ids=["pool-run", "slot-py", "remote-sub"],
+)
+def test_shared_placement_paid_launch_substituting_provider_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    # The binding reserved pool glm / provider codex; the launch asks grok.
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "provider substitution" in output["permissionDecisionReason"]
+    assert "'grok'" in output["permissionDecisionReason"]
+
+
+# --- required refusal 4: unaccounted descendant --------------------------------
+
+
+def test_shared_placement_launch_of_unaccounted_descendant_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The owner's current assignment covers child-1 only; the session swaps
+    # in a binding for child-2 to squeeze an extra paid child under the
+    # same lease.
+    _install(monkeypatch, tmp_path, _binding())
+    monkeypatch.setenv(
+        "POOL_EXECUTION_BINDING",
+        json.dumps(_binding(logical_child_key="child-2")),
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unaccounted descendant" in output["permissionDecisionReason"]
+    assert "logical_child_key" in output["permissionDecisionReason"]
+
+    # Native delegations are refused the same way.
+    with pytest.raises(SystemExit):
+        guard.guard_native_child({"model": "opus", "prompt": "help"})
+    assert "unaccounted descendant" in _emitted(capsys)[
+        "permissionDecisionReason"
+    ]
+
+
+# --- invariants: scoped arming, server-derived projections, allow path ---------
+
+
+def test_shared_placement_gate_auto_arms_when_a_binding_is_projected(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A projected binding alone arms the gate: the owner cannot be bypassed
+    # by leaving MASTERMIND_SHARED_PLACEMENT unset.
+    monkeypatch.delenv("MASTERMIND_SHARED_PLACEMENT", raising=False)
+    current = _binding(fence_counter=3)
+    _install(
+        monkeypatch, tmp_path, _binding(fence_counter=2),
+        receipt=_receipt(current, fence_counter=3),
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement)
+    assert "stale fence" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_unarmed_sessions_keep_the_legacy_launch_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Scoped arming (OQ-7): a session the owner did NOT arm keeps exactly
+    # the legacy behavior — no binding required, identity checks unchanged.
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
+    for name in (
+        "MASTERMIND_SHARED_PLACEMENT",
+        "POOL_EXECUTION_BINDING",
+        "MASTERMIND_PLACEMENT_RECEIPT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-1 POOL_PARENT_RUN_ID=parent-1 "
+        "POOL_TASK_CLASS=review pool run grok bounded /tmp grok-4.6"
+    )
+    guard.guard_bash(_payload(cwd, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
+def test_shared_placement_launch_rebinding_server_derived_projection_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-other POOL_PARENT_RUN_ID=hermes-run-7 "
+        "POOL_TASK_CLASS=code pool run glm \"bounded task\" /tmp glm-5.3"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "server-derived projection" in output["permissionDecisionReason"]
+    assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
+
+    # Inherited environment identity is held to the same projection
+    # (no explicit assignment in the command, so the env value is effective).
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "parent-forged")
+    inherited = (
+        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_TASK_CLASS=code "
+        'pool run glm "bounded task" /tmp glm-5.3'
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, inherited)
+    assert "POOL_PARENT_RUN_ID" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_shared_placement_launch_matching_current_binding_is_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+
+    # Explicit literal assignments equal to the projections pass.
+    _guard_launch(shared_placement)
+    assert capsys.readouterr().out == ""
+
+    # Inherited environment identity equal to the projections passes too.
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
+    monkeypatch.setenv("POOL_TASK_CLASS", "code")
+    command = 'pool run glm "bounded task" /tmp glm-5.3'
+    guard.guard_bash(_payload(shared_placement, command), {"command": command})
+    assert capsys.readouterr().out == ""

@@ -6,6 +6,16 @@ It creates no lifecycle, queue, merge, retry, watcher, or source-custody authori
 It enforces bounded provider-edge anti-burn invariants inside Mastermind workspaces:
 asynchronous CI waits, stable Fabric root accounting, and the standing native-Claude
 child routing fence.
+
+WO-11 (MMOS V1, CRITICAL): for sessions the placement owner has armed onto the
+shared placement path, every paid launch and native delegation must be covered
+by the CURRENT broker-issued ExecutionBinding.v1, validated against the
+owner-issued placement receipt over the authenticated owner channel. Refusal
+classes: missing binding, stale fence, provider substitution after reservation,
+unaccounted descendant. There is no independent signing authority — the binding
+is only an assignment of opaque references, trusted exactly as far as it matches
+the owner's current lease. The gate fences the launches it observes through this
+provider hook; it does not claim to fence arbitrary processes.
 """
 from __future__ import annotations
 
@@ -17,6 +27,7 @@ import re
 import sys
 import tempfile
 import time
+from typing import NoReturn
 
 
 MIN_WATCH_INTERVAL_S = 60
@@ -112,6 +123,46 @@ _FABRIC_IDENTITY_NAMES = (
     "POOL_TASK_CLASS",
 )
 
+# --- WO-11 shared-placement ExecutionBinding gate (engine independent) --------
+
+#: Scoped arming (OQ-7): the placement owner sets these when the session's
+#: work is claimed on the shared path (WO-14 claim -> binding at
+#: claim_payload -> projection into the session environment). Sessions not
+#: on the shared path keep the legacy identity checks unchanged.
+SHARED_PLACEMENT_ENV = "MASTERMIND_SHARED_PLACEMENT"
+#: The broker-issued ExecutionBinding.v1 (JSON), projected into the session
+#: environment by the authenticated owner at claim. Never self-declared
+#: authority: the guard trusts it only while it matches the owner receipt.
+BINDING_ENV = "POOL_EXECUTION_BINDING"
+#: Owner-written current-lease receipt (JSON file path). This is the
+#: authenticated owner channel for the guard: no independent signing
+#: authority exists, so the binding is validated for consistency against
+#: this owner-issued projection of the CURRENT lease (attempt, fence,
+#: child identity, lease state, expiry).
+PLACEMENT_RECEIPT_ENV = "MASTERMIND_PLACEMENT_RECEIPT"
+PLACEMENT_RECEIPT_SCHEMA = "mastermind.placement_receipt/v1"
+EXECUTION_BINDING_SCHEMA = "ExecutionBinding.v1"
+#: Fields that make the presented binding BE the owner's current fenced
+#: assignment: the (root, immediate parent, logical child) identity triple,
+#: the admitted request digest, and the fenced attempt.
+_BINDING_IDENTITY_FIELDS = (
+    "root_run_ref",
+    "immediate_parent_run_ref",
+    "logical_child_key",
+    "request_digest",
+    "attempt_ref",
+)
+_BINDING_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# Provider/pool token of each supported paid-launch wrapper shape.
+_POOL_RUN_RE = re.compile(r"(?is)\bpool\s+run\s+([A-Za-z0-9_.-]+)")
+_POOL_REMOTE_RE = re.compile(
+    r"(?is)\bpool\s+remote\s+([A-Za-z0-9_.-]+)\s+([A-Za-z0-9_.-]+)")
+_SUB_SH_RE = re.compile(r"(?is)\bsub\.sh\s+([A-Za-z0-9_.-]+)")
+_REMOTE_SUB_SH_RE = re.compile(
+    r"(?is)\bremote_sub\.sh\s+([A-Za-z0-9_.-]+)\s+([A-Za-z0-9_.-]+)")
+_SLOT_RE = re.compile(r"(?is)\bslot\.py\s+([A-Za-z0-9_.-]+)")
+
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -121,12 +172,12 @@ def family(model: str) -> str:
     return lowered
 
 
-def _emit(payload: dict[str, object]) -> None:
+def _emit(payload: dict[str, object]) -> NoReturn:
     print(json.dumps({"hookSpecificOutput": payload}, sort_keys=True))
     raise SystemExit(0)
 
 
-def deny(reason: str) -> None:
+def deny(reason: str) -> NoReturn:
     _emit(
         {
             "hookEventName": "PreToolUse",
@@ -281,9 +332,240 @@ def _command_or_environment_value(command: str, name: str) -> str:
     return os.environ.get(name, "").strip()
 
 
+def shared_placement_armed() -> bool:
+    """True when this session's paid launches run under the shared placement
+    path: the owner armed the scope (per-session, OQ-7 scoped arming) or has
+    already projected a binding into the session environment."""
+    if os.environ.get(BINDING_ENV, "").strip():
+        return True
+    return os.environ.get(SHARED_PLACEMENT_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _binding_problems(binding: object, owner: str) -> str:
+    """Stdlib-only ExecutionBinding.v1 shape validation. The guard is a
+    verbatim-copy deployment artifact and cannot import the shared contracts
+    module, so it re-states the binding's structural law locally."""
+    if not isinstance(binding, dict):
+        return f"{owner}: binding is not a JSON object"
+    if str(binding.get("schema") or "") != EXECUTION_BINDING_SCHEMA:
+        return f"{owner}: schema must be {EXECUTION_BINDING_SCHEMA}"
+    for name in ("root_run_ref", "immediate_parent_run_ref", "logical_child_key"):
+        if not str(binding.get(name) or "").strip():
+            return f"{owner}: {name} is required"
+    if not _BINDING_HEX64_RE.match(str(binding.get("request_digest") or "")):
+        return f"{owner}: request_digest must be a 64-char lowercase hex digest"
+    for name in ("fence_counter", "assignment_generation"):
+        value = binding.get(name, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return f"{owner}: {name} must be an integer >= 0"
+    return ""
+
+
+def launch_provider_token(command: str) -> str:
+    """The provider/pool token of a matched paid launch (lowercased), or ''.
+
+    Covers every wrapper shape the common launch path recognizes:
+    ``pool run <pool>``, ``pool remote <host> <pool>``, ``sub.sh <mode>``,
+    ``remote_sub.sh <host> <mode>`` and ``slot.py <pool>`` — the same
+    wrappers every engine's paid launch goes through, which is what makes
+    the gate engine-independent.
+    """
+    for regex, group in (
+        (_POOL_REMOTE_RE, 2),
+        (_REMOTE_SUB_SH_RE, 2),
+        (_POOL_RUN_RE, 1),
+        (_SUB_SH_RE, 1),
+        (_SLOT_RE, 1),
+    ):
+        match = regex.search(command)
+        if match:
+            return match.group(group).strip().lower()
+    return ""
+
+
+def _provider_token_matches(token: str, allowed: set[str]) -> bool:
+    """Composite launch modes (``glm-codex``, ``codex-native``) match when a
+    dash/underscore segment equals a reserved value; a wholly different lane
+    (``grok`` vs a ``glm`` reservation) does not."""
+    if not token:
+        return True
+    segments = set(re.split(r"[-_]", token))
+    return any(value and (value == token or value in segments) for value in allowed)
+
+
+def _expected_projection(binding: dict) -> dict[str, str]:
+    """POOL_ORCHESTRATOR_ID / POOL_PARENT_RUN_ID are server-derived
+    projections of the binding (Rev 4 l.287): children cannot promote,
+    re-root or re-parent themselves by changing the environment."""
+    root = str(binding.get("original_root_orchestrator_ref") or "").strip()
+    if not root:
+        root = str(binding.get("root_run_ref") or "").strip()
+    return {
+        "POOL_ORCHESTRATOR_ID": root,
+        "POOL_PARENT_RUN_ID": str(
+            binding.get("immediate_parent_run_ref") or ""
+        ).strip(),
+    }
+
+
+def validate_execution_binding(
+    command: str, launch: "re.Match[str] | None" = None
+) -> None:
+    """Refuse paid launches/delegations not covered by the CURRENT
+    broker-issued ExecutionBinding (WO-11; Rev 4 S3.D l.287-289, S4 steps
+    3-4).
+
+    Refusal classes: missing binding, stale fence (the reservation moved,
+    was released or expired), provider substitution after reservation, and
+    unaccounted descendants (a binding that does not cover this launch's
+    child identity). The binding is only an assignment of opaque references
+    — never a credential, and there is no independent signing authority:
+    it is trusted exactly as far as it matches the authenticated owner's
+    current lease receipt. This gate fences the launches it observes
+    through the provider hook; it does not fence arbitrary processes.
+    """
+    raw_binding = os.environ.get(BINDING_ENV, "").strip()
+    if not raw_binding:
+        deny(
+            "Mastermind shared-placement guard: missing binding — this "
+            "session is armed for shared placement but carries no "
+            f"broker-issued {EXECUTION_BINDING_SCHEMA} ({BINDING_ENV}). No "
+            "paid launch may proceed without the placement authority's "
+            "current binding; recover through the original operation key, "
+            "never by launching locally."
+        )
+    try:
+        binding = json.loads(raw_binding)
+    except ValueError:
+        deny(
+            "Mastermind shared-placement guard: missing binding — "
+            f"{BINDING_ENV} is not valid JSON."
+        )
+    problem = _binding_problems(binding, "shared-placement guard")
+    if problem:
+        deny(f"Mastermind shared-placement guard: {problem}.")
+
+    receipt_path = os.environ.get(PLACEMENT_RECEIPT_ENV, "").strip()
+    if not receipt_path:
+        deny(
+            "Mastermind shared-placement guard: the owner placement receipt "
+            f"channel ({PLACEMENT_RECEIPT_ENV}) is unavailable; the binding "
+            "cannot be checked against the current lease. Never launch a "
+            "paid child while placement truth is uncertain."
+        )
+    try:
+        receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        deny(
+            "Mastermind shared-placement guard: the owner placement receipt "
+            f"at {receipt_path} is unreadable; the binding cannot be checked "
+            "against the current lease. Never launch a paid child while "
+            "placement truth is uncertain."
+        )
+    if (
+        not isinstance(receipt, dict)
+        or str(receipt.get("schema") or "") != PLACEMENT_RECEIPT_SCHEMA
+    ):
+        deny(
+            "Mastermind shared-placement guard: placement receipt schema "
+            f"must be {PLACEMENT_RECEIPT_SCHEMA}."
+        )
+    current = receipt.get("execution_binding")
+    problem = _binding_problems(current, "placement receipt")
+    if problem:
+        deny(f"Mastermind shared-placement guard: {problem}.")
+
+    # Unaccounted descendants: the presented binding must BE the owner's
+    # current fenced assignment — same (root, immediate parent, logical
+    # child) identity, same admitted digest, same fenced attempt. A binding
+    # for a different child under this session is a descendant the
+    # placement authority never admitted or claimed.
+    for name in _BINDING_IDENTITY_FIELDS:
+        if str(binding.get(name)) != str(current.get(name)):
+            deny(
+                "Mastermind shared-placement guard: unaccounted descendant "
+                f"— {name} in the presented binding does not match the "
+                "owner's current assignment. Every paid child must be "
+                "admitted and claimed through the placement authority "
+                "before launch."
+            )
+
+    # Current lease: the fence must not have moved and the lease must be
+    # held and unexpired. Launching on a stale fence double-spends the
+    # reserved host slot, root concurrency and shared quota.
+    fence_now = receipt.get("fence_counter")
+    if isinstance(fence_now, bool) or not isinstance(fence_now, int):
+        deny(
+            "Mastermind shared-placement guard: placement receipt "
+            "fence_counter must be an integer."
+        )
+    fence_held = binding.get("fence_counter", 0)
+    lease_state = str(receipt.get("lease_state") or "").strip().upper()
+    expires_ms = receipt.get("lease_expires_at_ms")
+    expired = (
+        isinstance(expires_ms, int)
+        and not isinstance(expires_ms, bool)
+        and int(time.time() * 1000) >= expires_ms
+    )
+    if fence_held != fence_now or lease_state != "HELD" or expired:
+        deny(
+            "Mastermind shared-placement guard: stale fence — the presented "
+            f"binding holds fence {fence_held} but the owner's current "
+            f"lease is fence {fence_now} (lease_state="
+            f"{lease_state or 'UNKNOWN'}" + (", lease expired" if expired else "")
+            + "). The reservation moved; re-claim through the placement "
+            "authority instead of launching on a superseded assignment."
+        )
+
+    # Server-derived projections: the effective identity (explicit command
+    # assignment wins over inherited environment) must equal what the
+    # binding projects.
+    for env_name, expected_value in _expected_projection(binding).items():
+        effective = _command_or_environment_value(command, env_name)
+        if effective != expected_value:
+            deny(
+                "Mastermind shared-placement guard: "
+                f"{env_name} is a server-derived projection of the current "
+                f"{EXECUTION_BINDING_SCHEMA}; this launch declares "
+                f"{effective!r} but the binding projects {expected_value!r}. "
+                "A child cannot re-root, re-parent or promote itself by "
+                "changing the environment."
+            )
+
+    # Provider substitution: after reservation the launch must use the
+    # reserved provider/pool, not a different paid lane.
+    if launch is not None:
+        token = launch_provider_token(command[launch.start():])
+        allowed = {
+            str(binding.get("pool_ref") or "").strip().lower(),
+            str(binding.get("provider_ref") or "").strip().lower(),
+        }
+        if not _provider_token_matches(token, allowed):
+            reserved = sorted(name for name in allowed if name)
+            deny(
+                "Mastermind shared-placement guard: provider substitution — "
+                f"the current binding reserved {reserved} but this launch "
+                f"requests {token!r}. A reservation cannot be re-pointed at "
+                "a different provider after the fact; re-claim through the "
+                "placement authority."
+            )
+
+
 def guard_fabric_launch(command: str) -> None:
-    if FABRIC_LAUNCH_RE.search(command) is None:
+    launch = FABRIC_LAUNCH_RE.search(command)
+    if launch is None:
         return
+
+    # WO-11: shared-placement sessions validate the broker-issued
+    # ExecutionBinding against the owner's current lease BEFORE any other
+    # launch check — on the common paid-launch path, engine-independent.
+    if shared_placement_armed():
+        validate_execution_binding(command, launch)
 
     inherited_root = os.environ.get("POOL_ORCHESTRATOR_ID", "").strip()
     root_assigned, assigned_root = _command_assignment(
@@ -378,6 +660,12 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
 
 
 def guard_native_child(tool_input: dict[str, object]) -> None:
+    # WO-11: native Agent/Task delegations under shared placement must be
+    # covered by the CURRENT binding exactly like paid launches (missing
+    # binding / stale fence / unaccounted descendant refusals; there is no
+    # launch token to compare on this path, so no substitution check).
+    if shared_placement_armed():
+        validate_execution_binding("")
     model = str(tool_input.get("model") or "").strip()
     prompt = str(tool_input.get("prompt") or "")
     model_family = family(model)
