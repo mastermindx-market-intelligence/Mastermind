@@ -10,6 +10,7 @@ This map points to the editable designs and current continuation sections. All c
 | Review area | Native destination and visible improvement |
 | --- | --- |
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
+| Options Plan and Compare | [D08C comparison](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0): C02 `1OGC-0` now states the assumed100-share multiplier for its illustrative dollar outcomes; prior expiry-loss and phone-control corrections remain. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
 | Company Financials and historical evidence | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly preserves Annual; I/M `22CM-0` / `22SU-0` explain the historical source/calculation in EN dark and ZH light; J/K/L `22GR-0` / `22K0-0` / `22LN-0` show full-history selection and matching evidence at320px. Native review map `22MA-0` is appended to the readme. |
@@ -936,3 +937,39 @@ A bounded C3 reasoning audit of [Heatmap saved views/recovery](https://app.paper
 The list clearly separates a WDC request with an unknown save outcome from an earlier confirmed MU group, despite their shared illustrative name. Checking reads the original request without submitting another save. The live-filter entry says matches are reevaluated on opening and no background alerts start. Its qualification explicitly identifies saved records/request states as illustrative and leaves heatmap save types/original-request recovery to the existing persistence owner.
 
 The nearby R7 MU pending/unknown/confirmed/rejected specimens are a separate consistent example. No inspected native binding routed WDC to MU. Creating another WDC detail board solely because only the MU example is illustrated would not fix a demonstrated error. Previously repaired percentage-point coverage, failed-refresh/zero-match distinctions and account boundaries are retained and excluded from this phase's authored changes. No heatmap node, account, request or saved view was mutated.
+
+
+## Options comparison: the illustrative contract multiplier is explicit
+
+C02 **`1OGC-0`** on [D08C Plan, Compare and Review](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-13-0) showed per-unit authored entry prices alongside per-spread dollars without carrying the assumed contract multiplier into that comparison. The existing one-spread/USD context and hypothetical-fill disclaimer did not explain this conversion.
+
+One text node, **`1OK5-0`**, now reads:
+
+> Same exact legs, expiry basis, currency and spread size.  
+> 100 shares per contract assumed for this illustration.
+
+The original **Only entry prices differ** text **`1OK6-0`** remains. The two13px/16px lines fit the existing56px row **`1OK4-0`**, with no board expansion or type reduction.
+
+### Source and numerical scope
+
+Root read candidate `research/design_candidates/production_design_20261102/d08c/DATA_AND_BUILD.md` at Macro **`291f21aa8e9d757466412549a8d6537d889ab4d8`**, blob **`ce29e9f79ad292be4dd6c5677d9e6f5bd6a40024`**. It explicitly identifies the baseline320 debit/680 gain cap/603.20 breakeven as independent example arithmetic and preserves the deliberate assumed100 qualification until actual dated terms are validated.
+
+Root also read `terminal/lib/optionsPlanPayoff.ts` at Terminal **`f0af84bbd6c28c2f6477bd8ffc031903979023bd`**, blob **`cb68f58f3f64e3e586c7b775996209d177ca6a22`**. Current numerical output requires a server-held qualified dated reference and explicit `current_terms_qualified:false` among its source-boundary validations. The Paper illustration does not establish those terms or an executable quote.
+
+The unchanged example is a SPY600/610 call spread,20 November2026, one spread. With the explicitly assumed100 shares per contract, the three authored long/short prices and arithmetic remain:
+
+| Authored USD/unit prices | Total debit | Gain cap at expiry | Breakeven underlying price |
+| --- | ---: | ---: | ---: |
+|5.20 /2.00 |320 USD |680 USD |603.20 |
+|5.40 /2.00 |340 USD |660 USD |603.40 |
+|5.00 /2.00 |300 USD |700 USD |603.00 |
+
+Integer-cent arithmetic reproduces those displayed values under the stated hypothetical basis. No quote, source observation, price, leg, expiry, curve, cost estimate, gain cap, breakeven or save state changed. **Max loss at expiry**, unavailable net-after-costs, and unavailable before-expiry values remain as previously corrected. This is fixture explanation, not a new producer result or financial recommendation.
+
+Root inspected the full1440px render and27,236-character JSX. Masking only1OK5 reproduces the entire prior27,152-character JSX modulo whitespace, proving that the rest of the chart/table/composition is unchanged. Both the scoped edit and `options-c02-multiplier-finish-01` returned **APPLIED_RESPONSE_OBSERVED**. C04/C05 repairs, other candidate states, source/foundation qualifications and D08D's held target remain untouched.
+
+## Transcript-link audit: preserve the in-session evidence distinction
+
+A separate bounded C3 reasoning audit inspected Company transcript/source pages pA/pL and focused Call+Q&A board **`2VY-0`**. The observed native controls describe a selected in-session answer and opening the full exchange; no copied/bookmarked control promising an exact passage or revision was found. The native **Read full exchange in transcript** action **`3C9-0`** remains a valid in-memory evidence handoff, so it was not downgraded to a call-only label.
+
+The existing D07 source continuity issue remains: at Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`, `TranscriptDrawer.tsx` (blob **`221134c8c734ef5a490cde5c634edd0d42d79706`**) validates the in-memory expected document digest and focuses the admitted segment, while its ordinary Copy link serializes call ID and page/pane without that segment/digest. `MegaPane.tsx` (blob **`53ca3e06425d9a10b393e08189361a5036c4ea5d`**) reloads that URL as an ID-only target. D07's existing **Copy call link** wording remains a future source implementation requirement; no matching native Copy control in the inspected scope needed repair. No transcript node, source receipt, retained revision or URL owner was modified.
