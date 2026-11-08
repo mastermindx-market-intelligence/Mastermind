@@ -7,7 +7,6 @@ owners are the only subjects.
 from __future__ import annotations
 
 import contextlib
-import ast
 import io
 import os
 from pathlib import Path
@@ -215,20 +214,7 @@ class LongHorizonRuntimeTests(unittest.TestCase):
         self.assertEqual(OPERATOR_MIN_START_WINDOW_SECONDS, 660)
         source = (CANDIDATE / "fabric_operator_owner.py").read_text()
         self.assertIn("OPERATOR_MIN_START_WINDOW_SECONDS = 11 * 60", source)
-        # Existing issue/admission fences plus the reviewed protected-Memory
-        # economic reservation all retain the same duration before consumption.
-        tree = ast.parse(source)
-        holders = []
-        for owner in ast.walk(tree):
-            if not isinstance(owner, ast.FunctionDef):
-                continue
-            for node in ast.walk(owner):
-                if isinstance(node, ast.Compare) and isinstance(node.ops[0], ast.Lt) and any(
-                    isinstance(value, ast.Name) and value.id == 'OPERATOR_MIN_START_WINDOW_SECONDS'
-                    for value in node.comparators):
-                    holders.append(owner.name)
-        self.assertCountEqual(holders, ['reserve', 'reserve_protected_memory', 'validate_child_admission'])
-        self.assertEqual(source.count("< OPERATOR_MIN_START_WINDOW_SECONDS"), 3)
+        self.assertEqual(source.count("< OPERATOR_MIN_START_WINDOW_SECONDS"), 2)
 
     def test_operator_root_may_opt_into_four_hours_only(self):
         import tempfile

@@ -749,12 +749,7 @@ class FullCliDeadline(unittest.TestCase):
             root=Path(tmp);source=root/'source';source.mkdir()
             diagnostics=root/'diagnostics';diagnostics.mkdir(mode=0o700)
             names=(*original.SOURCE_SHA256,'remote_sub_helpers.py','commission_deadline.py',
-                   'lane_runtime.py','quota_circuit.py','lease_broker.py',
-                   # Actual current CLI's read-only generic-view gate closure;
-                   # copied/hash-checked by the same immutable original fixture.
-                   'fabric_memory_view.py','fabric_operator_owner.py',
-                   'fabric_operator_contract.py','artifact_delivery.py',
-                   'artifact_reader.py','native_runtime_bindings.py')
+                   'lane_runtime.py','quota_circuit.py','lease_broker.py')
             for name in names:
                 origin=ROOT/'candidate'/name
                 if not origin.exists(): origin=ROOT/'source'/name

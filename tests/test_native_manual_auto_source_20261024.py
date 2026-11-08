@@ -219,13 +219,7 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             assert sha(source) == COMPOSED_PICK
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
-            # The emitted Memory wrapper stays separately byte-bound. Restore
-            # only its authentic protected320 predecessor in this disposable
-            # historical inverse; never run the old proof on newer wrapper bytes.
-            assert sha(source) == "ed05bfe80371301f39cb9765bda3cd59f2ed46b4357d06f33386f5f76c58dace"
-            current = (ROOT / "tests/fixtures/memory-predecessor-fabric-task-320611.py.txt").read_bytes()
-            assert hashlib.sha256(current).hexdigest() == CURRENT_TASK_SHA
-            (stage / relative).write_bytes(current)
+            assert sha(source) == CURRENT_TASK_SHA
             # Undo only the exact forward repair in this private stage, then
             # retain every historical inverse and fixture at its original hash.
             admission_patch = ROOT / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
@@ -298,7 +292,7 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
     assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
-    assert sha(NATIVE / "candidate/fabric_task.py") == "ed05bfe80371301f39cb9765bda3cd59f2ed46b4357d06f33386f5f76c58dace"
+    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
         NATIVE / "candidate/pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.

@@ -12,7 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / 'ops/native_fabric/quota_continuity'
 sys.path[:0] = [str(NATIVE / 'candidate'), str(NATIVE / 'source')]
 import lane_runtime
-import provider_outcome as outcome
+# This prospective projection belongs to the explicit Memory owner namespace.
+# Load its exact source under a private name; leave canonical provider_outcome
+# and the default107 import graph untouched.
+_owner = ROOT / 'ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py'
+_spec = importlib.util.spec_from_file_location('_memory_origin_outcome', _owner)
+outcome = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(outcome)
 
 
 @pytest.fixture

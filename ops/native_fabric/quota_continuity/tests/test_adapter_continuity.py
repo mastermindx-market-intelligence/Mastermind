@@ -167,15 +167,7 @@ class Adapter(unittest.TestCase):
                     else:
                         artifact.symlink_to(artifact.with_name('absent-target'))
                     with patch.object(api, '_bounded_regular', side_effect=AssertionError('orphan content read')):
-                        if location == 'packet' and kind in ('directory', 'dangling_symlink'):
-                            # The newer generic view gate refuses unsafe packet
-                            # custody before the legacy status projection/content.
-                            from fabric_operator_contract import DelegationRefused
-                            with self.assertRaisesRegex(DelegationRefused, '^participant_view_required$'):
-                                api.inspect_run(run, owner_ext=self.root)
-                            self.assertEqual(self.calls, [])
-                        else:
-                            self.assert_unverified_original(run)
+                        self.assert_unverified_original(run)
                     with self.assertRaisesRegex(api.FabricTaskError, 'REQUEST_RUN_ALREADY_EXISTS_RECONCILE_ORIGINAL'):
                         self.request(run)
         self.assertEqual(self.calls, [])

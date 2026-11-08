@@ -163,7 +163,7 @@ def check_layout(job):
     assert tuple(ast.literal_eval(loop.iter)) == preflight.UNIT_PATTERNS
     import re
     modules = re.findall(r'(?:ops/native_fabric/quota_continuity/(?:tests|rollout)|tests)/test_[a-z_]+[.]py', native['run'])
-    assert len(modules) == len(set(modules)) == 11 and set(modules) == preflight.ROLLOUT_MODULES
+    assert len(modules) == len(set(modules)) == 14 and set(modules) == preflight.ROLLOUT_MODULES
     assert 'raise SystemExit(not result.wasSuccessful())' in native['run']
     assert 'all(totals[k] == 0 for k in ("failures", "errors", "skipped"))' in native['run']
 

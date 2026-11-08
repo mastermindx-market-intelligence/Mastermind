@@ -24,13 +24,17 @@ UNIT_PATTERNS = (
     'test_application_turn_*.py', 'test_go_application_*.py',
     'test_application_http_transports.py', 'test_quota_continuity.py',
     'test_application_http_admission.py', 'test_application_http_realm_projection.py',
+    'test_application_auto_request.py', 'test_application_cross_pool_auto.py',
+    'test_application_registered_pool_selection.py', 'test_application_registered_pool_composition.py',
     'test_bailian_application_handler_composition.py', 'test_broker_prelease_deadline.py',
     'test_slot_release_custody.py', 'test_qwen_account_eligibility.py',
     'test_qwen_429_account_priority.py',
 )
 ROLLOUT_MODULES = frozenset(native.PREFIX + 'tests/' + name for name in (
     'test_go_native_stage.py', 'test_go_native_release.py', 'test_go_native_entry.py',
-    'test_go_native_install.py', 'test_go_service_enrollment.py',
+    'test_go_native_install.py', 'test_provider_application_transition.py',
+    'test_quota_reset_native_stage.py', 'test_quota_reset_native_entry.py',
+    'test_go_service_enrollment.py',
     'test_go_service_startup.py', 'test_application_http_native_startup.py',
 )) | frozenset(native.PREFIX + 'rollout/' + name for name in (
     'test_native_generation.py', 'test_native_launcher_upgrade.py',
