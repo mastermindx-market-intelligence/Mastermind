@@ -27,19 +27,19 @@ Completion requires source tests, required CI/protected release, exact installed
 
 ## Task tree
 
-### P1 — Freeze architecture and capability contract (in_progress)
+### P1 — Freeze architecture and capability contract (source_complete)
 
 Inspect the native-host message routing, extension bundle verifier, Hermes MCP seam, installed release/config and active overlaps. Compare primary OpenAI, Anthropic and Chrome API documentation. Freeze exact-browser/target/document identities, permission scope, action result/effect semantics and the minimum integrated consumer.
 
-### P2 — Implement extension and native transport (proposed; depends P1)
+### P2 — Implement extension and native transport (source_complete)
 
 Extend the existing package with bounded tab listing, page snapshots and element references, navigation, click/fill/key/scroll, screenshot and diagnostics as supported by the reviewed permission model. Retain the legacy ChatGPT path and negotiated compatibility. Reuse the native connection and reject cross-instance/replayed/stale actions.
 
-### P3 — Integrate Hermes tool consumption (proposed; depends P1)
+### P3 — Integrate Hermes tool consumption (source_qualified)
 
 Expose a bounded schema through the existing Hermes/MCP owner with server-derived session identity and current browser grants. Preserve configuration qualification, tool allowlists and runtime custody. Tools return useful page/action results and explicit degraded states. Supply an in-scope usage skill/reference through the existing skill loader.
 
-### P4 — Verify, publish, release and install (proposed; depends P2, P3)
+### P4 — Verify, publish, release and install (in_progress)
 
 Test actual JS/Python modules for normal actions, multi-profile isolation, stale elements, navigation races, permission denial, restart, duplicate nonce, post-dispatch loss, bounded outputs and legacy protocol compatibility. Self-review integrated diff; satisfy actual repository gates. Install through the existing deployment owner at the exact protected release and obtain Chrome/Orbita plus Hermes proof. Preserve rollback through that owner.
 
@@ -70,6 +70,10 @@ State: MORE_WORK_EXISTS. Source is implemented and locally qualified; protected 
 - M2 observed qualification: 739 tests passed, zero failures/skips (Web Sol regression plus native browser plugin tests; /tmp/hermes-browser-qualified-20261107.xml). This includes the existing native census vertical. The final added status package-version field separately passed the focused Node controller contract.
 - Actual isolated Google Chrome DOM fixture passed sensitive exclusions, form readback, consumed refs, session separation, target mutation, offscreen refusal, document scrolling, focus proof, same-URL reload and snapshot bounds (tests/browser_page_playwright.cjs). This is fixture proof, not installed-profile acceptance.
 - Existing M2 surface inventory contains four multilogin-managed adapter coordinates. Three incumbent socket entries were observed; no upgraded connectivity claim. Compatibility installation wrappers currently refer to an older managed source workspace. Preserve incumbent effect/writer custody before any update. Any installed browser absent from existing validated coordinates requires enrollment-owner reconciliation, not fabricated ChatGPT bindings.
-- Native installed Hermes runtime qualification is next; initial guessed venv Python path was absent (no execution). The installed launcher exposed its actual pinned Python/bootstrap command. No install, enable, production browser command, merge or release has run.
+- Actual installed Hermes PluginManager/PluginContext registry probe passed in a temporary profile: mmx_browser registered, four existing coordinates discovered, a missing native session was refused, and unload removed the tool. Zero browser actions were dispatched and no production plugin was installed (tests/hermes_browser_registry_probe.py).
+- Actual isolated Chrome settings test passed enable/pause, one-site and explicit all-site grants, removal, invalid-scheme refusal, and required-debugger behavior. Desktop 1100px and mobile 390px screenshots were inspected; no horizontal overflow or script errors (tests/browser_settings_playwright.cjs). The fixture permission boundary is synthetic; real Chrome consent remains a rollout gate.
+- Source candidate b5efecb8bee583dae04c971833370ac7d41a63c7 is published in PR #2269: https://github.com/mastermindx-market-intelligence/Mastermind/pull/2269. The source implementation, actual registry probe and settings qualification are complete; this evidence/test delta follows on the same branch.
+- Read current protected release rules: master requires the test check, strict status checks and the native squash merge queue. Required approving review count is zero and CODEOWNERS review is not required. Current PR had no auto-merge request, no queue entry, no reviews and no labels when observed. No self-approval, direct merge, admin bypass, installation, enablement or production browser action has run.
+- Initial guessed venv Python path was absent (no execution). The actual installed launcher/bootstrap path was then used. A stdin bootstrap probe exited before registry execution; a source-file probe succeeded. These are bounded diagnostic outcomes, not permission denials or uncertain browser effects.
 
-Next: finish native registry and settings UI qualification, publish this same branch/PR, consume required CI and actual release rules, then qualify the incumbent per-profile installer and browser permission/readback gates. No new worker or background observer is running.
+Next: publish this evidence/test delta, mark the qualified PR Ready, consume exact-head hosted CI and protected queue controls, and reconcile the incumbent per-profile installation source/writer/effect state before any update. Actual accepted-release installation, Chrome/Orbita consent and Hermes-to-installed-browser journeys remain owed. No new worker or background observer is running.
