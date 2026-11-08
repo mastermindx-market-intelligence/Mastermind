@@ -1681,3 +1681,73 @@ This F03 phase made zero Paper edits and zero product-runtime calls. Browser int
 The continuing audit identified a bounded D23 handoff gap. The current original pointer `01M2WGNCX9475G79JRKJTCM08P / p-1T-0 / 74YE-0` identifies standalone Watchlists/Save States `01M6Y309YH7PJZMF23R7EDH3CM / p-1-0`. Its successful receipt `L3-0` names AI research / NVDA but offers Done and Undo without a qualified action to that list. Existing save/failure/uncertainty/undo/access specimens remain accepted and will be preserved. The current Monitor reference is Shared Shell `01M6Y2GT8S3YP4TK052PPESZEC / p-2-0 / 1O0-0`.
 
 Next: inspect the existing save caller, list identity and Monitor owner at the current Terminal source pin; then implement a disjoint native study for confirmed-save-to-exact-membership navigation. Preserve account/list/symbol identity, current-state-versus-past-receipt meaning, renamed/missing list states and original recovery work. Do not assume that a generic /monitor link restores a selected membership. The warned original remains no-modify, and all existing product/organization/release holds remain unchanged. No checkpoint-only stop is requested or required.
+
+## Continuation — D23 confirmed save to exact watchlist, 2026-11-08
+
+### Implemented native study
+
+The current saved-state reference names **AI research / NVDA** but provides Done and Undo without a qualified action into that list. Its relocation pointer identifies the standalone Watchlists file; no edit targeted the warned original. A disjoint page now develops the missing navigation step through the existing Company save and Monitor owners.
+
+**Paper:** [Proposed · Saved item to exact watchlist](https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0), in **Mastermind – Shared Market – Watchlists and Save States**.
+
+| New owned board | Delivered behavior |
+| --- | --- |
+| `1IC-0` — 01 · Saved item to exact watchlist | Confirmed membership offers **View AI research**, with Continue reading separate. The proposed Monitor destination expands the exact list and identifies NVDA after a current owned-inventory check. Company, chart and event actions remain explicit. |
+| `1S5-0` — 02 · Watchlist read states · EN/ZH | Three separate mobile outcomes: the same list exists but NVDA is absent; the read is unavailable; the exact list is absent from current owned inventory. No missing-read-to-empty conversion, deletion inference, same-name substitution or automatic resave. |
+| `22L-0` — 03 · Watchlist context · EN/ZH | A changed chooser does not redirect the earlier confirmed item; a renamed list keeps its ID and shows its current name; a changed account hides the old list and symbol. |
+| `2D4-0` — 04 · Source contract and unbound destination | Existing-owner implementation map and the honest **Open Monitor** fallback while exact incoming selection is not bound. This is a bounded builder note, not a complete D23 Read me or domain return. |
+
+The page has four 1440×900 boards, **five 390px and two 320px specimens**, and **18 explicit action frames with native computed minimum height of 44px**. All four board captures were visually inspected by root. Three literal newline artifacts and over-technical Chinese wording were corrected; the final exports contain no literal newline markers in inspected text. The source rectangles do not overlap. Native visual QA does not establish keyboard, touch, focus, screen-reader or browser acceptance.
+
+### Source identity and consequential architecture
+
+All eleven inspected source files are pinned to Terminal **`b38d93c2cc8d05f9f5c29598a3691304330ffee6`**, repository `mastermindx-market-intelligence/mastermind-terminal`. Local materialized source bytes were checked against their actual Git blobs before the environment disconnected. The principal source identities are:
+
+| Path under `terminal/` | Git blob |
+| --- | --- |
+| `components/fin/CompanyWatchSave.tsx` | `7dab903014873180aae2e50be4a05fb1618c7801` |
+| `lib/sharedShellMonitor.ts` | `15310ac9e912d86c6d252153d0adecbc0371afcd` |
+| `lib/watchlists.ts` | `4b4832866251f142ffc682fc3c051478bb0bf138` |
+| `app/api/watchlist/route.ts` | `62c93e10f25dfd22a046c30528ef6ed3c04234e6` |
+| `components/workspaces/MonitorWorkspace.tsx` | `62dee7b67d53d3f29cee5bc6184c7726524372f6` |
+| `app/(shell)/monitor/page.tsx` | `b73bd801cded5968168d35c883082bb67cb1fc9f` |
+| `lib/sharedShellNavigation.ts` | `f9d857ddded83ec13d82b1d8e69be943bb5078a7` |
+
+**Use the captured target, not the current chooser.** CompanyWatchSave retains the local operation ID, authenticated subject, list ID and normalized company symbol. After confirmation the chooser can change. The proposed destination must continue to use the confirmed operation's tuple, not recompute it from the newly selected list or a matching name.
+
+**Confirmation means a membership postcondition.** An accepted response remains pending. The existing caller starts a tagged same-owner inventory read after the response or timeout; the helper confirms only the exact list ID and symbol. The GET payload does not itself contain an account/operation witness: client binding and the caller's ordering matter. The operation ID is local coordination, not a server-issued insertion receipt.
+
+**Do not infer Undo ownership.** The add service expressly distinguishes “absent at this request's pre-read and present afterward” from “inserted by this request.” The upsert can lose a race to another writer. The existing remove operation deletes by list ID and symbol without an operation-owner predicate. Accordingly, this new study adds no Undo derived from add success or current membership. The original saved/Undo/recovery specimens remain preserved as separate references; this source inspection does not silently recertify their runtime binding. The source's fallback when the uniqueness migration is absent also means physical duplicate prevention is not a deployment fact established here.
+
+**Keep owned and shared inventories separate.** The authenticated GET uses owner-scoped SELECTs for owned parents and their memberships, with private/no-store response headers. Received grants arrive separately in `sharedWithMe`; Monitor parses `lists`. A shared-read failure can coexist with valid owned lists. The owned watchlist path does not create a default list or membership, but this is not a blanket no-effect claim about authentication or every workspace dependency.
+
+**Treat the exact destination as proposed.** The existing route is `/monitor`; current Monitor renders list details but does not resolve an incoming saved-list target. Its current location handling supports chart links. Exact selection, list expansion, row focus and transport naming need existing-owner implementation and consumer proof. No guessed query parameter, new route registry, persistence service, retry queue or save owner was added.
+
+**Preserve identity and lifecycle.** Rename resolves by original ID and then displays the current name. Absence of an explicit ID never falls back to the first list or a recreated name, and does not prove deletion. Subject-keyed workspace replacement, readiness, abort and generation checks are visible at the current Monitor call site. The proposal extends these fences to the incoming target, including dismissal and late completion. It does not claim an instantaneous cross-tab guarantee or a complete audit of every imported identity hook.
+
+### Verification and preserved work
+
+All **58 distinct native operations** returned **APPLIED_RESPONSE_OBSERVED**. There are **zero unresolved native effects**. Scoped finish completed on exactly `1IC-0 / 1S5-0 / 22L-0 / 2D4-0`. No operation was retried, relocated or replayed.
+
+All **22 original Watchlists boards** retain byte-for-byte identical visible JSX, the original page name and metadata, and its 1,956 nodes. The external Monitor reference **`01M6Y2GT8S3YP4TK052PPESZEC / p-2-0 / 1O0-0`** also has exact before/after JSX. The changed-account specimen contains none of the prior NVDA/AI research/Chip makers/Core AI fixture labels. These are specific native properties, not a full native backup/restore or hidden-property claim.
+
+A bounded non-author reasoning review found no must-fix semantic contradiction. It read all four exports and viewed the changed-state and context captures; the local transport closed before its other two image reads. Root had already inspected all four. This review does not replace consumer proof and was not treated as a mandatory delivery gate.
+
+No application endpoint, account data, save, list mutation, alert, position, trade or runtime navigation was executed. No held source PR, RIG, foundation release, organization hold or deployment control changed.
+
+### Durable artifact set and environment boundary
+
+This amendment carries twelve native evidence artifacts under `docs/design/evidence/paper_portfolio_20261108/d23/`:
+
+- Four complete editable JSX exports: [flow](evidence/paper_portfolio_20261108/d23/saved-item-flow.jsx), [current states](evidence/paper_portfolio_20261108/d23/current-membership-states.jsx), [context transitions](evidence/paper_portfolio_20261108/d23/context-transitions.jsx), [builder map](evidence/paper_portfolio_20261108/d23/source-builder-map.jsx).
+- Four original final native JPEG captures with the corresponding basenames, plus `before-confirmed-save.jpg` and `before-monitor-reference.jpg`.
+- [Exact preserved native references](evidence/paper_portfolio_20261108/d23/preserved-native-references.json), containing the 22 original Watchlists exports and external Monitor export with their equality results.
+- [Native design and source evidence](evidence/paper_portfolio_20261108/d23/native-design-evidence.json), containing the exact operations, source blobs, visual/identity/sizing checks and remaining proof.
+
+Eleven artifact byte lengths, SHA-256 and Git blob hashes were computed before the local environment disconnected; all six native JPEG blob creations matched those independently computed identities. No image was reconstructed or edited. The existing GitHub connection remained available, so canonical publication continued from retained exact native data. The interrupted work was a scratch-only evidence materialization, with no pending Paper or GitHub mutation. Its local completion is not claimed.
+
+Final publication requires exact text and canonical path/blob readback; binary-body fetch remains unsupported by this connector, so JPEG identity is verified by original-byte hash against the published path's Git blob. No decoded binary readback or local/browser test is inferred.
+
+### Next safe work
+
+D23's exact resolver still needs implementation and real consumer proof. The F03 source directory remains at fourteen observations; adding this proposal is not yet claimed and will use its existing model only when the affected build/verification path is available. The independent native/source audit continues with the next actual Alerts/Catalyst decision gap, after inspecting its existing design and source semantics. Local environment loss does not erase completed native work, justify repeated edits or stop available independent lanes.
