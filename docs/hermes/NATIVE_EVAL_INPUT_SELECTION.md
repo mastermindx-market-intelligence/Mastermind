@@ -884,3 +884,76 @@ original base52cb, so this is a real feature-base integration boundary, not a
 reason to alter merge-parent interpretation or rerun an unchanged candidate.
 The seven-path repair does not admit the inherited context/discovery/control
 changes and therefore does not itself establish a green integrated PR.
+
+
+## Protected evidence preservation and release ordering — 2026-11-08
+
+### Protected ticker-package behavior restored in the composed source
+
+Comparing the inherited Brain donor with protected
+`1890f60881707da8939167e5736aa02af1d7f125` exposed a real regression: its older
+`get_ticker_package` discarded the protected distinction between unavailable,
+partial and absent evidence, used unchecked fallback reads and returned raw
+producer exception text. This was not an EVAL scope allowance to grant.
+
+Only `get_ticker_package` was restored from protected Brain blob
+`3133459c2891cd2924a5676e170769562a949754`, originally delivered by
+`15c2d84ad217509049df6a4b5f0ab4dc1b8a4029` (PORTFOLIO AUDIT, PR787).
+The function text including its trailing newline has SHA-256
+`792c0eacd18f2c66fcce09fe905d6f78ebed353c3fec8139b33dce23c556c5f4`.
+All its helper dependencies were already identical. The remainder of the
+module's AST is unchanged from the contribution, preserving its intended
+cognition inference view and dispatch. The resulting whole-file SHA-256 is
+`05fc073a959b3d65cb0ece6c90233fb57887b9893b82d838f0fdbe3a49c7d225`.
+
+The original protected regression module was taken byte-for-byte: Git blob
+`87591f0e2addb698c2f98144f2955f7936549c0b`, SHA-256
+`e9a86aea41591b48f37ccbe785ab275fa2214af20fb2e33da44930a98fbefd30`.
+Before the restoration, all **11** selected discriminating cases failed. After
+it, all **56** cases in the complete protected module and **two** existing
+cognition view/import-order cases passed. These exercise the actual handler
+with explicit SDK, artifact and producer fixture edges; they do not establish
+live data freshness or model/provider acceptance.
+
+A separately selected original saved-paper preservation case was **skipped**
+because that invocation did not select the required paired Fabric fixture.
+It is not counted as passed. Its source remained unchanged; the earlier
+source-qualified paired saved-paper receipts retain their separate attribution.
+Thus the recorded post-repair invocation is **58 passed, one skipped**, with
+zero failures/errors and stable source, rather than an all-green 59-case claim.
+
+Baseline log SHA-256:
+`f4c2ff8ca4a4f8a3b48c1359b079cb262c78358abf3f755526ab9075c115671b`;
+baseline JUnit SHA-256:
+`c565cb1b3e465c60b19979c80abaecc42b72cd170201dd5fc5e7dc2dbd56a199`.
+Post-repair log SHA-256:
+`0e3bea0036d1a8e376506f17e4d144fd80afd8a73a757ef950bef5f5db6df75c`;
+post-repair JUnit SHA-256:
+`4263b562b1beb9633c8f87d058d007a85f15d065effd72b3b3eb3433c76fcb6a`.
+
+### Corrected release order on the same original carriers
+
+The controlling source decision is
+[PR2175 comment6714764501](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6714764501).
+It supersedes the earlier instruction to consume the outstanding PR2255 EVAL
+changes into PR2175 before its APPLICATION release.
+
+- Preserve original PR2234's already armed EVAL-to-master effect.
+- Finish original PR2175's APPLICATION/native composition and its actual
+  source/security/CI obligations without adding outstanding EVAL-owned changes
+  from PR2255. Its independently scoped APPLICATION delta need not wait on this
+  contribution. If EVAL lands first, reconcile its actual protected shared
+  runtime source in the incumbent composition.
+- After the required EVAL and APPLICATION inputs are protected, refine and
+  retarget the **same unarmed draft PR2255** to master as the residual EVAL
+  follow-up. Preserve the completed recovery, private Trial, grounding and
+  source-proof work. Every remaining effective path must satisfy the unchanged
+  finite gate, with zero forbidden-prefix changes.
+
+The preferred order is PR2234, PR2175, then the residual PR2255; the first two
+remain independently scoped and their actual qualified queue order need not be
+artificially constrained. Any remaining non-EVAL source input must finish on
+its existing carrier or remain outside the residual EVAL delta. A retarget
+alone, a conceptual dependency or altered parent interpretation is insufficient.
+No new release carrier, second composer, queue override, runtime grant or
+installation is authorized or claimed by this source ordering decision.
