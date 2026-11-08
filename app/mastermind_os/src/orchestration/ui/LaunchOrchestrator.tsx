@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { registerUnsavedNavigationHold } from "../../auth-navigation-guard";
-import { LaunchRequestPreview, type LaunchRequestPreviewRead } from "../../activation/LaunchRequestPreview";
+import { LaunchRequestPreview, type LaunchRequestPreviewRead, type LaunchRequestPresentation } from "../../activation/LaunchRequestPreview";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -274,6 +274,8 @@ export function LaunchOrchestrator({
   const [requestPreview, setRequestPreview] = useState<{
     read: LaunchRequestPreviewRead;
     formKey: string;
+    presentationKey: string;
+    presentation?: LaunchRequestPresentation;
     mapper: NonNullable<LaunchOrchestratorProps["previewRequest"]>;
     projects: readonly LaunchChoice[];
     profiles: readonly LaunchChoice[];
@@ -395,7 +397,8 @@ export function LaunchOrchestrator({
       validation: { pytest_targets: testTargets, git_diff_check: diffCheck } } : {}),
   };
   const previewFormKey = JSON.stringify(previewForm);
-  const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey &&
+  const presentationKey=JSON.stringify({goal:draftGoal,criteria:acceptanceCriteria,followUp:projectFollowUp});
+  const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey && requestPreview.presentationKey===presentationKey &&
     requestPreview.mapper === previewRequest && requestPreview.projects === projects &&
     requestPreview.profiles === profiles && requestPreview.frontierModels === frontierModels
       ? requestPreview.read : null;
@@ -404,7 +407,10 @@ export function LaunchOrchestrator({
     let read: LaunchRequestPreviewRead;
     try { read = previewRequest(previewForm); }
     catch { read = { state: "UNAVAILABLE" }; }
-    setRequestPreview({ read, formKey: previewFormKey, mapper: previewRequest,
+    const presentation=read.state==="PREPARED"&&read.goal===previewForm.goal&&composedGoal!==null?
+      Object.freeze({preview:read,wireGoal:previewForm.goal,goal:draftGoal,
+        criteria:Object.freeze(projectFollowUp?[]:acceptanceCriteria.split(/\r?\n/).map(line=>line.trim()).filter(Boolean))}):undefined;
+    setRequestPreview({ read, formKey: previewFormKey, presentationKey,presentation,mapper: previewRequest,
       projects, profiles, frontierModels });
   };
 
@@ -490,7 +496,7 @@ export function LaunchOrchestrator({
 
           {goalInvalid && <p id={`${goalId}-invalid`} className="field-error" role="alert">{goalError}</p>}
 
-          {!projectFollowUp && <div className="form-field">
+          {!projectFollowUp && <div className="form-field launch-acceptance">
             <label htmlFor={acceptanceId}>{criteriaCopy.label}</label>
             <textarea id={acceptanceId} value={acceptanceCriteria}
               onChange={event => updateDetails({ acceptanceCriteria: event.target.value })}
@@ -670,7 +676,7 @@ export function LaunchOrchestrator({
           )}
 
           {/* Actions */}
-          {visiblePreview ? <LaunchRequestPreview preview={visiblePreview}
+          {visiblePreview ? <LaunchRequestPreview preview={visiblePreview} presentation={requestPreview?.presentation}
             projects={projects} profiles={profiles} frontierModels={frontierModels} locale={locale} /> : null}
           <div className="form-actions">
             {previewRequest ? <button type="button" disabled={!canSubmit}

@@ -1,0 +1,338 @@
+{
+  "browser_prior_unchanged_source": {
+    "chat_asset_sha256": "a8d10d9edda239164167ee633ed1c7fc41b888ed17ab42855e8909b07547ec2e",
+    "exit": 0,
+    "log_sha256": "c9e3e9dc17ca196f9c2b4bf6cf4b3f6824cdd65f9406239aba2508be853d3054",
+    "playwright": "1.62.0",
+    "summary": [
+      "Ran 3 tests in 6.720s",
+      "OK"
+    ],
+    "test": "test_fabric_chat_browser.py",
+    "test_sha256": "1619e73f6a888407d118ddc184b6a46dcc42d270be8bc1751bba091370a2727c"
+  },
+  "captured_files": 1862,
+  "captured_source_path": "review_evidence/fabric_application/hardening-consumer-source-capture-20261107.json",
+  "captured_source_sha256": "9489ae99a016ebe60946b78ce837ad6297d56f278d86ab73d21ab13a28f3d330",
+  "consumed_original": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+  "consumer": {
+    "capture_sha256": "9489ae99a016ebe60946b78ce837ad6297d56f278d86ab73d21ab13a28f3d330",
+    "complete": true,
+    "records": [
+      {
+        "elapsed_seconds": 23.382,
+        "exit": 0,
+        "log_sha256": "c7f98adeb45aa81fb71fc824540883a10ff3536f3eba2c116a050900975b5ea4",
+        "summary": [
+          "Ran 47 tests in 18.603s",
+          "OK"
+        ],
+        "test": "test_*inference_composition.py"
+      },
+      {
+        "elapsed_seconds": 8.93,
+        "exit": 0,
+        "log_sha256": "b1d4e1df0658906e18504b6fc9cd55400e27f775d9c7bd8e7c0870fadd3e7867",
+        "summary": [
+          "Ran 8 tests in 6.458s",
+          "OK"
+        ],
+        "test": "test_fabric_chat_buffered_delivery.py"
+      },
+      {
+        "elapsed_seconds": 10.354,
+        "exit": 0,
+        "log_sha256": "ce8ab1b1036cfdfff8523b0c84280d2dd7baf86190f59017e65553e212f9ce0b",
+        "summary": [
+          "Ran 32 tests in 6.490s",
+          "OK"
+        ],
+        "test": "test_fabric_text_native_application.py"
+      },
+      {
+        "elapsed_seconds": 19.923,
+        "exit": 0,
+        "log_sha256": "cf22df5809769bd5d81924f38ac6725361bcc12bf2ac417cdd7cf20f9036b7c0",
+        "summary": [
+          "Ran 23 tests in 19.163s",
+          "OK"
+        ],
+        "test": "test_fabric_translation_composition.py"
+      },
+      {
+        "elapsed_seconds": 10.993,
+        "exit": 0,
+        "log_sha256": "f8a65cf0b57e301eaf26a9255733d601d4f1871e7cdc9d36f20f2f32fe2f29c0",
+        "summary": [
+          "Ran 14 tests in 8.904s",
+          "OK"
+        ],
+        "test": "test_fabric_text_cross_pool_auto.py"
+      },
+      {
+        "elapsed_seconds": 90.86,
+        "exit": 0,
+        "log_sha256": "730ef2ab31254b4aada02f425bf6812607631eeec170f830efe8373d2c954a5c",
+        "summary": [
+          "Ran 32 tests in 89.152s",
+          "OK"
+        ],
+        "test": "test_fabric_portfolio_composition.py"
+      },
+      {
+        "elapsed_seconds": 65.852,
+        "exit": 0,
+        "log_sha256": "367ee1f26fbd3306e8f174276cfe7f90e43fabc123068f62757b7de1f8b221d6",
+        "summary": [
+          "Ran 42 tests in 62.770s",
+          "OK"
+        ],
+        "test": "test_fabric_regional_portfolio_composition.py"
+      }
+    ],
+    "source": {
+      "capture_sha256": "9ebf5cc5170449c89264c851293657629d02eb5ff89696c144ca5082c072e78d",
+      "consumed_original": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+      "head": "0fbc1b4500d47d3938f1762b6fd2786829d57473",
+      "macro": "abab96df55f82cb5c26459a6f51b568d73a6a6f8",
+      "macro_archive_sha256": "c6fa1b89ef3b9f18d98e81bfa42357b2609f88f91c9dd90b51e7fb1b2d5c5344",
+      "root": "/tmp/mmx-3ec-brain-composition-g9d12jt4"
+    }
+  },
+  "frontend_asset_validation": {
+    "dotenv_files": [],
+    "files": 12,
+    "installed_or_published": false,
+    "manifest": {
+      "files": [
+        {
+          "byte_count": 352240,
+          "mime": "font/woff2",
+          "path": "assets/Inter-Variable-DiVDrmQJ.woff2",
+          "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+        },
+        {
+          "byte_count": 165420,
+          "mime": "font/ttf",
+          "path": "assets/Manrope-Variable-FzEoaBTQ.ttf",
+          "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40"
+        },
+        {
+          "byte_count": 27302,
+          "mime": "image/jpeg",
+          "path": "assets/atelier-office-poIrp4_y.jpg",
+          "sha256": "5ffdd2a6a1296a0565d495756010d8c3f68d9c787b4061e29324b286bab70b62"
+        },
+        {
+          "byte_count": 221125,
+          "mime": "text/css; charset=utf-8",
+          "path": "assets/index-lHPaIkI_.css",
+          "sha256": "36cc5fcd03fef30613c3dc553ecdf100341349ca635f8f165867b01aee8f8feb"
+        },
+        {
+          "byte_count": 1992445,
+          "mime": "text/javascript; charset=utf-8",
+          "path": "assets/index-zF3fQJ3y.js",
+          "sha256": "a82ff1db76f521dc27e384ac8902bb0f2fe89a9980995d397a4e916cd03571a8"
+        },
+        {
+          "byte_count": 49374,
+          "mime": "image/jpeg",
+          "path": "assets/private-entry-DdyQrU0W.jpg",
+          "sha256": "f14f930bf84c8d80635fdf34a93030a928ed51cb514cc07bdb8b7e33aebbf597"
+        },
+        {
+          "byte_count": 366,
+          "mime": "text/html; charset=utf-8",
+          "path": "index.html",
+          "sha256": "ec648a807c3251c108acc061b347f234f5d4d4ff5860c5c34c54b7b360de26a7"
+        },
+        {
+          "byte_count": 4380,
+          "mime": "text/plain; charset=utf-8",
+          "path": "licenses/fonts/Inter-OFL.txt",
+          "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+        },
+        {
+          "byte_count": 3075,
+          "mime": "text/plain; charset=utf-8",
+          "path": "licenses/fonts/Manrope-FONTLOG.txt",
+          "sha256": "b6b54bcc1dbd1b18d5afd087ec0b578097644b1c9ec3e0a642d4df7808f449c2"
+        },
+        {
+          "byte_count": 4384,
+          "mime": "text/plain; charset=utf-8",
+          "path": "licenses/fonts/Manrope-OFL.txt",
+          "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c"
+        },
+        {
+          "byte_count": 70364,
+          "mime": "text/plain; charset=utf-8",
+          "path": "third-party/deepseek-client-dependency-NOTICES.txt",
+          "sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4"
+        },
+        {
+          "byte_count": 1065,
+          "mime": "text/plain; charset=utf-8",
+          "path": "third-party/deepseek-harness-LICENSE.txt",
+          "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+        }
+      ],
+      "schema": "mastermind.os_assets.v1"
+    },
+    "manifest_sha256": "f861184272825e11f095eb3f60a3f7c73c6b039b89d02d40306e5cc1058f7f77",
+    "notice_count": 5,
+    "notices_byte_identical": true,
+    "npm_version": "11.17.0",
+    "profile": "licensed12",
+    "profile_owner_blob": "4f70ff2625d1a3fd8e5d12235d2c3baa28e739c8",
+    "schema": "mastermind.os_assets.v1",
+    "source_original": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+    "validator_blob": "b5465858e011a4651ffe9e822a7ebe3905be823c",
+    "vite_environment_keys": []
+  },
+  "frontend_build": {
+    "input_hashes": {
+      "package-lock.json": "f006593504884a30b2aca1a47f07c8274462fa199f519337b001fd8ce8ebbb68",
+      "package.json": "91603a97c4e0d56667879049f97bc29a181a0ac6854e614b8b430853f1cc94f7",
+      "tsconfig.build.json": "61ed723b26da0fc1d80c1385baf621d16dc7b32e98b50cde113b323be2ea074f",
+      "vite.config.ts": "0c494545fe8cf2659b0ee074d243151ce5334622d2f8ae8d90bf61150199781c"
+    },
+    "input_unchanged": true,
+    "node": "v26.5.0",
+    "output": [
+      {
+        "bytes": 352240,
+        "path": "assets/Inter-Variable-DiVDrmQJ.woff2",
+        "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+      },
+      {
+        "bytes": 165420,
+        "path": "assets/Manrope-Variable-FzEoaBTQ.ttf",
+        "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40"
+      },
+      {
+        "bytes": 27302,
+        "path": "assets/atelier-office-poIrp4_y.jpg",
+        "sha256": "5ffdd2a6a1296a0565d495756010d8c3f68d9c787b4061e29324b286bab70b62"
+      },
+      {
+        "bytes": 221125,
+        "path": "assets/index-lHPaIkI_.css",
+        "sha256": "36cc5fcd03fef30613c3dc553ecdf100341349ca635f8f165867b01aee8f8feb"
+      },
+      {
+        "bytes": 1992445,
+        "path": "assets/index-zF3fQJ3y.js",
+        "sha256": "a82ff1db76f521dc27e384ac8902bb0f2fe89a9980995d397a4e916cd03571a8"
+      },
+      {
+        "bytes": 49374,
+        "path": "assets/private-entry-DdyQrU0W.jpg",
+        "sha256": "f14f930bf84c8d80635fdf34a93030a928ed51cb514cc07bdb8b7e33aebbf597"
+      },
+      {
+        "bytes": 366,
+        "path": "index.html",
+        "sha256": "ec648a807c3251c108acc061b347f234f5d4d4ff5860c5c34c54b7b360de26a7"
+      },
+      {
+        "bytes": 4380,
+        "path": "licenses/fonts/Inter-OFL.txt",
+        "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+      },
+      {
+        "bytes": 3075,
+        "path": "licenses/fonts/Manrope-FONTLOG.txt",
+        "sha256": "b6b54bcc1dbd1b18d5afd087ec0b578097644b1c9ec3e0a642d4df7808f449c2"
+      },
+      {
+        "bytes": 4384,
+        "path": "licenses/fonts/Manrope-OFL.txt",
+        "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c"
+      },
+      {
+        "bytes": 70364,
+        "path": "third-party/deepseek-client-dependency-NOTICES.txt",
+        "sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4"
+      },
+      {
+        "bytes": 1065,
+        "path": "third-party/deepseek-harness-LICENSE.txt",
+        "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+      }
+    ],
+    "published": false,
+    "records": [
+      {
+        "elapsed_seconds": 4.847,
+        "exit": 0,
+        "log_sha256": "bfe502923a56067d85a8fab1be38b64ac170767bb5bef5e3b03bc819e82ee052",
+        "step": "install"
+      },
+      {
+        "elapsed_seconds": 5.859,
+        "exit": 0,
+        "log_sha256": "46eb8bfadf10419e004d1ee01cf88f7bac369cf6349ddc919cc6313690f197c8",
+        "step": "build"
+      }
+    ],
+    "source": {
+      "capture_sha256": "9ebf5cc5170449c89264c851293657629d02eb5ff89696c144ca5082c072e78d",
+      "consumed_original": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+      "head": "0fbc1b4500d47d3938f1762b6fd2786829d57473",
+      "macro": "abab96df55f82cb5c26459a6f51b568d73a6a6f8",
+      "macro_archive_sha256": "c6fa1b89ef3b9f18d98e81bfa42357b2609f88f91c9dd90b51e7fb1b2d5c5344",
+      "root": "/tmp/mmx-3ec-brain-composition-g9d12jt4"
+    }
+  },
+  "governing_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+  "http_startup_separate_process": {
+    "elapsed_seconds": 97.601,
+    "exit": 0,
+    "log_sha256": "a8da79c75e0a301e38e947631e6e0b8b93b01c6f8da3848f32bf205c0bdcb4eb",
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 22
+    },
+    "xml_sha256": "8212804c6a354821448dec74e1163820c285463acf825428a87e9b54793e57f8"
+  },
+  "macro": "abab96df55f82cb5c26459a6f51b568d73a6a6f8",
+  "mixed_process_generation_counterexample": {
+    "consumed_original": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+    "elapsed_seconds": 129.567,
+    "exit": 1,
+    "log_sha256": "31082f6918afb82f576859824d445d06e255a227fe011e426c7b979c6a3d3ced",
+    "paths": [
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+      "ops/native_fabric/quota_continuity/tests/test_application_http_realm_projection.py",
+      "ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py",
+      "tests/test_executive_fabric_release_identity_review.py"
+    ],
+    "source_parent": "0fbc1b4500d47d3938f1762b6fd2786829d57473",
+    "totals": {
+      "errors": 0,
+      "failures": 8,
+      "skipped": 0,
+      "tests": 396
+    },
+    "xml_sha256": "7eeb2c18717de0eb07c693f56fd740883015d4cdc01ea33204d14920b49986b8"
+  },
+  "operation_id": "fabric-app-admission-compose-20261107-sol-001",
+  "prior_interrupted_regional": {
+    "exit": -2,
+    "sha256": "f31c1df9062faa790271e135ba208b3f5507dca69a2c69ef985bacebc2923426",
+    "summary": [],
+    "test": "test_fabric_regional_portfolio_composition.py"
+  },
+  "prior_regional_diagnostic": {
+    "exit": "DIAGNOSTIC_TIMEOUT_90S",
+    "log_sha256": "264b271d2ed6ba8632eafab5fb05330f0993575bf5e0c61b9dfe2f4ab96195ce",
+    "root": "/tmp/mmx-3ec-brain-composition-g9d12jt4"
+  },
+  "runtime_installation_or_activation": false,
+  "schema": "mastermind.source_qualification_receipt.v1",
+  "scope": "source_only_not_installed_acceptance"
+}

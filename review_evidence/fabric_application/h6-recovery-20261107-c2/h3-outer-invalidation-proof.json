@@ -1,0 +1,78 @@
+{
+  "broker_sha256": "760a4432373c5785d107096af410dbcae77cdd3c77cb8dc0cab54a2ca8fe0815",
+  "errors": 0,
+  "failures": 0,
+  "fixture_sha256": "63dda830a38f941323a9e37a3d2a40f3dad2b4a3c8bf41bfff4997e96822b87e",
+  "live_state_mutated": false,
+  "native_selection": false,
+  "observations": [
+    {
+      "application_turn_refused": true,
+      "claim_reason": "account_unavailable",
+      "claim_refused": true,
+      "original_liability_unchanged": true,
+      "outer_field": "refresh_pending",
+      "rows_after": {
+        "application_requests": 0,
+        "application_turns": 0,
+        "leases": 1
+      },
+      "rows_before": {
+        "application_requests": 0,
+        "application_turns": 0,
+        "leases": 1
+      }
+    },
+    {
+      "application_turn_refused": true,
+      "claim_reason": "account_unavailable",
+      "claim_refused": true,
+      "original_liability_unchanged": true,
+      "outer_field": "refresh_error",
+      "rows_after": {
+        "application_requests": 0,
+        "application_turns": 0,
+        "leases": 1
+      },
+      "rows_before": {
+        "application_requests": 0,
+        "application_turns": 0,
+        "leases": 1
+      }
+    },
+    {
+      "application_turn_refused": true,
+      "claim_reason": "account_unavailable",
+      "claim_refused": true,
+      "original_liability_unchanged": true,
+      "outer_field": "terminal_refusal",
+      "rows_after": {
+        "application_requests": 0,
+        "application_turns": 0,
+        "leases": 1
+      },
+      "rows_before": {
+        "application_requests": 0,
+        "application_turns": 0,
+        "leases": 1
+      }
+    },
+    {
+      "claim_granted": true,
+      "clean_observation": true,
+      "synthetic_only": true
+    }
+  ],
+  "open_contracts": [
+    "outer physical/configuration binding",
+    "whole-operation meter enforcement",
+    "publication and claim serialization",
+    "actual quantities and settlement coverage"
+  ],
+  "provider_calls": false,
+  "quota_sha256": "00e8614b35696607fed0455de1b617d70ab70ce822486efe44f742844b5d8c4e",
+  "schema": "mastermind.h6.h3_outer_invalidation_proof.v1",
+  "skips": 0,
+  "strict_scope_qualified": false,
+  "tests": 4
+}

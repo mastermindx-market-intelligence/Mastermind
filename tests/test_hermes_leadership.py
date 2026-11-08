@@ -39,18 +39,26 @@ def reader_for(client, *, key='secretary', session='native-a', guard=None):
         access=client, currentness_guard=guard or (lambda: True))
 
 
-def test_nine_charters_use_existing_responsibility_syntax():
+def test_all_charters_use_existing_responsibility_syntax():
     from control_plane.executive_responsibility import normalize_responsibility_intent
     keys = api().CHARTER_KEYS
-    assert set(keys) == {'meta_ceo','secretary','delivery','engineering','reliability',
-                         'product','intelligence','assurance','grok_adviser'}
+    assert set(keys) == {'meta_ceo','autonomy_ceo','mastermind_ceo','secretary','delivery',
+                         'engineering','reliability','product','intelligence','assurance',
+                         'grok_adviser'}
     for key in keys:
         c = api().charter_for(key)
         assert c['key'] == key and c['authority_grant'] is False
         normalize_responsibility_intent(c['responsibility_intent'])
         assert c['objective'] and c['completion_evidence'] and c['limits']
+        assert any('maintained open-source' in limit and 'docs/REUSE_FIRST_ENGINEERING.md' in limit
+                   for limit in c['limits'])
         assert c['routing']['advisory_only'] is True
         assert not {'model', 'provider', 'account', 'host', 'api_key'} & c['routing'].keys()
+    # CEO tier keeps its gates as charter copy, not as authority.
+    ceo = api().charter_for('mastermind_ceo')
+    joined = ' '.join(ceo['limits'])
+    assert 'Paper-only' in joined and 'Never push master' in joined and 'GitHub origin' in joined
+    assert ceo['responsibility_intent']['responsibility_role'] == 'principal'
 
 
 def test_charter_copy_is_detached():

@@ -141,6 +141,64 @@ afterEach(() => {
   history.replaceState(null, "", "/os/");
   Object.defineProperty(window, "opener", { value: null, configurable: true });
 });
+describe("long-lived interactive browser sign-in", () => {
+  const fireSilentCode = (listeners: Set<(e: MessageEvent) => void>) => {
+    const frame = document.querySelector("iframe");
+    expect(frame).not.toBeNull();
+    const state = new URL(frame!.src).searchParams.get("state");
+    for (const listener of [...listeners]) listener({
+      source: frame!.contentWindow,
+      origin: ORIGIN,
+      data: { type: "mastermind-auth-callback", state, code: "silent-code" },
+    } as MessageEvent);
+  };
+
+  it("renews a five-minute interactive grant ahead of expiry without another sign-in or stored token", async () => {
+    const e = setup();
+    let issued = 0;
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: `private-rotated-${++issued}`,
+      expires_in: 300,
+    }));
+    await e.login();
+    expect(e.client.getState()).toMatchObject({ status: "signed_in", acquisition: true, content: true });
+    expect(e.open).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(240_000);
+    await flush();
+    expect(new URL(document.querySelector("iframe")!.src).searchParams.get("prompt")).toBe("none");
+    fireSilentCode(e.messages);
+    await flush();
+    fireSilentCode(e.messages);
+    await flush();
+    expect(issued).toBe(4); // original two scopes, renewed two scopes
+    expect(e.open).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_001); // old tokens are now expired
+    expect(e.client.getState()).toMatchObject({ status: "signed_in", acquisition: true, content: true });
+    expect(localStorage.getItem("mastermind-os-auth0-prior-login-v1:fixture-public-client")).toBe("1");
+    expect(JSON.stringify(Object.values(localStorage))).not.toContain("private-rotated");
+    expect(JSON.stringify(Object.values(sessionStorage))).not.toContain("private-rotated");
+  });
+
+  it("does not silently reauthenticate after an explicit logout interrupts renewal", async () => {
+    const e = setup();
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "short-lived-private",
+      expires_in: 300,
+    }));
+    await e.login();
+    await vi.advanceTimersByTimeAsync(240_000);
+    await flush();
+    expect(document.querySelector("iframe")).not.toBeNull();
+    await e.client.signOut();
+    fireSilentCode(e.messages);
+    await flush();
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(e.client.getState()).toMatchObject({ status: "signed_out", reason: "USER_SIGNED_OUT" });
+    expect(e.open).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+});
+
 describe("fixed project planning two-resource requests",()=>{
   const resource="https://fixture-resource.mastermind-x.com/executive";
   const args={operation_key:"original-planning",work_ref:"WS:EXAMPLE"};
@@ -2211,4 +2269,18 @@ describe("fixed project execution two-resource requests", () => {
     expect(e.fetcher).toHaveBeenCalledTimes(1);
     expect(e.fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
   });
+});
+
+// New read reuses the independent Executive READ owner, never Workspace/SEND.
+describe("authored company priorities fixed read",()=>{
+ it("uses the fixed empty JSON route with READ-only Executive scope",async()=>{
+  const resource="https://executive.example.invalid/mcp",e=setup({executiveResource:resource});
+  e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,scope:new URL(e.popup.location).searchParams.get("audience")===resource?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
+  await e.login();e.fetcher.mockReset();e.fetcher.mockResolvedValueOnce(response({schema:"inert-wire-only"}));
+  await e.client.executive!.companyPriorities!(new AbortController().signal);
+  expect(e.fetcher).toHaveBeenCalledExactlyOnceWith(ORIGIN+"/os/executive/company-priorities",expect.objectContaining({method:"POST",body:"{}",credentials:"omit",redirect:"error",cache:"no-store",headers:{Accept:"application/json","Content-Type":"application/json",Authorization:"Bearer private-token"}}));
+ });
+ it("discards the delayed READ after the current Executive grant ends",async()=>{
+  const e=setup({executiveResource:"https://executive.example.invalid/mcp"});await e.login();e.fetcher.mockReset();const held=deferred<Response>();e.fetcher.mockReturnValueOnce(held.promise);const read=e.client.executive!.companyPriorities!(new AbortController().signal);const refused=expect(read).rejects.toThrow();await e.client.signOut();held.resolve(response({must_not_escape:true}));await refused;
+ });
 });

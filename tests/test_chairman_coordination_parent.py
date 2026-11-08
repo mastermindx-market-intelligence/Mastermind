@@ -107,11 +107,22 @@ def active_parent(h):
 
 
 @pytest.mark.parametrize("prepared", ["ready", "compiled_ready"])
-def test_full_proposal_is_delivered_consumed_and_sealed_in_original_parent_result(prepared, request, record_testsuite_property):
+def test_full_proposal_is_delivered_consumed_and_sealed_in_original_parent_result(
+        prepared, request, record_testsuite_property, monkeypatch):
     h = request.getfixturevalue(prepared); sup, adapter = parent_supervisor(h)
+    observed = []
+    compare = sup._current_prompt_matches
+    def current(job, original, fresh):
+        observed.append((original, fresh))
+        return compare(job, original, fresh)
+    monkeypatch.setattr(sup, "_current_prompt_matches", current)
     done = asyncio.run(sup.run_cycle_once(h["root"].job_id, command_id=dispatch_command(h)))
     assert done.job.status is JobStatus.COMPLETED and done.attempt.status is AttemptStatus.COMPLETED
     assert adapter.start_count == 1
+    assert len(observed) == 1 and observed[0][0] != observed[0][1]
+    assert adapter.spec.prompt == observed[0][0]
+    assert (sup._run_dir(done.attempt.attempt_id) / "input" / "worker-prompt.txt").read_bytes() == (
+        observed[0][0].encode("utf-8"))
     assert adapter.received_task["coordination_return"]["candidate"] == h["c"]
     assert adapter.received_task["aggregation_handoff"] == h["handoff"]
     completed = h["runtime"].validated_role_completion(h["root"].job_id,
@@ -135,6 +146,7 @@ def test_full_proposal_is_delivered_consumed_and_sealed_in_original_parent_resul
         "parent_handoff_digest": body["handoff_digest"], "parent_revisions": body["revisions"],
         "candidate_artifact_digest": body["evidence_digests"][0],
         "full_proposal_present_in_parent_input": True, "proposal_used_in_parent_result": True,
+        "fresh_receipts_revalidated": True, "original_sealed_prompt_bytes_retained": True,
         "next_instruction_executed": False, "real_model_usefulness_proven": False,
         "web_pro_input_turn_return_proven": False, "project_acceptance_proven": False,
     }, sort_keys=True))
@@ -253,3 +265,78 @@ def test_parent_never_drops_an_explicit_unusable_target_to_retry_untargeted(read
         asyncio.run(sup.run_cycle_once(h["root"].job_id, command_id=dispatch_command(h)))
     assert adapter.start_count == 0
     assert h["runtime"].jobs.get_job(h["root"].job_id).current_attempt_id is None
+
+
+def _edited_parent_prompt(prompt, mutate, *, reseal=True):
+    from control_plane.wake_events import canonical_json_bytes
+    prefix, boundary, raw = prompt.rpartition(module()._PARENT_EVIDENCE_BOUNDARY)
+    assert boundary
+    task = json.loads(raw)
+    mutate(task)
+    if reseal:
+        returned = task["coordination_return"]
+        for packet in (returned["structural_review"], returned):
+            packet["packet_digest"] = hashlib.sha256(canonical_json_bytes({
+                key: value for key, value in packet.items() if key != "packet_digest"
+            })).hexdigest()
+    return prefix + boundary + json.dumps(task, sort_keys=True, ensure_ascii=True, allow_nan=False)
+
+
+def test_changed_current_partial_facts_refuse_before_parent_start(ready, monkeypatch):
+    h = ready; sup, adapter = parent_supervisor(h)
+    original = sup._enrich_spec_with_canary_claim
+    def changed(spec, job):
+        value = original(spec, job)
+        h["sources"] = dataclasses.replace(h["sources"], context={
+            **h["sources"].context, "coverage": "PARTIAL",
+            "omissions": ["Current active-build evidence became unavailable after sealing."]})
+        return value
+    monkeypatch.setattr(sup, "_enrich_spec_with_canary_claim", changed)
+    # This exact error requires fresh composition to succeed with its new,
+    # valid partial facts; refusing acquisition earlier is not this assertion.
+    with pytest.raises(SupervisorError, match="aggregation input changed after sealing"):
+        asyncio.run(sup.run_cycle_once(h["root"].job_id, command_id=dispatch_command(h)))
+    assert adapter.start_count == 0
+
+
+@pytest.mark.parametrize("reseal", [False, True])
+def test_original_observation_bytes_cannot_be_replaced_during_preparation(
+        ready, monkeypatch, reseal):
+    h = ready; sup, adapter = parent_supervisor(h)
+    original = sup._enrich_spec_with_canary_claim
+    def mutate(task):
+        returned = task["coordination_return"]
+        for observation in (returned["semantic_review"]["generation"],
+                            returned["structural_review"]["runtime_result_evidence"]):
+            observation["source_identity"] = (
+                "1" * 32 if observation["source_identity"] != "1" * 32 else "2" * 32)
+    def changed(spec, job):
+        value = original(spec, job)
+        return dataclasses.replace(value, prompt=_edited_parent_prompt(
+            value.prompt, mutate, reseal=reseal))
+    def unexpected(*args):
+        raise AssertionError("modified original prompt reached currentness comparison")
+    monkeypatch.setattr(sup, "_enrich_spec_with_canary_claim", changed)
+    monkeypatch.setattr(sup, "_current_prompt_matches", unexpected)
+    with pytest.raises(SupervisorError, match="aggregation input changed after sealing"):
+        asyncio.run(sup.run_cycle_once(h["root"].job_id, command_id=dispatch_command(h)))
+    assert adapter.start_count == 0
+
+
+@pytest.mark.parametrize("fault", ["invalid_digest", "generation", "json_type"])
+def test_parent_currentness_excludes_only_valid_observation_nonces(ready, fault):
+    h = ready; sup, _ = parent_supervisor(h); job, attempt = active_parent(h)
+    prompt = sup._prompt(job, attempt, attempt.effective_grant)
+    def mutate(task):
+        returned = task["coordination_return"]
+        if fault == "invalid_digest":
+            returned["packet_digest"] = "0" * 64
+        elif fault == "generation":
+            generation = returned["semantic_review"]["generation"]
+            generation["before"] += 1
+            generation["after"] += 1
+        else:
+            assert returned["review_supports_proposal"] is True
+            returned["review_supports_proposal"] = 1
+    changed = _edited_parent_prompt(prompt, mutate, reseal=fault != "invalid_digest")
+    assert not sup._current_prompt_matches(job, prompt, changed)

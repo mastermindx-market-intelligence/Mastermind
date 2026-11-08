@@ -541,19 +541,24 @@ body.page-mv .footnote {
   }
 
   fetch("/api/market_view", { headers: { "Accept": "application/json" } })
-    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
     .then(function (res) {
-      if (!res.ok || (res.body && res.body.available === false)) {
-        var note = (res.body && (res.body.note || res.body.error)) || "market view unavailable";
+      if (!res.ok || !res.body || typeof res.body !== "object" || Array.isArray(res.body) ||
+          res.body.available === false || res.body.read_status === "unavailable") {
+        var note = "market view unavailable";
+        if (res.status === 404 && res.body && res.body.available === false &&
+            res.body.read_status !== "unavailable" && res.body.note === "market_view artifact not built yet (brain.market_view.build has not run)") {
+          note = "market view not built yet";
+        }
         root.innerHTML = '<div class="msg">' + esc(note) + "</div>";
         sub.textContent = "unavailable";
         return;
       }
       render(res.body);
     })
-    .catch(function (e) {
-      root.innerHTML = '<div class="msg">Failed to load market view: ' + esc(e && e.message) + "</div>";
-      sub.textContent = "error";
+    .catch(function () {
+      root.innerHTML = '<div class="msg">market view unavailable</div>';
+      sub.textContent = "unavailable";
     });
 })();
 </script>

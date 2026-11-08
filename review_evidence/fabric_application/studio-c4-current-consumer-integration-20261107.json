@@ -1,0 +1,450 @@
+{
+  "schema": "mastermind.current_studio_consumer_composition.v1",
+  "prejoin_head": "c68931d85be127574f9be17c0687e266277815df",
+  "original_parent": "b4950c63cefbfb597cc1a3225d4cdef079f1a7d0",
+  "macro_pair": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+  "merge_resolution": {
+    "head": "c68931d85be127574f9be17c0687e266277815df",
+    "merge_parent": "b4950c63cefbfb597cc1a3225d4cdef079f1a7d0",
+    "resolution": "Retain full forward predecessor authentication and current native/realm qualification. Consume original historical pair helper/tests through the same status owner and shared static checks. Preserve original fixture diagnostics alongside private copied Python.",
+    "paths": [
+      "integrations/studio_direct_mcp/private_service_pin.py",
+      "integrations/studio_direct_mcp/private_service_status_successor.py",
+      "integrations/studio_direct_mcp/private_service_status_successor_test.py",
+      "tests/executive_fabric_release_identity_review.py",
+      "tests/integration/test_fabric_translation_composition.py"
+    ]
+  },
+  "decisions": [
+    "Retain full original payload authentication and predecessor fingerprints; share protected C4 owner with explicit authenticated before context.",
+    "Bind the complete completed C4 publisher transaction in the existing forward plan and confirm its durability before further effects.",
+    "Preserve ordinary live-state readers and actual current-pair validation in the original forward owner.",
+    "Use one existing shard-0 paired CI gate for exact Metabolism and Cognition/AUTO positive proof; retain ordinary vendor pin and historical fixture pins.",
+    "Canonicalize only disposable fixture paths. Production native canonical-store checks are unchanged."
+  ],
+  "proofs": {
+    "fixture_setup_failure": {
+      "rc": 1,
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-B",
+        "-m",
+        "unittest",
+        "private_service_pin_forward_recovery_test.ForwardC4PublisherTests.test_complete_c4_chain_forwards_and_starts_without_rewriting_history",
+        "-v"
+      ],
+      "log": "/tmp/mmx-c4-forward-red-proof.log",
+      "log_sha256": "01019cec08fd54e8ce68eb768c3139c3c865bb4f60f53f42716baba57f485fc9"
+    },
+    "reproduced_forward_failure": {
+      "rc": 1,
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-B",
+        "-m",
+        "unittest",
+        "private_service_pin_forward_recovery_test.ForwardC4PublisherTests.test_complete_c4_chain_forwards_and_starts_without_rewriting_history",
+        "-v"
+      ],
+      "log": "/tmp/mmx-c4-forward-red-proof-02.log",
+      "log_sha256": "26cc5c9dd9e2148fa77cc868df697feee0f73539444f7ea39fa238f8c5728282"
+    },
+    "c4_forward_join": {
+      "rc": 0,
+      "seconds": 33.48,
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--noconftest",
+        "-c",
+        "/dev/null",
+        "--rootdir",
+        "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+        "--basetemp",
+        "/tmp/mmx-c4-forward-joined-7cikamhl/pytest",
+        "--junitxml",
+        "/tmp/mmx-c4-forward-joined-7cikamhl/tests.xml",
+        "private_service_pin_forward_recovery_test.py",
+        "private_service_status_successor_test.py::C4PublisherSuccessorTests",
+        "private_service_status_successor_test.py::HistoricalStatusPairTests"
+      ],
+      "totals": {
+        "tests": 97,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "source": {
+        "private_service_pin.py": "60fd884affcb9448b7c87ec9e69fb2899707df09c3f742b96886d67ca9ce2e9e",
+        "private_service_pin_enrollment.py": "5ab7e1915c4d58ddf848917f1d97673ed89ff741df556fbfbc91f3408fd52774",
+        "private_service_status_successor.py": "c23fb5655a02d9365d1709e64ba8739d3ff8bd06a1c54512b8ba25890ba865ae",
+        "private_service_pin_forward_recovery_test.py": "161531085bef0128b32b40260348abac107f08dba21474d13e7c13c3d6c062a8",
+        "private_service_status_successor_test.py": "58bf8cbf773e0746896c8d1874396bfd92351cde4e189c57bf8dca77f2349b8e"
+      },
+      "source_unchanged": true,
+      "log": "/tmp/mmx-c4-forward-joined-7cikamhl/tests.log",
+      "log_sha256": "ac1b9d63d63a386957a414c46a02191dd22e5d7ce253cb8073705b3a004e4f73",
+      "junit": "/tmp/mmx-c4-forward-joined-7cikamhl/tests.xml",
+      "junit_sha256": "66686520ede2e577e815e47b730e7fdb7fc23e8f13475c8fc74f366c4d38d353",
+      "failures": []
+    },
+    "private_and_control": {
+      "source": {
+        "private_service.py": "969b12fc17a1c7b23aaddc2988a0252457234d47e65ecdab092c15df4163ba26",
+        "private_service_pin.py": "60fd884affcb9448b7c87ec9e69fb2899707df09c3f742b96886d67ca9ce2e9e",
+        "private_service_pin_enrollment.py": "5ab7e1915c4d58ddf848917f1d97673ed89ff741df556fbfbc91f3408fd52774",
+        "private_service_status_successor.py": "c23fb5655a02d9365d1709e64ba8739d3ff8bd06a1c54512b8ba25890ba865ae",
+        "private_service_pin_forward_recovery_test.py": "161531085bef0128b32b40260348abac107f08dba21474d13e7c13c3d6c062a8",
+        "private_service_status_successor_test.py": "58bf8cbf773e0746896c8d1874396bfd92351cde4e189c57bf8dca77f2349b8e",
+        "private_service_original_delivery_test.py": "950863bae39324aaf13bd987ce150445da890ce475c962dab30f50eff400286f",
+        "control_bundle_closure_test.py": "06325dc2cfa68a5fb47dce2eeecc72144e5365e7f969e7fe34491ba1e6ec38f6"
+      },
+      "source_unchanged": true,
+      "runs": [
+        {
+          "name": "private",
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "/tmp/mmx-studio-914-parent-full-6nawi10_/runner.py",
+            "private_service*_test.py",
+            "/tmp/mmx-studio-914-parent-full-6nawi10_/private.json"
+          ],
+          "rc": 1,
+          "seconds": 150.77,
+          "totals": {
+            "tests": 710,
+            "failures": 0,
+            "errors": 3,
+            "skipped": 0
+          },
+          "log": "/tmp/mmx-studio-914-parent-full-6nawi10_/private.log",
+          "log_sha256": "dc6f894b89867a0875bf748e5e1fee71ff96de06dc5251eeae295f2c628189db"
+        },
+        {
+          "name": "control",
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "/tmp/mmx-studio-914-parent-full-6nawi10_/runner.py",
+            "control_bundle*_test.py",
+            "/tmp/mmx-studio-914-parent-full-6nawi10_/control.json"
+          ],
+          "rc": 0,
+          "seconds": 12.39,
+          "totals": {
+            "tests": 53,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "log": "/tmp/mmx-studio-914-parent-full-6nawi10_/control.log",
+          "log_sha256": "7eb16dfe848ae46764460f45faf350fea680b7b4a26c150510787cc2da20a508"
+        }
+      ]
+    },
+    "paired_consumers": {
+      "schema": "mastermind.current_paired_ci_composition.v1",
+      "mastermind_head": "c68931d85be127574f9be17c0687e266277815df",
+      "macro_head": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+      "workflow_sha256": "c0c3fe380adaf77893baeab333a57f8bcb329f5f2cef942e989501f81c942767",
+      "archive_paths": [
+        "brain",
+        "bot",
+        "bridge",
+        "common",
+        "app",
+        "config",
+        "control_plane",
+        "data_layer",
+        "portfolio",
+        "scripts/translate_all.py",
+        "tests/integration/test_production_inference_composition.py",
+        "tests/integration/test_fabric_inference_composition.py",
+        "tests/integration/test_fabric_translation_composition.py",
+        "tests/integration/test_fabric_chat_inference_composition.py",
+        "tests/integration/test_fabric_chat_buffered_delivery.py",
+        "tests/integration/test_fabric_chat_cross_pool_auto.py",
+        "tests/test_advisor_cognition_plane.py",
+        "tests/integration/test_fabric_text_native_application.py",
+        "tests/integration/test_fabric_text_cross_pool_auto.py",
+        "tests/integration/test_technician_fabric_composition.py",
+        "tests/integration/test_fabric_portfolio_composition.py",
+        "tests/integration/test_fabric_regional_portfolio_composition.py",
+        "tests/integration/test_fabric_chat_browser.py",
+        "ops/native_fabric/quota_continuity",
+        "ops/native_fabric/experiential_proxy/gateway.py"
+      ],
+      "fixture": "/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain",
+      "runs": [
+        {
+          "name": "brain-inference",
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests/integration",
+            "-p",
+            "test_*inference_composition.py",
+            "-v"
+          ],
+          "rc": 0,
+          "seconds": 4.36,
+          "log": "/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain-inference.log",
+          "log_sha256": "d1e268a3fa97df943c03dd239ce286bfcf8a5b20d0982469dcefd3c9890d6988"
+        },
+        {
+          "name": "brain-cognition-auto",
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain",
+            "--basetemp",
+            "/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain-pytest",
+            "--junitxml",
+            "/tmp/mmx-current-paired-ci-proof-zj4pzno2/cognition-auto.xml",
+            "tests/test_advisor_cognition_plane.py",
+            "tests/integration/test_fabric_chat_cross_pool_auto.py",
+            "tests/integration/test_fabric_text_cross_pool_auto.py"
+          ],
+          "rc": 0,
+          "seconds": 15.43,
+          "log": "/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain-cognition-auto.log",
+          "log_sha256": "7c5ed24f93d89b90216663ac42bcceaec23f2660ec723269fa1d227994fbb2e1",
+          "totals": {
+            "tests": 58,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "cases_by_module": {},
+          "unknown_modules": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoAdvisorApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests",
+            ".AutoTextApplicationTests"
+          ],
+          "positive_proof": false,
+          "junit_sha256": "fc1f5174afae9361960deef34bf937fe36ea5f2d916b6f13cec28414c0c4d5f9"
+        },
+        {
+          "name": "brain-translation",
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests/integration",
+            "-p",
+            "test_fabric_translation_composition.py",
+            "-v"
+          ],
+          "rc": 0,
+          "seconds": 5.42,
+          "log": "/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain-translation.log",
+          "log_sha256": "b9915aff4520e115a5b6a3f0180960fcea3edfd31a1dd04c382c6925d5b8793b"
+        },
+        {
+          "name": "metabolism",
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/Volumes/Mastermind/agent-workspaces/macro/web/metabolism-original-recovery-20261107-sol-001",
+            "--basetemp",
+            "/tmp/mmx-current-paired-ci-proof-zj4pzno2/macro-pytest",
+            "--junitxml",
+            "/tmp/mmx-current-paired-ci-proof-zj4pzno2/metabolism.xml",
+            "tests/test_metabolism_audit.py",
+            "tests/test_metabolism_fabric_composition.py"
+          ],
+          "rc": 0,
+          "seconds": 24.92,
+          "log": "/tmp/mmx-current-paired-ci-proof-zj4pzno2/metabolism.log",
+          "log_sha256": "a386eb5c6fc72f5d35043b7a06e4fce221351ba4f0d97372f966d34a92b7de8c",
+          "totals": {
+            "tests": 227,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "cases_by_module": {
+            "tests.test_metabolism_audit": 121,
+            "tests.test_metabolism_fabric_composition": 106
+          },
+          "unknown_modules": [],
+          "positive_proof": true,
+          "junit_sha256": "f85f397d8b500bf6216218777db332d6d77e4947637b88ea7e119aec1c5019ff"
+        }
+      ],
+      "effects": "Inert source fixture, synthetic credentials/responses and local loopback only. No production configuration, account or provider changed."
+    },
+    "canonical_fixture_and_gate": {
+      "runs": [
+        {
+          "name": "cognition-auto",
+          "rc": 0,
+          "seconds": 17.71,
+          "totals": {
+            "tests": 58,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/private/tmp/mmx-current-paired-ci-proof-zj4pzno2/brain",
+            "--basetemp",
+            "/private/tmp/mmx-canonical-fixture-proof-4x9o9445/cognition-auto-pytest",
+            "--junitxml",
+            "/private/tmp/mmx-canonical-fixture-proof-4x9o9445/cognition-auto.xml",
+            "tests/test_advisor_cognition_plane.py",
+            "tests/integration/test_fabric_chat_cross_pool_auto.py",
+            "tests/integration/test_fabric_text_cross_pool_auto.py"
+          ],
+          "log": "/private/tmp/mmx-canonical-fixture-proof-4x9o9445/cognition-auto.log",
+          "log_sha256": "91ae52e59c1079fdd83b5659e06a0915eabd0b28c103a65da73f58821ffd1247",
+          "junit_sha256": "f7fbe33b8356e91b8472e9510ee7ddcba76fce8600ac48babca139eccb57dc64",
+          "cases_by_module": {
+            "tests.test_advisor_cognition_plane": 12,
+            "tests.integration.test_fabric_chat_cross_pool_auto": 16,
+            "tests.integration.test_fabric_text_cross_pool_auto": 14
+          },
+          "unknown": [],
+          "reported_subtests": 16,
+          "positive_proof": true
+        },
+        {
+          "name": "pruned-native-store",
+          "rc": 0,
+          "seconds": 3.35,
+          "totals": {
+            "tests": 6,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+            "--basetemp",
+            "/private/tmp/mmx-canonical-fixture-proof-4x9o9445/pruned-native-store-pytest",
+            "--junitxml",
+            "/private/tmp/mmx-canonical-fixture-proof-4x9o9445/pruned-native-store.xml",
+            "private_service_fleet_git_failure_test.py::PrunedBootstrapFormatterTests"
+          ],
+          "log": "/private/tmp/mmx-canonical-fixture-proof-4x9o9445/pruned-native-store.log",
+          "log_sha256": "185aa6d550c48a77df35d4219ae7bdbc7f655f0f73c0a0100e6e503993af8011",
+          "junit_sha256": "976c374b6ac3b338a73d91422105472221feb9acf2e5d593c480e614dea9dcde"
+        }
+      ],
+      "fixture_store_source_sha256": "e0b5f4930213ee59c296d37f32c2ffa05cdc7550a81507631271ab781a5cc1a7",
+      "workflow_sha256": "2413aa2f746c9a1dd160bfbd8aa34e4d2d569c8c87bbed18ea8323527eda5b2a",
+      "notes": "Canonical physical fixture roots retain production path checks. JUnit per-module inventory counts42 base cases and reports additional subtests separately."
+    }
+  },
+  "proof_interpretation": {
+    "c4_focused": "97 reported pytest cases including subtests, no failures/errors/skips.",
+    "private_full": "710 unittest methods:707 passed,3 canonical-temp-path fixture errors. This run is not relabeled green. The corrected fixture class then passed its3 methods and3 reported subtests.",
+    "control_bundle": "53 unittest methods passed, no failures/errors/skips.",
+    "paired_brain": "Inference and translation completed successfully. Cognition12+chat AUTO16+text AUTO14 base cases, plus16 reported subtests, passed with recognized per-module inventory.",
+    "metabolism": "121 audit and106 native composition cases passed with exact per-module positive proof."
+  },
+  "current_changed_source_sha256": {
+    ".github/workflows/ci.yml": "2413aa2f746c9a1dd160bfbd8aa34e4d2d569c8c87bbed18ea8323527eda5b2a",
+    ".github/workflows/hermes-application-inference.yml": "13c367c6bbb20606b8811cd02b96e2a5b7df0455df39038ba394e1e0d3b8e3bc",
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": "836dbbb8ab4ff803021093eb89fbaaf6834784e69fc8edcfa609a1f376750bda",
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": "98c3b87cf96235c1fef88b44175cec7c8350199094c8040f3665fd3b425ee338",
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": "97116b3a8cb5ffffe7f098779a7354ed4c79ecb9e1bdf5b08d4e3027a4c56ed5",
+    "integrations/studio_direct_mcp/private_service_fleet_git_failure_test.py": "e0b5f4930213ee59c296d37f32c2ffa05cdc7550a81507631271ab781a5cc1a7",
+    "integrations/studio_direct_mcp/private_service_original_delivery_test.py": "950863bae39324aaf13bd987ce150445da890ce475c962dab30f50eff400286f",
+    "integrations/studio_direct_mcp/private_service_pin.py": "60fd884affcb9448b7c87ec9e69fb2899707df09c3f742b96886d67ca9ce2e9e",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "5ab7e1915c4d58ddf848917f1d97673ed89ff741df556fbfbc91f3408fd52774",
+    "integrations/studio_direct_mcp/private_service_pin_forward_recovery_test.py": "161531085bef0128b32b40260348abac107f08dba21474d13e7c13c3d6c062a8",
+    "integrations/studio_direct_mcp/private_service_status_successor.py": "c23fb5655a02d9365d1709e64ba8739d3ff8bd06a1c54512b8ba25890ba865ae",
+    "integrations/studio_direct_mcp/private_service_status_successor_test.py": "58bf8cbf773e0746896c8d1874396bfd92351cde4e189c57bf8dca77f2349b8e",
+    "review_evidence/fabric_application/hermes-application-composition-root-20261107.json": "fe649837074c48de81b6891cfbf4d540b3e4127a072973e43751c2a9cc9c2695",
+    "review_evidence/fabric_application/studio-historical-forward-qualification-20261107.json": "da834795855a4bc56540d57d9d1ddab7733afaa0f08ae9ea609d08888a0459b7"
+  },
+  "runtime_effects": "No production selector, native patch installation, service enrollment, provider request, original J replay or held operation changed.",
+  "remaining": [
+    "Consume complete published Hermes a4ab80d4aba948dce1b604356f7668594bbb3b12 with actual current native qualification and paired d7b owner.",
+    "Require hosted Linux original-J and combined exact-head checks.",
+    "Preserve original final-carrier live writers and reconcile their published successors before source advancement."
+  ]
+}

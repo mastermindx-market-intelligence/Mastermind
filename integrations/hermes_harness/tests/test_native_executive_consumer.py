@@ -1299,6 +1299,10 @@ def test_enrollment_qualification_keeps_original_worker_after_observer_cancellat
     native_ready = types.SimpleNamespace(publish_gateway_runtime_ready=lambda _runner: "native-ready")
     monkeypatch.setattr(gateway, "_vendor_module", lambda name, _root: native_ready
                         if name == "gateway.run_runtime" else pytest.fail("unexpected native import"))
+    # This test owns cancellation/qualification, with an explicit loader edge.
+    # Actual pinned general-loader import custody is covered by the native
+    # Agent OS lifecycle tests, including policy namespace and isolation.
+    monkeypatch.setattr(gateway, "_install_held_consumer_import", lambda *_: lambda candidate: None)
     monkeypatch.setattr(control, "current_runtime_owner", lambda: OWNER)
     monkeypatch.setattr(plugin, "current_runtime_owner", lambda: OWNER)
     target = {"profile_id": str(role_home), "principal_id": publication.session.principal_id,

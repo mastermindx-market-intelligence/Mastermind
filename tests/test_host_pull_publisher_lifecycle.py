@@ -392,10 +392,27 @@ def test_bash_syntax_and_no_pidfile_race():
     assert "launchd/com.mastermind.host-pull.plist.template" not in text
 
 
-def test_stopped_publication_pins_only_verified_generation(workspace):
+@pytest.mark.parametrize("trailing_slash", [False, True])
+@pytest.mark.parametrize("preflight_repair", [False, True])
+def test_stopped_publication_pins_only_verified_generation(
+    workspace, trailing_slash, preflight_repair,
+):
     ctx = prepare(workspace)
+    ctx["env"]["TMPDIR"] = str(workspace) + ("/" if trailing_slash else "")
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    if preflight_repair:
+        # Full installer: mode refusal happens after its transaction marker
+        # is armed. Clean pre-effect failure must permit a corrected retry.
+        ctx["plist"].write_bytes(b"PRE-EFFECT-PLIST\n")
+        ctx["plist"].chmod(0o644)
+        refused = run(ctx)
+        assert refused.returncode == 78, refused.stderr
+        assert "backup failed" in refused.stderr
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        ctx["plist"].chmod(0o600)
     result = run(ctx)
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(ctx["plist"].read_bytes())
@@ -449,7 +466,7 @@ def test_bootout_waits_for_old_pid_before_one_bootstrap(workspace):
     assert_not_executed(ctx)
 
 
-def test_admitted_flat_template_rollback_restores_one_preimage(workspace):
+def test_admitted_flat_template_failure_retains_one_preimage_backup(workspace):
     daemon = DAEMON.read_text()
     assert daemon.count("$HERE/host_pull_launchd.plist.template") == 1
     ctx = prepare(workspace)
@@ -463,10 +480,16 @@ def test_admitted_flat_template_rollback_restores_one_preimage(workspace):
     assert "--template" not in args
     result = run(ctx)
     assert result.returncode == 78, result.stderr
-    assert ctx["plist"].read_bytes() == original
+    assert ctx["plist"].read_bytes() != original
+    assert str(ctx["pin"]).encode() in ctx["plist"].read_bytes()
     backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
+    assert launch_log(ctx).count("bootstrap ") == 1
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -528,7 +551,7 @@ def test_unsigned_template_at_the_fixed_lookup_is_refused(workspace):
     assert_not_executed(ctx)
 
 
-def test_bootstrap_failure_restores_plist_and_is_not_green(workspace):
+def test_absent_label_failed_bootstrap_preserves_candidate_and_backup(workspace):
     ctx = prepare(workspace)
     original = b"OLD-PLIST\n"
     ctx["plist"].write_bytes(original)
@@ -539,16 +562,21 @@ def test_bootstrap_failure_restores_plist_and_is_not_green(workspace):
     result = run(ctx)
     assert result.returncode == 78, result.stderr
     assert "bootstrap failed" in result.stderr
-    assert ctx["plist"].read_bytes() == original
+    assert ctx["plist"].read_bytes() != original
+    assert str(ctx["pin"]).encode() in ctx["plist"].read_bytes()
     assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
-    assert launch_log(ctx).count("bootstrap ") == 2
+    assert launch_log(ctx).count("bootstrap ") == 1
     backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
-def test_rollback_bootstrap_failure_does_not_retry(workspace):
+def test_repeated_bootstrap_failure_budget_does_not_trigger_second_attempt(workspace):
     ctx = prepare(workspace)
     original = b"OLD-PLIST\n"
     ctx["plist"].write_bytes(original)
@@ -558,9 +586,18 @@ def test_rollback_bootstrap_failure_does_not_retry(workspace):
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx)
     assert result.returncode == 78, result.stderr
-    assert "rollback bootstrap failed" in result.stderr
-    assert ctx["plist"].read_bytes() == original
-    assert launch_log(ctx).count("bootstrap ") == 2
+    assert "bootstrap failed" in result.stderr
+    assert ctx["plist"].read_bytes() != original
+    assert str(ctx["pin"]).encode() in ctx["plist"].read_bytes()
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert (ctx["stub"] / "bootstrap-fail-left").read_text().strip() == "1"
+    backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -862,11 +899,15 @@ def test_term_before_mutation_and_during_wait_and_before_bootstrap(workspace):
         if proc.poll() is not None:
             raise AssertionError(proc.stderr.read())
         time.sleep(0.05)
-    assert ctx["plist"].read_bytes() != original
+    rendered = ctx["plist"].read_bytes()
+    assert rendered != original
     proc.send_signal(signal.SIGTERM)
     _, err = proc.communicate(timeout=5)
     assert proc.returncode == 78, err
-    assert ctx["plist"].read_bytes() == original
+    assert "EFFECT_UNKNOWN" in err
+    assert ctx["plist"].read_bytes() == rendered
+    assert receipt_body(ctx)["outcome"] == "EFFECT_UNKNOWN"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert "bootstrap " not in launch_log(ctx)
     assert_not_executed(ctx)
 
@@ -966,8 +1007,8 @@ def receipt_body(ctx):
     [
         ("wait-pid", "EFFECT_UNKNOWN", 0, "process state uncertain"),
         ("post-bootout-print", "EFFECT_UNKNOWN", 0, "launchctl state uncertain"),
-        ("install-before-replace", "RECOVERED", 1, "recovered original service"),
-        ("install-after-replace", "RECOVERED", 1, "recovered original service"),
+        ("install-before-replace", "EFFECT_UNKNOWN", 0, "plist install failed"),
+        ("install-after-replace", "EFFECT_UNKNOWN", 0, "plist install failed"),
         ("pre-bootstrap-print", "EFFECT_UNKNOWN", 0, "launchctl state uncertain"),
     ],
 )
@@ -977,20 +1018,21 @@ def test_post_bootout_fault_injection(workspace, fault, outcome, bootstraps, sni
     result = run(ctx, fault=fault)
     assert result.returncode == 78, result.stderr
     assert snippet in result.stderr
-    assert ctx["plist"].read_bytes() == original
+    if fault in ("install-after-replace", "pre-bootstrap-print"):
+        assert ctx["plist"].read_bytes() != original
+    else:
+        assert ctx["plist"].read_bytes() == original
     assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
     assert launch_log(ctx).count("bootstrap ") == bootstraps
     assert launch_log(ctx).count("bootout ") == 1
     receipt = receipt_body(ctx)
     assert receipt["schema"] == "host-pull-lifecycle-receipt.v1"
     assert receipt["outcome"] == outcome
-    if outcome == "EFFECT_UNKNOWN":
-        assert "EFFECT_UNKNOWN" in result.stderr
-        assert "recovered original service" not in result.stderr
-        assert receipt["service"] == "stopped-uncertain"
-    else:
-        assert "recovered original service" in result.stderr
-        assert receipt["service"] == "restored"
+    assert outcome == "EFFECT_UNKNOWN"
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "recovered original service" not in result.stderr
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -1099,7 +1141,7 @@ def test_selector_move_before_bootout_does_not_bootout(workspace):
     assert_not_executed(ctx)
 
 
-def test_selector_move_before_plist_replace_restores_original_service(workspace):
+def test_peer_selector_before_plist_replace_preserves_original_bytes(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
     hold = workspace / "hold-plist"
@@ -1116,19 +1158,20 @@ def test_selector_move_before_plist_replace_restores_original_service(workspace)
     _out, err = proc.communicate(timeout=10)
     assert proc.returncode == 78, err
     assert "selector moved" in err
-    assert "recovered original service" in err
+    assert "EFFECT_UNKNOWN" in err
     assert ctx["plist"].read_bytes() == original
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootstrap ") == 0
     assert launch_log(ctx).count("bootout ") == 1
     receipt = receipt_body(ctx)
-    assert receipt["outcome"] == "RECOVERED"
-    assert receipt["service"] == "restored"
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     current = json.loads((ctx["store"] / "CURRENT.json").read_text())
     assert current["generation"] == other.name
     assert_not_executed(ctx)
 
 
-def test_selector_move_before_bootstrap_restores_original_service(workspace):
+def test_peer_selector_before_bootstrap_preserves_published_candidate(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
     hold = workspace / "hold-bootstrap"
@@ -1137,7 +1180,8 @@ def test_selector_move_before_bootstrap_restores_original_service(workspace):
         base_args(ctx, hold_before_bootstrap=hold),
         env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     _release_hold(proc, hold)
-    assert ctx["plist"].read_bytes() != original
+    published = ctx["plist"].read_bytes()
+    assert published != original
     assert "bootstrap " not in launch_log(ctx)
     other = _move_selector(ctx, workspace)
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
@@ -1145,12 +1189,14 @@ def test_selector_move_before_bootstrap_restores_original_service(workspace):
     _out, err = proc.communicate(timeout=10)
     assert proc.returncode == 78, err
     assert "selector moved" in err
-    assert "recovered original service" in err
-    assert ctx["plist"].read_bytes() == original
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert "EFFECT_UNKNOWN" in err
+    assert ctx["plist"].read_bytes() == published
+    assert launch_log(ctx).count("bootstrap ") == 0
     assert launch_log(ctx).count("bootout ") == 1
     receipt = receipt_body(ctx)
-    assert receipt["outcome"] == "RECOVERED"
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     current = json.loads((ctx["store"] / "CURRENT.json").read_text())
     assert current["generation"] == other.name
     assert_not_executed(ctx)
@@ -1191,8 +1237,9 @@ def test_bootout_nonzero_without_effect_is_no_effect(workspace):
     assert (ctx["stub"] / "ps-alive").exists()
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
-    assert log.count("print ") == 2
+    assert log.count("print ") == 3
     assert "bootstrap " not in log
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -1673,7 +1720,7 @@ def test_advance_refuses_while_publication_lock_is_held(workspace):
     assert_not_executed(ctx)
 
 
-def test_advance_rolls_selector_back_when_bootstrap_fails(workspace):
+def test_acknowledged_advance_failed_bootstrap_retains_target_selection(workspace):
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 12\n")
     selector = ctx["release"]
     before = _selection(ctx)
@@ -1697,19 +1744,24 @@ def test_advance_rolls_selector_back_when_bootstrap_fails(workspace):
     (ctx["stub"] / "pause-pid").unlink()
     _out, err = proc.communicate(timeout=10)
     assert proc.returncode == 78, err
-    assert "recovered original service" in err
-    assert ctx["plist"].read_bytes() == original
+    assert "EFFECT_UNKNOWN" in err
+    assert ctx["plist"].read_bytes() != original
+    assert str(target / "ext" / "host_pull.sh").encode() in ctx["plist"].read_bytes()
     final = _selection(ctx)
-    assert final["generation"] == selector.name
-    assert final["previous"] == target.name
-    assert final["sequence"] == before["sequence"] + 2
+    assert final["generation"] == target.name
+    assert final["previous"] == selector.name
+    assert final["sequence"] == before["sequence"] + 1
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
-    assert log.count("bootstrap ") == 2
+    assert log.count("bootstrap ") == 1
     assert log.index("bootout ") < log.index("bootstrap ")
     receipt = receipt_body(ctx)
-    assert receipt["outcome"] == "RECOVERED"
-    assert receipt["service"] == "restored"
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
     assert_not_executed(ctx)
 
 
@@ -1939,3 +1991,1278 @@ def test_signal_between_select_cas_and_ack_reconciles_current(workspace, mode, t
     assert not (ctx["store"] / ".select-pending").exists()
     assert list(ctx["backup"].glob("*.receipt")) == []
     assert_not_executed(ctx)
+
+
+# Original lifecycle uncertainty and peer-preservation regressions.
+
+
+def test_bootstrap_failure_preserves_original_backup(workspace):
+    daemon = DAEMON.read_text()
+    assert daemon.count("$HERE/host_pull_launchd.plist.template") == 1
+    ctx = prepare(workspace)
+    original = b"OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    args = base_args(ctx)
+    assert "--template" not in args
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert ctx["plist"].read_bytes() != original
+    assert receipt_body(ctx)["outcome"] == "EFFECT_UNKNOWN"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert_not_executed(ctx)
+
+
+def test_bootstrap_failure_retains_candidate_and_is_not_green(workspace):
+    ctx = prepare(workspace)
+    original = b"OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    # A label absent before installation cannot be certified as the recovered
+    # *original* collector merely because rollback bootstrap returned zero.
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "bootstrap failed" in result.stderr
+    assert "recovered original service:" not in result.stderr
+    assert (ctx["store"] / ".install-transaction.marker").is_file()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "BOOTSTRAP"
+    assert ctx["plist"].read_bytes() != original
+    assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
+    assert launch_log(ctx).count("bootstrap ") == 1
+    backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert_not_executed(ctx)
+
+
+def test_running_service_missing_preimage_refuses_before_mutation(workspace):
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    before = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "running service has no plist preimage" in result.stderr
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert json.loads((ctx["store"] / "CURRENT.json").read_text()) == before
+    assert_not_executed(ctx)
+
+
+def test_post_bootstrap_unverified_argv_records_effect_unknown(workspace):
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    # Existing fixture advertises a different collector without any argv edit.
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "bootstrap did not pin the verified collector" in result.stderr
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert "bootout " not in launch_log(ctx)
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "POST_BOOTSTRAP_VERIFY"
+    assert_not_executed(ctx)
+
+
+def test_failed_bootstrap_does_not_attempt_unowned_rollback(workspace):
+    ctx = prepare(workspace)
+    original = b"OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("2\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "bootstrap failed" in result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert ctx["plist"].read_bytes() != original
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert_not_executed(ctx)
+
+
+def test_selector_move_before_plist_replace_holds_stopped_service(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-plist"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_plist=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    assert "bootout " in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    other = _move_selector(ctx, workspace)
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "selector moved" in err
+    assert "EFFECT_UNKNOWN" in err
+    assert "recovered original service" not in err
+    assert ctx["plist"].read_bytes() == original
+    assert launch_log(ctx).count("bootstrap ") == 0
+    assert launch_log(ctx).count("bootout ") == 1
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    assert receipt["service"] == "stopped-uncertain"
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
+    assert_not_executed(ctx)
+
+
+@pytest.mark.parametrize(
+    ("phase", "pre_effect_proven", "effect_started"),
+    [
+        ("PLIST_REPLACED", False, False),
+        ("BOOTSTRAP_STARTED", True, False),
+        ("BOOTSTRAP_STARTED", False, False),
+        ("BOOTSTRAP_STARTED", True, True),
+        ("BOOTSTRAP_STARTED", False, True),
+        ("BOOTSTRAPPED", False, True),
+    ],
+)
+def test_holder_loss_source_never_restores_peer_plist(
+    tmp_path, phase, pre_effect_proven, effect_started,
+):
+    # Execute literal installed-source functions only. No real launchctl,
+    # fake-launchctl argv fixture, host service, or native selection.
+    raw = DAEMON.read_text()
+    start = raw.index("lose_install_holder() {\n")
+    end = raw.index("\n}\n\nprove_install_holder() {", start) + 2
+    function = raw[start:end]
+    proof_start = raw.index("effect_was_not_started() {\n")
+    proof_end = raw.index("\n}\n\nselector_moved_before_effect() {", proof_start) + 2
+    proof_function = raw[proof_start:proof_end]
+
+    locked = tmp_path / "current-locked-effect"
+    locked.mkdir()
+    if effect_started:
+        (locked / "started").write_bytes(b"effect-began\n")
+    plist = tmp_path / "installed.plist"
+    plist.write_bytes(b"CURRENT_PLIST\n")
+    selector = tmp_path / "CURRENT.json"
+    selector.write_bytes(b"SELECTOR_STAYS\n")
+    transaction = tmp_path / "transaction-marker"
+    transaction.write_bytes(b"UNCERTAIN_TX_STAYS\n")
+    fixture = (
+        "set -u\n"
+        + "PHASE=" + phase + "\n"
+        + "STOP_LOCKED=" + ("1" if pre_effect_proven else "0") + "\n"
+        + 'LOCKED_DIR="' + str(locked) + '"\n'
+        + 'TEST_PLIST="' + str(plist) + '"\n'
+        + 'restore_plist(){ printf "RESTORED\\n"; '
+          'printf "ORIGINAL_PLIST\\n" > "$TEST_PLIST"; }\n'
+        + 'note_install_blocked(){ printf "RECEIPT:EFFECT_UNKNOWN:%s\\n" "$1"; }\n'
+        + 'bootstrap_once(){ printf "UNSAFE_REBOOTSTRAP\\n"; }\n'
+        + 'die(){ printf "REFUSED\\n"; exit "$1"; }\n'
+        + proof_function + "\n"
+        + function + "\nlose_install_holder\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    expected = ["RECEIPT:EFFECT_UNKNOWN:INSTALL_HOLDER_LOST", "REFUSED"]
+    assert result.stdout.splitlines() == expected
+    assert plist.read_bytes() == b"CURRENT_PLIST\n"
+    assert selector.read_bytes() == b"SELECTOR_STAYS\n"
+    assert transaction.read_bytes() == b"UNCERTAIN_TX_STAYS\n"
+    assert (locked / "started").exists() == effect_started
+
+
+def test_bootstrap_effect_return_79_after_started_is_not_holder_loss(tmp_path):
+    # Execute the literal run_locked Bash function with a harmless py stub
+    # simulating a child command returning 79 *after* its started receipt.
+    # The original rc79 shortcut mislabeled this as holder death.
+    raw = DAEMON.read_text()
+    start = raw.index("run_locked() {\n")
+    end = raw.index("\n}\n\neffect_was_not_started() {", start) + 2
+    function = raw[start:end]
+    fixture = (
+        'set -u\n'
+        + 'TMPROOT=' + str(tmp_path) + '\n'
+        + 'STORE=inert\nGENERATION=inert\nEXPECT_CURRENT=inert\n'
+        + 'PUBLISHER=inert\nINSTALL_FENCE=inert\nHOLD_DURING_LOCK=\n'
+        + 'prove_install_holder(){ :; }\n'
+        + 'lose_install_holder(){ printf "WRONG_HOLDER_LOSS\\n"; exit 90; }\n'
+        + 'py(){ if [ "$1" = "locked-effect" ]; then '
+          ': > "$LOCKED_DIR/started"; return 79; fi; return 0; }\n'
+        + function + '\n'
+        + 'run_locked bootstrap /bin/false\n'
+        + 'printf "EXIT=%s STOP=%s\\n" "$?" "$STOP_LOCKED"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["EXIT=79 STOP=0"]
+
+
+def test_bootstrap_effect_return_79_before_started_refuses_with_pre_effect_proof(tmp_path):
+    # Run the literal run_locked function. A pre-admission holder loss must
+    # retain the pre-effect PLIST_REPLACED phase; rc79 with no started marker
+    # must then furnish positive STOP_LOCKED proof before loss handling.
+    raw = DAEMON.read_text()
+    start = raw.index("run_locked() {\n")
+    end = raw.index("\n}\n\neffect_was_not_started() {", start) + 2
+    function = raw[start:end]
+    fixture = (
+        "set -u\n"
+        + "PHASE=PLIST_REPLACED\n"
+        + 'TMPROOT="' + str(tmp_path) + '"\n'
+        + 'STORE=inert\nGENERATION=inert\nEXPECT_CURRENT=inert\n'
+        + 'PUBLISHER=inert\nINSTALL_FENCE=inert\nHOLD_DURING_LOCK=\n'
+        + 'prove_install_holder(){ [ "$PHASE" = "PLIST_REPLACED" ] || exit 91; }\n'
+        + 'lose_install_holder(){ '
+          '[ "$STOP_LOCKED" -eq 1 ] && [ "$PHASE" = "BOOTSTRAP_STARTED" ] '
+          '|| exit 92; printf "PRE_EFFECT_REFUSAL\\n"; exit 78; }\n'
+        + 'py(){ if [ "$1" = "locked-effect" ]; then return 79; '
+          'fi; return 0; }\n'
+        + function + "\n"
+        + 'run_locked bootstrap /bin/false\n'
+        + 'printf "UNEXPECTED_BOOTSTRAP_SUCCESS\\n"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    assert result.stdout.splitlines() == ["PRE_EFFECT_REFUSAL"]
+
+
+def test_absent_label_holder_death_preserves_candidate(workspace):
+    # Existing hermetic launcher helper only; no fake launchctl argv/stub edits,
+    # external service, original collector or native release effect.
+    ctx = prepare(workspace)
+    original = b"ORIGINAL-ABSENT-LABEL-PREIMAGE\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    report = workspace / "holder-report"
+    fd = os.open(report, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(fd)
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold, holder_report=report),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert installed != original
+        deadline = time.time() + 8
+        while time.time() < deadline and b"armed\n" not in report.read_bytes():
+            if proc.poll() is not None:
+                raise AssertionError(proc.stderr.read())
+            time.sleep(0.05)
+        assert b"armed\n" in report.read_bytes()
+        fields = dict(line.split("=", 1)
+                      for line in report.read_text().splitlines() if "=" in line)
+        holder = int(fields["pid"])
+        assert "bootstrap " not in launch_log(ctx)
+        os.kill(holder, signal.SIGKILL)
+        _wait_transaction_unlocked(ctx)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 78, err
+        assert "install transaction holder lost" in err
+        assert ctx["plist"].read_bytes() == installed
+        assert "EFFECT_UNKNOWN" in err
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL_HOLDER_LOST"
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_absent_label_selector_move_before_bootstrap_preserves_candidate(workspace):
+    # New negative-path coverage reuses the existing accepted hermetic stub;
+    # no launchctl argv/stub implementation change or real host effect.
+    ctx = prepare(workspace)
+    original = b"ORIGINAL-ABSENT-LABEL-PLIST\\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert installed != original
+        _move_selector(ctx, workspace)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert ctx["plist"].read_bytes() == installed
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "BOOTSTRAP_ADMIT"
+        assert "selector moved before bootstrap" in receipt["reason"]
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_fresh_absent_plist_pre_bootstrap_error_writes_receipt_without_backup(workspace):
+    ctx = prepare(workspace)
+    assert not ctx["plist"].exists() and not ctx["backup"].exists()
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    result = run(ctx, fault="pre-bootstrap-print")
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert ctx["plist"].exists()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "PRE_BOOTSTRAP_PRINT"
+    assert "launchctl state uncertain" in receipt["reason"]
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+
+
+def test_selector_move_before_bootstrap_preserves_unknown_mismatched_service(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    installed = ctx["plist"].read_bytes()
+    assert installed != original
+    assert "bootstrap " not in launch_log(ctx)
+    other = _move_selector(ctx, workspace)
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "selector moved" in err
+    assert "EFFECT_UNKNOWN" in err
+    assert "recovered original service" not in err
+    assert ctx["plist"].read_bytes() == installed
+    assert launch_log(ctx).count("bootstrap ") == 0
+    assert launch_log(ctx).count("bootout ") == 1
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    assert_not_executed(ctx)
+
+
+def test_advance_preserves_selector_when_rollback_argv_mismatches(workspace):
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 12\n")
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 13\n")
+    original = b"OLD-LAUNCHD-PIN\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    (ctx["stub"] / "pause-pid").write_text("")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
+    (ctx["stub"] / "argv").write_text("/bin/bash\n/old/generation/ext/host_pull.sh\n")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name, advance_from=selector.name),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _wait_for(proc, ctx["stub"] / "ps-entered")
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    assert _selection(ctx)["generation"] == target.name
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], target / "ext" / "host_pull.sh"))
+    (ctx["stub"] / "pause-pid").unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "EFFECT_UNKNOWN" in err
+    assert "recovered original service" not in err
+    assert ctx["plist"].read_bytes() != original
+    final = _selection(ctx)
+    assert final["generation"] == target.name
+    assert final["previous"] == selector.name
+    assert final["sequence"] == before["sequence"] + 1
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert log.count("bootstrap ") == 1
+    assert log.index("bootout ") < log.index("bootstrap ")
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert receipt["phase"] == "BOOTSTRAP"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    assert_not_executed(ctx)
+
+
+@pytest.mark.parametrize("initial_marker", [0, 1])
+def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path, initial_marker):
+    # Execute the exact advance_selector source under inert, no-launcher
+    # functions. The publisher already acknowledged CURRENT=target; the
+    # fence cleanup fails. No fake-launchctl argv, selector, or host mutation.
+    raw = DAEMON.read_text()
+    start = raw.index("advance_selector() {\n")
+    end = raw.index("\n}\n\n# CAS back", start) + 2
+    function = raw[start:end]
+    script = (
+        "set -u\n"
+        + 'ADVANCE_FROM=prior\nGENERATION=target\nEXPECT_CURRENT=prior\n'
+        + 'SELECTED_ADVANCE=0\nSELECT_FENCE=0\nMARKER_OWNED=' + str(initial_marker) + '\n'
+        + 'PHASE=' + ('BACKED_UP' if initial_marker else 'VERIFIED') + '\n'
+        + 'STORE=inert\nPUBLISHER=inert\nINSTALL_FENCE=inert\n'
+        + 'TMPROOT="' + str(tmp_path) + '"\nPYTHON=/bin/echo\n'
+        + 'prove_install_holder(){ :; }\n'
+        + 'py(){ [ "$1" = "install-transaction-arm" ] || return 88; printf "ARMED\\n"; }\n'
+        + 'snapshot_service(){ :; }\n'
+        + 'arm_select_fence(){ SELECT_FENCE=1; }\n'
+        + 'confirm_selection_json(){ :; }\n'
+        + 'read_selector_generation(){ SELECT_GENERATION="$GENERATION"; SELECT_PREVIOUS="$ADVANCE_FROM"; }\n'
+        + 'clear_select_fence(){ return 78; }\n'
+        + 'write_receipt(){ printf "RECEIPT:%s:%s\n" "$1" "$2"; }\n'
+        + 'note_install_blocked(){ return 1; }\n'
+        + 'die(){ printf "REFUSED:%s\n" "$*"; '
+          'printf "STATE:%s:%s:%s:%s\n" "$SELECTED_ADVANCE" "$SELECT_FENCE" "$MARKER_OWNED" "$PHASE"; exit "$1"; }\n'
+        + 'keep_select_unknown(){ '
+          'write_receipt EFFECT_UNKNOWN SELECT_UNKNOWN "$1" || true; '
+          'die 78 "EFFECT_UNKNOWN service stopped pending repair: $1"; }\n'
+        + function + "\nadvance_selector\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", script],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    assert "RECEIPT:EFFECT_UNKNOWN:SELECT_UNKNOWN" in result.stdout
+    assert ("STATE:0:1:1:PAIRING" if initial_marker == 0
+            else "STATE:0:1:1:BACKED_UP") in result.stdout
+    assert ("ARMED" in result.stdout) == (initial_marker == 0)
+    assert "EFFECT_UNKNOWN" in result.stdout
+
+
+@pytest.mark.parametrize(("sig", "exit_code"), [
+    (signal.SIGTERM, 143), (signal.SIGHUP, 129), (signal.SIGINT, 130),
+])
+@pytest.mark.parametrize("drift", ["intact", "disappeared", "argv", "plist"])
+def test_signal_after_ack_before_bootout_reproves_original_identity(
+    workspace, sig, exit_code, drift,
+):
+    """After selector CAS/fence ack, signals may reverse only a proven old service."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    baseline = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 61\n")
+    original = arm_running(ctx, workspace)
+    hold = workspace / "post-select-pre-bootout"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(
+            ctx, generation=target.name, expect=selector.name,
+            advance_from=selector.name, hold_before_bootout=hold,
+        ),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " not in launch_log(ctx)
+        if drift == "disappeared":
+            (ctx["stub"] / "print-mode").write_text("stopped\n")
+        elif drift == "argv":
+            (ctx["stub"] / "argv").write_text(
+                expected_argv(ctx["lock"], target / "ext" / "host_pull.sh")
+            )
+        elif drift == "plist":
+            ctx["plist"].write_bytes(b"PEER-PLIST-AFTER-CAS\n")
+        proc.send_signal(sig)
+        _out, err = proc.communicate(timeout=12)
+        last = _selection(ctx)
+        if drift == "intact":
+            assert proc.returncode == exit_code, err
+            assert last["generation"] == selector.name
+            assert last["sequence"] == baseline["sequence"] + 2
+            assert "EFFECT_UNKNOWN" not in err
+        else:
+            assert proc.returncode == 78, err
+            assert "EFFECT_UNKNOWN" in err
+            assert "original service identity unproven" in err
+            assert last["generation"] == target.name
+            assert last["previous"] == selector.name
+            assert last["sequence"] == baseline["sequence"] + 1
+            receipt = receipt_body(ctx)
+            assert receipt["outcome"] == "EFFECT_UNKNOWN"
+            assert receipt["phase"] == "signal-BACKED_UP"
+            assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == (
+            b"PEER-PLIST-AFTER-CAS\n" if drift == "plist" else original
+        )
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("drift", ["argv", "plist"])
+def test_bootout_nonzero_same_pid_with_identity_drift_is_unknown(workspace, drift):
+    """Nonzero bootout + same live PID does not prove argv or plist continuity."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 62\n")
+    original = arm_running(ctx, workspace)
+    (ctx["stub"] / "bootout-rc").write_text("1\n")
+    hold = workspace / "post-select-bootout-drift"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(
+            ctx, generation=target.name, expect=selector.name,
+            advance_from=selector.name, hold_before_bootout=hold,
+        ),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        if drift == "argv":
+            (ctx["stub"] / "argv").write_text(
+                expected_argv(ctx["lock"], target / "ext" / "host_pull.sh")
+            )
+        else:
+            ctx["plist"].write_bytes(b"PEER-PLIST-BEFORE-BOOTOUT\n")
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "original service identity unproven" in err
+        assert "bootout had no effect" not in err
+        last = _selection(ctx)
+        assert last["generation"] == target.name
+        assert last["previous"] == selector.name
+        assert last["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "BOOTOUT_ROLLBACK"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == (
+            b"PEER-PLIST-BEFORE-BOOTOUT\n" if drift == "plist" else original
+        )
+        assert (ctx["stub"] / "pid").read_text().strip() == "4242"
+        assert (ctx["stub"] / "ps-alive").exists()
+        assert launch_log(ctx).count("bootout ") == 1
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("drift", ["intact-absent", "became-loaded", "unreadable"])
+def test_absent_prebootout_install_failure_requires_saved_service_state(
+    workspace, drift,
+):
+    """An originally absent collector must stay absent through selector rollback."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 63\n")
+    original = b"ABSENT-LABEL-ORIGINAL-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "absent-install-refusal"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(
+            ctx, generation=target.name, expect=selector.name,
+            advance_from=selector.name, hold_before_plist=hold,
+            fault="install-before-replace",
+        ),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " not in launch_log(ctx)
+        if drift == "became-loaded":
+            (ctx["stub"] / "print-mode").write_text("running\n")
+            (ctx["stub"] / "ps-alive").write_text("")
+            (ctx["stub"] / "argv").write_text("/bin/bash\n/peer/collector.sh\n")
+        elif drift == "unreadable":
+            (ctx["stub"] / "print-style").write_text("garbage\n")
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        last = _selection(ctx)
+        assert ctx["plist"].read_bytes() == original
+        if drift == "intact-absent":
+            assert "plist install failed" in err
+            assert "EFFECT_UNKNOWN" not in err
+            assert last["generation"] == selector.name
+            assert last["sequence"] == before["sequence"] + 2
+        else:
+            assert "EFFECT_UNKNOWN" in err
+            assert "original service/plist identity unproven" in err
+            assert last["generation"] == target.name
+            assert last["previous"] == selector.name
+            assert last["sequence"] == before["sequence"] + 1
+            receipt = receipt_body(ctx)
+            assert receipt["outcome"] == "EFFECT_UNKNOWN"
+            assert receipt["phase"] == "INSTALL"
+            assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize(("initial", "peer"), [
+    (b"PRE-PEER-PLIST\n", b"PEER-REPLACED-PLIST\n"),
+    (b"PRE-PEER-PLIST\n", None),
+    (None, b"PEER-CREATED-PLIST\n"),
+])
+def test_install_before_replace_never_restores_over_peer_plist(workspace, initial, peer):
+    """Pre-replace failure preserves concurrent peer creation/edit/deletion."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 64\n")
+    if initial is not None:
+        ctx["plist"].write_bytes(initial)
+        ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "hold-preinstall-peer-change"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_before_plist=hold,
+                  fault="install-before-replace"),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        if peer is None:
+            ctx["plist"].unlink()
+        else:
+            ctx["plist"].write_bytes(peer)
+            ctx["plist"].chmod(0o600)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "original service/plist identity unproven" in err
+        assert ctx["plist"].exists() == (peer is not None)
+        if peer is not None:
+            assert ctx["plist"].read_bytes() == peer
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("post_failure_peer", [False, True])
+def test_install_after_replace_failure_retains_own_or_peer_bytes_and_unknown(
+    workspace, post_failure_peer,
+):
+    """Postreplace failure cannot overwrite later peer bytes during recovery."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 65\n")
+    original = b"ORIGINAL-BEFORE-REPLACE\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "hold-after-failed-install"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_after_install_failure=hold,
+                  fault="install-after-replace"),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        installed = ctx["plist"].read_bytes()
+        assert installed != original
+        assert plistlib.loads(installed)["ProgramArguments"][-1] == str(
+            target / "ext" / "host_pull.sh"
+        )
+        peer = b"PEER-AFTER-FAILED-REPLACE\n"
+        if post_failure_peer:
+            ctx["plist"].write_bytes(peer)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "original service/plist identity unproven" in err
+        assert ctx["plist"].read_bytes() == (peer if post_failure_peer else installed)
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_install_failure_without_selector_still_refuses_unverified_plist(workspace):
+    """No selector CAS does not excuse an unproven post-install plist effect."""
+    ctx = prepare(workspace)
+    original = b"NO-SELECTOR-OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    selected_before = _selection(ctx)
+    result = run(ctx, fault="install-after-replace")
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert ctx["plist"].read_bytes() != original
+    assert _selection(ctx) == selected_before
+    assert receipt_body(ctx)["outcome"] == "EFFECT_UNKNOWN"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+
+
+@pytest.mark.parametrize(("original", "action"), [
+    (b"ORIGINAL-BEFORE-SIGNAL\n", "edit"),
+    (b"ORIGINAL-BEFORE-SIGNAL\n", "delete"),
+    (None, "delete-and-create"),
+])
+def test_signal_after_plist_replace_preserves_peer_effects(
+    workspace, original, action,
+):
+    """No peer edit/deletion/recreation can be clobbered by the signal handler."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 66\n")
+    if original is not None:
+        ctx["plist"].write_bytes(original)
+        ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "hold-signal-post-install"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert original is None or installed != original
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        peer = b"PEER-WRITTEN-AFTER-OUR-INSTALL\n"
+        if action == "delete":
+            ctx["plist"].unlink()
+        elif action == "delete-and-create":
+            ctx["plist"].unlink()
+            ctx["plist"].write_bytes(peer)
+            ctx["plist"].chmod(0o600)
+        else:
+            ctx["plist"].write_bytes(peer)
+        proc.send_signal(signal.SIGTERM)
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "signal during PLIST_REPLACED" in err
+        assert ctx["plist"].exists() == (action != "delete")
+        if action != "delete":
+            assert ctx["plist"].read_bytes() == peer
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "signal-PLIST_REPLACED"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_source_has_no_unconditional_plist_restore_path():
+    """Fail if rollback again writes a plist without exclusive file ownership."""
+    text = DAEMON.read_text()
+    assert "restore_plist()" not in text
+    assert "restore_plist ||" not in text
+    assert "py atomic-restore" not in text
+    assert "py atomic-remove" not in text
+
+
+@pytest.mark.parametrize("action", ["edit", "delete", "delete-and-create"])
+def test_holder_loss_after_install_preserves_peer_plist(workspace, action):
+    """A dead transaction holder cannot rewrite peer plist after install."""
+    ctx = prepare(workspace)
+    original = b"HOLDER-OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    before = _selection(ctx)
+    hold = workspace / "holder-loss-peer-hold"
+    hold.write_text("")
+    report = workspace / "holder-loss-report"
+    report.touch(mode=0o600)
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold, holder_report=report),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert installed != original
+        deadline = time.time() + 8
+        while time.time() < deadline and b"armed\n" not in report.read_bytes():
+            if proc.poll() is not None:
+                raise AssertionError(proc.stderr.read())
+            time.sleep(0.05)
+        assert b"armed\n" in report.read_bytes()
+        fields = dict(line.split("=", 1)
+                      for line in report.read_text().splitlines() if "=" in line)
+        peer = b"PEER-AFTER-INSTALL-HOLDER\n"
+        if action == "delete":
+            ctx["plist"].unlink()
+        elif action == "delete-and-create":
+            ctx["plist"].unlink()
+            ctx["plist"].write_bytes(peer)
+        else:
+            ctx["plist"].write_bytes(peer)
+        os.kill(int(fields["pid"]), signal.SIGKILL)
+        _wait_transaction_unlocked(ctx)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "install transaction holder lost" in err
+        assert ctx["plist"].exists() == (action != "delete")
+        if action != "delete":
+            assert ctx["plist"].read_bytes() == peer
+        assert _selection(ctx) == before
+        assert receipt_body(ctx)["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt_body(ctx)["phase"] == "INSTALL_HOLDER_LOST"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("action", ["edit", "delete"])
+def test_uncertain_prebootstrap_print_retains_peer_plist(workspace, action):
+    """Uncertain launchctl print must not restore over later peer bytes."""
+    ctx = prepare(workspace)
+    old = b"OLD-BEFORE-PRINT\n"
+    ctx["plist"].write_bytes(old)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    before = _selection(ctx)
+    hold = workspace / "uncertain-print-plist"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert ctx["plist"].read_bytes() != old
+        peer = b"PEER-UNCERTAIN-PRINT\n"
+        if action == "delete":
+            ctx["plist"].unlink()
+        else:
+            ctx["plist"].write_bytes(peer)
+        (ctx["stub"] / "print-style").write_text("garbage\n")
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert ctx["plist"].exists() == (action != "delete")
+        if action != "delete":
+            assert ctx["plist"].read_bytes() == peer
+        assert _selection(ctx) == before
+        assert receipt_body(ctx)["phase"] == "PRE_BOOTSTRAP_PRINT"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("action", ["edit", "delete"])
+def test_postbootout_failed_install_never_restores_over_peer(workspace, action):
+    """BOOTED recovery refuses another plist write or launchctl bootstrap."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 67\n")
+    arm_running(ctx, workspace)
+    hold = workspace / "postbootout-failed-install"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_after_install_failure=hold,
+                  fault="install-after-replace"),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " in launch_log(ctx)
+        peer = b"PEER-AFTER-BOOTOUT\n"
+        if action == "delete":
+            ctx["plist"].unlink()
+        else:
+            ctx["plist"].write_bytes(peer)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert ctx["plist"].exists() == (action != "delete")
+        if action != "delete":
+            assert ctx["plist"].read_bytes() == peer
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        assert receipt_body(ctx)["phase"] == "INSTALL"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert launch_log(ctx).count("bootout ") == 1
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("action", ["edit", "delete"])
+def test_bootstrap_failure_does_not_restore_peer_plist(workspace, action):
+    """Failed bootstrap does not overwrite peer file before recovery."""
+    ctx = prepare(workspace)
+    original = b"BOOTSTRAP-PEER-PREIMAGE\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
+    before = _selection(ctx)
+    hold = workspace / "failed-bootstrap-peer"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert ctx["plist"].read_bytes() != original
+        peer = b"PEER-BEFORE-FAILED-BOOTSTRAP\n"
+        if action == "delete":
+            ctx["plist"].unlink()
+        else:
+            ctx["plist"].write_bytes(peer)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert ctx["plist"].exists() == (action != "delete")
+        if action != "delete":
+            assert ctx["plist"].read_bytes() == peer
+        assert _selection(ctx) == before
+        assert receipt_body(ctx)["phase"] == "BOOTSTRAP"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert launch_log(ctx).count("bootstrap ") == 1
+        assert "bootout " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("action", [
+    "intact", "edit", "delete", "wrong-mode", "symlink",
+])
+def test_postbootstrap_success_reproves_admitted_plist(workspace, action):
+    """Running PID/argv alone must not release the marker for a changed disk plist."""
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    original_selector = _selection(ctx)
+    hold = workspace / "hold-after-bootstrap-verify"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_after_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert installed
+        assert "bootstrap " in launch_log(ctx)
+        assert (ctx["stub"] / "print-mode").read_text().strip() == "running"
+        assert (ctx["stub"] / "argv").read_text() == expected_argv(ctx["lock"], ctx["pin"])
+        assert (ctx["stub"] / "ps-alive").exists()
+        peer = b"PEER-POST-BOOTSTRAP-PLIST\n"
+        peer_file = workspace / "thirdparty-plist"
+        if action == "edit":
+            ctx["plist"].write_bytes(peer)
+        elif action == "delete":
+            ctx["plist"].unlink()
+        elif action == "wrong-mode":
+            ctx["plist"].chmod(0o644)
+        elif action == "symlink":
+            peer_file.write_bytes(peer)
+            ctx["plist"].unlink()
+            ctx["plist"].symlink_to(peer_file)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=15)
+        assert _selection(ctx) == original_selector
+        log = launch_log(ctx)
+        assert "bootout " not in log
+        assert log.count("bootstrap ") == 1
+        assert_not_executed(ctx)
+        if action == "intact":
+            assert proc.returncode == 0, err
+            assert not (ctx["store"] / ".install-transaction.marker").exists()
+            assert ctx["plist"].read_bytes() == installed
+            assert list(ctx["backup"].glob("*.receipt")) == []
+        else:
+            assert proc.returncode == 78, err
+            assert "EFFECT_UNKNOWN" in err
+            assert "installed plist identity unproven" in err
+            receipt = receipt_body(ctx)
+            assert receipt["outcome"] == "EFFECT_UNKNOWN"
+            assert receipt["phase"] == "POST_BOOTSTRAP_VERIFY"
+            assert (ctx["store"] / ".install-transaction.marker").exists()
+            if action == "edit":
+                assert ctx["plist"].read_bytes() == peer
+            elif action == "delete":
+                assert not ctx["plist"].exists()
+            elif action == "wrong-mode":
+                assert ctx["plist"].read_bytes() == installed
+                assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+            elif action == "symlink":
+                assert ctx["plist"].is_symlink()
+                assert ctx["plist"].read_bytes() == peer
+                assert peer_file.read_bytes() == peer
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_postbootstrap_plist_seal_guard_is_production_noninteractive(workspace):
+    """A fixture pause after bootstrap is rejected outside hermetic mode."""
+    candidate = DAEMON.read_text()
+    assert 'elif cmd == "verify-installed-plist":' in candidate
+    assert 'py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA"' in candidate
+    assert 'HOLD_AFTER_BOOTSTRAP=""' in candidate
+    assert '[ -z "$HOLD_AFTER_BOOTSTRAP" ]' in candidate
+    assert '--hold-after-bootstrap) HOLD_AFTER_BOOTSTRAP=' in candidate
+
+
+@pytest.mark.parametrize("action", ["intact", "wrong-mode", "symlink"])
+def test_already_running_target_must_prove_disk_plist_identity(workspace, action):
+    """Fast-path byte equality must not accept mutable symlink or mode drift."""
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    initial = run(ctx)
+    assert initial.returncode == 0, initial.stderr
+    installed = ctx["plist"].read_bytes()
+    before = _selection(ctx)
+    (ctx["stub"] / "launchctl.log").write_text("")
+    peer_file = workspace / "identical-peer-plist"
+    if action == "wrong-mode":
+        ctx["plist"].chmod(0o644)
+    elif action == "symlink":
+        peer_file.write_bytes(installed)
+        ctx["plist"].unlink()
+        ctx["plist"].symlink_to(peer_file)
+    second = run(ctx)
+    assert _selection(ctx) == before
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+    if action == "intact":
+        assert second.returncode == 0, second.stderr
+        assert ctx["plist"].read_bytes() == installed
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert list(ctx["backup"].glob("*.receipt")) == []
+    else:
+        assert second.returncode == 78, second.stderr
+        assert "EFFECT_UNKNOWN" in second.stderr
+        assert "installed plist identity unproven" in second.stderr
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "ALREADY_RUNNING_VERIFY"
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == installed
+        if action == "wrong-mode":
+            assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+        else:
+            assert ctx["plist"].is_symlink()
+            assert peer_file.read_bytes() == installed
+
+
+@pytest.mark.parametrize("action", ["intact", "wrong-mode", "symlink"])
+def test_advance_from_pairs_only_after_strict_disk_plist_identity(workspace, action):
+    """A matching live target cannot CAS CURRENT until disk plist is trusted.
+
+    All paths are isolated fixture stores; no real launchd, selector or host
+    service is used. These cases cover the formerly missing --advance-from
+    pairing path, not merely the already-selected idempotent path.
+    """
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 71\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    installed = run(ctx)
+    assert installed.returncode == 0, installed.stderr
+    original = ctx["release"]
+    before = _selection(ctx)
+
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 72\n")
+    target_pin = target / "ext" / "host_pull.sh"
+    old_pin = str(ctx["pin"]).encode()
+    rendered = ctx["plist"].read_bytes()
+    assert rendered.count(old_pin) == 1
+    admitted_target = rendered.replace(old_pin, str(target_pin).encode())
+    ctx["plist"].write_bytes(admitted_target)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], target_pin))
+    (ctx["stub"] / "launchctl.log").write_text("")
+
+    peer_file = workspace / "advance-from-identical-peer-plist"
+    if action == "wrong-mode":
+        ctx["plist"].chmod(0o644)
+    elif action == "symlink":
+        peer_file.write_bytes(admitted_target)
+        ctx["plist"].unlink()
+        ctx["plist"].symlink_to(peer_file)
+
+    result = run(ctx, generation=target.name, expect=original.name,
+                 advance_from=original.name)
+    final = _selection(ctx)
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+    assert ctx["plist"].read_bytes() == admitted_target
+
+    if action == "intact":
+        assert result.returncode == 0, result.stderr
+        assert final["generation"] == target.name
+        assert final["previous"] == original.name
+        assert final["sequence"] == before["sequence"] + 1
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert list(ctx["backup"].glob("*.receipt")) == []
+    else:
+        assert result.returncode == 78, result.stderr
+        assert "EFFECT_UNKNOWN" in result.stderr
+        assert "installed plist identity unproven before selector advance" in result.stderr
+        # The crucial regression: even with same bytes and matching launchctl
+        # argv, a symlink or wrong-mode destination must not move CURRENT.
+        assert final == before
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "ALREADY_RUNNING_VERIFY"
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        if action == "wrong-mode":
+            assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+        else:
+            assert ctx["plist"].is_symlink()
+            assert peer_file.read_bytes() == admitted_target

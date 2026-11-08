@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import threading
 import unittest
 from unittest import mock
@@ -236,6 +237,109 @@ class ApplicationOriginalCollection(unittest.TestCase):
             self.assertEqual(second['state'],'UNKNOWN')
             release.set();self.assertEqual(first.result(5)['state'],'COMPLETE')
         self.assertEqual(len(self.observations),1)
+
+    def test_reconcile_observation_is_collection_only_and_never_repeated(self):
+        result=self.call('reconcile')
+        self.assertEqual(result['state'],'COMPLETE',result)
+        self.assertEqual(len(self.observations),1)
+        receipt=json.loads((Path(self.fx.destination)/'receipt.json').read_bytes())
+        self.assertEqual(receipt['acceptance'],'NOT_RECORDED')
+        self.assertEqual(receipt['lease_settlement'],'UNKNOWN')
+        self.assertEqual(receipt['controller_state'],'UNKNOWN')
+        self.assertFalse(receipt['original_operation_mutated'])
+        self.assertEqual(receipt['run_id'],self.run)
+        # The same fixed leaf is never read again and never re-published.
+        again=self.call('reconcile')
+        self.assertEqual(again['state'],'REFUSED')
+        self.assertEqual(again['reason'],'original_reconciliation_destination_exists')
+        self.assertEqual(again['effect_state'],'NOT_APPLIED')
+        self.assertEqual(len(self.observations),1)
+
+    def test_reconcile_refuses_an_existing_leaf_of_any_kind_with_zero_transport(self):
+        leaf=Path(self.fx.destination);leaf.mkdir(mode=0o700)
+        result=self.call('reconcile')
+        self.assertEqual(result['state'],'REFUSED')
+        self.assertEqual(result['reason'],'original_reconciliation_destination_exists')
+        self.assertEqual(result['effect_state'],'NOT_APPLIED')
+        self.assertFalse(self.observations)
+        self.assertFalse((leaf/'receipt.json').exists())
+
+    def test_reconcile_refuses_a_missing_parent_chain_with_zero_transport(self):
+        shutil.rmtree(Path(self.fx.destination).parent)
+        result=self.call('reconcile')
+        self.assertEqual(result['state'],'REFUSED')
+        self.assertEqual(result['reason'],'original_reconciliation_refused')
+        self.assertEqual(result['effect_state'],'NOT_APPLIED')
+        self.assertFalse(self.observations)
+
+    def test_reconcile_refuses_a_changed_source_pin_with_zero_transport(self):
+        self.fx.packet_pin.write_bytes(self.fx.packet+b'changed')
+        result=self.call('reconcile')
+        self.assertEqual(result['state'],'REFUSED')
+        self.assertFalse(self.observations)
+        self.assertFalse(Path(self.fx.destination).exists())
+
+    def test_reconcile_transport_failure_stays_unknown_and_never_reads_again(self):
+        def failed(alias,request):
+            raise OSError('transport_timeout')
+        with mock.patch.object(self.collector.delivery,'transport',failed):
+            result=self.call('reconcile')
+        self.assertEqual(result['state'],'UNKNOWN')
+        self.assertEqual(result['effect_state'],'UNKNOWN')
+        self.assertFalse(self.observations)
+        # The leaf was reserved before the transport, so the observation is
+        # never eligible again and no second read happens.
+        self.assertTrue(Path(self.fx.destination).exists())
+        again=self.call('reconcile')
+        self.assertEqual(again['state'],'REFUSED')
+        self.assertEqual(again['reason'],'original_reconciliation_destination_exists')
+        self.assertFalse(self.observations)
+
+    def test_reconcile_late_file_exists_never_claims_no_remote_read(self):
+        write = self.collector.delivery.write_exclusive
+        def late_failure(fd, name, raw):
+            if name == 'binding.json':
+                raise FileExistsError('late local publication conflict')
+            return write(fd, name, raw)
+        with mock.patch.object(self.collector.delivery, 'write_exclusive', late_failure):
+            result = self.call('reconcile')
+        self.assertEqual(len(self.observations), 1)
+        self.assertEqual(result['state'], 'UNKNOWN')
+        self.assertEqual(result['effect_state'], 'UNKNOWN')
+        self.assertTrue(result['this_invocation_remote_read_started'])
+        self.assertEqual(self.call('reconcile')['state'], 'REFUSED')
+        self.assertEqual(len(self.observations), 1)
+
+    def test_reconcile_disappearing_leaf_after_transport_remains_unknown(self):
+        def lost(alias, request):
+            self.observe(alias, request)
+            shutil.rmtree(self.fx.destination)
+            raise OSError('lost transport and local evidence')
+        with mock.patch.object(self.collector.delivery, 'transport', lost):
+            result = self.call('reconcile')
+        self.assertEqual(len(self.observations), 1)
+        self.assertFalse(Path(self.fx.destination).exists())
+        self.assertEqual(result['state'], 'UNKNOWN')
+        self.assertEqual(result['effect_state'], 'UNKNOWN')
+        self.assertTrue(result['this_invocation_remote_read_started'])
+
+
+    def test_reconcile_success_then_lost_final_evidence_remains_unknown(self):
+        original_collect = self.collector._collect_validated
+
+        def collect_then_remove(*args, **kwargs):
+            value = original_collect(*args, **kwargs)
+            shutil.rmtree(self.fx.destination)
+            return value
+
+        with mock.patch.object(self.collector, '_collect_validated', collect_then_remove):
+            result = self.call('reconcile')
+        self.assertEqual(len(self.observations), 1)
+        self.assertFalse(Path(self.fx.destination).exists())
+        self.assertEqual(result['state'], 'UNKNOWN')
+        self.assertEqual(result['effect_state'], 'UNKNOWN')
+        self.assertTrue(result['this_invocation_remote_read_started'])
+        self.assertFalse(result['retry_authorized'])
 
 
 class ApplicationCarrierOriginalCollection(ApplicationOriginalCollection):

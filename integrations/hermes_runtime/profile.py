@@ -211,7 +211,14 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
     else:
         provider = model.get("provider")
         default = model.get("default")
-        if provider != route["provider"] or default != route["default"]:
+        application = provider == "mastermind-fabric"
+        if application:
+            if (type(default) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", default) is None
+                    or "native_provider_id" in model
+                    or type(config.get("gateway")) is not dict
+                    or config["gateway"].get("backend") != "native-session-authority"):
+                issues.add("UNQUALIFIED_MODEL_ROUTE")
+        elif provider != route["provider"] or default != route["default"]:
             issues.add("UNQUALIFIED_MODEL_ROUTE")
         if not isinstance(provider, str):
             provider = ""
@@ -268,7 +275,7 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
                 issues.add("NATIVE_GATEWAY_ROLE_ADDRESS_REQUIRED")
             if not gateway_port or not backend_port or gateway_port == backend_port:
                 issues.add("NATIVE_GATEWAY_FIXED_PORTS_REQUIRED")
-            if native_id is None:
+            if native_id is None and provider != "mastermind-fabric":
                 issues.add("NATIVE_GATEWAY_MODEL_SELECTION_REQUIRED")
 
     service = config.get("service")
@@ -458,3 +465,4 @@ def _load_unique_yaml(data: bytes) -> Any:
     except (yaml.YAMLError, RecursionError) as exc:
         raise RuntimeRefusal("INVALID_UNIQUE_SAFE_YAML") from exc
     return parsed
+

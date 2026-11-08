@@ -14,7 +14,7 @@ import {intentIdForOperationKey} from "./orchestration/operation-key";
 import type {OrchestratorCommandBinding} from "./orchestration/host-command-bindings";
 import type {OperationPointer,PendingPointerStore} from "./orchestration/operation-controller";
 
-vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn().mockResolvedValue({
+vi.mock("@tauri-apps/api/core",()=>({isTauri:()=>false,invoke:vi.fn().mockResolvedValue({
   version:"0.1.0",source_revision:"a".repeat(40),build_identity:"fixture",transport:"UNCONFIGURED",state:"BUILT_NOT_PROVEN"})}));
 const signed:AuthState={status:"signed_in",reason:null,acquisition:true,content:true};
 const preview={schema:"mastermind.project_execution_preview.v1",work_ref:"WS:ONE",

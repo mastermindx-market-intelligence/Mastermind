@@ -183,3 +183,107 @@ def test_native_command_refuses_missing_context_and_stale_command(tmp_path,monke
     assert json.loads(command('status'))['state']=='REFUSED'
     ctx._manager._plugin_commands.clear()
     assert json.loads(command('status',session_id='native-session'))['state']=='REFUSED'
+
+
+# Route previews reuse the native MCP client; OMH never selects the account.
+def routing_request(**extra):
+    return dict(action='route', message='Inspect the failing test', category='quick',
+                task_class='census', complexity='C1_ROUTINE_BOUNDED', **extra)
+
+
+def routing_framework(tmp_path, monkeypatch):
+    m,d,_=load(tmp_path)
+    ctx,entries,calls,disposed,constants=framework(monkeypatch,d['profile_home'])
+    local=[]; remote=[]
+    advice=dict(schema='mastermind.hermes_omh.recommendation/v1',
+                state='RECOMMENDED_NOT_ADMITTED',admitted=False,dispatched=False,
+                selected_model=None,availability='NOT_OBSERVED',category='quick',
+                model_candidates=[dict(model_alias='unqualified-omh-alias',reasoning_effort='high')])
+    preview=dict(state='PREVIEW_ONLY',pool='canonical-pool',model='canonical-model',
+                 reserved=False,selection_rechecked_at_request=True,
+                 proof='PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH')
+    def run(*a,**kw):
+        local.append(json.loads(kw['input']))
+        return SimpleNamespace(returncode=0,stdout=json.dumps(advice).encode(),stderr=b'')
+    def call_mcp(server,tool,arguments,**kw):
+        remote.append((server,tool,arguments,kw))
+        return dict(ok=True,result=json.dumps(preview))
+    monkeypatch.setattr(m.subprocess,'run',run)
+    ctx.call_mcp=call_mcp
+    m.register(ctx)
+    return m,d,ctx,entries,calls[0]['handler'],constants,local,remote,advice,preview
+
+
+def test_route_uses_canonical_task_requirements_and_no_omh_model_override(tmp_path,monkeypatch):
+    m,d,ctx,entries,h,constants,local,remote,advice,preview=routing_framework(tmp_path,monkeypatch)
+    monkeypatch.setenv('ZAI_API_KEY','SECRET_SENTINEL')
+    raw=h(routing_request(),session_id='native-session',task_id='native-task')
+    out=json.loads(raw)
+    assert out['state']=='ROUTE_PREVIEW_NOT_ADMITTED'
+    assert out['admitted'] is False and out['dispatched'] is False and out['selected_model'] is None
+    assert out['recommendation']==dict(advice,bridge_release_commit='a'*40)
+    assert out['capacity_preview']==preview
+    assert out['routing_requirements']==dict(task_class='census',complexity='C1_ROUTINE_BOUNDED')
+    assert local==[dict(action='recommend',message='Inspect the failing test',category='quick')]
+    assert remote==[('mastermind-fabric-capacity','fabric_route_preview',
+                     dict(task_class='census',complexity='C1_ROUTINE_BOUNDED'),dict(timeout=20))]
+    assert 'SECRET_SENTINEL' not in raw
+
+
+@pytest.mark.parametrize('key,value',[
+    ('pool','zai'),('model','unqualified-omh-alias'),('server','foreign'),
+    ('task_class','invented'),('complexity','quick'),('complexity',True),
+])
+def test_route_refuses_unsupported_or_forced_routing_before_any_call(tmp_path,monkeypatch,key,value):
+    m,d,ctx,entries,h,constants,local,remote,advice,preview=routing_framework(tmp_path,monkeypatch)
+    request=routing_request();request[key]=value
+    assert json.loads(h(request,session_id='native-session'))['state']=='REFUSED'
+    assert not local and not remote
+
+
+@pytest.mark.parametrize('kind',[
+    'permission','exception','owner-error','truncated','bad-json','reserved',
+    'false-proof','extra-field','registration-drift','profile-drift','source-drift',
+])
+def test_route_failures_preserve_one_call_and_never_return_a_local_model(tmp_path,monkeypatch,kind):
+    m,d,ctx,entries,h,constants,local,remote,advice,preview=routing_framework(tmp_path,monkeypatch)
+    original=ctx.call_mcp
+    def call(*args,**kwargs):
+        response=original(*args,**kwargs)
+        if kind=='permission':raise PermissionError('SECRET_SENTINEL')
+        if kind=='exception':raise RuntimeError('SECRET_SENTINEL')
+        if kind=='owner-error':return dict(ok=False,error='FABRIC_PREVIEW_REFUSED')
+        if kind=='truncated':response['truncated']=True
+        if kind=='bad-json':response['result']='SECRET_SENTINEL'
+        if kind=='reserved':preview['reserved']=True
+        if kind=='false-proof':preview['proof']='RUNNING'
+        if kind=='extra-field':preview['credential']='SECRET_SENTINEL'
+        if kind=='registration-drift':entries.clear()
+        if kind=='profile-drift':constants.get_hermes_home=lambda:Path('/foreign')
+        if kind=='source-drift':monkeypatch.setattr(m,'verify_sources',lambda binding:False)
+        if kind in ('reserved','false-proof','extra-field'):response['result']=json.dumps(preview)
+        return response
+    ctx.call_mcp=call
+    raw=h(routing_request(),session_id='native-session')
+    out=json.loads(raw)
+    assert out['state']=='REFUSED' and out['dispatched'] is False
+    assert len(local)==1 and len(remote)==1
+    assert 'SECRET_SENTINEL' not in raw and 'unqualified-omh-alias' not in raw
+    if kind=='owner-error':assert out['capacity_reason']=='FABRIC_PREVIEW_REFUSED'
+
+
+def test_route_does_not_call_capacity_after_local_recommendation_refusal(tmp_path,monkeypatch):
+    m,d,ctx,entries,h,constants,local,remote,advice,preview=routing_framework(tmp_path,monkeypatch)
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(
+        returncode=2,stdout=b'{"state":"REFUSED","reason":"OMH_CATEGORY_UNKNOWN"}',stderr=b''))
+    out=json.loads(h(routing_request(),session_id='native-session'))
+    assert out['reason']=='OMH_CATEGORY_UNKNOWN' and not remote
+
+
+def test_route_command_uses_same_checked_native_path(tmp_path,monkeypatch):
+    m,d,ctx,entries,h,constants,local,remote,advice,preview=routing_framework(tmp_path,monkeypatch)
+    command=ctx._manager._plugin_commands['mmx-omh']['handler']
+    out=json.loads(command('route census C1_ROUTINE_BOUNDED quick Inspect the failing test',
+                           session_id='native-session'))
+    assert out['state']=='ROUTE_PREVIEW_NOT_ADMITTED' and len(remote)==1
+    assert 'route' in m.TOOL_SCHEMA['parameters']['properties']['action']['enum']

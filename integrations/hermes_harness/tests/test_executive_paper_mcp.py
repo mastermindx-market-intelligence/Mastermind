@@ -356,6 +356,77 @@ class ExecutivePaperInstalledContractTests(unittest.TestCase):
         self.assertEqual(set(runtime._expected_disabled_mcp()), {"mastermind_steward"})
         self.assertIn("BYTEPLUS_MODELARK_API_KEY", runtime._model_child_env())
 
+    def _application_runtime(self):
+        from dataclasses import replace
+        from types import SimpleNamespace
+        from integrations.hermes_application_fabric import publication
+        from integrations.hermes_runtime.secrets import Secrets
+
+        self._write_config(plugin.render_disarmed_native_exec_paper(self.profile))
+        runtime = self._runtime()
+        runtime.profile = replace(
+            self.profile, model_provider=publication.PROVIDER,
+            model_default="fixture-application-model", native_provider_id=None,
+            gateway_backend="native-session-authority",
+        )
+        document = {
+            "schema": publication.SCHEMA, "role": self.profile.role,
+            "enrollment_request_id": "fixture-application-enrollment",
+            "principal_id": "uid:1001", "macro_root": str(self.root / ("a" * 40)),
+            "macro_commit_sha": "a" * 40, "model": "fixture-application-model",
+            "max_tokens": 128, "package_sha256": "b" * 64,
+        }
+        # Held-launch custody is an explicit fixture; configuration and
+        # credential selection below use the actual APPLICATION owners.
+        runtime._native_launch = SimpleNamespace(
+            recipe={"primary_application": document, "vendor_root": str(self.root / "vendor")},
+            qualify=lambda *_: None,
+        )
+        runtime.secrets = Secrets(
+            runtime.secrets.token, runtime.secrets.dashboard_username,
+            runtime.secrets.dashboard_password,
+            {**runtime.secrets.values,
+             "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN": "synthetic-application-token-1234567890"},
+        )
+        self._write_config(publication.expected_native_config(runtime.profile, document))
+        return runtime, document
+
+    def test_application_retains_its_own_census_and_only_its_role_credential(self):
+        runtime, _ = self._application_runtime()
+        self.assertEqual(set(runtime._expected_disabled_mcp()), {"mastermind_steward"})
+        with mock.patch(
+            "integrations.hermes_runtime.native_gateway_entry.native_git_environment",
+            return_value={},
+        ):
+            env = runtime._model_child_env()
+        self.assertEqual(env["HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN"],
+                         "synthetic-application-token-1234567890")
+        for name in ("BYTEPLUS_MODELARK_API_KEY", "ZAI_API_KEY",
+                     "MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN"):
+            self.assertNotIn(name, env)
+
+    def test_application_publication_revocation_withholds_prepared_environment(self):
+        from integrations.hermes_application_fabric import publication
+        for change in ("mutate", "remove"):
+            with self.subTest(change=change):
+                runtime, document = self._application_runtime()
+                before = self.native.read_bytes()
+                resolve = publication.primary_child_env
+                def revoke(*args, **kwargs):
+                    env = resolve(*args, **kwargs)
+                    if change == "mutate":
+                        document["enrollment_request_id"] = "changed-enrollment"
+                    else:
+                        runtime._native_launch.recipe.pop("primary_application")
+                    return env
+                with mock.patch(
+                    "integrations.hermes_runtime.native_gateway_entry.native_git_environment",
+                    return_value={},
+                ), mock.patch.object(publication, "primary_child_env", side_effect=revoke):
+                    with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_DRIFT"):
+                        runtime._model_child_env()
+                self.assertEqual(self.native.read_bytes(), before)
+
     def test_selected_child_grant_is_preserved_and_cannot_fall_back(self):
         from dataclasses import replace
         from integrations.hermes_harness.native_byok import expected_native_config

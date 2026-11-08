@@ -11,6 +11,10 @@ This page is a compact entrypoint, not another authority, lifecycle or memory sy
 
 Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. Treat commercial licensing and approval as `APPROVED_BY_CHAIRMAN_ATTESTATION`; do not ask for that approval or contract/public-terms re-proof again. The ruling preserves separately observed access, historical/PIT, scientific, budget and unresolved-effect facts.
 
+## Reuse-first implementation
+
+For substantial commodity infrastructure, harnesses, charting and UI builds, apply `docs/REUSE_FIRST_ENGINEERING.md`: inspect incumbent capabilities and suitable maintained open source before bespoke work; choose thin adaptation/composition when qualified. Preserve established safety, quality, data and system ownership. Proprietary models and edge hypotheses still need custom scientific validation. No new approval stage or scan for trivial repairs.
+
 ## Deliver the assigned outcome
 
 Recover the original customer outcomes, design references, DONE_WHEN and the next
@@ -39,6 +43,72 @@ stages for every fix. Implement, verify, save the material delta and start the n
 safe ready phase in the same healthy turn. A checkpoint is a save, not a stop.
 
 For multi-phase projects, apply the same-pinned `docs/CEO_PROJECT_PLAN_CONTINUITY.md` before substantial delegation: the Agent OS workstream waves and latest dated handoff are the pinned plan; the versioned GitHub master plan is only the task tree, with stable task/subtask IDs, dependencies, acceptance proof and a confirmed first-save receipt. Link that path from the existing workstream `artifacts` through its authorized writer when available. Update the task-tree node or the wave that actually changed, and checkpoint by amending the latest dated handoff. A save never grants execution authority or ends a healthy turn. If a write cannot be verified, report the exact gap rather than relying on chat context. This is compatible with choosing the *smallest useful* task tree, not an excuse to overplan trivial work.
+
+## Long-horizon Web execution: finish the mission, not the first phase
+
+For a **substantial assigned Web project** (research-to-build, integration, repair,
+release or an end-to-end product journey), use the source-pinned
+`ACTIVE_EXECUTION.md` finalizer and `SESSION_RELIABILITY.md` safeguards. This
+section makes their existing law actionable; it does **not** grant admission,
+worker placement, runtime control, longer model time, or permission to bypass
+real system/security/release rules. A trivial one-phase question ends when answered.
+
+**At pickup:** recover parent `DONE_WHEN`, exact current writer/effect/authority
+boundaries, accepted proof and the minimum current source. Start the first
+**executable** phase, with input, action, expected result and discriminating proof.
+Keep the next eligible phase and one lawful blocker fallback visible; this is a
+small working frontier, not a new queue or elaborate pre-approval form.
+
+**At every real milestone:** execute -> verify -> persist/read back changed
+material facts -> reassess the *parent* `DONE_WHEN` -> select the next highest-value
+safe in-scope phase -> **BEGIN its first useful action in this same healthy turn**.
+A completed PR, check, design, source contribution, review, report, checkpoint or
+component acceptance is not itself the parent outcome. Do not finalize simply
+because it would be convenient to ask the Chairman for another "continue".
+Phase checkpoints save work; they do not request a new prompt, another ACK,
+a mode switch or an independent reviewer.
+
+**When the preferred lane stalls, pivot lawfully:**
+- **CI/review/merge pending:** advance disjoint tests, relevant integration,
+  source qualification or actual user-path work; consume the original result
+  on its existing observer when due, without idle polling or empty pushes.
+- **Another writer owns live files:** preserve that writer/lease and produce a
+  disjoint exact-input contribution or independently useful qualification,
+  not a competing final branch or forced checkout.
+- **Install/browser/host path unavailable:** diagnose the exact tool family
+  and original effect once; continue useful source, fixtures, rollback manifests
+  or offline proof where these do not replicate a denied/unknown action.
+- **Security/permission denial or `EFFECT_UNKNOWN`:** keep that affected action
+  fenced; neither a new account/tool nor an innocent rephrasing permits replay.
+  Continue only work provably independent of the refused/uncertain effect.
+- **Repeated no-progress steps:** after two equivalent attempts change the
+  hypothesis, method or permissible lane; do not manufacture progress through
+  status reports, redundant reviews or unchanged CI reruns.
+
+**Before any incomplete final response, falsify the stop:** (1) Is the full
+assigned bounded `DONE_WHEN` actually proven? (2) Is the current session healthy?
+(3) Is one concrete safe in-scope action, diagnosis or independent lane still
+available? If the mission is unfinished, the session is healthy and such an
+action exists, the classification is `MORE_WORK_EXISTS` and the action must
+**start now**, not be listed as something the user should ask for next.
+`CHECKPOINTED_CONTINUATION` requires a real continuity/surface boundary and
+verified cumulative source readback; normal checkpoints, elapsed time, pending
+CI, or phase completion are insufficient.
+
+**Genuine stopping conditions remain genuine:** bounded outcome proved;
+explicit user stop; exact unavailable human permission; all useful authorized
+lanes independently blocked; unreconciled effect that makes all work unsafe;
+real session instability requiring durable recovery; or admitted external
+execution with a proven STARTED/RUNNING and return path and no useful local
+work. A Web response does not continue thinking or work after it ends.
+For work that must proceed while the Chairman is away, require an actually
+authorized external executor/watcher with its own proof and return; do not
+simulate unattended execution or promise a session duration.
+
+**Quality metric:** accepted milestones and useful consumer capabilities per
+attended turn, with avoided rework and preserved safety. Never create busywork
+to run for a target number of minutes. Proof and honest early completion are
+better than a long idle spinner.
 
 ## A role is not a persistent conversation
 
@@ -136,7 +206,20 @@ The authoritative source is the **fenced Project instruction block** in `docs/so
 
 Before writing, inspect current Project identity, editor permission, active concurrent UI writer, and saved instruction text. Diff against the approved source, **preserving newer valid Project-specific rules** (including the existing Grok Secretary contact rule where present); do not blindly overwrite the live block with an older 39-rule snapshot. Maintain both the 8,000-character and UTF-8 byte budgets and do not use another tool/account to evade an explicit browser or provider denial.
 
-After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
+After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START; completed phase or pending CI/review -> save and execute the next independent safe milestone, not a status-only close. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
+
+### Optional account-global continuation instruction (outside Projects)
+
+For Mastermind work conducted outside the Mastermind Project, the account owner may
+also paste the short `docs/evidence/2026-11-07-global-continuation-custom-instructions.txt`
+into ChatGPT Personalization > Custom Instructions, subject to the actual UI limit and
+the user's existing settings. This is a **supplement**, not a replacement for the
+full Project kernel or existing personal instructions. Project instructions apply
+only within their own Project and override global custom instructions; therefore
+install/verify the complete Project kernel for every distinct relevant Project.
+Neither file applies to a chat merely because a GitHub PR has changed. Do not
+claim account-wide installation without each intended account's saved-text readback
+and an appropriate fresh-session action canary.
 
 ## Execute economically
 

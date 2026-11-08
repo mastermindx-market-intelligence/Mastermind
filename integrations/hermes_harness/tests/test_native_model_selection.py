@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -36,6 +37,9 @@ class NativeModelSelectionTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="hermes-select-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.stub = self.root / "hermes-stub"
+        shutil.copyfile(STUB, self.stub)
+        self.stub.chmod(0o700)
         self.secret = self.root / "secrets.env"
         self.secret.write_text(
             "HERMES_GATEWAY_TOKEN=synthetic-gateway-distinct-123456\n"
@@ -151,7 +155,7 @@ class NativeModelSelectionTests(unittest.TestCase):
         selected = replace(self.profile, native_provider_id=DEEPSEEK)
         native = selected.hermes_home / "profiles" / selected.role / "config.yaml"
         native.parent.mkdir(parents=True)
-        runtime = ServiceRuntime(selected, load_secrets(self.secret), STUB)
+        runtime = ServiceRuntime(selected, load_secrets(self.secret), self.stub)
         for renderer in (render_disarmed_native_config, render_hermes_config):
             with self.subTest(renderer=renderer.__name__):
                 native.write_text(renderer(selected))
@@ -169,7 +173,7 @@ class NativeModelSelectionTests(unittest.TestCase):
         result = _install(argparse.Namespace(
             role="mmsecretary", state=state, secrets_file=self.secret,
             systemd_user_dir=self.root / "config" / "systemd" / "user",
-            hermes_bin=STUB, upstream_source=upstream, fetch=False,
+            hermes_bin=self.stub, upstream_source=upstream, fetch=False,
             model_provider=DEEPSEEK,
         ))
         selection = result["native_model_selection"]
@@ -190,7 +194,7 @@ class NativeModelSelectionTests(unittest.TestCase):
         upgraded = _install(argparse.Namespace(
             role="mmsecretary", state=state, secrets_file=self.secret,
             systemd_user_dir=self.root / "config" / "systemd" / "user",
-            hermes_bin=STUB, upstream_source=upstream, fetch=False,
+            hermes_bin=self.stub, upstream_source=upstream, fetch=False,
             model_provider=None,
         ))
         self.assertEqual(upgraded["native_model_selection"], selection)
@@ -201,12 +205,12 @@ class NativeModelSelectionTests(unittest.TestCase):
             _install(argparse.Namespace(
                 role="mmmeta", state=state, secrets_file=self.secret,
                 systemd_user_dir=self.root / "config" / "systemd" / "user",
-                hermes_bin=STUB, upstream_source=upstream, fetch=False,
+                hermes_bin=self.stub, upstream_source=upstream, fetch=False,
                 model_provider="zai.glm-5.3",
             ))
         self.assertEqual(wrong_role.exception.code, "NATIVE_UPGRADE_ROLE_MISMATCH")
         self.assertEqual((state / "current" / "profile.yaml").read_bytes(), before_profile)
-        runtime = ServiceRuntime(loaded, load_secrets(self.secret), STUB)
+        runtime = ServiceRuntime(loaded, load_secrets(self.secret), self.stub)
         self.assertEqual(runtime._model_child_env()["BYTEPLUS_MODELARK_API_KEY"], FAKE)
         self.assertNotIn("ZAI_API_KEY", runtime._model_child_env())
         self.assertEqual(runtime.child_starts, 0)
@@ -219,3 +223,4 @@ class NativeModelSelectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -102,16 +102,44 @@ def open_subjects() -> set[str]:
     return {t["subject"] for t in _read() if t.get("status", "open") == "open"}
 
 
-def append(doc: dict) -> bool:
-    """Append a decision doc unless an open thesis on the same subject exists. Returns appended?"""
+def _require_thesis_id(row: dict) -> str:
+    """Require an exact canonical identity without coercion, trimming or fallback."""
+    thesis_id = row.get("id")
+    if not isinstance(thesis_id, str) or not thesis_id.strip():
+        raise ValueError("thesis id must be a nonblank string")
+    return thesis_id
+
+
+def append_receipt(doc: dict) -> dict:
+    """Append once or identify the single canonical open thesis for this subject.
+
+    Invalid or ambiguous identity is an error, not a deduplication receipt.
+    """
+    record = dict(doc)
+    thesis_id = _require_thesis_id(record)
+    subject = record["subject"]
     with _ledger_lock():
         rows = _read_unlocked()
-        subject = doc["subject"]
-        if any(t["subject"] == subject for t in rows if t.get("status", "open") == "open"):
-            return False
-        rows.append({**doc, "status": "open"})
+        matching = [
+            row for row in rows
+            if row.get("status", "open") == "open" and row["subject"] == subject
+        ]
+        if len(matching) > 1:
+            raise ValueError("multiple open theses for subject")
+        if matching:
+            return {
+                "appended": False,
+                "thesis_id": _require_thesis_id(matching[0]),
+                "reason": "open_subject_exists",
+            }
+        rows.append({**record, "status": "open"})
         _atomic_write(rows)
-        return True
+        return {"appended": True, "thesis_id": thesis_id, "reason": None}
+
+
+def append(doc: dict) -> bool:
+    """Compatibility API: append unless an open thesis exists; return appended?"""
+    return append_receipt(doc)["appended"]
 
 
 def close(subject: str, resolution: str = "closed", *, outcome: int | None = None,

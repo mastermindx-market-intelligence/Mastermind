@@ -1,0 +1,60 @@
+{
+  "schema": "mastermind.design.assignment.v1",
+  "operation_id": "hermes-design-director-20261108-c1-01",
+  "issued_at": "2026-11-08T05:58:17.392603+00:00",
+  "source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/sol/hermes-design-director-20261108-c1-01/docs/hermes/design-director/COMMISSION.md",
+  "shell_ref": "Preserve the Mastermind OS shell and navigation owned by https://github.com/mastermindx-market-intelligence/Mastermind/blob/5955a246c0e020cd6800d12f8da7bd6ff3a792dc/app/mastermind_os/src/App.tsx and the exact assigned Paper targets.",
+  "token_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/5955a246c0e020cd6800d12f8da7bd6ff3a792dc/app/mastermind_os/src/styles.css",
+  "constraints": [
+    "No decorative colored container edges",
+    "Do not invent live data, approval or execution authority",
+    "Preserve known active writers and exact target identity"
+  ],
+  "non_goals": [
+    "New router, identity store, scheduler or approval database",
+    "Trading signals or order execution"
+  ],
+  "effect_state": "none",
+  "assignment_id": "executive-os-journey",
+  "product": "Mastermind OS",
+  "persona": "Chairman supervising projects and delegated work",
+  "objective": "Create an elegant operational overview that explains what needs a decision, what has actually started, and what can safely continue.",
+  "user_question": "What needs me now, and what is moving?",
+  "useful_next_step": "Open the original decision or conversation with its evidence.",
+  "paper": {
+    "file_id": "01M3NRCX55B452A12819WNE1RH",
+    "page_id": "p-D-0",
+    "scope_node_ids": [
+      "LNV-0",
+      "N27-0"
+    ],
+    "allow_new_artboards": false
+  },
+  "preserve": [
+    "Original conversations and project links",
+    "Actual assignment and execution identities",
+    "Existing navigation and permission boundaries"
+  ],
+  "states": [
+    "Decision needed",
+    "Delivered but not started",
+    "Running with current evidence",
+    "Blocked or stale observation",
+    "Empty and recoverable failure"
+  ],
+  "viewports": [
+    "1600 desktop",
+    "390 mobile"
+  ],
+  "acceptance": [
+    "A delivery receipt cannot visually imply running work",
+    "Primary decision and its consequence are legible",
+    "Every status has an original evidence destination",
+    "Navigation and mobile prioritization remain coherent"
+  ],
+  "reference_ids": [
+    "os-today-desktop",
+    "os-today-mobile"
+  ],
+  "data_and_interactions": "Read the canonical Executive and Agent OS projections. An unavailable backend is an unavailable state; do not substitute attractive invented activity. Preserve existing account and role restrictions."
+}

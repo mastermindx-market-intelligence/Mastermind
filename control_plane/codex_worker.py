@@ -2614,6 +2614,20 @@ class CodexWorkerAdapter:
             ) from exc
 
     def _refuse_subscription_for_plain_start(self, spec: LaunchSpec) -> None:
+        """Reject subscription traffic and hold commercial plain START.
+
+        ProviderRealm *transport* review cannot grant autonomous START. An
+        owner-bound Executive claim, registered Worker and issuer-attested
+        Capacity are separately required; no such live authorization is
+        installed by this source-only release. Never use transport membership
+        as a substitute for those owner facts.
+        """
+        if self.provider_realm is not None:
+            from control_plane.codex_provider_realm import BYTEPLUS_MODELARK_COMMERCIAL
+            if self.provider_realm is BYTEPLUS_MODELARK_COMMERCIAL:
+                raise LaunchValidationError(
+                    "commercial ModelArk autonomous START is not owner-authorized"
+                )
         if (
             self.provider_realm is not None
             or self.subscription_realm_owner is not None

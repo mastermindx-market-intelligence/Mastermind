@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-import test_executive_mcp_app_composition as existing
+from tests import test_executive_mcp_app_composition as existing
 from integrations.executive_mcp import server
 from ops.executive_os import executive_mcp_entry as entry
 

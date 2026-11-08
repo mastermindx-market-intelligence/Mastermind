@@ -32,8 +32,17 @@ export type LaunchRequestPreviewRead =
       readonly targetKey: string | null;
     };
 
+/** View-only snapshot from the same validated composer form. It never changes
+ * the opaque intent or wire goal, and is ignored for a different preview. */
+export interface LaunchRequestPresentation {
+  readonly preview: LaunchRequestPreviewRead;
+  readonly wireGoal: string;
+  readonly goal: string;
+  readonly criteria: readonly string[];
+}
 export interface LaunchRequestPreviewProps {
   preview: LaunchRequestPreviewRead;
+  presentation?: LaunchRequestPresentation;
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   frontierModels?: readonly LaunchChoice[];
@@ -201,6 +210,7 @@ const WORDS = {
     title: "Launch request preview",
     summary: "Requested scope preview",
     goal: "Goal",
+    criteria: "Acceptance criteria",
     project: "Project",
     profile: "Profile",
     frontier: "Frontier model",
@@ -214,6 +224,7 @@ const WORDS = {
     title: "启动请求预览",
     summary: "请求范围预览",
     goal: "目标",
+    criteria: "验收标准",
     project: "项目",
     profile: "配置",
     frontier: "前沿模型",
@@ -252,6 +263,29 @@ function resolveSource(
     : match.label;
 }
 
+function currentPresentation(preview: LaunchRequestPreviewRead, value: LaunchRequestPresentation | undefined):
+  {goal:string;criteria:readonly string[]}|null {
+  try {
+    if(!value||preview.state!=="PREPARED"||!Object.isFrozen(value)||
+      ![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
+    const descriptors=Object.getOwnPropertyDescriptors(value),keys=Reflect.ownKeys(descriptors);
+    if(keys.length!==4||keys.some(key=>typeof key!=="string"||!["preview","wireGoal","goal","criteria"].includes(key))||
+      Object.values(descriptors).some(field=>!("value" in field)))return null;
+    const selected=descriptors.preview.value,wire=descriptors.wireGoal.value,goal=descriptors.goal.value,
+      criteria=descriptors.criteria.value;
+    if(selected!==preview||wire!==preview.goal||typeof goal!=="string"||!isValidGoal(goal)||
+      !Array.isArray(criteria)||Object.getPrototypeOf(criteria)!==Array.prototype||!Object.isFrozen(criteria)||criteria.length>6)return null;
+    const values:string[]=[];
+    if(Reflect.ownKeys(criteria).length!==criteria.length+1)return null;
+    for(let index=0;index<criteria.length;index++){
+      const field=Object.getOwnPropertyDescriptor(criteria,String(index));
+      if(!field||!("value" in field)||typeof field.value!=="string"||!field.value||field.value.length>500)return null;
+      values.push(field.value);
+    }
+    return {goal,criteria:values};
+  }catch{return null;}
+}
+
 /**
  * Current launch-request preview. Pure props rendering: the parent owns the
  * form and recomputes `preview` on every edit; this component keeps no state
@@ -259,6 +293,7 @@ function resolveSource(
  */
 export function LaunchRequestPreview({
   preview,
+  presentation,
   projects,
   profiles,
   frontierModels,
@@ -268,7 +303,7 @@ export function LaunchRequestPreview({
 
   if (preview.state === "UNAVAILABLE") {
     return (
-      <section className="card">
+      <section className="card launch-request-preview">
         <div className="section-title">
           <h2>{words.title}</h2>
         </div>
@@ -277,6 +312,7 @@ export function LaunchRequestPreview({
     );
   }
 
+  const content=currentPresentation(preview,presentation);
   const projectSource = resolveSource(projects, preview.projectRef);
   const profileSource = resolveSource(profiles, preview.profileRef);
   const frontierAlias = preview.frontierModelAlias;
@@ -284,15 +320,20 @@ export function LaunchRequestPreview({
     frontierAlias === null ? null : resolveSource(frontierModels, frontierAlias);
 
   return (
-    <section className="card">
+    <section className="card launch-request-preview">
       <div className="section-title">
         <h2>{words.title}</h2>
       </div>
       <details className="reason-details">
         <summary>{words.summary}</summary>
+        {content && <div className="launch-request-preview-content">
+          <h3>{words.goal}</h3><p className="launch-request-preview-goal">{content.goal}</p>
+          {content.criteria.length>0&&<><h3>{words.criteria}</h3><ul>
+            {content.criteria.map((criterion,index)=><li key={index}>{criterion}</li>)}
+          </ul></>}
+        </div>}
         <dl>
-          <dt>{words.goal}</dt>
-          <dd>{preview.goal}</dd>
+          {!content&&<><dt>{words.goal}</dt><dd>{preview.goal}</dd></>}
           <dt>{words.project}</dt>
           <dd>
             {projectSource !== null ? (

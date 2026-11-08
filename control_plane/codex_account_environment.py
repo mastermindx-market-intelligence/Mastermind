@@ -484,24 +484,35 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
         stage = "account/read"
         account = client.request("account/read", {"refreshToken": False}, timeout=timeout)
         result["account"] = account_readiness(account, {})
-        stage = "account/rateLimits/read"
-        limits = client.request("account/rateLimits/read", {}, timeout=timeout)
-        result["account"] = account_readiness(account, limits)
-        # Model metadata is advisory; quota-state reconciliation remains
-        # independently useful even if model/list is missing or unavailable.
-        # The selector must refuse UNKNOWN, never infer model eligibility.
-        if include_models:
-            result["model_visibility"] = native_model_visibility(None)
-            try:
-                stage = "model/list"
-                models = client.request("model/list",
-                                        {"limit": 100, "includeHidden": False},
-                                        timeout=timeout)
-                result["model_visibility"] = native_model_visibility(models)
-            except Exception:
-                # Provider errors can contain credentials: keep only UNKNOWN.
+        auth_state = result["account"]["auth_state"]
+        if auth_state != "MANAGED_CHATGPT_OBSERVED":
+            # Keep explicit native sign-in evidence. A quota request cannot
+            # qualify a missing/non-managed account and can obscure that state.
+            result["state"] = (
+                "LOGIN_REQUIRED"
+                if auth_state in {"LOGIN_REQUIRED", "NATIVE_CHATGPT_AUTH_REQUIRED"}
+                else "NATIVE_READ_UNAVAILABLE"
+            )
+            result["failed_method"] = stage
+        else:
+            stage = "account/rateLimits/read"
+            limits = client.request("account/rateLimits/read", {}, timeout=timeout)
+            result["account"] = account_readiness(account, limits)
+            # Model metadata is advisory; quota-state reconciliation remains
+            # independently useful even if model/list is missing or unavailable.
+            # The selector must refuse UNKNOWN, never infer model eligibility.
+            if include_models:
                 result["model_visibility"] = native_model_visibility(None)
-        result["state"] = "NATIVE_READS_COMPLETED"
+                try:
+                    stage = "model/list"
+                    models = client.request("model/list",
+                                            {"limit": 100, "includeHidden": False},
+                                            timeout=timeout)
+                    result["model_visibility"] = native_model_visibility(models)
+                except Exception:
+                    # Provider errors can contain credentials: keep only UNKNOWN.
+                    result["model_visibility"] = native_model_visibility(None)
+            result["state"] = "NATIVE_READS_COMPLETED"
     except Exception as error:
         # Provider errors can echo tokens/headers. Never return arbitrary errors.
         result["state"] = _failure_kind(error)

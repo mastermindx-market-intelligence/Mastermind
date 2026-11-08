@@ -14,6 +14,7 @@ class _ProjectDataReadBinding:
     context_callback:MethodType
     qualifier:object
     plan_callback:MethodType
+    agentos_context_callback:MethodType
 
 
 def _issue_project_data_read(owner,*,qualifier):
@@ -29,7 +30,12 @@ def _issue_project_data_read(owner,*,qualifier):
     if (type(plan_callback) is not MethodType or plan_callback.__self__ is not owner
             or type(owner).__dict__.get('read_plan') is not plan_callback.__func__):
         raise ValueError('CANONICAL_DATA_UNAVAILABLE')
-    return _ProjectDataReadBinding(_KEY,owner,owner.events.store,callback,context_callback(),context_callback,qualifier,plan_callback)
+    agentos_context_callback=owner.read_context
+    if (type(agentos_context_callback) is not MethodType or agentos_context_callback.__self__ is not owner
+            or type(owner).__dict__.get('read_context') is not agentos_context_callback.__func__):
+        raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+    return _ProjectDataReadBinding(_KEY,owner,owner.events.store,callback,context_callback(),context_callback,
+                                  qualifier,plan_callback,agentos_context_callback)
 
 
 def read_installed_project_data(binding,principal,*,operation,selection):
@@ -42,9 +48,15 @@ def read_installed_project_data(binding,principal,*,operation,selection):
             and binding.owner.read_knowledge==binding.callback
             and type(binding.owner).__dict__.get('read_knowledge') is binding.callback.__func__
             and binding.owner.read_plan==binding.plan_callback
-            and type(binding.owner).__dict__.get('read_plan') is binding.plan_callback.__func__)
+            and type(binding.owner).__dict__.get('read_plan') is binding.plan_callback.__func__
+            and binding.owner.read_context==binding.agentos_context_callback
+            and type(binding.owner).__dict__.get('read_context') is binding.agentos_context_callback.__func__)
     if not current():raise ValueError('CANONICAL_DATA_UNAVAILABLE')
-    callback=binding.plan_callback if operation=='project_plan' else binding.callback
+    if operation not in {'project_plan','project_knowledge_catalogue','project_knowledge_memory',
+                          'project_knowledge_source','project_discovery_source','agentos_current_context'}:
+        raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+    callback=(binding.plan_callback if operation=='project_plan' else binding.agentos_context_callback
+              if operation=='agentos_current_context' else binding.callback)
     result=callback(principal,operation=operation,selection=selection)
     if not current():raise ValueError('CANONICAL_DATA_UNAVAILABLE')
     if result is None:return None

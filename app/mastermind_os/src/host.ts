@@ -1,3 +1,4 @@
+import { decodeCompanyPriorities, type CompanyPrioritiesOwner } from "./meta-ceo/company-priorities";
 import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
@@ -16,6 +17,7 @@ import {decodeSourceOperationStatus} from './planning/plan-adoption-status';
 import {instructionHostMethods,instructionPublicRequest,type InstructionRawMethods,type InstructionHostMethods} from "./instructions/instruction-host";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
+import { decodeModelConfiguration, type ModelConfigurationRead } from "./resources/model-configuration";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
 import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
@@ -121,6 +123,7 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
   readProjectKnowledgeSource?(request: KnowledgeSourceSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
+  readModelConfiguration?(request: { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -213,6 +216,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readProjectKnowledgeSource?: (request: KnowledgeSourceSelection & { signal: AbortSignal }) => Promise<unknown>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
+  readModelConfiguration?: (request: { signal: AbortSignal }) => Promise<ModelConfigurationRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -227,6 +231,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
+  readonly companyPriorities?: CompanyPrioritiesOwner;
   readResult?: MissionResultRead;
   /** Mounted only when the raw method and the client invalidation generation both exist. */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
@@ -446,7 +451,28 @@ export function bindMissionHost(
       sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
+  const companyTransport=client.executive, companyRead=companyTransport?.companyPriorities;
+  const companyGeneration=companyTransport?.authGeneration, companyAvailable=companyTransport?.available;
+  const companySubscribe=companyTransport?.subscribe;
+  const companyCurrent=()=>!!companyTransport && client.executive===companyTransport &&
+    companyTransport.companyPriorities===companyRead && companyTransport.authGeneration===companyGeneration &&
+    companyTransport.available===companyAvailable && companyTransport.subscribe===companySubscribe;
   return {
+    ...(companyTransport && companyRead && companyGeneration && companyAvailable && companySubscribe ? {companyPriorities: {
+      generation: () => companyCurrent() ? companyGeneration.call(companyTransport) : -1,
+      available: () => companyCurrent() && companyAvailable.call(companyTransport),
+      subscribe: (listener:()=>void) => companySubscribe.call(companyTransport,listener),
+      read: async (signal:AbortSignal) => {
+        const generation=companyGeneration.call(companyTransport), started=epoch;
+        const current=()=>!signal.aborted && epoch===started && companyCurrent() && companyGeneration.call(companyTransport)===generation && companyAvailable.call(companyTransport);
+        if(!current())throw new Error("COMPANY_READ_UNAVAILABLE");
+        const raw=await companyRead.call(companyTransport,signal);
+        if(!current())throw new Error("READ_CANCELLED");
+        const value=decodeCompanyPriorities(raw);
+        if(!current())throw new Error("READ_CANCELLED");
+        return value;
+      },
+    }} : {}),
     ...(client.nativeDraftRecovery ? { nativeDraftRecovery: client.nativeDraftRecovery } : {}),
     ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
@@ -668,6 +694,22 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readModelConfiguration && client.invalidationGeneration ? {
+      async readModelConfiguration({ signal }: { signal: AbortSignal }) {
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readModelConfiguration!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source)
+            || source !== client.invalidationGeneration?.() || reader !== client.readModelConfiguration)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("MODEL_CONFIGURATION_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { signal });
+        verify();
+        return decodeModelConfiguration(raw);
       },
     } : {}),
     ...(client.readResourceCapacity && client.invalidationGeneration ? {
@@ -1141,6 +1183,7 @@ export async function createNativeClient(
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
+      | "read_model_configuration"
       | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
@@ -1374,6 +1417,7 @@ export async function createNativeClient(
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
+    readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
     readHostObservation: request => {
       const selection=hostObservationPublicSelection(request);
       return selection ? read("read_host_observation",request.signal,{selection})

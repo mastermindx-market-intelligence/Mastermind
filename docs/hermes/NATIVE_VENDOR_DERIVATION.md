@@ -1,10 +1,10 @@
 # Native Hermes vendor derivation
 
-The existing Executive release recipe can select one named repair of the
-immutable Hermes vendor: `computer_env_guard`. This connects the qualified
-two-file repair to dependency preparation, the role installer, the existing
-install receipt and native launch validation. It grants no computer-use tools
-and starts no driver or service.
+The existing Executive release recipe can select one of two fixed repairs of
+the immutable Hermes vendor: `computer_env_guard` or `diagnostic_privacy`. Each
+connects its qualified two-file repair to dependency preparation, the role
+installer, the existing install receipt and native launch validation. These
+source transformations grant no tools and start no driver or service.
 
 ## Exact selection
 
@@ -26,10 +26,12 @@ This is an illustrative recipe fragment, not an enrolled host path. The outer
 `vendor_root` names a separate destination and must remain the first
 `import_roots` entry. Source, destination, other import roots, inventory and
 first-party release must satisfy their existing path and custody constraints.
-All existing native recipe versions and their session/Executive consumer
-semantics remain intact. A missing derivation keeps the existing pristine
-installation behavior; null, unknown variants and a general dirty-checkout
-override are rejected.
+Existing v1 and selected-child consumer behavior stays intact. An optional
+context-v2 consumer requires `diagnostic_privacy`; its absence is refused even
+during structural bootstrap, before held semantic qualification. Other recipes
+retain the existing pristine path when no derivation is selected. Null, unknown
+variants, cross-variant patch identities, combined repairs and a general
+dirty-checkout override are rejected.
 
 The patch, manifest and MIT notice are read from the fixed held first-party
 `integrations/hermes_qualification/computer_env_guard` package. The actual patch
@@ -40,6 +42,32 @@ are fixed by the source contract:
 | --- | --- |
 | `tools/computer_use/permissions.py` | `c1b1f7b1de10fc14ff2892ec8b0dd7ca2c1976ef76a0d6884e93577caeea8d0d` |
 | `tools/computer_use/cua_backend.py` | `b106ce6b1086a932648c141a517821fd503a54b75d52e7cf5b127c94df1de78f` |
+
+### Diagnostic privacy selection
+
+The context-v2 consumer selects kind `diagnostic_privacy`, the same upstream
+base, and patch SHA-256
+`ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce`.
+Its fixed held package is
+`integrations/hermes_qualification/diagnostic_privacy`. The six-field receipt
+shape and full inventory/custody owner are the same as for the original repair.
+
+| Relative path | SHA-256 after repair |
+| --- | --- |
+| `agent/agent_init.py` | `eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08` |
+| `agent/memory_caller_scope.py` | `e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6` |
+
+The credential banner reports only a fixed presence message; it does not print
+key fragments or source labels or invoke a credential callback. Caller-scope
+and shared-instance refusals retain their decisions and error codes while
+omitting raw profile-home arguments from their diagnostics. This is a bounded
+repair of these diagnostic sites, not a claim of general log redaction.
+
+The original computer-only patch bytes and postimages remain unchanged. A
+privacy-only artifact must contain the original upstream computer files; a
+computer-only artifact must contain the original upstream memory files. The
+complete Git membership verifier refuses an undeclared combination. Computer
+activation remains separately held and is not required by the context consumer.
 
 ## Preparation and source identity
 

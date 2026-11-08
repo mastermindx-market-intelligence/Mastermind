@@ -132,7 +132,8 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     other member of the reviewed disarmed config is unchanged. Add the exact
     MCP/OAuth entry of the Executive connection, whose tool filter is empty so
     no raw Executive tool becomes model-facing, and the plugin grant that
-    names exactly that one server.
+    names exactly that one server. V2 also selects the native Agent OS memory
+    provider and disables the two independent file-memory stores.
 
     The bearer token and any client secret stay with the incumbent OAuth
     owner and its token storage. This config never carries one.
@@ -160,6 +161,18 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     plugins = render_consumer_plugin_config(publication)
     native["mcp_servers"][publication.mcp.server] = server
     native["plugins"] = plugins
+    from integrations.hermes_harness.native_executive_consumer import ExecutiveContextConsumerPublication
+    if type(publication) is ExecutiveContextConsumerPublication:
+        # Keep native MemoryManager/loader ownership. The held loader resolves
+        # this fixed provider to the original non-bundled consumer package.
+        memory = native.setdefault("memory", {})
+        if type(memory) is not dict:
+            raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
+        memory["provider"] = publication.context.provider
+        # Agent OS is the sole durable memory owner for this composition.
+        # Native defaults otherwise also load independent MEMORY.md / USER.md.
+        memory["memory_enabled"] = False
+        memory["user_profile_enabled"] = False
     import yaml  # no PyYAML import for the unrelated Secretary shadow scanner
 
     rendered = (
@@ -192,18 +205,36 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     return rendered
 
 
-def expected_native_config(profile: RuntimeProfile, consumer=None) -> str:
+def expected_native_config(profile: RuntimeProfile, consumer=None, *, evaluation_inputs=None) -> str:
     """The exact native config bytes this profile must carry.
 
     Without a qualified consumer this is the reviewed disarmed BYOK/read
     catalog. With one, the existing selected-child connection and its exact
     plugin grant are composed onto that same catalog. No credential is added.
     """
-    if consumer is None:
+    if consumer is None and evaluation_inputs is None:
         from integrations.hermes_harness.executive_paper_mcp import render_disarmed_native_exec_paper
         return render_disarmed_native_exec_paper(profile)
     from integrations.hermes_harness.native_executive_consumer import (
         publication_from_document,
     )
-    return render_qualified_native_byok(
-        profile, publication_from_document(consumer))
+    rendered = render_qualified_native_byok(profile, publication_from_document(consumer))
+    if evaluation_inputs is None:
+        return rendered
+    from pathlib import Path
+    if (type(evaluation_inputs) is not dict or set(evaluation_inputs) != {"schema", "artifact_root"}
+            or evaluation_inputs["schema"] != "mastermind.hermes_native_eval_inputs/v1"
+            or profile.role != "mmmeta"
+            or native_provider(profile.role, profile.native_provider_id).provider_id != "zai.glm-5.3"
+            or type(evaluation_inputs["artifact_root"]) is not str
+            or not Path(evaluation_inputs["artifact_root"]).is_absolute()
+            or consumer.get("schema") not in {"mastermind.hermes_native_executive_consumer/v3",
+                                               "mastermind.hermes_native_executive_consumer/v4"}):
+        raise RuntimeRefusal("NATIVE_EVAL_CONFIG_UNQUALIFIED")
+    native = _load_unique_yaml(rendered.encode("utf-8"))
+    # Native agent initialization owns this setting. The original unselected
+    # renderers remain byte-identical; trial effort stays per admission.
+    native["model"]["streaming"] = False
+    import yaml
+    return ("# Explicit native EVAL inputs select nonstreaming model requests.\n"
+            + yaml.safe_dump(native, sort_keys=False, allow_unicode=False))

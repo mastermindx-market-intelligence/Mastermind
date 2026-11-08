@@ -5,6 +5,8 @@ on:
     paths:
       - 'integrations/hermes_runtime/**'
       - '.github/workflows/hermes-runtime.yml'
+      - 'requirements/executive-mcp-macos-arm64-py312.in'
+      - 'requirements/hermes-transport-observation-test.in'
   workflow_dispatch:
 
 permissions:
@@ -14,7 +16,7 @@ jobs:
   runtime-acceptance:
     name: Hermes runtime acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -26,8 +28,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install the audited YAML parser and pinned test runner
-        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2' 'pytest==9.1.1'
+      - name: Install the reviewed edge package pins and test runner
+        # Reuse package inputs for the real SDK/HTTP fixtures. This Linux test
+        # matrix does not attest the production macOS runtime or its hash lock.
+        # A private clean venv also gives pinned source the same non-writable
+        # custody required by the production observer; ambient toolcache packages
+        # may be group-writable and must not weaken that source check.
+        run: |
+          umask 0022
+          runtime_test_env="$RUNNER_TEMP/hermes-runtime-test"
+          python -m venv "$runtime_test_env"
+          "$runtime_test_env/bin/python" -m pip install --disable-pip-version-check -r requirements/executive-mcp-macos-arm64-py312.in -r requirements/hermes-transport-observation-test.in 'pytest==9.1.1'
+          echo "$runtime_test_env/bin" >> "$GITHUB_PATH"
       - name: Compile the runtime package
         run: python -m compileall -q integrations/hermes_runtime
       - name: Run runtime acceptance tests

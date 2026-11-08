@@ -3,6 +3,7 @@ the data contracts the page JS fetches at runtime.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -845,8 +846,8 @@ def _book_quote_provenance(
     return out
 
 
-def _parse_note(path: Path) -> dict[str, Any] | None:
-    """Parse a research note markdown file into {title, tickers, date, body_md}."""
+def _parse_note(path: Path, *, strict: bool = False) -> dict[str, Any] | None:
+    """Parse a note; strict readers propagate evidence read/decode/stat failures."""
     try:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
@@ -885,6 +886,8 @@ def _parse_note(path: Path) -> dict[str, Any] | None:
             "_sort_key": sort_key,
         }
     except Exception:
+        if strict:
+            raise
         return None
 
 
@@ -1044,7 +1047,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         from brain import research_paper
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"research store unavailable: {exc}"}, status_code=503)
+        _log.warning("research paper store import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_store_unavailable",
+            "note": "research store unavailable",
+        }, status_code=503)
 
     paper = None
     try:
@@ -1054,15 +1062,24 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
         if paper is None and ticker:
             paper = research_paper.latest_for(ticker)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"could not load paper: {exc}"}, status_code=500)
+        _log.warning("research paper read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_paper_unavailable",
+            "note": "research paper unavailable",
+        }, status_code=500)
     if paper is None:
-        return JSONResponse({"error": "research paper not found"}, status_code=404)
+        return JSONResponse({"error": "research paper not found", "note": "research paper not found"}, status_code=404)
 
     try:
         from app import research_pdf
     except Exception as exc:  # noqa: BLE001 — reportlab missing, etc.
-        return JSONResponse({"error": f"PDF engine unavailable (is reportlab installed?): {exc}"},
-                            status_code=503)
+        _log.warning("research PDF engine import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_engine_unavailable",
+            "note": "PDF engine unavailable",
+        }, status_code=503)
 
     meta = {}
     try:
@@ -1072,7 +1089,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         pdf = research_pdf.build(paper, meta)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"PDF generation failed: {exc}"}, status_code=500)
+        _log.warning("research PDF generation failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_generation_failed",
+            "note": "PDF generation failed",
+        }, status_code=500)
 
     tkr = (paper.get("ticker") or "research").upper()
     datestr = str(paper.get("asof") or paper.get("generated_at") or "")[:10]
@@ -1366,11 +1388,16 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
     if view is not None:
         return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
                             status_code=400, headers={"Cache-Control": "no-store"})
-    path = _portfolio_dir(portfolio) / "latest.json"
-    if not path.exists():
-        return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
     try:
-        payload = json.loads(path.read_text())
+        path = _portfolio_dir(portfolio) / "latest.json"
+        try:
+            payload = json.loads(path.read_text())
+        except FileNotFoundError:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
+            raise
         from portfolio import registry
         # Runtime registry is authoritative: persisted book contracts may predate a benchmark
         # migration and must never make CSI 300 / Hang Seng appear as FXI or SPY in the UI.
@@ -1389,13 +1416,15 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
             }
 
         # ------------------------------------------------------------------
-        # Live marks: attach current price + unrealized P&L to each position
-        # (Polygon delayed quotes via the account's avg-cost lots). Degrades to
-        # nulls offline so the client always renders an honest dash.
+        # Stage the complete live account overlay before replacing the persisted snapshot.
+        # A partial preview or row mutation must not survive a later reconciliation failure.
         # ------------------------------------------------------------------
         if not archived:
+            payload.pop("account_preview", None)
             try:
                 from portfolio import paper_account
+
+                staged = copy.deepcopy(payload)
                 prices = _book_marks(portfolio)
                 # positions_pnl({}) still returns every actual account lot with honest null marks.
                 # This matters when the daily strategy snapshot has zero rows but the paper account
@@ -1406,7 +1435,7 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
                 account = paper_account._load_account(portfolio)
                 cash = float(account.get("cash") or 0.0)
                 starting_nav = float(account.get("starting_nav") or 1_000_000.0)
-                payload["account_preview"] = {
+                staged["account_preview"] = {
                     "inception_date": account.get("inception_date"),
                     "starting_nav": starting_nav,
                     "current_nav": round(float(account_nav), 2),
@@ -1420,7 +1449,7 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
                     "benchmark_name_zh": registry.benchmark_name_zh(portfolio),
                 }
                 published_tickers: set[str] = set()
-                for pos in payload.get("positions", []):
+                for pos in staged.get("positions", []):
                     ticker = pos.get("ticker")
                     if ticker:
                         published_tickers.add(ticker)
@@ -1477,11 +1506,18 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
                                 quote.get("is_live") or quote.get("source") == "yahoo_intraday"
                             ),
                         })
-                    payload.setdefault("positions", []).append(account_row)
-            except Exception:
-                # Keep the swallow: a failed account read must not sink the payload.
-                # But say WHY when the file exists and is unreadable, so the browser
-                # can render the canonical cell instead of an empty positions list.
+                    staged.setdefault("positions", []).append(account_row)
+                staged["account_reconciliation_status"] = "available"
+                payload = staged
+            except Exception as exc:  # noqa: BLE001 - retain the complete persisted snapshot
+                _log.warning("portfolio account reconciliation failed for %s: %s", portfolio, type(exc).__name__)
+                payload["account_reconciliation_status"] = "unavailable"
+                payload["snapshot_status"] = "partial"
+                failed_sources = list(payload.get("failed_sources") or [])
+                if "account_reconciliation" not in failed_sources:
+                    failed_sources.append("account_reconciliation")
+                payload["failed_sources"] = failed_sources
+                # Preserve the canonical read-only invalid-account diagnostic.
                 invalid_state = _account_state_probe(portfolio)
                 if invalid_state is not None:
                     payload["account_state"] = invalid_state
@@ -1573,7 +1609,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
 
         return JSONResponse(payload)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("portfolio snapshot read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "error": "portfolio_unavailable",
+            "snapshot_status": "unavailable",
+            "portfolio_id": portfolio,
+        }, status_code=500)
 
 
 # The tab-switcher status payload is just NAV/return chips — re-pricing every book on every poll or
@@ -1584,55 +1625,134 @@ _portfolios_cache: dict[str, Any] = {}  # {"payload": dict, "ts": float}
 
 
 def _portfolio_status(meta: dict) -> dict:
-    """Assemble one book's tab-switcher row (metadata + quick status). I/O-bound (live marks +
-    benchmark history), so callers run these concurrently across books."""
+    """Assemble one book's tab-switcher row without converting failed reads into zero state."""
     from portfolio import registry
-    pid = meta["id"]
-    status: dict[str, Any] = {"nav": None, "total_return_pct": None,
-                              "vs_benchmark_pct": None, "vs_spy_pct": None,
-                              "day_change_pct": None, "holdings": 0, "cash_pct": None, "as_of": None}
-    if registry.is_archived(pid):
-        perf = _archived_performance(pid)
-        nav = perf.get("current_nav") or 0
-        status.update({
-            "nav": perf.get("current_nav"),
-            "total_return_pct": perf.get("total_return_pct"),
-            "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
-            "vs_spy_pct": perf.get("vs_spy_pct"),
-            "day_change_pct": perf.get("day_change_pct"),
-            "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
-            "as_of": perf.get("frozen_as_of"),
-        })
-        snapshot = _read_json_object(registry.data_dir(pid) / "latest.json")
-        status["holdings"] = len(snapshot.get("positions") or [])
-        return {**{k: meta.get(k) for k in (
-                    "id", "name", "tagline", "kind", "manager", "benchmark",
-                    "benchmark_name", "benchmark_name_zh", "currency")},
-                "active": False, "lifecycle": "archived",
-                "superseded_by": meta.get("superseded_by"),
-                "archived_reason": meta.get("archived_reason"),
-                "status": status}
 
-    # the self-directed book has its own engine (not paper_account) — read its NAV/return directly
+    pid = meta["id"]
+    status: dict[str, Any] = {
+        "nav": None,
+        "total_return_pct": None,
+        "vs_benchmark_pct": None,
+        "vs_spy_pct": None,
+        "day_change_pct": None,
+        "holdings": None,
+        "cash_pct": None,
+        "as_of": None,
+    }
+    failed_sources: list[str] = []
+    status_reasons: list[str] = []
+
+    def _finish(*, primary_ok: bool = True, secondary_ok: bool = True) -> dict[str, Any]:
+        if not primary_ok:
+            status["read_status"] = "unavailable"
+        elif failed_sources or status_reasons or not secondary_ok:
+            status["read_status"] = "partial"
+        else:
+            status["read_status"] = "available"
+        if failed_sources:
+            status["failed_sources"] = list(failed_sources)
+        if status_reasons:
+            status["status_reasons"] = list(status_reasons)
+        return status
+
+    common_keys = (
+        "id", "name", "tagline", "kind", "manager", "benchmark",
+        "benchmark_name", "benchmark_name_zh", "currency",
+    )
+
+    if registry.is_archived(pid):
+        perf_ok = False
+        snapshot_ok = False
+        try:
+            perf = _archived_performance(pid)
+            nav = perf.get("current_nav") or 0
+            status.update({
+                "nav": perf.get("current_nav"),
+                "total_return_pct": perf.get("total_return_pct"),
+                "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
+                "vs_spy_pct": perf.get("vs_spy_pct"),
+                "day_change_pct": perf.get("day_change_pct"),
+                "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
+                "as_of": perf.get("frozen_as_of"),
+            })
+            perf_ok = True
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher archived performance failed for %s: %s", pid, type(exc).__name__)
+            failed_sources.append("performance")
+
+        try:
+            latest = registry.data_dir(pid) / "latest.json"
+            snapshot_missing = False
+            try:
+                snapshot = json.loads(latest.read_text())
+            except FileNotFoundError:
+                try:
+                    latest.lstat()
+                except FileNotFoundError:
+                    status_reasons.append("snapshot_missing")
+                    snapshot_missing = True
+                else:
+                    raise
+            if not snapshot_missing:
+                if not isinstance(snapshot, dict) or not isinstance(snapshot.get("positions"), list) or not all(isinstance(row, dict) for row in snapshot["positions"]):
+                    raise ValueError("portfolio snapshot positions must be a list")
+                status["holdings"] = len(snapshot["positions"])
+                status["as_of"] = snapshot.get("as_of") or status["as_of"]
+                snapshot_ok = True
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher archived snapshot failed for %s: %s", pid, type(exc).__name__)
+            failed_sources.append("snapshot")
+
+        _finish(primary_ok=(perf_ok or snapshot_ok), secondary_ok=(perf_ok and snapshot_ok))
+        return {
+            **{k: meta.get(k) for k in common_keys},
+            "active": False,
+            "lifecycle": "archived",
+            "superseded_by": meta.get("superseded_by"),
+            "archived_reason": meta.get("archived_reason"),
+            "status": status,
+        }
+
     if pid == "self_directed":
+        book_ok = False
         try:
             from portfolio import self_directed
+
             held = list((self_directed._load_account().get("positions") or {}).keys())
             bk = self_directed.book(
                 prices=_live_prices(held, refresh=False),
                 read_only=True,
                 resolve_missing_prices=False,
-            )  # tab badges are snapshot-only; the active-book live endpoint refreshes quotes
-            alloc = bk.get("allocation") or {}
+            )
+            if not isinstance(bk, dict):
+                raise ValueError("book must be an object")
+            alloc = bk.get("allocation")
+            if not isinstance(alloc, dict):
+                raise ValueError("book allocation must be an object")
+            cash_pct = alloc.get("cash_pct")
+            n_positions = alloc.get("n_positions")
+            if n_positions is None and isinstance(bk.get("positions"), list):
+                n_positions = len(bk.get("positions") or [])
+            if n_positions is not None and (isinstance(n_positions, bool) or not isinstance(n_positions, int) or n_positions < 0):
+                raise ValueError("book holdings must be a nonnegative count")
+            valuation_complete = bk.get("valuation_complete")
+            unpriced = list(bk.get("unpriced_tickers") or [])
             status.update({
                 "nav": bk.get("nav"),
                 "total_return_pct": alloc.get("total_return_pct"),
-                "cash_pct": round((alloc.get("cash_pct") or 0) * 100, 1),
-                "holdings": alloc.get("n_positions") or 0,
+                "cash_pct": round(cash_pct * 100, 1) if cash_pct is not None else None,
+                "holdings": n_positions,
                 "as_of": bk.get("inception_date"),
+                "valuation_complete": valuation_complete,
+                "unpriced_tickers": unpriced,
             })
-        except Exception:
-            pass
+            if valuation_complete is False:
+                status_reasons.append("valuation_incomplete")
+            book_ok = True
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher self-directed book failed: %s", type(exc).__name__)
+            failed_sources.append("book")
+
         # vs_spy and vs_defensive: the ledger's stored bogey returns are each renormalized on that
         # BOGEY's own inception, so subtracting them from the book's since-inception return compared
         # different windows (#1433). Recompute every leg over ONE shared window at READ time via
@@ -1663,17 +1783,25 @@ def _portfolio_status(meta: dict) -> dict:
             else:
                 for k in ("vs_spy_pct", "vs_defensive_pct", "vs_benchmark_pct"):
                     status.pop(k, None)
-        except Exception:  # noqa: BLE001
-            pass
-        return {**{k: meta.get(k) for k in (
-                    "id", "name", "tagline", "kind", "manager", "benchmark",
-                    "benchmark_name", "benchmark_name_zh", "currency")},
-                "status": status}
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("portfolio switcher self-directed benchmark failed: %s", type(exc).__name__)
+            failed_sources.append("benchmark")
+
+        _finish(primary_ok=book_ok)
+        return {**{k: meta.get(k) for k in common_keys}, "status": status}
+
     from portfolio import paper_account
+    perf_ok = False
+    snapshot_ok = False
     try:
         # The switcher is navigation metadata, not a reason to live-fetch every book at once.
         # Use cache/snapshot marks here; /api/live_marks updates the active tab during its session.
         perf = paper_account.performance(portfolio_id=pid, prices=_book_marks(pid, refresh=False))
+        if not isinstance(perf, dict):
+            raise ValueError("performance must be an object")
+        availability = perf.get("availability")
+        if availability is not None and not isinstance(availability, dict):
+            raise ValueError("performance availability must be an object")
         nav = perf.get("current_nav") or 0
         status.update({
             "nav": perf.get("current_nav"),
@@ -1687,51 +1815,96 @@ def _portfolio_status(meta: dict) -> dict:
             "performance_status": (perf.get("availability") or {}).get("status"),
             "as_of": (perf.get("availability") or {}).get("as_of"),
         })
-    except Exception:
-        pass
+        perf_status = (availability or {}).get("status")
+        perf_ok = perf_status in ("available", "provisional")
+        if perf_status == "provisional":
+            status_reasons.append("performance_provisional")
+        elif not perf_ok:
+            status_reasons.append("performance_unavailable")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("portfolio switcher performance failed for %s: %s", pid, type(exc).__name__)
+        failed_sources.append("performance")
+
     try:
         latest = registry.data_dir(pid) / "latest.json"
-        if latest.exists():
-            d = json.loads(latest.read_text())
-            status["holdings"] = len(d.get("positions") or [])
-            status["as_of"] = d.get("as_of") or status["as_of"]
-    except Exception:
-        pass
-    return {**{k: meta.get(k) for k in (
-                "id", "name", "tagline", "kind", "manager", "benchmark",
-                "benchmark_name", "benchmark_name_zh", "currency")},
-            "active": bool(meta.get("active", True)),
-            "lifecycle": meta.get("status") or ("active" if meta.get("active", True) else "archived"),
-            "superseded_by": meta.get("superseded_by"),
-            "archived_reason": meta.get("archived_reason"),
-            "status": status}
+        snapshot_missing = False
+        try:
+            snapshot = json.loads(latest.read_text())
+        except FileNotFoundError:
+            try:
+                latest.lstat()
+            except FileNotFoundError:
+                status_reasons.append("snapshot_missing")
+                snapshot_missing = True
+            else:
+                raise
+        if not snapshot_missing:
+            if not isinstance(snapshot, dict) or not isinstance(snapshot.get("positions"), list) or not all(isinstance(row, dict) for row in snapshot["positions"]):
+                raise ValueError("portfolio snapshot positions must be a list")
+            status["holdings"] = len(snapshot["positions"])
+            status["as_of"] = snapshot.get("as_of") or status["as_of"]
+            snapshot_ok = True
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("portfolio switcher snapshot failed for %s: %s", pid, type(exc).__name__)
+        failed_sources.append("snapshot")
+
+    _finish(primary_ok=(perf_ok or snapshot_ok), secondary_ok=(perf_ok and snapshot_ok))
+    return {
+        **{k: meta.get(k) for k in common_keys},
+        "active": bool(meta.get("active", True)),
+        "lifecycle": meta.get("status") or ("active" if meta.get("active", True) else "archived"),
+        "superseded_by": meta.get("superseded_by"),
+        "archived_reason": meta.get("archived_reason"),
+        "status": status,
+    }
 
 
 @router.get("/api/portfolios")
 def api_portfolios() -> JSONResponse:
-    """The set of portfolios the dashboard switches between, each with a quick status
-    (NAV, return, versus-book-benchmark, holdings) for the tab labels. US Brain is the active US
-    Mastermind Portfolio; Flagship, Heavyweight, and ETF remain read-only archived history.
+    """Dashboard portfolio registry + quick status, with degraded rows kept explicit."""
+    try:
+        from portfolio import registry
 
-    Each book's status is I/O-bound (live marks + benchmark history); we price them concurrently
-    and cache the assembled payload for ``_PORTFOLIOS_TTL`` so a tab click / poll doesn't re-price."""
-    from portfolio import registry
-    now = time.time()
-    cached = _portfolios_cache.get("payload")
-    if cached is not None and (now - _portfolios_cache.get("ts", 0.0)) < _PORTFOLIOS_TTL:
-        return JSONResponse(cached)
+        now = time.time()
+        def fully_available(payload):
+            rows = payload.get("portfolios") if isinstance(payload, dict) else None
+            return isinstance(rows, list) and all(
+                isinstance(row, dict) and isinstance(row.get("status"), dict)
+                and row["status"].get("read_status") == "available"
+                for row in rows
+            )
 
-    metas = registry.all_portfolios()
-    # Price the books concurrently — each row is independent and network-bound, so wall-clock
-    # collapses to roughly the slowest single book instead of the sum across all of them.
-    with ThreadPoolExecutor(max_workers=max(1, len(metas))) as ex:
-        out = list(ex.map(_portfolio_status, metas))
+        cached = _portfolios_cache.get("payload")
+        if fully_available(cached) and (now - _portfolios_cache.get("ts", 0.0)) < _PORTFOLIOS_TTL:
+            return JSONResponse(cached)
 
-    payload = {"portfolios": out, "default": registry.DASHBOARD_DEFAULT_ID,
-               "scope": "mastermind_portfolio"}
-    _portfolios_cache["payload"] = payload
-    _portfolios_cache["ts"] = now
-    return JSONResponse(payload)
+        metas = registry.all_portfolios()
+        with ThreadPoolExecutor(max_workers=max(1, len(metas))) as ex:
+            out = list(ex.map(_portfolio_status, metas))
+
+        payload = {
+            "portfolios": out,
+            "default": registry.DASHBOARD_DEFAULT_ID,
+            "scope": "mastermind_portfolio",
+        }
+        if fully_available(payload):
+            _portfolios_cache["payload"] = payload
+            _portfolios_cache["ts"] = now
+        else:
+            _portfolios_cache.pop("payload", None)
+            _portfolios_cache.pop("ts", None)
+        return JSONResponse(payload)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("portfolio switcher registry read failed: %s", type(exc).__name__)
+        _portfolios_cache.pop("payload", None)
+        _portfolios_cache.pop("ts", None)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "portfolios": None,
+            "default": _PRODUCT_DEFAULT_ID,
+            "scope": "mastermind_portfolio",
+            "error": "portfolios_unavailable",
+        }, status_code=503)
 
 
 @router.get("/api/forward-evaluation")
@@ -1852,11 +2025,24 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     try:
         from brain import posture as _posture
         return JSONResponse(_posture.posture(book))
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"book": book, "available": False, "posture_label": "—",
-                             "posture_label_zh": "—", "posture_tone": "muted", "sub_strategy": None,
-                             "favored": [], "avoided": [], "driver": None, "detail": None,
-                             "cash_pct": None, "invested_pct": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("posture read failed for %s: %s", book, type(exc).__name__)
+        return JSONResponse({
+            "book": book,
+            "available": False,
+            "read_status": "unavailable",
+            "posture_label": "—",
+            "posture_label_zh": "—",
+            "posture_tone": "muted",
+            "sub_strategy": None,
+            "favored": [],
+            "avoided": [],
+            "driver": None,
+            "detail": None,
+            "cash_pct": None,
+            "invested_pct": None,
+            "error": "posture_unavailable",
+        })
 
 
 @router.get("/api/market_view")
@@ -1868,25 +2054,45 @@ def api_market_view() -> JSONResponse:
     Read-only: reassesses freshness on a copy of data/market_view/latest.json. Publication
     clocks and historical evidence stay unchanged; expired inferences become unavailable.
     This is a display consumer, not a producer or sizing path. Degrades to ``available:false``
-    stub when the artifact is absent/unreadable (the organ built-but-not-running protects nothing
-    but breaks nothing) rather than raising."""
+    response when no publication exists. Read, parse or projection failures return an
+    unavailable response; they never masquerade as an artifact that has not been built."""
     path = _data() / "market_view" / "latest.json"
     freshness_headers = {"Cache-Control": "no-store"}
     try:
-        if not path.exists():
-            return JSONResponse(
-                {"available": False, "note": "market_view artifact not built yet "
-                 "(brain.market_view.build has not run)"},
-                status_code=404, headers=_NOCACHE)
-        view = json.loads(path.read_text())
+        try:
+            raw = path.read_text()
+        except FileNotFoundError as missing:
+            # Only observed absence below a real directory is "not built".
+            # Dangling links and paths that appeared after the failed read stay unavailable.
+            import stat
+
+            candidate = path
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        raise missing
+                    candidate = candidate.parent
+                    continue
+                if candidate != path and stat.S_ISDIR(info.st_mode):
+                    return JSONResponse(
+                        {"available": False, "note": "market_view artifact not built yet "
+                         "(brain.market_view.build has not run)"},
+                        status_code=404, headers=_NOCACHE)
+                raise missing
+        view = json.loads(raw)
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
         from brain import market_view
         view = market_view.serving_view(view)
         return JSONResponse(view, headers=freshness_headers)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("market view read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "market_view_unavailable", "note": "market view unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/agenda")
@@ -1903,16 +2109,19 @@ def api_agenda() -> JSONResponse:
     weekly CIO job writes it) rather than raising."""
     try:
         from brain import improvement_agenda
-        agenda = improvement_agenda.latest()
+        agenda = improvement_agenda.latest(strict=True)
         if not agenda:
             return JSONResponse(
                 {"available": False, "note": "no agenda built yet "
                  "(brain.improvement_agenda.write runs in the weekly CIO job)"},
                 status_code=404, headers=_NOCACHE)
         return JSONResponse(agenda, headers=_NOCACHE)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("agenda read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "agenda_unavailable", "note": "agenda unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/etf/outcomes")
@@ -1924,7 +2133,12 @@ def api_etf_outcomes() -> JSONResponse:
         from portfolio import etf_outcomes
         return JSONResponse(etf_outcomes.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {"status": "building"}, "error": str(exc)})
+        _log.warning("ETF outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "etf_outcomes_unavailable",
+        })
 
 
 @router.get("/api/overnight-tape")
@@ -1935,10 +2149,16 @@ def api_overnight_tape() -> JSONResponse:
     dashboard can't see. Polled by the dashboard's Overnight Tape panel; cached ~5 min server-side."""
     try:
         from data_layer import overnight
-        return JSONResponse(overnight.tape())
+        return JSONResponse(overnight.tape(strict=True))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"groups": {}, "risk": {"state": "calm", "reasons": ["unavailable"]},
-                             "live": False, "error": str(exc)})
+        _log.warning("overnight tape read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "overnight_status": "unavailable",
+            "groups": None,
+            "risk": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+        })
 
 
 @router.get("/api/research")
@@ -2621,26 +2841,41 @@ def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
 def api_outcomes() -> JSONResponse:
     """Realized thesis outcomes — triple-barrier + rel-return vs SPY (the learning signal that
     feeds the Brier track record). `labels` per thesis, `summary` stats, and the graded
-    `track_record`. Best-effort: returns empty-but-valid on any failure."""
+    `track_record`. Failed reads are unavailable; calibration-only failure preserves
+    the other evidence with an explicit partial status."""
     try:
         import bot  # noqa: F401 — bootstraps vendor/macro for the price accessor
         from datetime import date as _date
         from brain import calibration, outcomes, scorer
         asof = _date.today()
         realized = outcomes.realized_returns(asof)
+        calibration_failed = False
         try:
             cal = calibration.load() or calibration.compute(asof)
-        except Exception:  # noqa: BLE001
-            cal = {}
-        return JSONResponse({
+        except Exception as exc:  # noqa: BLE001 — preserve the healthy outcome evidence
+            _log.warning("outcomes calibration read failed: %s", type(exc).__name__)
+            cal = None
+            calibration_failed = True
+        payload = {
             "labels": outcomes.all_labels(asof),
             "summary": outcomes.summary(asof),
             "track_record": scorer.track_record(asof, realized=realized),
             "calibration": cal,
-        })
+        }
+        if calibration_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["calibration"]
+        return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"labels": [], "summary": {}, "track_record": {},
-                             "calibration": {}, "error": str(exc)})
+        _log.warning("outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "outcomes_unavailable",
+            "labels": None,
+            "summary": None,
+            "track_record": None,
+            "calibration": None,
+        })
 
 
 @router.get("/api/shadow_books")
@@ -2708,7 +2943,13 @@ def api_rejections() -> JSONResponse:
         from portfolio import rejections
         return JSONResponse(rejections.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
+        _log.warning("rejections read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "rejections_unavailable",
+            "coverage": None,
+            "scorecard": None,
+        })
 
 
 @router.get("/api/shadow_bandit")
@@ -2721,7 +2962,13 @@ def api_shadow_bandit() -> JSONResponse:
         from portfolio import bandit
         return JSONResponse(bandit.rank_shadow_books())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "arms": [], "error": str(exc)})
+        _log.warning("shadow bandit read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "arms": None,
+            "error": "shadow_bandit_unavailable",
+        })
 
 
 @router.get("/api/student")
@@ -2775,7 +3022,12 @@ def api_interim_marks() -> JSONResponse:
         from brain import interim_marks
         return JSONResponse(interim_marks.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {}, "error": str(exc)})
+        _log.warning("interim marks read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "interim_marks_unavailable",
+        })
 
 
 @router.get("/api/engine_backtest")
@@ -2856,7 +3108,15 @@ def api_mastermind_ai() -> JSONResponse:
         payload["legacy_route_prefix"] = "/api/mastermind_ai"
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"schema": "mastermind_ai_status.v1", "error": str(exc)})
+        _log.warning("mastermind portfolio loop status read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "schema": "mastermind_ai_status.v1",
+            "read_status": "unavailable",
+            "product_scope": "mastermind_portfolio_loop",
+            "public_chatbot_separate": True,
+            "legacy_route_prefix": "/api/mastermind_ai",
+            "error": "mastermind_ai_status_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/loop_log")
@@ -2869,7 +3129,13 @@ def api_mastermind_ai_loop_log(n: int = 50) -> JSONResponse:
         return JSONResponse({"loop_log": mastermind_ai.loop_log(limit=n),
                              "reviews": mastermind_ai.reviews(limit=12)})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"loop_log": [], "reviews": [], "error": str(exc)})
+        _log.warning("mastermind portfolio loop log read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "loop_log": None,
+            "reviews": None,
+            "error": "mastermind_ai_loop_log_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/improvements")
@@ -2881,8 +3147,15 @@ def api_mastermind_ai_improvements() -> JSONResponse:
         from brain import mastermind_ai
         return JSONResponse(mastermind_ai.improvements())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"pins": [], "agenda_top": [], "lessons_by_taxonomy": {},
-                             "error": str(exc)})
+        _log.warning("mastermind portfolio improvements read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "pins": None,
+            "self_tune": None,
+            "agenda_top": None,
+            "lessons_by_taxonomy": None,
+            "error": "mastermind_ai_improvements_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/reflection")
@@ -2895,7 +3168,12 @@ def api_mastermind_ai_reflection() -> JSONResponse:
         return JSONResponse(nw_reflection.latest() or {"schema": nw_reflection.SCHEMA,
                                                        "state": "absent"})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"state": "absent", "error": str(exc)})
+        _log.warning("mastermind portfolio reflection read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "state": "unavailable",
+            "error": "mastermind_ai_reflection_unavailable",
+        })
 
 
 class _MMAISettingsReq(BaseModel):
@@ -2910,16 +3188,38 @@ class _MMAIActNudgesReq(BaseModel):
     codes: list[str] | None = None    # missing/empty = all currently open nudges
 
 
+def _portfolio_loop_mutation_module():
+    """Load the incumbent mutation owner before any effectful method is called."""
+    import bot  # noqa: F401
+    from brain import mastermind_ai
+    return mastermind_ai
+
+
+def _portfolio_loop_mutation_failure(error: str, *, effect_status: str, retry_safe: bool) -> JSONResponse:
+    return JSONResponse({
+        "ok": False,
+        "effect_status": effect_status,
+        "retry_safe": retry_safe,
+        "error": error,
+    }, status_code=500)
+
+
 @router.post("/api/mastermind_ai/settings")
 def api_mastermind_ai_settings(req: _MMAISettingsReq) -> JSONResponse:
     """Operator settings patch — bounded to the known mastermind_ai keys (unknown/out-of-range
     keys are rejected, never applied)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio settings setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_settings_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.update_settings(req.settings or {}))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio settings update effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_settings_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/directive")
@@ -2928,11 +3228,17 @@ def api_mastermind_ai_directive(req: _MMAIDirectiveReq) -> JSONResponse:
     snapshot push, ingested by the next nightly macro build). Intake-scrubbed: secrets,
     env names, and $-amounts are refused — this text lands on a public artifact."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio directive setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_directive_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.add_directive(req.text))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio directive effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_directive_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/act_on_nudges")
@@ -2942,11 +3248,17 @@ def api_mastermind_ai_act_on_nudges(req: _MMAIActNudgesReq) -> JSONResponse:
     as a standing grant via the auto_act_on_findings setting (in which case run_cycle drafts
     them automatically). Every drafted text passes the same intake scrub as a typed one."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio nudge-action setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_act_on_nudges_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.draft_directives_from_nudges(req.codes))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio nudge-action effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_act_on_nudges_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/run")
@@ -2954,11 +3266,17 @@ def api_mastermind_ai_run() -> JSONResponse:
     """Run one self-improvement cycle now (non-LLM, observational; same code path as the
     nightly loop_maintenance step)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio manual-run setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_run_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.run_cycle(trigger="manual"))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio manual-run effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_run_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.get("/api/readiness")
@@ -2970,8 +3288,13 @@ def api_readiness() -> JSONResponse:
         import bot  # noqa: F401
         from portfolio import readiness
         return JSONResponse({"status": readiness.status(), "alerts": readiness.alerts()})
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": {}, "alerts": [], "error": str(exc)})
+    except Exception:  # noqa: BLE001
+        return JSONResponse({
+            "status": None,
+            "alerts": None,
+            "read_status": "unavailable",
+            "error": "readiness_unavailable",
+        })
 
 
 @router.get("/api/portfolio_learning")
@@ -3088,27 +3411,61 @@ _QUAD_ZH = {
 
 @router.get("/api/activity")
 def api_activity() -> JSONResponse:
-    """Reverse-chronological activity timeline (cap 60).
+    """Reverse-chronological Brain Log activity, preserving partial-source read truth.
 
-    Assembles events from:
-      - positions_ledger history entries  (kind "trade")
-      - decisions[] in latest.json        (kind "decision")
-      - research note files               (kind "research")
-      - runs table via latest.json as_of  (kind "run")
-
-    Each event also carries title_zh / detail_zh so the Brain Log renders in
-    Chinese when zh is toggled (see the localisation maps above).
+    A completely successful read keeps the legacy JSON-list contract. If one or more source
+    families fail, return a typed envelope so the dashboard can distinguish partial/unavailable
+    evidence from a genuinely empty timeline. A failed family contributes no half-read rows.
     """
     events: list[dict] = []
+    failed_sources: list[str] = []
+
+    def read_source(path: Path, *, directory: bool = False):
+        """Read first; only genuine absence below a real directory is empty."""
+        import stat
+
+        try:
+            return list(path.iterdir()) if directory else path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            ancestor = path
+            while True:
+                try:
+                    mode = ancestor.lstat().st_mode
+                except FileNotFoundError:
+                    if ancestor == ancestor.parent:
+                        raise
+                    ancestor = ancestor.parent
+                    continue
+                if ancestor == path or not stat.S_ISDIR(mode):
+                    raise
+                return None
+
+    def timestamp(value) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("invalid activity timestamp")
+        return value
+
+    def commit_source(rows: list[dict]) -> None:
+        fields = ("ts", "kind", "title", "detail", "title_zh", "detail_zh")
+        if any(not isinstance(row[field], str) for row in rows for field in fields):
+            raise ValueError("invalid activity event")
+        events.extend(rows)
 
     # --- trades from ledger history ---
     try:
+        source_events: list[dict] = []
         ledger_path = _data() / "portfolio" / "positions_ledger.json"
-        if ledger_path.exists():
-            ledger = json.loads(ledger_path.read_text())
+        ledger_raw = read_source(ledger_path)
+        if ledger_raw is not None:
+            ledger = json.loads(ledger_raw)
             for key, entry in ledger.items():
-                for h in entry.get("history", []):
-                    ts = h.get("ts") or ""
+                history = entry.get("history", [])
+                if not isinstance(history, list):
+                    raise ValueError("invalid activity history")
+                for h in history:
+                    ts = timestamp(h.get("ts"))
                     ev = h.get("event", "")
                     ticker = entry.get("ticker", key.split(":")[-1])
                     weight = h.get("weight")
@@ -3117,72 +3474,71 @@ def api_activity() -> JSONResponse:
                     still_open = entry.get("still_open")
                     verb_zh = _TRADE_VERB_ZH.get(ev.lower(), ev.upper())
                     sleeve_zh = _SLEEVE_ZH.get(sleeve.lower(), sleeve)
-                    events.append({
+                    source_events.append({
                         "ts": ts,
                         "kind": "trade",
                         "title": f"{ev.upper()} {ticker}{w_str}",
                         "title_zh": f"{verb_zh} {ticker}{w_str}",
-                        "detail": (
-                            f"{sleeve} sleeve | "
-                            f"{'open' if still_open else 'closed'}"
-                        ),
-                        "detail_zh": (
-                            f"{sleeve_zh}组合 | "
-                            f"{'持有中' if still_open else '已平仓'}"
-                        ),
+                        "detail": f"{sleeve} sleeve | {'open' if still_open else 'closed'}",
+                        "detail_zh": f"{sleeve_zh}组合 | {'持有中' if still_open else '已平仓'}",
                     })
-    except Exception:
-        pass
+        commit_source(source_events)
+    except Exception as exc:  # noqa: BLE001 - one source may fail without erasing the others
+        _log.warning("activity trades read failed: %s", type(exc).__name__)
+        failed_sources.append("trades")
 
-    # --- decisions from latest.json ---
+    # --- decisions + top-level run event from latest.json ---
     try:
+        source_events = []
         portfolio_path = _data() / "portfolio" / "latest.json"
-        if portfolio_path.exists():
-            portfolio = json.loads(portfolio_path.read_text())
-            asof = portfolio.get("as_of", "")
-            for d in portfolio.get("decisions", []):
+        portfolio_raw = read_source(portfolio_path)
+        if portfolio_raw is not None:
+            portfolio = json.loads(portfolio_raw)
+            asof = timestamp(portfolio.get("as_of"))
+            decisions = portfolio.get("decisions", [])
+            if not isinstance(decisions, list):
+                raise ValueError("invalid activity decisions")
+            for d in decisions:
                 lean = d.get("lean", "watch")
                 subject = d.get("subject", "?")
                 thesis = d.get("thesis") or ""
                 lean_zh = _DECISION_LEAN_ZH.get(lean.lower(), lean.upper())
                 thesis_zh = _cached_zh(thesis) or thesis
-                events.append({
-                    "ts": d.get("logged_at") or asof or "",
+                source_events.append({
+                    "ts": timestamp(d.get("logged_at")) or asof,
                     "kind": "decision",
                     "title": f"Decision: {lean.upper()} {subject}",
                     "title_zh": f"决策：{lean_zh} {subject}",
                     "detail": thesis[:200],
                     "detail_zh": thesis_zh[:200],
                 })
-            # top-level run event
             if asof:
-                regime = (portfolio.get("regime") or {})
+                regime = portfolio.get("regime") or {}
                 quad = regime.get("quad_name") or regime.get("quad")
                 quad_zh = _QUAD_ZH.get(quad, quad)
                 gross_pct = portfolio.get("gross", 0) * 100
                 cash_pct = portfolio.get("cash", 0) * 100
-                events.append({
+                source_events.append({
                     "ts": asof,
                     "kind": "run",
                     "title": f"Book rebuilt — {asof}",
                     "title_zh": f"组合重建 — {asof}",
-                    "detail": (
-                        f"Quad: {quad} | "
-                        f"gross={gross_pct:.1f}% cash={cash_pct:.1f}%"
-                    ),
-                    "detail_zh": (
-                        f"象限：{quad_zh} | "
-                        f"总敞口={gross_pct:.1f}% 现金={cash_pct:.1f}%"
-                    ),
+                    "detail": f"Quad: {quad} | gross={gross_pct:.1f}% cash={cash_pct:.1f}%",
+                    "detail_zh": f"象限：{quad_zh} | 总敞口={gross_pct:.1f}% 现金={cash_pct:.1f}%",
                 })
-    except Exception:
-        pass
+        commit_source(source_events)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("activity decisions read failed: %s", type(exc).__name__)
+        failed_sources.append("decisions")
 
     # --- research notes (deduped on title+body, newest kept) ---
     try:
+        source_events = []
         notes_dir = _data() / "research" / "notes"
-        if notes_dir.exists():
-            parsed = [n for n in (_parse_note(p) for p in notes_dir.glob("*.md"))
+        note_paths = read_source(notes_dir, directory=True)
+        if note_paths is not None:
+            parsed = [n for n in (_parse_note(p, strict=True) for p in note_paths
+                                  if p.name.endswith(".md"))
                       if n and n.get("date")]
             parsed.sort(key=lambda n: n["_sort_key"], reverse=True)
             seen: set[tuple[str, str]] = set()
@@ -3191,39 +3547,45 @@ def api_activity() -> JSONResponse:
                 if key in seen:
                     continue
                 seen.add(key)
-                tickers_str = (", ".join(note["tickers"]) if note.get("tickers") else "")
+                tickers_str = ", ".join(note["tickers"]) if note.get("tickers") else ""
                 title = note["title"]
                 body_md = note.get("body_md") or ""
                 title_zh = _cached_zh(title) or title
                 body_zh = _cached_zh(body_md) or body_md
-                events.append({
+                source_events.append({
                     "ts": note["date"],
                     "kind": "research",
                     "title": title,
                     "title_zh": title_zh,
-                    "detail": (
-                        (f"Tickers: {tickers_str} | " if tickers_str else "")
-                        + body_md[:160]
-                    ),
-                    "detail_zh": (
-                        (f"标的：{tickers_str} | " if tickers_str else "")
-                        + body_zh[:160]
-                    ),
+                    "detail": (f"Tickers: {tickers_str} | " if tickers_str else "") + body_md[:160],
+                    "detail_zh": (f"标的：{tickers_str} | " if tickers_str else "") + body_zh[:160],
                 })
-    except Exception:
-        pass
+        commit_source(source_events)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("activity research read failed: %s", type(exc).__name__)
+        failed_sources.append("research")
 
-    # flag actions logged today so the Brain Log can highlight + tag them "new".
-    # Wall-clock date is the trading-day source of truth here (matches the data's as_of).
     today_iso = date.today().isoformat()
-    for e in events:
-        e["today"] = (e.get("ts") or "")[:10] == today_iso
+    for event in events:
+        event["today"] = (event.get("ts") or "")[:10] == today_iso
+    events.sort(key=lambda event: event.get("ts") or "", reverse=True)
+    bounded = events[:60]
 
-    # sort newest first, cap at 60
-    events.sort(key=lambda e: e.get("ts") or "", reverse=True)
-    return JSONResponse(events[:60])
-
-
+    if len(failed_sources) == 3:
+        return JSONResponse({
+            "activity_status": "unavailable",
+            "events": None,
+            "failed_sources": failed_sources,
+            "error": "activity_unavailable",
+        })
+    if failed_sources:
+        return JSONResponse({
+            "activity_status": "partial",
+            "events": bounded,
+            "failed_sources": failed_sources,
+        })
+    # Preserve the original successful contract for existing readers.
+    return JSONResponse(bounded)
 
 
 @router.get("/api/runs")
@@ -3649,14 +4011,32 @@ def api_firm_allocator(rebuild: bool = False) -> JSONResponse:
         if rebuild:
             artifact = _fa.build_latest()
         else:
-            artifact = _fa.latest_artifact()
-            if artifact is None:
+            read_status, artifact = _fa.latest_artifact_checked()
+            if read_status == "unavailable":
+                return JSONResponse({
+                    "advisory_only": True,
+                    "computed": False,
+                    "read_status": "unavailable",
+                    "error": "firm_allocator_artifact_unavailable",
+                    "reason": "firm allocator artifact unavailable",
+                })
+            if read_status == "absent":
                 artifact = _fa.build_latest()
+        if artifact and artifact.get("build_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "unavailable"})
+        if artifact and artifact.get("persist_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "partial"})
         return JSONResponse(artifact or {"advisory_only": True, "computed": False,
                                          "reason": "no artifact available"})
     except Exception as exc:  # noqa: BLE001 — never 500
-        return JSONResponse({"advisory_only": True, "computed": False,
-                             "reason": f"firm_allocator endpoint error: {exc}"})
+        _log.warning("firm allocator endpoint failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "advisory_only": True,
+            "computed": False,
+            "read_status": "unavailable",
+            "error": "firm_allocator_unavailable",
+            "reason": "firm allocator unavailable",
+        })
 
 
 @router.get("/api/desk/experiments")
@@ -3680,18 +4060,29 @@ def api_desk_experiments() -> JSONResponse:
 
     Returns {as_of, total, open, matured, judged, cancelled, matured_items: [...],
              open_tristate: [...], all_items: [...]}.
-    Never 500s — degrades to an empty registry on any failure."""
+    Read one registry snapshot without a maturity write. Read/projection failures
+    return an explicit unavailable payload; genuine absence remains a zero state."""
     try:
         from brain import experiment_registry
-        s = experiment_registry.summary()
-        all_items = experiment_registry.load()
+        all_items = experiment_registry.load(strict=True)
+        s = experiment_registry.summary(experiments=all_items)
         s["all_items"] = all_items
         return JSONResponse(s)
     except Exception as exc:  # noqa: BLE001 — additive; never break the desk
-        return JSONResponse({"as_of": None, "total": 0, "open": 0, "matured": 0,
-                             "judged": 0, "cancelled": 0, "matured_items": [], "all_items": [],
-                             "open_tristate": [],
-                             "note": f"Experiment registry unavailable: {exc}"})
+        _log.warning("experiment registry read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "as_of": None,
+            "total": None,
+            "open": None,
+            "matured": None,
+            "judged": None,
+            "cancelled": None,
+            "matured_items": None,
+            "all_items": None,
+            "open_tristate": None,
+            "error": "experiment_registry_unavailable",
+        })
 
 
 @router.get("/api/scheduler")

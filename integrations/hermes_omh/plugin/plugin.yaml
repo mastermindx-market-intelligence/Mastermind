@@ -1,8 +1,8 @@
 name: mastermind-omh
 kind: standalone
-version: "1.0.0"
+version: "1.1.0"
 requires_hermes: ">=0.23.0"
-description: "Read-only Mastermind plan proposals and existing OMH model, effort, and skill recommendations. No execution, provider/account selection, memory replacement, or retries."
+description: "Read-only Mastermind plan proposals, OMH advice and canonical Fabric route previews. No execution, account selection, memory replacement, or added retries."
 author: Mastermind-X
 provides_tools:
   - mmx_omh

@@ -98,6 +98,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
+from common import workspace_discovery_correction_contract as correction
 
 __all__ = [
     "PUBLICATION_SCHEMA",
@@ -414,6 +415,14 @@ _KNOWLEDGE_PREFERENCE_REQUEST_ID_RE = re.compile(
 # public request schema/key set, never from a caller-supplied action string.
 _KNOWLEDGE_ACTIONS = (
     {
+        "action": correction.ACTION,
+        "recipe_action": correction.RECIPE_ACTION,
+        "request_schema": correction.REQUEST_SCHEMA,
+        "request_keys": correction.REQUEST_KEYS,
+        "request_id_re": re.compile(r"\A" + re.escape(correction.REQUEST_PREFIX) + r"[0-9a-f]{40}\Z"),
+        "expected_preference_revision": False,
+    },
+    {
         "action": KNOWLEDGE_ACTION_FILE_ADD,
         "recipe_action": KNOWLEDGE_RECIPE_ACTION_FILE_ADD,
         "request_schema": KNOWLEDGE_REQUEST_SCHEMA_FILE_ADD,
@@ -673,6 +682,11 @@ def _knowledge_request_lookup(request: Any) -> dict:
     request.  It is distinct from the private recipe fingerprint and from the
     scoped action permission stamp.
     """
+    if type(request) is dict and request.get("schema") == correction.REQUEST_SCHEMA:
+        try:
+            return correction.request_lookup(request)
+        except ValueError:
+            raise _Refusal(STATE_NOT_DISPATCHED, "REQUEST_INVALID") from None
     record = _knowledge_request_record(request)
     if record is None:
         raise _Refusal(STATE_NOT_DISPATCHED, "REQUEST_INVALID")
@@ -722,6 +736,11 @@ def _knowledge_request_lookup(request: Any) -> dict:
 def _validate_knowledge_lookup(lookup: Any) -> dict:
     """Validate the closed body-free 7-field lookup shape."""
     invalid = _Refusal(STATE_NOT_DISPATCHED, "REQUEST_INVALID")
+    if type(lookup) is dict and lookup.get("action") == correction.ACTION:
+        try:
+            return correction.validate_lookup(lookup)
+        except ValueError:
+            raise invalid from None
     if not isinstance(lookup, Mapping):
         raise invalid
     if frozenset(lookup.keys()) != _KNOWLEDGE_LOOKUP_KEYS:
@@ -779,7 +798,8 @@ def _validate_knowledge_recipe(recipe: Any, lookup: dict) -> dict:
     if not _is_hex64(recipe["permission_binding_digest"]):
         raise invalid
     postimages = recipe["postimages"]
-    if not isinstance(postimages, list) or len(postimages) != 2:
+    count = 3 if lookup["action"] == correction.ACTION else 2
+    if not isinstance(postimages, list) or len(postimages) != count:
         raise invalid
     total = 0
     paths = []
@@ -809,7 +829,7 @@ def _validate_knowledge_recipe(recipe: Any, lookup: dict) -> dict:
         paths.append(path)
     if total > KNOWLEDGE_RECIPE_OUTPUT_MAX_BYTES:
         raise invalid
-    if len(set(paths)) != 2:
+    if len(set(paths)) != count:
         raise invalid
     changed = _knowledge_changed_paths(postimages)
     if not changed:
@@ -851,6 +871,9 @@ def _knowledge_expected_paths(lookup: dict, request: Any, file_id: str) -> "list
     record = _knowledge_action_record(lookup["action"])
     key = lookup["work_ref"][len("WS:"):]
     workstream_path = PATH_PREFIX + "WS-" + key + PATH_SUFFIX
+    if record["action"] == correction.ACTION:
+        return ["agentos/discoveries/DSC-" + lookup["discovery_ref"][4:] + ".md",
+                "agentos/discoveries/DSC-PROJECT-CORRECTION-" + file_id[:40].upper() + ".md", workstream_path]
     if record["action"] == KNOWLEDGE_ACTION_FILE_ADD:
         file_request = request["file"]
         ext = _knowledge_file_extension(file_request["display_name"])
@@ -899,7 +922,7 @@ def _validate_knowledge_operation_metadata(
     identity = metadata["identity"]
     if not isinstance(identity, Mapping):
         raise invalid
-    if frozenset(identity.keys()) != _KNOWLEDGE_IDENTITY_KEYS:
+    if frozenset(identity.keys()) != frozenset(lookup) | {"principal_scope"}:
         raise invalid
     if dict(identity) != {**dict(lookup), "principal_scope": scope}:
         # Well-formed retained metadata that disagrees with the actual original
@@ -917,7 +940,8 @@ def _validate_knowledge_operation_metadata(
     if not _is_commit_id(metadata["expected_commit"]):
         raise invalid
     postimages = metadata["postimages"]
-    if not isinstance(postimages, list) or len(postimages) != 2:
+    count = 3 if lookup["action"] == correction.ACTION else 2
+    if not isinstance(postimages, list) or len(postimages) != count:
         raise invalid
     for image in postimages:
         if not isinstance(image, Mapping):
@@ -931,8 +955,11 @@ def _validate_knowledge_operation_metadata(
         preimage = image["expected_preimage_sha256"]
         if preimage is not None and not _is_hex64(preimage):
             raise invalid
-    if len(set(image["path"] for image in postimages)) != 2:
+    if len(set(image["path"] for image in postimages)) != count:
         raise invalid
+    if lookup["action"] == correction.ACTION:
+        if {image["path"]: image["expected_preimage_sha256"] for image in postimages} != correction.expected_preimages(lookup, scope):
+            raise invalid
     branch = metadata["branch"]
     if branch is not None and not _valid_branch_name(branch):
         raise invalid
@@ -947,7 +974,7 @@ def _validate_knowledge_operation_metadata(
         if not _is_commit_id(publication["commit"]):
             raise invalid
         images = publication["postimages"]
-        if not isinstance(images, list) or len(images) != 2:
+        if not isinstance(images, list) or len(images) != count:
             raise invalid
         for image in images:
             if not isinstance(image, Mapping):
@@ -988,7 +1015,8 @@ def _knowledge_publication_proof(metadata: Mapping[str, Any]) -> Optional[dict]:
     if metadata.get("phase") != KNOWLEDGE_PHASE_SOURCE_PUBLISHED:
         return None
     images = publication.get("postimages")
-    if not isinstance(images, list) or len(images) != 2:
+    count = 3 if metadata.get("identity", {}).get("action") == correction.ACTION else 2
+    if not isinstance(images, list) or len(images) != count:
         return None
     observed = [(image["path"], image["content_sha256"]) for image in images]
     retained = [
@@ -3044,8 +3072,9 @@ class FixedProjectGitPublisher:
             if frozenset(source.keys()) != _KNOWLEDGE_PUBLICATION_KEYS:
                 raise ValueError("publication does not match the closed schema")
             images = source["postimages"]
-            if not isinstance(images, list) or len(images) != 2:
-                raise ValueError("publication postimages are not exactly two")
+            count = 3 if op.lookup is not None and op.lookup.get("action") == correction.ACTION else 2
+            if not isinstance(images, list) or len(images) != count:
+                raise ValueError("publication postimages do not match the original action")
             source["postimages"] = [dict(image) for image in images]
             for image in source["postimages"]:
                 if frozenset(image.keys()) != _KNOWLEDGE_PUBLICATION_IMAGE_KEYS:

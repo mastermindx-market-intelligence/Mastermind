@@ -16,16 +16,9 @@
   ],
   "hermes_agents": [
     {
-      "name": "hermes-secretary",
-      "unit": "hermes-runtime-mmsecretary.service",
-      "secrets_file": "mmsecretary.secrets.env",
-      "self_user_id_env": "HERMES_SLACK_BOT_USER_ID",
-      "bot_token_env": "HERMES_SLACK_BOT_TOKEN"
-    },
-    {
-      "name": "hermes-metaceo",
-      "unit": "hermes-runtime-mmmeta.service",
-      "secrets_file": "mmmeta.secrets.env",
+      "name": "hermes-mmrelay",
+      "unit": "hermes-runtime-mmrelay.service",
+      "secrets_file": "mmrelay.secrets.env",
       "self_user_id_env": "HERMES_SLACK_BOT_USER_ID",
       "bot_token_env": "HERMES_SLACK_BOT_TOKEN"
     }

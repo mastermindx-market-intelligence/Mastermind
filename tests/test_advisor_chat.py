@@ -12,6 +12,10 @@ import json
 import pytest
 
 from brain import advisor, cli_bridge
+from portfolio import instrument_policy as _instrument_policy
+
+# Preserve the actual reader before the generic autouse company-data fixture runs.
+_REAL_MACRO_READER = _instrument_policy._read_macro_json
 
 
 # --------------------------------------------------------------------------- #
@@ -185,7 +189,9 @@ def test_chat_stream_surfaces_sdk_exception(monkeypatch):
     # carries the resume session_id + tools_used even on a failed turn) — post-stream
     # bookkeeping (key-failure detection, response ledger) runs between the two.
     err = next(e for e in evs if e["type"] == "error")
-    assert "cli exploded" in err["error"]
+    assert err["code"] == cli_bridge.CHAT_ERROR_CODE
+    assert err["error"] == cli_bridge.CHAT_ERROR_MESSAGE
+    assert "cli exploded" not in err["error"]
     assert evs[-1]["type"] == "done"
 
 
@@ -279,12 +285,32 @@ def test_advisor_action_is_proposal_only_and_cannot_touch_paper_state(tmp_path, 
     from brain import bot_mcp
     from brain import research_paper as rp
     from portfolio import advisor_trade
+    from portfolio import lenses
     from portfolio import paper_account as pa
     from portfolio import position_log as pl
 
     proposals = tmp_path / "recommendations.jsonl"
     monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
-    monkeypatch.setattr(rp, "latest_for", lambda ticker: {"ticker": ticker, "confirmed": True})
+    monkeypatch.setattr(rp, "latest_for", lambda ticker, **_kwargs: {"ticker": ticker, "confirmed": True})
+    # This test owns the proposal-only/no-execution invariant, not gate eligibility. Arrange a
+    # complete current preliminary gate so the proposal path is intentionally reachable.
+    monkeypatch.setattr(lenses, "full", lambda *_a, **_k: {
+        "subject": "AAPL", "kind": "name",
+        "rows": [{"lens": "trend", "direction": "bull"}],
+        "synthesis": {
+            "confluence": 0.42, "size_authority": "up", "vetoes": [], "divergences": []
+        },
+    })
+
+    # Exercise the actual instrument policy against a private canonical identity.
+    from portfolio import instrument_policy
+    monkeypatch.setattr(instrument_policy, "_ROOT", tmp_path)
+    monkeypatch.setattr(instrument_policy, "_read_macro_json", _REAL_MACRO_READER)
+    identity = tmp_path / "vendor" / "macro" / "site" / "stockdata" / "AAPL.json"
+    identity.parent.mkdir(parents=True)
+    identity.write_text(_json.dumps({
+        "ticker": "AAPL", "name": "Apple Inc.", "security_type": "common_stock",
+    }))
 
     # Any regression into the former mutation path fails loudly.
     monkeypatch.setattr(pa, "execute_fill", lambda *a, **k: (_ for _ in ()).throw(
@@ -319,7 +345,7 @@ def test_advisor_action_refuses_size_fields_before_writing(tmp_path, monkeypatch
 
     proposals = tmp_path / "recommendations.jsonl"
     monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
-    monkeypatch.setattr(rp, "latest_for", lambda ticker: {"ticker": ticker, "confirmed": True})
+    monkeypatch.setattr(rp, "latest_for", lambda ticker, **_kwargs: {"ticker": ticker, "confirmed": True})
 
     result = asyncio.run(bot_mcp.propose_portfolio_action.handler({
         "ticker": "AAPL",
@@ -342,7 +368,7 @@ def test_add_proposal_requires_confirmed_research(tmp_path, monkeypatch):
 
     proposals = tmp_path / "recommendations.jsonl"
     monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
-    monkeypatch.setattr(rp, "latest_for", lambda ticker: None)
+    monkeypatch.setattr(rp, "latest_for", lambda ticker, **_kwargs: None)
     result = asyncio.run(bot_mcp.propose_portfolio_action.handler({
         "ticker": "AAPL",
         "action": "add",

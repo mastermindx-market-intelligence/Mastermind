@@ -128,6 +128,8 @@ print(owner+":"+oct(stat.S_IMODE(os.lstat(p).st_mode))[2:])
            "SOURCE_REPO": str(repo), "EXPECTED_SHA": sha, "TREE_SHA": tree,
            "SCRIPT_DIR": str(ROOT / "ops/executive_os"), "PYTHON_BINARY": str(runner),
            "OS_WEB_ASSETS": str(out), "OS_WEB_ASSETS_DIGEST": digest, "CONTROL_AEAD_BUNDLE": "",
+           "HERMES_ATTENDED_SOURCE": "", "HERMES_ATTENDED_CONFIGURATION": "",
+           "HERMES_ATTENDED_CONFIGURATION_SHA256": "",
            "STAGE_RELEASE_ONLY": "1", "ALLOW_FROZEN_ACCEPTED_ANCESTOR": "0",
            "ARM_PRIVILEGED_BROKER": "0", "CONTROL_CONFIG_SOURCE": "", "PROTECTED_MASTER_SHA": "",
            "CALLS": str(tmp_path / "calls"), "FAIL": ""}
@@ -303,6 +305,34 @@ def test_ordinary_path_reuses_shared_stage(stage):
     assert r.returncode == 0, r.stderr
     assert (stage["release"] / ".executive-release-manifest.json").exists()
     unchanged(stage)
+
+
+def test_stage_only_and_admin_checkout_skip_foreign_global_codex_but_normal_install_does_not(tmp_path):
+    # Execute the exact real installed-binary preflight conditional under a
+    # deliberately failing CodeX probe. Source preparation must not touch the
+    # global package; a full installation must retain its security hold.
+    guard = section("stage-only Codex package isolation")
+    assert TEXT.index("# --- BEGIN stage-only Codex package isolation ---") < TEXT.index(
+        "# --- BEGIN stage-only dispatch ---")
+    prefix = (
+        "set -euo pipefail\n"
+        "verify_codex_component() { printf '%s\\n' \"$3\" >> \"$CALLS\"; return 65; }\n"
+    )
+    for staging, admin, permitted in (("1", "0", True), ("0", "1", True),
+                                      ("0", "0", False)):
+        calls = tmp_path / f"codex-calls-{staging}-{admin}"
+        env = {**os.environ, "STAGE_RELEASE_ONLY": staging,
+               "STAGE_ADMIN_CHECKOUT_ONLY": admin,
+               "CODEX_BINARY": "/intentionally-unavailable-codex",
+               "CODEX_SHA256": "a" * 64,
+               "CODEX_CODE_MODE_HOST_BINARY": "/intentionally-unavailable-host",
+               "CODEX_CODE_MODE_HOST_SHA256": "b" * 64,
+               "CALLS": str(calls)}
+        result = subprocess.run(["/bin/bash", "-c", prefix + guard], env=env,
+                                capture_output=True, text=True)
+        assert result.returncode == (0 if permitted else 65)
+        assert (calls.read_text().splitlines() if calls.exists() else []) == (
+            [] if permitted else ["codex"])
 
 
 def test_dispatch_precedes_all_installed_mutations_and_keeps_preflight():

@@ -267,6 +267,9 @@ async def reason(prompt: str, **kwargs) -> dict:
 
         if result.get("ok") and result.get("text"):
             return result
+        # An owned SDK terminal must not enter shared auth/quota classification.
+        if result.get("error") == cli_bridge._SDK_TERMINAL_ERROR:
+            return result
 
         # Claude's own candidate execution is scoped to one slot here. Advance
         # only when it classified that slot as auth/quota-dead; do not replay a

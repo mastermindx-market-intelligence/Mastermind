@@ -34,6 +34,15 @@ from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
+# Stable browser-safe failure code. Raw provider/SDK exceptions remain internal for
+# classification and telemetry but must never be streamed to the user surface.
+CHAT_ERROR_CODE = "advisor_chat_unavailable"
+CHAT_ERROR_MESSAGE = "Mastermind AI is temporarily unavailable. Please retry."
+
+
+def public_chat_error_event() -> dict[str, str]:
+    """Return the stable, browser-safe chat failure envelope."""
+    return {"type": "error", "code": CHAT_ERROR_CODE, "error": CHAT_ERROR_MESSAGE}
 
 # Headless reasoning must never open a permission prompt. Keep this adapter-level
 # invariant independent of user/project Claude settings and config drift.
@@ -126,13 +135,10 @@ def provider_refusal_run_id(
 
 
 def _require_provider_start(guard: Callable[[], None] | None) -> None:
-    """Existing provider's last local veto. Never mints admission authority.
-
-    The source owner supplies its original immutable observation/deadline
-    callback. Only a synchronous, successful None verdict permits continuing;
-    a denial is a non-started provider attempt, not an auth/quota failure.
-    """
+    """Existing provider's last local veto, bracketed by prospective selection checks."""
+    _require_legacy_application_unselected()
     if guard is None:
+        _require_legacy_application_unselected()
         return
     if not callable(guard) or inspect.iscoroutinefunction(guard):
         raise ProviderStartRefused("source admission revoked before provider start")
@@ -149,6 +155,7 @@ def _require_provider_start(guard: Callable[[], None] | None) -> None:
             # Cleanup cannot turn an invalid verdict into a retry-classified error.
             pass
         raise ProviderStartRefused("source admission revoked before provider start")
+    _require_legacy_application_unselected()
 
 
 def _block_kind(b) -> str:
@@ -198,16 +205,46 @@ def _selected_backend(override: str | None = None) -> str:
         return str(override).strip().lower()
     env = os.environ.get("BOT_LLM_BACKEND")
     if env is not None:
-        return env.strip().lower()
+        selected = env.strip().lower()
+        return "fabric" if selected == "fabric" and _application_fabric_selected() else selected
     try:
         return str(_cfg().get("backend", "waterfall")).strip().lower()
     except Exception:
         return "waterfall"
 
 
+def _application_fabric_selected() -> bool:
+    """MM presence or an explicit Fabric BOT/config selection is exclusive."""
+    if "MM_PROVIDER_APPLICATION_MODE" in os.environ:
+        return True
+    if os.environ.get("BOT_LLM_BACKEND", "").strip().lower() == "fabric":
+        return True
+    if os.environ.get("BOT_LLM_BACKEND") is not None:
+        return False
+    try:
+        return str(_cfg().get("backend", "")).strip().lower() == "fabric"
+    except Exception:
+        return False
+
+
+def _fabric_tools_unavailable() -> dict:
+    return {"ok": False, "text": None, "backend": "fabric",
+            "error": "fabric_tools_unavailable"}
+
+
+def _require_legacy_application_unselected() -> None:
+    """A fresh pre-dispatch fence, never cached routing or eligibility."""
+    if _application_fabric_selected():
+        raise ProviderStartRefused("fabric_tools_unavailable")
+
+
 def available() -> bool:
     """True if the configured subscription CLI backend is reachable."""
+    if _application_fabric_selected():
+        return False
     selected = _selected_backend()
+    if _application_fabric_selected():
+        return False
     if selected not in {"waterfall", "codex", "cli", "sdk"}:
         return False
     if selected == "waterfall":
@@ -222,6 +259,9 @@ def available() -> bool:
             return codex_bridge.available()
         except Exception:
             return False
+    # Config/backend resolution can itself change the live application selector.
+    if _application_fabric_selected():
+        return False
     return bool(cli_path()) and _SDK
 
 
@@ -468,6 +508,15 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
 _SDK_TERMINAL_ERROR = "sdk_terminal_error"
 
 
+class _SDKTerminalAfterToolUse(Exception):
+    """Carry an owned terminal outcome and its original iterator exception."""
+
+    def __init__(self, result: dict, original_exception: Exception):
+        super().__init__(_SDK_TERMINAL_ERROR)
+        self.result = result
+        self.original_exception = original_exception
+
+
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   system: str | None = None, append_system: str | None = None,
                   allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -487,6 +536,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     optional cooling metadata. Credential values are resolved separately when
     constructing the selected transport environment.
     """
+    if _application_fabric_selected():
+        return _fabric_tools_unavailable()
     _veto_kw = ({"before_provider_start": before_provider_start}
                 if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
@@ -495,8 +546,10 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 "error": "fabric_tools_unavailable" if selected_backend == "fabric"
                 else "backend_unsupported"}
     if selected_backend == "waterfall":
+        _require_legacy_application_unselected()
         from brain import provider_waterfall
-        return await provider_waterfall.reason(
+        _require_legacy_application_unselected()
+        result = await provider_waterfall.reason(
             prompt,
             role=role,
             model=model,
@@ -515,8 +568,13 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             record_book=record_book,
             **_veto_kw,
         )
+        # A late selector cannot erase an already-observed terminal, usage,
+        # failed tool effect, session, latency or error. Preserve the evidence.
+        return result
     if selected_backend == "codex":
+        _require_legacy_application_unselected()
         from brain import codex_bridge
+        _require_legacy_application_unselected()
         _codex_t0 = time.monotonic()
         result = await codex_bridge.reason(
             prompt,
@@ -576,7 +634,9 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 pass
         return result
     _t0 = time.monotonic()  # response-ledger latency clock (whole turn, entry→result)
+    _require_legacy_application_unselected()
     c = _cfg()
+    _require_legacy_application_unselected()
     rc = c.get("reasoning", {})
     if arm:
         if mcp_servers is None:
@@ -603,6 +663,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             "text": None,
             "error": delegation_error,
         }
+    _require_legacy_application_unselected()
     dirs = _abs_dirs(add_dirs if add_dirs is not None else rc.get("add_dirs", []))
     turns = max_turns or rc.get("max_turns", 1)
     workdir = cwd or str(_ROOT)
@@ -650,6 +711,10 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     _failure_box: dict = {}
 
     for _candidate_ordinal, _cand in enumerate(_cands_to_try):
+        if _application_fabric_selected():
+            if result is None:
+                _require_legacy_application_unselected()
+            break
         _key_id: str | None = _cand["key_id"] if _cand is not None else None
         _env_name: str | None = _cand["env_name"] if _cand is not None else None
 
@@ -670,6 +735,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                        if _sdk_diagnostic is not None else {}),
                     **_veto_kw,
                 )
+                used_key_id = _key_id
                 _sdk_call_finished = True
                 _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "exhausted")
                 # The SDK observed an error terminal. A tool-capable attempt may
@@ -710,8 +776,31 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except _SDKTerminalAfterToolUse as _terminal:
+                # The handler already saw tool use and an error terminal before
+                # its iterator raised. Preserve that owned outcome; exception
+                # prose cannot authorize replay of the potentially applied turn.
+                result = _terminal.result
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "raised", _terminal.original_exception,
+                        )
+                    except BaseException:
+                        # A diagnostic failure cannot replace the owned terminal.
+                        pass
+                used_key_id = _key_id
+                # Evidence-only attachment, not the condition for this fence.
+                result["provider_failure_evidence"] = dict(_failure_box)
+                break
             except ProviderStartRefused as _refusal:
                 _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                if _application_fabric_selected() and result is not None:
+                    # An earlier candidate may have started or completed effects.
+                    # This typed refusal belongs to the refused rung, not the turn's
+                    # observed accounting. Preserve the prior terminal as written.
+                    break
                 if not _sdk_call_finished:
                     _sdk_call_finished = True
                     try:
@@ -811,7 +900,10 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                         )
                     except ProviderStartRefused as _refusal:
                         _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                        if _application_fabric_selected() and result is not None:
+                            break
                         raise
+                    used_key_id = _key_id
                     # Classify subprocess result for key failure too
                     _classified2 = None
                     if _pool and _key_id is not None:
@@ -835,7 +927,6 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                         except Exception:
                             pass
                         continue
-                    used_key_id = _key_id
                     break
 
             except BaseException as _sdk_interruption:
@@ -864,7 +955,10 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 )
             except ProviderStartRefused as _refusal:
                 _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                if _application_fabric_selected() and result is not None:
+                    break
                 raise
+            used_key_id = _key_id
             _classified3 = None
             if _pool and _key_id is not None:
                 try:
@@ -890,44 +984,45 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             used_key_id = _key_id
             break
     else:
-        # All candidates exhausted without a usable result
-        try:
-            _freeze = _kr.all_cooling_info()
-        except Exception:
-            _freeze = {"all_cooling": True, "earliest_reset": ""}
-        _err_msg = (f"all pool keys cooling/dead; "
-                    f"earliest_reset={_freeze.get('earliest_reset', 'unknown')}")
-        try:
-            from brain import runlog as _rl
-            if _run_id:
-                _rl.log_step(_run_id, "key rotation", "pool exhausted", _err_msg)
-        except Exception:
-            pass
-        # WELL-KNOWN MARKER (federation / retry-at-reset): the book jobs discard reason()'s
-        # return value and reason() never raises, so an all-pool-cooling no-decision would be
-        # invisible to the scheduler.  Record a queryable run-event so app/scheduler.py can detect
-        # it (by book + time window) and schedule a one-shot retry at the pool's earliest reset.
-        # Best-effort — a logging miss must never change the returned result.
-        try:
-            from control_plane import run_events as _re
-            _re.append({
-                "kind": "brain_pool_exhausted",
-                "job": "",                 # the book job name is unknown here; scheduler keys on book
-                "book": str(book or ""),
-                "step": "rotation",
-                "status": "error",
-                "severity": "ADVISORY_ONLY",
-                "actor": "cli_bridge",
-                "extra": {
-                    "all_cooling": bool(_freeze.get("all_cooling", True)),
-                    "earliest_reset": str(_freeze.get("earliest_reset", "") or ""),
-                    "run_id": str(_run_id or ""),
-                },
-            })
-        except Exception:  # noqa: BLE001
-            pass
-        result = {**base, "ok": False, "backend": "none", "text": None,
-                  "error": _err_msg, "freeze_info": _freeze}
+        if not (_application_fabric_selected() and result is not None):
+            # All candidates exhausted without a usable result
+            try:
+                _freeze = _kr.all_cooling_info()
+            except Exception:
+                _freeze = {"all_cooling": True, "earliest_reset": ""}
+            _err_msg = (f"all pool keys cooling/dead; "
+                        f"earliest_reset={_freeze.get('earliest_reset', 'unknown')}")
+            try:
+                from brain import runlog as _rl
+                if _run_id:
+                    _rl.log_step(_run_id, "key rotation", "pool exhausted", _err_msg)
+            except Exception:
+                pass
+            # WELL-KNOWN MARKER (federation / retry-at-reset): the book jobs discard reason()'s
+            # return value and reason() never raises, so an all-pool-cooling no-decision would be
+            # invisible to the scheduler.  Record a queryable run-event so app/scheduler.py can detect
+            # it (by book + time window) and schedule a one-shot retry at the pool's earliest reset.
+            # Best-effort — a logging miss must never change the returned result.
+            try:
+                from control_plane import run_events as _re
+                _re.append({
+                    "kind": "brain_pool_exhausted",
+                    "job": "",                 # the book job name is unknown here; scheduler keys on book
+                    "book": str(book or ""),
+                    "step": "rotation",
+                    "status": "error",
+                    "severity": "ADVISORY_ONLY",
+                    "actor": "cli_bridge",
+                    "extra": {
+                        "all_cooling": bool(_freeze.get("all_cooling", True)),
+                        "earliest_reset": str(_freeze.get("earliest_reset", "") or ""),
+                        "run_id": str(_run_id or ""),
+                    },
+                })
+            except Exception:  # noqa: BLE001
+                pass
+            result = {**base, "ok": False, "backend": "none", "text": None,
+                      "error": _err_msg, "freeze_info": _freeze}
 
     if result is None:
         result = {**base, "ok": False, "backend": "none", "text": None,
@@ -1024,6 +1119,7 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     failure (brain/provider_failure.v1) while the SDK stream is still alive, so an
     exception after the evidence still leaves the box filled.  Evidence-only — never a
     retry/failover/cooling input — and it never carries response or prompt text."""
+    _require_legacy_application_unselected()
     # Claude Agent SDK intentionally loads no filesystem settings by default.  The regional PMs
     # may delegate only through this repository's reviewed, read-only `.claude/agents` profiles,
     # so opt into the project source explicitly (never user/local settings from the VPS account).
@@ -1054,14 +1150,32 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     # The first SDK query iteration may start a remote provider/model effect.
     # Evaluate the source owner's veto AFTER SDK/MCP option preparation and
     # immediately BEFORE handing it to the original SDK owner.
+    _require_legacy_application_unselected()
     _require_provider_start(before_provider_start)
+    _require_legacy_application_unselected()
     if failure_out is not None:
         try:
             failure_out["tool_activity_observed"] = False
         except Exception:
             pass
     _observe_sdk_diagnostic(_diagnostic, query_entered=True)
-    async for msg in _sdk_query(prompt=prompt, options=opts):
+    _sdk_stream = aiter(_sdk_query(prompt=prompt, options=opts))
+    _terminal_iterator_exception = None
+    while True:
+        try:
+            msg = await anext(_sdk_stream)
+        except StopAsyncIteration:
+            break
+        except ProviderStartRefused:
+            raise
+        except Exception as exc:
+            # These are existing handler-owned operational fields, independent
+            # of failure_out. No tool use or no failed terminal keeps the legacy
+            # exception path. Handler/observer errors are outside this catch.
+            if not (terminal_error and used):
+                raise
+            _terminal_iterator_exception = exc
+            break
         try:
             if hasattr(msg, "result"):                         # ResultMessage
                 # Preserve an explicit error even if a later terminal says success.
@@ -1175,16 +1289,20 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text) and not terminal_error, "text": text,
-            "model": mdl, "role": role, "armed": arm,
-            "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk",
-            **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    result = {"ok": bool(text) and not terminal_error, "text": text,
+              "model": mdl, "role": role, "armed": arm,
+              "tools_used": used, "cost_usd": cost, "session_id": sid,
+              "usage": _as_dict(usage), "backend": "sdk",
+              **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    if _terminal_iterator_exception is not None:
+        raise _SDKTerminalAfterToolUse(result, _terminal_iterator_exception) from _terminal_iterator_exception
+    return result
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
                           env_name: str | None = None,
                           before_provider_start: Callable[[], None] | None = None) -> dict:
+    _require_legacy_application_unselected()
     # NOTE: `--output-format json` returns only the final result text — no content
     # blocks arrive here, so this backend has no thinking to capture; the response
     # ledger still logs the turn (with thinking=[]) from reason().
@@ -1198,12 +1316,14 @@ async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs,
         argv += ["--system-prompt", system]
     if append_system:
         argv += ["--append-system-prompt", append_system]
-    # The caller's veto is not a provider selection/budget grant. It is
-    # checked after argv preparation, before any process effect occurs.
+    # Prepare argv and environment before the original caller's final veto.
+    # The same callback runs once, immediately before the process effect.
+    _require_legacy_application_unselected()
+    env = _subscription_env(env_name)
     _require_provider_start(before_provider_start)
     proc = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, cwd=workdir, env=_subscription_env(env_name))
+        stderr=asyncio.subprocess.PIPE, cwd=workdir, env=env)
     out, err = await proc.communicate(prompt.encode())
     try:
         j = json.loads(out.decode() or "{}")
@@ -1309,7 +1429,14 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     ~600 chars of streamed text + any error event to detect key failure and mark_cooling
     so the NEXT chat turn rotates to a healthy key.
     """
-    if _selected_backend() not in {"waterfall", "cli", "sdk"}:
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    selected_backend = _selected_backend()
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    if selected_backend not in {"waterfall", "cli", "sdk"}:
         yield {"type": "error", "error": "backend_chat_unsupported"}
         return
     if not _SDK:
@@ -1319,9 +1446,15 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         yield {"type": "error", "error": "claude CLI not installed (npm i -g @anthropic-ai/claude-code)"}
         return
 
-    from brain import bot_mcp
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    from brain import bot_mcp, cognition_mcp
     rc = _cfg().get("reasoning", {})
     mdl = resolve_model(role)
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
 
     # Pick first healthy candidate for this stream turn
     _stream_key_id: str | None = None
@@ -1336,22 +1469,39 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     except Exception:
         _pool = []
 
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    env = _subscription_env(_stream_env_name)
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
     opts = _Options(
         model=mdl,
-        allowed_tools=bot_mcp.armed_allowed_tools(),
+        allowed_tools=list(dict.fromkeys(
+            [*bot_mcp.armed_allowed_tools(), *cognition_mcp.allowed_tools()]
+        )),
         add_dirs=_abs_dirs(rc.get("add_dirs", [])),
         cwd=str(_ROOT),
         max_turns=max_turns or rc.get("research_max_turns", 16),
         permission_mode=_HEADLESS_PERMISSION_MODE,
-        env=_subscription_env(_stream_env_name),
+        env=env,
         setting_sources=["project"],
     )
-    opts.mcp_servers = {bot_mcp.SERVER_NAME: bot_mcp.build_server()}
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    opts.mcp_servers = {
+        bot_mcp.SERVER_NAME: bot_mcp.build_server(),
+        cognition_mcp.SERVER_NAME: cognition_mcp.build_server(),
+    }
     if resume:
         opts.resume = resume
     if append_system:
         opts.append_system_prompt = append_system
-
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
     sid, cost, used = resume, None, []
     # Buffer the first ~600 chars of streamed text for post-stream key-failure detection
     _text_buffer = ""
@@ -1378,6 +1528,11 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
                 pass
         return {"type": "tool_result"}
 
+    try:
+        _require_provider_start(None)
+    except ProviderStartRefused:
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
     emitted_text = False
     _stream_error: str | None = None
     try:
@@ -1437,7 +1592,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     except Exception as e:                                      # surface, don't crash the stream
         _stream_error = repr(e)[:600]
         _error_buffer = _stream_error
-        yield {"type": "error", "error": repr(e)[:300]}
+        yield public_chat_error_event()
 
     # Post-stream key-failure detection — mark_cooling so the NEXT turn rotates.
     # Always scan the TRUNCATED buffer: the final chunk can push it past 600 chars
