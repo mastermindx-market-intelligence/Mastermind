@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. The next foreground is a bounded research-assistant draft-context audit, checking whether editing or removing an @mention changes the context actually sent. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. Mastermind AI now also has an explicit draft-mention/context commitment study with desktop and six EN/ZH mobile panes, including deliberate send choices, deletion outcomes and stale-preview guards. Its original context previews and interaction board are unchanged. The next foreground is the chart reader’s lost historical-bar selection: source currently falls back to the latest bar without a deliberate adoption step. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -1038,3 +1038,123 @@ Implementation remains proposed. Runtime proof owed: select → refresh agreemen
 No permission to modify the held `marketHeatmap.ts`, `recoveredHeatmapThemes.json` or `heatmapStrings.ts` is inferred. No held F03 original, source restriction, PR hold or release control changed.
 
 This phase is complete as native design and source-owner clarification. The continuing mission immediately advances to a bounded Mastermind AI draft-context audit. Early source inspection identifies a possible gap between explicit context acceptance and a sticky draft-detected @mention; this is not yet a completed repair or a runtime finding.
+
+## Continuation — Mastermind AI draft mentions and explicit context
+
+### Exact input and source finding
+
+Current default Macro `main` resolved to `277d15c4e443cebd85d3a209c597167faa0a0c1a`. The affected file `templates/chat.html` is byte-identical to the earlier general product pin `ba32f20ba306f9e75b7c400992138e736b904516`: blob `93c56416344e6a5099308d6397bc6256d0d4d952`, 90,149 characters. Only affected source facts were refreshed; the governing Mastermind pin is unchanged.
+
+At lines 879–883 the composer listener matches against an uppercased draft value, takes the first `/@([A-Z]{1,6})/` match and immediately calls `setCtxSymbol`. The visible draft is not uppercased by that match. When the mention disappears, no corresponding clear/restore occurs. The explicit clear control calls `setCtxSymbol(null)`; `send()` later serializes the retained symbol into `context: { symbol: ctxSymbol, page: 'chat' }` on the existing `/api/brain/stream` request.
+
+Root independently retrieved that source and replayed the exact three-line input handler in isolation:
+
+| Input / action | Observed selected symbol in the replay |
+|---|---|
+| Type `@MSFT What changed?` | MSFT |
+| Remove the mention → `What changed?` | MSFT remains |
+| Type `@AAPL What changed?` | AAPL |
+| Remove the mention → `What changed?` | AAPL remains |
+| Invoke the existing explicit-clear effect, then input without a mention | null |
+
+This was a pure source-handler projection with no network/research request, not a browser or backend acceptance test. It establishes the sticky-context branch, not a production incident. The first-match regex can also consume prefixes or embedded text; it is not a security/listing qualification mechanism.
+
+Historical D14 assignment input was read at `6e1862867193ec6486a22001a0e4fb515da20448`, `research/design_candidates/production_design_20261102/handoffs/D14-ai.md`, blob `8b0b09eb527f6633aa54387fe6cf1195aa403159`. It is a design assignment reference; implementation findings above use the current affected source.
+
+### Native proposal delivered
+
+File: Mastermind AI `01M3P1QEHS5XXQY85BJT6QR2E1`.
+
+New containing page: [Proposed · Draft mention context](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-B-0), `p-B-0`. Board: `72Y-0`, **PROPOSED · Draft mentions and context · EN/ZH**, 1440px wide, auto-height.
+
+The proposal reuses the R10 Noir language and existing shared light tokens for Chinese mobile companions. Symbols and questions are illustrative. No research answer, entity-source qualification, live permission, usage receipt or server effect is invented.
+
+| Section | Native identity |
+|---|---|
+| Scope/header | `742-0` |
+| Desktop draft and review section / row | `74E-0 / 74J-0` |
+| Desktop composer / send review | `75H-0 / 76E-0` |
+| Mobile send-review section / row | `74L-0 / 74Q-0` |
+| EN Noir / Chinese light review panes | `776-0 / 77Y-0` |
+| Edit-outcome section | `74S-0` |
+| Uncommitted mention removed row / EN / ZH | `74Y-0 / 795-0 / 79T-0` |
+| Applied context persists row / EN / ZH | `750-0 / 7AW-0 / 7BK-0` |
+| Owner contract / six-card container | `752-0 / 757-0` |
+| Source and proof boundary | `759-0` |
+
+The product flow now distinguishes literal draft text, a suggested symbol, and applied symbol context visible at the send point.
+
+- A detected MSFT mention does not silently replace applied AAPL.
+- Send and Enter open the same local conflict review. **Use MSFT context** applies an eligible, still-current reviewed choice and returns to the unchanged draft without sending. **Send with AAPL context** sends the literal displayed message with precisely the displayed AAPL context for that submission. **Cancel** changes neither.
+- A deliberate comparison question is allowed. No text is rewritten or removed to make it match the attachment. With no applied symbol, the explicit action is **Send without attached context** / **不附带上下文发送**.
+- Removing an uncommitted @MSFT mention clears only the suggestion; explicitly applied AAPL remains. Removing text after explicitly applying MSFT leaves its visible context selected until Clear/change.
+- Clearing applied context while the mention remains must not be silently undone by the next input event.
+- Every complete context-style mention is evaluated. An applied AAPL match does not resolve a distinct MSFT mention in the same draft. The current single-context capability is retained; the user may deliberately send with the current context or none.
+- A review is bound to the exact candidate, reviewed draft, displayed applied context, and current conversation/access context. Changes retire it before either Apply or Send; a late preview cannot restore an obsolete decision.
+- The send path captures the displayed literal question and displayed context together. A send-with-current-context choice authorizes only that exact submission, not a persistent dismissal.
+- Use context is non-submit. Chinese IME composition and newline behavior must remain intact. Existing request admission, streaming/uncertain outcomes, source access, answer-receipt and Save/monitoring rules remain controlling.
+
+The active Apply examples explicitly assume that the existing context owner can establish eligibility for the complete identifier. A regex match does not establish that capability; unresolved/ineligible suggestions cannot receive an active Apply action. No new resolver endpoint, symbol registry, auth system, conversation lifecycle, cache or durable draft-context store is introduced. Current global `ctxSymbol` is not presented as proven per-conversation persistence.
+
+### Existing source-gap board updated, originals preserved
+
+Added note `7DH-0` to `p-9-0 / 5VN-0`, immediately after `5VT-0`. Its eight text leaves `7DI-0` through `7DP-0` record the current source pin/blob, exact pure-projection result, proposed flow and page/board locator. It expressly preserves the previous answer-evidence, incomplete-response, Chats 69–73 and Save/monitoring boundaries.
+
+Readback:
+
+| Protected/reference target | Result |
+|---|---|
+| Original desktop context preview `1ZY-0` | Full JSX byte-identical; 25 simple text leaves |
+| Original mobile context preview `1ZZ-0` | Full JSX byte-identical; 25 simple text leaves |
+| Original interaction/build board `1MO-0` | Full JSX byte-identical; 23 simple text leaves, with multiline content preserved by full comparison |
+| Source-gap board `5VN-0` | All 27 existing simple text leaves unchanged; exactly eight added leaves, total 35 |
+| New proposal `72Y-0` | 185 simple text leaves; six 390px mobile panes; 28 controls declare minimum 44px height |
+
+No mutations targeted Chats recovery `71F-0`, incomplete-answer boards `5WL-0 / 5YW-0`, held shared-shell transfers, the unnamed pre-existing page, or the warned original file.
+
+### Verification and effect receipts
+
+Root visually inspected the combined desktop, mobile conflict-review pair, both edit-outcome pairs, six-card contract, source-gap note and full board overview. No clipping was observed. Semantic review resolved stale Apply authority after draft/applied-context edits, all-mention conflict evaluation, exact uppercase-match wording and Chinese Apply-versus-Send semantics.
+
+All **32** native operations used the existing guarded Paper carrier, stable operation IDs, fresh inspected snapshots, and returned `APPLIED_RESPONSE_OBSERVED`. The composition was written incrementally into a native duplicate of the observed auto-height board on the new disjoint page.
+
+- `paper-portfolio-20261108-ai-mention-page-01`
+- `paper-portfolio-20261108-ai-mention-board-01`
+- `paper-portfolio-20261108-ai-mention-header-01`
+- `paper-portfolio-20261108-ai-mention-desktop-01`
+- `paper-portfolio-20261108-ai-mention-reviews-01`
+- `paper-portfolio-20261108-ai-mention-removal-01`
+- `paper-portfolio-20261108-ai-mention-contract-01`
+- `paper-portfolio-20261108-ai-mention-proof-01`
+- `paper-portfolio-20261108-ai-mention-desktop-pane-1`
+- `paper-portfolio-20261108-ai-mention-desktop-pane-2`
+- `paper-portfolio-20261108-ai-mention-reviews-pane-1`
+- `paper-portfolio-20261108-ai-mention-reviews-pane-2`
+- `paper-portfolio-20261108-ai-mention-reviews-pane-3`
+- `paper-portfolio-20261108-ai-mention-removed-pane-1`
+- `paper-portfolio-20261108-ai-mention-removed-pane-2`
+- `paper-portfolio-20261108-ai-mention-removed-pane-3`
+- `paper-portfolio-20261108-ai-mention-applied-pane-1`
+- `paper-portfolio-20261108-ai-mention-applied-pane-2`
+- `paper-portfolio-20261108-ai-mention-applied-pane-3`
+- `paper-portfolio-20261108-ai-mention-contract-1`
+- `paper-portfolio-20261108-ai-mention-contract-2`
+- `paper-portfolio-20261108-ai-mention-contract-3`
+- `paper-portfolio-20261108-ai-mention-contract-4`
+- `paper-portfolio-20261108-ai-mention-contract-5`
+- `paper-portfolio-20261108-ai-mention-contract-6`
+- `paper-portfolio-20261108-ai-mention-name-01`
+- `paper-portfolio-20261108-ai-mention-composer-copy-01`
+- `paper-portfolio-20261108-ai-mention-readme-note-01`
+- `paper-portfolio-20261108-ai-mention-readme-position-01`
+- `paper-portfolio-20261108-ai-mention-semantic-refinement-01`
+- `paper-portfolio-20261108-ai-mention-readme-refinement-01`
+- `paper-portfolio-20261108-ai-mention-finish-01`
+
+Scoped finish released only `72Y-0` and `5VN-0`. No uncertain effects, cross-carrier retries, application code writes, sent messages, research calls, deployment, PR-control or release changes occurred.
+
+Runtime proof remains owed for type/remove/replace and outgoing context; bare/partial, long/suffixed, embedded/email-like and multiple mentions; already-applied symbols; Cancel/Use/Clear; deliberate send with current/no context; stale review; conversation/access changes; late preview; Chinese IME; 320px/zoom/short-viewport reflow; and unchanged source-receipt/uncertain-request behavior. Paper geometry is not that runtime proof.
+
+### Reassessment and next foreground
+
+This native design/source-clarity phase is complete. The mission immediately continues to a distinct D06 chart-reader recovery gap. At the existing Terminal source pin, loss of a selected bar clears its key and the reader falls back to the latest plotted bar, also changing historical-event withholding. The current AI-attachment missing-bar proposal already covers its own boundary and must remain untouched. Next work is a disjoint reader-level specimen with explicit latest-bar adoption, current-series emptiness and existing-owner/focus constraints.
