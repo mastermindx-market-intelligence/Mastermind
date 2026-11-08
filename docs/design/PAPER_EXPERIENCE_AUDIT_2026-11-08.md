@@ -386,7 +386,7 @@ Sixteen text nodes were updated with all four native card structures, icons, 44p
 
 The new work is on [AI · Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0). Fresh inspection found a concrete distinction missing from the current client: failing to read history is different from successfully reading an empty history, and selecting a history item is different from committing it as the current conversation.
 
-Three editable native compositions were added in a free band at y=4120:
+Three editable native compositions were added. Their final measured shared-canvas placement is recorded in the later consolidation section:
 
 | Native board | Composition | Result |
 | --- | --- | --- |
@@ -489,3 +489,70 @@ The English text is **Source details unavailable**; Chinese is **来源详情暂
 Root independently read [templates/risk_radar_workspace.js](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/risk_radar_workspace.js), blob `10f21b5bcb9c2b13a5872b471677fe77ed3823c8`. It explicitly owns presentation without network requests or timers; the inspected dispatcher has view/horizon/Back/Escape behavior and no source-detail retry. This bounds the current specimen's promise; it does not assert that every other service in the wider system lacks a read capability.
 
 Root inspected all five full native renders and all five status JSX extractions, confirming correct locale/theme, no retry arrow, no link token and no action border. `risk-source-status-finish-01` finished the five new status nodes. The existing conditional retry contract remains intact. Events caption refusals, China description uncertainty and other held lanes were not touched. A future enabled retry still requires a demonstrated incumbent owner for the exact opened evidence; no fetch, polling, cache or request owner was added.
+
+## Continuation: Market Guide index units in contextual help
+
+On [Market Guide · Contextual Help + Visual Explanations](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0), the R16 compact help cards described a 56-point Risk Radar example as a probability advisory, while the existing full lesson already distinguished index points from pullback probability.
+
+Four exact text nodes were repaired:
+
+| Native card | Value node | Explanation node |
+| --- | --- | --- |
+| EN `2IL-1`, library `2HN-1` | `2IT-1`: 56 / 100 · Watch | `2J3-1`: Index points, not a pullback probability. Full guide → |
+| ZH `2MH-1`, library `2LJ-1` | `2MP-1`: 56 / 100 · 观察 | `2MZ-1`: 指数点数，不代表回撤概率。完整指南 → |
+
+Root read [engine/risk_radar.py](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/engine/risk_radar.py), blob `94222d44ec102e728da5443e2082da73ad29f17f`: the 0–100 score bands and the separate horizon-specific `_drawdown_prob` output are distinct. No score, threshold, model result, date, Watch state or automatic-exit qualification was changed.
+
+Both exact card renders and all four text readbacks passed. `guide-risk-index-finish-01` finished only the two cards. Existing full lesson `3CJ-0`, related/return work `3WC-0` onward, research-destination distinction `40P-0` onward, Evidence Matrix `3CB-0`/`3CD-0`, standalone quick-help updates and PR #7647 custody remain intact.
+
+## Continuation: International economic-source recovery
+
+On [International · Overview, Compare + Navigation](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-2-0), source-unavailable board `2EJ-0` offered Try this source again without an identified UI read/refresh operation. The existing lower card already offered navigation to price comparison.
+
+The independent source-recovery repair removes that unbound retry promise:
+
+- Headline `2F9-0`: Economic evidence is unavailable.
+- The existing retained economic timestamp remains 25 Sep 2026 · 08:00 UTC; `2FE-0` explicitly labels it Retained · Not a current assessment.
+- The existing comparison navigation was promoted into the primary 44px control. Its final label `R0Q-0` reads Open price comparison; no new comparison calculation or selection control was added.
+- `2FH-0` reads Inspect retained evidence. This specimen still assumes the displayed prior snapshot is available and permitted; it does not promise retention in every failure.
+- `2FJ-0`/`2FK-0` explain that the current selection, period and return basis remain in context, with the incumbent requirement to select another market before comparing when fewer than two remain.
+
+Sources at Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`:
+
+- [Workspace controller](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/intl_workspace.js), blob `62155676721a29a2bc65047e736b23fbba7e2f2a`, coordinates rendered views and existing state. Its inspected source contains no fetch/retry/refresh operation, and its Compare presentation distinguishes incomplete selection from missing or incompatible evidence.
+- [State owner](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/templates/intl_workspace_state.js), blob `8bbfcfd664667e0cd7febc41af0fe8cfacca1ae9`, preserves ordered selections and context, permits zero/one selections, and limits pins to four.
+- [Data contract](https://github.com/mastermindx-market-intelligence/macro/blob/0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964/docs/INTERNATIONAL_MACRO_DATA_CONTRACT.md), blob `fc2709626f979f3d09524b5486bce74adcd43366`, places bounded collection and retained parquet behavior with the existing collector. It also distinguishes a latest fetch provenance label from a successful stored-artifact receipt.
+
+Root verified the final 390px full render and 9,510-character JSX: no Try this source again text remains; the primary control fits and the clock, retained-view limit, secondary inspection and context explanation remain visible. `intl-source-recovery-finish-01` finished only `2EJ-0`. This change promotes an existing navigation path on a macro-source failure screen; it does not implement or accept a new Compare state, collector retry or runtime binding.
+
+## International comparison extension: exact historical boundary retained
+
+The separate proposed core-mobile comparison extension was not implemented or accepted. The original two-market board `2AM-0`, its JP/TW chart, values, selection controls and the existing R4/R8 comparison contract remain unchanged.
+
+Fresh native evidence identifies **Comparison operation 164** as blocked:
+
+- `RT-0` on `R0-0` retains Comparison 164 remains blocked.
+- `3U3-0` on `3TE-0` (Small Screen + Enlarged Text) says Comparison operation 164 remains blocked; archived HOLD98 is not a reviewed variant.
+
+These notes do not identify the exact target, requested mutation, original carrier, refusal category or effects. The surrounding responsive context is not sufficient to prove the proposed 390px selection/three-market work independent. History 287's unreconciled status is a separate record and was not transferred to operation 164.
+
+Bounded recovery checked the current archive directory/tree, native contracts, GitHub literal/broader searches, pinned International README/handoff/workstream, and the original Wave 1 specification archive. The archive's SHA-256 `81d04f9e10e3502532859d32557d7a91a240b2fdcfe2b294b1f30d2014a788b6` matched `INPUTS.json`; its 24 members contained no 164/HOLD98 receipt mapping. No refusal category or security denial was invented from the word blocked, and no held operation was replayed.
+
+Two temporary working copies were created before the preserved note was encountered. They never received the proposed substantive comparison changes. They were consolidated as unchanged references `QFS-0` and `QIB-0` inside clearly marked **WORKING HOLD · Not for build** atlas `QYU-0` on [ARCHIVE · Relocated Families](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-A-0). Its native auto-placement is x6240/y0, beyond the prior right edge x6160. The live journey page contains neither working copy. The wrapper explains the missing original receipt and preserves all old source IDs and holds. This is a visible work boundary, not a completed three-market enhancement.
+
+The smallest next input for this specific lane is the original operation 164 receipt or an authoritative record naming its exact effect. Independent design work continues; the whole Paper mission is not blocked.
+
+## Consolidation: measured placement and preserved design identities
+
+A placement read distinguished the adapter's active-page guard from the actual target-page result. The latter supports explicit page inventory. An inactive-page null coordinate is not proof of overlap; earlier raw placement assumptions are not retained as verified evidence.
+
+The newly authored AI states are now grouped in one native auto-placed review atlas:
+
+- [AI · Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0), atlas **`71F-0`**, x4100/y0, width2770. Prior boards end at x4020, leaving an 80px gap.
+- Row `71K-0` retains `64I-0` at1440×900 and `67G-0`, `6D4-0`, `6G6-0` at390×844.
+- Contract container `71L-0` retains `6BM-0` at1440px. All five content IDs and their native descendants remain intact.
+- Root and bounded C3 readback verified full-atlas placement, complete contract/footer, correct mobile drawer containment and unchanged dimensions. Final atlas JSX is112,737 characters. The original13 p8 top-level boards remain, alongside this one atlas. `ai-recovery-atlas-finish-01` finished the group.
+
+Terminal's current recovery directory likewise now sits in a measured native wrapper **`216F-0`**, x1560/y−580, on [Personal Desk · Build](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0). Original content `1ZLS-0` and panel `1ZHN-0` retain their IDs and copy. Native full render and root-position JSX verified the adjacent placement; `portfolio-reference-position-finish-01` finished it.
+
+The four new Options compositions A05–A08 and the two Personal Desk atlases were also found at their existing measured positions; they were not moved or rebuilt. No original source board was altered to create these wrappers. Compatible native duplication supplied blank-area placement, after which only the new owned copy was replaced with the container and the existing owned design nodes were moved into it. No held style/token tool was invoked.
