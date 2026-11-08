@@ -205,3 +205,38 @@ protected release, native selection and same-transaction recovery gates apply.
 This source edge qualifies an existing exact state from authenticated history
 and reviewed source. It does not manufacture an earlier Paper installation
 receipt or claim when the historical selection occurred.
+
+
+## Exact Tailnet forward consumers
+
+The complete native pool consumer census includes the two original Tailnet seats,
+`fabric-design` and `fabric-read`, alongside the eight original private seats.
+They use the same preserving forward transaction. Their admission retains the
+exact Tailnet V2 manifest, full module map, account, physical runtime and three-argument
+launch shape. The original and original-pin profiles remain accepted; exactly one
+reviewed future canonical manifest is added for each seat:
+
+| Account | Forward config SHA256 | Canonical manifest SHA256 |
+| --- | --- | --- |
+| fabric-design | d8224ad799b9927b43026d07f2716f63b5ecbdb41580f0eb2e15ba7a0ba84750 | a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c |
+| fabric-read | ab8443c18e485cd15107b2d87ac28455ed9754cd08dc5b6c90d24ac38a7e15c7 | 6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c |
+
+These identities are derived from authenticated original native-pin postimages
+and the qualified Go plan f13a4ada7571c3e1f5aeb025dff0f8967efb6d9b671fb3d623d2afdb074c46b9.
+Only the existing fleet launcher digest and dependent manifest config hash change.
+The canonical manifest is not learned from the installed target, and configHash
+is never ignored or normalized during profile qualification.
+
+The expanded forward cohort does not broaden the separate historical private-seat
+native-context exception. Modern standalone C3 and unknown accounts remain outside
+this transition. A target manifest alone cannot authorize startup: original history,
+committed forward completion and the selected Go successor remain required. Keep
+future-pinned seats stopped until the original Go transaction completes; then use
+normal start and real readiness/tool-path readback. Interrupted work stays on its
+original account, bundle and plan.
+
+Source-only previews must run from a complete verified source snapshot beneath
+HOME because the existing frozen Paper source reader enforces that path boundary.
+An external-volume authoring workspace is not a valid source location for those
+historical Paper checks. Preserve the guard and the original authoring/publishing
+operation; no installed controller or service is changed by a qualification snapshot.

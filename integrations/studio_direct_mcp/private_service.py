@@ -833,7 +833,7 @@ NATIVE_POOL_PIN_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-bu
 # successor pins to a qualified retained-Go application ingress. This is the
 # same cohort the incumbent native forward-selection proof already admits; it
 # is not a new roster, seat set or enrollment.
-NATIVE_POOL_PIN_FORWARD_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4'))
+NATIVE_POOL_PIN_FORWARD_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
 NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
                     'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
                     'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
@@ -891,16 +891,7 @@ NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537
 
 # Retained sealed Tailnet seats, each with only its original and exact native
 # pool-pin postimage. These are profile selectors, never an argv fallback.
-_NATIVE_POOL_PIN_TAILNET_CANONICAL = {
-    "fabric-design": frozenset((
-        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
-        "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
-    )),
-    "fabric-read": frozenset((
-        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
-        "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
-    )),
-}
+_NATIVE_POOL_PIN_TAILNET_CANONICAL = {'fabric-design': frozenset(('87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c', 'b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46', 'a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c')), 'fabric-read': frozenset(('f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb', '328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819', '6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c'))}
 
 
 

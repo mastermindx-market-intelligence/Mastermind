@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -32,6 +33,8 @@ class AdminV22ForwardTests(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def setUp(self):
+        prior_umask = os.umask(0o077)
+        self.addCleanup(os.umask, prior_umask)
         self.case = history_fixture.EnrolledRetainedReceiptTests(methodName="runTest")
         self.addCleanup(self.case.doCleanups)
         self.account = "admin-business"
@@ -45,6 +48,7 @@ class AdminV22ForwardTests(unittest.TestCase):
         self.home = svc._user_root()
         self.runtime_rel = Path(".local/share/mastermind-paper/runtime/v22")
         self.runtime = self.home / self.runtime_rel
+        self.runtime.mkdir(parents=True, mode=0o700)
         (self.runtime / "source").mkdir(parents=True, mode=0o700)
         (self.runtime / "venv/bin").mkdir(parents=True, mode=0o700)
         # External reviewed-source identity is inert; the actual runtime
