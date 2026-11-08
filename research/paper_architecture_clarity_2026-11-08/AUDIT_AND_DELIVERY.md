@@ -2,7 +2,7 @@
 
 ## Applied outcome
 
-The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide and Mastermind AI. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
+The first verified pass changed **44 artboards across 16 files**. The continuing pass has added substantive feature/state refinements to Sector, Terminal, F02, GMI, Expectation, Options, Market Memory, Guide, Mastermind AI and News. The first-pass count is retained as its original scope; it is not a cumulative claim for later work.
 
 | Current design entry | Verified continuation improvement |
 |---|---|
@@ -15,6 +15,7 @@ The first verified pass changed **44 artboards across 16 files**. The continuing
 | [Market Guide handoff](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0) | Direct entry opens explicitly scoped US research; contextual Back requires a real origin, with a separate unavailable-link state. |
 | [Market Memory comparison](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG/p-2-0) | Selected source-version unavailability preserves both record references and the exact comparison return. |
 | [Options D08C companion](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-15-0) | Explicit assessment target, new-firing notice, General assessment, receipt/revision recovery and 320px study. |
+| [News current-report recovery](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-3-0) | EN/ZH read-failure states retain the saved basis and use the existing story-detail request after a settled, eligible failure. |
 
 These are editable Paper improvements with visual/readback evidence. Proposed interactions remain explicitly qualified; source observations are not runtime reproductions or production acceptance. Existing owners, held files and release constraints remain preserved. Detailed deliveries below contain exact node IDs, sources, verification and reconciled effects.
 
@@ -55,9 +56,9 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The Chairman explicitly requested autonomous continuation beyond the initial pass. Nine material continuation lanes are verified above. Bounded next reviews examine Terminal replay recovery and News source-correction/return behavior; an existing complete contract is preserved rather than duplicated. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Ten material continuation product areas are verified above. The News current-report recovery increment is complete. Terminal replay retains D08D custody because its editable target is unconfirmed. Bounded read-only reviews now examine International, Ontology and OS decision/evidence paths for one concrete uncovered gap in each; existing complete contracts are preserved. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
 
-Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the AI interrupted-response companion are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
+Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the News current-report recovery companion are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
 ## Verified milestone — OS clarity and navigation
 
@@ -645,3 +646,65 @@ The existing Save-with-monitoring-off hold, architecture/source candidates, QA H
 Root inspected both complete new workbench artboards at native dimensions, the before-text specimen and the entire current builder board. Both desktop and mobile retain the exact draft; mobile wraps it legibly inside the original composer. All status text and controls are contained, with no clipped footer or invented successful visual. The builder addition is legible and leaves previous source/evidence/Save guidance intact. All own mutations returned observed success. `5WL-0`, `5YW-0` and `5VN-0` were explicitly released.
 
 Paper acceptance is complete for this visual increment. Runtime stream labeling, request reconciliation and evidence qualification remain implementation/consumer-proof work with their existing owners.
+
+
+## Continuation delivery 9 — News current-report failure preserves the saved basis
+
+### Grounded finding and current source
+
+The saved-story **Open current** path can fail without a visible story-detail error. Root read the existing #1207 candidate at `228c0e9b60f8b8a5818ea51e715cad12d19c7c0b`:
+
+| Existing source | Blob | Observed responsibility |
+|---|---|---|
+| [NewsCatchup.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/228c0e9b60f8b8a5818ea51e715cad12d19c7c0b/terminal/components/news/NewsCatchup.tsx) | `3d5ac82df72a8777d19c30c69cfda794be6d1de6` | Retains the original saved evidence basis, excludes out-of-order/zero drift annotation, and delegates Open current to the story-detail owner. |
+| [TickerNewsPanel.tsx](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/228c0e9b60f8b8a5818ea51e715cad12d19c7c0b/terminal/components/news/TickerNewsPanel.tsx) | `b0bc40356eec3c2d2adf9806c94d6de92c4e6862` | Existing busy/request/generation/detail-token guards; 409 refreshes. Other non-OK results return without a visible detail-error state. |
+| [news-corrected-save.spec.ts](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/228c0e9b60f8b8a5818ea51e715cad12d19c7c0b/terminal/e2e/news-corrected-save.spec.ts) | `1212851758c5605db443692fd5b9b31fe43313b0` | Existing assertions retain saved-basis equality after a changed source and Open current. Inspected, not rerun here. |
+
+The inspected reset effect does not include `userId` in its dependency list. Non-OK 401/403 responses have no dedicated visible branch in this handler. This window does **not** establish the complete account-change or rights-denial experience elsewhere. Those gaps remain explicit acceptance work; the generic retry specimen does not claim to implement them.
+
+Fresh read-only PR metadata observed #1207 open/non-Draft at the source above and #1210 open/non-Draft at `4c14600d54bd00711848a73357a66e95a3cf0d30`. Their source custody and repository controls were preserved. No product-source edit was made.
+
+### Editable Paper increment
+
+File `01M5EXPMQTSBFBAM8KKG83FTZH`, [Build & design rules](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH/p-3-0), existing fit-content board `2FG-0`.
+
+| New node | Purpose |
+|---|---|
+| `2PW-0` | Saved story → Open current recovery section, following the existing claim-comparison acceptance |
+| `2Q1-0` | English 390px conditional error: **Current reports unavailable** |
+| `2Q4-0` | Chinese 390px conditional error: **当前报道暂不可用** |
+| `2Q7-0` / `2R6-0` | Existing-owner binding and discriminating acceptance |
+| `2RB-0` | Immutable source note/link and inspection-versus-execution qualification |
+
+English copy: **We couldn’t load the current reports. Your saved evidence basis is unchanged.** Action: **Try again**. Chinese copy and **重试** preserve the same meaning. No claim is made that an inaccessible report was withdrawn or retracted.
+
+The new state is conditional on a settled, retryable read failure for the same current owner and context, while present access still permits the read. A historical rights receipt records the saved basis; it does not authorize current display. Denial, owner change and invalidated context keep their guarded outcomes and do not receive this generic retry.
+
+Try again performs one existing story-detail read after the prior request settles. Opening, failing, retrying or returning neither marks the story reviewed nor overwrites its saved basis. Keep the selected story, scroll, permitted evidence context and review state. Preserve 409 → refresh, revalidate owner/access/selection and discard late invalidated results. Runtime proof must cover these guards, deep equality of the saved basis, unchanged review state, focus and a story-specific status announcement.
+
+The previous Northwind claim-comparison contract, “Scope unverified” finding and acceptance remain unchanged. The independently reorganized Product / States & user help / Build & design rules pages were preserved.
+
+### Effect reconciliation and visual proof
+
+The initial eligibility paragraph operation `paper-enhance-20261108-c4-news-current-reports-binding-eligibility` returned **DOCUMENT_CHANGED**, with `retry_allowed=false`. The original target was read on the same carrier and still contained only its existing heading. No requested paragraph appeared. Classification: **GUARD_REFUSAL_TARGET_UNCHANGED**, not an uncertain applied effect.
+
+After that exact-target read, the root replanned a complete binding block with a fresh file preflight and a distinct operation. The refused paragraph operation was not replayed. The replanned block and source footer returned observed applied responses.
+
+Both native-width recovery cards and the entire final `2FG-0` board were visually inspected. English/Chinese text and 44px actions fit, and the full contract remains legible without clipping or overlap. All eight attempted operation outcomes are reconciled: seven observed applied operations, including the explicit finish of `2FG-0`, and the one known unchanged-target guard refusal. No unresolved own effect remains.
+
+The layouts are editable design evidence. The proposed error/retry behavior and current-owner access fencing are not implemented runtime proof.
+
+## Continuation audit — D08D replay recovery retains its existing owner
+
+The bounded replay audit found a source problem but no confirmed editable replay target. The existing [D08D README](https://github.com/mastermindx-market-intelligence/Macro/blob/44af2f06661b75142a244e4fcad1f88eb80e080b/research/design_candidates/production_design_20261102/d08d/README.md), blob `47fedb66160a45e1f6d0d7343bcb4612e99d5c54`, retains **PARTIAL / BLOCKED_RETURN**, proposed native file/page/artboard IDs of **null**, and the original denied empty board `1N2L-0`. It preserves D08B/D08C and the existing Draft/noReady/noMerge/noEnqueue/noRelabel/noDeploy boundaries.
+
+This is a source-recorded custody/reference gap, not a new denial of the current Paper tool. No action was taken against `1N2L-0`; no substitute replay board or second contract was created.
+
+Root also read current Terminal source at `f0af84bbd6c28c2f6477bd8ffc031903979023bd`:
+
+- [Typed client](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/lib/largeTrades/client.ts), blob `e751a58ac2dbd3dd3681560704a824855fa1f34f`, distinguishes signed out, access denied, rate limited, invalid, error and unavailable.
+- [Mounted replay reader](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/f0af84bbd6c28c2f6477bd8ffc031903979023bd/terminal/components/futures/IexDepthReplayView.tsx), blob `8bdf3fa5268f2fd6f4e028ff663ca4cd8ad3981f`, collapses every non-ready result into unavailable and shows the missing-archive message. A sign-in failure can therefore be mislabeled as missing coverage. This is source analysis, not a live reproduction.
+
+D08D already specifies access recovery and the independent replay owners. Its next native specimen should discriminate trusted signed-out status from denied/rate-limited/source outcomes, clear protected evidence, and use the existing account owner. That remains with the incumbent D08D work until a valid target is established.
+
+A prior possible criticism was withdrawn: **Refresh source already calls `setIndex(-1)`**, so current ordinary refresh resets to latest. The audit does not claim that it silently preserves an old index.
