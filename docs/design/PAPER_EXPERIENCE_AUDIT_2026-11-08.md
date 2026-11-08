@@ -2,6 +2,25 @@
 
 Operation: `paper-experience-audit-20261108-c3`.
 
+
+## Current design review map
+
+This map points to the editable designs and current continuation sections. All compositions remain design-level work with their recorded candidate, source and integration qualifications. The first-wave counts and inventory below are historical coverage, not a current portfolio-wide acceptance claim.
+
+| Review area | Native destination and visible improvement |
+| --- | --- |
+| Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return and A07/A08 narrow navigation. |
+| Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
+| AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
+| OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
+| Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
+| News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
+| Analytical provenance | [Expectation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) qualifies missing units/selected examples; [Ontology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) distinguishes page comparison from answer evidence. |
+| Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
+| International | [Current journey](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-2-0) exposes existing comparison navigation from source failure; [archive](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-A-0) retains unaccepted comparison references and operation 164's boundary. |
+| Prophet and Sector | [Prophet R7 studies](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0) qualify stale-data entry; [Sector compare](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0) uses rank semantics and explicit percentage-point gaps. |
+| Foundation | [F02](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN): bounded review retained existing state/evidence/return contracts; no new global mechanism or acceptance. |
+
 ## Delivered outcome and scope
 
 The assigned goal was to audit and improve the existing Paper designs, especially architecture, feature coherence and clarity. This first wave produced verified edits in **six existing Paper files**: content or interaction specimens on **13 boards**, plus clearer names and ordering for existing pages in Prophet and Sector Intelligence. The authored work includes **63 existing text-node updates**, four section-navigation compositions, one interaction-contract addition, two ineligible-action replacements and a preserved-node assessment reorder.
@@ -600,3 +619,28 @@ Both return-comparison headlines `FEN-0` / `FQK-0` now read **Energy leads Techn
 At Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`, `engine/sector_pulse.py` (blob `cf2e658f0baa73a884311ed0c7ae09f6c8e7da63`) computes historical rank minus current rank; positive means rank improved, and missing history returns no delta. `templates/si_workspace.js` (blob `2c7667c39b5a2a5171b5ef036ef45206fb0702fc`) counts the signs of `pulse_rank_delta_5d` and describes movement up/down the ranking. Root independently read both exact source excerpts and the current desktop/mobile JSX before editing.
 
 All 17 text changes read back exactly. Focused map, movement-strip and mobile-headline renders show readable wrapping; the complete long mobile board retains all sections and its footer. `sector-rank-clarity-finish-01` finished only the two comparison boards. Existing builder `BML-0`, qualified/unavailable model cells, historical priors, return contract `GPI-0`, and review-only clock canary `G4P-0` were preserved. This is native design correction; the fixture is not validated live market evidence.
+
+
+## Prophet R7: unavailable entry is not revocation or quote-only recovery
+
+On [Opportunity studies · R7/R8 reference page](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0), only the admitted R7 specimens `Y6V-0` (CRDO stale quote) and `W0A-0` (Early leadership lens) were changed. Seven text corrections remove an unsupported promise that a fresh quote alone would restore entry:
+
+- `Y81-0` / `W3L-0`: **A new quote isn’t enough**.
+- `Y8Y-0`: the last quote is 11:42 ET, tonight's plan is unavailable, entry cannot be confirmed, and Oct 17 levels remain dated context.
+- `Y99-0`: a new quote does not renew the assessment or plan; the same setup must pass all required checks.
+- Leaf text `Y7Z-0` / `W3O-0`: **Entry unavailable**, replacing Entry revoked.
+- Leaf heading `Y8X-0`: **Why entry is unavailable**.
+
+At Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964`, `engine/prophet_daily_brief.py` (blob `0c560dda74c8df951ed093ae52747eb28a4097a9`) joins the latest quote without renewing B4 clocks or recomputing/promoting its state. A stale/unavailable quote or unavailable required assessment/evidence/supplied plan withholds the displayed decision while retaining the separate B4-owned state. This is not evidence of revocation of a prior clearance. `engine/prophet_entry_availability.py` (blob `d49899fa4a3fbb201fc0161b3df3b933c1f075f9`) checks active identity/lifecycle, quote freshness/basis, source health, session/event eligibility and incumbent entry/risk/liquidity/invalidation conditions. Price inside the zone alone is insufficient.
+
+Root read both source files, refreshed both native JSX compositions, verified all seven final text nodes and inspected the complete 390px stale-quote board plus the lens state. Content-growing panels remain readable, and the complete source-date/footer section remains visible. `prophet-stale-entry-finish-01` finished only these two R7 specimens.
+
+The illustrative prices, quote/plan clocks, **Stage: Ready, Oct 20**, Oct 17 original-plan path, Save/Compare and Today controls remain unchanged. No polling, retry, assessment, trade or persistence owner was added. The existing setup detail's missing holding horizon remains missing: B4's `2_15_SESSIONS` new-entry availability horizon does not supply a holding period. Held `ZE5-0` / R8 uncertainty, first-wave entry order, comparison-only and concurrent work were preserved.
+
+## OS sidebar: mark proposed recent entries as examples
+
+A focused follow-up on `SD8-0` changed only heading `SGC-0` to **RECENT · EXAMPLE**. The illustrated Work visibility and Terminal sources rows remain unchanged; neither was silently rebound to a new project action. This qualifies the target-shell fixture without implying a second mounted history feed beside the newly qualified current-conversation list.
+
+The pinned `App.tsx` sidebar renders primary navigation and Work & Context / Advanced, not these Recent rows. `docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md` at Mastermind `5c3d3885234358aefb97ecdbc59be0864df14f8b` (blob `8be040d1c66c416bb259467c66fc932d4bc81678`) treats the five-destination shell as target design and says a topic title/recent row is insufficient conversation identity. Root read the actual source and the exact specification excerpt. The newer mounted list implementation takes precedence over the spec's historical absence-of-list baseline; it still does not enumerate history.
+
+The 200px sidebar group renders the complete qualified heading. JSX readback preserves both entries. `os-shell-example-finish-01` finished only `SD8-0`; no shared-shell rewrite or other OS board was included.
