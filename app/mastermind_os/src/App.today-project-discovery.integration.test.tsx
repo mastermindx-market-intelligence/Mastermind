@@ -47,8 +47,8 @@ async function setup(){
  const calls=(command:string)=>invoke.mock.calls.filter(([name])=>name===command);
  return{state,client,host:composed.host,view,calls,invoke,notify:(name:string,payload:unknown)=>{for(const listener of listeners.get(name)??[])listener({payload});}};
 }
-function todayRow(){const region=screen.queryByRole('region',{name:'Your projects',exact:true});return region?within(region).queryByText((_text,node)=>node?.classList.contains('today-faint')===true && node.textContent?.startsWith(workRef)===true)?.closest('li')??null:null;}
-async function acquiredToday(){const e=await setup();await projects();e.state.stage='N';fireEvent.click(screen.getByRole('button',{name:'Refresh Projects'}));await waitFor(()=>expect(newCard()).not.toBeNull());fireEvent.click(screen.getByRole('button',{name:'Today',exact:true}));await waitFor(()=>expect(todayRow()).not.toBeNull());return e;}
+function todayRow(){const region=screen.queryByRole('region',{name:'Your projects'});return region?within(region).queryByText((_text,node)=>node?.classList.contains('today-faint')===true && node.textContent?.startsWith(workRef)===true)?.closest('li')??null:null;}
+async function acquiredToday(){const e=await setup();await projects();e.state.stage='N';fireEvent.click(screen.getByRole('button',{name:'Refresh Projects'}));await waitFor(()=>expect(newCard()).not.toBeNull());fireEvent.click(screen.getByRole('button',{name:'Today'}));await waitFor(()=>expect(todayRow()).not.toBeNull());return e;}
 function newCard(){const browser=document.querySelector('.project-archive-browser');return browser?within(browser as HTMLElement).queryByText(workRef)?.closest('li')??null:null;}
 async function projects(){fireEvent.click(screen.getByRole('button',{name:'Projects'}));await screen.findByText(actual.programs.control_room.work[0].work_ref);}
 
@@ -58,9 +58,9 @@ describe('Today uses the same qualified current project catalogue',()=>{
   e.state.stage='N';fireEvent.click(screen.getByRole('button',{name:'Refresh Projects'}));
   await waitFor(()=>expect(newCard()).not.toBeNull());
   const readsAtReload=e.calls('read_programs').length;
-  fireEvent.click(screen.getByRole('button',{name:'Today',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'Today'}));
   expect(e.calls('read_programs')).toHaveLength(readsAtReload);
-  const today=await screen.findByRole('region',{name:'Your projects',exact:true});
+  const today=await screen.findByRole('region',{name:'Your projects'});
   const row=within(today).queryByText((_text,node)=>node?.classList.contains('today-faint')===true && node.textContent?.startsWith(workRef)===true);
   expect(row).not.toBeNull();
   expect(within(row!.closest('li')!).getByRole('button',{name:/Open project/})).toBeTruthy();
@@ -70,10 +70,10 @@ describe('Today uses the same qualified current project catalogue',()=>{
   expect(e.calls('read_mission_v3')[0][1]).toEqual({selection:{work_ref:workRef,root_job_id:rootJobId}});
   fireEvent.click(await screen.findByRole('button',{name:'Project details'}));
   const panel=await screen.findByRole('region',{name:'Project details'});
-  fireEvent.click(within(panel).getByRole('button',{name:'Plan',exact:true}));
-  const planOwner=within(screen.getByRole('region',{name:'Inspect Plan',exact:true}));
+  fireEvent.click(within(panel).getByRole('button',{name:'Plan'}));
+  const planOwner=within(screen.getByRole('region',{name:'Inspect Plan'}));
   expect((await planOwner.findByText((_text,node)=>node?.classList.contains('mm-project-plan__objective')===true && node.textContent===actual.selected_plan.plan.objective)).textContent).toBe(actual.selected_plan.plan.objective);
-  fireEvent.click(screen.getByRole('button',{name:'Today',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'Today'}));
   await waitFor(()=>expect(todayRow()).not.toBeNull());
   expect(e.calls('read_programs').length).toBeGreaterThanOrEqual(readsBefore);
   expect(await e.host.commandBinding!.store.read(executiveScope)).toBeNull();
@@ -82,7 +82,7 @@ describe('Today uses the same qualified current project catalogue',()=>{
  it('opens the genuine rootless configured project as catalogue details without creating a Mission',async()=>{
   const e=await setup();await projects();
   const configuredWork=actual.programs_before.control_room.work[0].work_ref;
-  fireEvent.click(screen.getByRole('button',{name:'Today',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'Today'}));
   const region=await screen.findByRole('region',{name:'Your projects'});
   const row=within(region).getByText((_text,node)=>node?.classList.contains('today-faint')===true && node.textContent?.startsWith(configuredWork)===true).closest('li')!;
   fireEvent.click(within(row).getByRole('button',{name:/Open project/}));
@@ -114,6 +114,6 @@ describe('Today uses the same qualified current project catalogue',()=>{
   const changed=structuredClone(actual.programs);changed.canonical_projects[0].source_observation.project_data.data_observation.canonical_data_commit='f'.repeat(40);
   await act(async()=>e.state.hold!.resolve(changed));
   await waitFor(()=>expect(screen.getByRole('button',{name:'Refresh Projects'}).hasAttribute('disabled')).toBe(false));
-  fireEvent.click(screen.getByRole('button',{name:'Today',exact:true}));expect(todayRow()).toBeNull();expect(e.calls('read_mission_v3')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button',{name:'Today'}));expect(todayRow()).toBeNull();expect(e.calls('read_mission_v3')).toHaveLength(0);
  });
 });
