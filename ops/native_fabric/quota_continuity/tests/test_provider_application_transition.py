@@ -619,8 +619,26 @@ def maintenance_guard_provider_stage(tmp_path_factory):
     root = tmp_path_factory.mktemp("provider-maintenance-input").resolve()
     base = materialize_fixed_parent(root / "base")
     stage = root / "provider"
-    compose.compose(base, stage, profile_name="current116-maintenance-guard")
-    files = json.loads((compose.HERE / "maintenance_guard/profile.json").read_bytes())["files"]
+    profile_bytes = (
+        ROOT / "rollout/provider_application/maintenance_guard/native40-profile.json"
+    ).read_bytes()
+    profile = json.loads(profile_bytes)
+    files = builder.provider_maintenance_guard_files()
+    assert profile["files"] == files
+    assert profile["source_map"] == {}
+    profile_root = root / "profile-source"
+    (profile_root / "maintenance_guard").mkdir(parents=True)
+    (profile_root / "maintenance_guard/profile.json").write_bytes(profile_bytes)
+    original_here = compose.HERE
+    for row in profile["patches"].values():
+        patch_bytes = (original_here / row["patch"]).read_bytes()
+        assert g.digest(patch_bytes) == row["patch_sha256"]
+        patch_path = profile_root / row["patch"]
+        patch_path.parent.mkdir(parents=True, exist_ok=True)
+        patch_path.write_bytes(patch_bytes)
+    with mock.patch.object(compose, "HERE", profile_root):
+        compose.compose(base, stage, profile_name="current116-maintenance-guard")
+    assert compose.HERE == original_here
     assert {name: g.digest((stage / name).read_bytes()) for name in files} == files
     assert files == builder.provider_maintenance_guard_files()
     return SimpleNamespace(root=root, stage=stage, files=files)
@@ -770,8 +788,8 @@ MAINTENANCE_SOURCE_INPUTS = [
     "../provider_plans/profile.json",
     "../provider_plans/remote_placement/profile.json",
     "../provider_plans/patches/pick_remote_plan_modes.forward.patch",
-    "../provider_plans/maintenance_guard/profile.json",
-    "../provider_plans/maintenance_guard/provenance.json",
+    "rollout/provider_application/maintenance_guard/native40-profile.json",
+    "rollout/provider_application/maintenance_guard/native40-provenance.json",
     "../provider_plans/router_admission.json",
     "../provider_plans/maintenance_guard/lease_broker.py.patch",
     "../provider_plans/maintenance_guard/remote_sub_exec.py.patch",
@@ -786,6 +804,7 @@ def test_maintenance_retained_source_commitments_fail_closed(tmp_path, path, fau
         destination = root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes((ROOT / relative).read_bytes())
+    assert builder.provider_maintenance_guard_files(root) == builder.provider_maintenance_guard_files()
     target = root / path
     if fault == "changed":
         target.write_bytes(target.read_bytes() + b"\n")

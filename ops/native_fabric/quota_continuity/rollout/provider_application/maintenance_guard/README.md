@@ -42,3 +42,9 @@ incompatible with remote placement; this composition does not qualify H2.
 
 Building or publishing this source does not select a native generation, forward
 an account, install Hermes, grant a service, or prove a provider turn.
+
+## Fixed native40 metadata
+
+The native40 composition retains byte-exact profile and provenance inputs from protected commit efab46368e13e9553e489cb61a58ca28055df175. The original profile blob is dabfec5279fc44dd397125227038295eb7a9a50c and the provenance blob is 5596ac2f29437d3a110522280c8037eb34042f24. Their existing SHA-256 commitments remain unchanged.
+
+The current provider-plan maintenance profile can advance independently. The native40 builder and historical fixture consume native40-profile.json and native40-provenance.json here, so a newer plan cannot silently change the selected predecessor or replace the five retained provider payloads. The original composer, fixed-parent fixture, current maintenance plan, patch checks and complete source-map checks keep their existing owners.

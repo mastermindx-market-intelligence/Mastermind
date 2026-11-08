@@ -891,11 +891,11 @@ def provider_maintenance_guard_files(root=None):
     """Authenticate the complete installed cohort from protected retained sources."""
     root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
     profile = json.loads(_provider_source(
-        root.parent / "provider_plans/maintenance_guard/profile.json",
+        root.parent / "quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json",
         "2d5fc0601e711def977fc2b5a32dcc2942ac10b98acfa25a2c797964f94af606"))
     _provider_source(root.parent / "provider_plans/router_admission.json",
                      "84542fddbccc8cc59ad8ae6b85bb78ccc4c078e6c61a73f9c9f0af3711123e17")
-    _provider_source(root.parent / "provider_plans/maintenance_guard/provenance.json",
+    _provider_source(root.parent / "quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json",
                      "419bd6764301890e062c9265db8e307b06527253c80c43b91793c552618f17d2")
     record, providers, _ = provider_remote_placement_record(root)
     files = profile.get("files")
