@@ -177,3 +177,31 @@ bridge before any bootstrap/kickstart. Consume actual outcomes and qualify the
 new C2 tool path before releasing the native return carrier. The source protocol
 and temp-seat tests do not prove host quiescence, service health, provider
 readiness, native OAuth, a canary or product acceptance.
+
+
+## Admin status followed by reviewed Paper v22
+
+The admin-business forward predecessor also recognizes the exact reviewed v22
+Paper selection after its completed enrollment and fleet-status successor. It
+authenticates the original native-pin, enrollment and status transactions through
+the existing historical-pair and status owners, then derives the successor from
+those retained bytes. Only the three existing Paper runtime fields and the
+manifest configHash change. Every other configuration field, module and receipt
+remains binding. The live manifest is never learned as a new predecessor.
+
+The private runtime verifier admits only the reviewed v22 path and bridge SHA
+af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b, already
+accepted by the Paper runtime staging owner. Its ownership, permissions, receipt,
+source identity and executable checks remain in force. The runtime is rechecked
+at each forward qualification and completed-forward startup.
+
+At startup and reconciliation the supplied pair is the retained forward
+preimage. The forward owner separately verifies the installed pair, whose pool
+pin has legitimately advanced. The Paper composition does not rewrite any
+historical transaction, install a runtime, stop or start a service, or add an
+ordinary pre-forward status-start exception. Existing per-seat quiescence,
+protected release, native selection and same-transaction recovery gates apply.
+
+This source edge qualifies an existing exact state from authenticated history
+and reviewed source. It does not manufacture an earlier Paper installation
+receipt or claim when the historical selection occurred.

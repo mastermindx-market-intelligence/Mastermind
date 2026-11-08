@@ -1679,17 +1679,24 @@ def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> 
     }
 
 
+PAPER_RUNTIME_V22_REL = Path(".local/share/mastermind-paper/runtime/v22")
+PAPER_RUNTIME_V22_BRIDGE_SHA256 = "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b"
+
+
 def _verify_paper_runtime(
     user_root: Path, *, expected_sha: str | None = None,
     runtime_rel: Path | None = None, rel: Path | None = None,
 ) -> dict:
     # One owner, two reviewed callers: M1 uses runtime_rel; C2 uses rel.
+    if runtime_rel == PAPER_RUNTIME_V22_REL or rel == PAPER_RUNTIME_V22_REL:
+        if (runtime_rel != PAPER_RUNTIME_V22_REL or rel != PAPER_RUNTIME_V22_REL
+                or expected_sha != PAPER_RUNTIME_V22_BRIDGE_SHA256):
+            raise SystemExit("Paper v22 requires the exact reviewed runtime and bridge")
+
     if runtime_rel is not None and rel is not None and runtime_rel != rel:
         raise SystemExit("Paper runtime conflicting generation selectors")
     runtime_rel = runtime_rel or rel or PAPER_RUNTIME_REL
-    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL,
-                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL,
-                           PAPER_RUNTIME_V10_REL):
+    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL, M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL, PAPER_RUNTIME_V10_REL, PAPER_RUNTIME_V22_REL):
         raise SystemExit("paper runtime generation is not an admitted target")
     if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
         fixed_sha = M1_PAPER_V5_BRIDGE_SHA256
