@@ -2,7 +2,17 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. Mastermind AI now also has an explicit draft-mention/context commitment study with desktop and six EN/ZH mobile panes, including deliberate send choices, deletion outcomes and stale-preview guards. Its original context previews and interaction board are unchanged. D06 now also has a reader-recovery proposal that keeps an unavailable exact bar from silently becoming Latest, aligns reader and overlay behavior, and preserves selection through empty/refill. F03 now also indexes those three proposals through twelve exact source observations, with candidate/entry roles preserved and each observation's limits exposed in HTML builder detail and generated Markdown. The notes and directory integration are committed and byte-read back; 160 return/identity checks, 83 directory source probes and 26 structural checks pass. D25 Guide now also has a six-pane EN/ZH return-clarity proposal, six corrected compact-help footers, source-aligned probability horizons and accurate dashboard action labels across all eight full Risk Guide variants. The original entry is unchanged, and every existing-board copy diff is bounded and verified. The next foreground is D22 Portfolio: inspect the current recovery additions and source contract before selecting a distinct unresolved feature gap. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman authorized continuing autonomous improvements across Paper. This remains an active portfolio mission. The latest completed native phase is **D18 Crypto relative-comparison basis**: three proposed boards add a selected-asset inspector, EN/ZH paired-history states and a source-bound build contract. All eight original R4 boards match exact before/after JSX; no runtime or public-route acceptance is claimed.
+
+Completed earlier native slices remain retained: Options changed-list review, Market Memory comparison, Prophet selection/identity/watch outcomes, OS project-opening recovery, News source return, International scanner-to-dossier context, Policy source notes, GMI public-company evidence, Sector comparison returns, Company benchmark availability, Heatmap reading refresh, AI draft context, chart-reader recovery, Guide return/horizon wording, Portfolio object/valuation boundaries, exact Watchlist destination, Catalyst manual-condition copy and the bond curve’s change-versus-level labels. Their exact targets, source pins, operations and verification are recorded in the dated sections below.
+
+**F03 source integration is at fourteen observations.** The latest published directory commit is `9be3e7a68722b9a738ddd8d78c0eb920330e6c7b`: D22 Portfolio and D25 Guide are discoverable by their exact native identities and source labels. All prior twelve observations are retained. The affected checks passed: **191 return/identity, 98 directory VM and 26 structural checks**. Source and artifact bodies were read back exactly. Browser verification remains unproven after the prior preview connection failure.
+
+The new D23 Watchlist and D18 Crypto studies are **not yet integrated into F03**. The local execution path became unavailable; the directory has not been hand-edited into an unverified generated state. Native Paper and canonical GitHub publication remain working. Existing original-file warnings, draft/merge holds, denied deployment lanes and unknown-runtime boundaries continue to bind.
+
+Bounded reviews of **D16 Forex, D17 Commodities, D19 China and D20 Hong Kong/Canada** found their inspected semantics already qualified. No redundant redesign was added. Their specific coverage and limits are preserved below and in the bounded-review evidence.
+
+The next independent foreground is **D09 flows/ownership and D11 research-library context**. Read-only triage has started; root will select and implement only a concrete unresolved native gap, preserving existing owners and accepted work.
 
 ## Assignment and evidence boundary
 
@@ -1830,3 +1840,81 @@ Five artifacts accompany this amendment under `docs/design/evidence/paper_portfo
 [Macro PR #9578](https://github.com/mastermindx-market-intelligence/Macro/pull/9578) was freshly observed open, non-draft, at head `34a32ff08b9e8296863668440adb208feac126f2`, with **merge-blocked** and no auto-merge. Its controls and source were untouched. No endpoint, market data refresh, save, trade, alert, browser-production proof or deployment was exercised.
 
 The prior Catalyst correction is durably published at **`65df2d032cc45ac6f2aa7ab1788affc7d7f79f6f`**; its four UTF-8 bodies, two native image path/blob identities and branch head matched readback. D15 completion advances the audit to current Forex designs. F03 remains truthfully at fourteen observations; D23 integration still needs a functioning affected build/verification path.
+
+
+## Continuation — D18 exact relative-comparison basis, 2026-11-08
+
+### Completed native study
+
+The [Crypto proposed comparison page](https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-3-0), file **`01M6Y3F0NXNDPAKJMJGCAD759Z`**, page **`p-3-0` — Proposed · Relative comparison basis**, now contains three editable 1440×1200 boards:
+
+| Board | Design contribution |
+|---|---|
+| **`2XH-0`** | Selected-asset comparison-basis inspector; retained R4 illustrative readings, unknown paired window and source details, and an explicit limit on cross-asset ranking. |
+| **`2YI-0`** | 390px EN and ZH insufficient-history specimens, plus a 320px dark ZH unknown-basis specimen. Valid asset evidence stays usable. |
+| **`2ZJ-0`** | Existing owner and R4 consumer map; current versus proposed fields; independent paired-window examples; source-clock and return-context requirements. |
+
+The existing R4 Markets board `8E-0` labels the metric “90D vs Bitcoin,” shows SOL **+8.8%** and ETH **+2.6%**, and says the comparison has the same horizon with an observation date of 15 October. This phase does **not** establish those illustrative values are wrong. It resolves the missing way to inspect whether their actual paired start/end dates and source bases support the implied comparison.
+
+The new desktop specimen retains those readings as **R4 illustrative examples**, orders assets by name, and displays the paired window, observations used and Bitcoin source as unprovided. The asset source is separately marked unattached to this specimen; that does not deny the existing owner’s asset-source field. The method explanation names the asset/BTC price ratio and 90 shared observation steps, not a percentage-point difference between two returns.
+
+### Source behavior verified at both current main and actual R4 candidate
+
+At Macro **`5eb1603edb4486f06c74df7c43a1082427a59b6e`**, [`engine/eth_state.py`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/engine/eth_state.py), blob **`481c04ad243c11abd8482a22b1845be1cd2a518d`**, establishes the following:
+
+- `_relative_state` joins each asset with Bitcoin by normalized daily labels, drops unmatched observations and requires **91 common observations**.
+- It forms the asset/BTC ratio and compares positional observations `[-91]` and `[-1]`: **90 shared observation steps**. Missing shared dates can make that interval longer than 90 calendar days. ETH and SOL are calculated independently.
+- Each asset’s `as_of` is its own latest observation. The contract’s aggregate `as_of` is the **maximum asset observation date**, not a matched relative-window end.
+- Asset and Bitcoin histories independently fall back from Coinbase to Yahoo. Asset source is emitted in `coverage.source`; selected Bitcoin source, paired start/end dates and common-observation counts are not emitted.
+- A relative result can be null while price and independently supported asset evidence remain available. Generic “Building history” alone does not disclose a precise common count or distinct cause.
+
+The current publication path is [`scripts/build_crypto.py`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/scripts/build_crypto.py), blob `f88a01545af0ef634f7ab947e90471a59513c081`, which writes `crypto_asset_states.json` and maps the existing asset lanes. The public [`templates/crypto.html.j2`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/templates/crypto.html.j2), blob `0c657a1b1d7eaa41faa2edb14ec110878c0601bc`, is not the R4 side-by-side comparison table.
+
+The actual R4 candidate was then checked at [Macro PR #9580](https://github.com/mastermindx-market-intelligence/Macro/pull/9580), head **`5e496c24c962e85a4f7f514dd43dc61443b95cab`**. It remains **open, draft, unmerged, without auto-merge**. Its `engine/eth_state.py` blob is exactly the same as current main. [`lib/crypto_intelligence_view.py`](https://github.com/mastermindx-market-intelligence/Macro/blob/5e496c24c962e85a4f7f514dd43dc61443b95cab/lib/crypto_intelligence_view.py), blob **`44d47c10fd9e39762d5304fc0bacbc29bf511e41`**, copies relative results and asset dates but does not add the missing paired metadata. Its existing [R4 drawer and comparison script](https://github.com/mastermindx-market-intelligence/Macro/blob/5e496c24c962e85a4f7f514dd43dc61443b95cab/templates/crypto_intelligence_r4.js), blob **`ff46d4408d243bcebb8e6cac95167b4a6ef933c4`**, preserves individual asset dates while referring to the same published horizon and defaulting the market sort to relative value. This is evidence of the remaining basis gap, not proof of a current production interaction.
+
+The proposed supplement reuses this existing R4 projection, builder and drawer. It introduces no second state owner, endpoint, source selector or client-side return calculation. The R4 source branch, draft status and release controls were not changed.
+
+### State and clock distinctions delivered
+
+**Insufficient paired history:** The EN/ZH fixture has **120 independent asset observations**, **82 common asset/BTC dates available**, and **91 required**. It keeps the valid asset price and access to asset evidence, while the relative result remains unavailable. It does not show a zero bar or assign leading/tracking/lagging status. The count and distinct reason are explicitly proposed receipt fields; they must not be inferred from the current generic source state.
+
+**Missing basis with a retained result:** The 320px ZH specimen retains SOL’s **+8.8% R4 illustrative reading**, while the window, common count and Bitcoin source remain unprovided. A bounded review caught an earlier ambiguity that had shown a dash here. It was corrected with exactly three text substitutions. Missing paired metadata alone must not silently become a missing relative value; the unavailable-history and unverified-basis cases now remain distinct.
+
+**Different window endpoints:** The builder fixture uses ETH/BTC **10 July–8 October** and SOL/BTC **17 July–15 October**, each with 91 observations used and 90 steps. Both are complete daily-series examples. Asset observation dates are separately shown as 8 and 15 October; the paired endpoints happen to match those dates in this fixture. Aggregate `as_of` is 15 October because it is the latest **asset** date. That does not extend ETH’s paired window to 15 October. A separate sentence explains how missing shared dates can lengthen a 90-step span.
+
+**Return behavior:** The existing R4 “Inspect evidence” entry is the proposed opening point. Closing retains the selected asset, filter and source-snapshot context. This is a design contract, not executed browser or focus-return proof.
+
+### Preservation and validation
+
+All eight original R4 boards — `1-0`, `4B-0`, `8E-0`, `BB-0`, `EF-0`, `G5-0`, `HX-0` and `QI-0` — **exactly matched their complete before/after JSX**. The original page name, 991-node count and complete artboard metadata matched. Original values, responsive references, source-state studies, alert-delivery boundary and public-route cutover gate remain intact. The archive received no mutations; no full archive audit is claimed.
+
+The new page contains **255 nodes** across three non-overlapping 1440×1200 boards. Root inspected all three final native captures and the corrected mobile capture; no clipping or collision was observed. Computed native styles verify **twelve action frames with minimum height 44px** and phone widths **390 / 390 / 320px**. The final exports contain no undefined/NaN/Infinity placeholders or literal escaped newlines.
+
+There were **56 distinct APPLIED_RESPONSE_OBSERVED operations and zero unknown effects**, including specific-node finish operations and the three-leaf compact-state correction. Source code and production data were read only. No endpoints, live account actions, trades, saves, alert activation, deployments, runtime tests or production acceptance were exercised.
+
+Nine D18 evidence files accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d18_crypto/`: the three full new-board JSX exports, the eight-board original preservation corpus, the source/operation evidence JSON, three final native JPEGs and the original R4 Markets capture. The primary exports are [basis inspector](evidence/paper_portfolio_20261108/d18_crypto/relative-basis-inspector.jsx), [paired-history states](evidence/paper_portfolio_20261108/d18_crypto/paired-history-states.jsx) and [existing-owner contract](evidence/paper_portfolio_20261108/d18_crypto/existing-owner-window-contract.jsx). Original JPEG bytes are carried directly through Git blob creation and path/SHA readback; no independent local digest or decoded binary-body readback is claimed.
+
+## Continuation — bounded reviews that preserve qualified work
+
+These reviews deliberately stop at the inspected questions. **No new repair was established**, so no duplicate native specimen or saved-object owner was added. The findings are not blanket acceptance of the products or their runtime behavior.
+
+| Domain | Current native references | Existing qualifications retained |
+|---|---|---|
+| **D16 Forex** | [Source Revisions, p-1](https://app.paper.design/file/01M6Y4CC5V5NZ92G3A0X3XZN3B/p-1-0): `8BD-0`, `9UA-0`, `AV5-0` | Assessed JPY versus literal USD/JPY; 164 bp level versus −6 bp change; 1.64 pp interest-rate differential versus covered-return inputs; future watch-lifecycle qualification. |
+| **D17 Commodities** | [Current reference page](https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0): `4OS-0`, `4VP-0`, `4LS-0`, `158-0`, `36B-0`, `473-0` | Research snapshot versus live quotes; price versus physical coverage; seasonal inventory/causality limits; held exact-curve qualification; existing clocks, AS_SAVED and revision requirements. |
+| **D19 China** | [R2 sector/company](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-3-0): `1EQ-0`, `1IM-0`; [Hub command](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-3-0): `KE-0` | Hong Kong listing/HKD basis; synthetic return series; illustrative listings versus full basket; source universe versus excerpts; holdings changes versus returns; model checks and unavailable onshore/offshore result. |
+| **D20 Hong Kong / Canada** | [Regional page](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-2-1): `DC-0`, `P9-0`, `1WY-0`, `255-0` | HK dated design sample and unknown quote time; absent change history without invented exits; Canada screen membership versus entry permission; unavailable current quotes; retained 320px ZH meaning and wrapping. |
+
+D16’s page reports 101 artboards, but the basic-info and root listings return 100. The omitted final lifecycle board was **not retrieved or certified**. The inspected implementation index supplies the relevant future-behavior qualification. Current source was checked at Macro `5eb1603edb4486f06c74df7c43a1082427a59b6e` in the existing R26 workspace, script and builder; historical #9996 deployment denial and proof limitations were not reopened.
+
+For D17, current `carry_vm` does not return a clock in the inspected object. That alone does not establish a new native defect or an actual consumer contradiction. The current native contract already holds exact exchange-curve qualification and preserves incumbent carry limitations. Those real source/receipt dependencies remain with their existing owners.
+
+D19’s finding does not certify all 48 R2 boards or all China routes. Its source handoff itself requires current-head reconciliation and actual incumbent bindings. D20’s visual result covers two desktop captures inspected by root and two 320px ZH captures inspected by the bounded reasoning reviewer; root independently read all four selected JSX. Native readability does not prove live freshness, interactions, focus behavior or production accessibility.
+
+[Bounded findings](evidence/paper_portfolio_20261108/bounded_reviews/no-new-gap-findings.json) and [eleven complete selected native reference captures](evidence/paper_portfolio_20261108/bounded_reviews/native-reference-excerpts.json) preserve the exact review scope.
+
+### Continued foreground
+
+D15’s three-label repair was canonically published at **`a3231285025440e83b2b3613d9d8935304154dbf`**. Its four UTF-8 bodies, two image path/blob identities and branch head matched readback. The audit’s opening continuation status is now refreshed to the actual latest work; its obsolete “next D22” statement and earlier F03 check totals no longer describe the current frontier.
+
+The independent next lanes are **D09 flow/ownership clarity** and **D11 Research saved-context clarity**, whose read-only triage is active. F03 still has fourteen observations. D23 and D18 integration await a functioning affected build/verification path, rather than unverified generated-output edits.
