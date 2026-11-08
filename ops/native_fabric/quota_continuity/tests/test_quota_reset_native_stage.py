@@ -73,13 +73,15 @@ def test_complete_emitted_generation_preserves_exact_parent_and_source_provenanc
         raw = (output / "native-code-stage" / relative).read_bytes()
         assert builder.sha(raw) == digest == inventory["files"][relative]["sha256"]
         assert len(raw) == inventory["files"][relative]["bytes"]
+    expected_preimages = {
+        **builder.QUOTA_RESET_PREIMAGES, **builder.QUOTA_RESET_COMPOSED_PREIMAGES}
     for name in builder.QUOTA_RESET_PATCHES:
         row = inventory["files"]["ext/" + name]
-        assert row["composition"]["preimage_sha256"] == builder.QUOTA_RESET_PREIMAGES[name]
+        assert row["composition"]["preimage_sha256"] == expected_preimages[name]
         assert row["composition"]["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
         assert row["source"] == "candidate/" + name
     dependencies = json.loads((output / "external-go-component/component.json").read_bytes())
-    assert dependencies["dependencies"]["lease_broker.py"]["sha256"] == builder.QUOTA_RESET_DIGESTS["lease_broker.py"]
+    assert dependencies["dependencies"]["lease_broker.py"]["sha256"] == builder.QUOTA_RESET_COMPOSED_DIGESTS["lease_broker.py"]
     assert dependencies["native_stage_dependencies"] == {
         name: actual["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
 
@@ -159,6 +161,9 @@ def copy_sources(tmp_path):
         shutil.copyfile(ROOT / "candidate" / name, root / "candidate" / name)
         suffix = ".patch" if name in builder.QUOTA_RESET_PATCHES else ""
         shutil.copyfile(ROOT.parent / "grok47/quota_billing" / (name + suffix), overlay / (name + suffix))
+    # Copied candidates are the reviewed maintenance-composed parent.
+    # Establish that valid fixture before any intentional source mutation.
+    builder.quota_reset_sources(root, composed_parent=True)
     return root, overlay
 
 
@@ -170,7 +175,7 @@ def test_changed_reviewed_source_refuses_before_any_stage_write(tmp_path, surfac
               "overlay": overlay / "quota_remote.py"}[surface]
     target.write_bytes(target.read_bytes() + b"\n# unqualified drift\n")
     with pytest.raises(ValueError, match="quota reset source digest"):
-        builder.quota_reset_sources(root)
+        builder.quota_reset_sources(root, composed_parent=True)
 
 
 @pytest.mark.parametrize("member", sorted(builder.QUOTA_RESET_DIGESTS))
@@ -181,7 +186,7 @@ def test_exact_bytes_through_symlink_are_not_a_qualified_source(tmp_path, member
     source.rename(retained)
     source.symlink_to(retained)
     with pytest.raises(ValueError, match="regular file"):
-        builder.quota_reset_sources(root)
+        builder.quota_reset_sources(root, composed_parent=True)
 
 
 @pytest.mark.parametrize("part", ["component", "stage"])
