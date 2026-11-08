@@ -1,0 +1,63 @@
+{
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+  "license": "MIT",
+  "license_file": "../../../../hermes_qualification/native_eval_inputs/UPSTREAM_LICENSE",
+  "proof_scope": "Pinned resolver, reasoning profile and original admission/retirement source; config, credentials and service remain explicit fixture edges.",
+  "files": {
+    "hermes_cli/runtime_provider.py": {
+      "fixture": "hermes_cli__runtime_provider.py.source",
+      "sha256": "d60a99f56c55f1d0b41f7d9f0b812625eb0339fe96b6ac19861831ca1c4aaa43",
+      "git_blob": "6ca7ec061c98d08c4a7ed464bc793c2335452eb6",
+      "bytes": 74610
+    },
+    "hermes_cli/runtime_provider_custom.py": {
+      "fixture": "hermes_cli__runtime_provider_custom.py.source",
+      "sha256": "bab0e7b68ce96dfd9fdea4aaad4f0e1b697c2e80917195b2d7bc5c5934285972",
+      "git_blob": "908516b0b47e98f4b35699a17ffedf9e22b57469",
+      "bytes": 39405
+    },
+    "hermes_state_runtime.py": {
+      "fixture": "hermes_state_runtime.py.source",
+      "bytes": 56549,
+      "git_blob": "516e3ea46152226e320dc0b6236e6af0b2a00ccb",
+      "sha256": "1553a9e5091413092dd30d7613b9aaa7338919bfc5a5d3ac3f4cf8c57de4411b"
+    },
+    "hermes_state_mutation_retirement.py": {
+      "fixture": "hermes_state_mutation_retirement.py.source",
+      "sha256": "bee966ed661abdadf4dec5556e371a17fb06c1ceef58ad51f0e62b847ac0fe73",
+      "git_blob": "0e3afdb7d3fa450963e86e8fb3bb20edca2a47d0",
+      "bytes": 25909
+    },
+    "plugins/model-providers/custom/__init__.py": {
+      "fixture": "plugins__model-providers__custom____init__.py.source",
+      "sha256": "e0bebb5675726793c87be3ba12d2cce088742106c852f142bcdf74f1d0156d98",
+      "git_blob": "2858553dc8c7d3004d87de813504894ee94ac932",
+      "bytes": 5349
+    },
+    "agent/reasoning_effort.py": {
+      "fixture": "agent__reasoning_effort.py.source",
+      "sha256": "050b8d56b474f24aaa0a63e542554f0382ffc49431ba769133157f617e5a8c6f",
+      "git_blob": "550f77659ee633495a4432c13cdd136542928fde",
+      "bytes": 15571
+    },
+    "providers/base.py": {
+      "fixture": "providers__base.py.source",
+      "sha256": "b948b1369e80690fe36bbedef5c5d4871c748bc34a0e31a64fc012fb5c99f0b1",
+      "git_blob": "5995a833a39173b88f25fcdcf7cdd20f2b82e0db",
+      "bytes": 21489
+    },
+    "hermes_state_common.py": {
+      "fixture": "hermes_state_common.py.source",
+      "bytes": 74542,
+      "git_blob": "c31526f02c6516cdd25cd611df8a388098564366",
+      "sha256": "1e089e97c9440647a91e0c559d9a7691c61290cc72a0c337ccfcd1c39d97b1b7"
+    },
+    "hermes_state_schema.py": {
+      "fixture": "hermes_state_schema.py.source",
+      "bytes": 83019,
+      "git_blob": "c83e6b21566121ec5c39f1a2893a6d7921aa036c",
+      "sha256": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37"
+    }
+  }
+}

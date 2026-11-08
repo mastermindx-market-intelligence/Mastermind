@@ -72,6 +72,8 @@ _CONFIGURATION_INTEGRITY_REASONS = frozenset(
         "TEMPORAL_CUTOFF_MISMATCH",
         "CORPUS_REVISION_MISMATCH",
         "SOURCE_POLICY_DIGEST_MISMATCH",
+        "REQUIRED_OBSERVATION_UNAVAILABLE",
+        "OBSERVATION_COVERAGE_INCOMPLETE",
     }
 )
 _EFFECT_INTEGRITY_REASONS = frozenset({"EFFECT_UNKNOWN", "UNAUTHORIZED_EFFECT", "EFFECT_REFERENCE_MISMATCH"})
@@ -205,12 +207,17 @@ def build_technical_integrity_scorer_pass(
     pass for one immutable run. Uses run validity/reason_codes ONLY -- it
     never claims broad task correctness or product usefulness."""
     reasons = set(run["validity"]["reason_codes"])
+    observation_gaps = sorted(reasons & {
+        "REQUIRED_OBSERVATION_UNAVAILABLE", "OBSERVATION_COVERAGE_INCOMPLETE"})
+    output_evidence = [] if run["evidence"]["output"] is None else [dict(run["evidence"]["output"])]
     dimension_results = []
     for dimension in sorted(DIMENSIONS):
         bucket = _DIMENSION_REASON_BUCKETS[dimension]
         matched = sorted(reasons & bucket)
-        status = "FAIL" if matched else "PASS"
-        evidence_refs = [] if status == "PASS" else [dict(run["evidence"]["output"])]
+        status = "FAIL" if matched else "UNKNOWN" if observation_gaps else "PASS"
+        if status == "UNKNOWN":
+            matched = list(observation_gaps)
+        evidence_refs = [] if status == "PASS" else list(output_evidence)
         dimension_results.append(
             {"dimension": dimension, "status": status, "reason_codes": matched, "evidence_refs": evidence_refs}
         )
@@ -227,7 +234,8 @@ def build_technical_integrity_scorer_pass(
         ),
         "method": "DETERMINISTIC",
         "input_evidence": sorted(
-            [dict(run["evidence"]["output"]), dict(run["evidence"]["tool_events"])],
+            [dict(run["evidence"][key]) for key in ("output", "tool_events")
+             if run["evidence"][key] is not None],
             key=lambda item: item["artifact_ref"],
         ),
         "dimension_results": dimension_results,
@@ -769,7 +777,8 @@ def build_scorer_pass_document(
     assembles and validates the closed document. ``build_technical_integrity_
     scorer_pass`` is left untouched above and does not use this helper, to
     keep this an additive change with zero risk to its existing behavior."""
-    input_evidence = input_evidence if input_evidence is not None else [dict(run["evidence"]["output"])]
+    input_evidence = (input_evidence if input_evidence is not None else
+                      [] if run["evidence"]["output"] is None else [dict(run["evidence"]["output"])])
     fields = {
         "scorer_pass_id": scorer_pass_id,
         "run_id": run["run_id"],
