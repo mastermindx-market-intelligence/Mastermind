@@ -1751,3 +1751,45 @@ Final publication requires exact text and canonical path/blob readback; binary-b
 ### Next safe work
 
 D23's exact resolver still needs implementation and real consumer proof. The F03 source directory remains at fourteen observations; adding this proposal is not yet claimed and will use its existing model only when the affected build/verification path is available. The independent native/source audit continues with the next actual Alerts/Catalyst decision gap, after inspecting its existing design and source semantics. Local environment loss does not erase completed native work, justify repeated edits or stop available independent lanes.
+
+## Continuation — D24 Catalyst local-condition clarity, 2026-11-08
+
+### Completed correction
+
+The [Catalyst condition specimen](https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0), exact board **`BU-0`** in file **`01M6Y2VTQBVC9NA39HNG1DYWFH`**, now describes a **local research condition for manual review**. Its previous future-crossing promise contradicted the same specimen's disclosure that it did not monitor prices or send alerts.
+
+Only five text leaves changed:
+
+| Leaf | Previous | Current |
+| --- | --- | --- |
+| `BX-0` | Watch a precise condition. | Save a research condition |
+| `C0-0` | Bring this case back when | Condition for manual review |
+| `C6-0` | Promised that a new valid crossing brings the case back | Retains the last-example-close qualification, asks the reader to review manually when new evidence is available, and preserves the no-execution-order meaning |
+| `C7-0` | Local-save disclosure without resolving the automatic-return promise | Explicitly names a local-save design specimen with no future-close monitoring, notifications or automatic case return |
+| `CC-0` | Save condition | Save locally |
+
+The full before and after copy is retained in the [exact edit receipt](evidence/paper_portfolio_20261108/d24_catalyst/local-condition-copy-evidence.json). The illustrative **EX-A / Aster Bio**, daily-close predicate, USD, **39.60**, Cancel action, node identities, layout and every other observed JSX byte are preserved.
+
+### Why the existing account alert cannot be silently substituted
+
+At Terminal `b38d93c2cc8d05f9f5c29598a3691304330ffee6`, the [ordinary alert form](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/b38d93c2cc8d05f9f5c29598a3691304330ffee6/terminal/components/AlertsView.tsx), blob `b89ce3fa8bacc6aa9706bc7e4c3e4b6d4c61b9ef`, constructs a `type: price / op: below / value` rule. It does not carry the Catalyst case or a daily-close-crossing basis.
+
+The [existing evaluator](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/b38d93c2cc8d05f9f5c29598a3691304330ffee6/ingest/alerts_engine.py), blob **`b7fc3cb44110642c2c4ba641785039de9e9994c1`**, makes the distinction concrete. `Data.last` uses a live quote when available and otherwise the persisted manifest EOD last. The ordinary price branch compares that value with the threshold and returns no crossing-state transition. This is not proof of a new finalized daily-close crossing, recurring condition evaluation or automatic Catalyst-case return.
+
+The account owner remains `terminal/app/api/alerts/route.ts`, blob `c1b9c801ff1605b233d5e81bd98f9b027da2fe40`; existing monitoring/delivery presentation remains `terminal/lib/alertsView.ts`, blob `3fab363a38aeb25c1041149d06aaf13ef45e5187`. No new alert type, evaluator, store, route, queue or account effect was introduced.
+
+The inspected Macro production template and script at `0242fc6a26d733160fc0e3d9fc710d32508cd030` — blobs `1aa725115a959f0de0f7f0ac288c976497c4e0ca` and `ba5e4b2356012cc429cd3600ceff44b5b3d7ddea` — are clinical-trial investigation surfaces. They did not establish this R1 specimen's local condition-save owner. Bounded source discovery did not establish that owner, so **local persistence and any future monitored handoff remain unverified**. The native copy says “design specimen” rather than claiming an exercised implementation.
+
+### Concurrent writer protection and proof
+
+Before any mutation, fresh JSX reads showed replacement node IDs and style changes on `1-0 / 3F-0 / 6F-0 / 9T-0 / EV-0 / AP-0`. The broader twelve-leaf edit plan was never dispatched. The unchanged `BU-0` specimen was reread and the work narrowed to its five explicit leaf IDs. Other boards were not targeted; this correction makes no whole-file or other-board preservation claim.
+
+The final BU-0 export is **exactly equal to its before export with the five intended text substitutions**. Root inspected the 450×620 native after screenshot: headings, condition, amount, qualification and both actions remain visible without clipping. The text correction and scoped finish both returned **APPLIED_RESPONSE_OBSERVED**; there are **two distinct operations and zero unresolved effects**. Finish targeted BU-0 only. No extra tests were created for this reversible copy correction.
+
+Five native evidence files accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d24_catalyst/`: complete [before JSX](evidence/paper_portfolio_20261108/d24_catalyst/condition-before.jsx), [after JSX](evidence/paper_portfolio_20261108/d24_catalyst/condition-after.jsx), original before/after JPEG captures and the exact edit/source evidence JSON. The JPEG blobs were created directly from the original Paper base64; no reconstruction, independent local digest or decoded binary body readback is claimed while local execution is unavailable.
+
+### Prior publication readback and continued work
+
+The D23 study and twelve artifacts are canonically published at **`a365475fb389ef2645f5ef29c9f0b23ac0a46179`**. All seven UTF-8 bodies, including the full audit, matched exact readback; all eleven precomputed asset identities matched their published paths. D23 evidence JSON is `ec071bd26b65d7210e50b70d001f6c27e00c724b`; the audit at that commit is `03f647ba52c51281044348f7f8f85b8d2237acca`. The branch head matched. Binary-body fetch remains unsupported and was not retried.
+
+No live listing, price/account endpoint, alert, save, localStorage effect, notification, trade, held PR or deployment was exercised by this Catalyst phase. Existing source and native holds remain intact. The next independent audit lane is D15 bonds/credit/cross-asset, using fresh relocation pointers and the actual yield/credit source owner. F03 D23 integration still awaits a functioning affected build/verification path; the directory remains truthfully at fourteen observations.
