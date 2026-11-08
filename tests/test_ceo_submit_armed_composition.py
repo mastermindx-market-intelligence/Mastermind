@@ -816,6 +816,11 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
         return True
+    # Squid's exact fixed HTTPS-port ACL is a source-reviewed service-port
+    # policy, not an OS UID/GID or peer identity. The identity guard otherwise
+    # rejects every modified value or line shape; this is not a port wildcard.
+    if stripped == "acl tls_only port 443" and token_text == "443":
+        return True
     if _line_mentions_identity_name(line):
         return False
     # Recognize only the mode slot of this closed shell statement shape.
@@ -880,6 +885,19 @@ def _scan_identity_source_lines(
         except (IndentationError, tokenize.TokenError):
             continue
     return flagged
+
+
+def test_d8_fixed_vendor_tls_port_is_not_an_os_identity():
+    """Only the exact reviewed Squid TLS ACL has a 443 network-port exception."""
+    assert _scan_identity_source_lines(["acl tls_only port 443"]) == []
+    for line, number in (
+        ("acl tls_only port 444", "444"),
+        ("acl tls_only port 450", "450"),
+        ("acl api_user port 443", "443"),
+        ("acl tls_only uid 443", "443"),
+        ("acl tls_only port 443 extra", "443"),
+    ):
+        assert number in _scan_identity_source_lines([line]), line
 
 
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
