@@ -445,10 +445,8 @@ def _retained_file_modes(roots, plan):
 def _preserved_runtime(svc, roots, raw):
     before = manifest_from(raw["manifest.before"])
     for name, h in before["files"].items():
-        if name == MODULE or (name in ("git-publish.mjs", "workspace-access.mjs")
-                             and publisher_composed):
-            continue
-        if digest(svc._fabric_release_bytes(roots["base"] / name)) != h:
+        if name != MODULE and digest(svc._fabric_release_bytes(
+                roots["base"] / name)) != h:
             fail("OTHER_MODULE_CHANGED")
     if (digest(svc._fabric_release_bytes(roots["plist"])) != before["plistHash"]
             or svc._stable_regular_file_hash(
