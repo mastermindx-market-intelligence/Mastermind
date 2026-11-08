@@ -17,7 +17,7 @@ This map points to the editable designs and current continuation sections. All c
 | Company navigation | [Existing family chooser](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1): 5ML keeps its complete family structure, with explicit44px Close/Lab target containers `22UE-0` / `22UH-0` around the original visuals. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
-| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): light/dark failed-update and pending-update states plus the combined query/stage result label38.0 as Research index while retaining the distinct dated, update and filter contexts. |
+| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): failed/pending/filter states now identify the Research index. [Research-list detail returns](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-5-0) add EN/ZH filing companions `7QG-0` / `7SY-0` with their actual list origin. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
 | Analytical provenance | [Expectation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) qualifies missing units/selected examples; [Ontology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) distinguishes page comparison from answer evidence. |
 | Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
@@ -1114,3 +1114,43 @@ Verification also proves:
 - C14 contains the correct5.40/2.00 entries and no old SVG,320/680 output or603.20 breakeven. C15 contains no operative Use control.
 
 All edits and scoped `options-scenario-flow-finish-01` returned **APPLIED_RESPONSE_OBSERVED**. Current final JSX sizes are C11:9,392; C12:10,435; C13:10,434; C14:11,419; C15:4,994 characters. This is editable design and build-contract proof, not keyboard/ARIA/runtime callback proof, qualified producer output, account admission or production acceptance. Original C06, D08D and Plan#804 release holds, candidate status and foundation qualifications remain preserved.
+
+
+## Intelligence Hub: company evidence returns to its originating research list
+
+The existing contract already reuses company detail from both the China Hub overview and the published research list, but the visible000030.SZ filing specimens still named only the Hub as their return. Root added the two missing list-origin compositions while preserving the original command-origin details and all source content.
+
+| Locale | Origin and actual Evidence invoker | New detail on p5 | Visible changes |
+| --- | --- | --- | --- |
+| Light EN | List59 **`2OW-0`**, full row02 `2Q6-0`, button **`2QG-0`** | **`7QG-0`**, x3290,y5525,390×1875 | Breadcrumb **Research results / Filing context** (`7SM-0`); **← Back to your research results** (`7QM-0`, control`7QL-0`). |
+| Light ZH | List93 **`4KM-0`** on p6, full row02 `4LW-0`, button **`4M6-0`** | **`7SY-0`**, x3760,y5525,390×1733 | Breadcrumb **研究结果 / 公告解读** (`7V4-0`); **← 返回研究结果** (`7T4-0`, control`7T3-0`). |
+
+These remain the exact000030.SZ record, source position02,27 September2026 snapshot. The pictured list examples have an empty query and All stages. Their captured values must not become defaults for another query, filter, snapshot, language or theme.
+
+### The existing contract and preserved filing facts
+
+Root read current native build-map nodes **`4J-0`** and **`4K-0`** plus published-list paragraph **`7U-0`**. They explicitly map row02 to existing detail49, require the existing48/49 details to support origin59, extend Chinese93 to existing51/52, and preserve actual query, stage, source, scroll, focus, language and theme. Direct entry without an origin retains the China Hub fallback. The precise return target is the surviving Evidence button, not heading group2Q7 or decorative ticker text.
+
+The source is the already verified historical command fixture at Macro **`bb310311b716ac3c7db7b7ed64d40039dd02bff7`**, path `site/china_intel/command.json`, blob **`692e0238c7c500ca2fa1d5ae73ccf2c54af3a878`**. Root inspected `command[1]`: ticker000030.SZ, the notice **关于举办2026年半年度网上业绩说明会的公告**, publication `2026-09-03T00:00:00+08:00`, visitor fields `not_yet_available`, and relative reference **`finalpage/2026-09-03/1225543087.PDF`**. Publication date remains distinct from the missing meeting date. An indexed briefing notice does not establish participants or institutional buying.
+
+The original numerical evidence remains unchanged: price return−7.55%, CSI300-relative reading−3.80%, distance from observed high−32.41%, opportunity index73.1 and existing numeric edge measure93.1. Four desks without readings, early model stage and unavailable entry checks remain. No original PDF body or validated download was fetched or fabricated.
+
+### Return through source inspection
+
+New source invokers **`7RM-0`** EN and **`7U4-0`** ZH retain **Find the original filing / 查找公告原文**. The existing disclosure consumer must carry the exact listing, indexed notice and actual list context. Returning from source inspection first restores the company evidence and its source invoker; closing company evidence then restores the originating list's Evidence control. An external document is not implicitly another local modal. This creates no router, history store, document viewer or automatic refresh.
+
+Top Close (`7SI-0` / `7V0-0`), Escape and the named Return share the actual origin contract. If owner/context or row identity no longer permits exact return, use the incumbent named research-results fallback, preserve current-owner privacy, and do not silently substitute newer evidence.
+
+### Native build note and clipping repair
+
+The source-linked note is **`7VG-0`**, inside its clearly named supplemental board **`7XY-0`** on [p2](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0), x6080,y2519,width1440 with content-driven height. It extends the existing4K/7U contract with the exact new native targets; it is not a separate navigation owner.
+
+An initial append under6S was present in JSX but rendered outside that parent's fixed2439px clipping boundary. Root diagnosed the actual computed height, then moved only the newly owned note into the new content-sized wrapper. The same7VG and all its children were retained. Original6S was read back exactly equal to its complete24,147-character pre-edit JSX. The wrapper is80px below6S and its complete rendered note is visible. No original contract, source/score section, page or held board was replaced or resized.
+
+### Verification and remaining scope
+
+Root inspected both complete390px detail renders and the final1440px build note. In each duplicated detail, inverse-mapping the generated node IDs and masking only the breadcrumb and return text makes the full JSX identical to its original. Original1SC (22,347 characters) and1XR (23,015) also read back unchanged. New EN is22,361 characters; new ZH23,015. Native p5 inventory grew17→19, and both added details are nonoverlapping with all existing boards.
+
+The native controls retain the original44px Close, source and Return geometry; root separately read the exact44×104 origin Evidence controls. All operations, including the initial scoped finish and the subsequent clipping repair/finish, returned **APPLIED_RESPONSE_OBSERVED** with known effects. No unknown mutation or replay remains.
+
+This closes the **000030.SZ / light EN–ZH / list-origin representation** gap. It is not completion of every7U case:000829.SZ, dark, filtered and prior-snapshot origins remain governed by the shared contract and their own records. Actual document access, navigation, browser back-stack, keyboard focus and refresh behavior still require consumer proof. p4/p5/p6 remain candidate_unqualified; held p7, source-only p8 and all other writers' structures are preserved.
