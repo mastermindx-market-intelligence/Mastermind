@@ -1,6 +1,6 @@
 {
   "owned_code_and_report_delta": "PASS",
-  "patch_and_receipt_bytes_preserved": true,
+  "whole_diff_returncode": 2,
   "retained_whitespace": [
     {
       "path": "integrations/hermes_qualification/native_eval_inputs/guard.patch",
@@ -13,12 +13,9 @@
     {
       "path": "ops/native_fabric/provider_plans/maintenance_guard/remote_sub_exec.py.patch",
       "reason": "byte-exact accepted patch context whitespace"
-    },
-    {
-      "path": "review_evidence/hermes_h4/root-source-join-20261108/root-publisher-cohort-02.log",
-      "reason": "byte-exact retained pytest failure log",
-      "sha256": "75ff9d4951fe1ac3ed67846ca30fbf3321202318a63b430e6923daa1a8cccf63"
     }
   ],
-  "whole_diff_returncode": 2
+  "patch_bytes_preserved": true,
+  "test_logs_retained_in_existing_local_artifacts": true,
+  "log_sha256_preserved_in_json_receipts": true
 }
