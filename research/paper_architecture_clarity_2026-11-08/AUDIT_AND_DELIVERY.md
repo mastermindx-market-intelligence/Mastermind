@@ -58,7 +58,7 @@ PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD: design architecture and customer-faci
 
 ## Current frontier
 
-The Chairman explicitly requested autonomous continuation beyond the initial pass. Twelve material continuation product areas are verified above. Policy’s expanded numeric disclosure and Ontology’s qualified receipt windows are complete. International’s inspected detail/filter/return/recovery journey and the OS Decision/Evidence path already cover the examined states; they were preserved. Terminal replay retains D08D custody because its editable target is unconfirmed. Bounded reviews now examine the remaining Hub, Risk Radar and Prophet journeys for grounded, disjoint gaps. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
+The Chairman explicitly requested autonomous continuation beyond the initial pass. Twelve material continuation product areas are verified above. Policy’s expanded numeric disclosure and Ontology’s qualified receipt windows are complete. International’s inspected detail/filter/return/recovery journey and the OS Decision/Evidence path already cover the examined states; they were preserved. Terminal replay retains D08D custody because its editable target is unconfirmed. The Hub’s apparent board-label mismatch is resolved as distinct US and China destinations. Bounded reviews now examine Risk Radar, Prophet and one shared component reference for grounded, disjoint gaps. Further edits require a fresh target read and a concrete uncovered gap; accepted designs are not redone merely to extend the pass.
 
 Canonical evidence is in [PR #2302](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2302). The PR is source delivery, not a master merge, application implementation or release. All own Paper effects through the Policy and Ontology refinements are reconciled and the affected artboards released. PLAN_NOT_ORG_LINKED remains a continuity-surface limitation, not a design permission gate. No background runner is commissioned.
 
@@ -789,7 +789,7 @@ Explanation `ACU-0` says: **Lookbacks count positions in each source series, not
 
 The selected evidence date **25 Sep 2026**, selected path, corrected snapshot answer, composer, unverified-recovery card, exact-return rules, R22/R23/R24 references and `4V9-0` / `4VA-0` release-held annotation remain unchanged.
 
-Root inspected the final 390px matched card and full R25 board. The four readings and windows are legible, the shared explanation wraps cleanly, and the fit-content card contains the composer and footer. Five own edit operations plus explicit finish returned **APPLIED_RESPONSE_OBSERVED**. No data value or precision was changed.
+Root inspected the final 390px matched card and full R25 board. The four readings and windows are legible, the shared explanation wraps cleanly, and the fit-content card contains the composer and footer. Four edit operations plus explicit finish returned **APPLIED_RESPONSE_OBSERVED**. No data value or precision was changed.
 
 ## Continuation audit — preserve covered International and OS journeys
 
@@ -813,3 +813,18 @@ Root read [the pinned Daily Flow Spec](https://github.com/mastermindx-market-int
 The fresh advisory inventory found **90 artboards across canonical pages 12–12D**: 23 daily, 18 Projects & Evidence, 12 Decisions, 21 Meta-CEO and 16 Sessions. This is an artboard count including indexes/contracts/states, not 90 distinct product screens. The first-pass count of 86 was its earlier observation. AT34/AT35’s four concurrent boards were preserved.
 
 Root read the current directory `KSG-0`: **Current product screens · Desktop and mobile**. It no longer carries a numeric total, so no count edit was needed. No OS canvas amendment was made in this continuation audit.
+
+
+## Continuation audit — Hub market destinations are intentionally distinct
+
+The earlier Buy-Board / Stocks Board terminology question is resolved. Root verified the actual destination bindings at Macro `03e4d374026943e9b455811656fe4d5e4d86f71a`:
+
+| Paper context | Current label | Existing source destination |
+|---|---|---|
+| US overview `86-0`, label `9R-0`, legend `G4-0` | Buy-Board | US desk key `standout` → `us_stocks.html` |
+| China evidence `1PU-0`, desk `1QX-0`, next action `1S4-0` / `1S6-0` | Stocks Board | China desk key `stocks` → `china_stocks.html` |
+| China return `1S8-0` | Back to the China command | Existing market-specific return specification |
+
+Sources: [US Hub template](https://github.com/mastermindx-market-intelligence/Macro/blob/03e4d374026943e9b455811656fe4d5e4d86f71a/templates/intelligence_hub.html.j2), blob `ee55a0e96712dc7c623e21a3c0915c2a078a8abc`; [China Hub template](https://github.com/mastermindx-market-intelligence/Macro/blob/03e4d374026943e9b455811656fe4d5e4d86f71a/templates/china_intel.html.j2), blob `b7045f7abac8e9ac2e095597cc8665bfd7dd569c`. The latter also names China Stocks Board in its market-board links.
+
+No common rename was applied. This proves separate board destinations, not exact-listing deep links or runtime return restoration. The current Paper brief preserves the two product owners. AXON `157-0`, its `AP-0` unavailable state, source-only material and QA canaries remain untouched; no substitute evidence destination was created.
