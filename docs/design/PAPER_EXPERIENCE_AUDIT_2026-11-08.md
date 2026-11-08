@@ -12,6 +12,7 @@ This map points to the editable designs and current continuation sections. All c
 | Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return and A11's separate source-default Tape filter draft. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
+| Company Financials | [D07 task studies](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0): unavailable Quarterly is explicit while the selected annual value, period and evidence remain intact. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
@@ -736,3 +737,27 @@ The supported premium thresholds remain0/100K/250K/500K/1M/5M. DTE and moneyness
 The complete390×844 render shows every field, the less-visible state summary, Reset/Apply and the device safe area without clipping. JSX verifies the fixture copy,44px controls, fixed viewport dimensions, x9160 placement, absence of317 and absence of observation1082. Fresh A04 JSX is unchanged. A09/A10, all previous source values and the held D08D target are untouched.
 
 F03 status `1NEJ-0` now adds **A11: Tape filter draft · source-default fixture**, retaining the A05–A10 line, provisional B/C status and all D/review holds. The final status render/readback is complete. `flow-phone-filter-finish-01` finished only A11 and that directory text. No actual preset, filter URL, account setting or application state was written. Keyboard/software-keyboard, multi-select menus, long locales, Apply/Cancel behavior and real result handling remain implementation proof obligations.
+
+
+## Company Financials: unavailable cadence preserves the annual selection
+
+On [D07 Company · Read me and Build contract](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-11-0), existing Financials Studies **C `1NJL-0`** and **D `1NMQ-0`** now qualify the unavailable Quarterly cadence. Their synthetic fixture supplies two annual periods and `statements.quarterly: null`; current source disables an unavailable cadence instead of opening an error or empty-result route.
+
+The two ordinary outlined Quarterly wrappers `1NKM-0` / `1NOM-0` were replaced with quiet48px **Quarterly / Not supplied** states **`22AD-0`** / **`22AH-0`**. Their108px slots, neighboring Annual/history controls and all primary geometry remain. Existing selection paragraphs `1NMO-0` / `1NND-0` retain their original text and add: **Quarterly statements are not supplied in this fixture; Annual remains selected.**
+
+Study C still selects Revenue **FY2024,100.0 USD m**; Study D still selects **FY2025,120.0 USD m**. Each keeps its own12-month period, filing/acquisition clocks, synthetic document-unavailable explanation and exact Revenue/FY return. Reported-zero EPS and missing EPS remain distinct. No new request, retry, alternate-series calculation or navigation owner was introduced, and no unavailable Quarterly transition is implied.
+
+### Exact evidence and qualification
+
+| Source | Pin / blob | Finding |
+| --- | --- | --- |
+| `d07/paper/task-study/fixtures.json` under the design-candidates package | Macro `da8df94d647f06b34e5a7a743f147980e627e854`; `b6e54cf182c898fe15d3074a266111f2c1a705b6` | Explicit SYNTHETIC_CONTRACT_EXAMPLE; ticker FIXTURE; equal-duration annual FY2024/FY2025, revenue100m/120m USD; quarterly null. |
+| `d07/paper/task-study/README.md` at the same design path/pin | `9cdd40259c41d62692395854ea90da0aabb74546` | C/D are editable provisional task studies; missing cadence requires honest coverage and retained Annual selection. Their original static review is not runtime or foundation acceptance. |
+| `terminal/components/fin/StatementsPage.tsx` | Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`; `77cbdad052503a5158cae882ad77bd69614abaca` | Independently resolves available bases and renders Quarterly with `disabled={!interimAvailable}`. |
+| `terminal/lib/finStatementMath.ts` | Same Terminal pin; `9bf1e3077a66d65f2546261cb9efa7b27140fda5` | Navigability requires at least one period. If requested Quarterly is absent and Annual exists, Annual remains the resolved basis. |
+
+The fixture's full path is `research/design_candidates/production_design_20261102/d07/paper/task-study/fixtures.json`. Its same path returned404 NOT_FOUND at current Macro `0a0e48e48f6f2f9ca7548e1f0fdc5dc838d9d964` in the bounded source check. Its immutable design pin remains the explicit provenance; it is not current-main shipped data. Root independently read the original fixture/README and the current renderer/math. The Financials fixture is not NVDA: NVDA belongs to separate historical-comparison studies, so no issuer relabeling was performed.
+
+Root refreshed exact target children/captions before mutation, verified both complete1008px compositions after the change, and compared both full evidence-column JSX subtrees with their pre-edit versions: they are unchanged. Coverage text,48px status treatment and each selected Revenue value read back correctly. `company-quarterly-clarity-finish-01` finished only C/D. Existing shared-shell, cadence, history, browser and review qualifications remain open.
+
+F03 discovery identified the primary Macro breadth reference as oversized MASTERMIND PAGES `01M2WGNCX9475G79JRKJTCM08P/p-13-1`; that file remains read-only under its prior data-loss warning. This Company correction used the existing independently editable Terminal page.
