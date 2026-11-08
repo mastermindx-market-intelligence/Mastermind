@@ -11182,6 +11182,1868 @@
       ],
       "contentPreserved": true,
       "visualVerification": "Representative family/context screenshots inspected; all per-node JSX content and padding preserved"
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-D-0",
+      "pageName": "09 · Options · Volatility Lab",
+      "artboardId": "UM6-0",
+      "artboardName": "V01 · Volatility · Expiry-led investigation · R1",
+      "oldNode": "UP8-0",
+      "newNode": "1Z8C-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-up8-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "UP8-0",
+        "UP9-0",
+        "UPA-0",
+        "UPB-0",
+        "UPC-0"
+      ],
+      "newIds": [
+        "1Z8C-0",
+        "1Z8D-0",
+        "1Z8E-0",
+        "1Z8F-0",
+        "1Z8G-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-D-0",
+      "pageName": "09 · Options · Volatility Lab",
+      "artboardId": "XFO-0",
+      "artboardName": "V05 · Expiry picker · Mobile EN",
+      "oldNode": "XGN-0",
+      "newNode": "1Z8I-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-xgn-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "XGN-0",
+        "XGR-0",
+        "XGQ-0",
+        "XGP-0",
+        "XGO-0"
+      ],
+      "newIds": [
+        "1Z8I-0",
+        "1Z8J-0",
+        "1Z8K-0",
+        "1Z8L-0",
+        "1Z8M-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-D-0",
+      "pageName": "09 · Options · Volatility Lab",
+      "artboardId": "XHI-0",
+      "artboardName": "V05 · Expiry picker · Mobile ZH",
+      "oldNode": "XHZ-0",
+      "newNode": "1Z9D-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-xhz-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "XHZ-0",
+        "XI3-0",
+        "XI2-0",
+        "XI1-0",
+        "XI0-0"
+      ],
+      "newIds": [
+        "1Z9D-0",
+        "1Z9E-0",
+        "1Z9F-0",
+        "1Z9G-0",
+        "1Z9H-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-3-0",
+      "pageName": "02 · Answer Craft · R7–R8 References",
+      "artboardId": "1DA-0",
+      "artboardName": "31 · ANSWER SPECIMEN · R8 · Desktop · Compare",
+      "oldNode": "1EE-0",
+      "newNode": "5W9-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-1ee-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 16px;",
+      "verified": true,
+      "oldIds": [
+        "1EE-0",
+        "1EF-0"
+      ],
+      "newIds": [
+        "5W9-0",
+        "5WA-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-3-0",
+      "pageName": "02 · Answer Craft · R7–R8 References",
+      "artboardId": "1FW-0",
+      "artboardName": "32 · ANSWER SPECIMEN · R8 · Desktop · Relationships",
+      "oldNode": "1GW-0",
+      "newNode": "5WC-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-1gw-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 16px;",
+      "verified": true,
+      "oldIds": [
+        "1GW-0",
+        "1GX-0"
+      ],
+      "newIds": [
+        "5WC-0",
+        "5WD-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-3-0",
+      "pageName": "02 · Answer Craft · R7–R8 References",
+      "artboardId": "1IL-0",
+      "artboardName": "33 · ANSWER SPECIMEN · R8 · Desktop · Sources",
+      "oldNode": "1JD-0",
+      "newNode": "5WF-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-1jd-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "1JD-0",
+        "1JE-0"
+      ],
+      "newIds": [
+        "5WF-0",
+        "5WG-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-3-0",
+      "pageName": "02 · Answer Craft · R7–R8 References",
+      "artboardId": "1IL-0",
+      "artboardName": "33 · ANSWER SPECIMEN · R8 · Desktop · Sources",
+      "oldNode": "1K7-0",
+      "newNode": "5WI-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-1k7-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 14px;",
+      "verified": true,
+      "oldIds": [
+        "1K7-0",
+        "1K8-0"
+      ],
+      "newIds": [
+        "5WI-0",
+        "5WJ-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-N-1",
+      "pageName": "Market Heatmaps · Mobile Atlas + Comparison · R6",
+      "artboardId": "SIT-0",
+      "artboardName": "19 · R6 · Mobile Memory · Matched Change",
+      "oldNode": "SO2-0",
+      "newNode": "1Z9J-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-so2-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "SO2-0",
+        "SO3-0",
+        "SO4-0",
+        "SO5-0"
+      ],
+      "newIds": [
+        "1Z9J-0",
+        "1Z9K-0",
+        "1Z9L-0",
+        "1Z9M-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2RB-1",
+      "artboardName": "R19 · Visual Detail Type System · EN · Light",
+      "oldNode": "2SB-1",
+      "newNode": "423-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2sb-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "2SB-1",
+        "2SC-1",
+        "2SD-1",
+        "2SE-1"
+      ],
+      "newIds": [
+        "423-0",
+        "424-0",
+        "425-0",
+        "426-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2RB-1",
+      "artboardName": "R19 · Visual Detail Type System · EN · Light",
+      "oldNode": "2TA-1",
+      "newNode": "428-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2ta-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "2TA-1",
+        "2TB-1",
+        "2TC-1",
+        "2TD-1"
+      ],
+      "newIds": [
+        "428-0",
+        "429-0",
+        "42A-0",
+        "42B-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2RB-1",
+      "artboardName": "R19 · Visual Detail Type System · EN · Light",
+      "oldNode": "2UF-1",
+      "newNode": "42D-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2uf-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "2UF-1",
+        "2UG-1",
+        "2UH-1",
+        "2UI-1"
+      ],
+      "newIds": [
+        "42D-0",
+        "42E-0",
+        "42F-0",
+        "42G-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2RB-1",
+      "artboardName": "R19 · Visual Detail Type System · EN · Light",
+      "oldNode": "2V9-1",
+      "newNode": "42I-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2v9-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "2V9-1",
+        "2VA-1",
+        "2VB-1",
+        "2VC-1"
+      ],
+      "newIds": [
+        "42I-0",
+        "42J-0",
+        "42K-0",
+        "42L-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "WG-0",
+      "artboardName": "Context help · light · en · 520",
+      "oldNode": "XM-0",
+      "newNode": "42N-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-xm-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "XM-0",
+        "XO-0",
+        "XQ-0"
+      ],
+      "newIds": [
+        "42N-0",
+        "42O-0",
+        "42P-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "1NE-0",
+      "artboardName": "Context help · dark · en · 520",
+      "oldNode": "1OK-0",
+      "newNode": "42R-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-1ok-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "1OK-0",
+        "1OM-0",
+        "1OO-0"
+      ],
+      "newIds": [
+        "42R-0",
+        "42S-0",
+        "42T-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "1OU-0",
+      "artboardName": "Context help · light · zh · 520",
+      "oldNode": "1Q0-0",
+      "newNode": "42V-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-1q0-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "1Q0-0",
+        "1Q2-0",
+        "1Q4-0"
+      ],
+      "newIds": [
+        "42V-0",
+        "42W-0",
+        "42X-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "1QA-0",
+      "artboardName": "Context help · dark · zh · 520",
+      "oldNode": "1RG-0",
+      "newNode": "42Z-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-1rg-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "1RG-0",
+        "1RI-0",
+        "1RK-0"
+      ],
+      "newIds": [
+        "42Z-0",
+        "430-0",
+        "431-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "21C-1",
+      "artboardName": "R14 · Risk Help · Light · EN",
+      "oldNode": "22W-1",
+      "newNode": "433-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-22w-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "22W-1",
+        "22X-1",
+        "22Y-1",
+        "22Z-1",
+        "230-1",
+        "231-1"
+      ],
+      "newIds": [
+        "433-0",
+        "434-0",
+        "435-0",
+        "436-0",
+        "437-0",
+        "438-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "21C-1",
+      "artboardName": "R14 · Risk Help · Light · EN",
+      "oldNode": "21I-1",
+      "newNode": "43A-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-21i-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "21I-1",
+        "21K-1",
+        "21J-1"
+      ],
+      "newIds": [
+        "43A-0",
+        "43B-0",
+        "43C-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "224-1",
+      "artboardName": "R14 · Risk Help · Dark · ZH",
+      "oldNode": "233-1",
+      "newNode": "43E-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-233-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "233-1",
+        "234-1",
+        "235-1",
+        "236-1",
+        "237-1",
+        "238-1"
+      ],
+      "newIds": [
+        "43E-0",
+        "43F-0",
+        "43G-0",
+        "43H-0",
+        "43I-0",
+        "43J-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "224-1",
+      "artboardName": "R14 · Risk Help · Dark · ZH",
+      "oldNode": "22A-1",
+      "newNode": "43L-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-22a-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "22A-1",
+        "22C-1",
+        "22B-1"
+      ],
+      "newIds": [
+        "43L-0",
+        "43M-0",
+        "43N-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2VF-1",
+      "artboardName": "R19 · 宏观象限 · ZH · Mobile",
+      "oldNode": "2WX-1",
+      "newNode": "43P-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2wx-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 17px;",
+      "verified": true,
+      "oldIds": [
+        "2WX-1",
+        "2WY-1",
+        "2WZ-1"
+      ],
+      "newIds": [
+        "43P-0",
+        "43Q-0",
+        "43R-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2VO-1",
+      "artboardName": "R19 · 转换状态 · ZH · Mobile",
+      "oldNode": "2XM-1",
+      "newNode": "43T-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2xm-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 17px;",
+      "verified": true,
+      "oldIds": [
+        "2XM-1",
+        "2XN-1",
+        "2XO-1"
+      ],
+      "newIds": [
+        "43T-0",
+        "43U-0",
+        "43V-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2VX-1",
+      "artboardName": "R19 · 证据矩阵 · ZH · Mobile",
+      "oldNode": "2YC-1",
+      "newNode": "43X-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2yc-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 17px;",
+      "verified": true,
+      "oldIds": [
+        "2YC-1",
+        "2YD-1",
+        "2YE-1"
+      ],
+      "newIds": [
+        "43X-0",
+        "43Y-0",
+        "43Z-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-3-0",
+      "pageName": "02 · Contextual Help + Visual Explanations",
+      "artboardId": "2W6-1",
+      "artboardName": "R19 · 板块热力 · ZH · Mobile",
+      "oldNode": "2YZ-1",
+      "newNode": "441-0",
+      "operationId": "paper-accent-estate-20261108-c4-qht33-2yz-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 17px;",
+      "verified": true,
+      "oldIds": [
+        "2YZ-1",
+        "2Z0-1",
+        "2Z1-1"
+      ],
+      "newIds": [
+        "441-0",
+        "442-0",
+        "443-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-1-0",
+      "pageName": "01 · Risk Radar · Main + Evidence",
+      "artboardId": "8R6-0",
+      "artboardName": "30 · Risk Radar · STATE · Mobile Main · Partial Data",
+      "oldNode": "8RM-0",
+      "newNode": "AGZ-0",
+      "operationId": "paper-accent-estate-20261108-c4-p380z-8rm-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "8RM-0",
+        "8RN-0",
+        "8RO-0",
+        "8RP-0",
+        "8RQ-0"
+      ],
+      "newIds": [
+        "AGZ-0",
+        "AH0-0",
+        "AH1-0",
+        "AH2-0",
+        "AH3-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-1-0",
+      "pageName": "01 · Risk Radar · Main + Evidence",
+      "artboardId": "8YA-0",
+      "artboardName": "32 · Risk Radar · Mobile Main · Light ZH",
+      "oldNode": "8YX-0",
+      "newNode": "AH5-0",
+      "operationId": "paper-accent-estate-20261108-c4-p380z-8yx-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "8YX-0",
+        "8Z1-0",
+        "8Z0-0",
+        "8YY-0",
+        "8YZ-0"
+      ],
+      "newIds": [
+        "AH5-0",
+        "AH6-0",
+        "AH7-0",
+        "AH8-0",
+        "AH9-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-1-0",
+      "pageName": "01 · Risk Radar · Main + Evidence",
+      "artboardId": "97F-0",
+      "artboardName": "34 · Risk Radar · Mobile Main · Light EN",
+      "oldNode": "982-0",
+      "newNode": "AHB-0",
+      "operationId": "paper-accent-estate-20261108-c4-p380z-982-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "982-0",
+        "986-0",
+        "985-0",
+        "983-0",
+        "984-0"
+      ],
+      "newIds": [
+        "AHB-0",
+        "AHC-0",
+        "AHD-0",
+        "AHE-0",
+        "AHF-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-1-0",
+      "pageName": "01 · Risk Radar · Main + Evidence",
+      "artboardId": "99D-0",
+      "artboardName": "36 · Risk Radar · Mobile Main · Dark ZH",
+      "oldNode": "9A0-0",
+      "newNode": "AHH-0",
+      "operationId": "paper-accent-estate-20261108-c4-p380z-9a0-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "9A0-0",
+        "9A4-0",
+        "9A3-0",
+        "9A1-0",
+        "9A2-0"
+      ],
+      "newIds": [
+        "AHH-0",
+        "AHI-0",
+        "AHJ-0",
+        "AHK-0",
+        "AHL-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-B-0",
+      "pageName": "80 · R10 · Builder Contracts & Reference States",
+      "artboardId": "422-0",
+      "artboardName": "106 · R10 SPEC · Search, Coverage + Saved States",
+      "oldNode": "46R-0",
+      "newNode": "NNL-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-46r-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 17px;",
+      "verified": true,
+      "oldIds": [
+        "46R-0",
+        "46S-0",
+        "46T-0"
+      ],
+      "newIds": [
+        "NNL-0",
+        "NNM-0",
+        "NNN-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-B-0",
+      "pageName": "80 · R10 · Builder Contracts & Reference States",
+      "artboardId": "422-0",
+      "artboardName": "106 · R10 SPEC · Search, Coverage + Saved States",
+      "oldNode": "47G-0",
+      "newNode": "NNP-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-47g-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "47G-0",
+        "47H-0",
+        "47I-0"
+      ],
+      "newIds": [
+        "NNP-0",
+        "NNQ-0",
+        "NNR-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-B-0",
+      "pageName": "80 · R10 · Builder Contracts & Reference States",
+      "artboardId": "422-0",
+      "artboardName": "106 · R10 SPEC · Search, Coverage + Saved States",
+      "oldNode": "47J-0",
+      "newNode": "NNT-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-47j-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "47J-0",
+        "47K-0",
+        "47L-0"
+      ],
+      "newIds": [
+        "NNT-0",
+        "NNU-0",
+        "NNV-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-B-0",
+      "pageName": "80 · R10 · Builder Contracts & Reference States",
+      "artboardId": "6EG-0",
+      "artboardName": "124 · R10 SPEC · Saved Research Workspace + Evidence Refresh",
+      "oldNode": "6IG-0",
+      "newNode": "NNX-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-6ig-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "6IG-0",
+        "6IH-0",
+        "6II-0",
+        "6IJ-0",
+        "6IK-0",
+        "6IL-0",
+        "6IM-0"
+      ],
+      "newIds": [
+        "NNX-0",
+        "NNY-0",
+        "NNZ-0",
+        "NO0-0",
+        "NO1-0",
+        "NO2-0",
+        "NO3-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-O-1",
+      "pageName": "Market Heatmaps · Saved Views + Recovery · R7–R8",
+      "artboardId": "U68-0",
+      "artboardName": "33 · R7 · Mobile Updated Result · WDC and Reversible Filter",
+      "oldNode": "U7L-0",
+      "newNode": "1ZAL-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-u7l-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 28px;",
+      "verified": true,
+      "oldIds": [
+        "U7L-0",
+        "U7M-0",
+        "U7N-0",
+        "U7O-0",
+        "U7P-0",
+        "U7Q-0"
+      ],
+      "newIds": [
+        "1ZAL-0",
+        "1ZAM-0",
+        "1ZAN-0",
+        "1ZAO-0",
+        "1ZAP-0",
+        "1ZAQ-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-O-1",
+      "pageName": "Market Heatmaps · Saved Views + Recovery · R7–R8",
+      "artboardId": "UDE-0",
+      "artboardName": "34 · R8 · Mobile Saved Views · Resume and Recover",
+      "oldNode": "UEB-0",
+      "newNode": "1ZAS-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-ueb-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "UEB-0",
+        "UEC-0",
+        "UED-0",
+        "UEE-0",
+        "UEF-0",
+        "UEG-0",
+        "UEH-0",
+        "UEI-0",
+        "UEJ-0",
+        "UEK-0",
+        "UEL-0",
+        "UEM-0",
+        "UEN-0"
+      ],
+      "newIds": [
+        "1ZAS-0",
+        "1ZAT-0",
+        "1ZAU-0",
+        "1ZAV-0",
+        "1ZAW-0",
+        "1ZAX-0",
+        "1ZAY-0",
+        "1ZAZ-0",
+        "1ZB0-0",
+        "1ZB1-0",
+        "1ZB2-0",
+        "1ZB3-0",
+        "1ZB4-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-O-1",
+      "pageName": "Market Heatmaps · Saved Views + Recovery · R7–R8",
+      "artboardId": "UIW-0",
+      "artboardName": "37 · R8 · Mobile Live Refresh Unavailable · Not Zero Matches",
+      "oldNode": "UJT-0",
+      "newNode": "1ZB6-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-ujt-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 21px;",
+      "verified": true,
+      "oldIds": [
+        "UJT-0",
+        "UJU-0",
+        "UJV-0",
+        "UJW-0",
+        "UJX-0",
+        "UJY-0",
+        "UJZ-0",
+        "UK0-0",
+        "UK1-0",
+        "UK2-0",
+        "UK3-0"
+      ],
+      "newIds": [
+        "1ZB6-0",
+        "1ZB7-0",
+        "1ZB8-0",
+        "1ZB9-0",
+        "1ZBA-0",
+        "1ZBB-0",
+        "1ZBC-0",
+        "1ZBD-0",
+        "1ZBE-0",
+        "1ZBF-0",
+        "1ZBG-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-3-0",
+      "pageName": "02 · Macro, Policy + Risk",
+      "artboardId": "2P9-0",
+      "artboardName": "47 · R10 · Risk + Transmission · Mobile Dark EN",
+      "oldNode": "2R3-0",
+      "newNode": "NO5-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-2r3-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "2R3-0",
+        "2R4-0",
+        "2R5-0",
+        "2R6-0",
+        "2R7-0"
+      ],
+      "newIds": [
+        "NO5-0",
+        "NO6-0",
+        "NO7-0",
+        "NO8-0",
+        "NO9-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-3-0",
+      "pageName": "02 · Macro, Policy + Risk",
+      "artboardId": "2RO-0",
+      "artboardName": "71 · R10 · Risk + Transmission · 320 · Dark EN",
+      "oldNode": "2TI-0",
+      "newNode": "NOB-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-2ti-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "2TI-0",
+        "2TJ-0",
+        "2TK-0",
+        "2TL-0",
+        "2TM-0"
+      ],
+      "newIds": [
+        "NOB-0",
+        "NOC-0",
+        "NOD-0",
+        "NOE-0",
+        "NOF-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-3-0",
+      "pageName": "02 · Macro, Policy + Risk",
+      "artboardId": "2U3-0",
+      "artboardName": "73 · R10 · Risk · 320 · 200% Text · Dark EN",
+      "oldNode": "2VX-0",
+      "newNode": "NOH-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-2vx-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 19px;",
+      "verified": true,
+      "oldIds": [
+        "2VX-0",
+        "2VY-0",
+        "2VZ-0",
+        "2W0-0",
+        "2W1-0"
+      ],
+      "newIds": [
+        "NOH-0",
+        "NOI-0",
+        "NOJ-0",
+        "NOK-0",
+        "NOL-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboardId": "77R-0",
+      "artboardName": "131 · R10 · Policy comparison · Draft preview",
+      "oldNode": "7CL-0",
+      "newNode": "NON-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-7cl-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 27px;",
+      "verified": true,
+      "oldIds": [
+        "7CL-0",
+        "7CM-0",
+        "7CN-0",
+        "7CO-0",
+        "7CP-0"
+      ],
+      "newIds": [
+        "NON-0",
+        "NOO-0",
+        "NOP-0",
+        "NOQ-0",
+        "NOR-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboardId": "7D2-0",
+      "artboardName": "132 · R10 · Review comparison changes",
+      "oldNode": "7GN-0",
+      "newNode": "NOT-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-7gn-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 27px;",
+      "verified": true,
+      "oldIds": [
+        "7GN-0",
+        "7GO-0",
+        "7GP-0",
+        "7GQ-0",
+        "7GR-0",
+        "7GS-0",
+        "7GT-0",
+        "7GU-0",
+        "7GV-0",
+        "7GW-0",
+        "7GX-0"
+      ],
+      "newIds": [
+        "NOT-0",
+        "NOU-0",
+        "NOV-0",
+        "NOW-0",
+        "NOX-0",
+        "NOY-0",
+        "NOZ-0",
+        "NP0-0",
+        "NP1-0",
+        "NP2-0",
+        "NP3-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboardId": "7D2-0",
+      "artboardName": "132 · R10 · Review comparison changes",
+      "oldNode": "7GZ-0",
+      "newNode": "NP5-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-7gz-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 27px;",
+      "verified": true,
+      "oldIds": [
+        "7GZ-0",
+        "7H0-0",
+        "7H1-0",
+        "7H2-0",
+        "7H3-0",
+        "7H4-0",
+        "7H5-0",
+        "7H6-0",
+        "7H7-0",
+        "7H8-0",
+        "7H9-0"
+      ],
+      "newIds": [
+        "NP5-0",
+        "NP6-0",
+        "NP7-0",
+        "NP8-0",
+        "NP9-0",
+        "NPA-0",
+        "NPB-0",
+        "NPC-0",
+        "NPD-0",
+        "NPE-0",
+        "NPF-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboardId": "7D2-0",
+      "artboardName": "132 · R10 · Review comparison changes",
+      "oldNode": "7HB-0",
+      "newNode": "NPH-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-7hb-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 27px;",
+      "verified": true,
+      "oldIds": [
+        "7HB-0",
+        "7HC-0",
+        "7HD-0",
+        "7HE-0",
+        "7HF-0",
+        "7HG-0",
+        "7HH-0",
+        "7HI-0",
+        "7HJ-0",
+        "7HK-0",
+        "7HL-0"
+      ],
+      "newIds": [
+        "NPH-0",
+        "NPI-0",
+        "NPJ-0",
+        "NPK-0",
+        "NPL-0",
+        "NPM-0",
+        "NPN-0",
+        "NPO-0",
+        "NPP-0",
+        "NPQ-0",
+        "NPR-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboardId": "7JV-0",
+      "artboardName": "134 · R10 · Comparison preview · Mobile",
+      "oldNode": "7M2-0",
+      "newNode": "NPT-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-7m2-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "7M2-0",
+        "7M3-0",
+        "7M4-0",
+        "7M5-0"
+      ],
+      "newIds": [
+        "NPT-0",
+        "NPU-0",
+        "NPV-0",
+        "NPW-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-D-0",
+      "pageName": "04B · Comparison Setup & Review · R10",
+      "artboardId": "7RR-0",
+      "artboardName": "137 · R10 · Comparison preview · 320",
+      "oldNode": "7S1-0",
+      "newNode": "NPY-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-7s1-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "7S1-0",
+        "7S4-0",
+        "7S3-0",
+        "7S2-0"
+      ],
+      "newIds": [
+        "NPY-0",
+        "NPZ-0",
+        "NQ0-0",
+        "NQ1-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9ML-0",
+      "artboardName": "143 · R10 · Company exposure · Desktop",
+      "oldNode": "9PA-0",
+      "newNode": "NQ3-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-9pa-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "9PA-0",
+        "9PB-0",
+        "9PC-0",
+        "9PD-0",
+        "9PE-0",
+        "9PF-0",
+        "9PG-0",
+        "9PH-0",
+        "9PI-0",
+        "9PJ-0",
+        "9PK-0"
+      ],
+      "newIds": [
+        "NQ3-0",
+        "NQ4-0",
+        "NQ5-0",
+        "NQ6-0",
+        "NQ7-0",
+        "NQ8-0",
+        "NQ9-0",
+        "NQA-0",
+        "NQB-0",
+        "NQC-0",
+        "NQD-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9ML-0",
+      "artboardName": "143 · R10 · Company exposure · Desktop",
+      "oldNode": "9RI-0",
+      "newNode": "NQF-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-9ri-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 27px;",
+      "verified": true,
+      "oldIds": [
+        "9RI-0",
+        "9RJ-0",
+        "9RK-0",
+        "9RL-0",
+        "9RM-0",
+        "9RN-0",
+        "9RO-0",
+        "9RP-0",
+        "9RQ-0",
+        "9RR-0",
+        "9RS-0",
+        "9RT-0",
+        "9RU-0",
+        "9RV-0",
+        "9RW-0",
+        "9RX-0",
+        "9RY-0"
+      ],
+      "newIds": [
+        "NQF-0",
+        "NQG-0",
+        "NQH-0",
+        "NQI-0",
+        "NQJ-0",
+        "NQK-0",
+        "NQL-0",
+        "NQM-0",
+        "NQN-0",
+        "NQO-0",
+        "NQP-0",
+        "NQQ-0",
+        "NQR-0",
+        "NQS-0",
+        "NQT-0",
+        "NQU-0",
+        "NQV-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9UA-0",
+      "artboardName": "145 · R10 · Company disclosure · Source detail · 320",
+      "oldNode": "9W1-0",
+      "newNode": "NQX-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-9w1-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 21px;",
+      "verified": true,
+      "oldIds": [
+        "9W1-0",
+        "9W2-0",
+        "9W3-0",
+        "9W4-0"
+      ],
+      "newIds": [
+        "NQX-0",
+        "NQY-0",
+        "NQZ-0",
+        "NR0-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9WA-0",
+      "artboardName": "146 · R10 · Regional disclosure · Japan unresolved · 320",
+      "oldNode": "9X0-0",
+      "newNode": "NR2-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-9x0-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 21px;",
+      "verified": true,
+      "oldIds": [
+        "9X0-0",
+        "9X1-0",
+        "9X2-0",
+        "9X3-0"
+      ],
+      "newIds": [
+        "NR2-0",
+        "NR3-0",
+        "NR4-0",
+        "NR5-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-F-0",
+      "pageName": "01B · Company Exposure & Transmission · R10",
+      "artboardId": "9XE-0",
+      "artboardName": "147 · R10 SPEC · Company exposure + transmission binding",
+      "oldNode": "9YJ-0",
+      "newNode": "NR7-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-9yj-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 27px;",
+      "verified": true,
+      "oldIds": [
+        "9YJ-0",
+        "9YK-0",
+        "9YL-0",
+        "9YM-0",
+        "9YN-0",
+        "9YO-0",
+        "9YP-0",
+        "9YQ-0",
+        "9YR-0",
+        "9YS-0",
+        "9YT-0"
+      ],
+      "newIds": [
+        "NR7-0",
+        "NR8-0",
+        "NR9-0",
+        "NRA-0",
+        "NRB-0",
+        "NRC-0",
+        "NRD-0",
+        "NRE-0",
+        "NRF-0",
+        "NRG-0",
+        "NRH-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-P-1",
+      "pageName": "Options · Build Contracts + Source Proof · Reference",
+      "artboardId": "G6A-0",
+      "artboardName": "N92 · Builder atlas · Plan Watch Review contracts and state receipts · R1",
+      "oldNode": "G7P-0",
+      "newNode": "1ZBI-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-g7p-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 16px;",
+      "verified": true,
+      "oldIds": [
+        "G7P-0",
+        "G7Q-0"
+      ],
+      "newIds": [
+        "1ZBI-0",
+        "1ZBJ-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-P-1",
+      "pageName": "Options · Build Contracts + Source Proof · Reference",
+      "artboardId": "M89-1",
+      "artboardName": "N96 · Evidence qualification · Build + research",
+      "oldNode": "MNC-1",
+      "newNode": "1ZBL-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-mnc-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "MNC-1",
+        "MND-1"
+      ],
+      "newIds": [
+        "1ZBL-0",
+        "1ZBM-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-P-1",
+      "pageName": "Options · Build Contracts + Source Proof · Reference",
+      "artboardId": "OND-1",
+      "artboardName": "N97 · Inspector states + source contract · Builder atlas",
+      "oldNode": "OR0-1",
+      "newNode": "1ZBO-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-or0-1-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 20px;",
+      "verified": true,
+      "oldIds": [
+        "OR0-1",
+        "OR1-1",
+        "OR2-1"
+      ],
+      "newIds": [
+        "1ZBO-0",
+        "1ZBP-0",
+        "1ZBQ-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-5-0",
+      "pageName": "04 · Research Library + Search",
+      "artboardId": "3MN-0",
+      "artboardName": "83 · R10 · Library · Backdrop · Mobile Dark EN",
+      "oldNode": "3NA-0",
+      "newNode": "NRJ-0",
+      "operationId": "paper-accent-estate-20261108-c4-8k5ag-3na-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 23px;",
+      "verified": true,
+      "oldIds": [
+        "3NA-0",
+        "3NB-0",
+        "3NC-0",
+        "3ND-0",
+        "3NE-0",
+        "3NF-0",
+        "3NG-0"
+      ],
+      "newIds": [
+        "NRJ-0",
+        "NRK-0",
+        "NRL-0",
+        "NRM-0",
+        "NRN-0",
+        "NRO-0",
+        "NRP-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18G0-0",
+      "artboardName": "3D01 · Chain Observatory · Desktop · Synthetic design",
+      "oldNode": "18JF-0",
+      "newNode": "1ZBS-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18jf-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 14px;",
+      "verified": true,
+      "oldIds": [
+        "18JF-0",
+        "18JG-0",
+        "18JH-0"
+      ],
+      "newIds": [
+        "1ZBS-0",
+        "1ZBT-0",
+        "1ZBU-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18OH-0",
+      "artboardName": "3D02 · Volatility Terrain · Synthetic study",
+      "oldNode": "18RG-0",
+      "newNode": "1ZBW-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18rg-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 14px;",
+      "verified": true,
+      "oldIds": [
+        "18RG-0",
+        "18RH-0",
+        "18RI-0"
+      ],
+      "newIds": [
+        "1ZBW-0",
+        "1ZBX-0",
+        "1ZBY-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18TJ-0",
+      "artboardName": "3D03 · Replay and Change · Synthetic study",
+      "oldNode": "18XH-0",
+      "newNode": "1ZC0-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-18xh-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 14px;",
+      "verified": true,
+      "oldIds": [
+        "18XH-0",
+        "18XI-0"
+      ],
+      "newIds": [
+        "1ZC0-0",
+        "1ZC1-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "fileName": "Terminal",
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "artboardId": "18XX-0",
+      "artboardName": "3D04 · Flow and Package Investigation · Synthetic study",
+      "oldNode": "192E-0",
+      "newNode": "1ZC3-0",
+      "operationId": "paper-accent-estate-20261108-c4-t05rm-192e-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 14px;",
+      "verified": true,
+      "oldIds": [
+        "192E-0",
+        "192F-0"
+      ],
+      "newIds": [
+        "1ZC3-0",
+        "1ZC4-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "3PA-0",
+      "artboardName": "10 · R11 · DESKTOP · Research Long Read",
+      "oldNode": "3TL-0",
+      "newNode": "639-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-3tl-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "3TL-0",
+        "3TM-0",
+        "3TN-0"
+      ],
+      "newIds": [
+        "639-0",
+        "63A-0",
+        "63B-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "3VC-0",
+      "artboardName": "31 · R11 STATE · Desktop · Evidence Inspector",
+      "oldNode": "3ZO-0",
+      "newNode": "63D-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-3zo-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "3ZO-0",
+        "3ZP-0",
+        "3ZQ-0"
+      ],
+      "newIds": [
+        "63D-0",
+        "63E-0",
+        "63F-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "476-0",
+      "artboardName": "34 · R11 · DESKTOP · Light · Research Long Read",
+      "oldNode": "4BH-0",
+      "newNode": "63H-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-4bh-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "4BH-0",
+        "4BI-0",
+        "4BJ-0"
+      ],
+      "newIds": [
+        "63H-0",
+        "63I-0",
+        "63J-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "428-0",
+      "artboardName": "32 · R11 · MOBILE · Guided Long Read",
+      "oldNode": "44W-0",
+      "newNode": "63L-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-44w-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "44W-0",
+        "44X-0",
+        "44Y-0"
+      ],
+      "newIds": [
+        "63L-0",
+        "63M-0",
+        "63N-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "4D8-0",
+      "artboardName": "35 · R11 · MOBILE · Research Outline",
+      "oldNode": "4FX-0",
+      "newNode": "63P-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-4fx-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "4FX-0",
+        "4FY-0",
+        "4FZ-0"
+      ],
+      "newIds": [
+        "63P-0",
+        "63Q-0",
+        "63R-0"
+      ],
+      "contentPreserved": true
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-5-0",
+      "pageName": "04 · Retained Shared Shell · Research Reading + Evidence",
+      "artboardId": "4HS-0",
+      "artboardName": "36 · R11 · TABLET · Guided Long Read",
+      "oldNode": "4KG-0",
+      "newNode": "63T-0",
+      "operationId": "paper-accent-estate-20261108-c4-qr2e1-4kg-0-v1",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "change": "Removed decorative left rail; retained surface and content alignment",
+      "css": "border-left-width: 0px; padding-left: 18px;",
+      "verified": true,
+      "oldIds": [
+        "4KG-0",
+        "4KH-0",
+        "4KI-0"
+      ],
+      "newIds": [
+        "63T-0",
+        "63U-0",
+        "63V-0"
+      ],
+      "contentPreserved": true
     }
   ],
   "remaining": [
@@ -17245,6 +19107,34 @@
       }
     ],
     "candidateDisposition": "371 broad candidate records from 465 artboards; includes genuine data marks and already-corrected targets. Classification still in progress.",
-    "readFailures": []
+    "readFailures": [],
+    "classificationReview": {
+      "artboardsRead": 465,
+      "thinCandidates": 142,
+      "shadowCandidates": 38,
+      "note": "Advisory review completed; root screenshot review overrode the initial KEEP recommendation for OS five mobile navigation edge bars. Those are pending correction, not accepted icons."
+    }
+  },
+  "canonicalGuidance": {
+    "fileId": "01M312VSDSZFVT45674GDVJVZN",
+    "pageId": "p-3-0",
+    "artboardId": "3XJ-1",
+    "operationId": "paper-accent-estate-20261108-c4-canonical-guidance-v1",
+    "state": "APPLIED_RESPONSE_OBSERVED",
+    "updates": [
+      {
+        "nodeId": "40B-1",
+        "html": "No blue page backgrounds, rainbow sidebars, decorative glows or container-edge accents. Color identifies a state, signal, action or focus, with a label."
+      },
+      {
+        "nodeId": "405-1",
+        "html": "Group with space, typography and neutral dividers. Use even neutral borders only where needed. Glass cards require a semantic reason."
+      },
+      {
+        "nodeId": "3YX-1",
+        "html": "Graphite shell with restrained cool illumination. Meaningful AI states may glow; never as container-edge strips or a navy page wash."
+      }
+    ],
+    "verified": true
   }
 }
