@@ -212,6 +212,19 @@ class ExecutivePaperInstalledContractTests(unittest.TestCase):
             self.assertEqual(expected_disabled_mcp(profile),
                              plugin.exact_disarmed_catalog(profile, path.read_bytes()))
 
+    def test_explicit_evaluation_missing_config_refuses_before_manifest_lookup(self):
+        from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+        self.native.unlink()
+        manifest = self.profile.state_dir / "install-manifest.json"
+        exists = Path.exists
+        def guarded_exists(path):
+            if path == manifest:
+                self.fail("explicit evaluation inspected the install manifest")
+            return exists(path)
+        with mock.patch.object(Path, "exists", guarded_exists):
+            with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_MISSING"):
+                expected_disabled_mcp(self.profile, evaluation_inputs={})
+
     def test_disabled_catalog_preserves_only_original_primary_key_and_proxy(self):
         runtime = self._runtime()
         ambient = {"MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN": "ambient-not-a-grant",

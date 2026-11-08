@@ -98,7 +98,15 @@ def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str =
     return argv
 
 
-def _read_native_config(profile: RuntimeProfile) -> bytes | None:
+def _validate_native_config_selection(profile, primary_application, evaluation_inputs):
+    # Mixed authorities must refuse before even inspecting role-owned files.
+    if evaluation_inputs is not None and (
+        primary_application is not None or profile.model_provider == "mastermind-fabric"
+    ):
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
+
+
+def _read_native_config(profile: RuntimeProfile, *, require_config=False) -> bytes | None:
     """Read the incumbent private configuration without following a replacement.
 
     The same read is used for registry admission and model-key forwarding.
@@ -106,7 +114,7 @@ def _read_native_config(profile: RuntimeProfile) -> bytes | None:
     """
     path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
     if not path.exists() and not path.is_symlink():
-        if (profile.state_dir / "install-manifest.json").exists():
+        if require_config or (profile.state_dir / "install-manifest.json").exists():
             raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
         return None
     if path.is_symlink():
@@ -141,10 +149,7 @@ def _native_config_catalog(
     primary_application=None, *, evaluation_inputs=None,
 ) -> dict[str, tuple[str, ...]] | None:
     """Derive the census from the exact admitted source, never a CLI claim."""
-    if evaluation_inputs is not None and (
-        primary_application is not None or profile.model_provider == "mastermind-fabric"
-    ):
-        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
+    _validate_native_config_selection(profile, primary_application, evaluation_inputs)
     if raw is None:
         if consumer is not None or primary_application is not None or evaluation_inputs is not None:
             raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
@@ -220,8 +225,10 @@ def expected_disabled_mcp(
     The read catalog remains disabled. Only the already-qualified selected-
     child connection may be enabled, with its original empty raw-tool filter.
     """
+    _validate_native_config_selection(profile, primary_application, evaluation_inputs)
     return _native_config_catalog(
-        profile, _read_native_config(profile), consumer, primary_application,
+        profile, _read_native_config(profile, require_config=evaluation_inputs is not None),
+        consumer, primary_application,
         evaluation_inputs=evaluation_inputs,
     )
 
@@ -565,7 +572,8 @@ class ServiceRuntime:
         recipe = self._native_launch.recipe if self._native_launch is not None else {}
         primary = deepcopy(recipe.get("primary_application"))
         evaluation_inputs = deepcopy(recipe.get("evaluation_inputs"))
-        observed = _read_native_config(self.profile)
+        _validate_native_config_selection(self.profile, primary, evaluation_inputs)
+        observed = _read_native_config(self.profile, require_config=evaluation_inputs is not None)
         catalog = _native_config_catalog(
             self.profile, observed, consumer, primary, evaluation_inputs=evaluation_inputs,
         )
@@ -629,7 +637,8 @@ class ServiceRuntime:
         # Credential resolution may perform I/O. A changed, withdrawn or
         # newly public config cannot receive the key prepared above.
         current_recipe = self._native_launch.recipe if self._native_launch is not None else {}
-        if (observed != _read_native_config(self.profile)
+        if (observed != _read_native_config(
+                self.profile, require_config=evaluation_inputs is not None)
                 or consumer != self._consumer_publication()
                 or primary != current_recipe.get("primary_application")
                 or evaluation_inputs != current_recipe.get("evaluation_inputs")):
