@@ -268,6 +268,13 @@ class Contribution:
             if not self.scope.closed:
                 self.errors.add(code)
 
+    def observe_unbound_transport(self):
+        # A gap belongs only to this original admission. Never borrow a foreign
+        # dispatch identity or redirect a copied stale context to a new owner.
+        with self.scope.live.event_stream.lock, self.scope.lock:
+            if not self.scope.closed and self.scope.current():
+                self.errors.add("unsupported_dispatch")
+
     def _clock_start(self):
         try:
             return _clock()
@@ -532,6 +539,21 @@ def prepare(binding, vendor):
         value = _observation()._current.get()
         return value if value is not None and value.binding is binding else None
 
+    def transport_context():
+        # This guard observes only ownership, never a request or response. Keep
+        # the original invocation outside the try so it cannot be replayed if
+        # the transport itself raises.
+        try:
+            context, owner = _dispatch_context.get(), scope()
+            if owner is not None:
+                if context is not None and context.contribution is owner.transport:
+                    return context
+                owner.transport.observe_unbound_transport()
+        except Exception:
+            # No weaker error() fallback: it cannot verify stale ownership.
+            pass
+        return None
+
     def note(contribution, method, *args, **kwargs):
         try:
             return getattr(contribution, method)(*args, **kwargs)
@@ -675,8 +697,8 @@ def prepare(binding, vendor):
             note(contribution, "finish", agent, span, state)
 
     def observed_application(client, **kwargs):
-        context, owner = _dispatch_context.get(), scope()
-        if context is None or owner is None or context.contribution is not owner.transport:
+        context = transport_context()
+        if context is None:
             return application_source.create(client, **kwargs)
         contribution, agent = context.contribution, context.agent
         snapshot, attempt = None, None
@@ -709,9 +731,8 @@ def prepare(binding, vendor):
 
     original_single = original_methods["_send_single_request"]
     def observed_single(client, request):
-        context = _dispatch_context.get()
-        owner = scope()
-        if context is None or owner is None or context.contribution is not owner.transport:
+        context = transport_context()
+        if context is None:
             return original_single(client, request)
         contribution, agent, dispatch_span = context.contribution, context.agent, context.span
         if context.client is not client or dispatch_span is None or not current():

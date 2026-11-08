@@ -62,3 +62,58 @@ These results qualify the source contribution and declared fixture boundaries ab
 The publisher can populate `execution.model_served` from a complete APPLICATION-only call graph when every original owner receipt's selected and serving-model commitments match the bytes of the frozen model label. This is an observed owner-reported label, with `model_identity_verified=False`. A different observed digest records an observation conflict; it is not decoded into an invented model name. AUTO selectors do not become concrete models, and a mixed HTTPX/APPLICATION run cannot inherit the APPLICATION subset's serving label.
 
 The serving-label addition has 27 passing APPLICATION tests, including eight cases that exercise the actual pinned native assembly and dispatch with explicit selected-input delivery fixtures. They cover exact matches, a different frozen label, AUTO selection, mixed routes, and incomplete assembly/attempt coverage. The 27 cases include the original 19; they are not additional to them. Existing effect, cleanup, coverage and validity gates are unchanged.
+
+## Unbound transport calls
+
+A synchronous HTTPX send or original APPLICATION create can occur inside an
+admission without a matching native dispatch context. The observer now records
+the existing bounded `unsupported_dispatch` error on that admission before
+forwarding the original invocation. It does not invent an attempt identity or
+inspect the unbound request, response, headers or credentials.
+
+The gap belongs only to the captured original scope. The existing event-stream
+lock and scope lock protect the closed/current check. A foreign dispatch context
+marks the verified current admission without borrowing the foreign identity.
+Closed, stale and copied old scopes cannot redirect this contribution into a
+later admission. Repeated gaps retain one enum in the existing error set.
+
+The ownership guard contains ordinary observation exceptions, and the original
+transport invocation remains outside that exception handler. The original call
+therefore executes once with its original arguments; its return or exception is
+preserved. Matching contexts retain all existing source, client, identity and
+sealing checks.
+
+The existing publication gate consumes the gap error and withholds scalar
+observations from the retained subset. Independently qualified timing and
+process observations can remain available. An unbound APPLICATION call alone
+does not select transport v4. Absence of a recorded gap is still not complete
+coverage, including when observation itself failed.
+
+The regression matrix uses original HTTPX/APPLICATION methods with declared
+in-process I/O edges. It covers missing, foreign, absent, closed and stale
+contexts; copied old scopes; observer/classification exceptions; unchanged
+original outcomes; bounded deduplication; and the real publication consumer
+after an unbound call followed by a qualified call. On the unchanged source,
+36 new cases produced 16 expected failures and no errors or skips; both
+publication cases exposed an incorrectly retained serving-model label.
+
+The repaired source passes all 100 cases in the HTTPX and APPLICATION modules
+(37 HTTPX and 63 APPLICATION, including the 36 new regression cases), with zero
+failures, errors or skips. Two separately selected native publication cases also
+pass: the actual SDK/pinned-worker receipt journey and the duplicate-event
+rejection journey. The latter two completed in 14.626 and 14.366 seconds.
+
+The attempted 236-case three-module run exceeded its 180-second process budget
+before completion and is not a passing qualification. The 100-case run and the
+two selected publication cases are completed source qualifications; the baseline
+and incomplete larger run must not be added to their distinct test count.
+
+Retained JUnit SHA-256 digests:
+
+- Baseline: `96f9bdd4ae46b6e826c2c0403933915592e8ad5935a27873a62dcdd93bf6427f`
+- Two transport modules: `3004fec05eadc1ec92142c8084c8564f614da57298c5bf177cc71f079e0c5d0a`
+- Two native publication cases: `109b547405965adb59703c7596ed028e58f4da0daa1b37caad4482cea2770870`
+
+These checks exercise in-process fixtures and the original source consumer. They
+do not establish installed acceptance, complete coverage, effect settlement,
+cleanup or learning efficacy.

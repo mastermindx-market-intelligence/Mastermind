@@ -298,10 +298,13 @@ def assembled_application_projection(engine, monkeypatch):
     monkeypatch.setattr(engine.lifecycle, "has_hook", lambda _: False)
     monkeypatch.setattr(engine.middleware, "apply_llm_request_middleware",
         lambda payload, **_: SimpleNamespace(payload=payload, original_payload=dict(payload), trace=[]))
-    def run(*, exact=True, mixed=False):
+    def run(*, exact=True, mixed=False, unbound=None):
         selected = {}
         async def handle(ref, row, agent):
             bound = bound_fixture(monkeypatch, agent, exact=exact)
+            if unbound is not None:
+                selected["unbound"] = make_unbound_call(monkeypatch, agent, unbound)
+                selected["unbound"].returned(selected["unbound"].invoke())
             agent._build_api_kwargs = lambda messages, **_: {
                 "model": bound.binding.requested_model, "messages": messages, "max_tokens": 128}
             def assembled(request_id):
@@ -334,7 +337,7 @@ def assembled_application_projection(engine, monkeypatch):
             unavailable = {"execution.model_served": "NOT_OBSERVED"}
             publication._wire_observations(draft, unavailable, document or doc, marker, inputs)
             return draft, unavailable
-        return SimpleNamespace(document=doc, build=build)
+        return SimpleNamespace(document=doc, build=build, unbound=selected.get("unbound"))
     return run
 
 
@@ -371,3 +374,179 @@ def test_serving_label_cannot_hide_incomplete_call_coverage(assembled_applicatio
     draft, unavailable = out.build("model-1", document=doc)
     assert draft["execution"]["model_served"] is None
     assert unavailable["execution.model_served"] == "NOT_OBSERVED"
+
+
+def make_unbound_call(monkeypatch, agent, kind, *, failure=None):
+    """Original transports with only their external I/O edges replaced."""
+    if kind == "httpx":
+        calls = []
+        original_response = httpx.Response(200, json={"private": "UNBOUND_ANSWER"})
+        request = httpx.Request("POST", "https://provider.invalid/v1/chat/completions",
+            json={"model": "UNBOUND_MODEL", "messages": [
+                {"role": "user", "content": "UNBOUND_PRIVATE_INPUT"}], "seed": 987})
+        def handler(actual_request):
+            assert actual_request is request
+            calls.append(actual_request)
+            if failure is not None:
+                raise failure
+            return original_response
+        def invoke():
+            with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+                return client._send_single_request(request)
+        def returned(value):
+            assert value is original_response
+    else:
+        def change(*_):
+            if failure is not None:
+                raise failure
+        bound = bound_fixture(monkeypatch, agent, exact=True, change=change)
+        bound.request["messages"][0]["content"] = "UNBOUND_PRIVATE_INPUT"
+        calls = bound.calls
+        def invoke():
+            client = application.HermesApplicationClient()
+            try:
+                with application.call_scope(bound.binding, bound.call):
+                    return client.create(**bound.request)
+            finally:
+                client.close()
+        def returned(value):
+            assert value.choices[0].message.content == "PRIVATE_ANSWER"
+    return SimpleNamespace(invoke=invoke, calls=calls, returned=returned)
+
+
+def exercise_unbound(call, failure, invoke=None):
+    invoke = call.invoke if invoke is None else invoke
+    if failure is None:
+        call.returned(invoke())
+    else:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            invoke()
+        assert caught.value is failure
+    assert len(call.calls) == 1
+
+
+@pytest.mark.parametrize("kind", ["httpx", "application"])
+@pytest.mark.parametrize("raises", [False, True], ids=["returned", "raised"])
+@pytest.mark.parametrize("scope_state", [
+    "current", "no_scope", "closed", "stale", "guard_error", "classification_error",
+])
+def test_unbound_original_transport_preserves_outcome_and_scope(
+        engine, monkeypatch, kind, raises, scope_state):
+    failure = KeyboardInterrupt("UNBOUND_PRIVATE_FAILURE") if raises else None
+    seen = {}
+    async def handle(ref, row, agent):
+        owner = observation._current.get()
+        call = make_unbound_call(monkeypatch, agent, kind, failure=failure)
+        with monkeypatch.context() as patch:
+            token = None
+            if scope_state == "no_scope":
+                token = observation._current.set(None)
+            elif scope_state == "closed":
+                patch.setattr(owner, "closed", True)
+            elif scope_state == "stale":
+                patch.setitem(owner.authority.executing, owner.session_id, owner.generation + 1)
+            elif scope_state == "guard_error":
+                def unavailable(_):
+                    raise RuntimeError("UNBOUND_PRIVATE_OBSERVER_FAILURE")
+                patch.setattr(transport.Contribution, "observe_unbound_transport", unavailable, raising=False)
+            elif scope_state == "classification_error":
+                class BadContext:
+                    @property
+                    def contribution(self):
+                        raise RuntimeError("UNBOUND_PRIVATE_CONTEXT_FAILURE")
+                token = transport._dispatch_context.set(BadContext())
+            try:
+                exercise_unbound(call, failure)
+            finally:
+                if token is not None:
+                    variable = observation._current if scope_state == "no_scope" else transport._dispatch_context
+                    variable.reset(token)
+        seen["owner"] = owner
+        engine.results.execution_result.get()["result"] = {"completed": True, "messages": [], "final_response": "done"}
+        return "done"
+    _, row, _, _ = run_admission(engine, behavior=handle)
+    value = engine.authority.pending_results[row["admission_id"]][observation.RESULT_KEY]["transport"]
+    assert value["errors"] == (["unsupported_dispatch"] if scope_state == "current" else [])
+    assert value["calls"] == value["dispatches"] == value["attempts"] == []
+    assert value.get("application_attempts", []) == []
+    assert transport.validate_document(value) == value
+    assert "UNBOUND_" not in json.dumps(value)
+    assert seen["owner"].closed
+
+
+@pytest.mark.parametrize("kind", ["httpx", "application"])
+@pytest.mark.parametrize("raises", [False, True], ids=["returned", "raised"])
+@pytest.mark.parametrize("context_state", ["foreign_dispatch", "copied_old_scope"])
+def test_unbound_transport_cannot_borrow_another_admissions_identity(
+        engine, monkeypatch, kind, raises, context_state):
+    import contextvars
+    old = {}
+    async def first(ref, row, agent):
+        old.update(scope=observation._current.get(), context=contextvars.copy_context())
+        engine.results.execution_result.get()["result"] = {"completed": True, "messages": [], "final_response": "first"}
+        return "first"
+    run_admission(engine, behavior=first)
+    assert old["scope"].closed
+    before = copy.deepcopy(old["scope"].transport.document())
+    failure = KeyboardInterrupt("UNBOUND_PRIVATE_FAILURE") if raises else None
+    async def second(ref, row, agent):
+        current = observation._current.get()
+        assert current is not old["scope"]
+        call = make_unbound_call(monkeypatch, agent, kind, failure=failure)
+        if context_state == "foreign_dispatch":
+            token = transport._dispatch_context.set(SimpleNamespace(contribution=old["scope"].transport))
+            try:
+                exercise_unbound(call, failure)
+            finally:
+                transport._dispatch_context.reset(token)
+        else:
+            exercise_unbound(call, failure, lambda: old["context"].run(call.invoke))
+        assert old["scope"].transport.document() == before
+        engine.results.execution_result.get()["result"] = {"completed": True, "messages": [], "final_response": "second"}
+        return "second"
+    _, row, _, _ = run_admission(engine, behavior=second)
+    value = engine.authority.pending_results[row["admission_id"]][observation.RESULT_KEY]["transport"]
+    assert value["errors"] == (["unsupported_dispatch"] if context_state == "foreign_dispatch" else [])
+    assert value["calls"] == value["dispatches"] == value["attempts"] == []
+    assert value.get("application_attempts", []) == []
+    assert transport.validate_document(value) == value
+    assert old["scope"].transport.document() == before
+
+
+@pytest.mark.parametrize("kind", ["httpx", "application"])
+def test_repeated_unbound_calls_keep_one_bounded_gap_without_payload(engine, monkeypatch, kind):
+    async def handle(ref, row, agent):
+        owner = observation._current.get()
+        before = owner.metadata_bytes
+        for _ in range(8):
+            exercise_unbound(make_unbound_call(monkeypatch, agent, kind), None)
+        assert owner.metadata_bytes == before
+        assert owner.transport.errors == {"unsupported_dispatch"}
+        engine.results.execution_result.get()["result"] = {"completed": True, "messages": [], "final_response": "done"}
+        return "done"
+    _, row, _, _ = run_admission(engine, behavior=handle)
+    value = engine.authority.pending_results[row["admission_id"]][observation.RESULT_KEY]["transport"]
+    assert value["errors"] == ["unsupported_dispatch"]
+    assert value["calls"] == value["dispatches"] == value["attempts"] == []
+    assert value.get("application_attempts", []) == []
+    assert "UNBOUND_" not in json.dumps(value)
+    assert transport.validate_document(value) == value
+
+
+@pytest.mark.parametrize("kind", ["httpx", "application"])
+def test_unbound_original_call_blocks_subset_scalar_publication(assembled_application_projection, kind):
+    out = assembled_application_projection(unbound=kind)
+    assert len(out.unbound.calls) == 1
+    value = out.document["transport"]
+    draft, unavailable = out.build("model-1")
+    assert draft["execution"]["model_served"] is None
+    assert value["errors"] == ["unsupported_dispatch"]
+    assert len(value["calls"]) == len(value["dispatches"]) == len(value["application_attempts"]) == 1
+    assert value["attempts"] == []
+    assert "model_requested" not in draft["execution"]
+    assert "provider" not in draft["execution"]
+    assert "native_session_fingerprint" not in draft["execution"]
+    assert unavailable["execution.model_served"] == "NOT_OBSERVED"
+    assert draft["observation_availability"]["coverage"]["provider_requests"]["status"] == "PARTIAL"
+    assert "UNBOUND_" not in json.dumps(value)
+    assert all(value[k] is False for k in ("complete_evaluation", "provider_delivery_proven", "model_identity_verified"))
