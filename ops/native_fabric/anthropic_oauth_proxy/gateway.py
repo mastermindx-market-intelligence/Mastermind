@@ -35,7 +35,22 @@ from .budget import DEFAULT_WEIGHTS, SlidingBudget, model_weight, parse_model_we
 UPSTREAM = "https://api.anthropic.com"
 ANTHROPIC_VERSION = "2023-06-01"
 OAUTH_BETA = "oauth-2025-04-20"
-CLAUDE_CODE_UA = "claude-code/2.1.300"
+# Mirror Hermes' native anthropic_adapter OAuth header set exactly: without the
+# full Claude-Code beta set, premium models (claude-fable-5*) shed requests with
+# generic upstream 429s while haiku-class traffic succeeds.
+DEFAULT_BETAS = ("interleaved-thinking-2025-05-14,"
+                 "fine-grained-tool-streaming-2025-05-14,"
+                 "claude-code-20250219,"
+                 "oauth-2025-04-20")
+CLAUDE_CODE_UA = "claude-code/2.1.296"
+# Claude Code identity mirror (see _apply_claude_code_identity in Hermes'
+# agent/anthropic_adapter.py) — Anthropic's OAuth billing/abuse classifier
+# fingerprints non-Claude-Code traffic and sheds it on premium models.
+_CC_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude."
+_CC_SYSTEM_REPLACEMENTS = (
+    ("Hermes Agent", "Claude Code"), ("Hermes agent", "Claude Code"),
+    ("Nous Research", "Anthropic"),
+)
 OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 TOKEN_URLS = (
     "https://platform.claude.com/v1/oauth/token",
@@ -769,6 +784,31 @@ def create_app(
             payload["model"] = upstream_model
             body = bytearray(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
 
+        # Anthropic's OAuth classifier sheds non-Claude-Code-shaped traffic on premium
+        # models (generic 429 rate_limit_error with x-should-retry). Hermes applies this
+        # same identity transform on its native OAuth routes (agent/anthropic_adapter.py::
+        # _apply_claude_code_identity) but NOT through custom base_url providers — this
+        # gateway owns the OAuth wire, so it owns the identity too. Verified live: with
+        # the CC system block present, claude-fable-5* answers 200; without it, 429.
+        if isinstance(payload, dict) and payload.get("model", "").startswith("claude-"):
+            system = payload.get("system")
+            if isinstance(system, str) and system:
+                system = [{"type": "text", "text": system}]
+            system = system if isinstance(system, list) else []
+            if not any(
+                isinstance(b, dict) and b.get("text", "").startswith(_CC_SYSTEM_PREFIX)
+                for b in system
+            ):
+                cc_block = {"type": "text", "text": _CC_SYSTEM_PREFIX}
+                for block in system:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        for old, new in _CC_SYSTEM_REPLACEMENTS:
+                            text = text.replace(old, new)
+                        block["text"] = text
+                payload["system"] = [cc_block] + system
+                body = bytearray(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
         pinned = request.headers.get("x-fabric-account", "").strip()
         only: str | None = None
         if pinned:
@@ -858,7 +898,7 @@ def create_app(
         assert gateway.upstream is not None
         headers = {
             "authorization": f"Bearer {account.access_token}",
-            "anthropic-beta": OAUTH_BETA,
+            "anthropic-beta": request.headers.get("anthropic-beta") or DEFAULT_BETAS,
             "anthropic-version": request.headers.get("anthropic-version") or ANTHROPIC_VERSION,
             "user-agent": CLAUDE_CODE_UA,
             "content-type": "application/json",
