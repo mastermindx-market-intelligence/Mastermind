@@ -10,7 +10,9 @@ import json
 import re
 from typing import Any
 
-from control_plane.operator_harness_contract import ObservedHarnessAttestation
+from control_plane.operator_harness_contract import (
+    ObservedHarnessAttestation, ObservedCapabilityIdentity, ObservedTriState,
+)
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}\Z")
 CLAIM_SCHEMA = "mastermind.dsh.native_prompt_claim.v1"
@@ -66,8 +68,182 @@ def native_extension(value: Any) -> dict[str, str]:
     return dict(value)
 
 
-def native_observation(value: Any, session_id: str) -> ObservedHarnessAttestation:
+
+OWNER_OBSERVATION_SCHEMA = "mastermind.dsh.native_owner_observation.v1"
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeAccountFacts:
+    inference_origin: str
+    user_id: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeWorkspaceFacts:
+    workspace_path: str
+    device: int
+    inode: int
+    uid: int
+    gid: int
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeProcessFacts:
+    pid: int
+    uid: int
+    gid: int
+    exec_path: str
+    node_version: str
+    binary_sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeSourceFacts:
+    entry_path: str
+    entry_sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeSelectionFacts:
+    provider: str
+    model: str
+    reasoning_effort: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeOwnerFacts:
+    """Actual Node owners only; no canonical Worker, principal or Git base."""
+    agent_id: str
+    session_cwd: str
+    process: NativeProcessFacts
+    source: NativeSourceFacts
+    selection: NativeSelectionFacts | None
+    account: NativeAccountFacts | None
+    workspace: NativeWorkspaceFacts | None
+    capabilities: tuple[ObservedCapabilityIdentity, ...] | None
+    effective_skills: tuple[str, ...] | None
+    effective_mcp: tuple[str, ...] | None
+    effective_plugins_or_apps: tuple[str, ...] | None
+    sandbox_state: str | None
+    approval_state: str | None
+    network_state: str | None
+    effective_config_digest: str | None
+    supports_subagent_capability_ceiling: ObservedTriState
+    unknown_fields: tuple[str, ...]
+
+
+def _native_owner_observation(value: Any, session_id: str) -> NativeOwnerFacts:
+    from control_plane.operator_harness_wire import observed_capability_identity
+    from pathlib import PurePosixPath
+    from urllib.parse import urlsplit
+
+    def closed(item, names):
+        if type(item) is not dict or set(item) != set(names):
+            raise ValueError()
+        return item
+
+    def text(item, nullable=False):
+        if item is None and nullable:
+            return None
+        if type(item) is not str or not item or len(item.encode("utf-8")) > OBSERVATION_MAX_BYTES:
+            raise ValueError()
+        return item
+
+    def path(item):
+        text(item)
+        p = PurePosixPath(item)
+        if not p.is_absolute() or str(p) != item or ".." in p.parts or item.startswith("//"):
+            raise ValueError()
+        return item
+
+    def digest(item):
+        if type(item) is not str or re.fullmatch(r"[0-9a-f]{64}", item) is None:
+            raise ValueError()
+        return item
+
+    def rows(item, convert, nullable=False):
+        if item is None and nullable:
+            return None
+        if type(item) is not list or len(item) > 4096:
+            raise ValueError()
+        return tuple(convert(x) for x in item)
+
+    def capability(item):
+        names = {field.name for field in dataclasses.fields(ObservedCapabilityIdentity)}
+        row = closed(item, names)
+        for key, field in row.items():
+            text(field, nullable=key not in {"kind", "name"})
+        return observed_capability_identity(row)
+
+    try:
+        closed(value, ("schema", "sessionId", "facts"))
+        if (value["schema"] != OWNER_OBSERVATION_SCHEMA
+                or native_id(value["sessionId"]) != native_id(session_id)
+                or len(json.dumps(value, ensure_ascii=False, allow_nan=False,
+                                  separators=(",", ":")).encode("utf-8")) > OBSERVATION_MAX_BYTES):
+            raise ValueError()
+        raw = closed(value["facts"], (field.name for field in dataclasses.fields(NativeOwnerFacts)))
+        if native_id(raw["agent_id"]) != session_id:
+            raise ValueError()
+        process = closed(raw["process"], (field.name for field in dataclasses.fields(NativeProcessFacts)))
+        for key in ("pid", "uid", "gid"):
+            integer(process[key], minimum=1 if key == "pid" else 0)
+        path(process["exec_path"])
+        if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", text(process["node_version"])):
+            raise ValueError()
+        digest(process["binary_sha256"])
+        source = closed(raw["source"], ("entry_path", "entry_sha256"))
+        path(source["entry_path"]); digest(source["entry_sha256"])
+        selection = raw["selection"]
+        if selection is not None:
+            closed(selection, ("provider", "model", "reasoning_effort"))
+            for key, item in selection.items():
+                text(item, nullable=key == "reasoning_effort")
+            selection = NativeSelectionFacts(**selection)
+        account = raw["account"]
+        if account is not None:
+            closed(account, ("inference_origin", "user_id"))
+            origin = urlsplit(text(account["inference_origin"]))
+            if (origin.scheme not in {"http", "https"} or not origin.hostname
+                    or origin.username or origin.password or origin.query or origin.fragment
+                    or origin.path not in {"", "/"}
+                    or account["inference_origin"] != origin.scheme + "://" + origin.netloc):
+                raise ValueError()
+            user_id = text(account["user_id"], nullable=True)
+            if user_id is not None and any(x in user_id.lower() for x in ("token", "refresh", "secret", "auth.json", "credential")):
+                raise ValueError()
+            account = NativeAccountFacts(**account)
+        workspace = raw["workspace"]
+        if workspace is not None:
+            closed(workspace, (field.name for field in dataclasses.fields(NativeWorkspaceFacts)))
+            path(workspace["workspace_path"])
+            for key in ("device", "inode", "uid", "gid"):
+                integer(workspace[key], minimum=1 if key == "inode" else 0)
+            workspace = NativeWorkspaceFacts(**workspace)
+        fields = {key: text(raw[key], nullable=True)
+                  for key in ("sandbox_state", "approval_state", "network_state", "effective_config_digest")}
+        if fields["effective_config_digest"] is not None:
+            digest(fields["effective_config_digest"])
+        return NativeOwnerFacts(
+            agent_id=raw["agent_id"], session_cwd=path(raw["session_cwd"]),
+            process=NativeProcessFacts(**process), source=NativeSourceFacts(**source),
+            selection=selection, account=account, workspace=workspace,
+            capabilities=rows(raw["capabilities"], capability, nullable=True),
+            effective_skills=rows(raw["effective_skills"], text, nullable=True),
+            effective_mcp=rows(raw["effective_mcp"], text, nullable=True),
+            effective_plugins_or_apps=rows(raw["effective_plugins_or_apps"], text, nullable=True),
+            **fields,
+            supports_subagent_capability_ceiling=ObservedTriState(raw["supports_subagent_capability_ceiling"]),
+            unknown_fields=rows(raw["unknown_fields"], text),
+        )
+    except (TypeError, ValueError, KeyError, OverflowError, RecursionError):
+        raise NativeProtocolError("NATIVE_OWNER_OBSERVATION_REFUSED") from None
+
+
+def native_observation(value: Any, session_id: str) -> ObservedHarnessAttestation | NativeOwnerFacts:
     """Decode the original session's passive OHF facts, preserving explicit nulls."""
+    if type(value) is dict and value.get("schema") == OWNER_OBSERVATION_SCHEMA:
+        return _native_owner_observation(value, session_id)
     # The general OHF wire also imports native result types from this module.
     from control_plane.operator_harness_wire import observed_harness_attestation
     try:

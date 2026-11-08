@@ -733,3 +733,41 @@ it.each(["preparation","header-after-microtask"] as const)(
     expect(h.agent.session.snapshotEvents().filter(event=>event.type==="request/header")).toEqual([]);
     expect(preparations).toBe(boundary==="preparation"?1:2);
   });
+
+
+// C31: these are deliberately inert Node-fact codec fixtures, not installed evidence.
+const nodeFacts=(id:string)=>({
+  agent_id:id,session_cwd:"/fixture/workspace",
+  process:{pid:123,uid:501,gid:20,exec_path:"/fixture/node",node_version:"v26.5.0",binary_sha256:"a".repeat(64)},
+  source:{entry_path:"/fixture/native_worker.mjs",entry_sha256:"b".repeat(64)},
+  selection:{provider:"deepseek-account",model:"deepseek-chat",reasoning_effort:null},
+  account:{inference_origin:"https://api.deepseek.com",user_id:null},
+  workspace:{workspace_path:"/fixture/workspace",device:1,inode:2,uid:501,gid:20},
+  capabilities:[],effective_skills:[],effective_mcp:[],effective_plugins_or_apps:[],
+  sandbox_state:null,approval_state:null,network_state:null,effective_config_digest:null,
+  supports_subagent_capability_ceiling:"FALSE",unknown_fields:[],
+});
+it("serializes actual Node-owned facts without fabricating a canonical Worker",async()=>{
+  const h=await host([],true,undefined,facts=>nodeFacts(facts.agent.id));
+  const response:any=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
+  expect(response.schema).toBe("mastermind.dsh.native_owner_observation.v1");
+  expect(response.facts).toEqual(nodeFacts(h.sessionId));
+  expect(response.facts).not.toHaveProperty("auth");
+});
+it.each(["/tmp//x","/tmp/x/","/tmp/./x","/tmp/../x","//tmp/x","relative"])(
+  "refuses noncanonical Node path %s before wire publication",async path=>{
+    const h=await host([],true,undefined,facts=>({...nodeFacts(facts.agent.id),session_cwd:path}));
+    await expect(h.client.request("_mastermind/native_observe",observationRequest(h.sessionId)))
+      .rejects.toThrow("native observation response is invalid");
+  });
+it("sanitizes a discriminator descriptor trap without exposing its text",async()=>{
+  const h=await host([],true,undefined,()=>new Proxy({},{getOwnPropertyDescriptor(){throw Error("private trap content");}}));
+  await expect(h.client.request("_mastermind/native_observe",observationRequest(h.sessionId)))
+    .rejects.toThrow("native observation response is invalid");
+});
+it("preserves unknown inventories separately from known empty inventories",async()=>{
+  const h=await host([],true,undefined,facts=>({...nodeFacts(facts.agent.id),capabilities:null,effective_mcp:null}));
+  const response:any=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
+  expect(response.facts.capabilities).toBeNull();expect(response.facts.effective_mcp).toBeNull();
+  expect(response.facts.effective_skills).toEqual([]);
+});

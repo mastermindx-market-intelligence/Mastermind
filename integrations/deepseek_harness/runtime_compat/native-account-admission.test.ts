@@ -44,7 +44,7 @@ it("passive account observation reads only the original grant and never publishe
   const profile=vi.spyOn(h.account,"getProfile"),device=vi.spyOn(h.account,"getDeviceIdentity");
   const snapshot=await h.account.getLocalInferenceSnapshot();
   expect(snapshot).toMatchObject({inferenceOrigin:INFERENCE,userId:null});
-  expect(Object.keys(snapshot!).sort()).toEqual(["inferenceOrigin","isCurrent","userId"]);
+  expect(Object.keys(snapshot!).sort()).toEqual(["inferenceOrigin","isCurrent","isInferenceCurrent","userId"]);
   expect(Object.isFrozen(snapshot)).toBe(true);expect(snapshot!.isCurrent()).toBe(true);
   expect(JSON.stringify(snapshot)).not.toContain("fixture-secret");
   expect(reads).toHaveBeenCalledExactlyOnceWith(KEY);expect(writes).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ it("profile identity refresh invalidates only its passive snapshot, not the same
     id:"observed-user",email:"m***@example.invalid",id_profile:{name:"Inert Account",picture:null},
   }}}));
   await h.account.getProfile(META);
-  expect(cold.isCurrent()).toBe(false);expect(witness.signal.aborted).toBe(false);expect(witness.assertCurrent()).toBe(true);
+  expect(cold.isCurrent()).toBe(false);expect(cold.isInferenceCurrent()).toBe(true);expect(witness.signal.aborted).toBe(false);expect(witness.assertCurrent()).toBe(true);
   const warm=(await h.account.getLocalInferenceSnapshot())!;
   expect(warm.userId).toBe("observed-user");expect(warm.isCurrent()).toBe(true);expect(h.fetch).toHaveBeenCalledTimes(1);
 });
@@ -128,7 +128,7 @@ it("disposing the original account invalidates both witnesses without a network 
   const h=await fixture();await h.write();
   const witness=(await h.account.resolveInferenceCredential(INFERENCE))!,snapshot=(await h.account.getLocalInferenceSnapshot())!;
   await h.fiber.dispose();expect(witness.signal.aborted).toBe(true);expect(()=>witness.assertCurrent()).toThrow();
-  expect(snapshot.isCurrent()).toBe(false);expect(h.fetch).not.toHaveBeenCalled();
+  expect(snapshot.isCurrent()).toBe(false);expect(snapshot.isInferenceCurrent()).toBe(false);expect(h.fetch).not.toHaveBeenCalled();
 });
 async function collect(stream:AsyncIterable<StreamChunk>){const result:StreamChunk[]=[];for await(const chunk of stream)result.push(chunk);return result;}
 const finish=(values:StreamChunk[])=>values.find(x=>x.type==="finish") as any;

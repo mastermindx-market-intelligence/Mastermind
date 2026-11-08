@@ -2,7 +2,7 @@
 /** Exact original native Agent and AgentLoop projects with captured host source. */
 
 import {createRequire} from "node:module";
-import {readFileSync,existsSync} from "node:fs";
+import {readFileSync,existsSync,mkdirSync,writeFileSync} from "node:fs";
 import {resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
@@ -16,14 +16,17 @@ for(const [name,digest] of Object.entries({...manifest.source_sha256,...manifest
 const ts=createRequire(resolve(donor,"package.json"))("typescript");
 const base=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFile);
 if(base.error)throw Error("Original source path configuration unavailable");
-const patched=["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek","packages/credentials/deepseek-account","packages/credentials/deepseek-account-platform","packages/llm/llm-deepseek-account"];
+const patched=["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek","packages/credentials/deepseek-account","packages/credentials/deepseek-account-platform","packages/llm/llm-deepseek-account","packages/core/tools","packages/sandbox/sandbox-policy","packages/interaction/user-approval","packages/skill/skill","packages/boot/app-boot","vendor/loader"];
 const projectCache=new Map();
+const loaderDeclarations=resolve(candidate,"vendor/loader/lib/types");
+let checkingVendor=false;
 function declarationPath(value){
  value=value.replace(/^\.\//,"");
  const match=/\/src(?:\/|$)/.exec(value);
  if(!match)return resolve(donor,value);
  const marker=match.index,relative=value.slice(0,marker),suffix=value.slice(marker+4).replace(/^\//,"")||"index.ts";
  if(relative.includes("*"))return resolve(donor,value);
+ if(relative==="vendor/loader"&&!checkingVendor)return resolve(loaderDeclarations,suffix.replace(/\.tsx?$/,".d.ts"));
  if(patched.includes(relative))return resolve(candidate,value);
  let parsed=projectCache.get(relative);
  if(!parsed){
@@ -35,14 +38,17 @@ function declarationPath(value){
  const output=resolve(directory,suffix.replace(/\.tsx?$/,".d.ts"));
  return output.includes("*")||existsSync(output)?output:resolve(donor,value);
 }
-const sourcePaths=Object.fromEntries(Object.entries(base.config.compilerOptions.paths).map(([key,values])=>[key,values.map(declarationPath)]));
 let total=0;
-for(const name of ["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek","packages/credentials/deepseek-account","packages/credentials/deepseek-account-platform","packages/llm/llm-deepseek-account"]){
+for(const name of ["vendor/loader",...patched.filter(name=>name!=="vendor/loader")]){
+ checkingVendor=name==="vendor/loader";
+ const sourcePaths=Object.fromEntries(Object.entries(base.config.compilerOptions.paths).map(([key,values])=>[key,values.map(declarationPath)]));
+
  const project=resolve(donor,name),raw=ts.readConfigFile(resolve(project,"tsconfig.json"),ts.sys.readFile);
  if(raw.error)throw Error("Host TypeScript project unavailable");
  const parsed=ts.parseJsonConfigFileContent(raw.config,ts.sys,project);
  const root=resolve(candidate,name,"src");
- const options={...parsed.options,noEmit:true,composite:false,incremental:false,declaration:false,declarationMap:false,
+ const options={...parsed.options,noEmit:!checkingVendor,composite:false,incremental:false,
+ declaration:checkingVendor,emitDeclarationOnly:checkingVendor,declarationMap:false,
  disableSourceOfProjectReferenceRedirect:true,rootDir:undefined,outDir:undefined,tsBuildInfoFile:undefined,
  typeRoots:[resolve(donor,"node_modules/@types")],
  paths:sourcePaths};
@@ -54,6 +60,11 @@ for(const name of ["packages/core/agent","packages/core/agent-loop","packages/ll
   for(const dependency of patched){
    const prefix=resolve(donor,dependency,"lib/types")+"/";
    if(found.resolvedFileName.startsWith(prefix)){
+    if(dependency==="vendor/loader"&&!checkingVendor){
+     const file=resolve(loaderDeclarations,found.resolvedFileName.slice(prefix.length));
+     if(!existsSync(file))throw Error("Qualified Loader declaration absent: "+file);
+     return {...found,resolvedFileName:file,extension:ts.Extension.Dts};
+    }
     const source=resolve(candidate,dependency,"src",found.resolvedFileName.slice(prefix.length).replace(/\.d\.ts$/,".ts"));
     if(!existsSync(source))throw Error("Patched declaration has no exact source: "+source);
     return {...found,resolvedFileName:source,extension:ts.Extension.Ts};
@@ -63,6 +74,20 @@ for(const name of ["packages/core/agent","packages/core/agent-loop","packages/ll
  });
  const program=ts.createProgram({rootNames:names,options,host});
  const diagnostics=[...parsed.errors,...ts.getPreEmitDiagnostics(program)];total+=diagnostics.length;
+ if(checkingVendor&&diagnostics.length===0){
+  // Preserve the vendor's own compiler options. Strict application projects
+  // consume declarations emitted from these same qualified patched sources.
+  const emitted=[];
+  const result=program.emit(undefined,(file,data,_bom,_error,sources)=>{
+   const source=sources?.find(item=>item.fileName.startsWith(root+"/"));
+   if(!source||!file.endsWith(".d.ts"))return;
+   const output=resolve(loaderDeclarations,source.fileName.slice(root.length+1).replace(/\.tsx?$/,".d.ts"));
+   mkdirSync(dirname(output),{recursive:true});writeFileSync(output,data);
+   emitted.push([output.slice(loaderDeclarations.length+1),createHash("sha256").update(data).digest("hex")]);
+  },undefined,true);
+  if(result.emitSkipped||result.diagnostics.length||emitted.length===0)throw Error("Qualified Loader declaration emit failed");
+  console.log("LOADER_DECLARATIONS "+JSON.stringify(emitted.sort()));
+ }
  console.log("PROJECT "+name+" DIAGNOSTICS "+diagnostics.length);
  console.log(ts.formatDiagnosticsWithColorAndContext(diagnostics,{getCanonicalFileName:x=>x,getCurrentDirectory:()=>here,getNewLine:()=>"\n"}));
 }

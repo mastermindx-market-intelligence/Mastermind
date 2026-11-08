@@ -51,6 +51,27 @@ class NativeOperatorError(RuntimeError):
         self.failure_class, self.effect_unknown = failure_class, effect_unknown
 
 
+def observe_native_workspace(workspace: Path):
+    """Observe the original workspace through the existing bounded Git reader."""
+    from control_plane.codex_operator_adapter import _default_base_sha
+    from control_plane.operator_harness_contract import WorkspaceIdentity
+    import re
+
+    path = Path(workspace)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise NativeOperatorError("native workspace is not canonical")
+    before = path.lstat()
+    if not stat.S_ISDIR(before.st_mode):
+        raise NativeOperatorError("native workspace is not a directory")
+    head = _default_base_sha(path)
+    after = path.lstat()
+    fields = ("st_dev", "st_ino", "st_uid", "st_gid", "st_mode")
+    if (any(getattr(before, key) != getattr(after, key) for key in fields)
+            or path.resolve(strict=True) != path or re.fullmatch(r"[0-9a-f]{40}", head) is None):
+        raise NativeOperatorError("native workspace changed during observation")
+    return WorkspaceIdentity(str(path), head, after.st_dev, after.st_ino, after.st_uid, after.st_gid)
+
+
 @dataclass(frozen=True)
 class NativeLaunchBinding:
     """Trusted composition inputs, never browser JSON or an authority receipt.

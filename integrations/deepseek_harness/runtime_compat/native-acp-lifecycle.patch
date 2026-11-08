@@ -21,7 +21,7 @@
  
  const DEFAULT_SESSION_LIST_PAGE_SIZE = 100
  
-@@ -71,7 +74,66 @@
+@@ -71,7 +74,97 @@
    return RequestError.internalError(undefined, detail)
  }
  
@@ -69,6 +69,37 @@
 +  readonly unknown_fields: readonly string[]
 +}
 +
++/** Actual Node-owned facts. Canonical Worker/principal/Git-base provenance stays in the broker. */
++export interface NativeOwnerFacts {
++  readonly agent_id: string
++  readonly session_cwd: string
++  readonly process: {
++    readonly pid: number; readonly uid: number; readonly gid: number
++    readonly exec_path: string; readonly node_version: string; readonly binary_sha256: string
++  }
++  readonly source: { readonly entry_path: string; readonly entry_sha256: string }
++  readonly selection: { readonly provider: string; readonly model: string; readonly reasoning_effort: string | null } | null
++  readonly account: { readonly inference_origin: string; readonly user_id: string | null } | null
++  readonly workspace: {
++    readonly workspace_path: string; readonly device: number; readonly inode: number; readonly uid: number; readonly gid: number
++  } | null
++  /** Null is unobserved; [] is an actually observed empty inventory. */
++  readonly capabilities: NativeObservedAttestation['capabilities'] | null
++  readonly effective_skills: readonly string[] | null
++  readonly effective_mcp: readonly string[] | null
++  readonly effective_plugins_or_apps: readonly string[] | null
++  readonly sandbox_state: string | null
++  readonly approval_state: string | null
++  readonly network_state: string | null
++  readonly effective_config_digest: string | null
++  readonly supports_subagent_capability_ceiling: NativeObservedAttestation['supports_subagent_capability_ceiling']
++  readonly unknown_fields: readonly string[]
++}
++
++type NativeObservationResponse =
++  | { schema: 'mastermind.dsh.native_observation.v1'; sessionId: string; attestation: NativeObservedAttestation }
++  | { schema: 'mastermind.dsh.native_owner_observation.v1'; sessionId: string; facts: NativeOwnerFacts }
++
  /** Plugin config: the provider/model selection used for each ACP-created agent. */
 +/** Actual candidate at the original serialized model assignment, never a wire grant. */
 +export interface NativeModelAssignmentFacts {
@@ -88,7 +119,7 @@
  export interface AcpConfig {
    /** Provider route for created agents. */
    provider?: string
-@@ -81,6 +143,12 @@
+@@ -81,6 +174,12 @@
    sessionListPageSize?: number
    /** Runtime-only transport override; production uses stdio. */
    stream?: Stream
@@ -97,11 +128,11 @@
 +  /** Runtime-only one-shot assignment admission from the original startup operation. */
 +  nativeModelAdmission?: (facts: NativeModelAssignmentFacts) => NativeModelAssignmentPermit
 +  /** Passive runtime-only facts on the original retained Agent and session. */
-+  nativeObservation?: (facts: NativeObservationFacts, signal: AbortSignal) => NativeObservedAttestation | Promise<NativeObservedAttestation>
++  nativeObservation?: (facts: NativeObservationFacts, signal: AbortSignal) => NativeObservedAttestation | NativeOwnerFacts | Promise<NativeObservedAttestation | NativeOwnerFacts>
  }
  
  export const Config: Schema<AcpConfig> = Schema.object({
-@@ -104,6 +172,18 @@
+@@ -104,6 +203,18 @@
    const activating = new Set<SessionId>()
    let closed = false
    let imagePromptEnabled = false
@@ -120,7 +151,7 @@
  
    /** Return the bridge-owned record for an agent, rejecting same-id impostors. */
    const ownedRecord = (agent: Parameters<AcpSession['owns']>[0]): AcpSession | undefined => {
-@@ -180,7 +260,7 @@
+@@ -180,16 +291,24 @@
      async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
        // Single-version agent: the spec's "same version if supported, else
        // the latest supported" both resolve to this server's one version.
@@ -129,7 +160,10 @@
        return {
          protocolVersion: PROTOCOL_VERSION,
          agentInfo: { name: 'deepseek-harness-acp', version: '0.0.1' },
-@@ -190,6 +270,14 @@
+         agentCapabilities: {
+-          mcpCapabilities: { http: true },
++          mcpCapabilities: { http: nativePromptAdmission === undefined },
+           promptCapabilities: { image: imagePromptEnabled, audio: false, embeddedContext: false },
            sessionCapabilities: { close: {}, list: {}, resume: {} },
          },
          authMethods: [],
@@ -144,7 +178,27 @@
        }
      },
  
-@@ -337,11 +425,52 @@
+@@ -200,6 +319,9 @@
+     async newSession(params: NewSessionRequest, signal: AbortSignal): Promise<NewSessionResponse> {
+       assertOpen()
+       validateWorkspaceParams(params)
++      if (nativePromptAdmission !== undefined && (params.mcpServers?.length ?? 0) !== 0) {
++        throw invalidParams('native MCP servers require an original capability owner')
++      }
+       const sessionId = brandString<SessionId>(randomUUID())
+       // No preset composition: the ACP bundle keeps the model-facing rows in
+       // the host plane, so this agent reads them from the global layer. A
+@@ -243,6 +365,9 @@
+     async resumeSession(params: ResumeSessionRequest, signal: AbortSignal): Promise<ResumeSessionResponse> {
+       assertOpen()
+       validateWorkspaceParams(params)
++      if (nativePromptAdmission !== undefined && (params.mcpServers?.length ?? 0) !== 0) {
++        throw invalidParams('native MCP servers require an original capability owner')
++      }
+       const sessionId = brandString<SessionId>(params.sessionId)
+       if (sessions.has(sessionId) || activating.has(sessionId) || ctx.sessions.get(sessionId) !== undefined) {
+         throw invalidParams(`session is already active: ${sessionId}`)
+@@ -337,11 +462,52 @@
      async setSessionConfigOption(
        params: SetSessionConfigOptionRequest,
        signal: AbortSignal,
@@ -198,7 +252,7 @@
        } catch (error: unknown) {
          if (error instanceof AcpModelConfigError) throw invalidParams(error.message)
          throw error
-@@ -362,13 +491,74 @@
+@@ -362,13 +528,74 @@
        return {}
      },
  
@@ -275,7 +329,7 @@
        sessions.get(brandString<SessionId>(params.sessionId))?.cancel()
        return Promise.resolve()
      },
-@@ -389,9 +579,39 @@
+@@ -389,9 +616,39 @@
      .onRequest(methods.agent.session.list, ({ params, signal }) => implementation.listSessions(params, signal))
      .onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal))
      .onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params))
@@ -317,7 +371,7 @@
    const connection = app.connect(stream)
    const conn: AgentContext = connection.client
  
-@@ -438,6 +658,131 @@
+@@ -438,6 +695,209 @@
    /* v8 ignore stop */
  
    ctx.effect(() => quiesce, 'acp.connection')
@@ -368,10 +422,11 @@
 +  })
 +}
 +
-+function nativeObservationResponse(sessionId: string, value: NativeObservedAttestation): {
-+  schema: 'mastermind.dsh.native_observation.v1'; sessionId: string; attestation: NativeObservedAttestation
-+} {
++function nativeObservationResponse(sessionId: string, value: NativeObservedAttestation | NativeOwnerFacts): NativeObservationResponse {
 +  try {
++    if (value !== null && typeof value === 'object' && Object.hasOwn(value, 'account')) {
++      return nativeOwnerObservationResponse(sessionId, value)
++    }
 +    const facts = nativeObservationObject(value, [
 +      'served_model', 'harness_version', 'harness_binary_digest', 'capabilities',
 +      'effective_skills', 'effective_mcp', 'effective_plugins_or_apps', 'sandbox_state',
@@ -428,6 +483,83 @@
 +    return response as unknown as ReturnType<typeof nativeObservationResponse>
 +  } catch {
 +    throw invalidParams('native observation response is invalid')
++  }
++}
++
++function nativeOwnerObservationResponse(sessionId: string, value: unknown): NativeObservationResponse {
++  try {
++    const facts = nativeObservationObject(value, [
++      'agent_id', 'session_cwd', 'process', 'source', 'selection', 'account', 'workspace',
++      'capabilities', 'effective_skills', 'effective_mcp', 'effective_plugins_or_apps',
++      'sandbox_state', 'approval_state', 'network_state', 'effective_config_digest',
++      'supports_subagent_capability_ceiling', 'unknown_fields',
++    ])
++    const text = (item: unknown, nullable = false): void => {
++      if (nullable && item === null) return
++      if (typeof item !== 'string' || item.length === 0 || Buffer.byteLength(item, 'utf8') > 32 * 1024) throw Error()
++    }
++    const path = (item: unknown): void => {
++      text(item)
++      if (typeof item !== 'string' || !isAbsolute(item) || resolve(item) !== item || item.startsWith('//')
++          || item.split('/').includes('..') || item.split('/').includes('.')) throw Error()
++    }
++    const digest = (item: unknown): void => {
++      if (typeof item !== 'string' || !/^[0-9a-f]{64}$/.test(item)) throw Error()
++    }
++    const counter = (item: unknown, minimum = 0): void => {
++      if (typeof item !== 'number' || !Number.isSafeInteger(item) || item < minimum) throw Error()
++    }
++    if (!nativeIdentifier(facts.agent_id) || facts.agent_id !== sessionId) throw Error()
++    path(facts.session_cwd)
++    const process = nativeObservationObject(facts.process, ['pid', 'uid', 'gid', 'exec_path', 'node_version', 'binary_sha256'])
++    counter(process.pid, 1); counter(process.uid); counter(process.gid); path(process.exec_path); digest(process.binary_sha256)
++    if (typeof process.node_version !== 'string' || !/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/.test(process.node_version)) throw Error()
++    facts.process = process
++    const source = nativeObservationObject(facts.source, ['entry_path', 'entry_sha256'])
++    path(source.entry_path); digest(source.entry_sha256); facts.source = source
++    if (facts.selection !== null) {
++      const selection = nativeObservationObject(facts.selection, ['provider', 'model', 'reasoning_effort'])
++      text(selection.provider); text(selection.model); text(selection.reasoning_effort, true); facts.selection = selection
++    }
++    if (facts.account !== null) {
++      const account = nativeObservationObject(facts.account, ['inference_origin', 'user_id'])
++      text(account.inference_origin); text(account.user_id, true)
++      const origin = new URL(account.inference_origin as string)
++      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== account.inference_origin
++          || origin.username || origin.password) throw Error()
++      if (typeof account.user_id === 'string' && ['token', 'refresh', 'secret', 'auth.json', 'credential']
++        .some(part => (account.user_id as string).toLowerCase().includes(part))) throw Error()
++      facts.account = account
++    }
++    if (facts.workspace !== null) {
++      const workspace = nativeObservationObject(facts.workspace, ['workspace_path', 'device', 'inode', 'uid', 'gid'])
++      path(workspace.workspace_path)
++      for (const key of ['device', 'inode', 'uid', 'gid']) counter(workspace[key], key === 'inode' ? 1 : 0)
++      facts.workspace = workspace
++    }
++    for (const key of ['effective_skills', 'effective_mcp', 'effective_plugins_or_apps', 'unknown_fields']) {
++      if (facts[key] === null && key !== 'unknown_fields') continue
++      const values = nativeObservationArray(facts[key]); for (const entry of values) text(entry)
++      facts[key] = values
++    }
++    if (facts.capabilities !== null) {
++      facts.capabilities = nativeObservationArray(facts.capabilities).map(item => {
++        const capability = nativeObservationObject(item, [
++          'kind', 'name', 'skill_content_digest', 'tool_schema_digest', 'mcp_server_identity',
++          'mcp_server_version', 'mcp_auth_status', 'resource_contract_digest',
++        ])
++        for (const [key, entry] of Object.entries(capability)) text(entry, key !== 'kind' && key !== 'name')
++        return capability
++      })
++    }
++    for (const key of ['sandbox_state', 'approval_state', 'network_state', 'effective_config_digest']) text(facts[key], true)
++    if (facts.effective_config_digest !== null) digest(facts.effective_config_digest)
++    if (!['VERIFIED', 'FALSE', 'UNKNOWN'].includes(facts.supports_subagent_capability_ceiling as string)) throw Error()
++    const response = { schema: 'mastermind.dsh.native_owner_observation.v1', sessionId, facts }
++    if (Buffer.byteLength(JSON.stringify(response), 'utf8') > 32 * 1024) throw Error()
++    return response as unknown as NativeObservationResponse
++  } catch {
++    throw invalidParams('native owner observation response is invalid')
 +  }
 +}
 +

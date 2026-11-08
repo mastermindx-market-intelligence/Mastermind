@@ -1,6 +1,17 @@
 --- a/apps/cli/src/profile-boot.ts
 +++ b/apps/cli/src/profile-boot.ts
-@@ -259,6 +259,12 @@
+@@ -226,8 +226,9 @@
+   patchFiles: readonly string[],
+   fromDefaultProfile?: string,
+   resolvedProfile?: ResolvedProfileRuntime,
++  userLayer = true,
+ ): Promise<ComposedProfile> {
+-  const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile)
++  const profile = resolvedProfile?.profile ?? prepareProfile(name, userLayer, fromDefaultProfile)
+   if (resolvedProfile !== undefined) writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+   const resolutionOptions = { installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR, profile }
+   const resolution = await createRuntimeResolution(resolutionOptions)
+@@ -259,6 +260,14 @@
    args: readonly string[]
    /** Application-owned package runtime, scoped to plugin package operations. */
    packageManager?: ProfileContext['packageManager']
@@ -10,10 +21,41 @@
 +   * exist. A returned Promise is refused rather than awaited during tree boot.
 +   */
 +  initializeHost?: (ctx: Context) => void
++  /** Runtime-only installed profile policy, checked before any config-tree evaluation. */
++  nativeProfileAdmission?: ProfileContext['nativeProfileAdmission']
  }
  
  /**
-@@ -326,6 +332,12 @@
+@@ -289,9 +298,20 @@
+     if (failures.length > 1) throw new AggregateError(failures, 'dsh: profile cleanup failed')
+   })()
+   try {
++    const nativeProfileAdmission = options.nativeProfileAdmission
++    if (nativeProfileAdmission !== undefined && (nativeProfileAdmission.userLayer !== false
++      || typeof nativeProfileAdmission.check !== 'function')) {
++      throw new Error('native installed profile policy required')
++    }
+     const composed = await composeProfile(
+       options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile,
++      nativeProfileAdmission === undefined,
+     )
++    const checked: unknown = nativeProfileAdmission?.check(composed.profile, composed.resolution)
++    if (checked !== undefined) {
++      void Promise.resolve(checked).catch(() => {})
++      throw new Error('native profile admission must be synchronous')
++    }
+     const appReady = createAppReady()
+     const shutdown = createProcessShutdown(dispose)
+     const signalShutdown = new AbortController()
+@@ -313,6 +333,7 @@
+     const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME)
+     const profileContext: ProfileContext = {
+       name: options.profile,
++      ...nativeProfileAdmission === undefined ? {} : { nativeProfileAdmission },
+       ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
+       dir: composed.profile.dir, patchPath: composed.profile.patchPath,
+       installAnchor: options.resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
+@@ -326,6 +347,12 @@
        // Before any config-tree entry mounts, so plugins resolve all launch-time
        // environment values from the same immutable launch snapshot.
        hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment)
@@ -150,6 +192,58 @@
        yield this.snapshotFor(OWNER)
        await abortion(generation)
        return
+--- a/packages/boot/app-boot/src/profile-context.ts
++++ b/packages/boot/app-boot/src/profile-context.ts
+@@ -1,6 +1,6 @@
+ /** Launcher-owned profile locations and composition inputs. */
+ import { join } from 'node:path'
+-import { composeEntries, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile } from './profile.ts'
++import { composeEntries, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile, type RuntimeResolution } from './profile.ts'
+ import { loadOptionalPatches } from './index.ts'
+ import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
+ 
+@@ -11,9 +11,16 @@
+   readonly env: Readonly<Record<string, string>>
+ }
+ 
++/** Runtime-only installed native composition; never supplied by a profile/YAML row. */
++export interface NativeProfileAdmission {
++  readonly userLayer: false
++  check(profile: Profile, resolution?: RuntimeResolution): void
++}
++
+ /** Current profile facts; scheduling and mutation belong to their callers. */
+ export interface ProfileContext {
+   readonly name: string
++  readonly nativeProfileAdmission?: NativeProfileAdmission
+   /** Packaged applications supply their bundled runtime instead of a PATH executable. */
+   readonly packageManager?: ProfilePnpmInvocation
+   readonly dir: string
+@@ -62,6 +69,11 @@
+  */
+ export function readBundlePatches(binName: string, context: ProfileContext, initialProfile?: Profile): PatchOptions[] {
+   const profile = initialProfile ?? loadProfileDirectory(binName, context.dir, context.installAnchor, { userLayer: false })
++  const checked: unknown = context.nativeProfileAdmission?.check(profile)
++  if (checked !== undefined) {
++    void Promise.resolve(checked).catch(() => {})
++    throw new Error('native profile admission must be synchronous')
++  }
+   return profile.layers.flatMap(layer => layer.patches)
+ }
+ 
+@@ -74,8 +86,10 @@
+ export function readProfilePatches(binName: string, context: ProfileContext, initialProfile?: Profile): PatchOptions[] {
+   const patches = structuredClone([
+     ...readBundlePatches(binName, context, initialProfile),
+-    ...(initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? []),
+-    ...(loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? []),
++    ...(context.nativeProfileAdmission === undefined
++      ? initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? [] : []),
++    ...(context.nativeProfileAdmission === undefined
++      ? loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? [] : []),
+     ...context.overlays,
+   ])
+   const telemetryPatch = resolveTelemetryPatch(context.telemetryDisabledEnv,
 --- a/packages/client/connection/src/rpc-host.ts
 +++ b/packages/client/connection/src/rpc-host.ts
 @@ -2,7 +2,7 @@
@@ -860,6 +954,292 @@
  }
  
  /**
+--- a/packages/core/tools/src/index.ts
++++ b/packages/core/tools/src/index.ts
+@@ -5,7 +5,7 @@
+  */
+ 
+ import type {} from '@deepseek-ai/dsh-working-directory'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+ import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
+@@ -138,6 +138,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     tools: ToolRuntime
++    nativeToolAdmission?: NativeToolAdmission
+   }
+ 
+   interface Events {
+@@ -715,6 +716,7 @@
+ interface ToolView {
+   /** Visible definitions after restrictions, scoped shadowing, and transport insertion. */
+   readonly visible: ReadonlyMap<string, ToolDefinition>
++  readonly registrations: ReadonlyMap<string, NativeToolRegistration>
+   /** Pre-restriction capability names used by prompt-order validation. */
+   readonly knownNames: ReadonlySet<string>
+   /** Current global names that a scoped restriction may name. */
+@@ -733,7 +735,7 @@
+ 
+ /** One scope's complete tool-registry contribution. */
+ class ToolLayer implements ScopeLayer {
+-  readonly tools: NamedEntries<ToolDefinition>
++  readonly tools: NamedEntries<NativeToolRegistration>
+   readonly restrictions = new AnonymousEntries<CompiledToolRestriction>()
+   readonly guards = new AnonymousEntries<ToolGuard>()
+   /**
+@@ -805,7 +807,147 @@
+  * Tool registry and execution pipeline. Scoped registrations shadow globals;
+  * one visibility resolver feeds presentation, lookup, and dispatch.
+  */
++
++/** Runtime-only native ceiling over the original registry's effective definitions. */
++export interface NativeToolAdmission {
++  readonly signal: AbortSignal
++  check(facts: NativeToolAdmissionFacts): boolean
++}
++export interface NativeToolAdmissionFacts {
++  readonly phase: 'view' | 'dispatch'
++  readonly runtime: ToolRuntime
++  readonly scope: ScopeKey | undefined
++  readonly definition: ToolDefinition
++  readonly registrationIdentity: object
++  readonly ownerIdentity: Context['fiber']
++  readonly execute: ToolDefinition['execute']
++  readonly execution?: ToolRunContext
++  /** Original caller cancellation, before an around-wrapper can replace exec.signal. */
++  readonly originalCallerSignal?: AbortSignal
++}
++export interface ToolRegistrationObservation {
++  readonly schema: Readonly<ToolSchema>
++  readonly definition: ToolDefinition
++  readonly registrationIdentity: object
++  readonly ownerIdentity: Context['fiber']
++  readonly execute: ToolDefinition['execute']
++  assertCurrent(): true
++}
++type NativeToolRegistration = {
++  readonly definition: ToolDefinition
++  readonly owner: Context['fiber']
++  readonly execute: ToolDefinition['execute'] | undefined
++}
++
++function nativeExecuteValue(definition: ToolDefinition): ToolDefinition['execute'] {
++  const descriptor = Object.getOwnPropertyDescriptor(definition, 'execute')
++  if (descriptor === undefined || !('value' in descriptor) || typeof descriptor.value !== 'function') {
++    throw new HarnessError('native tool callback must be an own data property', 'NATIVE_AUTHORITY')
++  }
++  return descriptor.value as ToolDefinition['execute']
++}
++
+ export class ToolRuntime extends Service {
++
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    runtime: ToolRuntime
++    admission: NativeToolAdmission
++    check: NativeToolAdmission['check']
++    signal: AbortSignal
++  }> | undefined
++
++  private nativeAdmits(
++    phase: 'view' | 'dispatch', scope: ScopeKey | undefined, definition: ToolDefinition,
++    execution?: ToolRunContext, capturedExecute?: ToolDefinition['execute'], originalCallerSignal?: AbortSignal,
++  ): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return true
++    const registration = this.rawView(scope).registrations.get(definition.name)
++    if (registration === undefined && phase === 'view') return false
++    if (registration === undefined) throw new HarnessError('native tool registration absent', 'NATIVE_AUTHORITY')
++    const execute = capturedExecute ?? nativeExecuteValue(definition)
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      execution?.signal.throwIfAborted()
++      originalCallerSignal?.throwIfAborted()
++      const current = binding.root.get('tools')
++      const original = current === undefined ? undefined
++        : (current as ToolRuntime & { [symbols.original]?: ToolRuntime })[symbols.original] ?? current
++      if (original !== binding.runtime || binding.root.get('nativeToolAdmission') !== binding.admission
++          || binding.admission.check !== binding.check || binding.admission.signal !== binding.signal
++          || this.rawView(scope).registrations.get(definition.name) !== registration
++          || this.rawView(scope).visible.get(definition.name) !== definition
++          || nativeExecuteValue(definition) !== execute || registration.execute !== execute) {
++        throw new HarnessError('native tool owner changed', 'NATIVE_AUTHORITY')
++      }
++      registration.owner.assertActive()
++    }
++    requireOwner()
++    const allowed: unknown = binding.check.call(binding.admission, Object.freeze({
++      phase, runtime: binding.runtime, scope, definition, registrationIdentity: registration,
++      ownerIdentity: registration.owner, execute,
++      ...execution === undefined ? {} : { execution },
++      ...originalCallerSignal === undefined ? {} : { originalCallerSignal },
++    }))
++    if (allowed !== true && allowed !== false) {
++      if (allowed instanceof Promise) void allowed.catch(() => {})
++      throw new HarnessError('native tool check must be synchronous', 'NATIVE_AUTHORITY')
++    }
++    requireOwner()
++    if (!allowed && phase === 'dispatch') {
++      throw new HarnessError('native tool dispatch refused', 'NATIVE_AUTHORITY')
++    }
++    return allowed
++  }
++
++  /** Passive source-owner observation; it never grants visibility or dispatch. */
++  observeRegistration(name: string, scope?: ScopeKey): ToolRegistrationObservation | undefined {
++    const definition = this.rawView(scope).visible.get(name)
++    if (definition === undefined) return undefined
++    const registration = this.rawView(scope).registrations.get(name)
++    if (registration === undefined) return undefined
++    const root = this.ctx.root
++    const owner: ToolRuntime = this
++    const original = (owner as ToolRuntime & { [symbols.original]?: ToolRuntime })[symbols.original] ?? owner
++    const execute = nativeExecuteValue(definition)
++    const schema = deepFreeze(this.schemaOf(definition, true))
++    const contract = JSON.stringify([schema, snapshotJsonValue(definition.output.schema)])
++    return Object.freeze({
++      schema, definition, registrationIdentity: registration, ownerIdentity: registration.owner, execute,
++      assertCurrent: (): true => {
++        const requireOwner = (): void => {
++          const live = root.get('tools')
++          const runtime = live === undefined ? undefined
++            : (live as ToolRuntime & { [symbols.original]?: ToolRuntime })[symbols.original] ?? live
++          if (runtime !== original || this.rawView(scope).registrations.get(name) !== registration
++              || this.rawView(scope).visible.get(name) !== definition
++              || nativeExecuteValue(definition) !== execute
++              || (this.nativeBinding !== undefined && registration.execute !== execute)) {
++            throw new HarnessError('observed tool registration changed', 'NATIVE_AUTHORITY')
++          }
++          registration.owner.assertActive()
++        }
++        requireOwner()
++        if (JSON.stringify([this.schemaOf(definition, true), snapshotJsonValue(definition.output.schema)]) !== contract) {
++          throw new HarnessError('observed tool schema changed', 'NATIVE_AUTHORITY')
++        }
++        requireOwner()
++        return true
++      },
++    })
++  }
++
++  private view(scope?: ScopeKey): ToolView {
++    const view = this.rawView(scope)
++    if (this.nativeBinding === undefined) return view
++    const visible = new Map<string, ToolDefinition>()
++    for (const [name, definition] of view.visible) {
++      if (this.nativeAdmits('view', scope, definition)) visible.set(name, definition)
++    }
++    return { ...view, visible }
++  }
++
+   static inject = ['systemPrompt']
+ 
+   static Config: z<Config> = z.object({
+@@ -849,6 +991,14 @@
+ 
+   constructor(ctx: Context, config: Config = {}) {
+     super(ctx, 'tools')
++    const admission = ctx.root.get('nativeToolAdmission')
++    if (admission !== undefined) {
++      const check = admission.check, signal = admission.signal
++      if (typeof check !== 'function' || !(signal instanceof AbortSignal)) {
++        throw new HarnessError('native tool admission is invalid', 'NATIVE_AUTHORITY')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, runtime: this, admission, check, signal })
++    }
+     this.ptcContext = ctx
+     // The schema already defaulted an omitted mode; the ?? narrows the
+     // optional-input type for direct (non-Loader) construction in tests.
+@@ -1090,7 +1240,10 @@
+     }
+     return this.layers.effect(
+       this.ctx,
+-      layer => layer.tools.insert(name, definition),
++      layer => layer.tools.insert(name, Object.freeze({
++        definition, owner: this.ctx.fiber,
++        execute: this.nativeBinding === undefined ? undefined : nativeExecuteValue(definition),
++      })),
+       { label: 'tools.register()' },
+     )
+   }
+@@ -1183,7 +1336,7 @@
+    * @param scope - the viewing scope (the agent), or undefined for the global view.
+    * @returns the complete derived view for that scope.
+    */
+-  private view(scope?: ScopeKey): ToolView {
++  private rawView(scope?: ScopeKey): ToolView {
+     // Scope-chain layers, farthest ancestor first, the exact scope last.
+     const layers = this.layers.chainLayers(scope)
+     // Chain-blind on purpose: this is the ONE layer whose registrations the
+@@ -1192,27 +1345,33 @@
+     const own = this.layers.peek(scope)
+     // Inherited surface, nearest ancestor last: a nearer scope's same-name
+     // entry shadows a farther one, and the global layer is the farthest.
+-    const inherited = new Map<string, ToolDefinition>(this.layers.global.tools.entries())
++    const inherited = new Map<string, NativeToolRegistration>(this.layers.global.tools.entries())
+     for (const layer of layers) {
+       if (layer === own) continue
+-      for (const [name, definition] of layer.tools.entries()) inherited.set(name, definition)
++      for (const [name, registration] of layer.tools.entries()) inherited.set(name, registration)
+     }
+     const visible = new Map<string, ToolDefinition>()
++    const registrations = new Map<string, NativeToolRegistration>()
+     const knownNames = new Set<string>()
+     const restrictableNames = new Set<string>()
+-    for (const [name, definition] of inherited) {
++    for (const [name, registration] of inherited) {
++      const { definition } = registration
+       knownNames.add(name)
+       restrictableNames.add(name)
+       // Restrictions intersect across the whole chain: any scope on it may
+       // mask an inherited name for everything nested inside it.
+-      if (layers.every(layer => layer.admits(name))) visible.set(name, definition)
++      if (layers.every(layer => layer.admits(name))) {
++        visible.set(name, definition)
++        registrations.set(name, registration)
++      }
+     }
+     // The scope's own registrations last, shadowing an inherited name and
+     // outside the filter above.
+     if (own !== undefined) {
+-      for (const [name, definition] of own.tools.entries()) {
++      for (const [name, registration] of own.tools.entries()) {
+         knownNames.add(name)
+-        visible.set(name, definition)
++        visible.set(name, registration.definition)
++        registrations.set(name, registration)
+       }
+     }
+     // Presentation infrastructure is resolved last and outside capability
+@@ -1223,7 +1382,7 @@
+     if (this.modeFor(scope) !== 'native') {
+       visible.set(RUN_CODE_NAME, this.requirePtcTransport())
+     }
+-    return { visible, knownNames, restrictableNames }
++    return { visible, registrations, knownNames, restrictableNames }
+   }
+ 
+   /**
+@@ -1585,8 +1744,15 @@
+     try {
+       const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
+       if (!tool) throw new ToolNotFoundError(exec.name)
++      const execute = tool.execute
++      if (this.nativeBinding !== undefined && state.bodyInvoked) {
++        throw new HarnessError('native tool body already invoked', 'NATIVE_AUTHORITY')
++      }
++      this.nativeAdmits('dispatch', exec.agent, tool, exec, execute, state.callerSignal)
++      // The native check contains the final registration/callback/currentness
++      // recheck. Invoke that captured callback with no intervening extension.
+       state.bodyInvoked = true
+-      const returned = await tool.execute(exec.arguments, exec)
++      const returned = await execute.call(tool, exec.arguments, exec)
+       const result = this.createSuccessResult(exec, tool, returned)
+       return isAborted(signal)
+         ? toolAbortedResult(result)
 --- a/packages/credentials/deepseek-account-platform/src/index.ts
 +++ b/packages/credentials/deepseek-account-platform/src/index.ts
 @@ -4,10 +4,10 @@
@@ -887,7 +1267,7 @@
      if (record === undefined || lifetime.signal.aborted) return null
      if (record.kind !== 'grant') throw new PlatformAuthError('storage')
      const parsed = grant.safeParse(record.payload)
-@@ -379,6 +379,64 @@
+@@ -379,6 +379,65 @@
      // A private origin override must never forward a grant issued by another environment.
      if (parsed.data.issuer !== this.origin) throw new PlatformAuthError('protocol')
      return parsed.data
@@ -947,12 +1327,13 @@
 +    const userId = cached?.token === captured.stored.token ? cached.profile.value.id || null : null
 +    const isCurrent = (): boolean => captured.isCurrent() && this.lastProfile === cached
 +      && (cached?.token === captured.stored.token ? cached.profile.value.id || null : null) === userId
-+    const result = Object.freeze({ inferenceOrigin: this.inferenceOrigin, userId, isCurrent })
++    const result = Object.freeze({ inferenceOrigin: this.inferenceOrigin, userId, isCurrent,
++      isInferenceCurrent: captured.isCurrent })
 +    return isCurrent() ? result : null
    }
  
    override async resolveToken(url: string): Promise<string | undefined> {
-@@ -390,13 +448,9 @@
+@@ -390,13 +449,9 @@
      if (record.kind !== 'grant') throw new PlatformAuthError('storage')
      const result = grant.safeParse(record.payload)
      if (!result.success) throw new PlatformAuthError('storage')
@@ -971,7 +1352,7 @@
    override async startSignIn(client: AccountClientMetadata, callbackOrigin: string, loginSource: 'web' | 'desktop'): Promise<AccountView> {
 --- a/packages/credentials/deepseek-account/src/index.ts
 +++ b/packages/credentials/deepseek-account/src/index.ts
-@@ -26,6 +26,19 @@
+@@ -26,6 +26,21 @@
    readonly embeddedPageDist?: string
    /** Host-only deployment request headers; the consuming client adds its own dynamic identity, and neither reaches renderer bootstrap. */
    readonly requestHeaders?: Readonly<Record<string, string>>
@@ -988,10 +1369,12 @@
 +  readonly inferenceOrigin: string
 +  readonly userId: AccountUserId | null
 +  isCurrent(): boolean
++  /** Original inference grant lifetime, independent of passive profile cache refresh. */
++  isInferenceCurrent(): boolean
  }
  
  /** Account operations; only Host consumers can obtain a request credential. */
-@@ -98,6 +111,14 @@
+@@ -98,6 +113,14 @@
     * @returns stored token, or undefined for other origins or a signed-out account.
     */
    abstract resolveToken(url: string): Promise<string | undefined>
@@ -1006,6 +1389,125 @@
    /**
     * Remove an inference-rejected token only while it still matches the stored login.
     * @param token - token captured by the rejected inference request.
+--- a/packages/interaction/user-approval/src/index.ts
++++ b/packages/interaction/user-approval/src/index.ts
+@@ -5,7 +5,7 @@
+  */
+ 
+ import { randomUUID } from 'node:crypto'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import { createUserMessage, type ToolCallId } from '@deepseek-ai/dsh-llm'
+@@ -24,6 +24,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     approval: ApprovalService
++    nativeApprovalCeiling?: { readonly signal: AbortSignal; readonly policy: 'never'; assertCurrent(): true }
+   }
+ }
+ 
+@@ -148,12 +149,52 @@
+  * changes to the model through the runtime-context snapshot and switch notices.
+  */
+ export class ApprovalService extends Service {
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    owner: ApprovalService
++    ceiling: NonNullable<Context['nativeApprovalCeiling']>
++    signal: AbortSignal
++    check: () => true
++  }> | undefined
++
++  /** The original host lifetime and this exact enforcing owner, checked synchronously. */
++  private requireNativeCeiling(): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return false
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      const current = binding.root.get('approval')
++      const owner = current === undefined ? undefined
++        : (current as ApprovalService & { [symbols.original]?: ApprovalService })[symbols.original] ?? current
++      if (owner !== binding.owner || binding.root.get('nativeApprovalCeiling') !== binding.ceiling
++          || binding.ceiling.signal !== binding.signal || binding.ceiling.assertCurrent !== binding.check
++          || binding.ceiling.policy !== 'never') throw new Error('native approval ceiling changed')
++    }
++    requireOwner()
++    const result: unknown = binding.check.call(binding.ceiling)
++    if (result !== true) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native approval ceiling refused')
++    }
++    requireOwner()
++    return true
++  }
++
+   static Config: z<Config> = z.object({
+     policy: z.union(['ask', 'never'] as const).default('ask'),
+   })
+ 
+   constructor(ctx: Context, public config: Config) {
+     super(ctx, 'approval')
++    const ceiling = ctx.root.get('nativeApprovalCeiling')
++    if (ceiling !== undefined) {
++      const signal = ceiling.signal, check = ceiling.assertCurrent
++      if (!(signal instanceof AbortSignal) || typeof check !== 'function' || ceiling.policy !== 'never') {
++        throw new Error('native approval ceiling is invalid')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, owner: this, ceiling, signal, check })
++    }
++
+ 
+     const effective = (agent: Agent): ApprovalPolicy => this.effectivePolicy(agent.session)
+ 
+@@ -182,6 +223,7 @@
+    * @param policy - the new effective policy.
+    */
+   setPolicy(agent: Agent, policy: ApprovalPolicy): void {
++    if (this.requireNativeCeiling() && policy !== 'never') throw new Error('native approval ceiling cannot widen')
+     const previous = this.effectivePolicy(agent.session)
+     if (previous === policy) return
+     setApprovalPolicy(agent.session, policy)
+@@ -213,6 +255,7 @@
+    *   append commit point.
+    */
+   async request(req: ApprovalRequest): Promise<ApprovalOutcome> {
++    this.requireNativeCeiling()
+     const session = req.agent.session
+     if (!hasOpenTurn(session)) {
+       throw new Error(
+@@ -240,8 +283,14 @@
+    * @param session - the exact accepted session whose policy applies.
+    * @returns the policy every ask for this session resolves under right now.
+    */
++  /** Observe the rule used by the original decision boundary, including a retained native ceiling. */
++  policyFor(session: Session): ApprovalPolicy {
++    return this.effectivePolicy(session)
++  }
++
+   private effectivePolicy(session: Session): ApprovalPolicy {
+-    return this.overrideOf(session) ?? this.config.policy ?? 'ask'
++    const policy = this.overrideOf(session) ?? this.config.policy ?? 'ask'
++    return this.requireNativeCeiling() ? 'never' : policy
+   }
+ 
+   /**
+@@ -272,7 +321,13 @@
+     // ahead of any gate LISTENER, so a listener-shaped gate cannot keep the
+     // documented promise that 'never' rejects deterministically regardless
+     // of registration order — only the service's own request path can.
+-    if (this.effectivePolicy(session) === 'never') return 'rejected'
++    try {
++      if (this.effectivePolicy(session) === 'never') return 'rejected'
++    } catch (error: unknown) {
++      // An already opened audit pair still settles after native retirement.
++      if (this.nativeBinding !== undefined) return 'cancelled'
++      throw error
++    }
+     // Enter the promise chain BEFORE dispatching: a listener that throws
+     // SYNCHRONOUSLY (before its first await) must land in the same rejection
+     // path as an async one — `Promise.resolve(call())` would let it escape
 --- a/packages/llm/llm-deepseek-account/src/catalog.ts
 +++ b/packages/llm/llm-deepseek-account/src/catalog.ts
 @@ -1,5 +1,7 @@
@@ -1910,6 +2412,185 @@
  }
  
  export default LlmRuntime
+--- a/packages/sandbox/sandbox-policy/src/index.ts
++++ b/packages/sandbox/sandbox-policy/src/index.ts
+@@ -21,7 +21,7 @@
+  */
+ 
+ import { isAbsolute } from 'node:path'
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import { z as zod } from 'zod'
+ import z from '@deepseek-ai/schemastery'
+ import type {} from '@deepseek-ai/dsh-agent'
+@@ -58,6 +58,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     sandboxPolicy: SandboxPolicyService
++    nativeSandboxCeiling?: { readonly signal: AbortSignal; readonly mode: 'read-only'; assertCurrent(): true }
+   }
+ }
+ 
+@@ -108,6 +109,37 @@
+  * mode log and immutable cwd travel together to every enforcing capability.
+  */
+ export class SandboxPolicyService extends Service {
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    owner: SandboxPolicyService
++    ceiling: NonNullable<Context['nativeSandboxCeiling']>
++    signal: AbortSignal
++    check: () => true
++  }> | undefined
++
++  /** The original host lifetime and this exact enforcing owner, checked synchronously. */
++  private requireNativeCeiling(): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return false
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      const current = binding.root.get('sandboxPolicy')
++      const owner = current === undefined ? undefined
++        : (current as SandboxPolicyService & { [symbols.original]?: SandboxPolicyService })[symbols.original] ?? current
++      if (owner !== binding.owner || binding.root.get('nativeSandboxCeiling') !== binding.ceiling
++          || binding.ceiling.signal !== binding.signal || binding.ceiling.assertCurrent !== binding.check
++          || binding.ceiling.mode !== 'read-only') throw new Error('native sandboxPolicy ceiling changed')
++    }
++    requireOwner()
++    const result: unknown = binding.check.call(binding.ceiling)
++    if (result !== true) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native sandboxPolicy ceiling refused')
++    }
++    requireOwner()
++    return true
++  }
++
+   // Inline schema call: the config catalog walks `static Config` statically.
+   static Config: z<Config> = z.object({
+     mode: z.union(['read-only', 'workspace-write', 'danger-full-access'] as const).default('read-only'),
+@@ -124,6 +156,15 @@
+   readonly workspaceRoot: string
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'sandboxPolicy')
++    const ceiling = ctx.root.get('nativeSandboxCeiling')
++    if (ceiling !== undefined) {
++      const signal = ceiling.signal, check = ceiling.assertCurrent
++      if (!(signal instanceof AbortSignal) || typeof check !== 'function' || ceiling.mode !== 'read-only') {
++        throw new Error('native sandboxPolicy ceiling is invalid')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, owner: this, ceiling, signal, check })
++    }
++
+     // schemastery (static Config) already filled `mode`; the cast records that
+     // runtime fact. `workspaceRoot` has NO schema default, so its fallback to
+     // the process cwd is real branching, resolved absolute either way.
+@@ -163,9 +204,12 @@
+    */
+   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
+     const { session } = request
++    const mode = request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode
++    const workspaceRoot = resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot)
++    const native = this.requireNativeCeiling()
+     return {
+-      mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
+-      workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
++      mode: native ? 'read-only' : mode,
++      workspaceRoot,
+       ...session === undefined ? {} : { sessionId: session.id },
+     }
+   }
+--- a/packages/skill/skill/src/index.ts
++++ b/packages/skill/skill/src/index.ts
+@@ -10,7 +10,7 @@
+  * @module @deepseek-ai/dsh-skill
+  */
+ 
+-import { Context, Service } from '@deepseek-ai/cordis'
++import { Context, Service, symbols } from '@deepseek-ai/cordis'
+ import type {} from '@deepseek-ai/dsh-llm'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+ import { NamedEntries, ScopedLayers, scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
+@@ -283,6 +283,7 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     skills: SkillRegistry
++    nativeSkillCeiling?: { readonly signal: AbortSignal; readonly mode: 'disabled'; assertCurrent(): true }
+   }
+ 
+   interface Events {
+@@ -354,6 +355,37 @@
+  * on demand.
+  */
+ export class SkillRegistry extends Service {
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    owner: SkillRegistry
++    ceiling: NonNullable<Context['nativeSkillCeiling']>
++    signal: AbortSignal
++    check: () => true
++  }> | undefined
++
++  /** The original host lifetime and this exact enforcing owner, checked synchronously. */
++  private requireNativeCeiling(): boolean {
++    const binding = this.nativeBinding
++    if (binding === undefined) return false
++    const requireOwner = (): void => {
++      binding.signal.throwIfAborted()
++      const current = binding.root.get('skills')
++      const owner = current === undefined ? undefined
++        : (current as SkillRegistry & { [symbols.original]?: SkillRegistry })[symbols.original] ?? current
++      if (owner !== binding.owner || binding.root.get('nativeSkillCeiling') !== binding.ceiling
++          || binding.ceiling.signal !== binding.signal || binding.ceiling.assertCurrent !== binding.check
++          || binding.ceiling.mode !== 'disabled') throw new Error('native skills ceiling changed')
++    }
++    requireOwner()
++    const result: unknown = binding.check.call(binding.ceiling)
++    if (result !== true) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native skills ceiling refused')
++    }
++    requireOwner()
++    return true
++  }
++
+   static Config: Schema<Config> = z.object({
+     collectCacheMaxEntries: z.number().default(DEFAULT_COLLECT_CACHE_ENTRIES),
+   })
+@@ -372,6 +404,15 @@
+ 
+   constructor(ctx: Context, config: Config = {}) {
+     super(ctx, 'skills')
++    const ceiling = ctx.root.get('nativeSkillCeiling')
++    if (ceiling !== undefined) {
++      const signal = ceiling.signal, check = ceiling.assertCurrent
++      if (!(signal instanceof AbortSignal) || typeof check !== 'function' || ceiling.mode !== 'disabled') {
++        throw new Error('native skills ceiling is invalid')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, owner: this, ceiling, signal, check })
++    }
++
+     this.collectCacheMaxEntries = config.collectCacheMaxEntries ?? DEFAULT_COLLECT_CACHE_ENTRIES
+     assertPositiveInteger('collectCacheMaxEntries', this.collectCacheMaxEntries)
+   }
+@@ -479,6 +520,8 @@
+    * @returns sorted summaries plus discovery-completeness state.
+    */
+   async snapshot(options: SkillViewOptions = {}): Promise<SkillCatalogSnapshot> {
++    throwIfAborted(options.signal)
++    if (this.requireNativeCeiling()) return { skills: [], complete: true }
+     const collected = await this.collect(options)
+     return {
+       skills: [...collected.entries.values()]
+@@ -498,6 +541,8 @@
+    * @returns the full skill, including body content, or `undefined`.
+    */
+   async get(name: string, options: SkillViewOptions = {}): Promise<SkillDefinition | undefined> {
++    throwIfAborted(options.signal)
++    if (this.requireNativeCeiling()) return undefined
+     if (!isSkillName(name)) return undefined
+     const collected = await this.collect(options)
+     throwIfAborted(options.signal)
 --- a/packages/typert/protocol/src/index.ts
 +++ b/packages/typert/protocol/src/index.ts
 @@ -20,6 +20,23 @@
@@ -1936,3 +2617,112 @@
  
  const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
  
+--- a/vendor/loader/src/config/entry.ts
++++ b/vendor/loader/src/config/entry.ts
+@@ -116,6 +116,7 @@
+ 
+   /** Merge new options, restart as needed, and persist through the parent tree. */
+   async update(options: Partial<EntryOptions>, create = false, force = false) {
++    this.loader.nativeUpdate(this, options, create)
+     const legacy = { ...this.options }
+ 
+     // step 1: update options
+--- a/vendor/loader/src/config/tree.ts
++++ b/vendor/loader/src/config/tree.ts
+@@ -110,6 +110,7 @@
+ 
+   /** Import a plugin module from a specifier or `cordis:` builtin. */
+   import(name: string, getOuterStack?: () => string[]) {
++    name = this.ctx.loader.nativeResolve(this, name)
+     if (name.startsWith('cordis:')) {
+       return this.ctx.loader.builtins[name.slice(7)]
+     }
+--- a/vendor/loader/src/index.ts
++++ b/vendor/loader/src/index.ts
+@@ -1,4 +1,4 @@
+-import { Context, FiberState, Inject, Service, type Fiber } from '@deepseek-ai/cordis'
++import { Context, FiberState, Inject, Service, symbols, type Fiber } from '@deepseek-ai/cordis'
+ import { defineProperty, isNullable, type Dict } from '@deepseek-ai/cosmokit'
+ import { ModuleLoader } from './internal.ts'
+ import { Entry, type EntryOptions } from './config/entry.ts'
+@@ -43,6 +43,7 @@
+ 
+   interface Context {
+     loader: Loader
++    nativeLoaderAdmission?: NativeLoaderAdmission
+   }
+ 
+   interface EnvData {
+@@ -52,6 +53,13 @@
+   interface Fiber {
+     entry?: Entry
+   }
++}
++
++/** A qualified native launch can freeze the original tree and admit exact module URLs. */
++export interface NativeLoaderAdmission {
++  readonly signal: AbortSignal
++  update(entry: Entry, options: Partial<EntryOptions>, create: boolean): void
++  resolve(tree: EntryTree, name: string): string
+ }
+ 
+ /** Loader config and dependency intercept namespace. */
+@@ -85,6 +93,58 @@
+   public internal = ModuleLoader.fromInternal()
+ 
+   public builtins: Dict<any> = Object.create(null)
++
++  private nativeBinding: {
++    owner: Loader; root: Context; admission: NativeLoaderAdmission;
++    signal: AbortSignal; update: NativeLoaderAdmission['update']; resolve: NativeLoaderAdmission['resolve']
++  } | null | undefined
++
++  /** Capture once at the first original tree operation, after host initialization. */
++  private nativeOwner() {
++    const identity = (value: Loader): Loader =>
++      (value as Loader & { [symbols.original]?: Loader })[symbols.original] ?? value
++    if (this.nativeBinding === undefined) {
++      const admission = this.ctx.root.get('nativeLoaderAdmission')
++      this.nativeBinding = admission === undefined ? null : {
++        owner: identity(this), root: this.ctx.root, admission,
++        signal: admission.signal, update: admission.update, resolve: admission.resolve,
++      }
++    }
++    const held = this.nativeBinding
++    if (held === null) return null
++    held.signal.throwIfAborted()
++    const current = held.root.get('loader')
++    if (current === undefined || identity(current) !== held.owner
++      || held.root.get('nativeLoaderAdmission') !== held.admission
++      || held.admission.signal !== held.signal || held.admission.update !== held.update
++      || held.admission.resolve !== held.resolve) throw new Error('native Loader owner changed')
++    return held
++  }
++
++  /** Before options are changed or !!js disabled/config expressions can execute. */
++  nativeUpdate(entry: Entry, options: Partial<EntryOptions>, create: boolean): void {
++    const held = this.nativeOwner()
++    if (held === null) return
++    const result: unknown = held.update.call(held.admission, entry, options, create)
++    if (result !== undefined) {
++      void Promise.resolve(result).catch(() => {})
++      throw new Error('native Loader update admission must be synchronous')
++    }
++    if (this.nativeOwner() !== held) throw new Error('native Loader owner changed')
++  }
++
++  /** Resolve once through the original active resolver, then import that exact URL. */
++  nativeResolve(tree: EntryTree, name: string): string {
++    const held = this.nativeOwner()
++    if (held === null) return name
++    const result: unknown = held.resolve.call(held.admission, tree, name)
++    if (typeof result !== 'string' || result.length === 0) {
++      if (result instanceof Promise) void result.catch(() => {})
++      throw new Error('native Loader module admission must be synchronous')
++    }
++    if (this.nativeOwner() !== held) throw new Error('native Loader owner changed')
++    return result
++  }
+ 
+   constructor(ctx: Context, public config: Loader.Config = {}) {
+     super(ctx)

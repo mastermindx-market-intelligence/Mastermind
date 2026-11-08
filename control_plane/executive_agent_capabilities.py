@@ -1531,6 +1531,14 @@ class ExecutionCapabilityProfile:
                 "harness_binary_digest must be a lowercase SHA-256 digest"
             )
         required: list[CapabilityIdentity] = []
+        if self.execution_surface == DSH_OPERATOR_EXECUTION_SURFACE:
+            # The fixed native slice uses the original source-qualified read
+            # and fixed-argv search implementations. It never inherits ambient
+            # tools, a shell, MCP, Skills or helper authority.
+            required.extend(
+                CapabilityIdentity(name=name, kind="tool", harness_binary_digest=binary_digest)
+                for name in ("read", "glob", "grep")
+            )
         if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
             # The SDK injects its result-rendering tool only for the fixed
             # Executive plan output schema. It is observed as a capability,

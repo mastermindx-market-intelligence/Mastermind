@@ -758,7 +758,8 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
         DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, DSH_MODEL_PROVIDER)
     from control_plane.native_conversation_result import DSH_NATIVE_HARNESS_KIND
     from integrations.acp_worker.turn import AcpProfile
-    from integrations.deepseek_harness.operator_adapter import NativeLaunchBinding, NativeOperatorAdapter
+    from integrations.deepseek_harness.operator_adapter import (
+        NativeLaunchBinding, NativeOperatorAdapter, observe_native_workspace)
     try:
         registry = ExecutionCapabilityRegistry.load()
     except CapabilityPolicyError:
@@ -768,6 +769,12 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
     def require_source():
         installed.require_current()
         dependencies.require_current()
+        try:
+            current_registry = ExecutionCapabilityRegistry.load()
+        except CapabilityPolicyError:
+            raise WorkerConfigError("native DeepSeek capability policy is no longer current") from None
+        if current_registry.policy_digest != registry.policy_digest:
+            raise WorkerConfigError("native DeepSeek capability policy changed")
 
     def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
         if (requested.worker_id != policy.worker_id or requested.provider != "acp"
@@ -796,6 +803,18 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
         if len(matches) != 1:
             raise WorkerConfigError("native DeepSeek request does not resolve to one reviewed policy")
         require_source()
+        profile = matches[0]
+        # Requirements travel on the existing enrolled launch, before original
+        # host services mount. They are never copied into observed identity.
+        execution_policy = json.dumps({
+            "schema": "mastermind.dsh.native_execution_policy.v1",
+            "profile_id": profile.profile_id,
+            "profile_digest": profile.profile_digest,
+            "policy_digest": registry.policy_digest,
+            "expected_config_digest": profile.expected_config_digest,
+            "config": profile.dsh_native_config_projection(),
+            "model": {"provider": DSH_MODEL_PROVIDER, "model": requested.requested_model},
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
         adapter = None
 
         def require_effect(operation, epoch, generation, method, session_id):
@@ -804,10 +823,70 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
             return broker.require_native_operator_effect(
                 adapter, operation, epoch, generation, method, session_id)
 
+        entry_sha256 = hashlib.sha256(installed.entrypoint.read_bytes()).hexdigest()
+
         async def observe(native):
-            # Read the actual retained Context/Agent owners. Requested policy
-            # fields never become an observed attestation.
-            return await native.observe()
+            # This reads the retained original process and workspace. Only the
+            # broker joins canonical Worker provenance to Node-owned facts.
+            from integrations.deepseek_harness.native_protocol import NativeOwnerFacts
+            from control_plane.operator_harness_contract import (
+                AuthIdentityConfidence, AuthRealmFact, ObservedHarnessAttestation)
+            if adapter is None or adapter.native is not native or native.resource is None:
+                raise WorkerConfigError("native DeepSeek observation has no original process")
+            resource, identity, session_id = native.resource, native.resource.identity, native.provider_session_id
+
+            def require_owner():
+                require_source()
+                if (adapter.native is not native or native.resource is not resource
+                        or resource.identity is not identity or not resource.identity_matches()
+                        or native.provider_session_id != session_id or adapter.close_operation is not None):
+                    raise WorkerConfigError("native DeepSeek observation owner changed")
+
+            require_owner()
+            before = await asyncio.to_thread(observe_native_workspace, workspace)
+            require_owner()
+            facts = await native.observe()
+            require_owner()
+            after = await asyncio.to_thread(observe_native_workspace, workspace)
+            require_owner()
+            if type(facts) is not NativeOwnerFacts:
+                raise WorkerConfigError("native DeepSeek requires actual Node owner facts")
+            if (before != after or facts.workspace is None or facts.agent_id != session_id
+                    or facts.session_cwd != after.workspace_path
+                    or any(getattr(facts.workspace, key) != getattr(after, key)
+                           for key in ("workspace_path", "device", "inode", "uid", "gid"))):
+                raise WorkerConfigError("native DeepSeek actual workspace observation differs")
+            process, source = facts.process, facts.source
+            if (process.pid != identity.pid or process.uid != identity.effective_uid
+                    or process.gid != identity.effective_gid
+                    or process.uid != policy.worker_uid or process.gid != policy.worker_gid
+                    or process.exec_path != installed.binary.path
+                    or process.node_version != installed.binary.version
+                    or process.binary_sha256 != installed.binary.sha256
+                    or source.entry_path != str(installed.entrypoint)
+                    or source.entry_sha256 != entry_sha256):
+                raise WorkerConfigError("native DeepSeek actual process/source observation differs")
+            if facts.selection is None or facts.selection.provider != DSH_MODEL_PROVIDER or facts.account is None:
+                raise WorkerConfigError("native DeepSeek original account/model owner is unavailable")
+            if any(getattr(facts, key) is None for key in (
+                    "capabilities", "effective_skills", "effective_mcp", "effective_plugins_or_apps")):
+                raise WorkerConfigError("native DeepSeek capability inventory is incomplete")
+            # A present, current grant with no cached profile ID is SLOT_ONLY.
+            # No account snapshot never becomes an authenticated slot.
+            account_id = facts.account.user_id
+            return ObservedHarnessAttestation(
+                served_model=facts.selection.model, harness_version=process.node_version,
+                harness_binary_digest=process.binary_sha256, capabilities=facts.capabilities,
+                effective_skills=facts.effective_skills, effective_mcp=facts.effective_mcp,
+                effective_plugins_or_apps=facts.effective_plugins_or_apps,
+                sandbox_state=facts.sandbox_state, approval_state=facts.approval_state,
+                network_state=facts.network_state, effective_config_digest=facts.effective_config_digest,
+                auth=AuthRealmFact(worker_id=policy.worker_id, provider="acp",
+                    auth_class=DSH_MODEL_PROVIDER, plan_type=None, nonsecret_provider_account_id=account_id,
+                    identity_confidence=(AuthIdentityConfidence.SLOT_ONLY if account_id is None
+                                         else AuthIdentityConfidence.PROVIDER_REPORTED)),
+                workspace=after, supports_subagent_capability_ceiling=facts.supports_subagent_capability_ceiling,
+                unknown_fields=facts.unknown_fields)
 
         home = os.environ.get("HOME")
         if not home or not Path(home).is_absolute():
@@ -816,7 +895,8 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
             binary=installed.binary,
             argv=(installed.binary.path, str(installed.entrypoint)),
             environment={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": home,
-                         "DSH_HOME": str(policy.provider_home), "LANG": "C.UTF-8"},
+                         "DSH_HOME": str(policy.provider_home), "LANG": "C.UTF-8",
+                         "MMX_NATIVE_EXECUTION_POLICY": execution_policy},
             provider_home=policy.provider_home,
             capture_root=policy.run_root,
             protocol_profile=AcpProfile(

@@ -14,7 +14,8 @@ PACKAGES = ("packages/core/agent", "packages/core/agent-loop", "apps/cli",
             "packages/api/gateway", "packages/client/connection",
             "packages/llm/llm", "packages/llm/llm-deepseek",
             "packages/credentials/deepseek-account", "packages/credentials/deepseek-account-platform",
-            "packages/llm/llm-deepseek-account")
+            "packages/llm/llm-deepseek-account",
+            'packages/core/tools', 'packages/sandbox/sandbox-policy', 'packages/interaction/user-approval', 'packages/skill/skill', 'packages/boot/app-boot', 'vendor/loader')
 CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[1] + "/src/index.ts",
                     PACKAGES[2] + "/src/profile-boot.ts", PACKAGES[3] + "/src/index.ts",
                     PACKAGES[4] + "/src/index.ts", PACKAGES[5] + "/src/index.ts",
@@ -23,7 +24,9 @@ CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[1] + "/src/index.ts
                     PACKAGES[8] + "/src/adapter.ts", PACKAGES[8] + "/src/host.ts",
                     PACKAGES[8] + "/src/types.ts", PACKAGES[9] + "/src/index.ts",
                     PACKAGES[10] + "/src/index.ts", PACKAGES[11] + "/src/index.ts",
-                    PACKAGES[11] + "/src/catalog.ts", PACKAGES[11] + "/src/listing.ts"))
+                    PACKAGES[11] + "/src/catalog.ts", PACKAGES[11] + "/src/listing.ts",
+                    PACKAGES[12] + "/src/index.ts", PACKAGES[13] + "/src/index.ts", PACKAGES[14] + "/src/index.ts", PACKAGES[15] + "/src/index.ts", PACKAGES[16] + "/src/profile-context.ts",
+                    PACKAGES[17] + "/src/index.ts", PACKAGES[17] + "/src/config/tree.ts", PACKAGES[17] + "/src/config/entry.ts"))
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -45,7 +48,7 @@ def manifest() -> dict:
         if (path.is_absolute() or ".." in path.parts
                 or not ((any(name.startswith(package + "/src/") for package in PACKAGES)
                          and path.suffix in (".ts", ".tsx"))
-                        or name == "packages/llm/llm/package.json")
+                        or name in ("packages/llm/llm/package.json", "packages/boot/app-boot/package.json"))
                 or type(digest) is not str or len(digest) != 64
                 or any(c not in "0123456789abcdef" for c in digest)):
             raise ValueError("native host source path or digest refused")

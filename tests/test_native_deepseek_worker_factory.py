@@ -48,7 +48,7 @@ def prepared(deepseek_installation,monkeypatch):
     registry=ExecutionCapabilityRegistry.load(candidate)
     profile=registry.profiles["operator.dsh.native-conversation.v1"]
     profiles={"candidate":profile}
-    monkeypatch.setattr(worker.ExecutionCapabilityRegistry,"load",lambda:SimpleNamespace(profiles=profiles))
+    monkeypatch.setattr(worker.ExecutionCapabilityRegistry,"load",lambda:SimpleNamespace(profiles=profiles,policy_digest=registry.policy_digest))
     workspace=Path(value["workspace_root"]);info=workspace.stat()
     identity=WorkspaceIdentity(str(workspace),"b"*40,info.st_dev,info.st_ino,info.st_uid,info.st_gid)
     requested=RequestedExecutionProfile(value["worker_id"],"acp","deepseek-chat","dsh-native-web-acp",
@@ -110,7 +110,14 @@ def test_actual_broker_and_adapter_use_only_original_loop_and_owner(prepared,mon
         marker=object()
         class OriginalNative:
             async def observe(self):return marker
-        assert await adapter.binding.observe_attestation(OriginalNative()) is marker
+        with pytest.raises(worker.WorkerConfigError,match="original process"):
+            await adapter.binding.observe_attestation(OriginalNative())
+        payload=json.loads(adapter.binding.environment["MMX_NATIVE_EXECUTION_POLICY"])
+        assert payload["profile_id"]=="operator.dsh.native-conversation.v1"
+        assert payload["config"]==prepared[3].dsh_native_config_projection()
+        assert payload["expected_config_digest"]==requested.expected_config_digest
+        assert set(payload)=={"schema","profile_id","profile_digest","policy_digest","expected_config_digest","config","model"}
+        assert not any(key in payload for key in ("worker_id","account","workspace","attestation"))
     asyncio.run(exercise())
     assert i.calls==before
 
@@ -161,3 +168,74 @@ def test_deepseek_refuses_a_borrowed_codex_lifetime(prepared):
     _,value,*_=prepared
     with pytest.raises(worker.WorkerConfigError,match="cannot borrow a Codex"):
         worker._build_broker(value,native_account=object())
+
+
+def node_owner(prepared, adapter, monkeypatch, *, change=None):
+    import hashlib
+    from control_plane import codex_operator_adapter as implementation
+    from integrations.deepseek_harness.native_protocol import native_observation
+    from test_dsh_native_protocol import owner_facts_wire
+    i,value,_,_,requested=prepared
+    wire=owner_facts_wire();facts=wire["facts"]
+    facts["session_cwd"]=requested.workspace.workspace_path
+    facts["workspace"]={key:getattr(requested.workspace,key) for key in ("workspace_path","device","inode","uid","gid")}
+    facts["process"].update(uid=value["worker_uid"],gid=value["worker_gid"],exec_path=str(i.binary),
+        binary_sha256=requested.harness_binary_digest)
+    facts["source"].update(entry_path=str(i.entry),entry_sha256=hashlib.sha256(i.entry.read_bytes()).hexdigest())
+    identities=[requested.workspace,requested.workspace]
+    monkeypatch.setattr(implementation,"_default_base_sha",lambda path:identities.pop(0).base_sha)
+    identity=SimpleNamespace(pid=123,effective_uid=value["worker_uid"],effective_gid=value["worker_gid"])
+    resource=SimpleNamespace(identity=identity,identity_matches=lambda:True)
+    async def observe():
+        if change=="resource":resource.identity=SimpleNamespace(**vars(identity))
+        if change=="closed":adapter.close_operation=object()
+        return native_observation(wire,"original-native")
+    native=SimpleNamespace(resource=resource,provider_session_id="original-native",observe=observe)
+    adapter.native=native
+    return native,wire,identities
+
+def test_factory_joins_actual_node_facts_to_original_worker_and_observed_git(prepared,monkeypatch):
+    _,value,_,_,requested=prepared
+    async def exercise():
+        broker=worker._build_broker(value,autonomy_guard=lambda:None)
+        adapter=broker.operator_adapter_factory(Path(value["workspace_root"]),lambda t:"",requested)
+        native,wire,_=node_owner(prepared,adapter,monkeypatch)
+        observed=await adapter.binding.observe_attestation(native)
+        assert observed.auth.worker_id==value["worker_id"] and observed.auth.provider=="acp"
+        assert observed.auth.identity_confidence.value=="SLOT_ONLY"
+        assert observed.auth.nonsecret_provider_account_id is None
+        assert observed.workspace == requested.workspace
+        assert observed.served_model=="deepseek-chat"
+        assert not any(key in wire["facts"] for key in ("worker_id","base_sha","principal"))
+    asyncio.run(exercise())
+
+@pytest.mark.parametrize("change",["pid","uid","gid","binary","source","workspace","git","account","inventory","provider","resource","closed"])
+def test_factory_refuses_mismatched_or_retired_original_facts(prepared,monkeypatch,change):
+    _,value,_,_,requested=prepared
+    async def exercise():
+        broker=worker._build_broker(value,autonomy_guard=lambda:None)
+        adapter=broker.operator_adapter_factory(Path(value["workspace_root"]),lambda t:"",requested)
+        native,wire,identities=node_owner(prepared,adapter,monkeypatch,change=change)
+        facts=wire["facts"]
+        if change in ("pid","uid","gid"):facts["process"][change]+=1
+        elif change=="binary":facts["process"]["binary_sha256"]="f"*64
+        elif change=="source":facts["source"]["entry_sha256"]="f"*64
+        elif change=="workspace":facts["workspace"]["inode"]+=1
+        elif change=="git":identities[1]=dataclasses.replace(requested.workspace,base_sha="e"*40)
+        elif change=="account":facts["account"]=None
+        elif change=="inventory":facts["effective_mcp"]=None
+        elif change=="provider":facts["selection"]["provider"]="foreign"
+        with pytest.raises(worker.WorkerConfigError):
+            await adapter.binding.observe_attestation(native)
+    asyncio.run(exercise())
+
+def test_factory_policy_currentness_uses_original_registry_digest(prepared,monkeypatch):
+    _,value,profiles,_,requested=prepared
+    async def exercise():
+        broker=worker._build_broker(value,autonomy_guard=lambda:None)
+        adapter=broker.operator_adapter_factory(Path(value["workspace_root"]),lambda t:"",requested)
+        monkeypatch.setattr(worker.ExecutionCapabilityRegistry,"load",
+            lambda:SimpleNamespace(profiles=profiles,policy_digest="f"*64))
+        with pytest.raises(worker.WorkerConfigError,match="policy changed"):
+            adapter.binding.verify_source()
+    asyncio.run(exercise())

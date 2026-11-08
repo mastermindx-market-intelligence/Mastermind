@@ -46,7 +46,8 @@ def test_explicit_candidate_is_disabled_and_declares_original_plugin_only():
     assert not any(key in projection for key in ("attestation", "account", "authority", "enabled"))
     manifest = profile.capability_manifest(harness_binary_digest="a"*64)
     assert [(item.kind, item.name, item.harness_binary_digest) for item in manifest.required] == [
-        ("plugin", "mastermind-company", "a"*64)]
+        ("tool", "read", "a"*64), ("tool", "glob", "a"*64),
+        ("tool", "grep", "a"*64), ("plugin", "mastermind-company", "a"*64)]
     assert manifest.allowed_ambient == ()
     assert len(profile.expected_config_digest) == 64
     assert not adapter_supports_execution_surface("acp", DSH_OPERATOR_EXECUTION_SURFACE)

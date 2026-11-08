@@ -373,3 +373,54 @@ def test_full_terminal_budget_still_refuses_every_late_native_callback(method):
             await StrictFrameReader(reader, client, extension_policy=client).readuntil()
         assert client.current.frames == 512
     asyncio.run(exercise())
+
+# C31 actual Node-owned facts: the broker, never Node, owns Worker/base-SHA joins.
+def owner_facts_wire(session_id="original-native"):
+    return {"schema":"mastermind.dsh.native_owner_observation.v1","sessionId":session_id,"facts":{
+        "agent_id":session_id,"session_cwd":"/fixture/workspace",
+        "process":{"pid":123,"uid":501,"gid":20,"exec_path":"/fixture/node","node_version":"v26.5.0","binary_sha256":"a"*64},
+        "source":{"entry_path":"/fixture/native_worker.mjs","entry_sha256":"b"*64},
+        "selection":{"provider":"deepseek-account","model":"deepseek-chat","reasoning_effort":None},
+        "account":{"inference_origin":"https://api.deepseek.com","user_id":None},
+        "workspace":{"workspace_path":"/fixture/workspace","device":1,"inode":2,"uid":501,"gid":20},
+        "capabilities":[],"effective_skills":[],"effective_mcp":[],"effective_plugins_or_apps":[],
+        "sandbox_state":None,"approval_state":None,"network_state":None,"effective_config_digest":None,
+        "supports_subagent_capability_ceiling":"FALSE","unknown_fields":[]}}
+
+def test_actual_node_fact_codec_preserves_unknowns_without_canonical_worker():
+    from integrations.deepseek_harness.native_protocol import native_observation, NativeOwnerFacts
+    wire=owner_facts_wire()
+    wire["facts"]["capabilities"]=None
+    parsed=native_observation(wire,"original-native")
+    assert type(parsed) is NativeOwnerFacts
+    assert parsed.capabilities is None and parsed.effective_skills==()
+    assert parsed.account.user_id is None and not hasattr(parsed,"auth")
+    wire["facts"]["account"]=None
+    assert native_observation(wire,"original-native").account is None
+
+@pytest.mark.parametrize("path",["/tmp//x","/tmp/x/","/tmp/./x","/tmp/../x","//tmp/x","relative"])
+def test_actual_node_fact_codec_refuses_noncanonical_paths(path):
+    from integrations.deepseek_harness.native_protocol import native_observation, NativeProtocolError
+    wire=owner_facts_wire();wire["facts"]["session_cwd"]=path
+    with pytest.raises(NativeProtocolError,match="NATIVE_OWNER_OBSERVATION_REFUSED"):
+        native_observation(wire,"original-native")
+
+@pytest.mark.parametrize("case",["extra","worker","session","pid","bool-pid","negative-uid","version","digest","origin-path","origin-user","account-secret","inventory","size"])
+def test_actual_node_fact_codec_is_closed_and_bounded(case):
+    from integrations.deepseek_harness.native_protocol import native_observation, NativeProtocolError
+    wire=owner_facts_wire();facts=wire["facts"]
+    if case=="extra":wire["other"]=True
+    elif case=="worker":facts["worker_id"]="invented"
+    elif case=="session":facts["agent_id"]="foreign"
+    elif case=="pid":facts["process"]["pid"]=0
+    elif case=="bool-pid":facts["process"]["pid"]=True
+    elif case=="negative-uid":facts["process"]["uid"]=-1
+    elif case=="version":facts["process"]["node_version"]="26.5.0"
+    elif case=="digest":facts["source"]["entry_sha256"]="A"*64
+    elif case=="origin-path":facts["account"]["inference_origin"]="https://api.deepseek.com/other"
+    elif case=="origin-user":facts["account"]["inference_origin"]="https://user@api.deepseek.com"
+    elif case=="account-secret":facts["account"]["user_id"]="credential material"
+    elif case=="inventory":facts["effective_mcp"]={}
+    else:facts["unknown_fields"]=["x"*32769]
+    with pytest.raises(NativeProtocolError,match="NATIVE_OWNER_OBSERVATION_REFUSED"):
+        native_observation(wire,"original-native")

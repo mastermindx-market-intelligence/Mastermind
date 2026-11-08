@@ -57,6 +57,62 @@ class _ModelSelection:
     wire_updates: int = 0
 
 
+
+def _native_update_document(value: Any) -> dict[str, Any]:
+    # The raw frame and the SDK callback must distinguish explicit rawInput:null
+    # from a missing field. All wire-supplied fields, including null, survive.
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        value = dump(mode="json", by_alias=True, exclude_unset=True)
+    return document(value)
+
+
+def _native_tool_projection(value: dict[str, Any]) -> bytes:
+    """Validate only the original ACP projection; this never proves dispatch."""
+    from scripts.ohf.acp_probe_boundary import _validate_json_structure
+
+    def text(item, maximum):
+        return (type(item) is str and 0 < len(item) <= maximum
+                and not any(ord(char) < 32 or ord(char) == 127 for char in item))
+
+    if not text(value.get("toolCallId"), 1024):
+        raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+    if value.get("sessionUpdate") == "tool_call":
+        if (set(value) != {"sessionUpdate", "toolCallId", "title", "kind", "status", "rawInput"}
+                or value["kind"] != "other" or value["status"] != "in_progress"
+                or not text(value["title"], 1024)):
+            raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+    elif value.get("sessionUpdate") == "tool_call_update":
+        if (set(value) != {"sessionUpdate", "toolCallId", "status", "content"}
+                or value["status"] not in {"completed", "failed"} or type(value["content"]) is not list):
+            raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+        for wrapped in value["content"]:
+            if type(wrapped) is not dict or set(wrapped) != {"type", "content"} or wrapped["type"] != "content":
+                raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+            block = wrapped["content"]
+            if type(block) is not dict:
+                raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+            if set(block) == {"type", "text"} and block["type"] == "text" and type(block["text"]) is str:
+                continue
+            if (set(block) != {"type", "data", "mimeType"} or block["type"] != "image"
+                    or type(block["data"]) is not str or block["mimeType"] not in
+                    {"image/png", "image/jpeg", "image/webp", "image/gif"}):
+                raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+            import base64
+            try:
+                raw = base64.b64decode(block["data"], validate=True)
+                if base64.b64encode(raw).decode("ascii") != block["data"]:
+                    raise ValueError()
+            except (ValueError, UnicodeError):
+                raise BoundaryViolation("UPDATE_NOT_ADMITTED") from None
+    else:
+        raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+    _validate_json_structure(value)
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+    if len(payload) > 64 * 1024:
+        raise BoundaryViolation("UPDATE_NOT_ADMITTED")
+    return payload
+
 class NativeClient(ProbeClient):
     """Finite native observations; permissions and unrelated extensions deny."""
 
@@ -193,7 +249,7 @@ class NativeClient(ProbeClient):
             current.wire_terminal = True
 
     def admit_update(self, update: Any) -> int:
-        data = document(update)
+        data = _native_update_document(update)
         kind = data.get("sessionUpdate")
         if kind in {"agent_message_chunk", "agent_thought_chunk", "user_message_chunk"}:
             if not {"sessionUpdate", "content"} <= set(data) or set(data) - {"sessionUpdate", "content", "messageId"}:
@@ -204,6 +260,8 @@ class NativeClient(ProbeClient):
             if "messageId" in data:
                 native_id(data["messageId"])
             return len(content["text"].encode("utf-8"))
+        if kind in {"tool_call", "tool_call_update"}:
+            return len(_native_tool_projection(data))
         if kind == "usage_update" and set(data) == {"sessionUpdate", "used", "size"}:
             integer(data["used"])
             integer(data["size"])
@@ -229,7 +287,7 @@ class NativeClient(ProbeClient):
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         try:
-            data = document(update)
+            data = _native_update_document(update)
         except (ValueError, TypeError):
             self.poison("UPDATE_NOT_ADMITTED")
             return
@@ -246,14 +304,19 @@ class NativeClient(ProbeClient):
             selected.updates += 1
             return
         before = self._updates
-        await super().session_update(session_id, update, **kwargs)
+        await super().session_update(session_id, data, **kwargs)
         if self._updates != before and self.on_update is not None:
-            data = document(update)
-            content = data.get("content", {})
-            text = content.get("text", "")
-            # Original Session owns text/history. OHF gets bounded progress facts.
-            self.on_update({"kind": data["sessionUpdate"], "message_id": data.get("messageId"),
-                            "text_bytes": len(text.encode()), "text_sha256": hashlib.sha256(text.encode()).hexdigest()})
+            # Original Session owns bodies. These notices describe committed
+            # projections; neither requested nor completed status proves execution.
+            if data["sessionUpdate"] in {"tool_call", "tool_call_update"}:
+                payload = _native_tool_projection(data)
+                self.on_update({"kind": data["sessionUpdate"], "tool_call_id": data["toolCallId"],
+                    "reported_status": data["status"], "evidence_kind": "NATIVE_SESSION_TOOL_PROJECTION",
+                    "payload_bytes": len(payload), "payload_sha256": hashlib.sha256(payload).hexdigest()})
+            else:
+                text = data.get("content", {}).get("text", "")
+                self.on_update({"kind": data["sessionUpdate"], "message_id": data.get("messageId"),
+                    "text_bytes": len(text.encode()), "text_sha256": hashlib.sha256(text.encode()).hexdigest()})
 
 
 class NativeTransport:
@@ -444,7 +507,7 @@ class NativeAcpProcess:
 
 
     async def observe(self, *, timeout_seconds: float = 30):
-        """Read facts from the same retained connection; no prompt or new owner."""
+        """Read versioned facts on the retained connection; the factory joins canonical owners."""
         connection, session_id = self.connection, self.provider_session_id
         def require_current():
             if (connection is None or session_id is None or self.connection is not connection
