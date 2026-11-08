@@ -7,6 +7,7 @@ Hermes reply is original-result evidence, not Web-chat push or consumption.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 from dataclasses import dataclass
@@ -25,11 +26,18 @@ class TeamBusUnavailable(RuntimeError):
 class TeamBusEffectUnknown(RuntimeError):
     """A modifying call may have crossed the transport; do not retry it."""
 
-    def __init__(self, operation_key: str) -> None:
+    def __init__(self, operation_key: str, *, tool_name: str = "session_send") -> None:
         self.operation_key = operation_key
-        super().__init__(
-            f"Operation {operation_key} has an unknown effect. "
+        self.tool_name = tool_name
+        recovery = (
             "Read the original operation via session_reply_read; do not resend."
+            if tool_name == "session_send" else
+            "Recover the original Executive admission receipt and reconcile its exact "
+            "request_ref with the existing Executive owner when available. Without "
+            "that receipt the effect remains unresolved; do not resubmit."
+        )
+        super().__init__(
+            f"{tool_name} operation {operation_key} has an unknown effect. {recovery}"
         )
 
 
@@ -125,6 +133,11 @@ class WebTeamClient:
             instruction=instruction, stop_condition=stop_condition))
         try:
             result = await self._call("session_send", args)
+        except asyncio.CancelledError as exc:
+            effect = TeamBusEffectUnknown(target.operation_key)
+            exc.team_bus_effect = effect
+            exc.add_note(str(effect))
+            raise
         except Exception as exc:
             raise TeamBusEffectUnknown(target.operation_key) from exc
         if not isinstance(result, Mapping) or result.get("tool") not in (None, "session_send"):
@@ -152,10 +165,15 @@ class WebTeamClient:
         key = args["operation_key"]
         try:
             result = await self._call("session_summon", args)
+        except asyncio.CancelledError as exc:
+            effect = TeamBusEffectUnknown(key, tool_name="session_summon")
+            exc.team_bus_effect = effect
+            exc.add_note(str(effect))
+            raise
         except Exception as exc:
-            raise TeamBusEffectUnknown(key) from exc
+            raise TeamBusEffectUnknown(key, tool_name="session_summon") from exc
         if (not isinstance(result, Mapping)
                 or result.get("tool") not in (None, "session_summon")
-                or result.get("ok") not in (True, False)):
-            raise TeamBusEffectUnknown(key)
+                or (result.get("ok") is not True and result.get("ok") is not False)):
+            raise TeamBusEffectUnknown(key, tool_name="session_summon")
         return result

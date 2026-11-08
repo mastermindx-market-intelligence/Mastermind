@@ -95,6 +95,8 @@ def test_transport_loss_preserves_original_key_without_retry():
     with pytest.raises(TeamBusEffectUnknown) as caught:
         run(client.send(selected, "First instruction", "Return one result"))
     assert caught.value.operation_key == selected.operation_key
+    assert caught.value.tool_name == "session_send"
+    assert "session_reply_read" in str(caught.value)
     assert [name for name, _ in calls].count("session_send") == 1
     assert len(calls) == 2
 
@@ -167,4 +169,68 @@ def test_worker_uncertain_effect_is_not_replayed():
     with pytest.raises(TeamBusEffectUnknown) as caught:
         run(client.submit_worker(args))
     assert caught.value.operation_key == "web-team-bus-testrun"
+    assert caught.value.tool_name == "session_summon"
+    assert "session_reply_read" not in str(caught.value)
+    assert "request_ref" in str(caught.value)
+    assert "do not resubmit" in str(caught.value)
     assert calls == ["session_summon"]
+
+
+@pytest.mark.parametrize("ok", [0, 1, None, "true"])
+def test_worker_malformed_status_preserves_admission_identity(ok):
+    calls = []
+    async def malformed(name, args):
+        calls.append((name, args))
+        return {"tool": name, "ok": ok, "data": {"accepted": True}}
+    client = WebTeamClient(malformed)
+    request = dict(operation_key="web-team-bus-testrun", objective="Source review",
+                   department="executive-infrastructure", priority=0,
+                   execution_profile="research_only",
+                   workstream="WS:EXECUTIVE-ECOSYSTEM-COMPLETION")
+    with pytest.raises(TeamBusEffectUnknown) as caught:
+        run(client.submit_worker(request))
+    assert caught.value.operation_key == request["operation_key"]
+    assert caught.value.tool_name == "session_summon"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("tool_name", ["session_send", "session_summon"])
+def test_cancellation_after_dispatch_preserves_cancel_and_original_effect(tool_name):
+    async def scenario():
+        dispatched = asyncio.Event()
+        cancelled = asyncio.CancelledError("foreground caller cancelled")
+        calls = []
+        async def blocked(name, args):
+            if name == "session_targets":
+                return reply(name, [target(args["kind"])])
+            calls.append((name, dict(args)))
+            dispatched.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                raise cancelled
+        client = WebTeamClient(blocked)
+        if tool_name == "session_send":
+            selected, = await client.targets("hermes_meta")
+            key = selected.operation_key
+            task = asyncio.create_task(client.send(selected, "Work", "Return"))
+        else:
+            key = "web-team-bus-testrun"
+            task = asyncio.create_task(client.submit_worker(dict(
+                operation_key=key, objective="Source review",
+                department="executive-infrastructure", priority=0,
+                execution_profile="research_only",
+                workstream="WS:EXECUTIVE-ECOSYSTEM-COMPLETION")))
+        await dispatched.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        assert caught.value is cancelled
+        assert task.cancelled()
+        effect = caught.value.team_bus_effect
+        assert isinstance(effect, TeamBusEffectUnknown)
+        assert effect.operation_key == key
+        assert effect.tool_name == tool_name
+        assert str(effect) in caught.value.__notes__
+        assert [name for name, _ in calls] == [tool_name]
+    run(scenario())

@@ -67,6 +67,16 @@ These are the existing installed tool contracts in
 for exactly these calls. It has no separately callable MCP listener.
 It deliberately preserves typed refusals and original-effect uncertainty.
 
+Transport loss while sending a continuation preserves the `session_send` tool
+name and original continuation key for `session_reply_read`. An uncertain
+`session_summon` instead preserves its admission operation key: recover the
+original Executive admission receipt and use its exact `request_ref` with the
+existing Executive reconciler when available. A missing receipt remains
+unresolved; a continuation read cannot reconcile a worker admission, and the
+request must not be resubmitted. Cancellation after either dispatch retains
+the original `CancelledError`, with `team_bus_effect` and an exception note
+carrying the same original tool/key and recovery guidance.
+
 ## Live census and known deployment gaps (do not flatten the layers)
 
 - The protected source's Session Bridge target kinds include
@@ -81,11 +91,16 @@ It deliberately preserves typed refusals and original-effect uncertainty.
   newer protected source adding native Hermes kinds. Refresh the installed
   app's tool metadata only after the actual host composition is verified.
   This is a deployment/schema mismatch, not proof that Hermes is addressable.
-- A read-only Executive state/capacity connection was observed previously,
-  but this run's `executive_state` and `session_targets` connection probes
-  failed with an OpenAI-facing MCP SSE 429. No send, reply, native turn or
-  worker launch was attempted; do not relabel a tunnel-health report as
-  authenticated Executive MCP readiness.
+- Earlier connection probes returned OpenAI-facing MCP SSE 429. The subsequent
+  2026-11-08 recovery reached Executive V3: `session_targets({})` returned a
+  successful empty legacy projection, while `executive_state` returned
+  `backend_unavailable`. The installed Control reader at `b4a5a8925c6c`
+  rejects valid multiline quoted Macro frontmatter. The accepted parser fix
+  is already in merged PR #2088 (`910b3eca8d2ed868cb5a83a8459ee702c4c30f6a`);
+  adoption must use the original installed Control release path. An MCP-only
+  update cannot replace the Control parser. No send, native turn or worker
+  launch was attempted. Current installation and original-effect holds remain
+  tracked under programme issue #1893; this source client does not release them.
 - Source tests for `integrations/deepseek_attended_fabric` prove its
   native AgentLoop boundary under fixtures, NOT installed DeepSeek session
   enrollment, a real admitted remote worker or source-provider usage.
@@ -120,9 +135,11 @@ programme's original H1-H8 or the native Hermes/DeepSeek release tracks.
 `tests/test_session_bridge_web_team_client.py` exercises exact target
 selection, a single verbatim send, stale/forged target refusal, typed/transport
 EFFECT_UNKNOWN, read-only original-answer recovery, unavailable reads and
-provider-neutral Executive work admission. Local isolated tests use a
-schema-validation shim; repository CI must execute against real
-`integrations.session_bridge.schemas` before this source can be accepted.
+provider-neutral Executive work admission. Regressions distinguish admission
+recovery from continuation recovery, reject numeric/malformed `ok` values and
+retain original cancellation after a single dispatch. Repository CI executes
+these tests against real `integrations.session_bridge.schemas`; earlier local
+shim results are not a substitute for that exact-head qualification.
 No active configuration, OAuth, public route, plugin installation, service,
 Hermes profile, DeepSeek session, run admission or deployment is changed by
 this candidate. Rollback removes only the optional client and test/docs.
@@ -137,4 +154,4 @@ this candidate. Rollback removes only the optional client and test/docs.
 
 **Activation path:** Qualify actual installed Executive V3 MCP health and current JWT resource policy; ensure real Meta/Secretary enrollment and refresh advertised target inventory; inspect the opt-in `reply_events_armed` and sealed original key/owner grant and authenticated subscription composition without assuming that source means armed. Then add only the missing Hermes-original-result event projection or real producer hook *inside the incumbent event owner*, with tests covering original identity, same-operation idempotency, revocation, retained committed answer vs pending, restart, malformed callbacks, and no duplicate native submits. Prove full event discovery (`events` capability), `events/list`, `events/subscribe`, challenge and sealed persistence, signed HTTPS 2xx, Work/Dot event receipt, `session_reply_read` and `events/unsubscribe`. For native Codex/Claude, reuse existing `session.reply_committed` exactly. Do not enable the feature before host key/policy custody and exact user presence are verified.
 
-**ChatGPT-side plugin:** [Mastermind Agent Bus](https://chatgpt.com/plugins/Plugin_8ce83097d87081919bba9f5a0063ec34) v0.1.1 describes this Work/Dot flow and explicit native-Hermes caveat. It is a skills-only companion to the separately installed/authenticated **Executive V3 MCP**; installing it neither repairs the current HTTP429 tunnel nor enables direct native target kinds or webhook delivery. Recovery of these live dependencies is part of the original Executive release path, not a synthetic app install.
+**ChatGPT-side plugin:** [Mastermind Agent Bus](https://chatgpt.com/plugins/Plugin_8ce83097d87081919bba9f5a0063ec34) v0.1.1 describes this Work/Dot flow and explicit native-Hermes caveat. It is a skills-only companion to the separately installed/authenticated **Executive V3 MCP**; installation does not replace the installed Control reader, enable direct native target kinds or activate webhook delivery. Recovery of these live dependencies is part of the original Executive release path.
