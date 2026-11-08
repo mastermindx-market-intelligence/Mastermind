@@ -309,6 +309,13 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
     saved_profile = dump_profile(profile)
 
     def qualify_profile():
+        primary = native_launch.recipe.get("primary_application")
+        if primary is not None:
+            current_primary = load_profile(profile_path)
+            enforce_role_tcp_ports(current_primary, native_launch=native_launch)
+            expected_disabled_mcp_with_application(current_primary, native_launch.recipe.get("executive_consumer"),
+                                                   primary_application=primary,
+                                                   evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
         current = load_profile(profile_path)
         if dump_profile(current) != saved_profile:
             raise RuntimeRefusal("NATIVE_ENROLLMENT_PROFILE_CHANGED")
@@ -318,12 +325,6 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
         assert_role_credential_isolation(current)
         expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"),
                               evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
-        primary = native_launch.recipe.get("primary_application")
-        if primary is not None:
-            enforce_role_tcp_ports(current, native_launch=native_launch)
-            expected_disabled_mcp_with_application(current, native_launch.recipe.get("executive_consumer"),
-                                                   primary_application=primary,
-                                                   evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
 
     qualify_profile()
     # Landlock attaches once while this entry is still single-threaded and
