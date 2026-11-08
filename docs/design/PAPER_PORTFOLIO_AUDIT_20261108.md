@@ -12,7 +12,7 @@ The new D23 Watchlist and D18 Crypto studies are **not yet integrated into F03**
 
 Bounded reviews of **D16 Forex, D17 Commodities, D19 China and D20 Hong Kong/Canada** found their inspected semantics already qualified. No redundant redesign was added. Their specific coverage and limits are preserved below and in the bounded-review evidence.
 
-The next independent foreground is **D09 flows/ownership and D11 research-library context**. Read-only triage has started; root will select and implement only a concrete unresolved native gap, preserving existing owners and accepted work.
+D09 Intraday Flow now uses state-specific recorded-view labels in all four unavailable-price variants. D11 Research Library now names its existing Saved research destination. Those five native text leaves are applied, exact-readback verified and documented below. The next independent foreground is a bounded D01 Today target check and read-only discovery of the existing F03 PR/verification path; no new runner, workflow or release action is implied.
 
 ## Assignment and evidence boundary
 
@@ -1918,3 +1918,55 @@ D19’s finding does not certify all 48 R2 boards or all China routes. Its sourc
 D15’s three-label repair was canonically published at **`a3231285025440e83b2b3613d9d8935304154dbf`**. Its four UTF-8 bodies, two image path/blob identities and branch head matched readback. The audit’s opening continuation status is now refreshed to the actual latest work; its obsolete “next D22” statement and earlier F03 check totals no longer describe the current frontier.
 
 The independent next lanes are **D09 flow/ownership clarity** and **D11 Research saved-context clarity**, whose read-only triage is active. F03 still has fourteen observations. D23 and D18 integration await a functioning affected build/verification path, rather than unverified generated-output edits.
+
+
+## Continuation — D09 recorded-view clocks and D11 saved-research identity
+
+### D09: unavailable prices no longer carry an unqualified fifteen-minute promise
+
+Four current [Intraday Flow specimens](https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0), file **`01M6Y2QK8TQZRN8T4BHG10CJXT`**, page **`p-1-0`**, explicitly say current prices are unavailable. Their separate disclosures retain a 2 November board-build time and, where supplied, a 27 July volume-source time. An unconditional “≈15-min delayed” badge could be read as the age of the displayed observations.
+
+The repair changes only that state-specific label:
+
+| Board / leaf | Before | After |
+|---|---|---|
+| Desktop EN `1-0 / A-0` | ≈15-min delayed | **Recorded view** |
+| Mobile EN `3S-0 / 41-0` | Board built 2 Nov 10:21 UTC · ≈15-min delayed | **Board built 2 Nov 10:21 UTC · Recorded view** |
+| Mobile ZH `53-0 / 5P-0` | 约延迟15分钟 | **记录视图** |
+| Desktop ZH `7D-0 / 7N-0` | 约延迟15分钟 | **记录视图** |
+
+At Macro **`5eb1603edb4486f06c74df7c43a1082427a59b6e`**, [`templates/intraday_flow.html.j2`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/templates/intraday_flow.html.j2), blob **`8832ceba22068eccc65704f7bf6d7bbe027a9e45`**, renders the delay tag statically at line 380. Its `updateFlowStamp` separately builds source status from quote, pulse and flow status, retaining the board-build time. The static literal does not establish a fifteen-minute observation age for these fixtures. No provider contract was established that would justify inventing a “nominal delay” meaning.
+
+Fresh pre-edit JSX matched the captured baseline. All four edited boards now equal their complete before-state JSX with exactly the listed text substitutions. The other six Intraday boards — `9F-0`, `AP-0`, `CG-0`, `DX-0`, `FE-0`, `GN-0` — match their entire before-state JSX. R3’s separate received/delayed examples and R4’s recorded-evidence, premium-basis and dated-dealer-level guidance remain intact.
+
+Root visually inspected representative desktop EN and mobile ZH before/after native captures. Labels fit; known build/source timestamps, unavailable-state copy and confirmation limits remain unchanged. There were **two distinct APPLIED_RESPONSE_OBSERVED operations and zero unknown effects**: the four-text edit and finish scoped to the four affected boards. The live template itself was not changed; no source-status endpoint or current market-data request was exercised.
+
+Evidence is in [clock correction and source receipt](evidence/paper_portfolio_20261108/d09_flow/clock-evidence.json), [complete scoped before/after JSX corpus](evidence/paper_portfolio_20261108/d09_flow/scan-before-after.json), and four original native JPEGs under `d09_flow/`.
+
+### D11: Library entry names the existing saved object
+
+The [International Research Library](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-5-0), file **`01M3P1TW5Y3XWQC37ADDS8K5AG`**, page **`p-5-0`**, desktop board **`RU-0`**, now labels leaf **`TF-0`** **“Saved research”** instead of “Saved tools.”
+
+The existing destination is already **Saved research** at `p-C-0 / 47Q-0 / 486-0`. Its records are research questions with selected measures, and its actions open saved research. The existing contract `p-B-0 / 6EG-0` preserves a question plus canonical research context; it does not establish a separate tool-bookmark object. This is a naming repair, not a new saved-state feature.
+
+The incumbent persistence boundary was refreshed against the actual Terminal default branch, **master**, at **`c30eab3f38717f571abcb8bb24a9df3e0a8edd30`**:
+
+| Source | Exact blob | Relevant observed behavior |
+|---|---|---|
+| [`terminal/app/api/thesis-saved-views/route.ts`](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/app/api/thesis-saved-views/route.ts) | `5807a90ce7623824017058daee83e0b4d7608acd` | Existing saved-view owner accepts the filter payload; no endpoint was called. |
+| [`terminal/lib/savedViews.ts`](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/lib/savedViews.ts) | `d72343e15f3c91433c47c942e2b034d0856f0435` | Normalizes lifecycle, staleDays, windowClosed and subjectGroupKey; it does not losslessly retain the R10 question/context object. |
+| [Macro `scripts/build_intl_library.py`](https://github.com/mastermindx-market-intelligence/Macro/blob/5eb1603edb4486f06c74df7c43a1082427a59b6e/scripts/build_intl_library.py) | `a9982516948c964caebe103849d177d16dfebc94` | Per-instrument data and standouts; not proof of a saved-tools store or an implemented R10 catalogue. |
+
+The native typed-extension qualification remains in force. No source mutation, account read, saved-view creation or new storage owner occurred.
+
+The full desktop-board JSX equals its baseline with **one text substitution**. Native before/after screenshots confirm the longer label fits in the toolbar. Compact “Saved” entries remain unchanged; no runtime accessible-name or route-binding proof is inferred. There were **two distinct APPLIED_RESPONSE_OBSERVED operations and zero unknown effects**, with finish scoped to `RU-0`. No whole-file preservation claim is made; accepted Hub, scanner and saved-workspace studies received no mutations.
+
+The [Library label evidence](evidence/paper_portfolio_20261108/d11_research/library-label-evidence.json) contains full before/after JSX, captured destination/owner contracts, exact source identities and operation receipts. Original before/after native JPEGs accompany it under `d11_research/`.
+
+### Durable prior phase and next safe work
+
+D18 and the four bounded regional/market reviews are canonically published at **`01cf699eb600040a5179d8bd8b2dc2e22d27c9c1`**. All eight UTF-8 bodies matched exact readback; all four image path/blob identities and the branch head matched. The audit blob at that commit is `d0ea58664271f7159c35e1cc2ca926292172e39a`.
+
+The new images in this D09/D11 phase are likewise the original Paper JPEG bytes, carried directly through Git blob creation and verified by published path/SHA. Independent local digests and decoded binary-body readback remain unclaimed while local execution is unavailable.
+
+The next independent work has already started: bounded discovery of an actual **D01 Today** native target and read-only investigation of the **existing F03 PR and affected verification path**. This does not create a replacement PR, runner, CI workflow or release path. Current F03 curation remains at fourteen observations until an affected integration can be verified.
