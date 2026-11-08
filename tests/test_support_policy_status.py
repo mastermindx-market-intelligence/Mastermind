@@ -238,6 +238,69 @@ def test_response_scope_authority_and_shape_cannot_be_forged(runtime,field,value
     with pytest.raises(ValueError):r.status.validate_response(json.dumps(out).encode(),r.request)
 
 
+def _assert_parser_fixture_custody(package):
+    import stat
+    # Explicit positive-fixture premises only. Do not normalize a failed owner
+    # or weaken the production reader; fixed diagnostic function/line identifies
+    # the closed condition without logging paths or package contents.
+    for directory in [*reversed(package.parents),package]:
+        info=directory.lstat()
+        if not stat.S_ISDIR(info.st_mode):raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'DIRECTORY_KIND'})
+        if info.st_uid not in (0,os.getuid()):raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'DIRECTORY_OWNER'})
+        if info.st_mode & 0o022:raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'DIRECTORY_WRITE_MODE'})
+    for item in package.iterdir():
+        if item.suffix not in ('.py','.so'):continue
+        info=item.lstat()
+        if not stat.S_ISREG(info.st_mode):raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'MODULE_KIND'})
+        if info.st_uid not in (0,os.getuid()):raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'MODULE_OWNER'})
+        if info.st_mode & 0o022:raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'MODULE_WRITE_MODE'})
+        if info.st_nlink!=1:raise AssertionError( {'state':'FIXTURE_UNQUALIFIED','reason':'MODULE_LINKS'})
+
+
+def _assert_generated_report_observed(report):
+    # Closed synthetic observations only. Each branch is a tracked source line
+    # available to the existing fixed diagnostic catalogue; no raw child output.
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='REQUEST_SHAPE':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'REQUEST_SHAPE'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='REQUEST_SCHEMA':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'REQUEST_SCHEMA'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='REQUEST_IDENTITY':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'REQUEST_IDENTITY'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='REQUEST_DIGEST':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'REQUEST_DIGEST'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='POLICY_SIZE':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'POLICY_SIZE'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='DESIRED_POLICY_CHANGED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'DESIRED_POLICY_CHANGED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='ACTIVE_LIMIT':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'ACTIVE_LIMIT'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='ACTIVE_CHANGED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'ACTIVE_CHANGED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='FILE_CUSTODY':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'FILE_CUSTODY'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='FILE_CHANGED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'FILE_CHANGED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='ADMISSION_LOCK_CUSTODY':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'ADMISSION_LOCK_CUSTODY'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='ADMISSION_LOCK_CHANGED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'ADMISSION_LOCK_CHANGED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='OCCUPANCY_UNKNOWN':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'OCCUPANCY_UNKNOWN'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='POLICY_CHANGED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'POLICY_CHANGED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='FINAL_NAMESPACE_CHANGED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'FINAL_NAMESPACE_CHANGED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='ADMISSION_BUSY':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'ADMISSION_BUSY'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='FIXED_COMPONENT_MISSING':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'FIXED_COMPONENT_MISSING'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='ACCESS_UNQUALIFIED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'ACCESS_UNQUALIFIED'})
+    if report.get('state')=='UNAVAILABLE' and report.get('reason')=='OBSERVATION_UNQUALIFIED':
+        raise AssertionError({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED'})
+    assert report.get('state')=='OBSERVED', {'state':'UNQUALIFIED','reason':'UNKNOWN_REPORT'}
+
+
 def test_generated_isolated_reader_executes_with_real_existing_parser(runtime):
     import venv
     import yaml
@@ -249,6 +312,7 @@ def test_generated_isolated_reader_executes_with_real_existing_parser(runtime):
     site=environment/'lib'/('python%d.%d'%sys.version_info[:2])/'site-packages'
     site.mkdir(parents=True,exist_ok=True)
     shutil.copytree(Path(yaml.__file__).parent,site/'yaml')
+    _assert_parser_fixture_custody(site/'yaml')
     sources=r.status.source_hashes()
     code=r.status.code_for_request(r.request,
         expected_hash=sources['support_policy_status.py'],expected_sources=sources)
@@ -257,7 +321,7 @@ def test_generated_isolated_reader_executes_with_real_existing_parser(runtime):
         input=json.dumps(r.request).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
     assert proc.returncode==0,proc.stderr.decode()
     report=r.status.validate_response(proc.stdout,r.request)
-    assert report['state']=='OBSERVED',report
+    _assert_generated_report_observed(report)
     assert report['comparison']=='IDENTICAL' and snapshot(r.root)==before
     assert len(code.encode())<120000
     changed=copy.deepcopy(r.request);changed['root']='foreign'
@@ -382,3 +446,32 @@ def test_native_desired_policy_uses_existing_orch_owner_not_ext_shadow(runtime):
     incumbent.write_bytes(r.desired+b'\n')
     with pytest.raises(ValueError,match='original_policy_source_unavailable'):
         r.status.original_request(r.run,r.original_root,r.parent)
+
+
+def test_exact_reviewed_source_tokens_do_not_admit_byte_drift():
+    from tests.executive_identity_review import mask_reviewed_identity_literals
+    from tests.executive_fabric_release_identity_review import REVIEWED_FILES
+    paths=[name for name in REVIEWED_FILES if name.startswith('ops/native_fabric/provider_plans/memory118/native_owner/')]
+    paths.append('ops/native_fabric/support_policy_status/reader.py')
+    assert len(paths)==4
+    for name in paths:
+        source=(ROOT/name).read_text()
+        assert mask_reviewed_identity_literals(name,source)!=source
+        changed=source+'\n# unreviewed source drift\n'
+        assert mask_reviewed_identity_literals(name,changed)==changed
+    assert mask_reviewed_identity_literals('ops/foreign.py',(ROOT/paths[-1]).read_text())==(ROOT/paths[-1]).read_text()
+
+
+def test_parser_diagnostic_refuses_unqualified_copy_without_paths(runtime):
+    import shutil
+    import yaml
+    r=runtime;package=r.root.parent/'closed-parser'
+    shutil.copytree(Path(yaml.__file__).parent,package)
+    package.chmod(0o775)
+    with pytest.raises(AssertionError) as caught:_assert_parser_fixture_custody(package)
+    assert caught.value.args==({'state':'FIXTURE_UNQUALIFIED','reason':'DIRECTORY_WRITE_MODE'},)
+    assert str(package) not in str(caught.value)
+    with pytest.raises(AssertionError) as caught:
+        _assert_generated_report_observed({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED','private':'CANARY'})
+    assert caught.value.args==({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED'},)
+    assert 'CANARY' not in str(caught.value)

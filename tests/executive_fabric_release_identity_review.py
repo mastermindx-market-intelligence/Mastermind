@@ -1022,3 +1022,13 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
     "sha256": "050d0dd2fd682ddc4f39b2e2b6a55b50794bb306c91992ba3c5ffb2a2d86694b",
     "sites": ((128, 72, 75, "int", "512"),),
 }
+
+# Exact accepted Memory native-owner namespace; same reviewed bytes/sites as
+# accepted dc79/55e/b87, no generic path or literal exception.
+REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/artifact_delivery.py'] = {'sha256': 'ad985dfc615ef2a8788939dcf42e008b1504126a3a23e23e46f82d6c391ad38a', 'sites': ((1397, 28, 33, 'int', '0o700'),)}
+REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py'] = {'sha256': 'c4082b778c8829e7e472599c9fbdb4cc0dfba400e6d7afff980bbe89669e4c70', 'sites': ((40, 21, 24, 'int', '501'), (212, 78, 81, 'int', '660'))}
+REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py'] = {'sha256': 'eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b', 'sites': ((202, 51, 54, 'int', '599'), (204, 43, 46, 'int', '429'))}
+
+# Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
+# Complete source hash plus typed spans; any byte drift restores the guard.
+REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': 'fe726a411192290c12e15e67ee7c8a94b3d798c0f37e79c41c924c46d6f78408', 'sites': ((364, 66, 69, 'int', '512'), (383, 54, 57, 'int', '512'))}
