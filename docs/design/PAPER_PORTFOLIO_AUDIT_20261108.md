@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. The next foreground is a bounded GMI evidence/return audit that preserves its accepted primary hierarchy. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. The next foreground is a bounded Sector R4 comparison-return qualification slice. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -654,3 +654,75 @@ Every mutation returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed o
 Required consumer proof when the formatter is implemented: the exact two-note fixture and original subjects/dates; only the relative-age suffix removed; unchanged non-narrative notes/order; empty-list omission; malformed and missing dates; unknown versus zero; four source rows/no invented URL; native keyboard collapse and actual dialog focus behavior; EN/ZH wrapping at 390px. Existing probes were inspected, not rerun, and no production behavior is claimed.
 
 **Next safe phase:** a read-only GMI evidence/return audit is running. Preserve the accepted primary hierarchy (subject, dated evidence, narrow claim, limitation, next destination); implement only a new consequential, source-supported interaction or identity gap.
+
+
+## Continuing phase — GMI public company evidence destination
+
+**State:** designed, visually inspected, read back and scoped-finished. File `01M5H6EARN9YHQV17JC6ZG9BRY`. The accepted primary hierarchy and existing company results remain unchanged.
+
+### What the audit changed
+
+The existing “Inspect Micron evidence” action (`6VF-0 / 6XS-0`; ZH `6Y9-0 / 6YV-0`) lacked a complete visible destination in the current inspected product flow. An older source bridge described a relationship-key selection defect at Macro `338a10852dcefa5d2bd07e5c6be0955c2b1e83fd`.
+
+Fresh source review materially changed the diagnosis. Candidate [Macro #10676](https://github.com/mastermindx-market-intelligence/Macro/pull/10676), exact head **`80d6ff71b9913524c4a381b543ec7a53383f50dc`**, already directs company evidence to an issuer page and withholds relationship details on a separate publication-status page. It is open, Draft, unmerged and has no auto-merge. All existing no-merge/Ready/un-draft/enqueue/relabel/deployment holds remain with that carrier; no source or release mutation occurred.
+
+The design therefore completes the existing **company results → public issuer evidence → publication status** journey. It does not add a relationship inspector or public relationship/package locator.
+
+### Exact current source
+
+| Source at candidate head | Blob | Ownership |
+|---|---|---|
+| `scripts/build_gmi_explorer.py` | `900253d42a7b1d43ad41aa493e8032444c4570de` | Exact public projection and stale issuer-file retirement. |
+| `templates/gmi_companies.html.j2` | `afb542f5740a4147c5ef0d05aaae25481d8d6851` | Company catalogue, issuer actions and catalogue/search empty states. |
+| `templates/gmi_issuer.html.j2` | `35b06fd42b3ef485564b504fcacecacb89383c49` | Issuer product evidence, unknowns, separate publication link. |
+| `templates/gmi_relationships.html.j2` | `53b8a697a17064367964b566788d553b7b27a4e0` | Publication restriction; no parties, relationship facts, amounts, excerpts or hidden record payload. |
+| `templates/_gmi_theme_data.html.j2` | `0520256ae0a2f61a33702070686be769d8640124` | Admitted product-card projection and issuer href. |
+| `templates/_gmi_product_macros.html.j2` | `88748e51a87c02ae3ae2c7ee17ee0cb0c905020f` | Dated product claim, native Source receipt and original-source link. |
+| `templates/_gmi_base.html.j2` | `1d76c899cb2ce05b66e7d37d19b53e212e814b4d` | Shared shell, focus and existing assets. |
+| `templates/gmi.js` | `6f5ee7dbd70c71b6dec99094b860cfaf2d6e78a3` | Existing route qualification and return context. |
+
+The source reviewer also checked `scripts/gmi_explorer/model.py` (blob `2614997dd87bf7d7e2d0b61b283c6b364801e1b1`), map template, and byte-identical paired `site/gmi.js`. Principal directly read the owner sources listed above. No new runtime or browser proof was performed.
+
+### Available evidence and honest return
+
+The company-results action maps to **`gmi-issuer-mu.html`**. The issuer template renders its admitted public product cards; it does not resolve a requested relationship key. The current builder admits one exact Micron observation by matching company attribution, proposal/theme, status/curation, lifecycle, product/platform, source identity/hash/date/labels and exact URL. This is the existing specific projection, not general permission for more facts.
+
+The proposal retains the original dated example: **Micron Technology / MU**, **24GB 8H HBM3E**, **NVIDIA H200**, **source 26 February 2024**, planned in that source. The **3 November 2026** reference research snapshot remains visibly qualified as a retained design fixture. Current delivery, deal size and revenue exposure remain unconfirmed. The existing Source receipt is a native disclosure of permitted card fields; those fields are not route selectors. The original-source action uses the current card's qualified URL with a new tab and `noopener noreferrer`; external reachability was not tested.
+
+“View publication status” opens **`gmi-relationships.html`**. Its state explains the lack of a verified public relationship view, withholds restricted details, and distinguishes publication restriction from absence of relationships. Theme research and separately cleared company evidence remain available.
+
+Existing `safeReturn()` accepts only `gmi.html` and `gmi-companies.html`. It preserves recognized theme/category/scope/evidence/lens keys and bounded query, or company query with at most one upstream theme return. Unknown fields, absolute/external routes and arbitrary stacks are excluded. Through the illustrated company-results journey, issuer and publication status show **Back to company results**. Direct entry without a qualified inherited return adds no synthetic Back. No relationship/package/read identity, source-snapshot guarantee, exact opener or scroll/focus restoration was added.
+
+### Paper deliverable and historical correction
+
+New artboard **`73X-0`**, “S05 · Public company evidence · EN/ZH”, on `p-4-0`, reuses the existing native return-board shell:
+
+| New section | Content |
+|---|---|
+| `76T-0` | Scope, retained dates and proposal/source boundary. |
+| `76Y-0` | 390px Noir EN issuer destination `76Z-0`, 390px Day ZH `781-0`, and source/return ownership notes. |
+| `79H-0` | 390px Day EN publication status `79I-0`, 390px Noir ZH `79Z-0`, qualified return and public-payload boundary. |
+| `7AR-0` | EN/ZH empty company catalogue, plus the separately unproven retired issuer URL response. |
+| `7BC-0` | Exact current source binding and remaining consumer acceptance. |
+
+Every newly drawn action/disclosure uses a minimum 44px control area. User-facing panels keep implementation metadata in adjacent build notes. The ready evidence retains source date, narrow claim and limitation beside each other.
+
+Four existing leaves in `6T4-0` were changed, all within the old source bridge: `73H-0` now says historical; `73I-0` directs readers to current S05; `73K-0` marks the old `model.edges[0]` diagnosis superseded and rejects invented current selectors; `73L-0` distinguishes newer qualified return context from the still-unproven focus/scroll/snapshot behavior. Original motion/return examples and all other source/history content remain.
+
+### Missing data and actual implementation limit
+
+The candidate renders **No company evidence yet** when the public catalogue is empty, and a separate search-level **No matching company** state. The new specimen illustrates the former in EN/ZH, with Explore themes and no inference that absent public evidence proves absent business activity.
+
+The builder deletes issuer HTML absent from its current projection. An issuer template's defensive empty-card branch only runs if that template is rendered; it cannot establish recovery for a deleted output. The serving response for an old URL was not inspected, so neither a verified 404 nor an implemented recovery shell is claimed. The design records this concrete consumer-proof gap without inventing a new route/store or displaying a substitute company.
+
+### Verification and preserved work
+
+Fresh JSX readback confirmed existing current EN company results `6VF-0`, ZH mobile `6Y9-0` and newer contract `5FS-0` **byte-identical**. Old `6T4-0` retained **58 text leaves with exactly the four intended edits and zero missing leaves**. New S05 has **109 text leaves**.
+
+Screenshots verified the EN/ZH issuer panes, both publication-status panes, empty-catalogue specimens, source contract and corrected historical bridge. The new 1440px board begins at x6080, after the prior board ending x6000. Inactive-page fit-content height is null; inspected sections render without overlap or clipped copy. A separate source critique found no concrete misleading identity, return or publication claim.
+
+All mutations returned **APPLIED_RESPONSE_OBSERVED**. Scoped finish completed on `73X-0 / 6T4-0`. No product code, public projection, source data, source rights, route owner, PR status or release control changed.
+
+Required consumer proof: ordinary and new-tab company → issuer → publication path; exact admitted attribution and unchanged public-payload boundary; direct entry and invalid return; empty catalogue versus search no-match; absent source URL; shared response for retired issuer URLs; native disclosure and external-link behavior; EN/ZH/theme/mobile reading. Existing exact opener, scroll and source-snapshot restoration remain unproven.
+
+**Next safe phase:** Sector R4 comparison-return qualification. A read-only audit found accepted success states without a visible unverified/changed-basis return outcome. Validate the incumbent state-owner contract before adding a disjoint proposal; preserve BML, GPI, G4P and all existing candidate holds.
