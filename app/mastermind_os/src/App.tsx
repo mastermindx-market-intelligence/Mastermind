@@ -180,6 +180,7 @@ import {
   type WorkDocument,
 } from "./work";
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
+import { nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
@@ -3659,6 +3660,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     }
     return readLaunchRequestPreview(binding, form);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision, launchHandoff]);
+  const partialNativeAuth = native && authState
+    ? nativePartialAuthPresentation(authState, locale) : null;
   // Presentation reuses the incumbent explicit auth action and its guards.
   const authenticationControl = authState ? (
                 <button
@@ -6039,8 +6042,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <div ref={preferencesPane}>{preferencesControl}</div>
           {authState ? (
             <div className="nav-account">
-              <small>{copy.authStatus[authState.status]}</small>
-              {authState.reason && authState.status !== "unconfigured" ? (
+              <small>{partialNativeAuth?.label ?? copy.authStatus[authState.status]}</small>
+              {partialNativeAuth ? <p className="muted">{partialNativeAuth.description}</p>
+                : authState.reason && authState.status !== "unconfigured" ? (
                 <p className="muted">
                   {authState.reason === "POPUP_BLOCKED"
                     ? copy.allowPopup
