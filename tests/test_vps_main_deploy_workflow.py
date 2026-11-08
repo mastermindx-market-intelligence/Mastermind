@@ -4,6 +4,7 @@ This suite tests the trusted workflow SHAPE, not an actual VPS deploy. The
 incumbent archive-and-rollback owner and real production proof remain separate.
 """
 from pathlib import Path
+import subprocess
 
 import yaml
 
@@ -59,3 +60,10 @@ def test_release_wake_uses_existing_exact_sha_and_rollback_owner() -> None:
     )
     for forbidden in ("rsync ", "git push", "gh pr merge", "systemctl restart", "--admin"):
         assert forbidden not in executable
+
+
+def test_deploy_command_shell_parses_without_running() -> None:
+    command = _workflow()["jobs"]["deploy"]["steps"][-1]["run"]
+    parsed = subprocess.run(["bash", "-n"], input=command, text=True,
+                            capture_output=True, check=False)
+    assert parsed.returncode == 0, parsed.stderr
