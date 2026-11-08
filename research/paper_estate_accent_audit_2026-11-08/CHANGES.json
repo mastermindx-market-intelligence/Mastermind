@@ -1,6 +1,6 @@
 {
   "schema": "PAPER_ACCENT_BEFORE_AFTER_MANIFEST_V1",
-  "changeCount": 1953,
+  "changeCount": 2036,
   "parts": [
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0001.json",
@@ -11,9 +11,9 @@
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0002.json",
-      "sha": "caf91984b3a5578460b4d5b1c2d5059d0f55fa96",
-      "bytes": 752068,
-      "commit": "6a1183bc6698b1fa121964ef991657d6bee1473d",
+      "sha": "ee5b7976fd8d0118260102f2d2c6ad7e1f1aee88",
+      "bytes": 752398,
+      "commit": "3396c6125b4ba9cfb557a51d8dee7d8e090bc9a1",
       "method": "EXACT_CONTENT_READBACK",
       "readbackLimitation": null,
       "changeCount": 128
@@ -34,9 +34,9 @@
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0005.json",
-      "sha": "c15719448176d837dd126f7cafb45085dc1725aa",
-      "bytes": 845212,
-      "commit": "65e50280c0ad4a1aef196334b8162e9fe47a6717",
+      "sha": "e897d1e97d2d0fa35b6ed29709c59ee8248bc16b",
+      "bytes": 845278,
+      "commit": "1807323fb19be864f3bf2f06955bc8bfdd0f8fd4",
       "method": "EXACT_CONTENT_READBACK",
       "readbackLimitation": null,
       "changeCount": 155
@@ -113,12 +113,21 @@
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0016.json",
-      "sha": "202b94a8d4885f6ac4d6b42ffba4fc00e063fa46",
-      "bytes": 732808,
-      "commit": "fda32f18ebe83654f512049f48a93dd0a762f57e",
+      "sha": "caa4e503a70fc3f6ca9362c2616d900570660d1e",
+      "bytes": 848468,
+      "commit": "65d7e3ebedcdec4a1589896a3111d2e18d1d9c17",
       "method": "EXACT_CONTENT_READBACK",
       "readbackLimitation": null,
-      "changeCount": 148
+      "changeCount": 186
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0017.json",
+      "sha": "a78c17453800e4fb0409d44a21d831b960437466",
+      "bytes": 123285,
+      "commit": "9e87cd9176c9e769bb83e2fb10ae5c8ef419e7df",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
+      "changeCount": 45
     }
   ],
   "previousFullSnapshot": {
