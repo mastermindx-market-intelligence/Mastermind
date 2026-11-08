@@ -143,11 +143,9 @@ def _observed_context(provider: dict, *, read, token: str, base: str, now=None):
     if type(catalog) is not list:
         raise HostContextRefused("PLAN_CATALOG_UNOBSERVED")
     catalog_ids = {row.get("id") for row in catalog if type(row) is dict}
-    # The documented :free qualifier authorizes as its base catalog slug.
-    # Preserve that qualifier on the wire; grant exhaustion is provider-enforced.
-    models = sorted(model for model in PLAN_MODELS
-                    if model in catalog_ids or
-                    (model.endswith(":free") and model[:-5] in catalog_ids))
+    # Max included models use their exact plain catalog IDs. A catalog row
+    # does not establish either a promotional grant or the Max funding guard.
+    models = sorted(model for model in PLAN_MODELS if model in catalog_ids)
     if not models:
         raise HostContextRefused("PLAN_MODELS_UNAVAILABLE")
     route_host = gateway.get("route_host")
@@ -156,13 +154,16 @@ def _observed_context(provider: dict, *, read, token: str, base: str, now=None):
     route_base = base + "/v1"
     return {
         "registry_entry": {"enabled": True, "plan": registration},
-        "entitlement": {"verified": True, "source": "authenticated_catalog_and_declared_plan"},
+        "entitlement": {"verified": True, "source": "authenticated_catalog_only"},
         "account": account,
         "quota_readback": {
             "schema": PLAN_OBSERVATION_SCHEMA, "source": "authenticated_gateway_metadata",
             "account": account, "organization_sha256": organization,
             "policy_digest": digest, "observed_at_unix": time.time() if now is None else now,
             "wallet_balance_usd": total - used, "available_models": models,
+            # No supported account endpoint has supplied these facts. Do not
+            # manufacture them from the chairman's plan declaration or wallet.
+            "included_funding": None,
         },
         "route_host": route_host,
         "routes": {endpoint: {
