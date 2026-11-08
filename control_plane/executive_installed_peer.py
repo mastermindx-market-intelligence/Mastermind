@@ -1067,6 +1067,14 @@ _MAX_READ_BYTES = 32 * 1024 * 1024
 _MAX_CLOSURE_BYTES = 256 * 1024 * 1024
 _MAX_DIRECTORY_ENTRIES = 4096
 _MAX_WALK_ENTRIES = 8192
+# The sealed release is a whole-repository ``git archive`` (install.sh
+# stage_sealed_release), so its entry count tracks the repository: 9,773 tree
+# entries on master when this bound was raised, which already exceeded the
+# 8,192 runtime-walk bound above. Bound the release walk on its own, with room
+# to grow. Measured cost of the verifier's own walk is ~0.13 ms/entry hashed and
+# ~0.04 ms/entry for the drift recheck, so a full bound stays far inside
+# _SERVICE_BUDGET_SECONDS; a slower host still fails closed on that budget.
+_MAX_RELEASE_ENTRIES = 32768
 _MAX_NAME_BYTES = 255
 _SERVICE_BUDGET_SECONDS = 25.0
 
@@ -2072,7 +2080,7 @@ def _walk_release(
             child_relative = name if not relative else relative + "/" + name
             if child_relative == _NETWORK_MANIFEST_NAME:
                 continue
-            if len(rows) >= _MAX_WALK_ENTRIES:
+            if len(rows) >= _MAX_RELEASE_ENTRIES:
                 raise _refuse("SERVICE_RELEASE_ENTRY_LIMIT")
             child = directory + "/" + name
             try:
