@@ -233,9 +233,16 @@ def _qualify_native_rollback(current: Path, previous: Path) -> None:
     previous_receipt = json.loads((previous / "install-receipt.json").read_text(encoding="utf-8"))
     if "native_gateway" not in current_receipt and "native_gateway" not in previous_receipt:
         return
+    # A matching launcher/adapter alone cannot admit an older configuration
+    # generation (including its consumer plugin and MCP grants). Restore a
+    # different held source/configuration recipe through the existing release
+    # owner, not by moving only the role-state symlink.
     fields = ("native_gateway", "native_vendor_derivation", "native_launcher_sha256",
-              "native_adapter_sha256", "profile_sha256")
-    if (any(current_receipt.get(key) != previous_receipt.get(key) for key in fields)
+              "native_adapter_sha256", "profile_sha256", "hermes_config_sha256")
+    config_digest = current_receipt.get("hermes_config_sha256")
+    if (not isinstance(config_digest, str) or len(config_digest) != 64
+            or any(character not in "0123456789abcdef" for character in config_digest)
+            or any(current_receipt.get(key) != previous_receipt.get(key) for key in fields)
             or (current / "bin/hermes").resolve(strict=True)
                != (previous / "bin/hermes").resolve(strict=True)):
         raise RuntimeRefusal("NATIVE_ROLLBACK_REQUIRES_MATCHING_RELEASE_RECIPE")
