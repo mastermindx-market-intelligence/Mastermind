@@ -19,13 +19,13 @@ Identify persona/user and machine jobs, outcome/proof and current Chairman inten
 
 ## Step 2 — Resolve identity, then owner
 
-Resolve `WS:<KEY>`, `MAS-###`, repo/PR/branch and runtime intent/Job before broad search. Map facts through canonical owners, not similar titles. Historical ownership is not current liveness. Separate role, receiver, lease/writer and effects. Current assignment owns the next recovery action until accepted succession; do not wait for dead chats or invent a workstream. Apply ACTIVE_EXECUTION's owner-gate proof before stopping: requested reviewer, old author and disabled runtime are different facts.
+Resolve `WS:<KEY>`, `MAS-###`, repo/PR/branch and runtime intent/Job before broad search. Map facts through canonical owners, not similar titles. Historical ownership is not current liveness. Separate role, receiver, lease/writer and effects. Current assignment owns the next recovery action until accepted succession; do not wait for dead chats or invent a workstream. Apply ACTIVE_EXECUTION's owner-gate proof before stopping: a requested reviewer, a historical author or a disabled runtime service are different facts.
 
 ## Step 2A — Recover the current checkpoint before history
 
-After pin/exact-operation recovery, use one continuation ref/owner lookup. Verify cumulative checkpoint owner, identity and revision; refresh only material changes. Navigation is not authority. If none is valid, use Step 3 and save before substantial effects. Avoid history chains, repeated proof and unrelated scans; deepen only for decisions or acceptance.
+After a verified pin/exact operation, use one continuation ref or owner lookup. Verify latest cumulative checkpoint owner/identity/revision; refresh only material source/law/runtime/effect/custody/interface/return changes. Navigation is not authority. Without a valid checkpoint, use Step 3 once and save before substantial effects. Otherwise no history chains, repeated accepted proof or unrelated scans; deepen only for decisions or acceptance.
 
-Ignored messages do not compact context. Bound reads; fresh context requires a genuinely new chat and verified ref. Project history is advisory; new chats transfer no lease, STARTed work, source writer or `EFFECT_UNKNOWN`.
+Ignoring messages proves no compaction. Bound reads; fresh context requires a genuinely new chat and verified ref. Host Project history is advisory. A new chat transfers no lease, STARTed operation, source writer or `EFFECT_UNKNOWN`.
 
 ### Multi-phase project plan recovery
 
