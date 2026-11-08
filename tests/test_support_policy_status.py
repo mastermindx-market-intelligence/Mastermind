@@ -312,6 +312,19 @@ def test_generated_isolated_reader_executes_with_real_existing_parser(runtime):
     site=environment/'lib'/('python%d.%d'%sys.version_info[:2])/'site-packages'
     site.mkdir(parents=True,exist_ok=True)
     shutil.copytree(Path(yaml.__file__).parent,site/'yaml')
+    # This POSITIVE fixture owns only these newly created copies. copytree
+    # inherits distributor package modes and mkdir inherits the caller umask;
+    # neither establishes the reader's declared non-writable custody premise.
+    # Qualify the disposable lexical venv chain and copied parser explicitly.
+    # Do not chmod the installed parser, interpreter, source or any ancestor.
+    for directory in (environment,environment/'lib',site.parent,site,site/'yaml'):
+        assert not directory.is_symlink()
+        directory.chmod(0o700)
+    import stat
+    for item in (site/'yaml').rglob('*'):
+        mode=item.lstat().st_mode
+        assert not stat.S_ISLNK(mode)
+        item.chmod(0o700 if stat.S_ISDIR(mode) else 0o600)
     _assert_parser_fixture_custody(site/'yaml')
     sources=r.status.source_hashes()
     code=r.status.code_for_request(r.request,
@@ -475,3 +488,18 @@ def test_parser_diagnostic_refuses_unqualified_copy_without_paths(runtime):
         _assert_generated_report_observed({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED','private':'CANARY'})
     assert caught.value.args==({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED'},)
     assert 'CANARY' not in str(caught.value)
+
+
+def test_actual_generated_reader_still_refuses_late_unsafe_parser_copy(runtime,monkeypatch):
+    original=subprocess.run;changed=[]
+    def boundary(argv,*args,**kwargs):
+        if len(argv)>4 and argv[1:4]==['-I','-S','-c']:
+            environment=Path(argv[0]).parent.parent
+            package=environment/'lib'/('python%d.%d'%sys.version_info[:2])/'site-packages/yaml'
+            package.chmod(0o775);changed.append(True)
+        return original(argv,*args,**kwargs)
+    monkeypatch.setattr(subprocess,'run',boundary)
+    with pytest.raises(AssertionError) as caught:
+        test_generated_isolated_reader_executes_with_real_existing_parser(runtime)
+    assert changed==[True]
+    assert caught.value.args==({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED'},)
