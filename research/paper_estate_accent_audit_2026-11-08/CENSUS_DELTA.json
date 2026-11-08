@@ -19005,7 +19005,16 @@
   },
   "originalFixedScopeCount": 2848,
   "currentScopeCount": 2941,
-  "newClassification": "IN_PROGRESS",
+  "newClassification": {
+    "status": "COMPLETE",
+    "scopeCount": 93,
+    "patchNodeCount": 188,
+    "indexSha256": "603f3e8dcb4008a20b6d5136b913b807cc22cb6fe7d8b093e7c5ae12f15a786d",
+    "mergedPlanSha256": "0caff2d10ea0b224373bb4beaa8b40abacbbd964996a5b861553eeed568b929a",
+    "document": "CLASSIFICATION_DELTA.json",
+    "gitBlob": "554ea90c66ac222c4469e5be88cd57d3779a5d01",
+    "executionStatus": "IN_PROGRESS"
+  },
   "originalPreservationBoundary": "217pages in4exactfiles preserved; no release inferred from names or warning-free headers.",
   "resourceParentTypeDiagnosis": {
     "sha256": "73d81d74686e99c5bb4184eb6530618b7a0fa8c568826dd85e51cf50c5a7e77e",
