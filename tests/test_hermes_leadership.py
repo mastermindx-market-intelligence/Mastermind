@@ -39,10 +39,10 @@ def reader_for(client, *, key='secretary', session='native-a', guard=None):
         access=client, currentness_guard=guard or (lambda: True))
 
 
-def test_nine_charters_use_existing_responsibility_syntax():
+def test_all_charters_use_existing_responsibility_syntax():
     from control_plane.executive_responsibility import normalize_responsibility_intent
     keys = api().CHARTER_KEYS
-    assert set(keys) == {'meta_ceo','secretary','delivery','engineering','reliability',
+    assert set(keys) == {'meta_ceo','autonomy_ceo','secretary','delivery','engineering','reliability',
                          'product','intelligence','assurance','grok_adviser'}
     for key in keys:
         c = api().charter_for(key)
