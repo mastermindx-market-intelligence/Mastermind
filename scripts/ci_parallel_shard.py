@@ -278,13 +278,14 @@ def validate_parallel_workflow(text: str) -> None:
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
 
     # Guard each hosted job's total wall-clock budget, not just pytest time.
-    # The merge queue gives all required checks 100 minutes. Shard zero uses
-    # additional Paper/Fabric qualifications and previously hit 45m at cleanup.
+    # Preserve the existing <=100-minute shard+fan-in source contract (the
+    # current server queue is180m). Real prerequisites took ~23m before the
+    # unchanged45m repository step; reserve bounded upload/cleanup headroom.
     shard_timeout = shards.get("timeout-minutes")
     gate_timeout = gate.get("timeout-minutes")
     if (
         type(shard_timeout) is not int
-        or not 45 <= shard_timeout <= 60
+        or not 45 <= shard_timeout <= 75
         or type(gate_timeout) is not int
         or not 1 <= gate_timeout <= 8
         or gate_timeout > shard_timeout
