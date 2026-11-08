@@ -2615,7 +2615,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
 
     app = Starlette(routes=[Route(COO_MCP_PATH, authenticated, methods=["POST"])], lifespan=lifespan)
     app.router.redirect_slashes = False
-    coo = _LiteralCooRoute(app)
+    coo = _LiteralCooRoute(app, evaluation_core=core)
     if principal_ruling_target is None:
         return coo
     return _CooWithPrincipalRuling(coo,
@@ -2735,11 +2735,22 @@ def build_principal_ruling_mcp_app(core: Any, *, target: Any) -> Any:
 
 
 class _LiteralCooRoute:
-    def __init__(self, app):
+    def __init__(self, app, *, evaluation_core=None):
         self._app = app
         self._guard = _DuplicateAuthorizationGuard(app, mcp_path="/mcp/coo")
+        self._evaluation_core = evaluation_core
 
     async def __call__(self, scope, receive, send):
+        # One exact prospective purpose facet, using the SAME signed COO
+        # authenticator/core and installed App peer. No extra MCP tool, generic
+        # operation route, profile grant or default mission authority.
+        if (scope.get('type') == 'http' and self._evaluation_core is not None
+                and scope.get('path') == '/mcp/coo/evaluation-assessment'
+                and scope.get('raw_path') == b'/mcp/coo/evaluation-assessment'
+                and scope.get('method') == 'POST' and not scope.get('query_string')):
+            mapped = dict(scope, path='/v1/memory/evaluation-assessment', raw_path=b'/v1/memory/evaluation-assessment')
+            await self._evaluation_core(mapped, receive, send)
+            return
         if scope.get("type") == "http" and (
                 scope.get("path") != "/mcp/coo" or scope.get("raw_path") != b"/mcp/coo"
                 or scope.get("method") != "POST" or scope.get("query_string")):
