@@ -10,7 +10,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
-import sys
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -37,10 +37,25 @@ def context_child(j, monkeypatch, *, after=lambda: None):
         return value[0], value[1], hashlib.sha256(value[2].encode()).hexdigest(), value[3]
     monkeypatch.setattr(collector, "_snapshot_pair", lambda *a, **kw: fixture_seal(snapshot(*a, **kw)))
     monkeypatch.setattr(collector, "_generation_pair", lambda *a, **kw: fixture_seal(generation(*a, **kw)))
-    site = Path(yaml.__file__).resolve().parent.parent
+    # The selected child may differ from pytest's interpreter. Its dependency
+    # site and runtime facts must come from that same qualified child; importing
+    # a parent-version extension under the child would falsify this fixture.
+    probe = subprocess.run(
+        [str(collector._python), "-I", "-B", "-c",
+         "import json, sys, yaml, _yaml; from pathlib import Path; "
+         "assert yaml.__with_libyaml__; "
+         "print(json.dumps(dict(python_version=sys.version.split()[0], "
+         "pyyaml_version=yaml.__version__, "
+         "site_packages=str(Path(yaml.__file__).resolve().parent.parent), "
+         "compat_site_packages=str(Path(_yaml.__file__).resolve().parent.parent))))"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    facts = json.loads(probe.stdout)
+    site = Path(facts["site_packages"])
+    assert site == Path(facts["compat_site_packages"])
     runtime = SimpleNamespace(site_packages=site, python_binary=collector._python,
-        python_version=sys.version.split()[0], python_binary_sha256="a" * 64,
-        pyyaml_version=yaml.__version__, pyyaml_record_sha256="b" * 64,
+        python_version=facts["python_version"], python_binary_sha256="a" * 64,
+        pyyaml_version=facts["pyyaml_version"], pyyaml_record_sha256="b" * 64,
         runtime_tree_sha256="c" * 64)
     monkeypatch.setattr(ceo_boot_packet, "_capacity_runtime_contract", lambda: runtime)
     monkeypatch.setattr(ceo_boot_packet, "attest_capacity_boot_runtime", lambda *a, **kw: site)

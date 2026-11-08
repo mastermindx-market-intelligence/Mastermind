@@ -259,3 +259,35 @@ def test_model_prediction_failure_does_not_preserve_partial_healthy_summary(monk
     assert "partial_summary_marker" not in payload and "n" not in payload
     assert summary_calls == [((), {})]
     assert prediction_calls == [((), {"top": 12})]
+
+
+def test_rejections_failure_is_unavailable_not_zero_coverage(monkeypatch, caplog):
+    from app import web
+    from portfolio import rejections
+
+    calls = _raise_from_reader(
+        monkeypatch, rejections, "summary", "secret /Users/private/rejections token=hidden"
+    )
+    response = web.api_rejections()
+    _assert_failed_read(response, calls, caplog)
+    payload = _body(response)
+    _closed(payload, "rejections_unavailable")
+    assert payload["coverage"] is None and payload["scorecard"] is None
+
+
+@pytest.mark.parametrize("expected", [
+    {"coverage": {"n_total": 0, "n_resolved": 0}, "scorecard": {"status": "building", "n_resolved": 0}},
+    {"coverage": {"n_total": 3, "n_resolved": 2}, "scorecard": {"status": "building", "n_resolved": 2}},
+], ids=("empty", "populated"))
+def test_successful_rejections_preserve_ordinary_coverage(monkeypatch, expected):
+    from app import web
+    from portfolio import rejections
+    from datetime import date
+
+    calls = _return_from_reader(monkeypatch, rejections, "summary", expected)
+    response = web.api_rejections()
+    assert response.status_code == 200
+    assert _body(response) == expected
+    assert "read_status" not in _body(response) and "error" not in _body(response)
+    assert len(calls) == 1 and len(calls[0][0]) == 1 and calls[0][1] == {}
+    date.fromisoformat(calls[0][0][0])

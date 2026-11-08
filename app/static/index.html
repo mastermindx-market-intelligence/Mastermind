@@ -6388,13 +6388,21 @@ window.downloadPaperPdf = function() {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="l-en">Generating…</span><span class="l-zh">生成中…</span>'; }
   var ticker = ((E('mm-modal-title') || {}).textContent || 'research').split(' ')[0].replace(/[^A-Za-z0-9._-]/g, '');
+  var failureMessage = 'PDF generation failed';
   fetch('/research_paper.pdf?id=' + encodeURIComponent(_openPaperId))
     .then(function(r) {
       if (!r.ok) {
-        return r.text().then(function(body) {
-          var msg = 'HTTP ' + r.status;
-          try { var j = JSON.parse(body); if (j && j.error) msg = j.error; } catch (e) { if (body) msg = body; }
-          throw new Error(msg);
+        return r.json().catch(function(){ return null; }).then(function(j) {
+          failureMessage = r.status === 404 ? 'research paper not found' : 'PDF generation failed';
+          var allowedNotes = {
+            404: ['research paper not found'],
+            500: ['research paper unavailable', 'PDF generation failed'],
+            503: ['research store unavailable', 'PDF engine unavailable']
+          }[r.status] || [];
+          if (j && typeof j.note === 'string' && allowedNotes.indexOf(j.note) !== -1) {
+            failureMessage = j.note;
+          }
+          return Promise.reject();
         });
       }
       return r.blob();
@@ -6406,7 +6414,7 @@ window.downloadPaperPdf = function() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
     })
-    .catch(function(e) { alert('PDF generation failed: ' + (e && e.message ? e.message : e)); })
+    .catch(function() { alert(failureMessage); })
     .finally(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } });
 };
 
@@ -8436,8 +8444,18 @@ window.addEventListener('resize', function() {
 // ── STRATEGY POSTURE: per-book strategy-label chip + hover playbook ────────────
 // The glance-able layer on top of the Brain's free-form rationale. Pure presentation —
 // the label / favored / avoided / driver are computed server-side by /api/posture.
+function _postureUnavailable() {
+  return { available: false, read_status: 'unavailable', posture_label: '—', posture_label_zh: '—', posture_tone: 'muted' };
+}
+
 function _postureChipHTML(p) {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (p && p.read_status === 'unavailable') {
+    return '<div class="mm-posture tone-muted">' +
+      '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
+      '<div class="mm-posture-head"><span class="mm-posture-label">' + (isZh ? '姿态暂不可用' : 'Posture unavailable') + '</span></div>' +
+      '<span class="mm-posture-sub">' + (isZh ? '最近一次读取未完成。' : 'The latest read did not complete.') + '</span></div>';
+  }
   if (!p || !p.available || !p.posture_label || p.posture_label === '—') {
     return '<div class="mm-posture tone-muted">' +
       '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
@@ -8468,9 +8486,13 @@ function _postureChipHTML(p) {
 function loadDeskPosture() {
   var host = E('desk-posture'); if (!host) return;
   fetch('/api/posture?book=flagship')
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ host.innerHTML = d ? ('<div class="mm-posture-wrap">' + _postureChipHTML(d) + '</div>') : ''; })
-    .catch(function(){ host.innerHTML = ''; });
+    .then(function(r){ return r.ok ? r.json() : _postureUnavailable(); })
+    .then(function(d){
+      var payload = d && typeof d === 'object' && !Array.isArray(d) && typeof d.available === 'boolean'
+        ? d : _postureUnavailable();
+      host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(payload) + '</div>';
+    })
+    .catch(function(){ host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(_postureUnavailable()) + '</div>'; });
 }
 
 function renderDecisions() {

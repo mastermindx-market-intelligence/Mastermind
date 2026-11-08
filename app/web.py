@@ -1045,7 +1045,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         from brain import research_paper
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"research store unavailable: {exc}"}, status_code=503)
+        _log.warning("research paper store import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_store_unavailable",
+            "note": "research store unavailable",
+        }, status_code=503)
 
     paper = None
     try:
@@ -1055,15 +1060,24 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
         if paper is None and ticker:
             paper = research_paper.latest_for(ticker)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"could not load paper: {exc}"}, status_code=500)
+        _log.warning("research paper read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_paper_unavailable",
+            "note": "research paper unavailable",
+        }, status_code=500)
     if paper is None:
-        return JSONResponse({"error": "research paper not found"}, status_code=404)
+        return JSONResponse({"error": "research paper not found", "note": "research paper not found"}, status_code=404)
 
     try:
         from app import research_pdf
     except Exception as exc:  # noqa: BLE001 — reportlab missing, etc.
-        return JSONResponse({"error": f"PDF engine unavailable (is reportlab installed?): {exc}"},
-                            status_code=503)
+        _log.warning("research PDF engine import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_engine_unavailable",
+            "note": "PDF engine unavailable",
+        }, status_code=503)
 
     meta = {}
     try:
@@ -1073,7 +1087,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         pdf = research_pdf.build(paper, meta)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"PDF generation failed: {exc}"}, status_code=500)
+        _log.warning("research PDF generation failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_generation_failed",
+            "note": "PDF generation failed",
+        }, status_code=500)
 
     tkr = (paper.get("ticker") or "research").upper()
     datestr = str(paper.get("asof") or paper.get("generated_at") or "")[:10]
@@ -1367,11 +1386,16 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
     if view is not None:
         return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
                             status_code=400, headers={"Cache-Control": "no-store"})
-    path = _portfolio_dir(portfolio) / "latest.json"
-    if not path.exists():
-        return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
     try:
-        payload = json.loads(path.read_text())
+        path = _portfolio_dir(portfolio) / "latest.json"
+        try:
+            payload = json.loads(path.read_text())
+        except FileNotFoundError:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
+            raise
         from portfolio import registry
         # Runtime registry is authoritative: persisted book contracts may predate a benchmark
         # migration and must never make CSI 300 / Hang Seng appear as FXI or SPY in the UI.
@@ -1583,7 +1607,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
 
         return JSONResponse(payload)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("portfolio snapshot read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "error": "portfolio_unavailable",
+            "snapshot_status": "unavailable",
+            "portfolio_id": portfolio,
+        }, status_code=500)
 
 
 # The tab-switcher status payload is just NAV/return chips — re-pricing every book on every poll or
@@ -1994,11 +2023,24 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     try:
         from brain import posture as _posture
         return JSONResponse(_posture.posture(book))
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"book": book, "available": False, "posture_label": "—",
-                             "posture_label_zh": "—", "posture_tone": "muted", "sub_strategy": None,
-                             "favored": [], "avoided": [], "driver": None, "detail": None,
-                             "cash_pct": None, "invested_pct": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("posture read failed for %s: %s", book, type(exc).__name__)
+        return JSONResponse({
+            "book": book,
+            "available": False,
+            "read_status": "unavailable",
+            "posture_label": "—",
+            "posture_label_zh": "—",
+            "posture_tone": "muted",
+            "sub_strategy": None,
+            "favored": [],
+            "avoided": [],
+            "driver": None,
+            "detail": None,
+            "cash_pct": None,
+            "invested_pct": None,
+            "error": "posture_unavailable",
+        })
 
 
 @router.get("/api/market_view")
@@ -2010,25 +2052,45 @@ def api_market_view() -> JSONResponse:
     Read-only: reassesses freshness on a copy of data/market_view/latest.json. Publication
     clocks and historical evidence stay unchanged; expired inferences become unavailable.
     This is a display consumer, not a producer or sizing path. Degrades to ``available:false``
-    stub when the artifact is absent/unreadable (the organ built-but-not-running protects nothing
-    but breaks nothing) rather than raising."""
+    response when no publication exists. Read, parse or projection failures return an
+    unavailable response; they never masquerade as an artifact that has not been built."""
     path = _data() / "market_view" / "latest.json"
     freshness_headers = {"Cache-Control": "no-store"}
     try:
-        if not path.exists():
-            return JSONResponse(
-                {"available": False, "note": "market_view artifact not built yet "
-                 "(brain.market_view.build has not run)"},
-                status_code=404, headers=_NOCACHE)
-        view = json.loads(path.read_text())
+        try:
+            raw = path.read_text()
+        except FileNotFoundError as missing:
+            # Only observed absence below a real directory is "not built".
+            # Dangling links and paths that appeared after the failed read stay unavailable.
+            import stat
+
+            candidate = path
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        raise missing
+                    candidate = candidate.parent
+                    continue
+                if candidate != path and stat.S_ISDIR(info.st_mode):
+                    return JSONResponse(
+                        {"available": False, "note": "market_view artifact not built yet "
+                         "(brain.market_view.build has not run)"},
+                        status_code=404, headers=_NOCACHE)
+                raise missing
+        view = json.loads(raw)
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
         from brain import market_view
         view = market_view.serving_view(view)
         return JSONResponse(view, headers=freshness_headers)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("market view read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "market_view_unavailable", "note": "market view unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/agenda")
@@ -2045,16 +2107,19 @@ def api_agenda() -> JSONResponse:
     weekly CIO job writes it) rather than raising."""
     try:
         from brain import improvement_agenda
-        agenda = improvement_agenda.latest()
+        agenda = improvement_agenda.latest(strict=True)
         if not agenda:
             return JSONResponse(
                 {"available": False, "note": "no agenda built yet "
                  "(brain.improvement_agenda.write runs in the weekly CIO job)"},
                 status_code=404, headers=_NOCACHE)
         return JSONResponse(agenda, headers=_NOCACHE)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("agenda read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "agenda_unavailable", "note": "agenda unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/etf/outcomes")
@@ -2066,7 +2131,12 @@ def api_etf_outcomes() -> JSONResponse:
         from portfolio import etf_outcomes
         return JSONResponse(etf_outcomes.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {"status": "building"}, "error": str(exc)})
+        _log.warning("ETF outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "etf_outcomes_unavailable",
+        })
 
 
 @router.get("/api/overnight-tape")
@@ -2763,26 +2833,41 @@ def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
 def api_outcomes() -> JSONResponse:
     """Realized thesis outcomes — triple-barrier + rel-return vs SPY (the learning signal that
     feeds the Brier track record). `labels` per thesis, `summary` stats, and the graded
-    `track_record`. Best-effort: returns empty-but-valid on any failure."""
+    `track_record`. Failed reads are unavailable; calibration-only failure preserves
+    the other evidence with an explicit partial status."""
     try:
         import bot  # noqa: F401 — bootstraps vendor/macro for the price accessor
         from datetime import date as _date
         from brain import calibration, outcomes, scorer
         asof = _date.today()
         realized = outcomes.realized_returns(asof)
+        calibration_failed = False
         try:
             cal = calibration.load() or calibration.compute(asof)
-        except Exception:  # noqa: BLE001
-            cal = {}
-        return JSONResponse({
+        except Exception as exc:  # noqa: BLE001 — preserve the healthy outcome evidence
+            _log.warning("outcomes calibration read failed: %s", type(exc).__name__)
+            cal = None
+            calibration_failed = True
+        payload = {
             "labels": outcomes.all_labels(asof),
             "summary": outcomes.summary(asof),
             "track_record": scorer.track_record(asof, realized=realized),
             "calibration": cal,
-        })
+        }
+        if calibration_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["calibration"]
+        return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"labels": [], "summary": {}, "track_record": {},
-                             "calibration": {}, "error": str(exc)})
+        _log.warning("outcomes read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "outcomes_unavailable",
+            "labels": None,
+            "summary": None,
+            "track_record": None,
+            "calibration": None,
+        })
 
 
 @router.get("/api/shadow_books")
@@ -2850,7 +2935,13 @@ def api_rejections() -> JSONResponse:
         from portfolio import rejections
         return JSONResponse(rejections.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
+        _log.warning("rejections read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "rejections_unavailable",
+            "coverage": None,
+            "scorecard": None,
+        })
 
 
 @router.get("/api/shadow_bandit")
@@ -2863,7 +2954,13 @@ def api_shadow_bandit() -> JSONResponse:
         from portfolio import bandit
         return JSONResponse(bandit.rank_shadow_books())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "arms": [], "error": str(exc)})
+        _log.warning("shadow bandit read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "arms": None,
+            "error": "shadow_bandit_unavailable",
+        })
 
 
 @router.get("/api/student")
@@ -2917,7 +3014,12 @@ def api_interim_marks() -> JSONResponse:
         from brain import interim_marks
         return JSONResponse(interim_marks.summary())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"scorecard": {}, "error": str(exc)})
+        _log.warning("interim marks read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "scorecard": None,
+            "error": "interim_marks_unavailable",
+        })
 
 
 @router.get("/api/engine_backtest")
@@ -3078,16 +3180,38 @@ class _MMAIActNudgesReq(BaseModel):
     codes: list[str] | None = None    # missing/empty = all currently open nudges
 
 
+def _portfolio_loop_mutation_module():
+    """Load the incumbent mutation owner before any effectful method is called."""
+    import bot  # noqa: F401
+    from brain import mastermind_ai
+    return mastermind_ai
+
+
+def _portfolio_loop_mutation_failure(error: str, *, effect_status: str, retry_safe: bool) -> JSONResponse:
+    return JSONResponse({
+        "ok": False,
+        "effect_status": effect_status,
+        "retry_safe": retry_safe,
+        "error": error,
+    }, status_code=500)
+
+
 @router.post("/api/mastermind_ai/settings")
 def api_mastermind_ai_settings(req: _MMAISettingsReq) -> JSONResponse:
     """Operator settings patch — bounded to the known mastermind_ai keys (unknown/out-of-range
     keys are rejected, never applied)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio settings setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_settings_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.update_settings(req.settings or {}))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio settings update effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_settings_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/directive")
@@ -3096,11 +3220,17 @@ def api_mastermind_ai_directive(req: _MMAIDirectiveReq) -> JSONResponse:
     snapshot push, ingested by the next nightly macro build). Intake-scrubbed: secrets,
     env names, and $-amounts are refused — this text lands on a public artifact."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio directive setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_directive_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.add_directive(req.text))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio directive effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_directive_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/act_on_nudges")
@@ -3110,11 +3240,17 @@ def api_mastermind_ai_act_on_nudges(req: _MMAIActNudgesReq) -> JSONResponse:
     as a standing grant via the auto_act_on_findings setting (in which case run_cycle drafts
     them automatically). Every drafted text passes the same intake scrub as a typed one."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio nudge-action setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_act_on_nudges_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.draft_directives_from_nudges(req.codes))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio nudge-action effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_act_on_nudges_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.post("/api/mastermind_ai/run")
@@ -3122,11 +3258,17 @@ def api_mastermind_ai_run() -> JSONResponse:
     """Run one self-improvement cycle now (non-LLM, observational; same code path as the
     nightly loop_maintenance step)."""
     try:
-        import bot  # noqa: F401
-        from brain import mastermind_ai
+        mastermind_ai = _portfolio_loop_mutation_module()
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("mastermind portfolio manual-run setup failed: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_run_unavailable", effect_status="not_applied", retry_safe=True)
+    try:
         return JSONResponse(mastermind_ai.run_cycle(trigger="manual"))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("mastermind portfolio manual-run effect unknown: %s", type(exc).__name__)
+        return _portfolio_loop_mutation_failure(
+            "mastermind_ai_run_effect_unknown", effect_status="unknown", retry_safe=False)
 
 
 @router.get("/api/readiness")
@@ -3822,14 +3964,32 @@ def api_firm_allocator(rebuild: bool = False) -> JSONResponse:
         if rebuild:
             artifact = _fa.build_latest()
         else:
-            artifact = _fa.latest_artifact()
-            if artifact is None:
+            read_status, artifact = _fa.latest_artifact_checked()
+            if read_status == "unavailable":
+                return JSONResponse({
+                    "advisory_only": True,
+                    "computed": False,
+                    "read_status": "unavailable",
+                    "error": "firm_allocator_artifact_unavailable",
+                    "reason": "firm allocator artifact unavailable",
+                })
+            if read_status == "absent":
                 artifact = _fa.build_latest()
+        if artifact and artifact.get("build_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "unavailable"})
+        if artifact and artifact.get("persist_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "partial"})
         return JSONResponse(artifact or {"advisory_only": True, "computed": False,
                                          "reason": "no artifact available"})
     except Exception as exc:  # noqa: BLE001 — never 500
-        return JSONResponse({"advisory_only": True, "computed": False,
-                             "reason": f"firm_allocator endpoint error: {exc}"})
+        _log.warning("firm allocator endpoint failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "advisory_only": True,
+            "computed": False,
+            "read_status": "unavailable",
+            "error": "firm_allocator_unavailable",
+            "reason": "firm allocator unavailable",
+        })
 
 
 @router.get("/api/desk/experiments")
@@ -3853,18 +4013,29 @@ def api_desk_experiments() -> JSONResponse:
 
     Returns {as_of, total, open, matured, judged, cancelled, matured_items: [...],
              open_tristate: [...], all_items: [...]}.
-    Never 500s — degrades to an empty registry on any failure."""
+    Read one registry snapshot without a maturity write. Read/projection failures
+    return an explicit unavailable payload; genuine absence remains a zero state."""
     try:
         from brain import experiment_registry
-        s = experiment_registry.summary()
-        all_items = experiment_registry.load()
+        all_items = experiment_registry.load(strict=True)
+        s = experiment_registry.summary(experiments=all_items)
         s["all_items"] = all_items
         return JSONResponse(s)
     except Exception as exc:  # noqa: BLE001 — additive; never break the desk
-        return JSONResponse({"as_of": None, "total": 0, "open": 0, "matured": 0,
-                             "judged": 0, "cancelled": 0, "matured_items": [], "all_items": [],
-                             "open_tristate": [],
-                             "note": f"Experiment registry unavailable: {exc}"})
+        _log.warning("experiment registry read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "as_of": None,
+            "total": None,
+            "open": None,
+            "matured": None,
+            "judged": None,
+            "cancelled": None,
+            "matured_items": None,
+            "all_items": None,
+            "open_tristate": None,
+            "error": "experiment_registry_unavailable",
+        })
 
 
 @router.get("/api/scheduler")
