@@ -230,14 +230,14 @@ Existing programme follow-up remains under F03 and the domain assignments. Use t
 The Chairman extended this same mission: continue autonomously with further fixes, upgrades and enhancements; do not stop at checkpoints. The first-pass results above remain verified and are not being redone.
 
 Current foreground phases:
-- **Options changed-list inspection:** add a read-only explanation of the exact existing before/current roster facts to original states atlas `01M5EPQ16VBT7SBW2NQVX2RJG4 / p-1-0 / 1-0`. Entry target `3F-0 / 3G-0`; new bounded section inside `2D-0`, ahead of existing guidance `4W-0`. Preserve accepted current-list stepping and the existing origin back-link. Do not invent a full membership diff or a confirmation gate.
+- **Options changed-list inspection — design implemented and verified:** original states atlas `01M5EPQ16VBT7SBW2NQVX2RJG4 / p-1-0 / 1-0` now has the paused changed-list entry `12R-0`, explicit review/adoption section `ZN-0`, and visible recovery/return states. Actual source evidence supersedes the initial automatic-stepping idea; application implementation is still owed.
 - **Market Memory historical comparison:** qualify the existing retained CPI producer and reader before extending the evidence workflow. Original eight refined specimens remain intact. Proposed state/data contracts will be bound to the existing source fingerprint and real available fields.
 - **Prophet current comparison:** inspect D03's current INTC/MSFT selection and the existing two-column comparison reference; repair missing occurrence identity/save consequence and add a coherent current-candidate comparison only after reading exact targets. Never transplant fictional DEMO values to real tickers.
 - Continue with the next evidenced in-scope design/feature issue after each verified phase; preserve concurrent writers and all original acceptance boundaries.
 
 Principal does visual composition and guarded Paper edits for **PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD / UNIQUE_APPROVED_ACCESS**. Three native children supply bounded architecture/critique reasoning only (Memory source, Options context, Prophet workflow); none is a canvas/source writer or substitute implementation worker. Existing Paper carrier and tool-scoped schema are requalified; no effect is uncertain.
 
-Proposed Options detail states use only facts already visible in the original atlas: AAPL opened at 2 of 10 on 16 Oct; current list 3 of 11 on 17 Oct; previous/next NVDA/AMD versus AVGO/NVDA. The source hash/order may differ, but a count difference does not establish which members were added/removed. The inspection must say exactly what is known and retain the current list for stepping.
+The initial Options idea used the atlas’s opening/current index, count, source dates and neighbor labels. Verified source inspection below showed that earlier neighbors are not retained and current-list stepping is paused. The implemented proposal therefore compares only index/count/source date and requires explicit validated adoption. No membership diff or automatic stepping is inferred.
 
 
 ### Options decision corrected by verified implementation evidence
@@ -247,3 +247,24 @@ Verified Terminal `mastermindx-market-intelligence/mastermind-terminal` protecte
 The next atlas revision therefore preserves paused stepping and adds a proposed explicit **Use current list** recovery, after a read-only review. The review uses only retained origin index/count/date and qualified current index/count/date. Earlier neighbors and full old membership are not retained in origin v1 and will not be fabricated. A missing current hash is unverified, not definitive evidence of membership change.
 
 The proposed action stays in the existing origin owner: coherent index/count/asOf/hash update for the same selected company, validated existing returnHref preserved, 1–500 count and 1024 encoded-envelope budgets retained, chart/hash/lens/strike unchanged. No new roster reader/cache/control plane or automatic adoption. Company-absent, missing-hash, unavailable and loading states do not offer adoption. This evidence changes the earlier provisional “current-list stepping” idea; the original selection/return purpose is preserved.
+
+
+### Options review/adoption — implemented design and verification
+
+[Paper states atlas](https://app.paper.design/file/01M5EPQ16VBT7SBW2NQVX2RJG4/p-1-0), artboard `1-0`:
+- Changed entry `12R-0` preserves AAPL and captured position, disables stepping, and exposes **List changed · Review**.
+- Review section `ZN-0`: desktop `ZV-0`, mobile EN `10X-0`, mobile ZH `11V-0`. Source dates are explicitly **16 Oct → 17 Oct**; **Opening list / Current list** compares position **2 → 3** and count **10 → 11**. Opening time and old neighbors are not asserted.
+- Proposed **Use current list** actions preserve the same company/chart. Post-adoption `13J-0` shows AAPL 3 of 11, Previous/Next and the visible **← Sector Central** return `147-0`.
+- Company-absent `137-0` and missing-source-identity `13D-0` preserve AAPL and return to Sector Central without adoption.
+- Builder contract `13U-0` specifies existing-reader reuse, coherent v1 rebase, validated return bytes, unknown versus changed, and Back/Forward/focus restoration. Existing guidance `52-0` specifies 44px review targets, visible focus, and Escape/close return to the trigger.
+- ZH uses **名单位置**, avoiding a false ranking claim, and the existing destination term **板块中心**.
+
+Principal inspected the final section, changed strip, ZH mobile and adoption-result screenshots. Bounded reasoning review independently found four semantic/return issues; all were corrected and the affected layouts rechecked. No clipping was observed. All mutations returned **APPLIED_RESPONSE_OBSERVED**; scoped `finish_working_on_nodes` completed for `1-0`. No source code, runtime route or production behavior was shipped.
+
+Source contract: [origin v1](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/lib/exposureOrigin.ts), [strip](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/exposure-map/ExposureOriginStrip.tsx), [roster reader](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/d7a83d3348a4fcb762d93221f19c4e94cbe4505e/terminal/components/exposure-map/useExposureOriginRoster.ts). Acceptance still requires actual rebase implementation, envelope validation, absent/hash/order/boundary cases and consumer Back/Forward proof.
+
+### Continuing foreground after Options
+
+Market Memory now has page `p-2-0` **02 · Record comparison · Proposed**, with duplicated existing-shell artboards `MX-0` (1440) and `P7-0` (390); their original counterparts are preserved. The new desktop comparison has January 1987, selected vintage dates 1 Jan 1997 and 20 Feb 2002, unavailable source values, unverified units, separate house observation and expected fingerprint. Mobile composition and state/entry contracts remain actively in progress. This is not a completed or deployed feature claim.
+
+The [CPI manifest](https://github.com/mastermindx-market-intelligence/Macro/blob/ba32f20ba306f9e75b7c400992138e736b904516/data/fred_vintage/release_targets/manifest.json) was read at the protected product pin. It declares 956 periods, 377 vintage dates, 293,509 rows and SHA-256 `eabad732825e9d6820774f067e8f86791cc3f64a6a81b655522af621c851f22c`; this is not a newly computed binary hash. No actual selected-period numeric values were retrieved or invented. Next: complete mobile and truthful record states, verify, save/read back, then continue Prophet D03.
