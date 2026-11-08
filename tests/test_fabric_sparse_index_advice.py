@@ -15,6 +15,7 @@ PARENT_INVENTORY_SHA256 = "fc3347a3633cd9127e93a77d23e6b60eab4b8dddad632f87dd7da
 PARENT_EXECUTOR_BYTES = 61402
 ROLLOUT = ROOT / "ops/native_fabric/quota_continuity/rollout"
 EXECUTOR = "ops/native_fabric/quota_continuity/candidate/remote_sub_exec.py"
+CENTRAL_GLM_PATCH = ROOT / "tests/fixtures/fabric-native-ubuntu4-central-glm-20261108.patch"
 applied = composed.applied
 module = composed.module
 repository = composed.repository
@@ -108,14 +109,15 @@ def test_post_observation_config_identity_still_refuses(repository, monkeypatch)
     assert f.calls == []
 
 
-def test_exact107_current_bytes_and_historical_parent_are_separate():
+def test_exact107_current_bytes_and_historical_parent_are_separate(tmp_path):
     b = builder()
     current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
     parent = b.before_sparse_index_advice(current)
     parent_raw = (json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()
     assert hashlib.sha256(parent_raw).hexdigest() == b.SPARSE_INDEX_ADVICE_PARENT_SHA256
     assert len(parent) == len(current) == 107
-    assert {k for k in current if current[k] != parent[k]} == {"ext/remote_sub_exec.py"}
+    assert {k for k in current if current[k] != parent[k]} == (
+        {"ext/remote_sub_exec.py"} | set(b.UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS))
     original = dict(current)
     assert b.before_sparse_index_advice(current) == parent
     assert b.before_sparse_index_advice(parent) == parent
@@ -132,6 +134,19 @@ def test_exact107_current_bytes_and_historical_parent_are_separate():
     assert row["bytes"] == len((ROOT / EXECUTOR).read_bytes())
     row["sha256"] = b.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
     row["bytes"] = PARENT_EXECUTOR_BYTES
+    # Walk the newer central GLM-Codex cohort rows back to the historical parent.
+    stage = tmp_path / "central-glm-parent"
+    stage.mkdir()
+    candidates = ROOT / "ops/native_fabric/quota_continuity/candidate"
+    for name in ("fabric_host_qualification.py", "fabric_task.py", "remote_sub.sh"):
+        (stage / name).write_bytes((candidates / name).read_bytes())
+    subprocess.run(["git", "apply", "--unidiff-zero", "--reverse", str(CENTRAL_GLM_PATCH)],
+                   cwd=stage, capture_output=True, text=True, timeout=10, check=True)
+    for name in ("fabric_host_qualification.py", "fabric_task.py", "remote_sub.sh"):
+        parent = (stage / name).read_bytes()
+        inventory_row = new["files"]["ext/" + name]
+        inventory_row["sha256"] = hashlib.sha256(parent).hexdigest()
+        inventory_row["bytes"] = len(parent)
     assert hashlib.sha256((json.dumps(new, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == PARENT_INVENTORY_SHA256
 
 

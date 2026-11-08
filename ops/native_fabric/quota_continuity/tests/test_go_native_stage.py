@@ -188,10 +188,15 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    # The closed central GLM-Codex qualification cohort is the newest native
+    # layer, so the historical walk reverses it before the older Ubuntu4 cohort.
+    for name, digest in builder.UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS.items():
+        assert default[name] == digest
+        historical[name] = builder.UBUNTU4_CENTRAL_GLM_NATIVE_PREIMAGES[name]
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
         expected = (builder.ADMISSION_INTEGRITY_DIGESTS["ext/fabric_task.py"] if name == "fabric_task.py"
                     else builder.GO_UBUNTU4_DIGESTS[name])
-        assert default["ext/" + name] == expected
+        assert historical["ext/" + name] == expected
         historical["ext/" + name] = original
     for name, original in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
@@ -744,9 +749,11 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
         unchanged = dict(manifest)
         builder.validate_go_base_manifest(manifest, captured)
         assert manifest == unchanged
+    head = dict(builder.ADMISSION_INTEGRITY_DIGESTS)
+    head.update(builder.UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS)
     for output in (builds.default, builds.application, builds.http):
         manifest = json.loads((output / "native-manifest.json").read_bytes())
-        for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
+        for name, digest in head.items():
             assert manifest[name] == digest
             assert g.digest((output / "native-code-stage" / name).read_bytes()) == digest
             assert g.digest((ROOT / "candidate" / Path(name).name).read_bytes()) == digest
@@ -800,22 +807,36 @@ def test_admission_integrity_forward_delta_is_reversible_and_source_exact(tmp_pa
     import subprocess
     patch_path = ROOT.parents[2] / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
     assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == "68c1abf049ee9e4c04fc749eebb9a4b99ba71a71c22945e0f5d02bc8fe107753"
+    glm_path = ROOT.parents[2] / "tests/fixtures/fabric-native-ubuntu4-central-glm-20261108.patch"
+    assert hashlib.sha256(glm_path.read_bytes()).hexdigest() == "a4c28dac32dce28e98ac28166a85bca26ed3778ceb0ee690428f991c5d1293a8"
+    def apply(patch, *options):
+        result = subprocess.run(
+            ["git", "apply", "--unidiff-zero", *options, str(patch)],
+            cwd=tmp_path, capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+    # The closed central GLM-Codex cohort is the shipped head. Walk that newer
+    # layer back first so the admission-integrity delta is proven against its
+    # own exact epoch, then prove both forward deltas reproduce shipped bytes.
+    cohort = ("fabric_host_qualification.py", "fabric_task.py", "remote_sub.sh")
+    for name in cohort:
+        (tmp_path / name).write_bytes((ROOT / "candidate" / name).read_bytes())
+    (tmp_path / "lane_runtime.py").write_bytes((ROOT / "candidate" / "lane_runtime.py").read_bytes())
+    apply(glm_path, "--reverse", "--check")
+    apply(glm_path, "--reverse")
     current = {}
     for relative, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
         name = Path(relative).name
-        current[name] = (ROOT / "candidate" / name).read_bytes()
+        current[name] = (tmp_path / name).read_bytes()
         assert g.digest(current[name]) == digest
-        (tmp_path / name).write_bytes(current[name])
-    def apply(*options):
-        result = subprocess.run(
-            ["git", "apply", "--unidiff-zero", *options, str(patch_path)],
-            cwd=tmp_path, capture_output=True, text=True, timeout=10)
-        assert result.returncode == 0, result.stderr
-    apply("--reverse", "--check")
-    apply("--reverse")
+    apply(patch_path, "--reverse", "--check")
+    apply(patch_path, "--reverse")
     for relative, digest in builder.ADMISSION_INTEGRITY_PREIMAGES.items():
         assert g.digest((tmp_path / Path(relative).name).read_bytes()) == digest
-    apply("--check")
-    apply()
+    apply(patch_path, "--check")
+    apply(patch_path)
     for name, raw in current.items():
         assert (tmp_path / name).read_bytes() == raw
+    apply(glm_path, "--check")
+    apply(glm_path)
+    for name in cohort:
+        assert (tmp_path / name).read_bytes() == (ROOT / "candidate" / name).read_bytes()
