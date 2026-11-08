@@ -23,6 +23,7 @@ This map points to the editable designs and current continuation sections. All c
 | Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
 | International | [Current journey](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-2-0) exposes existing comparison navigation from source failure; [archive](https://app.paper.design/file/01M3P1TW5Y3XWQC37ADDS8K5AG/p-A-0) retains unaccepted comparison references and operation 164's boundary. |
 | Prophet and Sector | [Prophet R7 studies](https://app.paper.design/file/01M3NT5Y3G5HTJHVR0K5W2MDJM/p-C-0) qualify stale-data entry; [Sector compare](https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-4-0) uses rank semantics and explicit percentage-point gaps. |
+| File locations | The existing [migration directory](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0) now locates the former PAGES material. F03 points Options R1 and the broader D06 R1 reference to their verified new files, while keeping current Terminal destinations and qualifications. |
 | Foundation | [F02](https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN): bounded review retained existing state/evidence/return contracts; no new global mechanism or acceptance. |
 
 ## Delivered outcome and scope
@@ -1313,3 +1314,51 @@ Both full mobile renders and the new native note were inspected. A first newly c
 - All operations and scoped **hub-000829-list-finish-01** returned **APPLIED_RESPONSE_OBSERVED** with no per-node errors.
 
 The visible light EN/ZH paths for the first two published records now have their actual list origin. This does not claim every company, dark/filtered/prior-snapshot variant, working browser back-stack, document-access path or runtime focus behavior is complete. Current candidate_unqualified status, held p7 and source-only p8 remain preserved.
+
+
+## File-location reconciliation: moved references retain their authority
+
+A later native read established a material change outside this session's authored work: former **MASTERMIND PAGES** file **01M2WGNCX9475G79JRKJTCM08P** is now named **MASTERMIND PAGES - MOVED - Navigation only**. Its Options and D06 source pages each contain a17-node move notice with an explicit destination and an **authority unchanged** qualification.
+
+This supersedes the earlier **current-location assumption** that these two broad references still lived in the oversized working source. It does not erase the historical warning/hold record or promote any relocated revision.
+
+### Native migration record and bounded independent observation
+
+The existing [Migration Directory](https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0), status root **1-0**, reports completion on8 November2026:42 smaller files,62 retained page URLs,56 relocated design pages plus six earlier signposts, and940 accounted-for artboards. It also reports structure/token/asset/visual/reopen checks and removal of the size warning.
+
+Those portfolio-wide fidelity counts are **the migration directory's report**, not independent execution or acceptance by this audit. Root's new verification is bounded to the two actual move notices, matching directory entries and destination inventories below. The migration directory also explicitly retains draft/reference/archive status and the precedence of newer existing product work. The dated recovery copy **01M6XQBG616KHKS5011KKQTQSN** remains a preservation source, not a working destination.
+
+| Broader reference | Original bookmark and move notice | Explicit new destination | Root independently observed |
+| --- | --- | --- | --- |
+| Options Research Desk R1 | [PAGES p25](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-25-0), **74T4-0**; destination text **74TD-0** | [01M6Y2RQMB5WNV6DHHAY5PJVZS /p1](https://app.paper.design/file/01M6Y2RQMB5WNV6DHHAY5PJVZS/p-1-0) | File/page title matches;2,579 nodes and8 boards for Brief, Flow, Scanner, components, recovery and ticker studies. Migration-map p3 card **2U-0**, URL **2W-0**, agrees. |
+| Market Structure, Stages and Allocation D06 R1 | [PAGES p29](https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-29-0), **759M-0**; destination text **759V-0** | [01M6Y1NJ2SKGG89DZ13E4NVAE2 /p1](https://app.paper.design/file/01M6Y1NJ2SKGG89DZ13E4NVAE2/p-1-0) | File/page title matches;592 nodes and6 EN/ZH desktop/mobile boards for market structure, stages and S&amp;P model allocation. Migration-map p5 card **8B-0**, URL **8D-0**, agrees. |
+
+Root made no copy, retirement, deletion or migration operation. The old bookmarks remain valid navigation references. An editable destination and a relocation timestamp do not establish new design authority.
+
+### Repair in the incumbent F03 directory
+
+Only the stale locators in existing Terminal **F03 directory1NDQ-0 /p-R-0** were repaired.
+
+**Options row1NEC-0:** **1NEI-0** now leads with **Broader R1 reference** and the new Options file, followed by the retained **Old bookmark**. Its existing Terminal retained-Options destination and held original **1N2L-0 ·do not replay** remain unchanged. The newer A/B/C references, C11–C18 continuation labels and D08D no-admission/review qualifications remain untouched.
+
+**Chart row1XOB-0:** **1XOF-0** retains the primary Terminal workspace **p17** and Macro supplement **p18**, then adds the relocated broader D06 R1 reference and old p29 bookmark. **1XOC-0** changes only its stale “Broader PAGES p-29-0 retained” locator to **Broader R1 reference: relocated**. Task-study/reference role, partial native supplement and **Review: acceptance not established** remain.
+
+The relocation does not replace current Terminal p17/p18 with the older broader D06 reference. Similarly, the Options R1 file does not replace D08A/B/C or release D08D.
+
+### Reconciliation and verification
+
+**Disagreement class:** stale reference/projection after a native file-location change. **Owner per fact:** Paper supplies actual file/page identity and visible relocation mapping; GitHub source and existing governing decisions retain design/implementation/release qualifications. Current Chairman intent authorizes the bounded directory repair; the move notice itself does not grant authority.
+
+The compatible protected source pin remains **Mastermind5c3d3885234358aefb97ecdbc59be0864df14f8b**. Root consumed same-pin INDEX, RECONCILE_STATE and CLOSEOUT plus the plugin authority-boundaries reference. No lifecycle, migration registry or acceptance state was created.
+
+Native verification:
+
+- The entire Options row is identical modulo whitespace after masking only **1NEI-0** (**6,971→7,049** JSX characters).
+- The entire Chart row is identical modulo whitespace after masking only **1XOF-0 /1XOC-0** (**2,482→2,659** characters).
+- Both final link groups render legibly. The complete current F03 directory was read back at **27,573** characters and contains both new destinations, both named old bookmarks, the current C16–C18 pointer and the unchanged D08D target hold.
+- The bounded directory audit found no other direct old-PAGES reference requiring a destination change. Other rows already point to their current product files; family-name similarity does not justify replacing those links.
+- All exact edits and scoped **options-relocated-reference-finish-01 /d06-relocated-reference-finish-01** returned **APPLIED_RESPONSE_OBSERVED** without per-node errors.
+
+During the source save, root also observed and preserved concurrent commit **c74f6a1bae034f8ad44f80ab63d0fc28553c82b9**. Its complete one-line diff changes a two-space Markdown hard break to an explicit backslash, retaining the same two-line Options quotation while satisfying the existing whitespace gate. All later design additions were preserved. This additive reconciliation is based on that fresh blob; it neither resets the branch nor extends the older PR body's exact-head CI qualification to new source.
+
+The current location mismatch is resolved for these two references. Full migration-fidelity acceptance remains with its actual receipt, and all prior design, implementation and release qualifications continue to bind.
