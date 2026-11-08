@@ -17,6 +17,7 @@ This map points to the editable designs and current continuation sections. All c
 | Company navigation | [Existing family chooser](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1): 5ML keeps its complete family structure, with explicit44px Close/Lab target containers `22UE-0` / `22UH-0` around the original visuals. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
+| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): light/dark failed-update states `3ZW-0` / `4BN-0` now label38.0 as Research index while retaining the dated snapshot and unavailable entry checks. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
 | Analytical provenance | [Expectation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) qualifies missing units/selected examples; [Ontology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) distinguishes page comparison from answer evidence. |
 | Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
@@ -188,7 +189,7 @@ Final observed snapshots:
 
 Initial source receipt: `f008755294940fd40b99950f8a68862812102c98`. Verified Policy/Prophet milestone receipt: `5e0fd66697b2f6eec1f75e46a185740b5140eb37`. This file's Git commit supplies its immutable final revision; the PR supplies review/CI/merge state separately.
 
-## Remaining gaps, falsifiers and safe continuation
+## Initial-pass remaining gaps and continuation (historical)
 
 | Priority | Concrete gap | Next evidence/action |
 | --- | --- | --- |
@@ -202,7 +203,7 @@ Primary continuation for a broader design wave: resolve D08A shared-shell integr
 
 Protected historical effects remain untouched: OS knowledge duplicates `SPU-0` / `STU-0` under `mm-knowledge-flow-added-state-shells-20261004-001`; OS note `T0J-0` under `mm-knowledge-guide-mobile-chrome-amendment-20261004-001`; Prophet R8 desktop-dark `ZE5-0`, identified as unresolved by its existing D03 contract. The separately refused Figma action was not repeated.
 
-## Delivery and continuity boundary
+## Initial-pass delivery record (historical)
 
 The Paper changes are applied and verified. This source record is reviewable documentation, not a replacement for current law or proof of merged acceptance. No release, deployment, user notification, financial action or runtime transition occurred.
 
@@ -973,3 +974,35 @@ Root inspected the full1440px render and27,236-character JSX. Masking only1OK5 r
 A separate bounded C3 reasoning audit inspected Company transcript/source pages pA/pL and focused Call+Q&A board **`2VY-0`**. The observed native controls describe a selected in-session answer and opening the full exchange; no copied/bookmarked control promising an exact passage or revision was found. The native **Read full exchange in transcript** action **`3C9-0`** remains a valid in-memory evidence handoff, so it was not downgraded to a call-only label.
 
 The existing D07 source continuity issue remains: at Terminal `f0af84bbd6c28c2f6477bd8ffc031903979023bd`, `TranscriptDrawer.tsx` (blob **`221134c8c734ef5a490cde5c634edd0d42d79706`**) validates the in-memory expected document digest and focuses the admitted segment, while its ordinary Copy link serializes call ID and page/pane without that segment/digest. `MegaPane.tsx` (blob **`53ca3e06425d9a10b393e08189361a5036c4ea5d`**) reloads that URL as an ID-only target. D07's existing **Copy call link** wording remains a future source implementation requirement; no matching native Copy control in the inspected scope needed repair. No transcript node, source receipt, retained revision or URL owner was modified.
+
+
+## Intelligence Hub: retained research values carry their index label
+
+Two failed-update variants in the specialized **Intelligence Hub · R4 Workspace** file now identify the retained numerical field as **Research index**:
+
+| Variant on [Loading, Filters and Locale Coverage](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0) | Board / changed text | Result |
+| --- | --- | --- |
+| Light EN, prior list retained | `3ZW-0` / **`7KT-0`** | Research index38.0 beside601218.SS. |
+| Dark EN, prior list retained | `4BN-0` / **`7M8-0`** | The same label/value with the incumbent dark-theme text roles. |
+
+Both previously showed only38.0 beside the ticker, with no index label elsewhere in the full composition. The current native contract **`6S-0`**, paragraph **`72J-0`**, explicitly requires Research index as the mobile-list presentation label. Its existing requirements preserve all30 records, source order, valid zeroes, listing identity, filters and return behavior, and keep opportunity and early-stage measures distinct.
+
+The new label is12px regular muted text next to the unchanged18px semibold value. It fits the existing card header without a new panel, scale, percentage, currency sign or score calculation. Original rank18 and listing601218.SS remain.
+
+### Exact source and retained recovery meaning
+
+Root fetched [the historical command fixture](https://github.com/mastermindx-market-intelligence/macro/blob/bb310311b716ac3c7db7b7ed64d40039dd02bff7/site/china_intel/command.json) at Macro **`bb310311b716ac3c7db7b7ed64d40039dd02bff7`**, blob **`692e0238c7c500ca2fa1d5ae73ccf2c54af3a878`**. It declares `china_intel.command.v1`, generated `2026-09-27T13:00:52.369955+00:00`; `command[17]` contains `ticker:"601218.SS"`, `opportunity_score:38`, `traj:null`. Research index names this existing field in the presentation; it is not a new scoring owner or an entry permission.
+
+Both screens retain **DESIGN PREVIEW · PREVIOUS SNAPSHOT**, the27 September research date/**Not live**, **1 of30 records in the previous snapshot**, the failed-check explanation, current-price unavailability, **Entry check unavailable · Research only**, and their Check again/evidence/Clear search actions. The proposed check binding and its account/generation/access guards remain with the existing contract. No request was sent, source refreshed, record resorted or actual entry assessed.
+
+Root read the F03 D11 registry at `design/f03-paper-directory-20261102-c2`, path `research/design_candidates/production_design_20261102/f03/assignments/D11.md`, blob **`7e7eb79686f7c780fae18e994554a465058d95c5`**. It classifies p6 as **candidate_unqualified**, distinct from held p7/`157-0` and source-only QA/baseline roles. Current native metadata names the specialized file Intelligence Hub · R4 Workspace; the older registry label Refined vase is discovery history, not a second file. No held/source-only state or other writer's structure was changed.
+
+### Verification
+
+Root inspected both complete390px renders. Light JSX changed14,217→14,323 characters; dark changed14,261→14,366. Masking only the corresponding index text node reproduces the entire prior JSX modulo whitespace in each case. All other nodes, text and styles remain intact. The label,38.0 value, exact listing, dated snapshot and unavailable-entry state read back correctly. Scoped edits and finishes all returned **APPLIED_RESPONSE_OBSERVED** through fresh exact-file C3 bindings.
+
+This verifies the two represented recovery states. It does not claim an exhaustive Hub audit, implemented retry behavior, live-data qualification, model calibration or production acceptance.
+
+### Options assumption consistency after the C02 repair
+
+A focused C3 consistency read found the expected assumed100 qualification already present in C01 (`1PIY-0`, `1PJJ-0`, `1PJZ-0`), C04 (`1POD-0`) and C05 (`1RTL-0`, `1RTR-0`). Those existing labels and all prior phone geometry were preserved. The demonstrated omission was confined to the corrected C02 comparison; no further Options change was needed in that bounded check.
