@@ -328,6 +328,8 @@ def validate_response(raw, request):
             'response_comparison')
     require((response['comparison'] == 'ABSENT') == (response['current_policy_sha256'] is None
             and response['current_critical_sha256'] is None), 'response_comparison')
+    require(response['comparison'] == 'ABSENT' or (response['current_policy_sha256'] is not None
+            and response['current_critical_sha256'] is not None), 'response_comparison')
     desired = validate_request(request)
     require(response['desired_critical_sha256'] == policy.critical_fingerprint(desired),
             'response_desired_fingerprint')
@@ -383,10 +385,25 @@ def code_for_request(request, *, expected_hash, expected_sources):
             == expected_sources, 'reader_sources_changed')
     # The incumbent portable export deliberately excludes only the Mac native
     # owner-path mapping; all its no-follow custody/layout checks are retained.
+    import ast
+    delivery_text = sources['artifact_delivery.py'].decode('utf-8')
+    parsed = ast.parse(delivery_text)
+    lines = delivery_text.splitlines(keepends=True)
+    exported = {}
+    for node in parsed.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+            exported[node.name] = ''.join(lines[node.lineno - 1:node.end_lineno])
+    chain = exported['DirectoryChain']
+    local_adapter = '            path = owner_path(path, HERE)'
+    require(chain.count(local_adapter) == 1, 'portable_source_changed')
+    chain = chain.replace(local_adapter, '            path = Path(path)', 1)
+    portable = chain + '\n\n' + '\n\n'.join(exported[name] for name in (
+        'validate_remote_lane_root', 'validate_remote_lane_layout',
+        'observe_remote_lane_layout', 'verify_remote_lane_release'))
     remote_delivery = ('from pathlib import Path, PurePosixPath\n'
         'import os,stat,json,hashlib\nimport artifact_reader as reader\n'
         'def digest(raw): return hashlib.sha256(raw).hexdigest()\n'
-        + delivery.remote_lane_root_source())
+        + portable)
     sources['artifact_delivery.py'] = remote_delivery.encode()
     package = {name.removesuffix('.py'): base64.b64encode(gzip.compress(raw, mtime=0)).decode()
                for name, raw in sources.items()}
@@ -446,7 +463,7 @@ print(json.dumps(report,sort_keys=True,separators=(',',':')))
     return code
 
 
-def inspect_original(run_id, root, parent, *, owner_ext=None):
+def inspect_original(run_id, root, parent, *, qualified_sources, owner_ext=None):
     """Explicit single original-owner read, with local same-operation retention.
 
     Callers need their actual existing transport grant. No worker, lease, refresh
@@ -455,8 +472,9 @@ def inspect_original(run_id, root, parent, *, owner_ext=None):
     import artifact_reader
     import provider_outcome
     here = Path(__file__).resolve().parent if owner_ext is None else Path(owner_ext)
-    request, frame, alias = original_request(run_id, root, parent, owner_ext=here)
     sources = source_hashes(owner_ext=here)
+    require(sources == qualified_sources, 'reviewed_sources_changed')
+    request, frame, alias = original_request(run_id, root, parent, owner_ext=here)
     intent_path = here / 'state/remote_sub' / (run_id + '.support-policy-status.intent.json')
     result_path = here / 'state/remote_sub' / (run_id + '.support-policy-status.result.json')
     closed = {'schema': SCHEMA, 'state': 'PRIOR_OR_UNKNOWN_READ',

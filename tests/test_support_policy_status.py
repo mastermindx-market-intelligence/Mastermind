@@ -225,7 +225,7 @@ def test_parent_or_registry_withdrawal_after_read_scrubs_response(runtime,monkey
         r.registry['ubuntu0']['physical_lane_root']=str(r.root/'different')
         return json.dumps(value).encode()
     monkeypatch.setattr(r.delivery,'transport',read)
-    out=r.status.inspect_original(r.run,r.original_root,r.parent)
+    out=r.status.inspect_original(r.run,r.original_root,r.parent,qualified_sources=r.status.source_hashes())
     assert out['state']=='PRIOR_OR_UNKNOWN_READ' and 'counts' not in out
     assert (r.state/(r.run+'.support-policy-status.intent.json')).exists()
 
@@ -334,3 +334,34 @@ def test_closed_adapter_cli_rejects_path_host_and_account(runtime,capsys):
                 '--parent',r.parent,option,'arbitrary'])
         assert stopped.value.code==2
     assert not (r.state/(r.run+'.support-policy-status.intent.json')).exists()
+
+
+def test_adapter_static_reader_pin_refuses_before_module_execution(runtime,monkeypatch,capsys):
+    r=runtime;marker=r.root/'never-executed'
+    source=r.ext/'support_policy_status.py'
+    source.write_text(source.read_text().replace('from __future__ import annotations',
+        'from __future__ import annotations\nfrom pathlib import Path\nPath('+repr(str(marker))+').write_text("unsafe")',1))
+    def forbidden(*args,**kwargs):raise AssertionError('transport reached drifted module')
+    monkeypatch.setattr(r.delivery,'transport',forbidden)
+    assert r.task.main(['support-policy-status',r.run,'--root',r.original_root,'--parent',r.parent])==78
+    assert json.loads(capsys.readouterr().out)['state']=='UNAVAILABLE'
+    assert not marker.exists() and not (r.state/(r.run+'.support-policy-status.intent.json')).exists()
+
+
+def test_portable_export_uses_verified_delivery_bytes_not_inspect_reread(runtime,monkeypatch):
+    r=runtime;sources=r.status.source_hashes()
+    def forbidden():raise AssertionError('fresh inspect.getsource export must not run')
+    monkeypatch.setattr(r.delivery,'remote_lane_root_source',forbidden)
+    assert r.status.code_for_request(r.request,expected_hash=sources['support_policy_status.py'],expected_sources=sources)
+
+
+@pytest.mark.parametrize('comparison',['IDENTICAL','CRITICALLY_COMPATIBLE','CRITICAL_MISMATCH'])
+@pytest.mark.parametrize('field',['current_policy_sha256','current_critical_sha256'])
+def test_nonabsent_comparison_rejects_each_single_null(runtime,comparison,field):
+    r=runtime;out=r.status.observe(r.request)
+    out['comparison']=comparison
+    if comparison!='IDENTICAL':out['current_policy_sha256']='1'*64
+    if comparison=='CRITICAL_MISMATCH':out['current_critical_sha256']='2'*64
+    out[field]=None
+    with pytest.raises(ValueError,match='response_comparison'):
+        r.status.validate_response(json.dumps(out).encode(),r.request)

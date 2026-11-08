@@ -6,22 +6,30 @@
   "patches": {
     "ext/fabric_task.py": {
       "before": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28",
-      "after": "3728219c9a38484b6bfa60406be8a711178c943f01781aac657bb0852802897d",
+      "after": "dc683415061093a880c332c22f56f716c62d843efe05399afd358a0424d9916f",
       "patch": "patches/fabric_task.py.forward.patch",
-      "patch_sha256": "2da5b12a7c52f251d2ebc1c637bf8639103815a738ddae4fee970680ba46497a"
+      "patch_sha256": "6f3bd3c1058c737ea3a11bf84a07c7d4c9f4a4c4df44400fe760841364d1a2f5"
     },
     "ext/artifact_delivery.py": {
       "before": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
-      "after": "ba8bdca361827efae32c7a46c3398561d187ebe8a5bd64537685183a95dde3bd",
+      "after": "037f31e788f71934d500121c0301efbf045e8f58e348518fcecb8d0733a93f1d",
       "patch": "patches/artifact_delivery.py.forward.patch",
-      "patch_sha256": "74b96abf06cd32d33c83f922a39f7fd0b36b3553796a7608a6f24d1ee5022c40"
+      "patch_sha256": "2e68b16b30e146c9daa8bbacea1527c39f7ffb91590aa5aec12aa92480559d8e"
     }
   },
   "new_module": {
     "path": "ext/support_policy_status.py",
     "source": "ops/native_fabric/support_policy_status/reader.py",
-    "sha256": "8c2d728e5ca8ba2b606147656d5bb18bfb7a84e2a95f7f8828eb4be8b3d63ab6"
+    "sha256": "76bc04c889430cbb21efd172e438eeb9a26ce08e134098df4de7bb5c33a56803"
   },
   "runtime_effects": false,
-  "final_cohort": "Root combines actual Memory118/helper postimages before selection. No old116 native-manifest/publisher/selector is emitted by this component."
+  "final_cohort": "Root combines actual Memory118/helper postimages before selection. No old116 native-manifest/publisher/selector is emitted by this component.",
+  "reviewed_reader_closure": {
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "lane_runtime.py": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
+    "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
+    "artifact_delivery.py": "037f31e788f71934d500121c0301efbf045e8f58e348518fcecb8d0733a93f1d",
+    "support_policy_status.py": "76bc04c889430cbb21efd172e438eeb9a26ce08e134098df4de7bb5c33a56803"
+  }
 }
