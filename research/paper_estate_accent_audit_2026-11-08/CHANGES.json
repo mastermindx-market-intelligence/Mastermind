@@ -1,12 +1,14 @@
 {
   "schema": "PAPER_ACCENT_BEFORE_AFTER_MANIFEST_V1",
-  "changeCount": 1661,
+  "changeCount": 1828,
   "parts": [
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0001.json",
-      "sha": "7d3dfdbedf07322b70ebb9375f0a7c9e85bb6df0",
-      "bytes": 674614,
-      "reused": true,
+      "sha": "1c4f3f93a69ab67a47ab09535ca44eb5c0d40fd2",
+      "bytes": 674915,
+      "commit": "c5c71ace837210cfaa874923c038a82ef078d0e1",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
       "changeCount": 162
     },
     {
@@ -67,9 +69,11 @@
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0010.json",
-      "sha": "de4c537063c8f00488dd3aa985a34d29398e0caf",
-      "bytes": 843091,
-      "reused": true,
+      "sha": "468cb783adff78a2499da4201b85945d6a8cab61",
+      "bytes": 850029,
+      "commit": "f08608624437984d662c9ebf66e8582a3131e889",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
       "changeCount": 138
     },
     {
@@ -83,37 +87,40 @@
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0012.json",
       "sha": "b413759f7d973e8984816c326684f27adff37143",
       "bytes": 847525,
-      "commit": "e02de30ad09c376ba699830ec8729f9190d8959d",
-      "method": "EXACT_CONTENT_READBACK",
-      "readbackLimitation": null,
+      "reused": true,
       "changeCount": 127
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0013.json",
       "sha": "96918654b3a33cf2f340b1501dce77b5ba271b9a",
       "bytes": 832603,
-      "commit": "4109182832f4e4cdd4e488fb69b37dbc768eee2f",
-      "method": "EXACT_CONTENT_READBACK",
-      "readbackLimitation": null,
+      "reused": true,
       "changeCount": 33
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0014.json",
       "sha": "fc43f4d09e5fbb63820733e76878977ec7df89fd",
       "bytes": 821849,
-      "commit": "1f93e4c76fefabadcfacbdbe4b21bc16ef69f760",
-      "method": "EXACT_CONTENT_READBACK",
-      "readbackLimitation": null,
+      "reused": true,
       "changeCount": 33
     },
     {
       "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0015.json",
-      "sha": "60320636407b764d76cecd48b101c7952c9d8d27",
-      "bytes": 396754,
-      "commit": "62eae56d8d0f90820d3676988d37a12914d3b8d4",
+      "sha": "162e8cd31aa3ab10761972ffd1944d92967f5bd1",
+      "bytes": 846234,
+      "commit": "caa10a7f7624870bdbf27ae8d6254e8093840c7a",
       "method": "EXACT_CONTENT_READBACK",
       "readbackLimitation": null,
-      "changeCount": 15
+      "changeCount": 159
+    },
+    {
+      "path": "research/paper_estate_accent_audit_2026-11-08/CHANGES/part-0016.json",
+      "sha": "4c0b90919a00b63c9d820651c82d3f68378f96b3",
+      "bytes": 207793,
+      "commit": "47bb2d5abad745191f865c3472ef01faede5ac6d",
+      "method": "EXACT_CONTENT_READBACK",
+      "readbackLimitation": null,
+      "changeCount": 23
     }
   ],
   "previousFullSnapshot": {
