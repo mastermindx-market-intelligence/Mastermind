@@ -9,7 +9,7 @@ This map points to the editable designs and current continuation sections. All c
 
 | Review area | Native destination and visible improvement |
 | --- | --- |
-| Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return and A07/A08 narrow navigation. |
+| Options Flow and navigation | [Terminal · Options Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0): A05 shared-shell scan, A06 evidence return, A07/A08 narrow navigation and A09/A10 1280px modal/return. |
 | Personal Desk | [Portfolio recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-Y-0): record and target atlases `1Z0H-0` / `1ZET-0`; [builder directory](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-X-0) at `216F-0`. |
 | AI Chats | [Save + Resume Recovery](https://app.paper.design/file/01M3P1QEHS5XXQY85BJT6QR2E1/p-8-0): atlas `71F-0` groups failed history/selection reads, loading, draft decisions and existing-owner requirements. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
@@ -644,3 +644,37 @@ A focused follow-up on `SD8-0` changed only heading `SGC-0` to **RECENT · EXAMP
 The pinned `App.tsx` sidebar renders primary navigation and Work & Context / Advanced, not these Recent rows. `docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md` at Mastermind `5c3d3885234358aefb97ecdbc59be0864df14f8b` (blob `8be040d1c66c416bb259467c66fc932d4bc81678`) treats the five-destination shell as target design and says a topic title/recent row is insufficient conversation identity. Root read the actual source and the exact specification excerpt. The newer mounted list implementation takes precedence over the spec's historical absence-of-list baseline; it still does not enumerate history.
 
 The 200px sidebar group renders the complete qualified heading. JSX readback preserves both entries. `os-shell-example-finish-01` finished only `SD8-0`; no shared-shell rewrite or other OS board was included.
+
+
+## Options Flow: 1280px modal and exact-return composition
+
+Two new native drafts on [Options · Live Flow](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-16-0) make the narrow-desktop behavior reviewable:
+
+| New board | Native ID | Measured canvas position | Composition |
+| --- | --- | --- | --- |
+| A09 · Flow evidence modal · 1280 · DRAFT | `21FC-0` | x6440/y0, width1280 | Full-width scan behind one 440px evidence modal; selected observation and source retained. |
+| A10 · Flow after evidence closes · 1280 · DRAFT | `21KT-0` | x7800/y0, width1280 | Same scan/selection after closing; selected Inspect control `21SL-0` visibly carries the return-focus state. |
+
+A08 ends at x6360; A09 starts80px later. A09 ends at x7720; A10 starts80px later. Both were created through compatible native duplication/clone composition into blank canvas, preserving original A05/A06 and all older boards. No held style/token/create-artboard action was used.
+
+### Why a modal is required for this candidate composition
+
+At1280, the expanded224px rail leaves1056px; two24px gutters leave **1008px** useful content. A320px dock plus24px gap would leave **664px** primary width. The actual A05 scan `1Y63-0` declares **minWidth690px**, so this composition cannot keep its dock at1280 without violating its own layout requirement.
+
+This690px value is a **native candidate composition constraint**, not a released domain breakpoint. F01's default minimum remains640; its dock-eligible1280 example is conditional on the domain fitting. `research/design_candidates/production_design_20261102/d08a/RESPONSIVE.md` at Macro `c3413d84650ce85ca0c875c16b53b5e519b46f35`, blob `8a0b4ba17ad41bccd111ab9e91159c41c590051d`, explicitly permits a larger content requirement and forbids squeezed text/automatic compact navigation. No final domain minimum is claimed qualified. The source's440px modal pattern is reused as the newly proposed1280 adaptation.
+
+### Evidence and return remain with the existing owners
+
+Both backgrounds preserve A05's224px expanded navigation,64px header, local views, source session, applied filters/sort, selected observation and buffered **12 new · Review** update. The scan occupies1008px. Opening/closing evidence does not apply the update.
+
+The modal `21R9-0`, inside overlay `21R8-0`, preserves the original specimen: observation **#1082**, **SPY · 680 Call**, expiry **06 Nov 2026**, **$3.24m** gross premium, **+2.3σ**, **14** prints, **30 Oct · ET** session, **10:14 ET · demo** event clock, `live_flow.feed/v1`, **Book verification required**, and **Root-only if unqualified · no Save or trade.** It has a persistent named heading, visible44×44 close control, at-least44px existing investigation/source-detail actions, and an explicit Back to Flow path.
+
+The companion A10 illustrates the valid successful return to the cloned original Inspect trigger. Required behavior remains conditional: restore that exact connected/visible/enabled invoker only while the same observation, period, access and source generation remain valid and this close owns focus. If it vanished or the context changed, disclose the condition and use the existing stable scan fallback without substituting another row. Modal/dock changes keep one inspector, one selection and existing lifecycle ownership. Named-dialog semantics, contained focus, inert background, Escape and resize/return behavior require implementation proof; static Paper does not execute them.
+
+These requirements bind to F01 candidate.4 §4 at `abfecf1efc452383fe720cb3ea2016ad8d7088e0` and the existing D08A `IMPLEMENTATION_HANDOFF.md`, blob `0c35daf4091f1068201f732d8f24dfed0d294565`, at the same D08A candidate commit above: I4 observation/return, I5 responsive hierarchy, I6 unavailable-original recovery. Root independently read both D08A files. Their historical source is not represented as already containing these new native boards, nor as authorizing product implementation/release.
+
+### Verification and discovery
+
+Root inspected both complete1280px renders; the modal fits, all source facts/actions are readable, and the restored scan keeps the selected row and full chart. JSX verified the1008/690/440 dimensions, selected identity, scope, pending update and focused return target. The native chart subtree in both new boards is identical to A05 after removing node IDs and formatting whitespace; bars, labels and analytical values were preserved. Fresh A05 JSX is unchanged.
+
+The existing F03 directory `1NDQ-0` / Options section `1NEC-0` now references **Draft A05–A10: shell, phone evidence, 1280 modal/return** in `1NEJ-0`. Its existing A-page link and historical handoff URL remain, as do B/C provisional status, D08D's no-admission/target-hold text and Review pending / no acceptance implied. The directory text was rendered/read back. `flow1280-pair-finish-01` finished only A09, A10 and that status text. This completes a new native responsive pair, not a runtime or released-breakpoint proof.
