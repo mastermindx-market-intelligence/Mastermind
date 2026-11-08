@@ -20,6 +20,7 @@ MAX_BYTES = 8192
 # parent_job_id, source ownership and delegated grants have different owners.
 _REPORTS_TO = {
     "meta_ceo": "chairman",
+    "autonomy_ceo": "meta_ceo",
     "secretary": "meta_ceo",
     "delivery": "secretary",
     "engineering": "meta_ceo",

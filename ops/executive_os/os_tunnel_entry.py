@@ -97,6 +97,7 @@ def launch_spec(config: dict, credential: bytes) -> tuple[str, list[str], dict[s
 
 
 APPLICATION_SCHEMA = "mastermind.application_tunnel.v1"
+APPLICATION_ROLE_SCHEMA = "mastermind.application_tunnel.v2"
 APPLICATION_AUDIENCE = "mastermind-fabric-app"
 # Proposed source constants for the closed APPLICATION reverse. They are not an
 # observed available or installed grant; a collision is refused, never resolved
@@ -108,6 +109,9 @@ APPLICATION_REVERSE_TARGET = f"{APPLICATION_REVERSE}:127.0.0.1:{APPLICATION_TARG
 # The server-side remote-address ACL names the reverse listener only; the
 # sealed client separately fixes the native target.
 APPLICATION_REMOTE_REGEX = r"^R:127\.0\.0\.1:50142$"
+APPLICATION_ROLE_REVERSES = (APPLICATION_REVERSE, "R:127.0.0.2:50142", "R:127.0.0.3:50142")
+APPLICATION_ROLE_TARGETS = tuple(remote + ":127.0.0.1:4142" for remote in APPLICATION_ROLE_REVERSES)
+APPLICATION_ROLE_REGEXES = (APPLICATION_REMOTE_REGEX, r"^R:127\.0\.0\.2:50142$", r"^R:127\.0\.0\.3:50142$")
 
 
 class ApplicationPurpose(NamedTuple):
@@ -190,7 +194,8 @@ def closed_application_purpose(purpose):
 def _application_launch_spec(config, credential, purpose):
     purpose = closed_application_purpose(purpose)
     if (type(config) is not dict or set(config) != {"schema", "binary_sha256", "server_fingerprint"}
-            or config["schema"] != purpose.client_schema
+            or config["schema"] not in ((purpose.client_schema, APPLICATION_ROLE_SCHEMA)
+                    if purpose is FABRIC_APPLICATION else (purpose.client_schema,))
             or type(config["binary_sha256"]) is not str
             or not re.fullmatch(r"[0-9a-f]{64}", config["binary_sha256"])
             or type(config["server_fingerprint"]) is not str
@@ -202,8 +207,9 @@ def _application_launch_spec(config, credential, purpose):
     if not re.fullmatch(re.escape(purpose.audience) + r":[A-Za-z0-9_-]{32,128}", auth):
         raise ValueError("application tunnel credential refused")
     binary = str(ROOT / "transports/chisel" / config["binary_sha256"] / "chisel")
+    remotes = APPLICATION_ROLE_TARGETS if config["schema"] == APPLICATION_ROLE_SCHEMA else (purpose.reverse_target,)
     argv = [binary, "client", "--fingerprint", config["server_fingerprint"],
-            "--keepalive", "20s", SERVER, purpose.reverse_target]
+            "--keepalive", "20s", SERVER, *remotes]
     return binary, argv, {"PATH": "/usr/bin:/bin", "LANG": "C", "AUTH": auth}
 
 

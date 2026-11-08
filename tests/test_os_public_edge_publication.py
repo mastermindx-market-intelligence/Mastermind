@@ -736,7 +736,7 @@ def test_closed_json_refusals(raw):
 
 
 
-def _expand_noir_dist(app, *, rich=False, notices=False):
+def _expand_noir_dist(app, *, rich=False, notices=False, private_entry=False):
     """Only exact already-approved static asset names in the local release fixture."""
     dist = app / "dist"
     fixed = {
@@ -752,7 +752,9 @@ def _expand_noir_dist(app, *, rich=False, notices=False):
             "assets/SourceMarkdown-fixture.js": b"export const proof=true;",
             "assets/SourceMarkdown-fixture.css": b".source-markdown{color:inherit}",
         })
-    if rich or notices:
+    if private_entry:
+        fixed["assets/private-entry-fixture.jpg"] = b"fixture private entry JPEG"
+    if rich or notices or private_entry:
         fixed.update({
             "third-party/deepseek-client-dependency-NOTICES.txt": b"Fixture dependency notice",
             "third-party/deepseek-harness-LICENSE.txt": b"Fixture MIT notice",
@@ -816,6 +818,64 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
     assert "/os/assets/SourceMarkdown-fixture.js" in paths
     assert "/os/assets/SourceMarkdown-fixture.css" in paths
+    assert "/os/assets/index-oldnoir.js" not in paths
+
+
+@pytest.mark.parametrize("old_count", [9, 11, 13])
+def test_original_publication_9_11_13_to_12_closes_entire_two_phase_path(inputs, monkeypatch, tmp_path, old_count):
+    """Real licensed12 must survive private stage loading and both publication phases."""
+    old = tmp_path / ("old-"+str(old_count))
+    make_dist(old / "app/mastermind_os", "oldnoir")
+    _expand_noir_dist(old / "app/mastermind_os", notices=old_count >= 11, rich=old_count == 13)
+    old_manifest = entry.build_os_asset_manifest(old)
+    assert len(old_manifest["files"]) == old_count
+    (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(old_manifest))
+    seals.create(old, inputs["old_sha"], inputs["old_tree"])
+    live = tmp_path / "live-private.json"
+    live.write_bytes(m.canonical(fullconfig(old_manifest)))
+
+    def build_private(app, **kw):
+        tools = make_dist(app, "private")
+        _expand_noir_dist(app, private_entry=True)
+        return tools
+
+    monkeypatch.setattr(assets, "_build", build_private)
+    new_bundle = tmp_path / "bundle-private"
+    assets.prepare(source_repo=inputs["source_repo"], expected_sha=inputs["new_sha"],
+                   web_client_id="test-public-client", output=new_bundle,
+                   build_user="fixture", node=Path("/fixture/node"),
+                   npm_cli=Path("/fixture/npm"))
+    qualified = assets.qualify(new_bundle, expected_sha=inputs["new_sha"],
+                               tree_sha=inputs["new_tree"], source_repo=inputs["source_repo"])
+    new_manifest = entry.build_os_asset_manifest(new_bundle)
+    assert len(new_manifest["files"]) == 12
+    configured = {**inputs, "old_root": old, "live_config": live,
+                  "new_bundle": new_bundle, "new_digest": qualified.digest,
+                  "out": tmp_path / "stage-private"}
+    receipt = m.stage_host(**configured)
+    descriptor = m.decode((configured["out"] / m.DESCRIPTOR).read_bytes())
+    assert len(descriptor["indexes"]["old"]) == old_count + 1
+    assert len(descriptor["indexes"]["new"]) == 13
+    relay = InertRelay(configured)
+    monkeypatch.setattr(m, "_http", relay.http)
+    monkeypatch.setattr(m, "_listener", lambda port, pid: m.require(
+        (port, pid) == (49152, 123), "listener differs"))
+    monkeypatch.setattr(m, "_validate", lambda stage, phase, config: m.require(
+        m.decode(stage.read("prepare.json" if phase == "prepare" else "final.json")) == config,
+        "validation bytes differ"))
+    original = (configured, receipt, relay)
+    assert publish(original)["state"] == "PREPARED"
+    assert ready(original)["state"] == "CUTOVER_READY"
+    assert not any(event[:2] == ("GET", "new") for event in relay.events)
+    relay.selected = "new"  # Test-host switch only. The production owner remains external.
+    assert publish(original, "finalize")["state"] == "FINAL"
+    assert relay.events.count(("POST", "config")) == 2
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    assert "/os/assets/SourceMarkdown-fixture.js" not in paths
+    assert "/os/assets/SourceMarkdown-fixture.css" not in paths
+    assert "/os/assets/private-entry-fixture.jpg" in paths
+    assert "/os/third-party/deepseek-client-dependency-NOTICES.txt" in paths
+    assert "/os/third-party/deepseek-harness-LICENSE.txt" in paths
     assert "/os/assets/index-oldnoir.js" not in paths
 
 

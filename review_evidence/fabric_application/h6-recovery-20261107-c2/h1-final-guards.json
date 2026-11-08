@@ -1,0 +1,23 @@
+{
+  "head": "650598ae9236d9817cf33aafb04751f7d8ee3a47",
+  "command": [
+    "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/private/tmp/h6-h1-final-guards-rjuzzkyq/pytest",
+    "--junitxml=/private/tmp/h6-h1-final-guards-rjuzzkyq/guards.xml",
+    "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "tests/test_executive_fabric_release_identity_review.py::test_only_exact_reviewed_file_and_spelling_qualifies[review_evidence/fabric_application/shared-relay-source-qualification-20261107.json]",
+    "tests/test_executive_fabric_release_identity_review.py::test_changed_or_extended_file_cannot_reuse_review[review_evidence/fabric_application/shared-relay-source-qualification-20261107.json]",
+    "tests/test_no_anonymous_macro_reads.py"
+  ],
+  "returncode": 0,
+  "elapsed_seconds": 33.335,
+  "testcase_records": 30,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "log_sha256": "a2a3c4b68aa70416fb312e4aaae8e14c352c367fc692b27c4622eb9644d825cf"
+}

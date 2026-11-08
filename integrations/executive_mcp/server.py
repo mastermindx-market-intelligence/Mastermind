@@ -607,6 +607,7 @@ _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
+    "/workspace/resources/models/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",

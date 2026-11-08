@@ -34,14 +34,14 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "eb0f16538da9b26a692ebbe2b3d6cefec4cc00528d2af57dc255d5c4cfb93900",
-        "ast_sha256": "e2fdea6a6b96e2eb69bb5c3119cc27eb54506b76ee638fcd35032ed0a528daf6",
+        "source_sha256": "7a082151202b959a7a623f8350c6a269c8cce95208e028f5afac7dadfb76bf63",
+        "ast_sha256": "8d1bee6bf8b9408a9e04fe4bf5b6a6818c617c8a03929a7111369bf0a265f931",
         "sites": (
-            (("body", 3, "body", 59, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 60, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 59, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 60, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 59, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 60, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
         ),
     },
@@ -75,12 +75,13 @@ REVIEWED_ANCHORS = {
 # Company method plus each original Fabric operand/path against protected
 # source. Only whole-source/enclosing-method pins change; no new literal site
 # or scanner exemption is added. This is source review, not host acceptance.
+# H5 joins protected779fc3be: exact Company listener and Fabric response subtree
+# remain AST-identical; only the composed full-source and ingress pins change.
 
-# Native-v2 transport plus protected current-context composition: the original
-# six literal sites remain unchanged. Native schema selection adds two enclosing
-# statements before the same Fabric branch, so its three paths move 57 -> 59.
-# The historical Company AST and installed entry AST are unchanged. These fixed
-# source/AST pins describe the reviewed composition, not installed acceptance.
+# Native Session admission, protected model READ and attended Fabric composition
+# retain all six reviewed operands. The three original Fabric paths now share
+# enclosing position60. The historical Company AST and installed entry AST stay
+# unchanged; these source/AST pins do not claim installed acceptance.
 # Discovery correction extends the original authenticated App-peer branch.
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole

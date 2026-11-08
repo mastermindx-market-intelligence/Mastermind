@@ -64,6 +64,18 @@ def test_deepseek_closed_reverse_has_distinct_identity_and_target():
     with pytest.raises(ValueError):
         entry.closed_application_purpose(DSH._replace(target_port=4142))
     assert control.Paths.deepseek().credential != control.Paths().credential
+    assert control._is_same_purpose({"argv": argv}, Path(argv[0]), purpose=DSH)
+    assert not control._is_same_purpose({"argv": argv}, Path(argv[0]), purpose=FABRIC)
+    fabric_config = {**config, "schema": FABRIC.client_schema}
+    _, fabric_argv, _ = entry.application_launch_spec(
+        fabric_config, (FABRIC.audience + ":" + "x" * 48).encode())
+    assert control._is_same_purpose({"argv": fabric_argv}, Path(fabric_argv[0]), purpose=FABRIC)
+    assert not control._is_same_purpose({"argv": fabric_argv}, Path(fabric_argv[0]), purpose=DSH)
+    _, role_argv, _ = entry.application_launch_spec(
+        {**fabric_config, "schema": entry.APPLICATION_ROLE_SCHEMA},
+        (FABRIC.audience + ":" + "x" * 48).encode())
+    assert control._is_same_purpose({"argv": role_argv}, Path(role_argv[0]), purpose=FABRIC)
+    assert not control._is_same_purpose({"argv": role_argv}, Path(role_argv[0]), purpose=DSH)
 
 
 def test_deepseek_real_stage_apply_start_stop_preserves_native_owner(sealed_root):
@@ -199,3 +211,80 @@ def test_peer_receipt_must_describe_retained_candidate(sealed_root):
     with pytest.raises(ValueError, match="historical authfile identity"):
         _apply(dsh)
     assert not (dsh.paths.server_operation_root / "operation" / "server-intent.json").exists()
+
+
+def test_deepseek_role_aliases_refuse_before_any_custody_lock(sealed_root, monkeypatch):
+    h = _case(sealed_root / "dsh-no-role-aliases", DSH)
+    def refuse_lock(*args, **kwargs):
+        pytest.fail("unsupported DSH role selector reached a custody lock")
+    monkeypatch.setattr(control, "_PurposeLock", refuse_lock)
+    calls = (
+        (control.stage, dict(source_repo=h.root / "absent", source_sha="a" * 40,
+            release_root=h.root / "absent", release_commit_sha="a" * 40,
+            release_tree_sha="b" * 40, qualification_path=h.root / "absent")),
+        (control.apply_client, {}),
+        (control.reconcile, {}),
+        (control.start_client, {"server_receipt": h.root / "absent"}),
+        (control.stop_client, {}),
+    )
+    for action, kwargs in calls:
+        with pytest.raises(ValueError, match="role aliases require the original Fabric purpose"):
+            action(**kwargs, paths=h.paths, role_aliases=True)
+    config = {"schema": entry.APPLICATION_ROLE_SCHEMA, "binary_sha256": "b" * 64,
+              "server_fingerprint": "F" * 43 + "="}
+    with pytest.raises(ValueError, match="configuration refused"):
+        entry.deepseek_launch_spec(config, (DSH.audience + ":" + "x" * 48).encode())
+
+
+def test_unresolved_fabric_role_journal_blocks_deepseek_before_new_intent(sealed_root):
+    from tests.test_hermes_primary_application_tunnel import original, role_stage
+    base = sealed_root / "role-peer-unknown"
+    fabric = _case(base / "fabric", FABRIC, base / "host")
+    dsh = _case(base / "dsh", DSH, base / "host")
+    receipt, system = original(fabric)
+    role_stage(fabric, receipt, system)
+    dsh.stage()
+    pending = fabric.paths.server_operation_root / "operation-hermes-v2"
+    pending.mkdir()
+    _own(pending, 0o700)
+    intent = pending / "server-intent.json"
+    intent.write_bytes(b"{}")
+    _own(intent, 0o600)
+    before = fabric.paths.server_authfile.read_bytes()
+    with pytest.raises(ValueError, match="another original authfile operation requires reconciliation"):
+        _apply(dsh)
+    assert fabric.paths.server_authfile.read_bytes() == before
+    assert intent.read_bytes() == b"{}"
+    assert not (dsh.paths.server_operation_root / "operation/server-intent.json").exists()
+
+
+def test_settled_fabric_role_and_deepseek_keep_original_receipts_and_exact_grants(sealed_root):
+    from tests.test_hermes_primary_application_tunnel import original, role_stage, role_server
+    base = sealed_root / "role-peer-settled"
+    fabric = _case(base / "fabric", FABRIC, base / "host")
+    dsh = _case(base / "dsh", DSH, base / "host")
+    receipt, system = original(fabric)
+    credential_identity = control._capture_preimage(fabric.paths.credential)
+    role_stage(fabric, receipt, system)
+    role_receipt_path = role_server(fabric, system)
+    role_receipt = json.loads(role_receipt_path.read_bytes())
+    journals = [fabric.paths.server_operation_root / name / "server-receipt.json"
+                for name in ("operation", "operation-hermes-v2")]
+    historical = [path.read_bytes() for path in journals]
+    dsh.stage()
+    _apply(dsh)
+    before = fabric.paths.server_authfile.read_bytes()
+    bundle = control._stage_directory(fabric.paths, True) / "server-bundle.json"
+    observed = control.reconcile_server(bundle_path=bundle,
+        expected_digest=control.digest(bundle.read_bytes()), paths=fabric.paths, system=system)
+    assert observed["authfile_observation"] == "OWN_GRANT_PRESENT_AUTHFILE_ADVANCED"
+    assert {key: observed[key] for key in role_receipt} == role_receipt
+    assert observed["current_authfile_sha256"] == control.digest(before)
+    assert observed["server_reload_proven"] is False
+    assert fabric.paths.server_authfile.read_bytes() == before
+    assert [path.read_bytes() for path in journals] == historical
+    assert control._capture_preimage(fabric.paths.credential) == credential_identity
+    entries = json.loads(before)
+    assert entries[fabric.paths.credential.read_text()] == list(entry.APPLICATION_ROLE_REGEXES)
+    assert sum(key.startswith(DSH.audience + ":") for key in entries) == 1
+    assert all(entries[key] == value for key, value in INCUMBENT.items())

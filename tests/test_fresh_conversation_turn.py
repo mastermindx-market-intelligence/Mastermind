@@ -16,6 +16,21 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
     async def run():
         app, token, wt, service, runtime, request, adapters, calls, sink = await mounted(tmp_path, rsa_key, monkeypatch)
         request = {**request, "operation_key": os.environ.get("S34_CREATE_OPERATION_KEY", request["operation_key"])}
+        # Hold the original finisher while checking replay. The recorded reply
+        # precedes ordinary shutdown, whose lifecycle events are independent of
+        # a duplicate public request.
+        finish_entered = asyncio.Event()
+        finish_released = asyncio.Event()
+        finish_calls = 0
+        dispatch_task = None
+        original_finish = service.operator_supervisor.finish_retained_native_job
+        async def gated_finish(retained):
+            nonlocal finish_calls
+            finish_calls += 1
+            finish_entered.set()
+            await finish_released.wait()
+            await original_finish(retained)
+        monkeypatch.setattr(service.operator_supervisor, "finish_retained_native_job", gated_finish)
         diagnostics = []
         from control_plane import fresh_conversation_turn as module
         original_read = module.read_turn
@@ -38,6 +53,7 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             assert programs["ok"] and runtime.events.list_events()==before_programs
             _, created = await post(app, "create", {**request,"preview_digest":preview["data"]["preview"]["digest"]}, token, wt)
             assert created["ok"] and created["data"]["state"] == "CREATED", created
+            dispatch_task = service._dispatch_tasks[created["data"]["locator"]["job_id"]]
             from control_plane.fresh_conversation import FreshConversationOwner
             from control_plane.principal_projection import neutral_principal_projection
             raw=calls[-1]["principal"]
@@ -83,21 +99,31 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
             turn_selected = {**selected,"turn_key":turn_request["turn_key"]}
             _, read = await post(app,"turn_read",turn_selected,token)
             assert read["ok"] and read["data"]["result"] == second["data"]["result"],(read,diagnostics,service._dispatch_errors)
-            # The original result may be durable before its background job
-            # appends JOB_COMPLETED. Finish that original dispatch before
-            # measuring whether the duplicate itself adds any event.
-            task=service._dispatch_tasks.get(created["data"]["locator"]["job_id"])
-            if task is not None:await asyncio.wait_for(asyncio.shield(task),5)
+            await asyncio.wait_for(finish_entered.wait(), 5)
+            assert finish_calls == 1 and not dispatch_task.done()
             events = runtime.events.list_events()
             _, repeated = await post(app,"turn",turn_request,token,wt)
             assert repeated["ok"] and repeated["data"]["result"] == second["data"]["result"],repeated
-            assert runtime.events.list_events() == events and adapters[0].begin_turn_calls == 2
+            assert runtime.events.list_events() == events
+            assert adapters[0].start_calls == 1 and adapters[0].begin_turn_calls == 2
             _, status = await post(app,"turn_status",turn_selected,token)
             assert status["ok"] and status["data"]["result"] == second["data"]["result"]
+            finish_released.set()
+            await asyncio.wait_for(asyncio.shield(dispatch_task), 5)
+            assert finish_calls == 1
             archived=FreshConversationOwner(service,expected_policy=expected,authorized_policies=policies).read_reference(read_principal,reference)
             assert archived["epoch"] is None and archived["state"]=="SETTLED"
             assert archived["initial_result"]["digest"]==initial_digest
             assert archived["turns"][0]["result"]==second["data"]["result"]
+            # Check the same full-event invariant after the real original
+            # finisher settles too; neither phase may initiate another turn.
+            settled_events = runtime.events.list_events()
+            _, settled_repeat = await post(app,"turn",turn_request,token,wt)
+            assert settled_repeat["ok"] and settled_repeat["data"]["result"] == second["data"]["result"], settled_repeat
+            assert runtime.events.list_events() == settled_events
+            assert adapters[0].start_calls == 1 and adapters[0].begin_turn_calls == 2
+            assert len(runtime.jobs.list_jobs()) == 2 and len(runtime.attempts.list_attempts()) == 1
+            assert runtime.events.get_event_by_command_id(before.command_id) == before
             assert "operation_key" not in consume_request and second["data"]["operation_key"] is None
             path = os.environ.get("S34_TURN_FIXTURE_OUTPUT")
             if path:
@@ -110,7 +136,12 @@ def test_signed_consumed_parent_second_turn_original_read_and_no_replay(tmp_path
                             "inert private kernel peer forwarding actual frame", "inert physical native provider"]),
                         stream,ensure_ascii=False,sort_keys=True,indent=2)
         finally:
-            await cleanup(service)
+            finish_released.set()
+            try:
+                if dispatch_task is not None:
+                    await asyncio.wait_for(asyncio.shield(dispatch_task), 5)
+            finally:
+                await cleanup(service)
     asyncio.run(run())
 
 

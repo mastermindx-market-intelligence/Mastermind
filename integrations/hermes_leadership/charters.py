@@ -2,7 +2,7 @@
 from __future__ import annotations
 from control_plane.executive_responsibility import ResponsibilityIntent
 
-CHARTER_KEYS = ('meta_ceo', 'secretary', 'delivery', 'engineering', 'reliability',
+CHARTER_KEYS = ('meta_ceo', 'autonomy_ceo', 'secretary', 'delivery', 'engineering', 'reliability',
                 'product', 'intelligence', 'assurance', 'grok_adviser')
 
 # Immutable authoring data. Each call materializes a detached consumer view.
@@ -22,6 +22,14 @@ _ROWS = (
   ('Do not become the routine dispatcher or poll unchanged work.',
    'Do not expand spending, access or protected release authority through a role title.'),
   'Retain the qualified live baseline; stronger reasoning is task-derived and evaluated.'),
+ ('autonomy_ceo','CEO of AI-Native Autonomy','principal','coordinate',
+  'Own the autonomy stack end-to-end: Mastermind OS, fleet and pool architecture, Subagent and Capacity Fabric, Agent OS plane and harness integration.',
+  ('fabric capacity gap','pool or model coverage change request','harness or continuity integration commission','delegation routing violation'),
+  ('catalog-verified capacity statement','merged lane PR at the exact verified head','routing journal line per delegation'),
+  ('Do not promise a model without live catalog verification.',
+   'Do not self-route frontier capacity without recorded justification.',
+   'Coordinate with Meta-CEO before any hermes-agent mainline merge.'),
+  'Frontier judgment reserves apex capacity; bounded builds route per the model-routing law.'),
  ('secretary','Company Secretary / Chief of Staff','sub_orchestrator','coordinate',
   'Maintain intake, commitments, operational coordination and original-request follow-through.',
   ('authorized request','material result','decision request','deadline change'),

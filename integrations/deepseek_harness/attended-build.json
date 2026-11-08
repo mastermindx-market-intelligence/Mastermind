@@ -1,19 +1,19 @@
 {
   "schema": "mastermind.dsh_attended_build.v1",
   "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
-  "package_manifest_sha256": "387f5ba0e3e9d41fb5d228861456044945db16ae09332b6788bb0f2b20a438e9",
-  "app_config_sha256": "dcda64e50012369f59bef338afb9418ee18e11db709d11704f7d1ac73aa4e7b9",
+  "package_manifest_sha256": "79570a871965abfac1fc51ae538b302a5a79bd40b26c41a4f9f8010c9ebabaed",
+  "app_config_sha256": "61da053ca49ecf20b56325aae6ce5f622b47cae16ca4dad5f869b7f484719b50",
   "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
-  "native_client_build_sha256": "d3448c18d970361c3ef76d95929917c2bb5886aa3cb44a242567199988662a0d",
+  "native_client_build_sha256": "6d9529336be67e059e55b3727fd9fa6d2fe53a40ad9a1079deaac9f939ed84ad",
   "index_sha256": "0c37affd964c8819b210e02b5da8c600c2cfa03ee999fc3977a8809b2e8c74a0",
   "company_host_exports": {
     "./company-peer": {
       "file": "company-peer.js",
-      "sha256": "26100e77cdfeee7afb493f93f2eb7dec5e0aa594ca8caab5d0ae59ca8161f587"
+      "sha256": "8a00870eea70d3e89de1bff988731409700e0b9ae6c2003ee2f8a528bc24ea5b"
     },
     "./executive-read-port": {
       "file": "executive-read-port.js",
-      "sha256": "d3f328cec83fa8e189b9227f06be895f38403457063ed7038d43b90660530e1f"
+      "sha256": "7d11c2d521b4f41a0ff49c292476d05ac6c6086facdffe37bfcbafc4507f7eb5"
     }
   },
   "native_session_patch": {
@@ -33,14 +33,14 @@
     "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
     "receipt_sha256": "8931fd1764e7887b76c9ea1c0d07cd9ce6379dc069c75516d066ed509cfefeef"
   },
-  "evidence_commit": "4f4984822a5aea458a10827abca6bf387814ce00",
-  "custody": "Source-linked C41 complete staged attended package and original Worker entry, with seven build gates and full check-only closure qualification; no native final-layout materialization, installation or production acceptance claimed.",
+  "evidence_commit": "11eea754d6a93f275559f8cff3b6bcadb0dd162a",
+  "custody": "Source-linked C43 complete staged attended package and original Worker entry; seven build gates, full check-only closure and a finite test-owned closed-Session answer read through the compiled entry passed. No final Worker materialization, installation or production acceptance claimed.",
   "installed": false,
   "provider_calls": 0,
   "native_worker": {
     "schema": "mastermind.dsh_native_worker_entry/v1",
     "entry": "native_worker.mjs",
-    "sha256": "e47e35060596ee9fe4e7bc4715dfaff32be22d22a4cbd394db72daabe8ea5469",
+    "sha256": "3763d2269fdb19b29ead9b52b23d98c93550a6d15efee81d681e6d1552909642",
     "agent_name": "deepseek-harness-acp",
     "agent_version": "0.0.1",
     "model_provider": "deepseek-account"

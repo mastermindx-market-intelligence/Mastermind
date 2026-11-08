@@ -10,7 +10,8 @@ from tests.test_os_public_edge_transition import NATIVE_PATHS
 ROUTE = '/workspace/byok/roles/current'
 
 def test_byok_read_has_one_exact_get_and_no_post_or_source_branch():
-    assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + (ROUTE,)
+    assert edge.PRE_MODEL_CONFIGURATION_GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + (ROUTE,)
+    assert edge.GET_ROUTES == edge.PRE_MODEL_CONFIGURATION_GET_ROUTES + ("/workspace/resources/models/current",)
     assert edge.PRE_PROJECT_EXECUTION_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES
     assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_PROJECT_EXECUTION_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
@@ -18,10 +19,10 @@ def test_byok_read_has_one_exact_get_and_no_post_or_source_branch():
         "/os/executive/direct-native/correction",
     )
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
-    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
+    assert (edge.PRE_MODEL_CONFIGURATION_GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert ROUTE not in edge.POST_ROUTES + edge.SOURCE_POST_ROUTES
     assert (edge.PRE_BYOK_ROLES_GET_ROUTES, edge.PRE_BYOK_ROLES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
-    assert len(edge.TRANSITION_ROUTE_PROFILES) == 33
+    assert len(edge.TRANSITION_ROUTE_PROFILES) == 34
     text = edge.render(manifest(),49152)
     get = text.split('    @get {',1)[1].split('    }',1)[0]
     assert 'method GET' in get and get.count(ROUTE) == 1

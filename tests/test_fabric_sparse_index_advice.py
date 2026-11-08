@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 import test_fabric_native_security_composition_20261018 as composed
+from tests.native107_source_fixtures import historical_manifest_and_inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT_INVENTORY_SHA256 = "fc3347a3633cd9127e93a77d23e6b60eab4b8dddad632f87dd7dad5a57886dc5"
@@ -27,15 +28,34 @@ def builder():
     return value
 
 
-def test_executor_adds_only_the_one_command_scoped_setting(tmp_path):
-    # Reconstruct the immutable710 preimage with the appended fixture delta;
-    # no unmerged branch or historical Git object is needed in later CI.
+def _advice_epoch_executor(tmp_path):
+    """Reconstruct the exact retained advice delta from qualified inverses."""
+    b = builder()
     target = tmp_path / "remote_sub_exec.py"
     target.write_bytes((ROOT / EXECUTOR).read_bytes())
-    composed.donor_contract._git(tmp_path, "apply", "--reverse", str(composed.SPARSE_INDEX_ADVICE_FORWARD_PATCH))
-    assert hashlib.sha256(target.read_bytes()).hexdigest() == composed.PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA
-    old = ast.parse(target.read_bytes())
-    new = ast.parse((ROOT / EXECUTOR).read_text())
+    assert hashlib.sha256(target.read_bytes()).hexdigest() == composed.CURRENT_COMPOSED_SHA
+    for patch, extra, expected in [
+        (composed.SPARSE_PREFLIGHT_PATCH, (), composed.APPLICATION_COMPOSED_SHA),
+        (composed.APPLICATION_CARRIER_FORWARD_PATCH, ("--unidiff-zero",), composed.FINAL_COMPOSED_SHA),
+    ]:
+        composed.donor_contract._git(tmp_path, "apply", *extra, "--reverse", "--check", str(patch))
+        composed.donor_contract._git(tmp_path, "apply", *extra, "--reverse", str(patch))
+        assert hashlib.sha256(target.read_bytes()).hexdigest() == expected
+    old = target.read_bytes()
+    assert hashlib.sha256(old).hexdigest() == b.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+    patch = ROOT / "tests/fixtures/fabric-native-sparse-index-advice-forward.patch"
+    assert hashlib.sha256(patch.read_bytes()).hexdigest() == "4ad04e658b51d3e6fdba7a9d13227810ea6bdf541345344647cab2b9799e62a7"
+    composed.donor_contract._git(tmp_path, "apply", "--check", str(patch))
+    composed.donor_contract._git(tmp_path, "apply", str(patch))
+    new = target.read_bytes()
+    historical, _ = historical_manifest_and_inventory()
+    assert hashlib.sha256(new).hexdigest() == historical["ext/remote_sub_exec.py"] == b.SPARSE_INDEX_ADVICE_EXECUTOR_SHA256
+    return old, new
+
+
+def test_executor_adds_only_the_one_command_scoped_setting(tmp_path):
+    old_raw, new_raw = _advice_epoch_executor(tmp_path)
+    old, new = ast.parse(old_raw), ast.parse(new_raw)
     def settings(tree):
         return next(n for n in tree.body if isinstance(n, ast.Assign)
                     and any(isinstance(t, ast.Name) and t.id == "_SPARSE_GIT_SETTINGS" for t in n.targets))
@@ -108,9 +128,9 @@ def test_post_observation_config_identity_still_refuses(repository, monkeypatch)
     assert f.calls == []
 
 
-def test_exact107_current_bytes_and_historical_parent_are_separate():
+def test_exact107_current_bytes_and_historical_parent_are_separate(tmp_path):
     b = builder()
-    current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    current, historical_inventory = historical_manifest_and_inventory()
     parent = b.before_sparse_index_advice(current)
     parent_raw = (json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()
     assert hashlib.sha256(parent_raw).hexdigest() == b.SPARSE_INDEX_ADVICE_PARENT_SHA256
@@ -126,10 +146,15 @@ def test_exact107_current_bytes_and_historical_parent_are_separate():
     # Historical H/Q guards are not widened to accept the new source epoch.
     with pytest.raises(ValueError): b.before_qualification_quiescence(current)
     with pytest.raises(ValueError): b.before_host_pull_integrity(current)
-    new = json.loads((ROLLOUT / "native-source-inventory.json").read_bytes())
+    live = json.loads((ROLLOUT / "native-source-inventory.json").read_bytes())
+    live_row = live["files"]["ext/remote_sub_exec.py"]
+    assert live_row["sha256"] == hashlib.sha256((ROOT / EXECUTOR).read_bytes()).hexdigest()
+    assert live_row["bytes"] == len((ROOT / EXECUTOR).read_bytes())
+    _, historical_executor = _advice_epoch_executor(tmp_path)
+    new = historical_inventory
     row = new["files"]["ext/remote_sub_exec.py"]
-    assert row["sha256"] == hashlib.sha256((ROOT / EXECUTOR).read_bytes()).hexdigest()
-    assert row["bytes"] == len((ROOT / EXECUTOR).read_bytes())
+    assert row["sha256"] == hashlib.sha256(historical_executor).hexdigest()
+    assert row["bytes"] == len(historical_executor)
     row["sha256"] = b.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
     row["bytes"] = PARENT_EXECUTOR_BYTES
     assert hashlib.sha256((json.dumps(new, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == PARENT_INVENTORY_SHA256
@@ -137,7 +162,7 @@ def test_exact107_current_bytes_and_historical_parent_are_separate():
 
 @pytest.mark.parametrize("drift", ["extra", "missing", "foreign", "old-broker", "old-host", "executor-byte"])
 def test_mixed_or_foreign107_never_reuses_advice_qualification(drift):
-    b = builder(); current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    b = builder(); current, _ = historical_manifest_and_inventory()
     if drift == "extra": current["ext/foreign.py"] = "f" * 64
     elif drift == "missing": del current["pool"]
     elif drift == "foreign": current["pool"] = "f" * 64
@@ -156,3 +181,95 @@ def test_new_forward_proof_rejects_unrelated_byte_drift(tmp_path, monkeypatch):
         return raw + b"\n# foreign byte\n" if path == source else raw
     monkeypatch.setattr(Path, "read_bytes", drift)
     with pytest.raises(AssertionError): composed._composition(tmp_path)
+
+
+def test_go_normalization_preserves_current_and_historical_capture_boundaries():
+    b = builder()
+    current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    legacy, _ = historical_manifest_and_inventory()
+    parent = b.before_sparse_index_advice(legacy)
+    current_capture = {name: current["ext/" + name] for name in b.GO_APPLICATION_DEPENDENCIES}
+    legacy_capture = {name: legacy["ext/" + name] for name in b.GO_APPLICATION_DEPENDENCIES}
+    before = (dict(current), dict(legacy), dict(parent))
+    b.validate_go_base_manifest(current, current_capture)
+    b.validate_go_base_manifest(legacy, legacy_capture)
+    b.validate_go_base_manifest(parent, legacy_capture)
+    assert b.before_sparse_index_advice(current) == current
+    with pytest.raises(ValueError):
+        b.validate_go_base_manifest(current, legacy_capture)
+    with pytest.raises(ValueError):
+        b.validate_go_base_manifest(legacy, current_capture)
+    assert (current, legacy, parent) == before
+
+
+@pytest.mark.parametrize("member", [
+    "ext/remote_sub_exec.py", "ext/host_pull.sh",
+    "ext/host_pull_backend.py", "ext/lease_broker.py",
+])
+def test_go_advice_inverse_cannot_erase_original_input_drift(member):
+    b = builder()
+    legacy, _ = historical_manifest_and_inventory()
+    capture = {name: legacy["ext/" + name] for name in b.GO_APPLICATION_DEPENDENCIES}
+    b.validate_go_base_manifest(legacy, capture)
+    mutated = dict(legacy)
+    mutated[member] = "0" * 64
+    before = dict(mutated)
+    with pytest.raises(ValueError):
+        b.validate_go_base_manifest(mutated, capture)
+    assert mutated == before
+
+
+def test_current_complete_old_host_tuple_is_the_declared_http_parent():
+    b = builder()
+    current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    digest = lambda value: hashlib.sha256(
+        (json.dumps(value, sort_keys=True, indent=2) + "\n").encode()
+    ).hexdigest()
+    assert digest(current) == "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
+    parent = dict(current)
+    parent.update(b.HOST_PULL_INTEGRITY_PREIMAGES)
+    assert digest(parent) == b.HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256
+    assert digest(parent) == "b5ceff4116f5407810bfe755151de69ca0ce4fe3276b3e76a10a93e13909a68c"
+    assert b.before_host_pull_integrity(parent) == parent
+    capture = {name: current["ext/" + name] for name in b.GO_APPLICATION_DEPENDENCIES}
+    before = dict(parent)
+    b.validate_go_base_manifest(parent, capture)
+    normalized = b.normalize_application_carrier_base_manifest(parent)
+    assert normalized == b.normalize_application_carrier_base_manifest(current)
+    assert digest(normalized) == b.APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256
+    assert digest(normalized) == "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
+    assert parent == before
+
+
+@pytest.mark.parametrize("case", [
+    "one-old-host", "two-old-hosts", "foreign-host", "foreign-executor",
+    "old-broker", "foreign-broker", "missing-host", "extra-member",
+])
+def test_current_source_cohort_refuses_partial_or_foreign_tuples(case):
+    b = builder()
+    current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    capture = {name: current["ext/" + name] for name in b.GO_APPLICATION_DEPENDENCIES}
+    b.validate_go_base_manifest(current, capture)
+    mutated = dict(current)
+    hosts = sorted(b.HOST_PULL_INTEGRITY_PREIMAGES)
+    if case in {"one-old-host", "two-old-hosts"}:
+        count = 1 if case == "one-old-host" else 2
+        for name in hosts[:count]:
+            mutated[name] = b.HOST_PULL_INTEGRITY_PREIMAGES[name]
+    elif case == "foreign-host":
+        mutated[hosts[0]] = "0" * 64
+    elif case == "foreign-executor":
+        mutated["ext/remote_sub_exec.py"] = "0" * 64
+    elif case == "old-broker":
+        legacy, _ = historical_manifest_and_inventory()
+        mutated["ext/lease_broker.py"] = legacy["ext/lease_broker.py"]
+    elif case == "foreign-broker":
+        mutated["ext/lease_broker.py"] = "0" * 64
+    elif case == "missing-host":
+        del mutated[hosts[0]]
+    elif case == "extra-member":
+        mutated["ext/unreviewed-member.py"] = "0" * 64
+    before = dict(mutated)
+    with pytest.raises(ValueError):
+        b.validate_go_base_manifest(mutated, capture)
+    assert mutated == before

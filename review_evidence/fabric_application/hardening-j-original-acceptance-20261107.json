@@ -1,0 +1,36 @@
+{
+  "schema": "fabric-original-package-acceptance.v1",
+  "root_id": "fabric-application-integration-20261104-sol",
+  "run_id": "fabric-app-j-native-cohort-20261107-01",
+  "status": {
+    "acceptance_reason": "VALIDATED_OUTCOME",
+    "acceptance_state": "ACCEPTED",
+    "accepted": true,
+    "accepted_by": "deterministic",
+    "parent_run_id": "fabric-application-integration-20261104-sol",
+    "rc": 0,
+    "result_available": true,
+    "result_bytes": 16860,
+    "root_id": "fabric-application-integration-20261104-sol",
+    "run_id": "fabric-app-j-native-cohort-20261107-01",
+    "schema": "mastermind.fabric_task_status.v1",
+    "signal": "ok",
+    "state": "TERMINAL",
+    "continuation": {
+      "requested_run_id": "fabric-app-j-native-cohort-20261107-01",
+      "effective_run_id": "fabric-app-j-native-cohort-20261107-01",
+      "prior_attempts": [],
+      "controller_return": "RECORDED",
+      "controller_reason": "terminal_return"
+    }
+  },
+  "reviewed_response_sha256": "14499ef9285da444b5801a50ded0615a4c114ff71750ae39a09bc4ed800f03df",
+  "verification_summary": "deterministic_test_evidence",
+  "legacy_acceptance_not_atomic_attestation": true,
+  "patch_sha256": "a71bac2d11eefbc5b56b4b72dab432279d7e2c6de860bfbc0bf83443aaf0c307",
+  "canonical_original_source": "37061f19118ab704f04fd55e8f895409a43c75ce",
+  "root_reproduction": "review_evidence/fabric_application/hardening-j-native-original-return-20261107.json",
+  "composed_proof": "review_evidence/fabric_application/hardening-j-sparse-package-composition-20261107.json",
+  "no_worker_replay": true,
+  "no_runtime_activation": true
+}

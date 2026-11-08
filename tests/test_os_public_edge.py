@@ -67,6 +67,7 @@ def test_authenticated_native_and_control_room_routes_are_exact_and_method_scope
         "/workspace/mission-result/current",
         "/workspace/native-draft-identity/current",
         "/workspace/byok/roles/current",
+        "/workspace/resources/models/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
     }

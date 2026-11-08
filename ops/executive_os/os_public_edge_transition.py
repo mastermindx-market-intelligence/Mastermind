@@ -33,6 +33,7 @@ from ops.executive_os.os_public_edge import (
     COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES, GET_ROUTES, HOST, LEGACY_GET_ROUTES,
     LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTES, MCP_ROUTES,
     NATIVE_CONVERSATION_POST_ROUTES, NATIVE_MAX_BODY,
+    PRE_MODEL_CONFIGURATION_GET_ROUTES, PRE_MODEL_CONFIGURATION_POST_ROUTES,
     POST_ROUTES, SOURCE_MAX_BODY, SOURCE_POST_ROUTES, TRANSITION_ROUTE_PROFILES,
     asset_routes,
 )
@@ -338,8 +339,14 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...], relay_port: int
     else:
         mcp_profile = "absent"
     if has_native:
-        current_profile = TRANSITION_ROUTE_PROFILES.index((GET_ROUTES, POST_ROUTES))
-        if (not has_source or current_profile not in get_matches.intersection(post_matches)
+        native_profiles = {
+            TRANSITION_ROUTE_PROFILES.index(profile)
+            for profile in (
+                (PRE_MODEL_CONFIGURATION_GET_ROUTES, PRE_MODEL_CONFIGURATION_POST_ROUTES),
+                (GET_ROUTES, POST_ROUTES),
+            )
+        }
+        if (not has_source or not native_profiles.intersection(get_matches, post_matches)
                 or mcp_profile not in {"absent", "complete"}):
             raise ValueError("OS edge transition native profile incomplete")
     return {"inner": path, "get": get_path, "post": post_path, "source": source_path,
