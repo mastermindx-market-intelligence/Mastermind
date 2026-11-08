@@ -1,7 +1,7 @@
 """Native Supervisor consumer with real Runtime and explicit inert host seams.
 
-The candidate profile is not enabled on disk. Positive cases supply test-only
-config projection, original-input custody and provider observations. C13 covers
+Positive cases use the unpatched canonical policy and config projection.
+Original-input custody and provider observations remain inert. C13 covers
 the actual nominal input source; these cases exercise its Supervisor consumer.
 """
 import asyncio
@@ -12,7 +12,6 @@ import pytest
 
 from control_plane import executive_runtime as rt
 from control_plane import fresh_conversation_admission as input_owner
-from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.executive_operator_supervisor import (
     ExecutiveOperatorSupervisor, ExecutiveOperatorSupervisorError, RetainedNativeOperatorSession,
@@ -28,12 +27,6 @@ MESSAGE = "  原生对话\nKeep the exact input.  "
 
 def _case(tmp_path, monkeypatch):
     f = _started_native(tmp_path, monkeypatch, claim_only=True, worktree=tmp_path / "workspace")
-    registry = ExecutionCapabilityRegistry.load()
-    declared = replace(registry.profiles[f.job.constraints["execution_profile_id"]], enabled=False)
-    projection = declared.dsh_native_config_projection()
-    # Explicit inert compiler fixture. Production still rejects enabled native
-    # policy until its actual observation/authority producer is qualified.
-    monkeypatch.setattr(type(declared), "dsh_native_config_projection", lambda self: dict(projection))
     adapters, inputs = [], []
     class InertNative(_NativeTurnAdapter, _ActiveAdapter, RemoteOperatorHarnessAdapter):
         def __init__(self, loader):

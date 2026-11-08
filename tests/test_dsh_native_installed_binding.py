@@ -20,24 +20,12 @@ ALIAS = "dsh.native.conversation"
 
 
 def native_binding_case(tmp_path, monkeypatch, principal=None):
-    """Real temporary policy, router, existing registry, and binding owner."""
-    capability = json.loads((ROOT / "config/executive_agent_capabilities.json").read_bytes())
-    candidate = json.loads((ROOT / "config/executive_dsh_native_conversation_capabilities.json").read_bytes())
-    capability["profiles"][PROFILE] = {**candidate["profiles"][PROFILE], "enabled": True}
-    capability_path = tmp_path / "native-inert-capability-policy.json"
-    capability_path.write_text(json.dumps(capability))
-    routes = json.loads((ROOT / "config/executive_worker_routes.json").read_bytes())
-    routes["providers"]["acp"] = dict(adapter_id="dsh-native-acp", enabled=True, autonomous_allowed=True)
-    routes["model_aliases"][ALIAS] = dict(provider_alias="acp", execution_profile_id=PROFILE,
-        model="deepseek-chat", effort="default", cost_class="small", capabilities=["read"], worker_eligible=True)
-    route_path = tmp_path / "native-inert-routes.json"
-    route_path.write_text(json.dumps(routes))
-    router = ModelRouter.load(route_path, capability_policy_path=capability_path)
-    original_router, original_registry = ModelRouter.load, ExecutionCapabilityRegistry.load
-    monkeypatch.setattr(ModelRouter, "load", classmethod(
-        lambda cls, *a, **kw: router if not a and not kw else original_router(*a, **kw)))
-    monkeypatch.setattr(ExecutionCapabilityRegistry, "load", classmethod(
-        lambda cls, *a, **kw: router.capability_registry if not a and not kw else original_registry(*a, **kw)))
+    """Default canonical policy/router and the original temporary Worker registry.
+
+    No policy loader is patched: Runtime, Supervisor and binding consumers must
+    agree on the same source. Physical host/provider fixtures remain inert.
+    """
+    router = ModelRouter.load()
     values = case(tmp_path, principal)
     service, runtime = values[:2]
     alias = router.model_aliases[ALIAS]
@@ -106,8 +94,10 @@ def test_bound_source_withdraws_on_original_owner_or_policy_drift(tmp_path, monk
     elif drift == "source":
         service._native_conversation_binding_source = object()
     elif drift == "route":
+        monkeypatch.setattr(ModelRouter, "load", classmethod(lambda cls: fixture.router))
         fixture.router.model_aliases[ALIAS] = dataclasses.replace(fixture.router.model_aliases[ALIAS], model="different-model")
     else:
+        monkeypatch.setattr(ModelRouter, "load", classmethod(lambda cls: fixture.router))
         registry = fixture.router.capability_registry
         registry.profiles[PROFILE] = dataclasses.replace(registry.profiles[PROFILE], enabled=False)
     with pytest.raises((ValueError, RuntimeError)):

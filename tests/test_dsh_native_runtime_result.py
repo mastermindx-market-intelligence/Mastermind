@@ -1,7 +1,7 @@
-"""Real Runtime transactions with an explicit inert, test-only native policy.
+"""Real Runtime transactions using the unpatched canonical native policy.
 
-The production candidate remains disabled; no installed producer, account grant,
-process, or provider effect is represented by this state-plane fixture.
+Physical installation, account, process and provider observations remain inert.
+The separate candidate stays disabled; this fixture does not prove installation.
 """
 from dataclasses import replace
 from types import SimpleNamespace
@@ -20,21 +20,15 @@ from control_plane.operator_harness_contract import (
     WorkspaceIdentity,
 )
 from integrations.deepseek_harness.native_protocol import NativeClaim, NativeResult, NativeTerminal
-from test_dsh_native_runtime_binding import _root, CANDIDATE, PROFILE
+from test_dsh_native_runtime_binding import _root, PROFILE
 from test_interactive_tx5_runtime import _attestation
 
 
 def _started_native(tmp_path, monkeypatch, *, claim_only=False, capacity_join=None, worktree=None, unclaimed=False):
-    declaration = ExecutionCapabilityRegistry.load(CANDIDATE)
-    declared = declaration.profiles[PROFILE]
+    registry = ExecutionCapabilityRegistry.load()
+    declared = registry.resolve(PROFILE)
     manifest = declared.capability_manifest(harness_binary_digest="c"*64)
-    # Explicit inert fixture input at the existing load seam; never written to policy.
-    enabled_fixture = replace(declared, enabled=True,
-        profile_digest=hashlib.sha256(b"DSH native Runtime TEST ONLY profile").hexdigest())
-    registry = replace(declaration, profiles={PROFILE: enabled_fixture},
-        policy_digest=hashlib.sha256(b"DSH native Runtime TEST ONLY policy").hexdigest())
     runtime, root = _root(tmp_path, native_registry=registry, worktree=worktree)
-    monkeypatch.setattr(ExecutionCapabilityRegistry, "load", classmethod(lambda cls, *a, **k: registry))
     job = runtime.jobs.create_interactive_operator(root.job_id,
         command_id=f"coo-cycle:{root.job_id}:create-interactive:0")
     constraints = job.constraints

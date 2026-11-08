@@ -259,14 +259,19 @@ it("global New conversation uses the shared manifest-free owner and exact origin
     work_ref:workRef,operation_key:preview.operation_key,
   });
   fireEvent.click(open);
-  const recorded=await screen.findByRole('button',{name:'Read recorded conversation'});
-  await waitFor(()=>{expect(recorded).toHaveProperty('disabled',false);fireEvent.click(recorded);});
-  fireEvent.click(await screen.findByRole('button',{name:'Read reply'}));
+  const record=await screen.findByRole('region',{name:'Recorded conversation'});
+  const recorded=within(record).getByRole('button',{name:'Read recorded conversation'});
+  await waitFor(()=>expect(recorded).toHaveProperty('disabled',false));
+  fireEvent.click(recorded);
+  const reply=await within(record).findByRole('button',{name:'Read reply'});
+  await waitFor(()=>expect(reply).toHaveProperty('disabled',false));
+  fireEvent.click(reply);
   // Markdown omits its final paragraph newline; the content owner still checks
   // the exact source digest and every original fragment at the transport seam.
   expect(freshFixture.answer.endsWith('\n')).toBe(true);
-  await screen.findByText((_text,node)=>node?.classList.contains('source-markdown')===true&&
-    node.textContent===freshFixture.answer.slice(0,-1));
+  await waitFor(()=>{
+    expect(record.querySelector('.source-markdown')?.textContent).toBe(freshFixture.answer.slice(0,-1));
+  },{container:record,timeout:5_000});
   expect(f.invoke.mock.calls.filter(([name,args])=>name==='executive_project_conversations_read'&&
     args?.operation==='fresh_read'&&(args.arguments as any)?.content)).toHaveLength(freshFixture.fragments.length);
   expect(f.freshCalls("create")).toHaveLength(1);

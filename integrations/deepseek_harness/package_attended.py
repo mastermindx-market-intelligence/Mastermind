@@ -575,8 +575,89 @@ def export_publication(*, release, source_repo, source_sha, out):
             "artifact_digest": publication.digest(raw), "installed": False}
 
 
+
+def native_attestation_publication(*, worker_config, worker_config_sha256,
+        source_repo, source_sha, reconcile=False, expected_receipt_sha256=None):
+    """Finite receipt edge for one already-enrolled Worker; never activation.
+
+    All installed coordinates come from the original root-pinned configuration.
+    This root observation does not impersonate the Worker's realm/account check.
+    """
+    from control_plane import native_provider_attestation as attestation
+    from control_plane.codex_provider_realm import _native_read_config, _native_enrollment
+    from scripts import executive_os_phase1c_worker as worker
+    if os.geteuid() != attestation._ROOT_UID:
+        raise ValueError("Native receipt publication requires root")
+    path, source_repo = exact_path(worker_config), exact_path(source_repo)
+    original = _native_read_config(path, worker_config_sha256)
+    if (original.get("schema_version") != worker.NATIVE_CONFIG_SCHEMA_VERSION
+            or original.get("native_provider") != "deepseek"
+            or worker._load_config(path, require_root_owner=True) != original):
+        raise ValueError("Original native Worker configuration differs")
+    enrollment, slot = _native_enrollment(original)
+    config_observation = attestation._file_observation(path, content=True)
+    if config_observation["sha256"] != worker_config_sha256:
+        raise ValueError("Original native Worker configuration changed")
+    binary = Path(original["deepseek_node_binary"])
+    node_observation = attestation._file_observation(binary, content=True)
+    if node_observation["sha256"] != enrollment["provider_binary_sha256"]:
+        raise ValueError("Native Node differs from original enrolled binary")
+    def current():
+        if (_native_read_config(path, worker_config_sha256) != original
+                or attestation._runtime_identity(path) != config_observation["identity"]
+                or attestation._runtime_identity(binary) != node_observation["identity"]):
+            raise ValueError("Original native Worker or Node identity changed")
+    current()
+    arguments = dict(receipt_path=Path(original["deepseek_attestation_receipt"]),
+        binary_path=binary, release=Path(original["deepseek_release"]),
+        source_repo=source_repo, source_sha=source_sha,
+        expected_owner_gid=slot.worker_gid,
+        allowed_versions=frozenset(original["allowed_node_versions"]), current=current)
+    if reconcile:
+        result = attestation.reconcile_native_deepseek_attestation(**arguments,
+            expected_receipt_sha256=expected_receipt_sha256)
+    else:
+        if expected_receipt_sha256 is not None:
+            raise ValueError("An expected existing receipt is reconciliation input only")
+        result = attestation.publish_native_deepseek_attestation(**arguments)
+    try:
+        current()
+    except Exception as exc:
+        if not reconcile and result.get("effect_state") == "APPLIED":
+            error = attestation.NativeAttestationPublicationUnknown(
+                "published native receipt requires original Worker reconciliation")
+            error.evidence = {**result, "effect_state": "EFFECT_UNKNOWN",
+                "worker_config_sha256": worker_config_sha256}
+            raise error from exc
+        raise
+    return {**result, "worker_config_sha256": worker_config_sha256,
+            "worker_identity_observation": "NOT_OBSERVED",
+            "account_eligibility": "NOT_OBSERVED"}
+
+
 if __name__ == "__main__":
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] in {"publish-native-attestation", "reconcile-native-attestation"}:
+        root = HERE.parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        parser = argparse.ArgumentParser(description="Publish/reconcile the original native Worker receipt")
+        for name in ("worker-config", "worker-config-sha256", "source-repo", "source-sha"):
+            parser.add_argument("--" + name, required=True)
+        reconcile = sys.argv[1] == "reconcile-native-attestation"
+        if reconcile:
+            parser.add_argument("--expected-receipt-sha256")
+        from control_plane.native_provider_attestation import (
+            NativeAttestationPublicationPending, NativeAttestationPublicationUnknown)
+        try:
+            result = native_attestation_publication(
+                **vars(parser.parse_args(sys.argv[2:])), reconcile=reconcile)
+        except (NativeAttestationPublicationPending, NativeAttestationPublicationUnknown) as exc:
+            print(json.dumps({"ok": False, "state": type(exc).__name__,
+                **getattr(exc, "evidence", {})}, sort_keys=True))
+            raise SystemExit(70)
+        print(json.dumps(result, sort_keys=True))
+        raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "export-publication":
         parser = argparse.ArgumentParser(description="Qualify and export native public assets")
         for name in ("release", "source-repo", "source-sha", "out"):

@@ -708,3 +708,243 @@ def load_native_deepseek_attestation(receipt_path: Path, *, expected_binary_path
     except (OSError, ProviderRealmError, FilesystemSecurityError, KeyError, TypeError,
             UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise NativeAttestationError("native DeepSeek attestation is unavailable or invalid") from exc
+
+
+class NativeAttestationPublicationPending(NativeAttestationError):
+    """An exact private candidate remains; canonical publication was not attempted."""
+
+
+class NativeAttestationPublicationUnknown(RuntimeError):
+    """Reconcile the original receipt/stage; never rebuild or retry the publication."""
+
+
+def _deepseek_publication_names(receipt_path, release):
+    receipt = _deepseek_path(str(receipt_path))
+    if receipt == Path("/") or receipt.is_relative_to(release):
+        _fail("native receipt must be outside the immutable package")
+    name = "." + receipt.name + ".native-attestation.stage"
+    if len(os.fsencode(name)) > 255:
+        _fail("native receipt stage name exceeds its bound")
+    return receipt, receipt.parent / name
+
+
+def _deepseek_publication_parent(receipt):
+    """Qualify once, then hold a readable descriptor across our own directory writes."""
+    import contextlib
+    import fcntl
+
+    @contextlib.contextmanager
+    def held():
+        fd = -1
+        try:
+            # _native_open is a read snapshot: exit before changing this directory.
+            with _native_open(receipt.parent, directory=True) as (qualified, before):
+                fd = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                             | os.O_CLOEXEC, dir_fd=qualified)
+                if _identity(os.fstat(fd)) != _identity(before):
+                    _fail("native receipt parent changed during qualification")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            def current():
+                actual, named = os.fstat(fd), receipt.parent.lstat()
+                stable = lambda i: (i.st_dev, i.st_ino, i.st_mode, i.st_uid, i.st_gid)
+                if stable(actual) != stable(before) or stable(named) != stable(before):
+                    _fail("native receipt parent identity changed")
+                _check_entry(receipt.parent, fd, actual, directory=True)
+            current()
+            yield fd, current
+            current()
+        finally:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+    return held()
+
+
+def _deepseek_receipt_entry(parent_fd, name):
+    try:
+        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def publish_native_deepseek_attestation(*, receipt_path: Path, binary_path: Path,
+        release: Path, source_repo: Path, source_sha: str, expected_owner_gid: int,
+        allowed_versions: frozenset[str], current=None) -> dict:
+    """Publish one root-qualified receipt for the existing Worker, without activation.
+
+    The package owner supplies its original pinned Worker-config predicate.
+    A pending stage is retained, not overwritten, rebuilt or silently adopted.
+    """
+    if os.geteuid() != _ROOT_UID:
+        _fail("native attestation producer requires root")
+    release = _deepseek_path(str(release))
+    receipt, stage = _deepseek_publication_names(receipt_path, release)
+    if (type(expected_owner_gid) is not int or expected_owner_gid <= 0
+            or type(allowed_versions) is not frozenset or not 1 <= len(allowed_versions) <= 4
+            or any(type(v) is not str or re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", v) is None
+                   for v in allowed_versions)
+            or current is not None and not callable(current)):
+        _fail("native receipt publication configuration is invalid")
+    def config_current():
+        if current is not None and current() is not None:
+            _fail("original native Worker configuration changed")
+    created = attempted = False
+    raw = staged = None
+    stage_fd = -1
+    try:
+        with _deepseek_publication_parent(receipt) as (parent_fd, parent_current):
+            if any(_deepseek_receipt_entry(parent_fd, p.name) is not None for p in (receipt, stage)):
+                _fail("original native receipt or private stage requires reconciliation")
+            config_current()
+            document = build_native_deepseek_attestation(binary_path=binary_path,
+                release=release, source_repo=source_repo, source_sha=source_sha)
+            _deepseek_shape(document)
+            if document["node"]["version"] not in allowed_versions:
+                _fail("native Node version differs from original Worker configuration")
+            raw = _canonical(document) + b"\n"
+            if not 0 < len(raw) <= _LIMIT:
+                _fail("native receipt publication exceeds its bound")
+            parent_current()
+            config_current()
+            stage_fd = os.open(stage.name, os.O_RDWR | os.O_CREAT | os.O_EXCL
+                               | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent_fd)
+            created = True
+            os.fchown(stage_fd, _ROOT_UID, expected_owner_gid)
+            os.fchmod(stage_fd, 0o600)
+            pending = memoryview(raw)
+            while pending:
+                count = os.write(stage_fd, pending)
+                if count <= 0:
+                    raise OSError("short native receipt write")
+                pending = pending[count:]
+            os.fchmod(stage_fd, 0o440)
+            os.fsync(stage_fd)
+            staged = os.fstat(stage_fd)
+            if _identity(_deepseek_receipt_entry(parent_fd, stage.name)) != _identity(staged):
+                _fail("native receipt stage inode changed")
+            _check_entry(stage, stage_fd, staged)
+            os.lseek(stage_fd, 0, os.SEEK_SET)
+            if _read(stage_fd, _LIMIT) != raw:
+                _fail("native receipt stage bytes differ")
+            prepared = load_native_deepseek_attestation(stage,
+                expected_binary_path=binary_path, expected_release=release,
+                expected_owner_gid=expected_owner_gid, allowed_versions=allowed_versions)
+            prepared.require_current()
+            from ops.executive_os.install_source_policy import validate_acceptance_source
+            if validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha) != document["qualification"]["source_tree"]:
+                _fail("native protected source changed before receipt publication")
+            config_current()
+            parent_current()
+            if _deepseek_receipt_entry(parent_fd, receipt.name) is not None:
+                _fail("native receipt destination appeared before publication")
+            # Rejoin the exact staged capability after every external guard:
+            # none may replace the bytes or package being promoted.
+            prepared.require_current()
+            if _identity(os.fstat(stage_fd)) != _identity(_deepseek_receipt_entry(parent_fd, stage.name)):
+                _fail("native receipt stage changed before publication")
+            from ops.executive_os.capacity_host_artifacts import _rename_exclusive
+            attempted = True
+            _rename_exclusive(parent_fd, stage.name, parent_fd, receipt.name)
+            os.fsync(parent_fd)
+            actual = _deepseek_receipt_entry(parent_fd, receipt.name)
+            if (actual is None or (actual.st_dev, actual.st_ino) != (staged.st_dev, staged.st_ino)
+                    or _deepseek_receipt_entry(parent_fd, stage.name) is not None):
+                _fail("native receipt publication inode is unconfirmed")
+            installed = load_native_deepseek_attestation(receipt,
+                expected_binary_path=binary_path, expected_release=release,
+                expected_owner_gid=expected_owner_gid, allowed_versions=allowed_versions)
+            installed.require_current()
+            if installed.source_digest != hashlib.sha256(raw).hexdigest():
+                _fail("native receipt publication readback differs")
+            config_current()
+            parent_current()
+            installed.require_current()
+            if _deepseek_receipt_entry(parent_fd, stage.name) is not None:
+                _fail("native receipt private stage reappeared after publication")
+            return {"schema": "mastermind.dsh_native_attestation_publication/v1",
+                "state": "PUBLISHED", "effect_state": "APPLIED", "receipt_path": str(receipt),
+                "receipt_sha256": installed.source_digest, "source_sha": installed.source_sha,
+                "worker_gid": expected_owner_gid, "worker_observation": "NOT_OBSERVED",
+                "service_activated": False, "provider_calls": 0}
+    except BaseException as exc:
+        if attempted or created:
+            error = (NativeAttestationPublicationUnknown(
+                "original native receipt publication requires read-only reconciliation")
+                if attempted else NativeAttestationPublicationPending(
+                "original private native receipt retained; canonical publication not attempted"))
+            error.evidence = {
+                "receipt_path": str(receipt), "stage_path": str(stage),
+                "receipt_sha256": hashlib.sha256(raw).hexdigest() if raw is not None else None,
+                "stage_identity": _identity(staged) if staged is not None else None,
+                "effect_state": "EFFECT_UNKNOWN" if attempted else "STAGED_NOT_PUBLISHED",
+            }
+            raise error from exc
+        raise
+    finally:
+        if stage_fd >= 0:
+            try:
+                os.close(stage_fd)
+            except OSError:
+                pass
+
+
+def reconcile_native_deepseek_attestation(*, receipt_path: Path, binary_path: Path,
+        release: Path, source_repo: Path, source_sha: str, expected_owner_gid: int,
+        allowed_versions: frozenset[str], expected_receipt_sha256: str | None = None,
+        current=None) -> dict:
+    """Observe only the original target and stage; never complete or replay a write."""
+    if os.geteuid() != _ROOT_UID:
+        _fail("native attestation reconciliation requires root")
+    release = _deepseek_path(str(release))
+    receipt, stage = _deepseek_publication_names(receipt_path, release)
+    if expected_receipt_sha256 is not None and not _deepseek_digest(expected_receipt_sha256):
+        _fail("native receipt reconciliation digest is invalid")
+    with _deepseek_publication_parent(receipt) as (parent_fd, parent_current):
+        if current is not None and current() is not None:
+            _fail("original native Worker configuration changed")
+        target = _deepseek_receipt_entry(parent_fd, receipt.name)
+        pending = _deepseek_receipt_entry(parent_fd, stage.name)
+        result = {"schema": "mastermind.dsh_native_attestation_publication/v1",
+            "receipt_path": str(receipt), "stage_path": str(stage), "effect_state": "NONE",
+            "service_activated": False, "provider_calls": 0, "worker_observation": "NOT_OBSERVED"}
+        if pending is not None:
+            # Retain even an incomplete private write. Its bytes are evidence,
+            # never execution authority and never input to a new build.
+            with _native_open(stage) as (fd, info):
+                _check_entry(stage, fd, info)
+                if info.st_size > _LIMIT:
+                    _fail("pending native receipt exceeds its bound")
+                raw = _read(fd, _LIMIT)
+                result.update(stage_sha256=hashlib.sha256(raw).hexdigest(),
+                              stage_identity=_identity(info))
+            result["state"] = "COLLISION" if target is not None else "PENDING_PRIVATE"
+        elif target is None:
+            result["state"] = "NOT_PUBLISHED"
+        else:
+            installed = load_native_deepseek_attestation(receipt,
+                expected_binary_path=binary_path, expected_release=release,
+                expected_owner_gid=expected_owner_gid, allowed_versions=allowed_versions)
+            from ops.executive_os.install_source_policy import validate_acceptance_source
+            tree = validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha)
+            doc = _json_receipt(receipt, mode=0o440, gid=expected_owner_gid,
+                                digest=installed.source_digest)
+            if (installed.source_sha != source_sha or doc["qualification"]["source_tree"] != tree
+                    or expected_receipt_sha256 is not None
+                    and installed.source_digest != expected_receipt_sha256):
+                _fail("original native receipt source or expected bytes differ")
+            installed.require_current()
+            result.update(state="PRESENT_QUALIFIED", receipt_sha256=installed.source_digest,
+                          receipt_identity=json.loads(installed._receipt)["identity"])
+        if current is not None and current() is not None:
+            _fail("original native Worker configuration changed")
+        parent_current()
+        for path, before in ((receipt, target), (stage, pending)):
+            after = _deepseek_receipt_entry(parent_fd, path.name)
+            if ((before is None) != (after is None)
+                    or before is not None and _identity(before) != _identity(after)):
+                _fail("native receipt publication state changed during reconciliation")
+        if result["state"] == "PRESENT_QUALIFIED":
+            installed.require_current()
+        return result

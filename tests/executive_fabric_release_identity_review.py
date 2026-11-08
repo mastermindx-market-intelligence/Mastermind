@@ -563,13 +563,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '1f4ca7ab5d60b6f5acde4c313691be0e436868bff8dffd1cd763efd894688e86',
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '9fbc7f6da35610e3709897c00414bd4c739f0de32d5130b06eef508c8695d85a',
  'sites': ((349, 24, 27, 'int', '501'),
-           (6975, 35, 37, 'int', '80'),
-           (6976, 50, 55, 'int', '0o755'),
-           (7844, 41, 46, 'int', '0o644'),
-           (8625, 64, 69, 'int', '0o644'),
-           (10042, 41, 46, 'int', '0o644'))}
+           (6996, 35, 37, 'int', '80'),
+           (6997, 50, 55, 'int', '0o755'),
+           (7865, 41, 46, 'int', '0o644'),
+           (8658, 64, 69, 'int', '0o644'),
+           (10105, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -784,10 +784,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': 'be4aa8d258a5d4766382998323f76eca16a645f0bf614167885854aae9829e69', 'sites': ((1699, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -815,17 +812,7 @@ REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
 
 # Original #852 held subscription principals, source-qualified at exact sites.
 # This fixed source evidence grants no installed identity, credential or capacity.
-REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
- 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
-           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
-           (170, 19, 22, 'int', '459'),
-           (171, 19, 22, 'int', '459'),
-           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
-           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
-           (182, 19, 22, 'int', '460'),
-           (183, 19, 22, 'int', '460'),
-           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
-           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': 'b1e005d389ee5bd9ddf7168500b416610e10f4ba573d02ef7d669b40f75b1cf8', 'sites': ((170, 20, 44, 'str', '"_mastermind_alibaba_01"'), (171, 21, 45, 'str', '"_mastermind_alibaba_01"'), (172, 19, 22, 'int', '459'), (173, 19, 22, 'int', '459'), (182, 20, 44, 'str', '"_mastermind_minimax_01"'), (183, 21, 45, 'str', '"_mastermind_minimax_01"'), (184, 19, 22, 'int', '460'), (185, 19, 22, 'int', '460'), (290, 12, 36, 'str', '"_mastermind_alibaba_01"'), (298, 12, 36, 'str', '"_mastermind_minimax_01"'))}
 
 
 # The unchanged optional observation owner limits a regular binding file to

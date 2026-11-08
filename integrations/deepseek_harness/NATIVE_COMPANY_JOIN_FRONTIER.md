@@ -1085,3 +1085,19 @@ The LIVE Control component update restarts Control and must not be applied under
 the mission's no-active-service-restart constraint. Source preparation proceeds.
 All accepted Hermes/C21 DO_NOT_REDO evidence and production holds remain in force.
 MORE_WORK_EXISTS; this is not a mission-complete handoff.
+
+## C36 — canonical native admission and original publication owners qualified (2026-11-08)
+
+The C35/C36 continuation is implemented in the original operation/workspace on source base 88f90968a61f5109c8977c69b4561395e7165dee. Exact source and test receipts are retained in research/evidence/deepseek-native-admission-publication-c36-20261108.json. This closes three source producer gaps; it does not claim installed acceptance.
+
+- The canonical capability registry and ModelRouter now carry the enabled read-only native conversation tuple. Ordinary task routes and production_armed=false are preserved. Positive native consumer tests use these actual defaults; disabled-candidate and predecessor policy digest assertions remain.
+- The original native attestation owner now publishes a private root:original-Worker-GID 0440 receipt through the incumbent exclusive rename primitive. Partial-stage and uncertain-rename outcomes retain original target/stage evidence; reconciliation is read-only and never rebuilds or replays. The existing package CLI derives coordinates from the original pinned Worker configuration and enrollment.
+- The incumbent Control component transaction accepts a closed native_conversation input variant, composes initial v5 into v6 while retaining Hermes/Secretary/Meta, execution row order and transports, archives the original input, and reconstructs that exact input on recovery. Live apply is not performed because it would restart Control.
+- The ACP addition is regenerated into both canonical hash-locked gate files using pip-tools 7.6.1. All prior package versions and hashes remain. The actual macOS lock realizes and runs all 37 native Worker factory cases. Linux realization remains owed to the next hosted head.
+- The large-answer UI wait is scoped to its recorded conversation and dispatches Read reply once; exact answer, newline, fragments and request assertions are preserved. All seven focused App cases pass.
+
+Qualification: native policy/router/runtime suite 362 passed; latest combined backend suite 548 passed and four stale identity-record failures, repaired by exact literal/AST reviews; the complete identity suites then pass 214/214. Publication/control focused tests in the combined run pass, including partial writes, lost rename returns, changed final callbacks, native initial selection and lifecycle no-replay. All recorded test input snapshots are unchanged during execution. Shell syntax and diff checks pass.
+
+Next ready work: compose protected master 036e8d26cb2b158856f1250b2dfc9cca9700f28a (no governing-law delta from the retained 03512 pin), retaining the sealed asset output mode, stage-only Codex isolation and Hermes browser addition. Then complete final-layout/native package and standalone Node materialization through install.sh --stage-release-only. The official Node v26.5.0 candidate is checksum/signature verified and has system-only dylibs; its different binary digest must be accepted through the original Worker enrollment/config owner before live admission.
+
+Remaining production holds: accepted protected source; original root package/Node/ACP custody and receipt; original Worker/account/realm/quota/host admission and routing; signed-in packaged DeepSeek create/history/send/original-answer/logout/reconnect/uncertain-send/Stop/same-Session-resume/tool-settlement proof. No service restart, new Session owner, provider call, root installation, deployment, or production acceptance is claimed. Preserve the completed Hermes #2180 and C21 canary without repeating them. Continue C37 in this healthy session.

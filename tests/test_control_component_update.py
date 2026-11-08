@@ -516,8 +516,8 @@ class FakeHost(ac.ProductionControlComponentHost):
                 self._component_prior_archives.get(name, b""))
         # The coordinated selection archives exist only for a transaction
         # that sealed a selection.
-        for name in ac._COMPONENT_BINDING_ARCHIVES:
-            if name in self._component_prior_archives:
+        for name in ac._component_archive_names(self.manifest):
+            if name not in ac._COMPONENT_ARCHIVES and name in self._component_prior_archives:
                 self.files.write(
                     os.fspath(ac.AUTONOMY_TRANSACTION / name),
                     self._component_prior_archives[name])
@@ -549,9 +549,7 @@ class FakeHost(ac.ProductionControlComponentHost):
         for name in ("prior-control.json", "prior-worker.json"):
             archives[name] = self.files.read(
                 os.fspath(ac.AUTONOMY_TRANSACTION / name))
-        names = ac._COMPONENT_ARCHIVES
-        if manifest is not None and type(manifest.get("component_binding")) is dict:
-            names = names + ac._COMPONENT_BINDING_ARCHIVES
+        names = ac._component_archive_names(manifest or {})
         for name in names:
             archives[name] = self.files.read(
                 os.fspath(ac.AUTONOMY_TRANSACTION / name))
@@ -3712,3 +3710,168 @@ def test_recovery_keeps_sealed_legacy_v3_policy_for_prior_secretary(
     ccu.reconcile(host, target_sha=TARGET_SHA)
     assert host._component_binding_candidate_bytes == original
     assert host.binding_publications == publications
+
+
+# The first native selection is a variant of the incumbent transaction, not a
+# new configuration writer or a live admission/registration assertion.
+def _initial_native_input(host, tmp_path, *, execution_rows=False):
+    from control_plane import executive_fabric_composition as composition
+    prior_path, _, prior = _prior_role_conversations(tmp_path, True, native=True)
+    native = prior.pop("native_conversation")
+    prior["schema_version"] = composition.CONVERSATION_CONFIG_SCHEMA_VERSION
+    if execution_rows:
+        for index in (2, 3):
+            row = dict(_binding_route(), host_ref="host-"+str(index)*64, worker_id=f"worker-{index}")
+            prior["bindings"].append(row)
+            prior["remote_transports"].append(_binding_transport(tmp_path, row))
+    raw = json.dumps(prior, sort_keys=True, separators=(",", ":")).encode()
+    Path(prior_path).write_bytes(raw)
+    digest = _sha(raw)
+    _select_binding(host, prior_path, digest)
+    path = tmp_path/"native conversation input.json"
+    raw = json.dumps(native, sort_keys=True).encode()
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return prior, native, str(path), _sha(raw), prior_path
+
+
+def test_initial_native_selection_preserves_all_original_members_and_execution_order(
+        host, publisher, tmp_path, root_owned_files):
+    from control_plane import executive_fabric_composition as composition
+    prior, native, path, digest, prior_path = _initial_native_input(host, tmp_path, execution_rows=True)
+    original = dict(host.files.data)
+    planned = ccu.plan(host, target_sha=TARGET_SHA,
+        native_conversation_input=path, native_conversation_sha256=digest)
+    assert host.files.data == original and not host.commands
+    assert planned["plan"]["selection"]["input_kind"] == "native_conversation"
+    assert planned["plan"]["selection"]["input_sha256"] == digest
+    ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=planned["plan_sha256"],
+        native_conversation_input=path, native_conversation_sha256=digest)
+    candidate = _composed(host)
+    assert candidate["schema_version"] == composition.NATIVE_CONFIG_SCHEMA_VERSION
+    assert candidate["native_conversation"] == native
+    assert {k: v for k, v in candidate.items() if k not in ("schema_version", "native_conversation")} == {
+        k: v for k, v in prior.items() if k != "schema_version"}
+    parsed = composition._composition_parts(host._component_binding_candidate_bytes)
+    assert parsed[5].registration.worker_id == native["registration"]["worker_id"]
+    assert parsed[5].transport is parsed[2].transport
+    assert [row.worker_id for row in parsed[0]] == ["worker-2", "worker-3"]
+    assert len(host.binding_publications) == 1
+    assert json.loads(Path(prior_path).read_bytes()) == prior
+
+
+@pytest.mark.parametrize("fault", ["host", "workspace", "binary", "worker-collision", "prior-native", "missing-meta"])
+def test_initial_native_selection_refuses_mismatched_expected_facts_before_effect(
+        host, tmp_path, root_owned_files, fault):
+    prior, native, path, _, prior_path = _initial_native_input(host, tmp_path, execution_rows=True)
+    if fault == "host":
+        native["registration"]["host_ref"] = "host-"+"9"*64
+    elif fault == "workspace":
+        native["workspace"]["inode"] = 0
+    elif fault == "binary":
+        native["harness_binary_digest"] = "not-a-digest"
+    elif fault == "worker-collision":
+        native["registration"]["worker_id"] = "worker-2"
+    else:
+        from control_plane import executive_fabric_composition as composition
+        if fault == "prior-native":
+            prior["schema_version"] = composition.NATIVE_CONFIG_SCHEMA_VERSION
+            prior["native_conversation"] = copy.deepcopy(native)
+            prior["native_conversation"]["registration"]["worker_id"] = "other-original"
+        else:
+            prior["schema_version"] = composition.SECRETARY_CONFIG_SCHEMA_VERSION
+            del prior["hermes_meta_conversation"]
+        raw = json.dumps(prior).encode()
+        Path(prior_path).write_bytes(raw)
+        _select_binding(host, prior_path, _sha(raw))
+    raw = json.dumps(native).encode()
+    Path(path).write_bytes(raw)
+    before = dict(host.files.data)
+    with pytest.raises(ac.ComponentUpdateRefused):
+        ccu.plan(host, target_sha=TARGET_SHA,
+            native_conversation_input=path, native_conversation_sha256=_sha(raw))
+    assert host.files.data == before and not host.commands and not host.binding_publications
+
+
+def test_initial_native_recovery_uses_sealed_v5_and_native_input_without_republication(
+        host, publisher, tmp_path, root_owned_files):
+    prior, native, path, digest, _ = _initial_native_input(host, tmp_path)
+    planned = ccu.plan(host, target_sha=TARGET_SHA,
+        native_conversation_input=path, native_conversation_sha256=digest)
+    ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=planned["plan_sha256"],
+        native_conversation_input=path, native_conversation_sha256=digest)
+    raw = host._component_binding_candidate_bytes
+    assert "prior-component-native-conversation-input.json" in ac._component_archive_names(host.manifest)
+    assert "prior-component-hermes-read-input.json" not in ac._component_archive_names(host.manifest)
+    # Recovery must ignore a moved external input and use the original archive.
+    Path(path).write_bytes(b"untrusted replacement after original publication")
+    published = list(host.binding_publications)
+    commands = list(host.commands)
+    host.closed = False
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host._component_binding_candidate_bytes == raw
+    assert host.binding_publications == published
+    assert host.commands == commands
+    assert _composed(host)["native_conversation"] == native
+    assert _composed(host)["hermes_meta_conversation"] == prior["hermes_meta_conversation"]
+
+
+@pytest.mark.parametrize("fault", ["kind", "native-archive", "prior-archive"])
+def test_native_recovery_refuses_a_substituted_original_archive_or_variant(
+        host, publisher, tmp_path, root_owned_files, fault):
+    _, _, path, digest, _ = _initial_native_input(host, tmp_path)
+    planned = ccu.plan(host, target_sha=TARGET_SHA,
+        native_conversation_input=path, native_conversation_sha256=digest)
+    ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=planned["plan_sha256"],
+        native_conversation_input=path, native_conversation_sha256=digest)
+    published = list(host.binding_publications)
+    if fault == "kind":
+        host.manifest["component_binding"]["input_kind"] = "other"
+    else:
+        name = ("prior-component-native-conversation-input.json" if fault == "native-archive"
+                else "prior-component-binding-selection.json")
+        archive = os.fspath(ac.AUTONOMY_TRANSACTION/name)
+        host.files.data[archive] += b" "
+    host.closed = False
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.binding_publications == published
+
+
+def test_native_input_move_after_plan_is_refused_before_any_transaction(host, tmp_path, root_owned_files):
+    _, _, path, digest, _ = _initial_native_input(host, tmp_path)
+    planned = ccu.plan(host, target_sha=TARGET_SHA,
+        native_conversation_input=path, native_conversation_sha256=digest)
+    Path(path).write_bytes(Path(path).read_bytes()+b" ")
+    before = dict(host.files.data)
+    with pytest.raises(ac.ComponentUpdateRefused):
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=planned["plan_sha256"],
+            native_conversation_input=path, native_conversation_sha256=digest)
+    assert host.files.data == before and not host.commands
+
+
+def test_native_closed_argv_preserves_spaces_and_forbids_partial_duplicate_or_mixed_selection():
+    path = "/Library/Application Support/MastermindExecutive/staged/native.json"
+    base = ("plan-control-component", "--expected-sha", "a"*40)
+    pair = ("--native-conversation-input", path, "--native-conversation-sha256", "b"*64)
+    result = _control_component_argv(*base, *pair)
+    assert result.returncode == 0
+    assert result.stdout.decode().splitlines() == [*base, *pair]
+    rejected = [
+        (*base, *pair[:2]), (*base, *pair[2:]), (*base, *pair, *pair),
+        (*base, *pair, "--hermes-role-metadata-read-input", path,
+         "--hermes-role-metadata-read-sha256", "c"*64),
+        ("reconcile-control-component", *base[1:], *pair),
+    ]
+    assert all(_control_component_argv(*args).returncode == 1 for args in rejected)
+
+
+@pytest.mark.parametrize("arguments", [
+    {"native_conversation_input": "/original/input"},
+    {"native_conversation_sha256": "a"*64},
+    {"native_conversation_input": "/original/input", "native_conversation_sha256": "a"*64,
+     "hermes_read_input": "/original/hermes", "hermes_read_sha256": "b"*64},
+])
+def test_native_pair_or_mixed_input_refusal_precedes_host_observation(arguments):
+    with pytest.raises(ccu.ComponentError):
+        ccu.plan(object(), target_sha=TARGET_SHA, **arguments)

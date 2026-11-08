@@ -721,6 +721,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     # The accepted native-return generation remains in the default policy;
     # removing only its own additions recovers the same frozen predecessor.
     protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.dsh.native-conversation.v1"]
     del protected_raw["profiles"]["operator.appserver.readonly.docs-mcp.native-helper.sol61.v1"]
     del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
     del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
@@ -1068,14 +1069,17 @@ _V5_PAID_PROFILE_ID = "fabric.paid.glm.sealed-input.v1"
 _V5_ACP_PROFILE_ID = "worker.acp.providerfree.readonly.v1"
 _V5_CLAUDE_PROFILE_ID = "operator.claude.readonly.v1"
 
-# Frozen pre-Sol61 V3 and accepted V4 identities remain stable under V5
-# parsing. The current V3 default adds only the explicitly qualified Sol61
-# profile, so its complete policy identity is recorded separately.
+# Frozen pre-Sol61, pre-native V3 and accepted V4 identities remain stable.
+# Record the current policy separately; reconstruct each predecessor by
+# removing only its explicitly added profile, never by changing old rows.
 _V3_PRE_SOL61_POLICY_DIGEST = (
     "8e26d2d6cd0ca04b1fae93ae64b87c58d0b5d005467a095fcb9585dafd0807ad"
 )
-_V3_DEFAULT_POLICY_DIGEST = (
+_V3_PRE_NATIVE_POLICY_DIGEST = (
     "2afebde77e277c6c5d63b279e883c2590eb7e34d891127e1a46c5de86790164d"
+)
+_V3_DEFAULT_POLICY_DIGEST = (
+    "8367fd19300e8bbd887fd86b094a6a3445a6dcf4cff5bb52dd5e2d72e20f2a75"
 )
 _V3_PAID_PROFILE_DIGEST = (
     "ba1e883c749a1bd237b197141f9c4e83a206b70ea45cdee64ddbaf53f00739f7"
@@ -1230,7 +1234,7 @@ def test_v3_and_v4_do_not_accept_validation_resource_fields(tmp_path):
 
 
 def test_v3_and_v4_keep_their_exact_normalized_digests(tmp_path):
-    """V5 preserves historical identities; Sol61 is one explicit V3 addition."""
+    """V5 preserves every predecessor; Sol61 and native are explicit additions."""
 
     v3 = ExecutionCapabilityRegistry.load(_DEFAULT_POLICY_PATH)
     assert v3.schema_version == CAPABILITY_POLICY_SCHEMA_V3
@@ -1246,12 +1250,18 @@ def test_v3_and_v4_keep_their_exact_normalized_digests(tmp_path):
     # Recover only the documented predecessor; retain every old profile and
     # every top-level policy field under its original normalized identity.
     historical_raw = _raw_policy()
+    native_profile = "operator.dsh.native-conversation.v1"
+    del historical_raw["profiles"][native_profile]
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, historical_raw))
+    assert previous.policy_digest == _V3_PRE_NATIVE_POLICY_DIGEST
+    assert set(v3.profiles) == set(previous.profiles) | {native_profile}
+    assert all(profile == v3.profiles[key] for key, profile in previous.profiles.items())
     sol61_profile = "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1"
     del historical_raw["profiles"][sol61_profile]
     historical = ExecutionCapabilityRegistry.load(_write(tmp_path, historical_raw))
     assert historical.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert historical.policy_digest == _V3_PRE_SOL61_POLICY_DIGEST
-    assert set(v3.profiles) == set(historical.profiles) | {sol61_profile}
+    assert set(v3.profiles) == set(historical.profiles) | {sol61_profile, native_profile}
     assert all(
         profile.profile_digest == v3.profiles[profile_id].profile_digest
         for profile_id, profile in historical.profiles.items()

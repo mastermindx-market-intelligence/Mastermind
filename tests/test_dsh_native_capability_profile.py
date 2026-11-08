@@ -37,7 +37,7 @@ def test_explicit_candidate_is_disabled_and_declares_original_plugin_only():
     registry = ExecutionCapabilityRegistry.load(CANDIDATE)
     profile = registry.profiles[DSH_NATIVE_CONVERSATION_PROFILE_ID]
     assert profile.enabled is False
-    assert DSH_NATIVE_CONVERSATION_PROFILE_ID not in incumbent.profiles
+    assert incumbent.resolve(DSH_NATIVE_CONVERSATION_PROFILE_ID).enabled is True
     with pytest.raises(CapabilityPolicyError):
         registry.resolve(DSH_NATIVE_CONVERSATION_PROFILE_ID)
     projection = profile.dsh_native_config_projection()
@@ -130,4 +130,29 @@ def test_enabled_exact_tuple_compiles_through_original_registry_without_installa
     assert profile.dsh_native_config_projection()["plugins"] == ["mastermind-company"]
     assert not is_sealed_worker_execution_surface(DSH_OPERATOR_EXECUTION_SURFACE)
     assert (DEFAULT.read_bytes(), CANDIDATE.read_bytes()) == before
-    assert DSH_NATIVE_CONVERSATION_PROFILE_ID not in ExecutionCapabilityRegistry.load().profiles
+    assert ExecutionCapabilityRegistry.load().resolve(DSH_NATIVE_CONVERSATION_PROFILE_ID) == profile
+
+
+def test_default_native_route_resolves_exact_profile_without_changing_task_routes():
+    from control_plane.model_router import ModelRouter
+    registry = ExecutionCapabilityRegistry.load()
+    router = ModelRouter.load()
+    profile = registry.resolve(DSH_NATIVE_CONVERSATION_PROFILE_ID)
+    disabled = ExecutionCapabilityRegistry.load(CANDIDATE).profiles[DSH_NATIVE_CONVERSATION_PROFILE_ID]
+    assert profile.enabled and profile.profile_digest != disabled.profile_digest
+    assert profile.dsh_native_config_projection() == disabled.dsh_native_config_projection()
+    assert profile.capability_manifest(harness_binary_digest="a"*64) == disabled.capability_manifest(harness_binary_digest="a"*64)
+    alias = router.model_aliases["dsh.native.conversation"]
+    assert alias.worker_eligible and alias.adapter_id == "dsh-native-acp"
+    assert (alias.provider_alias, alias.model, alias.effort, alias.cost_class) == (
+        "acp", "deepseek-chat", "default", "small")
+    assert alias.execution_profile_id == profile.profile_id
+    assert alias.execution_profile_digest == profile.profile_digest
+    assert alias.capability_policy_digest == registry.policy_digest
+    assert router.capability_registry.policy_digest == registry.policy_digest
+    capabilities = json.loads(DEFAULT.read_bytes())
+    routes = json.loads((ROOT/"config/executive_worker_routes.json").read_bytes())
+    assert capabilities["production_armed"] is routes["production_armed"] is False
+    assert "dsh.native.conversation" not in json.dumps(routes["routes"])
+    assert routes["providers"]["acp"] == dict(
+        adapter_id="dsh-native-acp", enabled=True, autonomous_allowed=True)

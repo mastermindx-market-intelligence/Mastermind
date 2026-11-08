@@ -338,6 +338,7 @@ class BindingSelectionInputs:
     prior_secretary_conversation: Mapping[str, Any] | None = None
     prior_meta_conversation: Mapping[str, Any] | None = None
     prior_native_conversation: Mapping[str, Any] | None = None
+    input_kind: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -360,11 +361,12 @@ class BindingSelection:
     remote_transports_count: int
     execution_present: bool
     effect: str
+    input_kind: str | None = None
 
     def document(self) -> dict[str, Any]:
         """The closed selection member of the plan and of the sealed marker."""
 
-        return {
+        value = {
             "input_sha256": self.input_sha256,
             "candidate_sha256": self.candidate_sha256,
             "destination": self.destination,
@@ -376,6 +378,9 @@ class BindingSelection:
             "execution_present": self.execution_present,
             "effect": self.effect,
         }
+        if self.input_kind is not None:
+            value["input_kind"] = self.input_kind
+        return value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -575,6 +580,13 @@ def compile_candidate(
     selection_metadata: BindingSelection | None = None
     selector: dict[str, str] | None = None
     if selection is not None:
+        if (selection.input_kind not in (None, "native_conversation")
+                or selection.input_kind == "native_conversation" and (
+                    not selection.prior_selector_present
+                    or selection.prior_native_conversation is None
+                    or selection.prior_secretary_conversation is None
+                    or selection.prior_meta_conversation is None)):
+            raise ComponentError("control_component_native_conversation_binding_conflict")
         if HEX64.fullmatch(selection.input_sha256) is None:
             raise ComponentError("binding_input_digest_invalid")
         if selection.prior_selector_present and (
@@ -605,6 +617,7 @@ def compile_candidate(
                 selection.prior_bindings or selection.prior_remote_transports
             ),
             effect=binding_effect(destination),
+            input_kind=selection.input_kind,
         )
 
     try:
@@ -622,6 +635,10 @@ def compile_candidate(
             "proof_base_sha",
             "proof_source_repository",
         )
+    if (selection is not None and selection.input_kind == "native_conversation"
+            and document.get("fabric_bindings_path") == selector["path"]
+            and document.get("fabric_bindings_sha256") == selector["sha256"]):
+        allowed = ("proof_base_sha", "proof_source_repository")
     if changed != allowed:
         raise ComponentError("control_config_scope_invalid")
     if successor.get("proof_source_repository") != (
@@ -787,21 +804,39 @@ def hermes_read_selector(
     return (input_path, input_sha256)
 
 
+def native_conversation_selector(input_path: str | None, input_sha256: str | None) -> tuple[str, str] | None:
+    """One explicit expected native selection on the incumbent update carrier."""
+    if input_path is None and input_sha256 is None:
+        return None
+    if input_path is None or input_sha256 is None:
+        raise ComponentError("control_component_native_conversation_selector_incomplete")
+    if (type(input_path) is not str or not input_path
+            or type(input_sha256) is not str or HEX64.fullmatch(input_sha256) is None):
+        raise ComponentError("control_component_native_conversation_input_invalid")
+    return input_path, input_sha256
+
+
 def plan(
     host: Any,
     *,
     target_sha: str,
     hermes_read_input: str | None = None,
     hermes_read_sha256: str | None = None,
+    native_conversation_input: str | None = None,
+    native_conversation_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Compile and prove the plan.  Read-only: no marker, no effect."""
 
     if HEX40.fullmatch(target_sha) is None:
         raise ComponentError("release_sha_invalid")
     selector = hermes_read_selector(hermes_read_input, hermes_read_sha256)
-    observation = host.observe_control_component_update(
-        target_sha=target_sha, hermes_read=selector
-    )
+    native = native_conversation_selector(native_conversation_input, native_conversation_sha256)
+    if native is not None and selector is not None:
+        raise ComponentError("control_component_selection_conflict")
+    options = dict(target_sha=target_sha, hermes_read=selector)
+    if native is not None:
+        options["native_conversation"] = native
+    observation = host.observe_control_component_update(**options)
     document = observation["plan"]
     return {
         "ok": True,
@@ -819,6 +854,8 @@ def apply(
     plan_sha256: str,
     hermes_read_input: str | None = None,
     hermes_read_sha256: str | None = None,
+    native_conversation_input: str | None = None,
+    native_conversation_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Publish exactly the approved plan through the incumbent owner."""
 
@@ -829,12 +866,13 @@ def apply(
     if HEX64.fullmatch(plan_sha256) is None:
         raise ComponentError("plan_sha256_invalid")
     selector = hermes_read_selector(hermes_read_input, hermes_read_sha256)
-    return owner.execute_control_component_update(
-        host,
-        target_sha=target_sha,
-        plan_sha256=plan_sha256,
-        hermes_read=selector,
-    )
+    native = native_conversation_selector(native_conversation_input, native_conversation_sha256)
+    if native is not None and selector is not None:
+        raise ComponentError("control_component_selection_conflict")
+    options = dict(target_sha=target_sha, plan_sha256=plan_sha256, hermes_read=selector)
+    if native is not None:
+        options["native_conversation"] = native
+    return owner.execute_control_component_update(host, **options)
 
 
 def reconcile(host: Any, *, target_sha: str) -> dict[str, Any]:

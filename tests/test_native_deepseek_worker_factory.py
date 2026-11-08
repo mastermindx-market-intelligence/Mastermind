@@ -42,13 +42,11 @@ def prepared(deepseek_installation,monkeypatch):
     i.dependency_checks=[]
     monkeypatch.setattr(worker,"_activate_native_deepseek_dependencies",
         lambda installed,uid:SimpleNamespace(require_current=lambda:i.dependency_checks.append(uid)))
-    source=Path(__file__).resolve().parents[1]/"config/executive_dsh_native_conversation_capabilities.json"
-    raw=json.loads(source.read_text());raw["profiles"]["operator.dsh.native-conversation.v1"]["enabled"]=True
-    candidate=i.root/"candidate.json";candidate.write_text(json.dumps(raw))
-    registry=ExecutionCapabilityRegistry.load(candidate)
-    profile=registry.profiles["operator.dsh.native-conversation.v1"]
-    profiles={"candidate":profile}
-    monkeypatch.setattr(worker.ExecutionCapabilityRegistry,"load",lambda:SimpleNamespace(profiles=profiles,policy_digest=registry.policy_digest))
+    # The production default registry is the same owner used by Runtime and
+    # Supervisor. Only physical installation/dependency observations are inert.
+    registry=ExecutionCapabilityRegistry.load()
+    profile=registry.resolve("operator.dsh.native-conversation.v1")
+    profiles=registry.profiles
     workspace=Path(value["workspace_root"]);info=workspace.stat()
     identity=WorkspaceIdentity(str(workspace),"b"*40,info.st_dev,info.st_ino,info.st_uid,info.st_gid)
     requested=RequestedExecutionProfile(value["worker_id"],"acp","deepseek-chat","dsh-native-web-acp",
@@ -124,9 +122,13 @@ def test_actual_broker_and_adapter_use_only_original_loop_and_owner(prepared,mon
 
 @pytest.mark.parametrize("change",["disabled","duplicate","worker","provider","binary","version",
                                     "write-path","configuration","capabilities","network"])
-def test_factory_refuses_before_constructing_or_sending(prepared,change):
+def test_factory_refuses_before_constructing_or_sending(prepared,monkeypatch,change):
     _,value,profiles,profile,requested=prepared
-    if change=="disabled":profiles["candidate"]=dataclasses.replace(profile,enabled=False)
+    if change in {"disabled","duplicate"}:
+        policy_digest=ExecutionCapabilityRegistry.load().policy_digest
+        monkeypatch.setattr(worker.ExecutionCapabilityRegistry,"load",
+            lambda:SimpleNamespace(profiles=profiles,policy_digest=policy_digest))
+    if change=="disabled":profiles[profile.profile_id]=dataclasses.replace(profile,enabled=False)
     elif change=="duplicate":profiles["duplicate"]=profile
     else:
         changes={"worker":{"worker_id":"foreign"},"provider":{"provider":"openai-codex"},

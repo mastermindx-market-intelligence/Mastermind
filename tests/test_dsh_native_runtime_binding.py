@@ -100,7 +100,9 @@ def test_original_creator_stores_exact_binding_and_reconciles_replay(tmp_path):
 
 def test_public_creator_cannot_execute_disabled_or_missing_native_profile(tmp_path, monkeypatch):
     runtime, root = _root(tmp_path)
-    for registry in (ExecutionCapabilityRegistry.load(), ExecutionCapabilityRegistry.load(CANDIDATE)):
+    missing = ExecutionCapabilityRegistry.load()
+    del missing.profiles[PROFILE]
+    for registry in (missing, ExecutionCapabilityRegistry.load(CANDIDATE)):
         with monkeypatch.context() as m:
             m.setattr(ExecutionCapabilityRegistry, "load", classmethod(lambda cls: registry))
             with pytest.raises(CapabilityPolicyError):
