@@ -387,4 +387,23 @@ Root inspected both new card screenshots. Both are legible without overflow; exp
 
 The initial GMI source diagnosis used protected main snapshot `ba32f20ba306f9e75b7c400992138e736b904516`. An incumbent authored candidate was subsequently found: Draft Macro [#10676](https://github.com/mastermindx-market-intelligence/macro/pull/10676), actual current head `80d6ff71b9913524c4a381b543ec7a53383f50dc` (the body’s older `be851458...` is not its current head). That candidate already implements `gmi-companies.html`, URL/history behavior and multi-link issuer rendering. Therefore the earlier main-only `view=companies` proposal and primary-link-loop repair are **not selected** and must not duplicate or displace that writer.
 
-No GMI mutation or competing source branch has been dispatched in this continuation. Preserve #10676’s Draft/no-Ready/no-merge/no-enqueue/no-relabel holds and the original model-run `EFFECT_UNKNOWN / ROOT_UNVERIFIED` fence. Continue diagnosis against the actual candidate; do not replay or consume its fenced model result.
+At this diagnosis point, no new GMI mutation or competing source branch had been dispatched. Preserve #10676’s Draft/no-Ready/no-merge/no-enqueue/no-relabel holds and the original model-run `EFFECT_UNKNOWN / ROOT_UNVERIFIED` fence. Continue diagnosis against the actual candidate; do not replay or consume its fenced model result.
+
+
+## Continuation delivery 3 — GMI current-source binding
+
+A full Foundations census resolved the remaining design question: current p-4-0 already contains `S04 · Return to research & recovery` (`6T4-0`), with EN/ZH, desktop/mobile return controls and incomplete-payload recovery. It also now contains independently authored `S04B` (`71U-0`) motion/return intentions. These were inspected and preserved; no duplicate return board or route scheme was created.
+
+Root added only source/proof clarification `734-0` to the existing `S03 · Responsive & interaction contracts` board `5FS-0`, before its acceptance boundary. The card:
+
+- Names the actual `gmi_return` / `gmi-companies.html` candidate and recognized internal return-state contract.
+- Distinguishes retained context-restoration browser proof from exact invoking-control focus and source-snapshot restoration, neither of which is established by the inspected return code.
+- Requires keyboard Back to restore the visible invoking company action, or a stable results/search fallback when that action is absent. Ordinary navigation and new-tab entry require proof independent of browser back-cache behavior.
+- Preserves the public projection and excludes incidental private ledger/fingerprint exposure in public return URLs.
+- Gives an immutable [source link at 80d6ff71](https://github.com/mastermindx-market-intelligence/macro/blob/80d6ff71b9913524c4a381b543ec7a53383f50dc/templates/gmi.js), preserving all #10676 release/model fences.
+
+Root read the actual candidate `safeReturn`, `refreshJourney` and `restoreCompanies` functions, inspected the new card screenshot, and released only owned board `5FS-0`. The ten accepted product boards, earlier fixtures and independently authored `S04B` remain untouched in this continuation.
+
+Inventory update: the bounded current Paper resource census returned 39 resources. It now includes a separately authored Migration Directory and a Recovery Only copy; the original MASTERMIND PAGES file explicitly says READ ONLY / MIGRATION PENDING. None of those migration, recovery or adapter canary surfaces were mutated by this writer. F02’s newly observed `9VK-0` Signal Ink motion contract was likewise preserved; our two interaction rows are disjoint.
+
+Next active audit frontier: Expectation chart-to-table continuity and Options watch/review continuation, using current incumbent source/candidate owners before selecting additional edits.
