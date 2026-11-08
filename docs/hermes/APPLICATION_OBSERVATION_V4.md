@@ -56,3 +56,9 @@ The complete native producer still needs the evidence specified in `NATIVE_EVAL_
 The focused Python 3.12 qualification used OpenAI 2.54.0 and HTTPX 0.28.1. All 19 APPLICATION cases and 37 historical HTTPX cases passed without failures or skips. The 136 existing native publication cases also passed. The final owner-identity comparison was followed by a passing repeat of the same 19 APPLICATION cases; that repeat is not an additional 19 distinct cases.
 
 These results qualify the source contribution and declared fixture boundaries above. They do not assert hosted CI completion, protected merge, installation, a live VALID Trial, or an uptime measurement.
+
+## Qualified observed serving label
+
+The publisher can populate `execution.model_served` from a complete APPLICATION-only call graph when every original owner receipt's selected and serving-model commitments match the bytes of the frozen model label. This is an observed owner-reported label, with `model_identity_verified=False`. A different observed digest records an observation conflict; it is not decoded into an invented model name. AUTO selectors do not become concrete models, and a mixed HTTPX/APPLICATION run cannot inherit the APPLICATION subset's serving label.
+
+The serving-label addition has 27 passing APPLICATION tests, including eight cases that exercise the actual pinned native assembly and dispatch with explicit selected-input delivery fixtures. They cover exact matches, a different frozen label, AUTO selection, mixed routes, and incomplete assembly/attempt coverage. The 27 cases include the original 19; they are not additional to them. Existing effect, cleanup, coverage and validity gates are unchanged.

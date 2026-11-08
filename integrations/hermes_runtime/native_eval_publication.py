@@ -302,6 +302,16 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         draft["execution"]["model_requested"] = selected
     elif any(row["model"]["status"] == "observed_digest" and row["model"] != expected for row in requests):
         unavailable["execution.model_requested"] = "OBSERVATION_CONFLICT"
+    if application_attempts:
+        # This is the original owner-reported serving label, not an assertion
+        # about model weights. A known frozen label is used only after its
+        # bytes match every qualified return. HTTPX siblings still lack this
+        # owner evidence and prevent promotion from an APPLICATION subset.
+        served = [row["response"]["serving_model"] for row in application_attempts]
+        if any(item != expected for item in served):
+            unavailable["execution.model_served"] = "OBSERVATION_CONFLICT"
+        elif not http_attempts:
+            draft["execution"]["model_served"] = selected
     # APPLICATION request content is an entry snapshot, not an independently
     # verified owner-wire request. Its source-qualified owner receipt remains
     # separately retained in trace, including original/routed commitments.

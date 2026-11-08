@@ -289,3 +289,85 @@ def test_application_and_httpx_share_attempt_cap(engine, monkeypatch):
     assert len(value["application_attempts"]) == 1 and value["attempts"] == []
     assert value["overflow"] is True
     assert transport.validate_document(value) == value
+
+
+@pytest.fixture
+def assembled_application_projection(engine, monkeypatch):
+    # Actual pinned assembly and dispatch; selected-input delivery below is an
+    # explicit projection fixture, not a live admitted EVAL configuration.
+    monkeypatch.setattr(engine.lifecycle, "has_hook", lambda _: False)
+    monkeypatch.setattr(engine.middleware, "apply_llm_request_middleware",
+        lambda payload, **_: SimpleNamespace(payload=payload, original_payload=dict(payload), trace=[]))
+    def run(*, exact=True, mixed=False):
+        selected = {}
+        async def handle(ref, row, agent):
+            bound = bound_fixture(monkeypatch, agent, exact=exact)
+            agent._build_api_kwargs = lambda messages, **_: {
+                "model": bound.binding.requested_model, "messages": messages, "max_tokens": 128}
+            def assembled(request_id):
+                return engine.build(agent, api_messages=copy.deepcopy(bound.request["messages"]),
+                    api_request_id=request_id, effective_task_id="task-A", turn_id="turn-A").api_kwargs
+            with application.call_scope(bound.binding, bound.call):
+                engine.invoke(agent, assembled("request-A"), application.HermesApplicationClient)
+            if mixed:
+                engine.invoke(agent, assembled("http-request"),
+                    lambda: sdk(lambda _: httpx.Response(200, json=success("model-1"))),
+                    request_id="http-request")
+            selected["provider"] = agent.provider
+            engine.results.execution_result.get()["result"] = {
+                "final_response": "done", "completed": True, "messages": []}
+            return "done"
+        _, row, _, _ = run_admission(engine, behavior=handle)
+        doc = engine.authority.pending_results[row["admission_id"]][observation.RESULT_KEY]
+        assert transport.validate_document(doc["transport"]) == doc["transport"]
+        assert not doc["metadata_overflow"] and not doc["transport"]["overflow"]
+        from integrations.hermes_runtime.native_eval_inputs import PREVIOUS_RESULT_SCHEMA
+        inputs = {"schema": PREVIOUS_RESULT_SCHEMA, "errors": [], "assemblies": [
+            {key: event[key] for key in ("agent_session_id", "turn_id", "api_request_id",
+                 "api_call_count", "retry_count", "content_sha256")} for event in doc["observations"]]}
+        marker = {"source": {"release": "a" * 40, "profile_id": "fixture"},
+                  "configuration": {"execution": {"provider": selected["provider"]}}}
+        def build(model, *, document=None):
+            draft = {"execution": {"model_served": None}, "timing": {}, "resources": {},
+                     "randomness": {}, "_selected_model": model,
+                     "observation_availability": {"coverage": {}}}
+            unavailable = {"execution.model_served": "NOT_OBSERVED"}
+            publication._wire_observations(draft, unavailable, document or doc, marker, inputs)
+            return draft, unavailable
+        return SimpleNamespace(document=doc, build=build)
+    return run
+
+
+@pytest.mark.parametrize("exact,mixed,frozen,expected,reason", [
+    (True, False, "model-1", "model-1", "NOT_OBSERVED"),
+    (True, False, "other-model", None, "OBSERVATION_CONFLICT"),
+    (False, False, "host-selection", None, "OBSERVATION_CONFLICT"),
+    (True, True, "model-1", None, "NOT_OBSERVED"),
+])
+def test_serving_label_requires_every_original_qualified_return(
+        assembled_application_projection, exact, mixed, frozen, expected, reason):
+    out = assembled_application_projection(exact=exact, mixed=mixed)
+    draft, unavailable = out.build(frozen)
+    assert draft["execution"]["model_served"] == expected
+    assert unavailable["execution.model_served"] == reason
+    assert draft["execution"].get("model_requested") == (frozen if frozen != "other-model" else None)
+    assert draft["observation_availability"]["coverage"]["provider_requests"]["status"] == "PARTIAL"
+    value = out.document["transport"]
+    assert all(value[k] is False for k in ("complete_evaluation", "provider_delivery_proven", "model_identity_verified"))
+
+
+@pytest.mark.parametrize("defect", ["assembly", "overflow", "unfinished", "missing_attempt"])
+def test_serving_label_cannot_hide_incomplete_call_coverage(assembled_application_projection, defect):
+    out = assembled_application_projection()
+    doc = copy.deepcopy(out.document)
+    if defect == "assembly":
+        doc["observations"][0]["content_sha256"] = "e" * 64
+    elif defect == "overflow":
+        doc["transport"]["overflow"] = True
+    elif defect == "unfinished":
+        doc["transport"]["application_attempts"][0].update(state="entered", response=None)
+    else:
+        doc["transport"]["application_attempts"] = []
+    draft, unavailable = out.build("model-1", document=doc)
+    assert draft["execution"]["model_served"] is None
+    assert unavailable["execution.model_served"] == "NOT_OBSERVED"
