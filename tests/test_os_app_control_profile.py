@@ -64,7 +64,7 @@ def test_owner_selects_an_exact_origin_and_qualified_catalogue():
     for bad in [{"origin": "https://mcp.mastermind-x.com", "tool_schema_digest": WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST}, {"origin": "http://remote.example", "tool_schema_digest": APP_CONTROL_TOOL_SCHEMA_DIGEST}, {"origin": "https://mcp.mastermind-x.com", "tool_schema_digest": APP_CONTROL_TOOL_SCHEMA_DIGEST, "script": "anything"}]:
         with pytest.raises(ServiceConfigurationError):
             parse_browser_service_config({**source, "app_control": bad})
-    for invalid in ["https://example.com/", "https://user@example.com", "https://example.com?x=1", "https://example.com:443", "https://example.com#x", "http://remote.example"]:
+    for invalid in ["https://example.com/", "https://user@example.com", "https://example.com?x=1", "https://example.com:443", "http://localhost:80", "https://example.com#x", "http://remote.example"]:
         with pytest.raises(ValueError): validate_app_control_origin(invalid)
 
 

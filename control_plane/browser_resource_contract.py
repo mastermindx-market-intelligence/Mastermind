@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from http.client import HTTP_PORT, HTTPS_PORT
 from pathlib import PurePosixPath
 import re
 from urllib.parse import urlsplit
@@ -76,7 +77,7 @@ def validate_app_control_origin(value: object) -> str:
             raise ValueError()
         authority = f"[{host}]" if ":" in host else host
         if port is not None:
-            if port == (443 if parsed.scheme == "https" else 80):
+            if port == (HTTPS_PORT if parsed.scheme == "https" else HTTP_PORT):
                 raise ValueError()
             authority += f":{port}"
         if value != f"{parsed.scheme}://{authority}":

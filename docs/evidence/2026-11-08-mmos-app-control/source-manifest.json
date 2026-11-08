@@ -67,9 +67,9 @@
     },
     {
       "path": "control_plane/browser_resource_contract.py",
-      "bytes": 9859,
-      "sha256": "7eb036f6b055327e5aeef9af2f573041c6a61425e05a9775e1c90a22d701761a",
-      "git_blob": "48403e4dd07c4e278082f89dc2f4bb0c644e8d58"
+      "bytes": 9919,
+      "sha256": "ee0080081a656b887bfe82d42ad81f96add4c8fdd256c439bb9a5bdcbea7a9ba",
+      "git_blob": "1eae99c4ef1789503a43407ddb1bc900ab549df1"
     },
     {
       "path": "integrations/workbench_action_mcp/service.py",
@@ -181,9 +181,9 @@
     },
     {
       "path": "tests/test_os_app_control_profile.py",
-      "bytes": 7798,
-      "sha256": "54d39709b68346890d157e23b0b0890ae3b7bbd7a9f02c383f4d7a41d45a88ee",
-      "git_blob": "05a1338577fe24f47d68ce1876644b61c3ef20db"
+      "bytes": 7821,
+      "sha256": "a287d7e30341120b29e6f1044c40bfae14f2aab496331b53de15420fa5cab491",
+      "git_blob": "5618d8d8ef12a58d66bbf9d486c5b66d538e816f"
     },
     {
       "path": "tests/test_workbench_browser_port.py",
@@ -271,5 +271,7 @@
     "bytes": 3346,
     "sha256": "61fb32ec2c4e3baca8dc9de390b018cfa271908fa4e5501cbdff96ef09f2b5d5",
     "git_blob": "d270913ec6ababdc217808141cc7cfec63430a4b"
-  }
+  },
+  "qualified_procedures_pin": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+  "revision_note": "Protocol default-port constants name stdlib semantics; topology guard unchanged. Source behavior proof predates this semantics-preserving repair; 39 affected tests rerun."
 }

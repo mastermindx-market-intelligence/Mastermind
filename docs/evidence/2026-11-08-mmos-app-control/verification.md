@@ -149,3 +149,23 @@ selection, infer release from a PR/CI result, copy credentials, manufacture a
 review requirement, or erase uncertain original effects. The remaining blockers
 are specific access/release/runtime controls; they are not a requirement for the
 historical author or another chat to take ownership.
+
+## Boundary recovery and CI repair
+
+The original repository CI run [42489928865](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42489928865) finished with shard 4 and aggregate `test` failed; other shards passed. The app workflow, native macOS build, CodeQL and credential-engine checks passed. This supersedes the earlier pending-check observation in the PR body.
+
+The failure was `test_d8_template_topology_and_protected_defaults`: the contextual topology scanner reported `['443']` from `validate_app_control_origin`. Ports are intentionally guarded. Replacing the protocol literals with the standard library's `HTTP_PORT` and `HTTPS_PORT` preserves URL validation and leaves the guard untouched. Explicit HTTPS and HTTP-loopback default ports remain rejected.
+
+After the repair, 39 profile/browser-port/browser-resource cases passed, including actual Chromium plus the stdio child. Fifteen selected D8 topology/scope cases passed in an isolated Git validation snapshot containing the complete candidate (local validation tree `261fc5d2e88224a87844685537c35c7049e4d00d`). This is focused source evidence, not the future hosted aggregate result; counts overlap earlier suites.
+
+Current governing procedures were requalified at protected master `1d0579c0540f5281e52faf069dd7dba2f480c7c6`: all 15 applicable law files are byte-identical to the original implementation pin. The affected browser resource contract's base blob is unchanged too. No ancestry-only update or foreign source change is included.
+
+The Studio failure's previous classification was too broad. Exact installed-family source (`gateway.mjs` Git blob `f87ac012339e82fe46bce5ddc70d1d04183d1b6e`, `fleet-routing.mjs` blob `63c47d73ae7b73a61c95cee1803c549ecd6df9c8`) wraps local catalogue, connection, remote catalogue and schema errors in `FLEET_ROUTE_PREFLIGHT_REFUSED`, then discards the inner cause. The same original C3/M2 preflight returned `NOT_APPLIED` again and safe readback remained unbound. A bounded original-local-owner diagnostic subsequently read the installed module hashes, matching both pinned blobs, and the configured route names. It proves `FLEET_ROUTE_HOST_NOT_CONFIGURED`: `m2` is absent; the only remote refs are `mini3` and `mini4`. The existing unbound local C3 backend already runs on `m2studio`; its configuration read and native diagnostic commands succeed. The exact installed preflight consumed the local catalogue (26 tools) and refused the unknown ref before remote initialization (zero remote tools). This resolves the local-owner access boundary without any fleet fallback or host-binding change. New MCP sessions create new route-binding state even when sharing a backend, so account-wide state must not be substituted for explicit original resource identity.
+
+A bounded original-owner diagnostic through Fabric was admitted by economic policy but stopped at `SUPPORT_POLICY_STALE_ACTIVE_REFUSED` before worker START proof. Original run `mastermind-os-agent-control-20261108-c3-route-audit-1` and controller `27206` remain the only diagnostic operation; its effects/reservation are not replayed or cleared. Status reports terminal failure, root verification false and execution absence not proven. This is a support-publication consistency boundary, not evidence that the Chairman must approve the diagnostic again.
+
+The managed GitHub connection's documented exclusion of administration access explains the separate branch-protection 403. That exact denied read is not retried or reconstructed through another account. GitHub's native expected-head mechanism exists, but the exposed auto-merge wrapper omits it. An adapter fix can restore a head fence; it does not manufacture missing enforcement qualification. No release, restart, profile activation or installed acceptance is claimed.
+
+### Corrected local-owner operation
+
+Fleet inventory host names are not configured route refs. `studio_select_host` is optional one-way routing for the named remote refs, not a mandatory readiness step for the existing local backend. After any local backend dispatch, that frontend session is intentionally ineligible for later fleet selection. The original local path is therefore used deliberately for owner diagnosis, with physical host identity observed before commands. No alternate account, gateway, host or credential was used. The previous broad refusal interpretation was a diagnostic error.
