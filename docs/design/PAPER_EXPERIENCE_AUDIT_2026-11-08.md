@@ -946,7 +946,7 @@ C02 **`1OGC-0`** on [D08C Plan, Compare and Review](https://app.paper.design/fil
 
 One text node, **`1OK5-0`**, now reads:
 
-> Same exact legs, expiry basis, currency and spread size.  
+> Same exact legs, expiry basis, currency and spread size.\
 > 100 shares per contract assumed for this illustration.
 
 The original **Only entry prices differ** text **`1OK6-0`** remains. The two13px/16px lines fit the existing56px row **`1OK4-0`**, with no board expansion or type reduction.
