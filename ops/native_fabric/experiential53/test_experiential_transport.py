@@ -314,8 +314,8 @@ class StatusFailClosedTests(unittest.TestCase):
     def test_401_auth_refused(self):
         self._status_case(401, "GATEWAY_AUTH_REFUSED")
 
-    def test_403_auth_refused(self):
-        self._status_case(403, "GATEWAY_AUTH_REFUSED")
+    def test_403_permission_refused(self):
+        self._status_case(403, "GATEWAY_PERMISSION_REFUSED")
 
     def test_413_body_refused(self):
         self._status_case(413, "GATEWAY_REQUEST_TOO_LARGE")
@@ -895,6 +895,26 @@ class ProviderRequestIdTests(unittest.TestCase):
             self.assertEqual(caught.exception.reason, "GATEWAY_AUTH_REFUSED")
             self.assertIn(f"provider_request_id={self.HANDLE}",
                           caught.exception.detail)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(len(server.requests), 1)
+
+    def test_permission_error_code_survives_one_actual_http_failure(self):
+        body = json.dumps({"error": {
+            "code": "model_not_granted", "type": "permission_error",
+            "param": "model", "message": "PRIVATE-BODY-MUST-NOT-ESCAPE"}}).encode()
+        server = self._server_with(403, {"X-Request-Id": self.HANDLE}, body)
+        try:
+            with self.assertRaises(REFUSED) as caught:
+                run_ok(server)
+            self.assertEqual(caught.exception.reason, "GATEWAY_PERMISSION_REFUSED")
+            self.assertNotIn("PRIVATE-BODY", str(caught.exception))
+            evidence = transport.transport_refusal_metadata(str(caught.exception))
+            self.assertEqual(evidence["kind"], "permission")
+            self.assertEqual(evidence["http_status"], 403)
+            self.assertEqual(evidence["provider_error"]["code"], "model_not_granted")
+            self.assertEqual(evidence["provider_request_id"], self.HANDLE)
         finally:
             server.shutdown()
             server.server_close()
