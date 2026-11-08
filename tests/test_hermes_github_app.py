@@ -340,3 +340,53 @@ def test_real_signed_authoring_issuer_scopes_token_and_rejects_extra_grants():
     assert source.token_for_installation(installation_id=4321).startswith("AUTHORING_")
     assert len(observed) == 1
     assert "AUTHORING_TOKEN_NOT_FOR_TOOL_OUTPUT" not in repr(source)
+
+def test_actual_native_registration_owns_exact_tool_scope_when_donor_available(tmp_path, monkeypatch):
+    """Optional upstream-native canary; never a claim of installed Hermes."""
+    import os
+    from pathlib import Path
+    from integrations.hermes_github_native import (
+        TOOL_NAME, register_native_tool,
+    )
+    root = os.environ.get("HERMES_LEADERSHIP_UPSTREAM")
+    if not root:
+        pytest.skip("native Hermes donor not provided")
+    from integrations.hermes_harness.tests.test_native_tool_registration import _Upstream
+    donor = Path(root)
+    assert (donor / "hermes_cli/plugins.py").is_file()
+    owner = _Upstream(donor)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    scope = tmp_path / "host-1"
+    scope.mkdir()
+    manager = owner.PluginManager(scope_key=str(scope))
+    manifest = owner.PluginManifest(
+        name="mastermind-github-app", version="1", source="project",
+        path=str(scope), provides_tools=[TOOL_NAME], key="mastermind-github-app",
+    )
+    ctx = owner.PluginContext(manifest, manager)
+    app, fake, _ = make()
+    binding = HostHermesGitHubBinding(
+        profile_id=ctx.profile_name,
+        resolve_client=lambda session: app if session == "session-123" else None,
+        currentness_guard=lambda: True,
+    )
+    # The host-bound client must name the exact native profile.
+    object.__setattr__(app.binding, "profile_id", ctx.profile_name)
+    lease = register_native_tool(ctx, binding, profile_id=ctx.profile_name)
+    try:
+        entry = owner.registry.snapshot_registration(TOOL_NAME, scope=str(scope))
+        assert entry.handler is lease.handler and entry.is_async is True
+        assert entry.schema["parameters"]["additionalProperties"] is False
+        result = json.loads(asyncio.run(entry.handler(
+            {"action": "status"}, session_id="session-123",
+        )))
+        assert result["state"] == "AVAILABLE"
+        with pytest.raises(RuntimeError, match="GITHUB_NATIVE_COLLISION"):
+            register_native_tool(ctx, binding, profile_id=ctx.profile_name)
+    finally:
+        lease.dispose()
+    assert owner.registry.snapshot_registration(TOOL_NAME, scope=str(scope)) is None
+    revoked = json.loads(asyncio.run(lease.handler(
+        {"action": "status"}, session_id="session-123",
+    )))
+    assert revoked["state"] == "REFUSED"
