@@ -1251,3 +1251,14 @@ Verification is concrete:
 - All scoped edits and **options-phone-finish-01** returned **APPLIED_RESPONSE_OBSERVED** without per-node errors.
 
 This establishes editable phone-state and build-contract proof. Real focus restoration, scrolling/ARIA behavior, race handling, local callbacks and qualified calculation still require consumer implementation/proof. F01/D08C candidate qualifications, Plan#804 and D08D holds remain unchanged.
+
+
+## Options architecture: the existing directory points to the current comparison studies
+
+The F03 Options row **1NEC-0** on [Terminal pR](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-R-0) now exposes both parts of the same build path. **1NEH-0** retains A/B/C's existing candidate/readme links and adds the direct **C · Plan / Compare** destination on p13. No separate directory was created.
+
+Owned status text **1NEJ-0** retains A05–A11 and B's provisional status, then identifies **C11–C15: choice, exact review, apply/refusal** and **C16–C18: phone continuation ·390px**. It explicitly says **C: local adoption proposed ·not implemented**. D's no-new-candidate status, prior denial/target hold and Review pending/no acceptance remain unchanged. All four source handoff URLs and the broader oversized-PAGES reference remain intact.
+
+Root inspected the complete row render and final four-line link group. The final label was shortened so the p13 URL fits without an isolated trailing character; typography and all layout roles remain unchanged. Computed styles show the existing root1NDQ has content-driven height. Masking only1NEH and1NEJ makes the entire row JSX identical modulo whitespace (**6,742→6,971** characters).
+
+The two text edits, fit correction and scoped **options-scenario-directory-finish-01** returned **APPLIED_RESPONSE_OBSERVED**. This is a discoverability correction to the incumbent directory, with no candidate promotion, held-lane modification or new navigation owner.
