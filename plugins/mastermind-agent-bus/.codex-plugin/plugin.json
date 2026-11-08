@@ -1,7 +1,6 @@
 {
   "author": {
-    "name": "Chris Wong",
-    "email": "chriswong6031@gmail.com"
+    "name": "MastermindX"
   },
   "description": "ChatGPT workflows for direct, owner-governed Hermes teammate messaging, original replies, and Executive OS worker delegation through an already-connected Mastermind MCP app.",
   "interface": {
@@ -23,5 +22,5 @@
   "name": "mastermind-agent-bus",
   "repository": "https://github.com/mastermindx-market-intelligence/Mastermind",
   "skills": "./skills",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
