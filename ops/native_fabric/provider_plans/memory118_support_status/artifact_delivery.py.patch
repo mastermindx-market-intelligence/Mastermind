@@ -1,0 +1,48 @@
+--- a/ext/artifact_delivery.py
++++ b/ext/artifact_delivery.py
+@@ -535,6 +535,8 @@
+ 
+ 
+ def qualify(request):
++    from fabric_memory_view import require_generic_channel
++    require_generic_channel(HERE, request.get('run_id'))
+     import fabric_task
+     reader.validate_request(request)
+     rid = request["run_id"]
+@@ -929,6 +931,20 @@
+         import native_host_review_delivery
+         code = native_host_review_delivery.code_for_request(request, expected_hash=observer_source_hash)
+         response_limit = native_host_review_delivery.MAX_RESPONSE
++    elif type(request) is dict and request.get("schema") == "mastermind.original_support_policy_status.v1":
++        # Separate prelaunch owner join; do not widen any old observation scope.
++        import types
++        reader_path = Path(__file__).resolve().parent / "support_policy_status.py"
++        reader_raw = local_file(reader_path, 512 * 1024)
++        reviewed_reader = "76bc04c889430cbb21efd172e438eeb9a26ce08e134098df4de7bb5c33a56803"
++        if digest(reader_raw) != reviewed_reader or observer_source_hash != reviewed_reader:
++            raise ValueError("support_policy_reader_source_unqualified")
++        fixed_reader = types.ModuleType("support_policy_status_fixed")
++        fixed_reader.__file__ = str(reader_path)
++        exec(compile(reader_raw, str(reader_path), "exec"), fixed_reader.__dict__)
++        code = fixed_reader.code_for_request(request,
++            expected_hash=reviewed_reader, expected_sources=current_sources_sha256)
++        response_limit = 16384
+     elif type(request) is dict and request.get("schema") == "mastermind.fabric_run_observation_request.v1":
+         import run_observation_delivery
+         code = run_observation_delivery.code_for_request(request, expected_hash=observer_source_hash)
+@@ -1600,6 +1616,15 @@
+ 
+ 
+ def main():
++    # All fixed --read-artifacts variants pass the original ID in argv[2].
++    # Refuse before helper dispatch/SSH/destination reservation or raw reads.
++    if len(sys.argv) > 2 and sys.argv[1].startswith('--'):
++        from fabric_memory_view import require_generic_channel
++        try:
++            require_generic_channel(HERE, sys.argv[2])
++        except ValueError:
++            print('{"state":"REFUSED","reason":"participant_view_required"}')
++            return 75
+     if sys.argv[1:2] == ["--mac-policy-return"]:
+         import mac_policy_return
+         p = argparse.ArgumentParser(description="Original mac-policy retained evidence only")
