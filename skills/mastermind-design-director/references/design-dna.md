@@ -7,6 +7,11 @@ Content: `docs/DESIGN_DOCTRINE.md`; visual grammar:
 `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md`; actual values: `templates/theme.css`.
 Use these immutable sources, then refresh only affected facts when source changes.
 
+The corpus stores implementation provenance as explicit `repository`, `ref`, `path`
+and `access` fields. These are source identities, not anonymous download URLs. Read
+them through the existing authenticated source connection or registered Macro
+checkout. The offline helper does not resolve repositories or acquire credentials.
+
 Mastermind OS keeps its own tokens and component owner at
 `Mastermind@5955a246c0e020cd6800d12f8da7bd6ff3a792dc`:
 `app/mastermind_os/src/styles.css` and `app/mastermind_os/src/App.tsx`.

@@ -45,7 +45,18 @@
         "observed_at": "2026-11-08T05:58:17.392603+00:00"
       },
       "implementation_refs": [
-        "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/docs/DESIGN_DOCTRINE.md"
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/styles.css",
+          "access": "existing_authenticated_source_owner"
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/App.tsx",
+          "access": "existing_authenticated_source_owner"
+        }
       ],
       "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
     },
@@ -87,7 +98,18 @@
         "observed_at": "2026-11-08T05:58:17.392603+00:00"
       },
       "implementation_refs": [
-        "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/docs/DESIGN_DOCTRINE.md"
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/styles.css",
+          "access": "existing_authenticated_source_owner"
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "ref": "5955a246c0e020cd6800d12f8da7bd6ff3a792dc",
+          "path": "app/mastermind_os/src/App.tsx",
+          "access": "existing_authenticated_source_owner"
+        }
       ],
       "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
     },
@@ -135,7 +157,12 @@
         "observed_at": "2026-11-08T05:58:17.392603+00:00"
       },
       "implementation_refs": [
-        "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/docs/DESIGN_DOCTRINE.md"
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "ref": "bc6627515c0b0209c9b0779beaab9e780cf0370a",
+          "path": "docs/DESIGN_DOCTRINE.md",
+          "access": "existing_authenticated_source_owner"
+        }
       ],
       "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
     },
@@ -182,7 +209,12 @@
         "observed_at": "2026-11-08T05:58:17.392603+00:00"
       },
       "implementation_refs": [
-        "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/docs/DESIGN_DOCTRINE.md"
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "ref": "bc6627515c0b0209c9b0779beaab9e780cf0370a",
+          "path": "docs/DESIGN_DOCTRINE.md",
+          "access": "existing_authenticated_source_owner"
+        }
       ],
       "version_note": "Evidence bytes retained from the 2026-11-08 attended audit; current Paper must be re-read before edits."
     }

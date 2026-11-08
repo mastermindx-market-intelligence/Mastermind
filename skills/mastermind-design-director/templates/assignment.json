@@ -4,7 +4,7 @@
   "issued_at": "2026-11-08T05:58:17.392603+00:00",
   "source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/sol/hermes-design-director-20261108-c1-01/docs/hermes/design-director/COMMISSION.md",
   "shell_ref": "Preserve the target product\u2019s existing shell and navigation; Terminal has a separately governed theme.",
-  "token_ref": "https://github.com/mastermindx-market-intelligence/macro/blob/bc6627515c0b0209c9b0779beaab9e780cf0370a/templates/theme.css",
+  "token_ref": "Authenticated source owner: repository=mastermindx-market-intelligence/macro; ref=bc6627515c0b0209c9b0779beaab9e780cf0370a; path=templates/theme.css. Read through the existing authenticated source connection or registered Macro checkout.",
   "constraints": [
     "No decorative colored container edges",
     "Do not invent live data, approval or execution authority",
