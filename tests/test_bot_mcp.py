@@ -299,4 +299,3 @@ def test_unified_news_origin_survives_actual_tool_transport(tmp_path, monkeypatc
     assert out["evidence_grade"] == "vendored_snapshot"
     if mode == "scalar_fallback":
         assert "news" not in out
-

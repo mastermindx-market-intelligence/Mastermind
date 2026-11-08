@@ -424,4 +424,3 @@ def test_news_row_unified_origin_stays_with_selected_rows(monkeypatch, retained,
     assert fallback["value"]["retained_from_previous_build"] is False
     assert fallback["value"]["n_recent"] == 99
     assert fallback["value"]["source_file"] == "site/news/by_ticker.json"
-
