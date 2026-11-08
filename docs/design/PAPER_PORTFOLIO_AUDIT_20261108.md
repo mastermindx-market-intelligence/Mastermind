@@ -2,7 +2,7 @@
 
 ## Current continuation status
 
-The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. Mastermind AI now also has an explicit draft-mention/context commitment study with desktop and six EN/ZH mobile panes, including deliberate send choices, deletion outcomes and stale-preview guards. Its original context previews and interaction board are unchanged. The next foreground is the chart reader’s lost historical-bar selection: source currently falls back to the latest bar without a deliberate adoption step. This is a continuing design mission; the first-pass exit below is historical.
+The Chairman extended the mission after the first pass and authorized continued autonomous improvements. Completed in the continuing pass: Options changed-list review and adoption; Market Memory exact-record comparison; Prophet selected comparison, identity and watchlist outcomes; OS created-project opening and invalid-link recovery; News source reading and return; International scanner-to-dossier context preservation; and Policy source notes with an exact original-fixture projection and EN/ZH disclosure states. GMI's public company evidence destination and publication-status boundary are also completed, with the superseded source diagnosis marked historical. Sector R4 now also has EN/ZH comparison-return outcomes for unverified basis, known source change, missing selections and separately qualified position failure. Terminal Company now also has the corrected historical consensus status and a six-pane EN/ZH benchmark-availability journey. F03's source directory now also exposes Sector's provisional Readme, bounded comparison-return proposal and retained reference separately; an additive exact-candidate-board locator makes GPL-0 and its full compound identity searchable without changing the frozen census. Both source phases are committed and read back. Real-browser directory verification remains open after the selected browser could not reach the temporary workspace preview. Discover/Heatmaps now also has a native selected-reading refresh study with one desktop and six EN/ZH mobile panes, plus a source-owner correction in its main Readme. The original overview and mobile examples are unchanged. Mastermind AI now also has an explicit draft-mention/context commitment study with desktop and six EN/ZH mobile panes, including deliberate send choices, deletion outcomes and stale-preview guards. Its original context previews and interaction board are unchanged. D06 now also has a reader-recovery proposal that keeps an unavailable exact bar from silently becoming Latest, aligns reader and overlay behavior, and preserves selection through empty/refill. The next foreground is F03 discovery integration for the three new bounded Heatmap, AI and chart-reader proposals, preserving unqualified status and the frozen inventory. This is a continuing design mission; the first-pass exit below is historical.
 
 ## Assignment and evidence boundary
 
@@ -1158,3 +1158,119 @@ Runtime proof remains owed for type/remove/replace and outgoing context; bare/pa
 ### Reassessment and next foreground
 
 This native design/source-clarity phase is complete. The mission immediately continues to a distinct D06 chart-reader recovery gap. At the existing Terminal source pin, loss of a selected bar clears its key and the reader falls back to the latest plotted bar, also changing historical-event withholding. The current AI-attachment missing-bar proposal already covers its own boundary and must remain untouched. Next work is a disjoint reader-level specimen with explicit latest-bar adoption, current-series emptiness and existing-owner/focus constraints.
+
+## Continuation — D06 chart-reader selection loss and empty/refill
+
+### Source findings and refreshed affected pin
+
+Protected Terminal `master` was refreshed to `ff49e04491b3deb6d02e98a890130e2b4af01e00`. Root independently read these exact files:
+
+| Source | Blob SHA | Finding |
+|---|---|---|
+| `terminal/components/ChartPanel.tsx` | `f95679c4977d8c96017dab8888f4d81f92a52bd9` | Missing selected time is cleared during refresh; an empty series resets the panel while the owner may retain the selected time |
+| `terminal/components/VisualIntelligencePanel.tsx` | `50cc6eb481940ca538219571d6b27d712266f3bb` | Update/reset clear local selection; null or absent lookup resolves to lastIndex |
+| `terminal/components/ChartContextDock.ts` | `d0d64f7d2ec663f9ed91f7663432b55bd4316575` | Dock is a presentation destination; ChartPanel owns analysis and selection |
+| `terminal/lib/visualIntelligence.ts` | `32275d7029b97e5c9cbcea3f7d56e7a070da5ee1` | Overlay also substitutes the final fact for null or invalid selected index |
+
+The first three files are byte-identical to the earlier `d7a83d3348a4fcb762d93221f19c4e94cbe4505e` input. The governing Mastermind procedure pin is unchanged.
+
+The source establishes three related conditional failures, not a reproduced production incident:
+
+1. `ChartPanel.refreshVisualContext` clears a missing selected key; the panel also clears it and resolves to the last index. The reader can therefore replace a selected bar with “Latest plotted bar” without a deliberate Latest action.
+2. The overlay consumer independently maps null/invalid selected index to the final fact. Its range lines, labels and associated tooltips then use that fact; current-calendar events can become eligible when replay is false and calendar data is available. A reader-only fix would leave this fallback active.
+3. During nonempty → empty → refill, the chart owner can retain an exact key while `panel.reset("empty")` clears the panel’s frame and selection. The panel can return to Latest while the owner/overlays still resolve the historical key.
+
+Existing intentional resets remain binding: symbol, **effectiveTimeframe** (including startup/data-ready semantics), extended-hours mode, overnight/24h mode and exact replay `clock:at` cutoff. A shared replay boolean alone is insufficient. The recovery remains within the owning ChartPanel/pane instance and consumes only replacement data accepted by its existing load/source guards.
+
+### Native design delivered
+
+File: Terminal `01M3NSZGE8JWN2EZCSF0DT05RM`.
+
+New containing page: [Proposed · Chart reader recovery](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-1E-0), `p-1E-0`. Board: `23MJ-0`, **PROPOSED · Chart reader recovery · EN/ZH**, 1440px wide, auto-height. Body: `23VK-0`.
+
+| Section | Native identity |
+|---|---|
+| Lost selected-key section / reader pair | `23VX-0 / 23W2-0` |
+| EN dark 360px desktop reader / ZH light 390px mobile | `23WQ-0 / 23XF-0` |
+| Empty/refill section / reader pair | `23W4-0 / 23W9-0` |
+| EN light 360px desktop reader / ZH dark 390px mobile | `23YM-0 / 23ZB-0` |
+| Existing-owner contract section / six cards | `23WB-0 / 23WG-0` |
+| Source and proof boundary | `23WI-0` |
+
+The prior selection `002326.SZ · 3D · 15 Oct 2026` is reused from the existing illustrative D06 fixture. No substitute latest-bar date, numerical price/return, timezone or quote freshness is invented.
+
+**When the requested key is absent and other usable bars remain**, the reader retains the selected identity, withholds its numerical interpretation and offers **View latest plotted bar** or **Return to chart**. A deliberate user selection of another available bar uses the normal interaction path without an additional confirmation.
+
+**When there are no usable current bars**, no Latest destination is offered as active. Loading and accepted empty data remain separate availability states. Numeric interpretation and dependent overlays clear without implicitly changing the requested selection to Latest.
+
+The product decision is explicit: the live reader may re-resolve the **same exact requested key** when it returns in an accepted same-binding series, provided no newer user selection superseded it. This preserves the user’s continuing inspection intent and does not adopt a different bar. If the key is still absent, recovery remains. An old key returning after the user chose Latest or another bar cannot take over. This live-reader rule does not weaken the separate captured AI-attachment contract.
+
+### Architecture and interaction contract
+
+Selection is resolved once by the existing ChartPanel owner and projected into the reader and overlays. The panel’s update/select/reset paths cannot independently convert unavailable selection into Latest.
+
+- Preserve distinct Latest intent, exact-key intent with a current resolution, and exact-key intent without a current resolution.
+- Do not encode unavailable selection as null, -1, NaN or a missing index: the current overlay consumer treats those as latest fallback.
+- While unresolved, jointly withhold reader synthesis/values, selected-bar range lines/labels/tooltips and current-calendar events.
+- Keep independent current plotted bars, regime/volume presentation, chart tools and saved layer preferences. Do not toggle `visualLevels` or `visualEvents` off merely to withhold temporary output.
+- Preserve replay’s current-calendar restrictions even after an explicit Latest selection.
+- Preserve intentional source/binding retirements. Do not carry the old symbol/session/cutoff warning into a new binding.
+- A deliberate Latest action rechecks the current eligible last bar at action time through the existing `inspect(null)` path. It does not introduce a fetch, chart remount or viewport change.
+- A generic refresh, repaint, calendar callback or synthetic crosshair notification cannot authorize a different selected bar. Use the incumbent interaction owner; add no separate gesture watcher or selection store.
+- Close/Return uses the existing dock and focus owner, preserves the current chart/range/settings and cannot reopen on data completion.
+- Panning a still-loaded bar offscreen does not make it missing from the accepted series.
+
+### Build-note addition and preserved references
+
+Added `241C-0` to `p-17-0 / 1W4S-0`, immediately after the existing header `1W4T-0`. Eight leaves `241D-0` through `241K-0` contain the source diagnosis, ownership contract and proposal page/board locator. This is a scoped behavior/build note, not evidence that the entire D06 assignment or a new full Readme contract has been accepted.
+
+Readback evidence:
+
+| Target | Verified result |
+|---|---|
+| Desktop normal reader workspace `1U01-0` | Full JSX byte-identical; 82 simple text leaves |
+| Mobile normal reader `1UEL-0` | Full JSX byte-identical; 50 leaves |
+| Chinese normal reader `1V6P-0` | Full JSX byte-identical; 51 leaves |
+| Existing behavior board `1W4S-0` | All 85 existing simple leaves unchanged; exactly eight additions, total 93 |
+| Existing AI attachment group `1XV6-0` and remaining tail | Byte-identical subtree comparison |
+| Earlier heatmap proposal `22UK-0` | Full JSX byte-identical to its final prior-phase snapshot |
+| New recovery board `23MJ-0` | 113 simple text leaves; two 360px desktop and two 390px mobile panes; 12 controls declare minimum 44px height |
+
+### Verification and effect receipts
+
+Root visually inspected the lost-selection pair, empty/refill pair, six-card contract, build note and full board overview. Chinese status wording was aligned with the English unavailable state. No clipping was observed. A focused semantic review accepted the full binding, same-key refill decision, dependent range/tooltips/event gating, deliberate action and date-only boundary.
+
+All **24** native operations remained on the existing guarded Paper carrier and returned `APPLIED_RESPONSE_OBSERVED`:
+
+- `paper-portfolio-20261108-chart-reader-page-01`
+- `paper-portfolio-20261108-chart-reader-board-01`
+- `paper-portfolio-20261108-chart-reader-header-01`
+- `paper-portfolio-20261108-chart-reader-lost-01`
+- `paper-portfolio-20261108-chart-reader-empty-01`
+- `paper-portfolio-20261108-chart-reader-contract-01`
+- `paper-portfolio-20261108-chart-reader-proof-01`
+- `paper-portfolio-20261108-chart-reader-lost-pane-1`
+- `paper-portfolio-20261108-chart-reader-lost-pane-2`
+- `paper-portfolio-20261108-chart-reader-lost-pane-3`
+- `paper-portfolio-20261108-chart-reader-empty-pane-1`
+- `paper-portfolio-20261108-chart-reader-empty-pane-2`
+- `paper-portfolio-20261108-chart-reader-empty-pane-3`
+- `paper-portfolio-20261108-chart-reader-contract-1`
+- `paper-portfolio-20261108-chart-reader-contract-2`
+- `paper-portfolio-20261108-chart-reader-contract-3`
+- `paper-portfolio-20261108-chart-reader-contract-4`
+- `paper-portfolio-20261108-chart-reader-contract-5`
+- `paper-portfolio-20261108-chart-reader-contract-6`
+- `paper-portfolio-20261108-chart-reader-name-01`
+- `paper-portfolio-20261108-chart-reader-build-note-01`
+- `paper-portfolio-20261108-chart-reader-build-note-position-01`
+- `paper-portfolio-20261108-chart-reader-copy-01`
+- `paper-portfolio-20261108-chart-reader-finish-01`
+
+Scoped finish released only `23MJ-0` and `1W4S-0`. No application code, deployment, PR control, release, trading or AI send/attachment effect occurred. Source and Paper evidence do not establish runtime acceptance.
+
+Required runtime cases remain: same-key refresh; key disappearance with other bars; empty/loading → refill with the key present and absent; old-key return after a newer user selection; session-mode changes; exact replay-cutoff changes while replay remains true; synthetic versus deliberate crosshair input; explicit Latest/another bar; action-time target loss; no usable Latest target; close/reopen and focus; off-viewport selection; reader/range/tooltips/calendar agreement; EN/Chinese and narrow/zoom interaction.
+
+### Reassessment and immediate next action
+
+Native D06 recovery design and source clarification are complete. Next is source-directory discoverability for the three newly completed bounded proposals: D04 heatmap selected reading, D14 draft context and D06 reader recovery. Reuse the existing F03 observation/curation and optional candidate-board mechanism. Preserve null approvals, unqualified proposal status, all prior observations, the frozen artboard census and the 301 NOT_DISPATCHED organization actions. A behavior/source-gap board must not be relabeled as a full returned domain Readme merely to populate a field.
