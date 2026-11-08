@@ -2147,10 +2147,16 @@ def api_overnight_tape() -> JSONResponse:
     dashboard can't see. Polled by the dashboard's Overnight Tape panel; cached ~5 min server-side."""
     try:
         from data_layer import overnight
-        return JSONResponse(overnight.tape())
+        return JSONResponse(overnight.tape(strict=True))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"groups": {}, "risk": {"state": "calm", "reasons": ["unavailable"]},
-                             "live": False, "error": str(exc)})
+        _log.warning("overnight tape read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "overnight_status": "unavailable",
+            "groups": None,
+            "risk": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+        })
 
 
 @router.get("/api/research")
