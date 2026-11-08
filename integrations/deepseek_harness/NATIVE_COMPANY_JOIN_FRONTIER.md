@@ -1,3 +1,29 @@
+## C45 — current and historical composition qualified after hosted CI
+
+The same original operation `deepseek-mastermind-chat-20261106-c2`, managed M2 writer and branch continue. The implementation source is `ea35c3a1da6aeb02e6ca38b9ecbe29fc3f1bf2cf`; its six exact-head commit effects are recorded in [C45 evidence](../../research/evidence/deepseek-native-ci-composition-c45-20261108.json). C43–C44 source/package evidence below remains retained.
+
+Hosted C44 checks exposed four concrete source/test issues. The current paired Control archive now pins the complete current realm bytes, while the historical provider APPLICATION producer deliberately reads its two exact retained historical inputs. The original composition commitments, quota-reader assertions, current DeepSeek profile/realm, historical 116-member equality and actual inventory provenance are preserved.
+
+The company-priorities fixture now uses its complete historical GET/POST pair, retaining its one-route delta and Caddy assertions. The native history permission check reads the same captured stat value directly; complete identity equality, UID/GID and currentness remain. The new frozen realm uses the already supported `.py.source` convention. Every original classifier statement and assertion is unchanged. A new actual-archive regression checks identity additions, UID/GID field mutations and false postimages; the historical bytes remain unchanged.
+
+### Qualification and retained failures
+
+- **25 actual paired translation tests passed**, including original native A/B calls, same-operation holds and the two-process race. All 4,546 pre-existing input bytes remained unchanged; the raw receipt's sole new zero-byte Brain lock is explicitly reconciled.
+- **146 historical provider test cases and 9 subtests passed** on the final archive candidate. The earlier qualification and complete-AST-identical assertion wrapping are retained separately.
+- **12 company-priorities tests passed** with unchanged source inputs.
+- **338 identity-guard tests passed** on the final archive candidate. The preceding **349 passed/one scanner failure** and the abandoned broader classifier attempt with **five older witness failures** are retained. Native history tests passed with the same current source bytes; the final candidate restores all original classifier/assertion semantics.
+- C44 OS frontend and native macOS build/test jobs passed. Prior KittenTTS and CodeQL Python failures were HTTP504 dependency/tool downloads before their tests or analysis. A new candidate still requires its own hosted CI; no old result is promoted to new-head success.
+
+The earlier Ready action was reversed after the exact-head merge preflight detected failures. **No auto-merge or merge-queue request was invoked.** Current delivery effects and subsequent GitHub source/readback belong in the existing [canonical continuation](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2177#issuecomment-6707499732).
+
+### Production remains distinct
+
+No installed release, external provider request, active-service restart or live conversation/Session owner was created in this repair. Accepted Hermes #2180/#2228 and the C21 same-Session canary were not repeated. Preserve #2120/#2134/#2147, Paperclip, company priorities and #2175; `os_assets.py` remains unchanged and #1870 excluded.
+
+Production still requires accepted source/required exact-head CI, original final Worker/Node/native/ACP materialization and attestation, original company-account/realm/capability/quota/host admission, compatible service routing, and the real signed-in packaged DeepSeek journey. Closed installed/config/search, Fabric/VPS, protection-admin and foreign-worktree actions remain closed. The latest installed DeepSeek journey observation remains `backend_unavailable` at 2026-11-07T18:51:29. A separate read-only Executive V3 status call at 2026-11-08T11:08:27.130900Z also returned `backend_unavailable`; submission/execution readiness was not observed.
+
+**Next action:** publish this qualified candidate on the same branch, verify GitHub head/tree/blob content, update PR/canonical evidence, and continue eligible Ready/native protected merge and exact-head CI. Source judgment is not GitHub APPROVED.
+
 # DeepSeek native company join: exact acceptance frontier
 
 ## C43–C44 — original closed-session answers recovered; protected #2175 composed
