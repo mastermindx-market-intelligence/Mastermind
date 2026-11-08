@@ -22,7 +22,7 @@
 +            import hashlib
 +            import types
 +            import artifact_delivery
-+            qualified_sources = {'artifact_reader.py': 'e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469', 'lane_runtime.py': 'a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f', 'support_bundle.py': 'afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822', 'fabric_policy_snapshot.py': 'a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20', 'artifact_delivery.py': 'eaeecfc0b2f2ff232bf3c31f6169803f0eb19d7666aa9974161c325feec47e4d', 'support_policy_status.py': 'fe726a411192290c12e15e67ee7c8a94b3d798c0f37e79c41c924c46d6f78408'}
++            qualified_sources = {'artifact_reader.py': 'e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469', 'lane_runtime.py': 'a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f', 'support_bundle.py': 'afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822', 'fabric_policy_snapshot.py': 'a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20', 'artifact_delivery.py': '57235369ace90055bd5ec1fbb91059f7c438595aab837c94cf1648fbe71225c7', 'support_policy_status.py': '3edf6de5a6cd8fc20978f4453cdb80bc87e78603c7bf9404a2daa03cfe9b015b'}
 +            verified_sources = {name: artifact_delivery.local_file(HERE / name, 512 * 1024)
 +                                for name in qualified_sources}
 +            if {name: hashlib.sha256(raw).hexdigest() for name, raw in verified_sources.items()} != qualified_sources:

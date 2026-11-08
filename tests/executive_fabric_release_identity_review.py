@@ -1031,4 +1031,4 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
-REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': 'fe726a411192290c12e15e67ee7c8a94b3d798c0f37e79c41c924c46d6f78408', 'sites': ((364, 66, 69, 'int', '512'), (383, 54, 57, 'int', '512'))}
+REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '3edf6de5a6cd8fc20978f4453cdb80bc87e78603c7bf9404a2daa03cfe9b015b', 'sites': ((365, 66, 69, 'int', '512'), (384, 54, 57, 'int', '512'))}

@@ -87,15 +87,27 @@ def runtime(patched_source, monkeypatch):
                 'request_sha256':hashlib.sha256(request_raw).hexdigest(),'state':'LAUNCH_ATTEMPT_RESERVED',
                 'route':{'POOL':'glm','MODE':'glm','MODEL':'fixture','HOST':'ubuntu0'}}
             (state / (run+'.request-launch.json')).write_text(json.dumps(launch))
-            manifest = {'schema':'remote-support-code.v1','files':{
-                name:hashlib.sha256(desired).hexdigest() if name=='pools.yaml' else '2'*64
-                for name in status.support.SOURCE_FILES}}
-            (state / (run+'.support.json')).write_text(json.dumps(manifest))
+            # Actual incumbent producer: the retained manual file is a flat
+            # fixed file-hash map. Its digest wraps that map separately.
+            import io
+            from contextlib import redirect_stdout
+            helpers=importlib.import_module('remote_sub_helpers')
+            produced=io.StringIO()
+            with monkeypatch.context() as producer_scope, redirect_stdout(produced):
+                producer_scope.delenv('FABRIC_CANONICAL_PAID_MODE',raising=False)
+                producer_scope.setattr(sys,'argv',['support-meta',str(ext),
+                    str(state/(run+'.support.json')),*status.support.SOURCE_FILES])
+                helpers.support_meta()
+            producer_reply=produced.getvalue().strip().split()
+            manifest=json.loads((state/(run+'.support.json')).read_text())
+            assert set(manifest)==set(status.support.SOURCE_FILES)
+            assert producer_reply==[hashlib.sha256(status.support._canon_manifest(manifest)).hexdigest(),
+                hashlib.sha256(desired).hexdigest()]
             for path in state.iterdir(): path.chmod(0o600)
             req, frame, alias = status.original_request(run, original_root, parent)
             yield SimpleNamespace(status=status,delivery=delivery,lane=lane,host=host,task=task,
                 ext=ext,root=root,lock=lock,policy=policy,desired=desired,doc=doc,registry=registry,
-                run=run,original_root=original_root,parent=parent,request=req,state=state)
+                run=run,original_root=original_root,parent=parent,request=req,state=state,producer_reply=producer_reply)
         finally:
             for name in names:
                 sys.modules.pop(name,None)
@@ -192,7 +204,7 @@ def test_prelaunch_owner_join_refuses_foreign_or_unretained_facts(runtime,monkey
     if kind=='request_hash':
         p=r.state/(r.run+'.request-launch.json');value=json.loads(p.read_text());value['request_sha256']='0'*64;p.write_text(json.dumps(value))
     if kind=='manifest':
-        p=r.state/(r.run+'.support.json');value=json.loads(p.read_text());value['files']['arbitrary']='0'*64;p.write_text(json.dumps(value))
+        p=r.state/(r.run+'.support.json');value=json.loads(p.read_text());value['arbitrary']='0'*64;p.write_text(json.dumps(value))
     if kind=='policy_source':(r.ext.parent/'orch/fabric/pools.yaml').write_bytes(r.desired+b'\n')
     if kind=='caller':monkeypatch.setenv('CODEX_THREAD_ID','foreign')
     with pytest.raises(ValueError):r.status.original_request(r.run,root,parent)
@@ -503,3 +515,37 @@ def test_actual_generated_reader_still_refuses_late_unsafe_parser_copy(runtime,m
         test_generated_isolated_reader_executes_with_real_existing_parser(runtime)
     assert changed==[True]
     assert caught.value.args==({'state':'UNAVAILABLE','reason':'OBSERVATION_UNQUALIFIED'},)
+
+
+def test_actual_manual_producer_manifest_joins_reader_without_wrapper(runtime):
+    r=runtime
+    manifest=json.loads((r.state/(r.run+'.support.json')).read_text())
+    assert frozenset(manifest) in r.status.support.SOURCE_GENERATIONS
+    assert 'schema' not in manifest and 'files' not in manifest
+    assert r.request['support_digest']==r.producer_reply[0]
+    assert r.request['desired_policy_sha256']==r.producer_reply[1]
+
+
+@pytest.mark.parametrize('kind',['wrapped','mixed','extra','missing_policy','unsafe_name','invalid_digest','duplicate'])
+def test_original_manual_manifest_rejects_unproduced_or_ambiguous_shapes(runtime,kind):
+    r=runtime;p=r.state/(r.run+'.support.json');value=json.loads(p.read_text())
+    if kind=='wrapped':value={'schema':'remote-support-code.v1','files':value}
+    if kind=='mixed':value.update(schema='remote-support-code.v1',files=dict(value))
+    if kind=='extra':value['metadata']='0'*64
+    if kind=='missing_policy':value.pop('pools.yaml')
+    if kind=='unsafe_name':value['../pools.yaml']=value.pop('pools.yaml')
+    if kind=='invalid_digest':value['pools.yaml']='NOT_A_SHA256'
+    if kind=='duplicate':
+        raw=json.dumps(value);p.write_text(raw[:-1]+',"pools.yaml":"'+'0'*64+'"}')
+    else:p.write_text(json.dumps(value))
+    with pytest.raises(ValueError):r.status.original_request(r.run,r.original_root,r.parent)
+
+
+def test_missing_enrolled_physical_root_refuses_before_intent_or_transport(runtime,monkeypatch):
+    r=runtime;r.registry['ubuntu0'].pop('physical_lane_root')
+    def forbidden(*args,**kwargs):raise AssertionError('unconfigured root reached transport')
+    monkeypatch.setattr(r.delivery,'transport',forbidden)
+    with pytest.raises(ValueError,match='fixed_remote_root_unconfigured'):
+        r.status.original_request(r.run,r.original_root,r.parent)
+    assert r.task.main(['support-policy-status',r.run,'--root',r.original_root,'--parent',r.parent])==78
+    assert not (r.state/(r.run+'.support-policy-status.intent.json')).exists()

@@ -271,16 +271,17 @@ def original_request(run_id, root, parent, *, owner_ext=None):
     binding = delivery.configured_remote_lane_root(route['HOST'], entry)
     require(binding is not None, 'fixed_remote_root_unconfigured')
     delivery.validate_remote_lane_root(binding)
-    require(type(manifest) is dict and set(manifest) == {'schema', 'files'}
-            and manifest['schema'] == 'remote-support-code.v1'
-            and type(manifest['files']) is dict and frozenset(manifest['files']) in support.SOURCE_GENERATIONS
-            and 'pools.yaml' in manifest['files']
+    # The incumbent support_meta producer retains ONLY the flat file map;
+    # its digest wraps that map separately through the bundle canonicalizer.
+    # A release envelope or mixed form is not original manual metadata.
+    require(type(manifest) is dict and frozenset(manifest) in support.SOURCE_GENERATIONS
+            and 'pools.yaml' in manifest
             and all(type(v) is str and re.fullmatch(r'[0-9a-f]{64}', v)
-                    for v in manifest['files'].values()), 'original_support_manifest')
+                    for v in manifest.values()), 'original_support_manifest')
     desired = delivery.local_file(here.parent / 'orch/fabric/pools.yaml', LIMIT)
     desired_sha = hashlib.sha256(desired).hexdigest()
-    require(desired_sha == manifest['files']['pools.yaml'], 'original_policy_source_unavailable')
-    support_digest = hashlib.sha256(artifact_reader.canonical(manifest)).hexdigest()
+    require(desired_sha == manifest['pools.yaml'], 'original_policy_source_unavailable')
+    support_digest = hashlib.sha256(support._canon_manifest(manifest)).hexdigest()
     frame = {name: hashlib.sha256(raw).hexdigest() for name, raw in blobs.items()}
     frame['configured_host'] = hashlib.sha256(artifact_reader.canonical(entry)).hexdigest()
     frame['policy'] = desired_sha
