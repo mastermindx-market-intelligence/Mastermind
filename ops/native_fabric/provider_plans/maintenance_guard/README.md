@@ -1,47 +1,53 @@
-# Current116 maintenance guard source overlay
+# Sequence-39 maintenance guard and sparse-Git compatibility
 
-This optional source profile starts from the complete sequence-37 generation
-`9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4`.
-It preserves all 116 payload names and changes three payloads: `ext/lease_broker.py`
-adds the two previously reviewed static qualification/maintenance guard methods;
-`ext/pick.py` applies the fixed-parent remote-placement patch from component
-`7b1ba72f1a7159ea04278e7901f4cdd4ffc2304f`. It excludes exactly the two local-only
-plan pools from remote validation while preserving ordinary remote eligibility
-and the separate AUTO class/consent rules. `ext/remote_sub_exec.py` carries the previously reviewed command-scoped sparse
-Git warning suppression while retaining every current APPLICATION definition and
-strict stderr/config/read-only guard. The other 113 payloads stay exact.
-Every incumbent Broker method, application-native recipe/invocation/recovery and
-release check, module global and CLI remains unchanged. The ordinary provider-plan
-profile and its default composition remain unchanged. Both patches use the same
-repository-owned source root; callers cannot supply a profile or patch path.
+This version of the existing closed maintenance profile starts from the complete
+sequence-39 generation
+`774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea`
+(previous `296e522f…`, sequence 38). The picker correction is already present.
+All five newer provider-plan payloads stay intact.
 
-The source provenance is the protected provider-plan chain: first profile
-`7bc8a208d5cf867fcc269d9c049d53e52445347b` applied six patches over sequence 35,
-including Broker `42d45e5c…` to `a841230c…`. The current profile at
-`2541a68e9240ca3fb5c1fda7b68e1df8984c973b` inherited that Broker and applied four
-AUTO patches over sequence 36. Its complete output manifest matches sequence 37.
-The historical Broker patch is correctly absent from the current four-patch set.
-`provenance.json` binds the exact method ASTs to reviewed source C43. Hashes prove
-source correspondence; they do not establish live publisher custody or authority.
+Exactly two payloads change: Broker `a841230c…` to `4072c76f…` adds the two
+reviewed static qualification/maintenance guard methods; executor `bb036914…`
+to `e13c8147…` carries the reviewed command-scoped
+`advice.sparseIndexExpanded=false` setting. Both fixed-parent patches are
+byte-identical to their protected PR2241 versions. The other 114 payloads remain
+byte-identical to sequence 39, including every newer provider-plan file and the
+already corrected picker. Incumbent application methods, main entrypoints,
+strict stderr/configuration/currentness guards and source ownership remain intact.
 
-Run the existing source composer with the closed profile choice:
+The composer, its closed profile names, CLI, source validators and ordinary/default
+profile do not change. No caller supplies a profile path, parent override, policy,
+account or dynamic approval. Both the exact generation and entire predecessor
+manifest must qualify before any output is created. A sequence-37 or sequence-38
+parent is refused. The original sequence-37 maintenance profile remains immutable
+in protected PR2241 commit `efab46368e13e9553e489cb61a58ca28055df175`;
+its `e032…`/`e895…` prospective stages must not replace a newer selected cohort.
+
+## Source qualification
+
+The inert fixture reconstructs sequence 37 from the existing sealed public source,
+uses the actual default composer for sequence 38, then uses the actual remote
+placement profile for sequence 39. All 116 hashes are checked before the maintenance
+profile is applied. Fixture source descriptors are comparison data, not installed
+selection, admission, caller permission or provider receipts. Tests do not import
+Broker or exercise its database/lock methods. Existing reviewed guard and executor
+logic is reused unchanged; the new checks qualify this exact parent and preservation.
+
+## Compose and adoption boundary
 
 ```sh
 python3 ops/native_fabric/provider_plans/compose.py \
-  --profile current116-maintenance-guard --base <verified-public-source-base> \
-  --output <new-source-stage>
+  --profile current116-maintenance-guard --base VERIFIED_SEQUENCE39 \
+  --output NEW_PRIVATE_SOURCE_STAGE
 ```
 
-Composition checks the exact predecessor and all regular code payloads. It does
-not copy runtime links or inspect their targets, construct Broker, read a database
-or lock, inspect policy, publish an artifact, or select code. The committed inert
-test reconstructs the actual current116 from the existing source fixture and
-production default composer, then checks the new composition and actual picker traversal with inert owner
-observations, without executing Broker or guard methods. Accepted guard behavior/review remains separate evidence.
+This builds regular public code and FILES.json only. It neither copies runtime
+links nor reads their targets; no Broker construction, database, lock, policy,
+host, provider, publication or selection operation occurs.
 
-The incumbent `native_generation.py` remains the only publication/CAS-selection
-owner. Root must reconcile the actual current generation and live writers before
-any separately authorized adoption. A newer selected cohort requires a new exact
-source composition; this profile cannot roll it back. After qualified adoption,
-fixed ORCH repair and policy qualification remain separate authorized effects;
-no failed Fabric operation is retried by composing or selecting this source.
+The incumbent `native_generation.py` remains the sole artifact publication and
+exact-current-generation CAS selection owner. Root must reconcile actual current
+source, selection and live-writer custody before any separately authorized adoption.
+If current moves, this fixed-parent profile refuses rather than rolling it back.
+Host maintenance, policy qualification and any genuinely new worker admission are
+separate effects. No original refused or uncertain operation is retried.
