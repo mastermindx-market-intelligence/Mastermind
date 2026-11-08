@@ -88,7 +88,8 @@ class FakeGitHub:
                 "head": {"sha": self.head, "ref": BRANCH,
                          "repo": {"full_name": REPO}},
                 "base": {"ref": "master"},
-                "body": data["body"],
+                "body": data["body"], "state": "open",
+                "user": {"login": "mastermind-hermes-author[bot]"},
             }
             self.prs.append(pr)
             return httpx.Response(201, json=pr)
@@ -104,6 +105,7 @@ class FakeGitHub:
             comment = {
                 "id": 777, "html_url": "https://github.com/example/repo/issues/42#comment-777",
                 "body": data["body"],
+                "user": {"login": "mastermind-hermes-author[bot]"},
             }
             self.comments.append(comment)
             if self.fail_post_comment:
@@ -130,7 +132,8 @@ def make(fake=None, *, authorized_paths=("docs/hermes/",), allowed_issues=frozen
         profile_id=profile_id, role=role, session_id="session-123",
         operation_id="work-001", repository=REPO,
         branch=branch, base_branch="master", base_sha=BASE,
-        installation_id=4321, allowed_path_prefixes=authorized_paths,
+        installation_id=4321, app_bot_login="mastermind-hermes-author[bot]",
+        allowed_path_prefixes=authorized_paths,
         allowed_issue_numbers=allowed_issues, token_source=issuer,
         currentness_guard=guard,
     )
@@ -389,3 +392,51 @@ def test_actual_native_registration_owns_exact_tool_scope_when_donor_available(t
         {"action": "status"}, session_id="session-123",
     )))
     assert revoked["state"] == "REFUSED"
+
+def test_spoofed_pr_marker_from_human_never_becomes_app_identity():
+    app, fake, _ = make()
+    app.create_branch()
+    fake.prs.append({
+        "number": 91, "state": "open",
+        "html_url": "https://github.com/example/repo/pull/91",
+        "head": {"ref": BRANCH, "sha": BASE,
+                 "repo": {"full_name": REPO}},
+        "base": {"ref": "master"},
+        "user": {"login": "some-human"},
+        "body": "<!-- " + app.binding.audit_marker + " -->",
+    })
+    writes_before = len(fake.writes)
+    with pytest.raises(GitHubBotRefused, match="PR_OWNED_BY_OTHER"):
+        app.create_pr(expected_head=BASE, title="Impersonated PR", body="x")
+    assert len(fake.writes) == writes_before
+
+
+def test_spoofed_comment_marker_is_not_recovered_as_bot_comment():
+    app, fake, _ = make()
+    app.create_branch()
+    app.create_pr(expected_head=BASE, title="Canary issue", body="Body")
+    marker = "<!-- " + app.binding.audit_marker + " request=reply-forged -->"
+    fake.comments.append({
+        "id": 333, "body": marker,
+        "user": {"login": "someone-else"},
+        "html_url": "https://github.com/example/repo/issues/42#comment-333",
+    })
+    assert app.find_comment(issue_number=42, request_id="reply-forged") is None
+    created = app.create_comment(
+        issue_number=42, request_id="reply-forged", body="Actual bot response",
+    )
+    assert created["state"] == "CREATED" and created["id"] == 777
+
+
+def test_missing_or_forged_author_bot_login_refuses_binding():
+    app, fake, _ = make()
+    with pytest.raises(GitHubBotRefused, match="HOST_BINDING_INVALID"):
+        HostGitHubSession(
+            profile_id="engineering", role="engineering",
+            session_id="session-123", operation_id="work-001",
+            repository=REPO, branch=BRANCH, base_branch="master", base_sha=BASE,
+            installation_id=4321, app_bot_login="human-user",
+            allowed_path_prefixes=("docs/hermes/",),
+            allowed_issue_numbers=frozenset(),
+            token_source=app.binding.token_source, currentness_guard=lambda: True,
+        )

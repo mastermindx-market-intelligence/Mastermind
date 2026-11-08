@@ -27,6 +27,7 @@ _ROLE = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 _OPERATION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _BRANCH = re.compile(r"hermes/[a-z0-9][a-z0-9._/-]{0,99}\Z")
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
+_APP_BOT = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,95}\[bot\]\Z")
 _PATH = re.compile(r"[A-Za-z0-9_./-]{1,240}\Z")
 _REQUEST = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 _LIMIT = 1 << 18
@@ -72,6 +73,7 @@ class HostGitHubSession:
     base_branch: str
     base_sha: str
     installation_id: int
+    app_bot_login: str
     allowed_path_prefixes: tuple[str, ...]
     allowed_issue_numbers: frozenset[int]
     token_source: GitHubAppInstallationTokens
@@ -94,7 +96,9 @@ class HostGitHubSession:
                 or self.base_branch not in ("main", "master")
                 or type(self.base_sha) is not str
                 or _SHA.fullmatch(self.base_sha) is None
-                or type(self.installation_id) is not int or self.installation_id <= 0):
+                or type(self.installation_id) is not int or self.installation_id <= 0
+                or type(self.app_bot_login) is not str
+                or _APP_BOT.fullmatch(self.app_bot_login) is None):
             raise GitHubBotRefused("GITHUB_HOST_BINDING_INVALID")
         if (not isinstance(self.token_source, GitHubAppInstallationTokens)
                 or self.token_source._repository != self.repository
@@ -298,10 +302,22 @@ class HermesGitHubApp:
             for pr in self._prs():
                 if not isinstance(pr, dict):
                     raise GitHubBotUnavailable("GITHUB_PR_LIST_UNVERIFIED")
-                if self.binding.audit_marker not in (pr.get("body") or ""):
+                expected_marker = "<!-- " + self.binding.audit_marker + " -->"
+                if (pr.get("state") != "open"
+                        or type(pr.get("number")) is not int
+                        or not isinstance(pr.get("user"), dict)
+                        or pr["user"].get("login") != self.binding.app_bot_login
+                        or not isinstance(pr.get("head"), dict)
+                        or pr["head"].get("ref") != self.binding.branch
+                        or pr["head"].get("sha") != expected_head
+                        or not isinstance(pr["head"].get("repo"), dict)
+                        or pr["head"]["repo"].get("full_name") != self.binding.repository
+                        or not isinstance(pr.get("base"), dict)
+                        or pr["base"].get("ref") != self.binding.base_branch
+                        or expected_marker not in (pr.get("body") or "")):
                     raise GitHubBotRefused("GITHUB_BRANCH_PR_OWNED_BY_OTHER")
                 return {"schema": SCHEMA, "state": "EXISTS",
-                        "number": pr.get("number"), "url": pr.get("html_url")}
+                        "number": pr["number"], "url": pr.get("html_url")}
             result = self._read_or_write("POST", "/pulls", payload={
                 "head": self.binding.branch, "base": self.binding.base_branch,
                 "title": title,
@@ -311,7 +327,10 @@ class HermesGitHubApp:
             if (not isinstance(result, dict)
                     or type(result.get("number")) is not int
                     or result["number"] < 1
-                    or (result.get("head") or {}).get("sha") != expected_head):
+                    or not isinstance(result.get("user"), dict)
+                    or result["user"].get("login") != self.binding.app_bot_login
+                    or not isinstance(result.get("head"), dict)
+                    or result["head"].get("sha") != expected_head):
                 raise GitHubBotEffectUnknown("GITHUB_PR_CREATE_UNVERIFIED")
             return {"schema": SCHEMA, "state": "CREATED",
                     "number": result["number"], "url": result.get("html_url")}
@@ -320,12 +339,17 @@ class HermesGitHubApp:
         if issue_number in self.binding.allowed_issue_numbers:
             return
         pr = self._read_or_write("GET", "/pulls/" + str(issue_number), missing=True)
-        if (not isinstance(pr, dict)
-                or (pr.get("head") or {}).get("ref") != self.binding.branch
-                or ((pr.get("head") or {}).get("repo") or {}).get("full_name")
-                   != self.binding.repository
-                or (pr.get("base") or {}).get("ref") != self.binding.base_branch
-                or self.binding.audit_marker not in (pr.get("body") or "")):
+        expected_marker = "<!-- " + self.binding.audit_marker + " -->"
+        if (not isinstance(pr, dict) or pr.get("state") != "open"
+                or not isinstance(pr.get("user"), dict)
+                or pr["user"].get("login") != self.binding.app_bot_login
+                or not isinstance(pr.get("head"), dict)
+                or pr["head"].get("ref") != self.binding.branch
+                or not isinstance(pr["head"].get("repo"), dict)
+                or pr["head"]["repo"].get("full_name") != self.binding.repository
+                or not isinstance(pr.get("base"), dict)
+                or pr["base"].get("ref") != self.binding.base_branch
+                or expected_marker not in (pr.get("body") or "")):
             raise GitHubBotRefused("GITHUB_COMMENT_TARGET_NOT_GRANTED")
 
     def find_comment(self, *, issue_number: int, request_id: str) -> dict | None:
@@ -343,6 +367,8 @@ class HermesGitHubApp:
             if not isinstance(result, list):
                 raise GitHubBotUnavailable("GITHUB_COMMENTS_UNVERIFIED")
             found = [x for x in result if isinstance(x, dict)
+                     and isinstance(x.get("user"), dict)
+                     and x["user"].get("login") == self.binding.app_bot_login
                      and marker in (x.get("body") or "")]
             if len(found) > 1:
                 raise GitHubBotUnavailable("GITHUB_DUPLICATE_COMMENT_AMBIGUOUS")
@@ -369,7 +395,10 @@ class HermesGitHubApp:
                 payload={"body": body + "\n\n" + marker},
             )
             if (not isinstance(result, dict)
-                    or type(result.get("id")) is not int or result["id"] < 1):
+                    or type(result.get("id")) is not int or result["id"] < 1
+                    or not isinstance(result.get("user"), dict)
+                    or result["user"].get("login") != self.binding.app_bot_login
+                    or marker not in (result.get("body") or "")):
                 raise GitHubBotEffectUnknown("GITHUB_COMMENT_CREATE_UNVERIFIED")
             return {"schema": SCHEMA, "state": "CREATED",
                     "id": result["id"], "url": result.get("html_url")}
