@@ -348,3 +348,51 @@ def test_real_runtime_private_bridge_to_native_process_preserves_original_histor
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=10)
+
+
+@pytest.mark.parametrize("native_enabled,census_enabled", [(True, True), (True, False), (False, True)])
+def test_original_bridge_keeps_native_history_and_profile_census_independent(h, tmp_path, native_enabled, census_enabled):
+    calls = []
+    def census(principal, arguments):
+        assert principal == principal_projection(h.principal)
+        assert arguments == {}
+        calls.append("census")
+        return {"fixture_profile_census": True}
+    def forbidden(*args):
+        pytest.fail("read entered a modifying owner")
+    h.owner = build_runtime_session_bridge(
+        h.runtime, dialogue_socket_path=tmp_path / "unused-coexistence.sock",
+        deepseek_session=h.native if native_enabled else None,
+        web_census_handler=census if census_enabled else None,
+        summon_handler=forbidden, attention_requester=forbidden)
+    frame = {**h.frame(), "tool": "session_web_census", "arguments": {}}
+    before = [event.to_dict() for event in h.runtime.events.list_events(job_id=h.job.job_id)]
+    async def exercise():
+        observed = await h.owner.handle_frame(frame)
+        assert observed["ok"] is census_enabled
+        if census_enabled:
+            assert observed["data"] == {"fixture_profile_census": True}
+        else:
+            assert observed["error"]["code"] == "backend_unavailable"
+        assert_no_frame(h)
+        prior_calls = list(calls)
+        if native_enabled:
+            result, (wire, _) = await roundtrip(h)
+            assert result["ok"] is True
+            assert result["data"]["native_session_id"] == h.association.native_session_id
+            assert wire["read"] == {"kind": "snapshot"}
+        else:
+            result = await h.owner.handle_frame(h.frame())
+            assert result["ok"] is False and result["data"] is None
+            assert_no_frame(h)
+        assert calls == prior_calls
+        with pytest.raises(ValueError, match="native read guard requires"):
+            await h.owner.handle_frame(frame, native_read_guard=forbidden)
+        assert calls == prior_calls
+        h.live["source"] = False
+        observed = await h.owner.handle_frame(frame)
+        assert observed["ok"] is census_enabled
+        assert calls == (["census", "census"] if census_enabled else [])
+        assert_no_frame(h)
+    asyncio.run(exercise())
+    assert [event.to_dict() for event in h.runtime.events.list_events(job_id=h.job.job_id)] == before

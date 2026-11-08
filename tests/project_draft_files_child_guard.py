@@ -13,7 +13,7 @@ from ops.executive_os.capacity_source_contract import PYTHON_BINARY
 
 PINNED = {
  'agentos_project_knowledge_recipe_entry.py':'80b954460662c4eac7c87c2d752cdcba5504e260084b68f9ee6cbfc3c82c6534',
- 'agentos_project_knowledge_entry.py':'9b3662838ee93d764ea9740ecc66a5644b041c6e6eef003939f544f8a2d4a037',
+ 'agentos_project_knowledge_entry.py':'52ca6fada4482f5ef0b24e6c0dc099e1f25c0732d7cf605b5ecb64b04f6845c3',
 }
 
 def allows_fixed_child(executable,argv,cwd,env,*,code_root,owned_root):

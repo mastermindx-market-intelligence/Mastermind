@@ -90,6 +90,7 @@ def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
     contracts.validate_run_shape(trial.run)
     _check(type(trial.output) is bytes and 0 < len(trial.output) <= 1_048_576,
            "TRIAL_OUTPUT_BOUND")
+    _check(type(trial.run["evidence"]["output"]) is dict, "NATIVE_TRIAL_OBSERVATION_UNAVAILABLE")
     _check(trial.run["evidence"]["output"]["digest"] == sha256_bytes(trial.output),
            "TRIAL_OUTPUT_CHANGED")
     _check(trial.configuration["procedure"]["instruction_bundle"]["digest"] == harness_digest(files),
@@ -97,7 +98,11 @@ def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
     v = trial.run["validity"]
     draft = {key: copy.deepcopy(value) for key, value in trial.run.items()
              if key not in ("validity", "run_digest", "created_at")}
-    draft["schema"] = contracts.RUN_DRAFT_SCHEMA
+    draft["schema"] = {
+        contracts.RUN_SCHEMA: contracts.RUN_DRAFT_SCHEMA,
+        contracts.RUN_SCHEMA_V2: contracts.RUN_DRAFT_SCHEMA_V2,
+        contracts.RUN_SCHEMA_V3: contracts.RUN_DRAFT_SCHEMA_V3,
+    }[trial.run["schema"]]
     recomputed = validity.finalize_run_receipt(
         trial.scenario, trial.configuration, trial.experiment, draft,
         validator_id=v["validator_id"], validator_version=v["validator_version"],

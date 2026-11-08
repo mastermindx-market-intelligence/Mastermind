@@ -105,10 +105,15 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
+def before_source_successors(manifest):
+    return builder.before_qualification_quiescence(
+        builder.before_host_pull_integrity(builder.before_sparse_index_advice(manifest)))
+
+
 def before_admission_integrity(manifest):
     # Historical-generation cases retain their exact parent, while the current
     # build and the new successor tests below inspect the actual repaired bytes.
-    previous = builder.before_host_pull_integrity(manifest)
+    previous = before_source_successors(manifest)
     if any(previous.get(name) == digest
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
@@ -433,8 +438,10 @@ def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(
     previous = dict(current)
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for cohort in (previous, current):
+        # This historical sparse-config fixture retains its exact710 endpoint.
+        # The new advice epoch requires the complete current107 parent separately.
         for digest in (builder.GO_BASE_EXECUTOR_SHA256,
-                       builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]):
+                       builder.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE):
             exact = dict(cohort)
             exact["ext/remote_sub_exec.py"] = digest
             before = dict(exact)
@@ -724,7 +731,8 @@ def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
 
 
 def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
-    current = builder.before_host_pull_integrity(
+    # Isolate the admission cohort after both exact source-successor proofs.
+    current = before_source_successors(
         json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
@@ -751,7 +759,8 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    current = builder.before_host_pull_integrity(
+    # Isolate the admission cohort after both exact source-successor proofs.
+    current = before_source_successors(
         json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)

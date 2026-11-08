@@ -8,7 +8,7 @@ Chris-Dot remains the real OpenAI-hosted Dot with its memory, computer, tools an
 
 Shared Slack workspace T0BRD2AQXQV, Executive bot U0BT71H4FQE, A2 channel C0BSBM78V1N (#agent-dispatch), C1 channel C0BSGABKBFY (#sol-runtime). The previously deleted dedicated legacy Relay must **not** be recreated.
 
-Observed blocker: native credential verification returned SLACK_AUTH_REFUSED and C1_SLACK_IDENTITY_REFUSED, while the shared bot was absent from both configured channels. Only the existing Slack app owner can determine and repair the precise authorization through a normal consent flow. Never bypass this via another bot, token or carrier.
+Historical blocker: the installed A2/C1 credential formerly refused authorization. The Chairman subsequently restored the original bot's membership in both configured channels; fresh membership was verified. This does **not** prove the installed host token or Chris's OpenAI event subscription. A later native verifier invocation was explicitly denied by the tool's safety boundary; do not replay it through another carrier. Never create a replacement bot or copy a token.
 
 ## Implemented default-off source
 
@@ -29,6 +29,14 @@ Existing OAuth scope mastermind.executive.read is retained exactly. The canary r
 5. Chris posts one harmless channel-thread message with marker MMX_CHRIS_DOT_CANARY_V1:, captures its exact thread_ts and message_ts; a trusted Executive owner issues one private canary_deliver against those timestamps. No user-selected URL, sender, or message body is accepted.
 6. Confirm the existing A2 client re-read complete history, one bounded webhook was sent, the real Chris-Dot reacted and posted an authorized reply into the original thread using its own connected Slack action if that action is available. If the connected action is unavailable, outbound parity has **not** passed. Compare Slack installed-app count before/after.
 7. Verify wrong account/channel/sender, bot echo, edited/deleted/incomplete source, expiry, revocation, duplicate and ambiguous HTTP outcomes. No automatic replay after an unknown effect; verify unsubscribe.
+
+## Native MCP gateway enrollment without an alternate config writer
+
+The incumbent `plan-mcp-component` / `apply-mcp-component` transaction now supports one **optional paired** source-owned input: `--chris-dot-canary-input <root-sealed 0600 JSON file>` plus `--chris-dot-canary-sha256 <SHA-256 of its original bytes>`. Both absent preserve source-only release updates. One alone, an unsafe input, foreign workspace/bot/channel/sender or a new grant over an existing enrolled grant refuses before installed effects. A valid input contains exactly the original `dot_canary` fields (not credentials, callback secret or OAuth token) with `armed: true`, `subject_digest` from **Chris's real authenticated ChatGPT OAuth principal**, the fixed existing workspace/bot/channel/Slack sender and a fresh Slack cutoff timestamp.
+
+This is a **new optional admission inside the original MCP component-update operation**, not a second issuer, sidecar, file store, or update transaction. The existing root-owned no-follow bounded input reader checks custody and byte digest. The original operator sees a plan containing only the enrollment-document digest, gateway before/after hashes and unchanged closed release effects. If the actual approved plan is applied, the original owner atomically installs `reply_events_armed: true` and exactly the closed `dot_canary` object alongside the normal new source SHA, retaining every old policy, resource, port and grant. The selected input is frozen in the incumbent transaction marker so `reconcile-mcp-component` never reopens it or takes new arguments. No service or grant is selected by the source merge itself.
+
+A **separate original Control composition** must already be or become explicitly authorized with `reply_events.armed: true`, existing AEAD key custody and `dot_canary_enabled: true`; the MCP component update does **not** create, provision or turn on Control's event host. The native A2 `--enable-dot-canary` mode and actual Chris OAuth consent remain further separate gates. Do not directly edit either protected installed config, invent a subject digest or use a complete-configuration transplant to bypass these owners.
 
 ## Exact Executive two-sided opt-in (same owners, not a new auth plane)
 

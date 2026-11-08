@@ -86,6 +86,7 @@ async function setup({holdRead=false,loseCreateReturn=false,pendingAttended=null
      operation==='consume'||operation==='consume_status'?actual.consume_request:lookup);
    if(operation==='preview')return structuredClone(actual.preview);
    if(operation==='create'){created=true;if(loseCreateReturn)throw Error('EXECUTIVE_TRANSPORT_UNAVAILABLE');return structuredClone(actual.create);}
+   if(operation==='recover')return structuredClone(actual.recover);
    if(operation==='status')return structuredClone(actual.status);
    if(operation==='read')return holdRead?pending:structuredClone(kept?actual.read_after_consumed:actual.read);
    if(operation==='consume'){kept=true;return structuredClone(actual.consume);}
@@ -179,10 +180,10 @@ it('keeps a timed-out Create UNKNOWN and recovers the same original across pendi
  const readsBeforeRemount=e.calls('read').length;
  e.view.unmount();history.replaceState(null,'',originalUrl);const reopened=e.mount();
  const check=await screen.findByRole('button',{name:'Check initial request'});
- expect(e.calls('status')).toHaveLength(0);expect(e.calls('read')).toHaveLength(readsBeforeRemount);
+ expect(e.calls('recover')).toHaveLength(0);expect(e.calls('status')).toHaveLength(0);expect(e.calls('read')).toHaveLength(readsBeforeRemount);
  fireEvent.click(check);
  await screen.findByRole('button',{name:'Open initial response'});
- expect(e.calls('status')).toHaveLength(1);expect(await store.read(scope)).toBeNull();
+ expect(e.calls('recover')).toHaveLength(1);expect(e.calls('status')).toHaveLength(0);expect(await store.read(scope)).toBeNull();
  await openAnswer(e);
  reopened.unmount();history.replaceState(null,'',originalUrl);e.mount();
  const terminalCheck=await screen.findByRole('button',{name:'Check initial request'});
@@ -190,7 +191,8 @@ it('keeps a timed-out Create UNKNOWN and recovers the same original across pendi
  await waitFor(()=>expect(e.calls('read').length).toBeGreaterThan(before));
  await openAnswer(e);
  expect(e.calls('preview')).toHaveLength(1);expect(e.calls('create')).toHaveLength(1);
- for(const [,args] of [...e.calls('read'),...e.calls('status')])expect(args?.arguments).toEqual(lookup);
+ expect(e.calls('recover')).toHaveLength(1);expect(e.calls('status')).toHaveLength(0);
+ for(const [,args] of [...e.calls('read'),...e.calls('recover'),...e.calls('status')])expect(args?.arguments).toEqual(lookup);
 });
 it('refuses a prepared Create after global Host replacement without any render or notification',async()=>{
  const e=await setup();await prepare(e);

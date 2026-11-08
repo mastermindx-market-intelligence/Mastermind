@@ -14,9 +14,10 @@ from starlette.responses import JSONResponse, Response
 from common.executive_workspace_contract import canonical
 from common.workspace_source_operation_contract import validate_status, validate_lookup
 from common.workspace_source_operation_wire import (
-    FRAME_SCHEMA, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, validate_frame, operation_request_limit)
+    FRAME_SCHEMA, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, validate_frame, operation_request_limit, operation_response_limit)
 from control_plane.workspace_owned_task import await_owned
 from integrations.mastermind_workspace_app.contract import principal_frame
+from common import workspace_discovery_correction_contract as correction
 
 
 def _unique(pairs):
@@ -28,6 +29,8 @@ def _unique(pairs):
 
 
 def _preview(body, request, scope):
+    if request.get("action") == correction.ACTION:
+        return correction.validate_preview(body, request=request["request"], principal_scope=scope)
     keys = {"schema", "selection", "owner_context", "request_sha256", "recipe_fingerprint_sha256", "preview_witness", "preview"}
     if (type(body) is not dict or set(body) != keys
             or body["schema"] != "mastermind.workspace_source_operation_preview.v1"
@@ -44,7 +47,7 @@ def _preview(body, request, scope):
     validate_witness(body["preview_witness"])
     if body["preview_witness"]["recipe_fingerprint_sha256"] != body["recipe_fingerprint_sha256"]:
         raise ValueError()
-    if selected["action"] in {"add_project_file", "set_project_communication_preference"}:
+    if selected["action"] in {"add_project_file", "set_project_communication_preference", correction.ACTION}:
         _knowledge_preview(body["preview"], request["request"], selected, scope)
         return body
     if selected["action"] == "ADOPT_PLAN":
@@ -118,7 +121,7 @@ async def source_operation_http(request, *, config, operation):
     if factory is None or factory.policy != config.authenticator.policy:
         return _refuse_json(503, "source_unavailable")
     try:
-        if operation in {"read", "options"}:
+        if operation in {"read", "read_original", "options"}:
             refused = await _reject_any_body(request)
             if refused is not None: return refused
             raw_query = request.scope.get("query_string", b"")
@@ -129,8 +132,8 @@ async def source_operation_http(request, *, config, operation):
             if len({k for k, _ in pairs}) != len(pairs): raise ValueError()
             value = dict(pairs)
             if "schema" in value: raise ValueError()
-            if value.get("action") in {"add_project_file", "set_project_communication_preference"}:
-                if value.get("expected_preference_revision") == "null": value["expected_preference_revision"] = None
+            if value.get("action") in {"add_project_file", "set_project_communication_preference", correction.ACTION}:
+                if value.get("action") != correction.ACTION and value.get("expected_preference_revision") == "null": value["expected_preference_revision"] = None
             elif operation != "options": value["schema"] = "mastermind.workspace_source_operation_lookup.v1"
         else:
             if request.scope.get("query_string"): raise ValueError()
@@ -154,7 +157,7 @@ async def source_operation_http(request, *, config, operation):
         scope = permission.principal_scope
         latest_gate = None
         latest_stamp = None
-        if action in {"add_project_file", "set_project_communication_preference"} and operation in {"prepare", "submit"}:
+        if action in {"add_project_file", "set_project_communication_preference", correction.ACTION} and operation in {"prepare", "submit"}:
             from integrations.mastermind_workspace_app.project_authoring_grant import workspace_project_authorizers
             latest_gate, _ = workspace_project_authorizers(policy=factory.policy,
                 load_bindings=factory._load_bindings,action="read_latest_project_data")
@@ -191,12 +194,15 @@ async def source_operation_http(request, *, config, operation):
                     or re.fullmatch(r'[a-f0-9]{40}',result['expected_macro_sha']) is None
                     or type(result['profiles']) is not list or not 1<=len(result['profiles'])<=8):raise ValueError()
         elif operation == "prepare": result = _preview(result, value, scope)
+        elif operation == "read_original":
+            from common.workspace_discovery_original_contract import validate as validate_original
+            result = validate_original(result, lookup=value, principal_scope=scope)
         else:
             result = validate_status(result)
             if (result["selection"] != {k: value[k] for k in ("action", "request_id", "work_ref")}
                     or result["owner_context"] != {"principal_scope": scope}): raise ValueError()
         raw = canonical(result)
-        if len(raw) + 1 > MAX_RESPONSE_BYTES: raise ValueError()
+        if len(raw) + 1 > operation_response_limit(operation): raise ValueError()
         return Response(raw, status_code=200, media_type="application/json", headers={"Cache-Control": "no-store"})
     except (Exception, asyncio.CancelledError):
         # No transport exception proves no effect. The durable original hint

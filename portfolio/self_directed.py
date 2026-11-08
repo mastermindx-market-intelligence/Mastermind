@@ -242,10 +242,21 @@ def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
-    """Durably replace one runtime-state file without exposing a partial JSON document."""
+    """Replace one complete file, retaining an existing target's permission bits.
+
+    Fresh files retain the existing open/umask behavior. Directory admission stays with each
+    caller; this primitive never creates directories or supplies a multi-file transaction.
+    """
+    existing_mode = None
+    try:
+        existing_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        pass
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as fh:
+            if existing_mode is not None:
+                os.fchmod(fh.fileno(), existing_mode)
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
@@ -524,7 +535,7 @@ def _load_pending() -> list[dict]:
 
 def _save_pending(orders: list[dict]) -> None:
     _require_book_dir()
-    _PENDING_PATH.write_text(json.dumps(orders, indent=2, default=str))
+    _atomic_write_bytes(_PENDING_PATH, json.dumps(orders, indent=2, default=str).encode("utf-8"))
 
 
 def _load_theses() -> dict[str, dict]:
@@ -539,7 +550,9 @@ def _load_theses() -> dict[str, dict]:
 
 def _save_theses(theses: dict[str, dict]) -> None:
     _require_book_dir()
-    _THESES_PATH.write_text(json.dumps(theses, indent=2, default=str, ensure_ascii=False))
+    _atomic_write_bytes(
+        _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False).encode("utf-8")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1003,7 +1016,7 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
     }
     if _check_book_dir(_PUBLISHED_PATH.parent)[0] is not None:
         return None   # E14: never create the published dir from a scheduler path
-    _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
+    _atomic_write_bytes(_PUBLISHED_PATH, json.dumps(doc, indent=2, default=str).encode("utf-8"))
     return doc
 
 
@@ -1093,7 +1106,9 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
             if r.get("date") != asof:            # idempotent per date
                 rows.append(r)
     rows.append(row)
-    _NAV_PATH.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
+    _atomic_write_bytes(
+        _NAV_PATH, ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8")
+    )
     return row
 
 

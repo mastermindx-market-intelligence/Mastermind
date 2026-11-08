@@ -383,6 +383,18 @@ WORKSPACE_OAUTH_DERIVATION_POSTIMAGES = {
 }
 _WORKSPACE_OAUTH_PACKAGE = "integrations/hermes_qualification/workspace_oauth_privacy"
 
+# Explicit cumulative source selection. Historical derivation meanings and
+# postimages remain unchanged; no arbitrary patch stack is admitted.
+EVAL_INPUTS_DERIVATION_KIND = "native_eval_inputs"
+EVAL_INPUTS_DERIVATION_PATCH = "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211"
+EVAL_INPUTS_DERIVATION_POSTIMAGES = {**WORKSPACE_OAUTH_DERIVATION_POSTIMAGES,
+    "hermes_state_common.py": "bc77e0f3b74596030016ff72bc6c8eff959507e9cc414dfc102c8e8140a972e8",
+    "hermes_state_runtime.py": "5b30be6913da982c7cb50dd3ad8c37700229288eab0eb101dce1843b27777340",
+    "hermes_state_schema.py": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37",
+    "gateway/session_authority.py": "7779fd227b5e3105ded5a3407434c7a8c77e1d998cdf087e1e8a492d0cd9ae99",
+    "hermes_state_mutation_retirement.py": "12c890e1a2ae4a3b89b01de58c3f5330b87431f48f7672c04cd3b68c7e8e677c"}
+_EVAL_INPUTS_PACKAGE = "integrations/hermes_qualification/native_eval_inputs"
+
 
 def _derivation_policy(kind):
     if kind == DERIVATION_KIND:
@@ -391,6 +403,8 @@ def _derivation_policy(kind):
         return PRIVACY_DERIVATION_PATCH, PRIVACY_DERIVATION_POSTIMAGES, _PRIVACY_PACKAGE
     if kind == WORKSPACE_OAUTH_DERIVATION_KIND:
         return WORKSPACE_OAUTH_DERIVATION_PATCH, WORKSPACE_OAUTH_DERIVATION_POSTIMAGES, _WORKSPACE_OAUTH_PACKAGE
+    if kind == EVAL_INPUTS_DERIVATION_KIND:
+        return EVAL_INPUTS_DERIVATION_PATCH, EVAL_INPUTS_DERIVATION_POSTIMAGES, _EVAL_INPUTS_PACKAGE
     _refuse()
 
 
@@ -549,6 +563,8 @@ def _guard(owner, kind):
         from integrations.hermes_qualification.diagnostic_privacy import qualify
     elif kind == WORKSPACE_OAUTH_DERIVATION_KIND:
         from integrations.hermes_qualification.workspace_oauth_privacy import qualify
+    elif kind == EVAL_INPUTS_DERIVATION_KIND:
+        from integrations.hermes_qualification.native_eval_inputs import qualify
     else:
         _refuse()
     package = owner.root / relative
@@ -564,7 +580,7 @@ def _guard(owner, kind):
             or {name: row["after_sha256"] for name, row in policy["files"].items()}
                != postimages):
         _refuse()
-    if (kind in {PRIVACY_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_KIND} and hashlib.sha256(
+    if (kind in {PRIVACY_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_KIND, EVAL_INPUTS_DERIVATION_KIND} and hashlib.sha256(
             owner.source(f"{relative}/UPSTREAM_LICENSE")).hexdigest() != PRIVACY_LICENSE_SHA256):
         _refuse()
     owner.check()

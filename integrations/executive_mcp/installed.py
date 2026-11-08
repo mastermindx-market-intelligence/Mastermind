@@ -1434,30 +1434,42 @@ before/after, not falsely described as cancellable hard wall-clock work.
         raise GatewayError("backend_unavailable", "installed context runtime unavailable") from None
 
 
+def _agentos_context_file(root: Path, plan: _MacroMaterializationPlan, relative: str, *, maximum, remaining):
+    """Read one ordinary file from the already held materialization plan."""
+    remaining()
+    mode, oid = plan.file_objects[relative]
+    if mode not in {"100644", "100755"}:
+        raise ValueError("invalid context source mode")
+    descriptor = os.open(root / relative, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("context source is not ordinary")
+        if before.st_size > maximum:
+            return None
+        raw = stream.read(maximum + 1)
+        after = os.fstat(stream.fileno())
+    fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if (len(raw) != before.st_size or len(raw) > maximum
+            or tuple(getattr(before, key) for key in fields) != tuple(getattr(after, key) for key in fields)
+            or _git_blob_oid(raw) != oid):
+        raise ValueError("context source changed")
+    remaining()
+    return {"path": relative, "mode": mode, "git_blob": oid,
+            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+
+
 def _agentos_context_sources(root: Path, plan: _MacroMaterializationPlan, *, remaining):
     """Observe the two permitted Macro executable files inside the verified plan."""
     from control_plane.agentos_context_bundle import REQUIRED_COMPILER_PATHS, MAX_COMPILER_SOURCE_BYTES, canonical_digest
     try:
         sources = []
         for relative in sorted(REQUIRED_COMPILER_PATHS):
-            remaining()
-            mode, oid = plan.file_objects[relative]
-            if mode not in {"100644", "100755"}:
-                raise ValueError("invalid compiler mode")
-            descriptor = os.open(root / relative, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-            with os.fdopen(descriptor, "rb") as stream:
-                before = os.fstat(stream.fileno())
-                if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_COMPILER_SOURCE_BYTES:
-                    raise ValueError("compiler source is unavailable")
-                raw = stream.read(MAX_COMPILER_SOURCE_BYTES + 1)
-                after = os.fstat(stream.fileno())
-            if (len(raw) != before.st_size or len(raw) > MAX_COMPILER_SOURCE_BYTES
-                    or (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns)
-                    != (after.st_dev, after.st_ino, after.st_mode, after.st_mtime_ns, after.st_ctime_ns)
-                    or _git_blob_oid(raw) != oid):
-                raise ValueError("compiler source changed")
-            sources.append({"path": relative, "mode": mode, "git_blob": oid,
-                            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
+            source = _agentos_context_file(root, plan, relative,
+                maximum=MAX_COMPILER_SOURCE_BYTES, remaining=remaining)
+            if source is None:
+                raise ValueError("compiler source is unavailable")
+            sources.append(source)
         inventory = {"head": plan.head,
             "files": [[path, *plan.file_objects[path]] for path in sorted(plan.files)],
             "directories": sorted(plan.directories)}
@@ -1468,6 +1480,40 @@ def _agentos_context_sources(root: Path, plan: _MacroMaterializationPlan, *, rem
         raise
     except (OSError, KeyError, TypeError, ValueError):
         raise GatewayError("backend_unavailable", "installed context compiler source unavailable") from None
+
+
+def _agentos_selected_record_sources(root: Path, plan: _MacroMaterializationPlan, *, raw, bundle,
+                                    work_ref, remaining):
+    """Bind selected record contributions to this held DATA snapshot only."""
+    from control_plane import agentos_context_bundle as contract
+    try:
+        uses = contract.selected_record_uses(bundle, work_ref=work_ref)
+        selected_items = sum(map(len, uses.values()))
+        entries, overflow = [], None
+        for relative, positions in uses.items():
+            source = _agentos_context_file(root, plan, relative,
+                maximum=contract.MAX_RECORD_SOURCE_BYTES, remaining=remaining)
+            if source is None:
+                overflow = "RECORD_BYTES"
+            else:
+                entries.append({**source, "uses": positions})
+        arguments = {"bundle_sha256": hashlib.sha256(raw).hexdigest(), "data_commit": plan.head,
+                     "selected_items": selected_items}
+        value = contract.record_source_inventory(**arguments, entries=entries)
+        size = len(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,
+                              separators=(",", ":")).encode("utf-8"))
+        if overflow is not None or size > contract.MAX_RECORD_INVENTORY_BYTES:
+            # Preserve the full original context. Evidence alone overflows,
+            # explicitly retaining counts and no misleading empty-source claim.
+            value = contract.record_source_inventory(**arguments, entries=[],
+                overflow_reason=overflow or "INVENTORY_BYTES")
+        remaining()
+        return contract.validate_record_source_inventory(value, raw=raw, bundle=bundle,
+            work_ref=work_ref, data_commit=plan.head)
+    except GatewayError:
+        raise
+    except (OSError, KeyError, TypeError, ValueError, RecursionError):
+        raise GatewayError("backend_unavailable", "installed context record sources unavailable") from None
 
 
 def _clone_git_read_database(source: Path, destination: Path, *, deadline: float) -> None:
@@ -2758,6 +2804,7 @@ class InstalledBootPacketCollector:
             "project_knowledge_catalogue": readers.AgentOsProjectKnowledgeCatalogueReader,
             "project_knowledge_memory": readers.AgentOsProjectKnowledgeMemoryReader,
             "project_knowledge_source": readers.AgentOsProjectKnowledgeSourceReader,
+            "project_discovery_source": readers.AgentOsProjectDiscoverySourceReader,
         }
         if (allowed.get(kind) is not reader_type or not root.is_absolute()
                 or type(self) is not InstalledBootPacketCollector
@@ -2786,6 +2833,11 @@ class InstalledBootPacketCollector:
         return self._project_knowledge_reader(macro_root=macro_root,
             reader_type=AgentOsProjectKnowledgeSourceReader, kind="project_knowledge_source")
 
+    def project_discovery_source_reader(self, *, macro_root):
+        from control_plane.installed_project_knowledge_readers import AgentOsProjectDiscoverySourceReader
+        return self._project_knowledge_reader(macro_root=macro_root,
+            reader_type=AgentOsProjectDiscoverySourceReader, kind="project_discovery_source")
+
     def _read_project_knowledge(self, *, operation, selected, timeout):
         import math
         from common.workspace_project_knowledge_read_contract import selection
@@ -2808,6 +2860,11 @@ class InstalledBootPacketCollector:
         return self._read_project_knowledge(operation="project_knowledge_source",
             selected={"work_ref": work_ref, "source_ref": source_ref,
                       "expected_revision": expected_revision}, timeout=timeout)
+
+    def read_project_discovery_source(self, *, work_ref, discovery_ref, expected_source_commit, timeout=15.0):
+        return self._read_project_knowledge(operation="project_discovery_source",
+            selected={"work_ref": work_ref, "discovery_ref": discovery_ref,
+                      "expected_source_commit": expected_source_commit}, timeout=timeout)
 
     def project_creation_source_reader(self, *, macro_root: Path):
         from control_plane.agentos_project_creation_source import AgentOsProjectCreationReader, _SOURCE_ROOT
@@ -3140,6 +3197,9 @@ class InstalledBootPacketCollector:
                 if operation == "project_knowledge_source":
                     argv.extend(["--source-ref", selected["source_ref"],
                                  "--expected-revision", selected["expected_revision"]])
+                elif operation == "project_discovery_source":
+                    argv.extend(["--discovery-ref", selected["discovery_ref"],
+                                 "--expected-source-commit", selected["expected_source_commit"]])
             if data_view is not None:
                 argv.extend(["--code-root", os.fspath(self._macro_root), "--code-commit", data_view.code_commit])
             output_limit = (131072 if project_archive_request is not None else
@@ -3184,7 +3244,7 @@ class InstalledBootPacketCollector:
                     if (bundle.get("repo_sha") != expected_packet_macro_sha or type(bundle.get("token_budget")) is not int
                             or bundle["token_budget"] != context_contract.TOKEN_BUDGET):
                         raise ValueError("context identity differs")
-                    receipt = {"schema": (context_contract.CURRENT_RECEIPT_SCHEMA if agentos_context_current else context_contract.RECEIPT_SCHEMA), "owner": "agent_os",
+                    receipt = {"schema": (context_contract.CURRENT_RECEIPT_SCHEMA_V2 if agentos_context_current else context_contract.RECEIPT_SCHEMA), "owner": "agent_os",
                         "source_mode": (context_contract.CURRENT_SOURCE_MODE if agentos_context_current else context_contract.SOURCE_MODE), "workstream": agentos_context_request,
                         "token_budget": context_contract.TOKEN_BUDGET, "bundle_sha256": hashlib.sha256(raw).hexdigest(),
                         "source_script_sha256": next(item["sha256"] for item in context_sources if item["path"] == "scripts/agentos.py"),
@@ -3200,6 +3260,9 @@ class InstalledBootPacketCollector:
                         "omitted_count": len(bundle["omitted_due_to_budget"]), "execution_authority": False}
                     if agentos_context_current:
                         receipt.update(context_current)
+                        receipt["selected_record_sources"] = _agentos_selected_record_sources(
+                            packet_macro_root, packet_plan, raw=raw, bundle=bundle,
+                            work_ref=agentos_context_request, remaining=remaining)
                     validator = (context_contract.validate_current_context_read if agentos_context_current
                                  else context_contract.validate_context_read)
                     packet = validator(raw, receipt, work_ref=agentos_context_request)
@@ -3267,7 +3330,7 @@ class InstalledBootPacketCollector:
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed Direction source unavailable") from None
             elif project_knowledge_request is not None:
-                from common.workspace_project_knowledge_read_contract import validate_body
+                from common.workspace_project_knowledge_read_contract import validate_body, result_selection
                 operation, selected = project_knowledge_request
                 try:
                     def unique_knowledge_object(pairs):
@@ -3277,7 +3340,7 @@ class InstalledBootPacketCollector:
                             result[key] = item
                         return result
                     packet = validate_body(json.loads(stdout, object_pairs_hook=unique_knowledge_object), operation=operation)
-                    expected_selection = {key: item for key, item in selected.items() if key != "expected_revision"}
+                    expected_selection = result_selection(selected)
                     if packet["selection"] != expected_selection:
                         raise ValueError("knowledge selection changed")
                     if packet.get("source") is not None and packet["source"]["commit"] != expected_packet_macro_sha:
@@ -3285,6 +3348,9 @@ class InstalledBootPacketCollector:
                     if (operation == "project_knowledge_source" and packet["availability"] == "AVAILABLE"
                             and packet["source"]["revision"] != selected["expected_revision"]):
                         raise ValueError("knowledge revision changed")
+                    if (operation == "project_discovery_source" and packet["availability"] == "AVAILABLE"
+                            and packet["source"]["commit"] != selected["expected_source_commit"]):
+                        raise ValueError("discovery DATA changed")
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed project knowledge source unavailable") from None
             elif project_instructions_request is not None:

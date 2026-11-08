@@ -76,10 +76,12 @@ class CeoIngressWorkspaceClient:
         from common import workspace_resource_capacity_contract as capacity_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
-        current_context = type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
-        context_read = type(frame) is dict and frame.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA}
+        discovery_context = type(frame) is dict and frame.get("schema") == context_wire.DISCOVERY_FRAME_SCHEMA
+        current_context = discovery_context or type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
+        context_read = current_context or type(frame) is dict and frame.get("schema") == context_wire.FRAME_SCHEMA
         if context_read:
-            (context_wire.validate_current_frame if current_context else context_wire.validate_frame)(frame)
+            validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+            validator(frame)
             ceiling = context_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == byok_wire.FRAME_SCHEMA:
@@ -94,8 +96,8 @@ class CeoIngressWorkspaceClient:
             ceiling = direction_wire.MAX_RESPONSE_BYTES
         elif type(frame) is dict and frame.get("schema") == source_wire.FRAME_SCHEMA:
             frame = source_wire.validate_frame(frame)
-            ceiling = source_wire.MAX_RESPONSE_BYTES
-            timeout = self.timeout_seconds if frame["operation"] == "read" else self.action_timeout_seconds
+            ceiling = source_wire.operation_response_limit(frame["operation"])
+            timeout = self.timeout_seconds if frame["operation"] in {"read", "read_original"} else self.action_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == instructions_wire.FRAME_SCHEMA:
             instructions_wire.validate_frame(frame)
             ceiling = instructions_wire.MAX_RESPONSE_BYTES
@@ -110,7 +112,7 @@ class CeoIngressWorkspaceClient:
             session_wire.validate_frame(frame)
             ceiling = session_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
-        elif isinstance(frame, dict) and frame.get("schema") == knowledge_wire.FRAME_SCHEMA:
+        elif isinstance(frame, dict) and frame.get("schema") in {knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
             knowledge_wire.validate_frame(frame)
             ceiling = knowledge_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
@@ -184,7 +186,7 @@ class CeoIngressWorkspaceClient:
                     if set(value) != {"ok", "result"} or type(value["result"]) is not dict:
                         raise ValueError("source_unavailable")
                     if context_read:
-                        validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                        validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
                         validator(value["result"], expected_context=frame["principal_context"],
                             capability_profile_digest=frame["capability_profile_digest"],
                             **({"expected_workspace_principal": frame["workspace_principal"]} if current_context else {}))

@@ -34,8 +34,8 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "9726d0c3e2d463b70a5279703b917e3c7072f39c3845952dc2727ebec1e35f7d",
-        "ast_sha256": "3896840161f4a32ba343a0b9d5d772384340b00556be61b7e4184f212f8fdcce",
+        "source_sha256": "eb0f16538da9b26a692ebbe2b3d6cefec4cc00528d2af57dc255d5c4cfb93900",
+        "ast_sha256": "e2fdea6a6b96e2eb69bb5c3119cc27eb54506b76ee638fcd35032ed0a528daf6",
         "sites": (
             (("body", 3, "body", 59, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -81,3 +81,7 @@ REVIEWED_ANCHORS = {
 # statements before the same Fabric branch, so its three paths move 57 -> 59.
 # The historical Company AST and installed entry AST are unchanged. These fixed
 # source/AST pins describe the reviewed composition, not installed acceptance.
+# Discovery correction extends the original authenticated App-peer branch.
+# The Company method and all three Fabric error operands, including their
+# complete AST paths and token spans, remain unchanged. Only the exact whole
+# source and enclosing ingress-method digests change for this composition.

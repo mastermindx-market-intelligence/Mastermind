@@ -30,7 +30,9 @@ from brain import translate
 PINS = {
     "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
     "candidate/go_shim.py": "97deba9fc1f68458670b16a21cb410575a7466f8",
-    "candidate/lease_broker.py": "9b22048111a2bb3112c65b0abfb57f0870126ed6",
+    # Reviewed c5 current-quiescence/guard addition; incumbent97 definitions
+    # are unchanged. Keep this exact blob fence, including drift rejection below.
+    "candidate/lease_broker.py": "425dde8715612ab871f191c97a8142b80bffb13f",
     "candidate/go_lease_gateway.py": "7eb74e2a9a18d3c6a1ad1f51ed198bd0e32bcdeb",
     "candidate/go_lease_capability.py": "13e6b2d43cbb2933512e6e46d27a431e7813af88",
     "candidate/application_http_transports.py": "b0b8404b45dd0a3e73a34430c2ef3a28b1edbf6d",
@@ -145,6 +147,21 @@ class FabricTranslationCompositionTests(unittest.TestCase):
     def start(self, guard):
         self.addCleanup(guard.stop)
         return guard.start()
+
+    def test_reviewed_broker_byte_drift_stops_before_native_fixture_import(self):
+        source = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/candidate/lease_broker.py"
+        original = Path.read_bytes
+        def drift(path):
+            raw = original(path)
+            return raw + b"\n" if path == source else raw
+        class DriftFixture(FabricTranslationCompositionTests):
+            pass
+        with patch.dict(os.environ, {"MM_REQUIRE_FABRIC_COMPOSITION": "1",
+                                     "MM_FABRIC_FIXTURE_ROOT": str(self.macro_root)}), \
+                patch.object(Path, "read_bytes", drift), \
+                patch.object(importlib.util, "spec_from_file_location", side_effect=AssertionError("native import after drift")):
+            with self.assertRaisesRegex(AssertionError, "Native source mismatch: candidate/lease_broker.py"):
+                DriftFixture.setUpClass()
 
     def setUp(self):
         from engine import fabric_inference_client

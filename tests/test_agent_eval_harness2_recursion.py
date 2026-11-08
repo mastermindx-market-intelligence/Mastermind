@@ -120,6 +120,35 @@ class FixturePort:
         return self.reflection_mutation(answer) if self.reflection_mutation else answer
 
 
+class SourcePairV3Port(FixturePort):
+    """Synthetic complete receipts; this port grants no native execution."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.sources = [{"artifact_ref": REPO_REF_BASE + "#fixture/" + name,
+                         "digest": sha256_bytes(b"identical fixture source\n")}
+                        for name in ("one.md", "two.md")]
+        fields = {key: copy.deepcopy(value) for key, value in self.scenario.items()
+                  if key not in {"schema", "scenario_digest"}}
+        fields["source_policy"]["allowlist_artifacts"] = sorted(
+            fields["source_policy"]["allowlist_artifacts"] + copy.deepcopy(self.sources),
+            key=lambda row: row["artifact_ref"])
+        fields["privacy"]["model_visible_artifact_refs"] = sorted(
+            set(fields["privacy"]["model_visible_artifact_refs"]) |
+            {row["artifact_ref"] for row in self.sources})
+        self.scenario = contracts.build_scenario(fields, schema=contracts.SCENARIO_SCHEMA_V2)
+
+    def adjust_draft(self, label, draft):
+        draft["schema"] = contracts.RUN_DRAFT_SCHEMA_V3
+        draft["observations"]["observed_sources"] = copy.deepcopy(self.sources)
+        draft["observation_availability"] = {
+            "unavailable": [], "coverage": {
+                key: {"status": "COMPLETE", "reason": None}
+                for key in sorted(contracts.RUN_OBSERVATION_COVERAGE_KEYS)
+            },
+        }
+
+
 def invoke(port, *, mode="agg", k=1, experience=(), limits=None, resolved=None):
     return run_refinement(task=TASK, common_base=BASE, expected_scenario=port.scenario,
         baseline_configuration=port.base_configuration, prior_experience=experience,
@@ -150,6 +179,42 @@ def test_real_local_program_contrast(tmp_path):
     assert port.trials["base1"].output == b"105\n"
     assert result["selected_output"] == b"85\n"
     assert len(list(tmp_path.glob("arithmetic-*.py"))) == 4
+
+
+def test_current_v3_source_pairs_use_original_retained_trials(tmp_path):
+    port = SourcePairV3Port(tmp_path)
+    result = invoke(port)
+    assert result["selected_output"] == b"85\n"
+    assert result["promotion"] == "NONE" and result["automatic_memory_write"] is False
+    assert len(result["retained_native_runs"]) == 4
+    for run_id in result["retained_native_runs"]:
+        run = port.native.resolve_run(run_id)
+        assert run["schema"] == contracts.RUN_SCHEMA_V3
+        assert run["validity"]["status"] == "VALID"
+        assert run["observations"]["observed_sources"] == port.sources
+
+
+@pytest.mark.parametrize("change,reason", [("missing", "NATIVE_TRIAL_INVALID"),
+    ("effect", "NATIVE_EFFECT_REQUIRES_RECONCILIATION")])
+def test_current_v3_unavailable_or_uncertain_trial_stops_the_original_port(tmp_path, change, reason):
+    class RefusedPort(SourcePairV3Port):
+        def adjust_draft(self, label, draft):
+            super().adjust_draft(label, draft)
+            if change == "missing":
+                draft["execution"]["model_served"] = None
+                draft["observation_availability"]["unavailable"] = [
+                    {"path": "execution.model_served", "reason": "NOT_OBSERVED"}]
+            else:
+                draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:uncertain",
+                                   "reconciliation_ref": None}
+    port = RefusedPort(tmp_path)
+    with pytest.raises(Harness2CycleError, match=reason) as error:
+        invoke(port)
+    assert [(call[0], call[1]) for call in port.calls] == [("execute", "base1")]
+    retained = port.trials["base1"].run
+    assert error.value.retained_run_ids == (retained["run_id"],)
+    assert port.native.resolve_run(retained["run_id"]) == retained
+    assert retained["validity"]["status"] != "VALID"
 
 
 def test_parallel_compositions_do_not_inherit_previous_composition(tmp_path):

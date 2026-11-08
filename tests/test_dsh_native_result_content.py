@@ -143,6 +143,13 @@ def test_original_native_fresh_result_reassembles_actual_donor_content_without_r
                 assert code == 200 and initial["ok"]
                 code, status = await native_post(app, "status", lookup, token)
                 assert code == 200 and status["ok"] and status["data"]["state"] == "CREATED"
+                code, recovered_reply = await native_post(app, "recover", lookup, token, workspace_token)
+                assert code == 200 and recovered_reply["ok"] and recovered_reply["operation"] == "recover"
+                assert recovered_reply["data"]["state"] == "CREATED"
+                assert recovered_reply["data"]["session"] == created["session"]
+                assert recovered_reply["data"]["locator"] == created["locator"]
+                assert recovered_reply["data"]["result"] == status["data"]["result"]
+                assert len(adapters) == adapters[0].start_calls == adapters[0].calls == 1
                 code, executive_context = await exchange(app._executive, token, operation="context",
                     path="/os/executive/context", body=b"{}")
                 assert code == 200 and executive_context["principal_scope"] == principal_namespace(principal)
@@ -233,7 +240,7 @@ def test_original_native_fresh_result_reassembles_actual_donor_content_without_r
                         "test-generated native history; inert process/provider; no installed account proof",
                         "actual context-only history auth leaf; no Session lifecycle or target enumeration"],
                     request=request, create_request=create_request, preview=preview, create=created_reply,
-                    read=initial, status=status, executive_context=executive_context, history_context=history_context,
+                    read=initial, status=status, recover=recovered_reply, executive_context=executive_context, history_context=history_context,
                     programs_before=programs_before, programs=programs, mission=mission,
                     clock=dict(verified_at_seconds=clock[0], exported_at_seconds=app._executive._clock(),
                         verified_expiry=verified.expires_at),

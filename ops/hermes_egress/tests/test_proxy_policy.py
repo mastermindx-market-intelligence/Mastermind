@@ -33,6 +33,8 @@ def _require_exact_hostname_acls(config: str) -> None:
         ["acl", "secretary_office", "dstdomain", "-n", "mcp.mastermind-x.com"],
         ["acl", "secretary_issuer", "dstdomain", "-n", "dev-eo0jf8us5mup7wd5.us.auth0.com"],
         ["acl", "meta_vendor", "dstdomain", "-n", "api.z.ai"],
+        ["acl", "meta_office", "dstdomain", "-n", "mcp.mastermind-x.com"],
+        ["acl", "meta_issuer", "dstdomain", "-n", "dev-eo0jf8us5mup7wd5.us.auth0.com"],
     ], "every host ACL must use exact hostname-only dstdomain -n"
 
 
@@ -59,7 +61,7 @@ class FixedRoleProxyPolicy(unittest.TestCase):
         self.assertNotIn("intercept", "\n".join(self.active))
         self.assertNotIn("tproxy", "\n".join(self.active))
 
-    def test_exact_two_host_port_method_pairs_and_default_deny(self):
+    def test_exact_role_host_port_method_pairs_and_default_deny(self):
         expected = [
             "http_access deny !CONNECT",
             "http_access deny !tls_only",
@@ -68,6 +70,8 @@ class FixedRoleProxyPolicy(unittest.TestCase):
             "http_access allow secretary_socket secretary_office CONNECT tls_only",
             "http_access allow secretary_socket secretary_issuer CONNECT tls_only",
             "http_access allow meta_socket meta_vendor CONNECT tls_only",
+            "http_access allow meta_socket meta_office CONNECT tls_only",
+            "http_access allow meta_socket meta_issuer CONNECT tls_only",
             "http_access deny all",
         ]
         self.assertEqual(self.rules, expected)
@@ -77,6 +81,9 @@ class FixedRoleProxyPolicy(unittest.TestCase):
         self.assertEqual(self.active.count(
             "acl secretary_issuer dstdomain -n dev-eo0jf8us5mup7wd5.us.auth0.com"), 1)
         self.assertEqual(self.active.count("acl meta_vendor dstdomain -n api.z.ai"), 1)
+        self.assertEqual(self.active.count("acl meta_office dstdomain -n mcp.mastermind-x.com"), 1)
+        self.assertEqual(self.active.count(
+            "acl meta_issuer dstdomain -n dev-eo0jf8us5mup7wd5.us.auth0.com"), 1)
         self.assertEqual(self.active.count("acl secretary_socket myportname hermes_secretary"), 1)
         self.assertEqual(self.active.count("acl meta_socket myportname hermes_meta"), 1)
         self.assertFalse(any(x.startswith("http_access allow all") for x in self.active))
@@ -104,6 +111,8 @@ class FixedRoleProxyPolicy(unittest.TestCase):
             ["acl", "secretary_office", "dstdomain", "-n", "mcp.mastermind-x.com"],
             ["acl", "secretary_issuer", "dstdomain", "-n", "dev-eo0jf8us5mup7wd5.us.auth0.com"],
             ["acl", "meta_vendor", "dstdomain", "-n", "api.z.ai"],
+            ["acl", "meta_office", "dstdomain", "-n", "mcp.mastermind-x.com"],
+            ["acl", "meta_issuer", "dstdomain", "-n", "dev-eo0jf8us5mup7wd5.us.auth0.com"],
         ])
 
     def test_stock_proxy_is_a_conflicting_ordered_unit(self):
@@ -154,6 +163,8 @@ class FixedRoleProxyPolicy(unittest.TestCase):
             ("secretary_office", "mcp.mastermind-x.com"),
             ("secretary_issuer", "dev-eo0jf8us5mup7wd5.us.auth0.com"),
             ("meta_vendor", "api.z.ai"),
+            ("meta_office", "mcp.mastermind-x.com"),
+            ("meta_issuer", "dev-eo0jf8us5mup7wd5.us.auth0.com"),
         ):
             expected = f"acl {role} dstdomain -n {host}"
             for replacement in (
@@ -167,9 +178,9 @@ class FixedRoleProxyPolicy(unittest.TestCase):
                     with self.assertRaises(AssertionError):
                         _require_exact_hostname_acls(damaged)
 
-    def test_secretary_keeps_its_original_provider_and_gains_only_two_exact_hosts(self):
+    def test_roles_keep_separate_providers_and_exact_os_hosts(self):
         # The original model vendor stays; exactly two additional exact
-        # hostnames are admitted, both on the Secretary listener only.
+        # hostnames are admitted through each role's own named ACLs.
         self.assertIn("acl secretary_vendor dstdomain -n ark.ap-southeast.bytepluses.com",
                       self.active)
         self.assertIn("acl secretary_office dstdomain -n mcp.mastermind-x.com", self.active)
@@ -182,14 +193,14 @@ class FixedRoleProxyPolicy(unittest.TestCase):
                 secretary_hosts.add(parts[3])
         self.assertEqual(secretary_hosts, {"secretary_vendor", "secretary_office",
                                            "secretary_issuer"})
-        # The Meta listener keeps its one original vendor only; its socket
-        # existing is never a reason to widen it.
+        # Meta's native OS consumer uses only the same two exact hosts in
+        # addition to its own vendor, through separate role-specific ACLs.
         meta_hosts = set()
         for rule in self.rules:
             parts = rule.split()
             if parts[0] == "http_access" and parts[1] == "allow" and parts[2] == "meta_socket":
                 meta_hosts.add(parts[3])
-        self.assertEqual(meta_hosts, {"meta_vendor"})
+        self.assertEqual(meta_hosts, {"meta_vendor", "meta_office", "meta_issuer"})
         # No cross-role allow line and no host without a socket constraint.
         for rule in self.rules:
             if not rule.startswith("http_access allow "):
@@ -356,10 +367,18 @@ class DamagedPolicyIsRefused(unittest.TestCase):
             "office-wildcard": (
                 "acl secretary_office dstdomain -n mcp.mastermind-x.com",
                 "acl secretary_office dstdomain -n *.mastermind-x.com", "_guard_acl_shape"),
-            # The Meta role must not inherit the Secretary's new hosts.
+            # A role must not inherit another role's ACL, even for a shared host.
             "meta-inherits-office": (
                 "http_access allow meta_socket meta_vendor CONNECT tls_only",
                 "http_access allow meta_socket meta_vendor secretary_office CONNECT tls_only",
+                "_guard_allow_shape"),
+            "meta-office-cross-socket": (
+                "http_access allow meta_socket meta_office CONNECT tls_only",
+                "http_access allow secretary_socket meta_office CONNECT tls_only",
+                "_guard_allow_shape"),
+            "meta-issuer-any-port": (
+                "http_access allow meta_socket meta_issuer CONNECT tls_only",
+                "http_access allow meta_socket meta_issuer CONNECT",
                 "_guard_allow_shape"),
             # The Secretary must not inherit the Meta vendor.
             "secretary-inherits-meta": (

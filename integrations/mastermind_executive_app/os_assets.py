@@ -16,9 +16,6 @@ _NOIR = (
     (r"assets/Manrope-Variable-[A-Za-z0-9_-]+\.ttf", "font/ttf"),
     (r"assets/Inter-Variable-[A-Za-z0-9_-]+\.woff2", "font/woff2"),
 )
-_AUTH_ENTRY = (
-    (r"assets/private-entry-[A-Za-z0-9_-]+\.jpg", "image/jpeg"),
-)
 _LICENSES = (
     "licenses/fonts/Inter-OFL.txt",
     "licenses/fonts/Manrope-OFL.txt",
@@ -26,6 +23,9 @@ _LICENSES = (
 )
 
 
+_PRIVATE_ENTRY = (
+    (r"assets/private-entry-[A-Za-z0-9_-]+\.jpg", "image/jpeg"),
+)
 _RICH_CLIENT = (
     (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.js", "text/javascript; charset=utf-8"),
     (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.css", "text/css; charset=utf-8"),
@@ -41,14 +41,14 @@ OS_ASSET_PROFILE_FILE_COUNTS = (
     1 + len(_BASE),
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES),
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_PRIVATE_ENTRY),
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT),
-    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_AUTH_ENTRY),
-    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT) + len(_AUTH_ENTRY),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT) + len(_PRIVATE_ENTRY),
 )
 
 
 def os_asset_mimes(names) -> dict[str, str]:
-    """Exactly the existing profiles or complete licensed auth-entry12/rich14.
+    """Exactly legacy3, Noir9, licensed Noir11, private-entry12, or rich Noir13/14.
 
     There is no wildcard asset directory, arbitrary chunk name, optional partial
     profile or caller-supplied MIME. File custody and bytes stay with the launcher.
@@ -59,8 +59,8 @@ def os_asset_mimes(names) -> dict[str, str]:
         raise ValueError("fixed OS asset set required")
     expected = {"index.html": "text/html; charset=utf-8"}
     patterns = (_BASE + (_NOIR if len(names) in (9, 11, 12, 13, 14) else ())
-                + (_RICH_CLIENT if len(names) in (13, 14) else ())
-                + (_AUTH_ENTRY if len(names) in (12, 14) else ()))
+                + (_PRIVATE_ENTRY if len(names) in (12, 14) else ())
+                + (_RICH_CLIENT if len(names) in (13, 14) else ()))
     for pattern, mime in patterns:
         matches = [name for name in names if re.fullmatch(pattern, name)]
         if len(matches) != 1:

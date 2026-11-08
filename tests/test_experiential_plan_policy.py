@@ -9,7 +9,7 @@ import pytest
 
 from ops.native_fabric.experiential_proxy.gateway import Settings, create_app
 from control_plane.experiential_plan_policy import (
-    FREE_CHAT_MODELS, FREE_NATIVE_MODELS, PAID_UNCENSORED_MODELS, plan_policy_digest,
+    FREE_CHAT_MODELS, FREE_NATIVE_MODELS, PAID_UNCENSORED_MODELS, plan_policy_digest, validate_plan_request,
 )
 
 TOKEN = "local-plan-policy-fixture-token"
@@ -43,12 +43,14 @@ def exercise(tmp_path, *, mode="free_only", endpoint="chat/completions",
 
 @pytest.mark.parametrize("model", FREE_CHAT_MODELS)
 @pytest.mark.parametrize("endpoint", ["responses", "chat/completions"])
-def test_free_model_keeps_exact_body(tmp_path, model, endpoint):
+def test_included_plain_model_is_recognized_but_funding_is_required(tmp_path, model, endpoint):
     body = json.dumps({"model": model, "input": "fixture"}).encode()
     r, status, seen = exercise(tmp_path, endpoint=endpoint, body=body)
-    assert r.status_code == 200
-    assert seen == [("/v1/" + endpoint, body)]
-    assert status["slots"][0]["used_in_window"] == 1
+    assert validate_plan_request("free_only", endpoint, body) == "free"
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "PLAN_INCLUDED_FUNDING_UNVERIFIED"
+    assert not seen
+    assert status["slots"][0]["used_in_window"] == 0
     assert status["slots"][0]["inflight"] == 0
 
 
@@ -71,19 +73,19 @@ def test_paid_optin_preserves_selected_model(tmp_path, model):
 
 
 @pytest.mark.parametrize("body,endpoint,reason", [
-    (b'{"model":"deepseek-v4.1-flash"}', "responses", "PLAN_MODEL_NOT_ALLOWED"),
+    (b'{"model":"deepseek-v4.1-flash:free"}', "responses", "PLAN_MODEL_NOT_ALLOWED"),
     (b'{"model":"glm-5.3-uncensored"}', "responses", "PLAN_MODEL_NOT_ALLOWED"),
-    (b'{"model":"gpt-6-luna-decisions:free"}', "responses", "PLAN_MODEL_PROTOCOL_MISMATCH"),
-    (b'{"model":"jev-latest:free"}', "responses", "PLAN_MODEL_PROTOCOL_MISMATCH"),
-    (b'{"model":"clef:free"}', "systemone", "PLAN_MODEL_PROTOCOL_MISMATCH"),
-    (b'{"model":"clef:free"}', "embeddings", "PLAN_MODEL_PROTOCOL_MISMATCH"),
-    (b'{"model":"clef:free","model":"paid"}', "responses", "PLAN_DUPLICATE_JSON_FIELD"),
-    (b'{"model":"clef:free","temperature":NaN}', "responses", "PLAN_INVALID_JSON"),
+    (b'{"model":"gpt-6-luna-decisions"}', "responses", "PLAN_MODEL_PROTOCOL_MISMATCH"),
+    (b'{"model":"jev-latest"}', "responses", "PLAN_MODEL_PROTOCOL_MISMATCH"),
+    (b'{"model":"clef"}', "systemone", "PLAN_MODEL_PROTOCOL_MISMATCH"),
+    (b'{"model":"clef"}', "embeddings", "PLAN_MODEL_PROTOCOL_MISMATCH"),
+    (b'{"model":"clef","model":"paid"}', "responses", "PLAN_DUPLICATE_JSON_FIELD"),
+    (b'{"model":"clef","temperature":NaN}', "responses", "PLAN_INVALID_JSON"),
     (b'{"model":false}', "responses", "PLAN_EXACT_MODEL_REQUIRED"),
     (b'[]', "responses", "PLAN_JSON_OBJECT_REQUIRED"),
     (b'{', "responses", "PLAN_INVALID_JSON"),
-    (b'{"model":"clef:free","fallbacks":["paid"]}', "responses", "PLAN_ROUTING_OVERRIDE_REFUSED"),
-    (b'{"model":"clef:free","route_id":"paid-route"}', "responses", "PLAN_ROUTING_OVERRIDE_REFUSED"),
+    (b'{"model":"clef","fallbacks":["paid"]}', "responses", "PLAN_ROUTING_OVERRIDE_REFUSED"),
+    (b'{"model":"clef","route_id":"paid-route"}', "responses", "PLAN_ROUTING_OVERRIDE_REFUSED"),
 ])
 def test_refusal_is_before_rpm_and_send(tmp_path, body, endpoint, reason):
     r, status, seen = exercise(tmp_path, mode="free_and_uncensored", body=body, endpoint=endpoint)
@@ -95,16 +97,18 @@ def test_refusal_is_before_rpm_and_send(tmp_path, body, endpoint, reason):
 
 
 @pytest.mark.parametrize("model,endpoint", FREE_NATIVE_MODELS.items())
-def test_native_decision_model_uses_native_protocol(tmp_path, model, endpoint):
+def test_native_decision_protocol_still_requires_verified_funding(tmp_path, model, endpoint):
     body = json.dumps({"model": model}).encode()
     r, _, seen = exercise(tmp_path, endpoint=endpoint, body=body)
-    assert r.status_code == 200
-    assert seen == [("/v1/" + endpoint, body)]
+    assert validate_plan_request("free_only", endpoint, body) == "free"
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "PLAN_INCLUDED_FUNDING_UNVERIFIED"
+    assert not seen
 
 
 @pytest.mark.parametrize("code", [402, 403, 429, 500])
 def test_provider_refusal_is_once_without_paid_spill(tmp_path, code):
-    body = b'{"model":"deepseek-v4.1-flash:free"}'
+    body = b'{"model":"deepseek-v4.1-flash-uncensored"}'
     r, status, seen = exercise(tmp_path, mode="free_and_uncensored",
                               body=body, upstream_status=code,
                               upstream_body={"error": {"code": "free_limit_reached"}})
@@ -164,7 +168,7 @@ def test_missing_or_drifted_policy_fails_before_send(tmp_path, sent_mode):
                 if sent_mode:
                     h["x-fabric-plan-policy"] = plan_policy_digest(sent_mode)
                 r = await client.post("/v1/responses", headers=h,
-                                      json={"model": "clef:free"})
+                                      json={"model": "clef"})
                 status = (await client.get("/statusz", headers=h)).json()
                 return r, status
     r, status = asyncio.run(run())

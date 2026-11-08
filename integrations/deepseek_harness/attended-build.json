@@ -1,11 +1,11 @@
 {
   "schema": "mastermind.dsh_attended_build.v1",
   "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
-  "package_manifest_sha256": "a75cbb2d050ada3570425bfd458586dd69bec07a48a398153f0fae9181cdd2c5",
-  "app_config_sha256": "e9f6272dc869536a3e2cf3b3e326c8d56f8a0e92240d218baab04f03182d1b26",
+  "package_manifest_sha256": "5972644fee8dafabe332e17a98a1cd59cb0f06a859018eccb549091ddddb7cef",
+  "app_config_sha256": "a0c1df93bbb510b653ca758942e727b1c67384d0e716ac0f4b7bc48bf365492e",
   "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
-  "native_client_build_sha256": "acf01742ae8580bd28ca7f87c0b9e40cf5bbe991254f010f1995b7e321448011",
-  "index_sha256": "2690f794b0b04377d96dbfbd0d5bf3515a840045fd5f692a297f00997ab41ade",
+  "native_client_build_sha256": "80209a8e056ff00a364600854ed1def6cceadd4542e40672a9cc8144de9693d7",
+  "index_sha256": "0c37affd964c8819b210e02b5da8c600c2cfa03ee999fc3977a8809b2e8c74a0",
   "company_host_exports": {
     "./company-peer": {
       "file": "company-peer.js",
@@ -13,7 +13,7 @@
     },
     "./executive-read-port": {
       "file": "executive-read-port.js",
-      "sha256": "2907c91681b1a649a6c26948c1dff7466e5b10a62a8539c0c67ade0355470608"
+      "sha256": "d3f328cec83fa8e189b9227f06be895f38403457063ed7038d43b90660530e1f"
     }
   },
   "native_session_patch": {
@@ -22,19 +22,28 @@
     "receipt_sha256": "a026a25beac1b32b422974e800e4084e999f13621573a8e0426a1bd7ec5c0aea"
   },
   "native_owner_access": {
-    "source_sha256": "87f6007a593e6aa845524e741bc59606d646e577fdf6177e09a15ec00276f778",
+    "source_sha256": "07f538387397222ebda157ec3be76e88e9bba4dfe19842ac8a9ee5e83016b054",
     "patch_sha256": "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00",
-    "host_source_sha256": "a667dd236fa03f723f8dc571c44c62a36b1530230cbaafac0ec80058c7bd78f4",
-    "host_patch_sha256": "80b392b848df05a9332704a4591f881386711d46263895b2b2426a2982154637",
-    "receipt_sha256": "1bbc5d8610e03f4c7073516eea14085a9d7e7868b4625aaa93973d33eb250ad6"
+    "host_source_sha256": "c1b49a4e2cedbf7930b8633aa4c3047c919e5484d13bd744c70e887e35552878",
+    "host_patch_sha256": "db1a96b6b68a338fc030c05313deecc5e02973223e1dc84690ef4abebe8f8597",
+    "receipt_sha256": "569f5e69f1a16950fb92987872aa65e585b6cbe4fde40d7d1d053c40d75df093"
   },
   "native_acp_patch": {
-    "source_sha256": "644bb9e7ed6ba59c522d12b3c8cf01ba8edd80eefd24ab98d426d7a02a3bd885",
-    "patch_sha256": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
-    "receipt_sha256": "25a8cb3a4565efc72ee0bccca442f53851ccab008d347b94eb79ef349dd1c7af"
+    "source_sha256": "dbbf07c429433fe6a37e1ddb1fdd851c4dc498ca7998e2f598af5083e5bed720",
+    "patch_sha256": "701874521bcaac03524d586ad15963ef9305f23a38f88988b1893819420a772d",
+    "receipt_sha256": "8931fd1764e7887b76c9ea1c0d07cd9ce6379dc069c75516d066ed509cfefeef"
   },
-  "evidence_commit": "988b6890d26bebc211ca3d01949ca161ff414d32",
-  "custody": "Protected-source acceptance of the qualified attended build; snapshot evidence only",
+  "evidence_commit": "e2c9451ef5bf428bbbbbfa06aa420c8033f8ad7b",
+  "custody": "Source-linked staged native attended build and Worker entry; snapshot evidence only, with no installation or production acceptance claimed.",
   "installed": false,
-  "provider_calls": 0
+  "provider_calls": 0,
+  "native_worker": {
+    "schema": "mastermind.dsh_native_worker_entry/v1",
+    "entry": "native_worker.mjs",
+    "sha256": "087883b459b87f6742ace82a19df7e2dfe71d0453fe781c513a55d4b7a400c6d",
+    "agent_name": "deepseek-harness-acp",
+    "agent_version": "0.0.1",
+    "model_provider": "deepseek-account"
+  },
+  "native_worker_patch_sha256": "79d2034a4e0e21f3386333d1959e1196a8a8c21535c860c696ce9c3cb8082583"
 }
