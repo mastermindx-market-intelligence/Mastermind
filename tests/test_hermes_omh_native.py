@@ -287,3 +287,93 @@ def test_route_command_uses_same_checked_native_path(tmp_path,monkeypatch):
                            session_id='native-session'))
     assert out['state']=='ROUTE_PREVIEW_NOT_ADMITTED' and len(remote)==1
     assert 'route' in m.TOOL_SCHEMA['parameters']['properties']['action']['enum']
+
+
+# --- WO-07 OQ-10 re-point: fabric_route_preview rides the shared law ---------
+#
+# The stdio bridge keeps its exact tool name, argument schema and legacy
+# answer fields (installed consumers depend on them), but its routing answer
+# is now composed by the Executive route_preview module (RoutePreview.v1,
+# NONE_SOURCE_PREVIEW_ONLY). If the shared law is unavailable or refuses,
+# the whole preview refuses instead of serving an owner-only answer.
+
+def _capacity_bridge():
+    source=ROOT/'integrations/hermes_omh/capacity_bridge.py'
+    assert source.is_file(),'capacity bridge not implemented'
+    spec=importlib.util.spec_from_file_location('capacity_bridge_test',source)
+    mod=importlib.util.module_from_spec(spec);sys.modules[spec.name]=mod;spec.loader.exec_module(mod)
+    return mod
+
+
+def _owner_preview_answer():
+    return dict(state='PREVIEW_ONLY',pool='canonical-pool',model='canonical-model',
+                mode='attended',host='m1-studio',reserved=False,
+                selection_rechecked_at_request=True)
+
+
+def test_fabric_route_preview_merges_the_shared_law_composition(tmp_path,monkeypatch):
+    bridge=_capacity_bridge()
+    monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[dict(pool='canonical-pool')]))
+    def run(*args,**kwargs):
+        assert kwargs.get('timeout')==15
+        return SimpleNamespace(returncode=0,
+            stdout=json.dumps(_owner_preview_answer()).encode(),stderr=b'')
+    monkeypatch.setattr(bridge.subprocess,'run',run)
+    answer=bridge.preview(dict(task_class='execute',complexity='C2_COMPLEX_BOUNDED'))
+    assert answer['proof']=='PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH'
+    assert answer['reserved'] is False and answer['state']=='PREVIEW_ONLY'
+    assert answer['pool']=='canonical-pool' and answer['model']=='canonical-model'
+    assert answer['authority']=='NONE_SOURCE_PREVIEW_ONLY'
+    record=answer['route_preview']
+    assert record['schema']=='RoutePreview.v1'
+    assert record['authority']=='NONE_SOURCE_PREVIEW_ONLY'
+    assert record['production_armed'] is False
+    assert record['requested_complexity']=='C2_COMPLEX_BOUNDED'
+    assert record['capacity_knowledge']=='unknown' and record['rank_basis']=='suitability_only'
+
+
+def test_fabric_route_preview_frontier_is_downgraded_by_the_shared_law(tmp_path,monkeypatch):
+    bridge=_capacity_bridge()
+    monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[]))
+    monkeypatch.setattr(bridge.subprocess,'run',lambda *a,**k:SimpleNamespace(
+        returncode=0,stdout=json.dumps(_owner_preview_answer()).encode(),stderr=b''))
+    answer=bridge.preview(dict(task_class='architecture',complexity='C3_FRONTIER_JUDGMENT'))
+    record=answer['route_preview']
+    assert record['requested_complexity']=='C3_FRONTIER_JUDGMENT'
+    assert record['effective_complexity']=='C2_COMPLEX_BOUNDED'
+    assert record['witness_disposition']=='downgraded'
+
+
+def test_fabric_route_preview_refuses_without_the_shared_law(tmp_path,monkeypatch):
+    bridge=_capacity_bridge()
+    # An unavailable shared law (import failure or refusal) refuses the whole
+    # preview instead of serving an owner-only routing answer.
+    monkeypatch.setitem(sys.modules,'integrations.executive_mcp.route_preview',None)
+    with pytest.raises(ValueError) as caught:
+        bridge.preview(dict(task_class='execute',complexity='C1_ROUTINE_BOUNDED'))
+    assert str(caught.value)=='ROUTE_PREVIEW_SOURCE_UNAVAILABLE'
+
+
+def test_capacity_preview_validator_accepts_repointed_and_legacy_shapes(tmp_path):
+    m,d,_=load(tmp_path)
+    def call(ctx,payload):
+        ctx=SimpleNamespace(call_mcp=lambda *a,**k:dict(ok=True,result=json.dumps(payload)))
+        return m._capacity_preview(ctx,{})
+    shared=dict(schema='RoutePreview.v1',authority='NONE_SOURCE_PREVIEW_ONLY',
+                production_armed=False,capacity_knowledge='unknown',
+                rank_basis='suitability_only')
+    repointed=dict(_owner_preview_answer(),
+                   proof='PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH',
+                   authority='NONE_SOURCE_PREVIEW_ONLY',route_preview=shared)
+    assert call(SimpleNamespace(),repointed)['pool']=='canonical-pool'
+    legacy=dict(_owner_preview_answer(),
+                proof='PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH')
+    assert call(SimpleNamespace(),legacy)['state']=='PREVIEW_ONLY'
+    for bad in (
+        dict(repointed,authority='SOME_OTHER_AUTHORITY'),
+        dict(repointed,route_preview=dict(shared,production_armed=True)),
+        dict(repointed,route_preview=dict(shared,authority='OTHER')),
+        dict(repointed,route_preview=dict(shared,capacity_knowledge='guessed')),
+    ):
+        with pytest.raises(m.CapacityPreviewError):
+            call(SimpleNamespace(),bad)
