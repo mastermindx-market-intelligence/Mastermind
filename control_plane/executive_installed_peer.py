@@ -1067,14 +1067,17 @@ _MAX_READ_BYTES = 32 * 1024 * 1024
 _MAX_CLOSURE_BYTES = 256 * 1024 * 1024
 _MAX_DIRECTORY_ENTRIES = 4096
 _MAX_WALK_ENTRIES = 8192
-# The sealed release is a whole-repository ``git archive`` (install.sh
-# stage_sealed_release), so its entry count tracks the repository: 9,773 tree
-# entries on master when this bound was raised, which already exceeded the
-# 8,192 runtime-walk bound above. Bound the release walk on its own, with room
-# to grow. Measured cost of the verifier's own walk is ~0.13 ms/entry hashed and
-# ~0.04 ms/entry for the drift recheck, so a full bound stays far inside
-# _SERVICE_BUDGET_SECONDS; a slower host still fails closed on that budget.
-_MAX_RELEASE_ENTRIES = 32768
+# The sealed release is the whole-repository ``git archive`` plus installer-added
+# assets (install.sh stage_sealed_release), so its entry count tracks the
+# repository: about 9,800 tree entries on master when this bound was set, already
+# past the 8,192 runtime-walk bound above. Bound the release walk on its own.
+# The same install.sh step runs release_manifest.py create/verify on the release,
+# and that reader refuses a manifest over 16,384 entries, so no staged release can
+# exceed it; keep the two equal rather than advertise headroom no reader accepts.
+# Measured cost of this walk is ~0.13 ms/entry hashed and ~0.04 ms/entry for the
+# drift recheck, so a full bound stays far inside _SERVICE_BUDGET_SECONDS; a slower
+# host still fails closed on that budget.
+_MAX_RELEASE_ENTRIES = 16384
 _MAX_NAME_BYTES = 255
 _SERVICE_BUDGET_SECONDS = 25.0
 

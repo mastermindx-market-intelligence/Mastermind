@@ -2167,7 +2167,7 @@ def test_release_observation_matcher_admits_four_socket_control_plist():
 
 # --- Release walk entry bound (incident #1656) -------------------------------
 # The sealed release is a whole-repository archive, so its entry count tracks the
-# repository (9,773 on master when the bound was raised) and must not be held to
+# repository (about 9,800 on master when the bound was set) and must not be held to
 # the smaller bound that guards the Python runtime walk. All filesystem access is
 # faked; none of this qualifies a real host.
 
@@ -2204,6 +2204,10 @@ def test_release_walk_recheck_applies_the_same_bound(monkeypatch):
     monkeypatch.setattr(m, "_close", lambda handle: None)
     rows = m._walk_release("/fixed/release", m._Budget(25), hash_files=False)
     assert len(rows) == m._MAX_WALK_ENTRIES + 1
+    _fake_release(monkeypatch, m._MAX_RELEASE_ENTRIES + 1)
+    with pytest.raises(peer.PeerIdentityError) as caught:
+        m._walk_release("/fixed/release", m._Budget(25), hash_files=False)
+    assert caught.value.code == "SERVICE_RELEASE_ENTRY_LIMIT"
 
 
 def test_release_bound_does_not_widen_the_python_runtime_walk(monkeypatch):
@@ -2216,10 +2220,16 @@ def test_release_bound_does_not_widen_the_python_runtime_walk(monkeypatch):
                         lambda *a, **k: (7, directory, directory))
     monkeypatch.setattr(m, "_close", lambda handle: None)
     monkeypatch.setattr(m, "_lstat", lambda path: directory)
-    monkeypatch.setattr(
-        m, "_directory_entries",
-        lambda path, budget: ["n%05d" % index
-                              for index in range(m._MAX_WALK_ENTRIES + 1)])
+    listed = []
+
+    def entries(path, budget):
+        listed.append(path)
+        return ["n%05d" % index for index in range(m._MAX_WALK_ENTRIES + 1)]
+
+    monkeypatch.setattr(m, "_directory_entries", entries)
     with pytest.raises(peer.PeerIdentityError) as caught:
         m._inventory_python_base(m._Budget(25))
     assert caught.value.code == "SERVICE_RUNTIME_ENTRY_LIMIT"
+    # Refused on the first listing: a runtime walk bounded by the larger release
+    # bound would still refuse, but only after descending into the children.
+    assert len(listed) == 1
