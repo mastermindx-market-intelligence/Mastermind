@@ -17,7 +17,7 @@ This map points to the editable designs and current continuation sections. All c
 | Company navigation | [Existing family chooser](https://app.paper.design/file/01M3NSZGE8JWN2EZCSF0DT05RM/p-9-1): 5ML keeps its complete family structure, with explicit44px Close/Lab target containers `22UE-0` / `22UH-0` around the original visuals. |
 | OS Conversations | [Canonical Atelier · Conversations](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0): current window, unsent draft, project rows, incomplete coverage and mobile access action. |
 | Policy and Memory | [Policy](https://app.paper.design/file/01M6Q4WK0EMPV1G2KDGGRQBC1B/p-1-0) provides section navigation/evidence distinctions; [Memory](https://app.paper.design/file/01M6PXFEP1E1T59M2B3N673PMG) qualifies record verification failures. |
-| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): light/dark failed-update states `3ZW-0` / `4BN-0` now label38.0 as Research index while retaining the dated snapshot and unavailable entry checks. |
+| Intelligence Hub | [Retained-list recovery](https://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-6-0): light/dark failed-update and pending-update states plus the combined query/stage result label38.0 as Research index while retaining the distinct dated, update and filter contexts. |
 | News and GMI | [News](https://app.paper.design/file/01M5EXPMQTSBFBAM8KKG83FTZH) has eligible review/recovery actions; [GMI](https://app.paper.design/file/01M5H6EARN9YHQV17JC6ZG9BRY/p-4-0) uses existing full-index/theme paths and retains dated context. |
 | Analytical provenance | [Expectation](https://app.paper.design/file/01M5EX8RTPR7YEZD2A144XED2S/p-1-0) qualifies missing units/selected examples; [Ontology](https://app.paper.design/file/01M3P1X4FR6BRTB13KA736Y1HT/p-1-0) distinguishes page comparison from answer evidence. |
 | Risk and contextual help | [Risk Radar](https://app.paper.design/file/01M38EVF74SJWG1GANN5VP380Z/p-1-0) removes unbound retry affordances; [Guide](https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-3-0) labels model index points correctly. |
@@ -1006,3 +1006,22 @@ This verifies the two represented recovery states. It does not claim an exhausti
 ### Options assumption consistency after the C02 repair
 
 A focused C3 consistency read found the expected assumed100 qualification already present in C01 (`1PIY-0`, `1PJJ-0`, `1PJZ-0`), C04 (`1POD-0`) and C05 (`1RTL-0`, `1RTR-0`). Those existing labels and all prior phone geometry were preserved. The demonstrated omission was confined to the corrected C02 comparison; no further Options change was needed in that bounded check.
+
+
+## Intelligence Hub: complete the same index label across pending and filtered states
+
+The same existing-field label is now present in three additional p6 mobile variants:
+
+| State | Board | Exact changed text |
+| --- | --- | --- |
+| Refresh in progress, previous list retained · light EN | `3YB-0` | `7K9-0` |
+| Refresh in progress, previous list retained · dark EN | `4A2-0` | `7LO-0` |
+| Combined601218 query + Consensus stage match · light EN | `44P-0` | `7L6-0` |
+
+Each now shows **Research index38.0** using the same12px regular muted label and unchanged18px semibold value. This implements the existing native requirement72J and the exact historical command fixture already cited above; it introduces no denominator, probability, currency or new score calculation.
+
+The first two preserve **Checking for an update**, previous-snapshot wording,27 September/**Not live**, the unchanged source-position18 listing601218.SS,1-of30 count, price-evidence absence and unavailable entry checks. The combined state preserves the601218 query, **Consensus** filter, **1 match ·6 records have this stage**, source-position18, and its two different clearing actions: **Clear stage · keep601218** and **Clear search · show6 Consensus records**. Pending updates and completed filter matches remain distinct states.
+
+Root inspected all three full390px renders. Exact before/after JSX lengths were13,567→13,673,13,618→13,723 and13,068→13,174. In each case, masking only the identified score text div makes the complete before/after JSX identical modulo whitespace. Every other native node, analytical value, layout style and action label remains unchanged.
+
+The single three-node edit `hub-index-label-consistency-01` and the scoped finish `hub-index-consistency-finish-01` both returned **APPLIED_RESPONSE_OBSERVED**. This completes the observed label omission across these three additional states; p6 remains candidate_unqualified, and held p7/source-only p8 and other writers' structures remain untouched. This is native design clarity, with no actual request, refreshed data, executed filter or production acceptance claimed.
