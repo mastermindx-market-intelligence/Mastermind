@@ -35,11 +35,14 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
 
     assert manifest["manifest_version"] == 3
     assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.2.0"
+    assert manifest["version"] == "0.3.0"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
-    assert permissions == {"nativeMessaging", "alarms"}
+    assert permissions == {"nativeMessaging", "alarms", "debugger"}
+    assert manifest["optional_permissions"] == ["tabs", "scripting"]
+    assert manifest["optional_host_permissions"] == ["http://*/*", "https://*/*"]
+    assert manifest["options_page"] == "browser.html"
 
     forbidden_permissions = {
         "activeTab",
@@ -49,7 +52,6 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
         "clipboardWrite",
         "contentSettings",
         "cookies",
-        "debugger",
         "downloads",
         "geolocation",
         "history",

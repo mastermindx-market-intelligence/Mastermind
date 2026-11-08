@@ -49,6 +49,8 @@ def test_nine_charters_use_existing_responsibility_syntax():
         assert c['key'] == key and c['authority_grant'] is False
         normalize_responsibility_intent(c['responsibility_intent'])
         assert c['objective'] and c['completion_evidence'] and c['limits']
+        assert any('maintained open-source' in limit and 'docs/REUSE_FIRST_ENGINEERING.md' in limit
+                   for limit in c['limits'])
         assert c['routing']['advisory_only'] is True
         assert not {'model', 'provider', 'account', 'host', 'api_key'} & c['routing'].keys()
 

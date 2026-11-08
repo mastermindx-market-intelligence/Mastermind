@@ -1,19 +1,21 @@
 # Web mission-continuation instructions — manual installation
 
-Status: source candidate under Mastermind PR #2266. This document is not a saved
-ChatGPT setting, Runtime grant, worker START or a model-duration guarantee.
+Status: manual rollout instructions for protected source. This document is not a saved
+ChatGPT setting, runtime grant, worker START or a model-duration guarantee.
 The source of truth for an accepted Project bootstrap is the **protected master**
-version of `docs/sol_skills/BOOTSTRAP_KERNEL.md`. The branch's export below is
-ready for manual pilot/paste after confirming its actual installed target and
-preserving newer valid Project-specific rules.
+version of `docs/sol_skills/BOOTSTRAP_KERNEL.md`. Use its matching export from the
+same protected revision after confirming the intended target and preserving
+newer valid Project-specific rules.
 
 ## Files to use
 
-1. **Project instruction (full, 7,996 characters and bytes, excluding the final LF; copy this alone):**
+1. **Project instruction (full, 7,998 characters and bytes, excluding the final LF; copy this alone):**
    `docs/evidence/2026-11-07-mission-continuation-project-instructions.txt`.
    This mirrors the exact `Approved Project instruction text` fence in the
-   candidate `docs/sol_skills/BOOTSTRAP_KERNEL.md`; do not paste the surrounding
-   Markdown or source-law explanations into the Project field.
+   same-revision `docs/sol_skills/BOOTSTRAP_KERNEL.md`; do not paste the surrounding
+   Markdown or source-law explanations into the Project field. The reuse-first
+   export, `docs/evidence/2026-11-07-reuse-first-project-instructions.txt`, is
+   byte-identical; both exports include one final LF (7,999 UTF-8 bytes).
 2. **Account-level Custom Instructions (optional, 1,221 characters):**
    `docs/evidence/2026-11-07-global-continuation-custom-instructions.txt`.
    This covers substantial work outside a Project but **does not replace** the
@@ -44,7 +46,7 @@ preserving newer valid Project-specific rules.
 5. If Mastermind work happens in chats outside Projects, optionally add the
    account-global overlay via **Settings > Personalization > Custom Instructions**.
    Project instructions override global Custom Instructions inside that Project.
-   Do not paste the 7,996-character Project block into the smaller global field.
+   Do not paste the 7,998-character Project block into the smaller global field.
 6. On each intended account/surface, start a fresh real, authorized mission
    canary with a ready phase and a distinct next phase. Observe whether it
    actually *starts* the second phase after checking and saving the first.

@@ -322,6 +322,10 @@ def _prepare_native_operator(profile_path: Path, hermes_bin: Path, *, expected_r
                               evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
 
     qualify_profile()
+    # Landlock attaches once while this entry is still single-threaded and
+    # before asyncio creates a loop or executor. Children inherit it. Owner
+    # rechecks below retain the exact profile and must not reattach policy.
+    enforce_role_tcp_ports(profile)
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)
     prepare_vendor(Path(native_launch.recipe["vendor_root"]))
     from hermes_cli.gateway_runtime_discovery import query_identify
