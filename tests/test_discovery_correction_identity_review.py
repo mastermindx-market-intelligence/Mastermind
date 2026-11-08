@@ -3,9 +3,7 @@ from pathlib import Path
 import pytest
 
 RECORDS = {
-    "app/mastermind_os/src-tauri/src/auth.rs": (
-        "57b58e9fa3bca82cb9185e590ab360bb0cf89bc214bec2f60d41cc5413908609",
-        ((3678, 68, 71, "int", "503"), (3683, 69, 72, "int", "503"), (3687, 67, 70, "int", "503"))),
+    "app/mastermind_os/src-tauri/src/auth.rs": ('2b3d98ec88d00a779b8b89d9dee84aae6d9d0f07e68d8c6a0f9d625ad2c24650', ((3716, 68, 71, 'int', '503'), (3721, 69, 72, 'int', '503'), (3725, 67, 70, 'int', '503'))),
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),
